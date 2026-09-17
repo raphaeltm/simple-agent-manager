@@ -211,10 +211,20 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   // overscan window, so card-local state would collapse on scroll.
   const groupExpansion = useToolCallGroupExpansion();
   const onToggleGroup = groupExpansion.toggleGroup;
-  // Same signal the project-chat dock uses — anything `!== 'idle'` plus a 1s idle
-  // stabiliser. `isWorkingActivity` would be wrong here for the same reason it is
-  // wrong there: `onMessage` sets `responding` for every tool row, so a
-  // prompting-only predicate flickers the glyph between calls.
+  /*
+   * Same signal the project-chat dock uses — anything `!== 'idle'` plus a 1s idle
+   * stabiliser — so the two surfaces agree on "the agent is busy".
+   *
+   * `isWorkingActivity` would be wrong: it covers only `prompting`/`recovering`,
+   * and THIS view reaches `responding` from an assistant row in `onMessage`
+   * (below) and from the `getChatSession` state snapshot. A prompting-only
+   * predicate settles the glyph for the whole of a streaming turn.
+   *
+   * Note this view's `onMessage` moves activity for `role === 'assistant'` ONLY,
+   * where project chat moves it for every non-user row — so a tool-only burst
+   * does not mark this surface working at all. That asymmetry predates grouping
+   * and is recorded in the task file rather than changed here.
+   */
   const agentIsWorking = useCompletionDockWorking(agentActivity);
   const lastDisplayId = conversationItems[conversationItems.length - 1]?.id ?? null;
 

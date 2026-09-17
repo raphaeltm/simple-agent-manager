@@ -512,12 +512,12 @@ still-running turn has no assistant message yet.
 
 ### Reddened tests per fix
 
-| Fix                    | Test proven red first                                                                                                              | Control that stayed green                       |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| 1 (live predicate)     | `keeps the tail group in motion while the agent is mid-turn, and settles when idle` — red against `isWorkingActivity`, green after | its own first half (idle ⇒ `data-state="done"`) |
-| 2 (workspace surface)  | `puts the tail group in motion when the session hydrates as working` — red with `groupLive={false}`                                | `collapses a run of tool calls into one card`   |
-| 3 (expansion survives) | built-in pair: the uncontrolled control comes back collapsed while the controlled case stays open                                  | —                                               |
-| 4 (matchToolCard memo) | `evaluates the payload once per item object` — red with the WeakMap removed                                                        | the other two memo cases                        |
+| Fix                    | Test proven red first                                                                                                                                                                   | Control that stayed green                                                          |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| 1 (live predicate)     | `keeps the tail group in motion while the agent is mid-turn, and settles when idle` — red against `isWorkingActivity`, green after                                                      | its own first half (idle ⇒ `data-state="done"`)                                    |
+| 2 (workspace surface)  | `puts the TAIL group in motion once the agent is responding` — red when `WorkspaceChatView.tsx:228` is reverted to `isWorkingActivity(agentActivity)`, and red with `groupLive={false}` | the other 2 tests in the file, incl. `collapses a run of tool calls into one card` |
+| 3 (expansion survives) | built-in pair: the uncontrolled control comes back collapsed while the controlled case stays open                                                                                       | —                                                                                  |
+| 4 (matchToolCard memo) | `evaluates the payload once per item object` — red with the WeakMap removed                                                                                                             | the other two memo cases                                                           |
 
 ### Verification after the fix round
 
@@ -550,3 +550,40 @@ SAM_STAGING_LIVE_TOOL_GROUP=1 PLAYWRIGHT_BASE_URL=https://app.sammy.party \
   npx playwright test staging-tool-group-verify \
   --project="iPhone SE (375x667)" --project="Desktop (1280x800)"
 ```
+
+## Round 3 (2026-09-17, test + comment only)
+
+Test-engineer re-review: the HIGH fix was confirmed PASS, but the workspace-surface
+live test was **non-discriminating**. It hydrated `agentActivity='prompting'`, which
+`isWorkingActivity` and `completionDockWorking` both report as working, so reverting
+`WorkspaceChatView.tsx:228` to the old predicate left all three tests green. The
+reviewer verified that empirically; I reproduced it.
+
+Rewritten to separate the predicates through this surface's real triggers.
+`responding` is the only state where they disagree, and the only way this view reaches
+it is an assistant row in `onMessage` — but an assistant row also pushes the group off
+the tail, which would zero `groupLive` for an unrelated reason. So the test now pushes
+assistant text (to reach `responding`) and then one more tool row, which opens a NEW
+run and therefore a new TAIL group whose single call is already `completed`:
+
+- `['done', 'running']` across the two glyphs is the assertion. Nothing in the tail
+  group's own statuses can produce `running`, so only `groupLive` can.
+- The settled FIRST group is a built-in control that `groupLive` stays scoped to the
+  tail row.
+- The idle control at the top of the test is retained.
+
+Proven: reverting line 228 to `isWorkingActivity(agentActivity)` reddens exactly
+`puts the TAIL group in motion once the agent is responding`; the other two stay green.
+Restored.
+
+Also corrected the comment above that line — it claimed `onMessage` sets `responding`
+"for every tool row", which is true of project chat but NOT of this surface (assistant
+rows only). The comment now states this view's actual behaviour and names the
+asymmetry inline instead of only in this file.
+
+No runtime code changed in this round (comment text only), so a staging deploy of the
+previous commit remains valid.
+
+Verification: `pnpm --filter @simple-agent-manager/web test` — 313 files / 3791 tests
+passed, 0 failed, 0 skipped. Typecheck clean; lint 0 errors / 3 pre-existing warnings;
+format ratchet passed.

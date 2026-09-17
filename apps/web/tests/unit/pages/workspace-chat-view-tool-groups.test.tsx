@@ -133,18 +133,6 @@ describe('WorkspaceChatView — tool activity cards', () => {
   });
 
   /*
-   * Same F5b guard as project chat, reached through this surface's real working
-   * signal: `getChatSession`'s state snapshot is hydrated on load
-   * (`hydrateActivity`), which is how a page opened mid-turn knows the agent is
-   * busy. Nothing in the group's own statuses can produce the running glyph —
-   * every call is `completed` — so only the `live` prop can.
-   *
-   * NOTE the surfaces are NOT identical upstream of this: this view's
-   * `onMessage` only moves activity for `role === 'assistant'`, while project
-   * chat moves it for every non-user row. That asymmetry predates grouping and
-   * is recorded in the task file rather than changed here.
-   */
-  /*
    * A row arriving over the DO socket must join the EXISTING tail group rather
    * than start a second card — the live-tail case, driven through this view's
    * real `onMessage` handler.
@@ -165,19 +153,50 @@ describe('WorkspaceChatView — tool activity cards', () => {
     expect(screen.getAllByTestId('tool-call-group')).toHaveLength(1);
   });
 
-  it('puts the tail group in motion when the session hydrates as working', async () => {
-    mocks.getChatSession.mockResolvedValue({
-      ...(await mocks.getChatSession()),
-      state: { activity: 'prompting', activityAt: 5_000 },
-    });
-
+  /*
+   * F5b on this surface, made DISCRIMINATING.
+   *
+   * An earlier version hydrated `agentActivity='prompting'`, which
+   * `isWorkingActivity` and `completionDockWorking` BOTH report as working — so
+   * it passed against either predicate and proved nothing. `responding` is the
+   * state that separates them, and the only way this view reaches it is an
+   * assistant row through `onMessage` (this surface, unlike project chat, does
+   * not move activity for tool rows).
+   *
+   * So: push assistant text (-> responding), then a further tool row, which
+   * starts a NEW run and therefore a new TAIL group whose single call is already
+   * `completed`. Nothing in that group's statuses can produce the running glyph;
+   * only `groupLive` can. The settled first group is the built-in control that
+   * `groupLive` stays scoped to the tail row.
+   */
+  it('puts the TAIL group in motion once the agent is responding', async () => {
     renderView(<WorkspaceChatView projectId="proj-1" sessionId={SESSION_ID} />);
 
+    // Control: agent idle, every call settled -> the one glyph reads done.
+    const glyph = await waitFor(() => screen.getByTestId('tool-group-glyph'));
+    expect(glyph).toHaveAttribute('data-state', 'done');
+    expect(screen.queryByText('· working')).toBeNull();
+
+    // Real trigger #1: assistant text moves this surface to `responding`.
+    await act(async () => {
+      capturedWsOnMessage!(textMessage('m-a1', 'assistant', 'Running a few more checks.', 5_000));
+    });
+    // Real trigger #2: the next tool row opens a new run after that text, so the
+    // tail display row is a group again.
+    await act(async () => {
+      capturedWsOnMessage!(toolMessage('m-t4', 'Bash: pnpm build', 6_000));
+    });
+
     await waitFor(() => {
-      expect(screen.getByTestId('tool-group-glyph')).toHaveAttribute('data-state', 'running');
+      const states = screen
+        .getAllByTestId('tool-group-glyph')
+        .map((el) => el.getAttribute('data-state'));
+      expect(states).toEqual(['done', 'running']);
     });
     expect(screen.getByText('· working')).toBeTruthy();
-    // Liveness: the group is still the grouped row, not some other card.
+    // Liveness: the tail really is the new single-call group, not a re-render of
+    // the first one.
+    expect(screen.getByRole('button', { name: /1 tool call/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /3 tool calls/ })).toBeTruthy();
   });
 });
