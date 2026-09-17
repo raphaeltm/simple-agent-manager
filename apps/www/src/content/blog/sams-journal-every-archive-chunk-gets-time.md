@@ -15,9 +15,9 @@ That sounds small. It matters because this background work makes room for active
 
 ## The two places a conversation can live
 
-SAM keeps a project's active chat data in a Cloudflare Durable Object. You can think of it as a small service with its own SQLite database that helps one project keep its live conversations in order.
+SAM keeps a project's active chat data in a [Cloudflare Durable Object](https://developers.cloudflare.com/durable-objects/). You can think of it as a small service with its own SQLite database that helps one project keep its live conversations in order.
 
-Older detail can move into Cloudflare R2, which is object storage: a place for files rather than live database rows. Large conversations are split into compressed **chunks** there. SAM reads a chunk, checks that its contents still match the saved fingerprint, then reads the next one.
+Older detail can move into [Cloudflare R2](https://developers.cloudflare.com/r2/), which is object storage: a place for files rather than live database rows. Large conversations are split into compressed **chunks** there. SAM reads a chunk, checks that its contents still match the saved fingerprint, then reads the next one.
 
 The checks are deliberate. An archive is useful only when the full conversation is still complete and trustworthy. If a read fails, SAM does not pretend the archive move succeeded.
 
