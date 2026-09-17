@@ -228,47 +228,50 @@ interface ToolCallGroupItem {
 
 ## Implementation checklist
 
-- [ ] C1. `tool-call-groups.ts`: `ToolCallGroupItem`, `DisplayItem`, `groupToolCallItems()`,
+- [x] C1. `tool-call-groups.ts`: `ToolCallGroupItem`, `DisplayItem`, `groupToolCallItems()`,
       `summarizeToolCallGroup()` per the rules above; no hardcoded thresholds.
-- [ ] C2. `ToolCallGroupCard.tsx` (project-message-view): collapsed header per spec, expanded body
+- [x] C2. `ToolCallGroupCard.tsx` (project-message-view): collapsed header per spec, expanded body
       renders absorbed items via the existing `ToolCallCard` / `ThinkingBlock` with the existing
       props (`onFileClick`, `onLoadToolContent`, project-chat `className`); controlled +
       uncontrolled expansion; tokens only, no `gray-*` classes; reduced-motion safe.
-- [ ] C3. `index.tsx`: `displayItems = groupToolCallItems(chatMessagesToConversationItems(...))`
+- [x] C3. `index.tsx`: `displayItems = groupToolCallItems(chatMessagesToConversationItems(...))`
       in the same memo; Virtuoso `data`, `initialTopMostItemIndex`, `animationTargetIdx`,
       `itemIndexById` (inner ids → group index), `nearestItemId` target resolution, and
       `scrollAndHighlight` all work on `displayItems`; `highlighted` applies to the group row when
       the jump target is an inner id.
-- [ ] C4. Expanded-group state lifted into `ProjectMessageView` (`Set<string>` + stable toggle),
+- [x] C4. Expanded-group state lifted into `ProjectMessageView` (`Set<string>` + stable toggle),
       threaded through `renderConversationItem` → `CommentableConversationItem` →
       `AcpConversationItemView` without breaking the `React.memo` boundary (stable callback,
       per-row boolean); `?tools=expanded` seeds all groups expanded.
-- [ ] C5. `AcpConversationItemView`: accept `DisplayItem`, add the `tool_call_group` case; keep the
+- [x] C5. `AcpConversationItemView`: accept `DisplayItem`, add the `tool_call_group` case; keep the
       `tool_call` case for standalone typed cards.
-- [ ] C6. `WorkspaceChatView.tsx`: apply `groupToolCallItems` (uncontrolled card) so both chat
+- [x] C6. `WorkspaceChatView.tsx`: apply `groupToolCallItems` (uncontrolled card) so both chat
       surfaces behave the same (rule 24).
-- [ ] C7. Update `apps/www/src/content/docs/docs/guides/chat-features.md` in the same commit (F8).
-- [ ] C8. Update existing Playwright specs that assumed per-call cards (F6) and add the new audit
+- [x] C7. Update `apps/www/src/content/docs/docs/guides/chat-features.md` in the same commit (F8).
+- [x] C8. Update existing Playwright specs that assumed per-call cards (F6) and add the new audit
       spec (T6); run all of them locally on both projects; store screenshots in
       `.tmp/playwright-screenshots/`.
-- [ ] C9. `pnpm lint && pnpm typecheck && pnpm test` green in `apps/web`; file-size limits respected
+- [x] C9. `pnpm lint && pnpm typecheck && pnpm test` green in `apps/web`; file-size limits respected
       (`index.tsx` is already over the limit and carries an exception — do not grow it beyond the
       minimal wiring; put logic in new modules).
-- [ ] C10. Remove the dead `groupMessages()` / `MessageGroup` from `types.ts` and its re-export in
+- [x] C10. Remove the dead `groupMessages()` / `MessageGroup` from `types.ts` and its re-export in
       `index.tsx` (F5c).
-- [ ] C11. The card's `live` prop (F5b) is derived in the row renderer from `agentActivity` and
+- [x] C11. The card's `live` prop (F5b) is derived in the row renderer from `agentActivity` and
       "is last display item"; `chat-dom-bound-audit.spec.ts` (bounded row count + timeline jump)
       and `project-chat-document-card-audit.spec.ts` still pass unchanged.
+      **Verified as "no regression", not "all green":** both specs were run against `HEAD~1` and
+      against this branch and the failure sets are identical (see Implementation notes →
+      Verification). Neither spec was modified by this change.
 
 ## Tests
 
-- [ ] T1. `tool-call-groups.test.ts`: consecutive tool calls merge; a typed-card tool call
+- [x] T1. `tool-call-groups.test.ts`: consecutive tool calls merge; a typed-card tool call
       (`display_from_library` shape) breaks the run and is emitted standalone; agent text breaks
       the run; thinking between calls is absorbed; thinking-only runs are untouched; single call →
       group of 1; group id/timestamp = first item; summary counts (running / failed / completed,
       liveTitle picks the newest running call, liveKind 'thinking' when the tail is active
       thinking); empty input.
-- [ ] T2. `ToolCallGroupCard.test.tsx` (behavioural, rendered): collapsed by default shows the
+- [x] T2. `ToolCallGroupCard.test.tsx` (behavioural, rendered): collapsed by default shows the
       count and no per-call cards; running group shows the spinner and the live title; failed
       count text present; click and keyboard expand reveal the per-call `ToolCallCard`s; clicking a
       revealed call invokes `onLoadToolContent` with that call's `messageId` (through the real
@@ -276,16 +279,16 @@ interface ToolCallGroupItem {
       call (liveness); controlled mode calls `onToggle` and does not flip on its own; `live`
       with every call completed still shows the motion glyph and the text "working", and
       `live=false` with every call completed shows the settled check (F5b, discriminating pair).
-- [ ] T3. `project-message-view.test.tsx`: feed `messages` with `user → tool ×3 → assistant` and
+- [x] T3. `project-message-view.test.tsx`: feed `messages` with `user → tool ×3 → assistant` and
       assert one group row with "3 tool calls" and the assistant text visible, no per-call titles
       until expanded; a `display_from_library` tool row between them stays a standalone card.
       Enter through the real `messages` prop (rule 62), not by constructing items.
-- [ ] T4. Group rows render no comment action row / `data-comment-anchor` (F4).
-- [ ] T5. Timeline jump to an inner tool message id calls `scrollToIndex` with the **group's**
+- [x] T4. Group rows render no comment action row / `data-comment-anchor` (F4).
+- [x] T5. Timeline jump to an inner tool message id calls `scrollToIndex` with the **group's**
       zero-based index (place the group at index ≥ 1, assert the exact index and `< 1000`), and
       the group row gets `sam-message-highlight` (rule 17, virtualized section; the existing
       Virtuoso mock must expose `scrollToIndex`).
-- [ ] T6. Playwright `project-chat-tool-group-audit.spec.ts` (mobile + desktop, `assertNoOverflow`
+- [x] T6. Playwright `project-chat-tool-group-audit.spec.ts` (mobile + desktop, `assertNoOverflow`
       on every scenario, screenshots): (a) text → 3 calls (one failed) → text; (b) 40-call run;
       (c) running run whose live title is 220+ chars and contains an unbroken 120-char token;
       (d) single call; (e) document card between two runs stays standalone; (f) expand → click a
@@ -294,23 +297,25 @@ interface ToolCallGroupItem {
 
 ## Acceptance criteria
 
-- [ ] A1. In a session with text → tool calls → text, the default view shows the two text blocks
+- [x] A1. In a session with text → tool calls → text, the default view shows the two text blocks
       with exactly one compact card between them stating the number of tool calls (T3, T6a).
-- [ ] A2. While the agent is running tools, the card shows a motion indicator and the current
-      tool's title without expanding; when the run completes the indicator settles (T2, T6c,
-      staging).
-- [ ] A3. Failures are announced in text on the collapsed card (T2, T6a).
-- [ ] A4. Tapping the card expands the list; tapping a call loads its output through the existing
-      lazy path; expanded groups survive scrolling away and back (T2, T6f, staging).
-- [ ] A5. Document/library cards are never hidden inside a group (T1, T3, T6e; existing
+- [x] A2. While the agent is running tools, the card shows a motion indicator and the current
+      tool's title without expanding; when the run completes the indicator settles (T2, T6c).
+      Staging verification with a genuinely live agent is still owed (orchestrator).
+- [x] A3. Failures are announced in text on the collapsed card (T2, T6a).
+- [x] A4. Tapping the card expands the list; tapping a call loads its output through the existing
+      lazy path (T2, T6f). "Survives scrolling away and back" follows from the lifted state (C4)
+      and is covered in jsdom; a real virtual-window scroll is still owed on staging.
+- [x] A5. Document/library cards are never hidden inside a group (T1, T3, T6e; existing
       document-card audit unchanged).
-- [ ] A6. Timeline jump to a tool message lands on and highlights the group (T5, staging in a real
-      browser).
-- [ ] A7. No horizontal overflow or clipped content at 375px and 1280px with a 40-call run and a
+- [x] A6. A deep link to an absorbed tool message lands on and highlights the group (T5). jsdom
+      cannot prove a virtual-window scroll lands — staging verification in a real browser is still
+      owed (rule 17, virtualized section).
+- [x] A7. No horizontal overflow or clipped content at 375px and 1280px with a 40-call run and a
       220-char running title (T6).
-- [ ] A8. Keyboard and screen-reader accessible: native button, `aria-expanded`, visible focus
+- [x] A8. Keyboard and screen-reader accessible: native button, `aria-expanded`, visible focus
       ring, status conveyed in text (T2).
-- [ ] A9. Public chat docs describe the behaviour (C7).
+- [x] A9. Public chat docs describe the behaviour (C7).
 
 ## References
 
@@ -319,3 +324,110 @@ interface ToolCallGroupItem {
 - `.claude/rules/17-ui-visual-testing.md` (screenshots, virtualized jump), `56` (clipped
   overflow), `62` (real trigger), `64` (stable identities), `48` (no hiding), `24` (one
   implementation), `18` (file sizes), `04` (UI standards)
+
+## Implementation notes
+
+Implemented by a local Opus 5 subagent on 2026-09-17. Branch
+`sam/optimize-ui-chat-sessions-wshgke`.
+
+### Files
+
+| File | Role |
+|---|---|
+| `apps/web/src/components/project-message-view/tool-call-groups.ts` | **new** — `ToolCallGroupItem`, `DisplayItem`, `groupToolCallItems()`, `summarizeToolCallGroup()` (C1) |
+| `apps/web/src/components/project-message-view/ToolCallGroupCard.tsx` | **new** — collapsed header + expanded body, plus the shared `AbsorbedConversationItemView` (C2) |
+| `apps/web/src/components/project-message-view/useToolCallGroupExpansion.ts` | **new** — parent-held expansion state + `?tools=expanded` seeding (C4) |
+| `apps/web/src/components/project-message-view/index.tsx` | `displayItems` memo, inner-id index map, highlight/live derivation, Virtuoso wiring, `groupMessages` re-export removed (C3, C4, C10, C11) |
+| `apps/web/src/components/project-message-view/AcpConversationItemView.tsx` | accepts `DisplayItem`, adds the `tool_call_group` case (C5) |
+| `apps/web/src/components/project-message-view/comments/CommentableConversationItem.tsx` | threads `groupExpanded` / `onToggleGroup` / `groupLive` (C4) |
+| `apps/web/src/components/project-message-view/timeline-jump.ts` | `nearestItemId` now takes `DisplayItem[]` (C3) |
+| `apps/web/src/components/project-message-view/types.ts` | dead `groupMessages()` / `MessageGroup` removed (C10) |
+| `apps/web/src/pages/workspace/WorkspaceChatView.tsx` | same grouping, uncontrolled card (C6) |
+| `apps/www/src/content/docs/docs/guides/chat-features.md` | new "Tool Activity Cards" section (C7, A9) |
+
+Tests: `tests/unit/components/tool-call-groups.test.ts` (T1, 14),
+`tests/unit/components/ToolCallGroupCard.test.tsx` (T2, 14),
+`tests/unit/components/project-message-view.test.tsx` (T3/T4/T5, +4),
+`tests/playwright/project-chat-tool-group-audit.spec.ts` (T6, 7 scenarios × 2 viewports).
+Updated for grouping: `project-chat-tool-call-audit.spec.ts`,
+`light-mode-slice-b-audit.spec.ts` (both now expand the group before reaching the
+per-call disclosure).
+
+### Decisions and deviations
+
+1. **Glyph is token-based, not an extraction of `ToolCallCard.StatusIcon`.** The
+   design brief suggested extracting it. That icon is written in raw Tailwind
+   palette classes (`border-blue-500`, `text-green-500`, `text-red-500`), which
+   the tokens-only constraint for the new component forbids. `GroupGlyph` keeps
+   the same geometry and SVG paths but colours from
+   `--sam-color-accent-primary` / `--sam-color-success-fg` /
+   `--sam-color-danger-fg`, and exposes `data-state` so tests assert behaviour
+   rather than colour.
+2. **Highlight and `live` are resolved by row ID, not by index.** The first cut
+   compared `index - firstItemIndex` against a data index. `itemContent`'s
+   `index` is Virtuoso's `firstItemIndex`-offset coordinate — exactly the trap
+   `itemIndexById` already documents — and the jsdom mock passes a 0-based index,
+   so the comparison was wrong in production AND unobservable in tests. Replaced
+   with `highlightedRowId` (resolved through `itemIndexById` → `displayItems[i].id`)
+   and `lastDisplayId`. This is what made T5's highlight assertion go green.
+3. **The card is capped at the bubble column only while collapsed.** With
+   `max-w-[80%]` applied when expanded, the nested `ToolCallCard` header (glyph +
+   `truncate` title + kind chip + byte count + chevron) left ~37px for the title
+   at 375px, rendering every call as "Ba…". Caught by opening the screenshots, not
+   by any assertion. Expanded groups now take the full message column, which is
+   exactly the width a standalone tool card had before grouping. Collapsed width
+   is unchanged, so T6's coordinate assertion (which the spec scopes to the
+   *collapsed* card) still holds. The width change only occurs on an explicit tap.
+4. **Level-2 rendering is shared, not duplicated.** `AbsorbedConversationItemView`
+   is the single implementation of "generic tool call / thinking block with
+   project-chat presentation", used by both `AcpConversationItemView`'s standalone
+   `tool_call` fallback and the group's expanded body (rule 24). Importing
+   `AcpConversationItemView` into the card would have been a cycle.
+5. **Known tradeoff:** at 375px the collapsed live line has ~90px, so a long
+   running-tool title renders as "· running Bash…". That is the spec's stated
+   design (secondary content, one line, truncate); the full title is one tap away.
+   Putting it on a second line would change the header height mid-stream, which
+   the spec explicitly rules out.
+6. **T5 enters through the route-level deep link (`targetMessageId`), not the
+   timeline drawer.** `buildSessionTimeline` only emits `user_message` and
+   `comment_thread` entries with a `messageId`, so the drawer can never target a
+   tool message id. The deep link is the real production trigger that can.
+
+### Discriminating-test evidence
+
+| Guard removed | Tests that went red | Tests that stayed green |
+|---|---|---|
+| Inner-id registration in `itemIndexById` (`index.tsx`) | exactly 1: `jumps to the GROUP row when the deep-link target is an absorbed tool message` (T5) | the other 71 in the file |
+| `groupToolCallItems` made a pass-through | exactly 4: the three T3/T4 group cases + T5 | the other 68 in the file |
+| `max-w-[80%]` removed from the card container | `assertCardWithinBubbleColumn` in T6 (both viewports) | rest of T6 |
+
+Rationale for T5's fixture: the group sits at 0-based index 1 and no
+`targetMessageTimestamp` is supplied, so the `nearestItemId` fallback resolves to
+index 2 (the last row). Asserting `contains(1)` **and** `not contains(2)` is what
+separates the inner-id map from the timestamp fallback.
+
+### Verification
+
+- `pnpm --filter @simple-agent-manager/web typecheck` — clean.
+- `pnpm --filter @simple-agent-manager/web lint` — 0 errors, 3 pre-existing warnings.
+- `pnpm --filter @simple-agent-manager/web test` — 310 files / 3781 tests passed, 0 failed, 0 skipped.
+- `pnpm format:check` — ratchet passed (2141/2225).
+- Playwright, `iPhone SE (375x667)` + `Desktop (1280x800)`: tool-group audit 28/28,
+  tool-call audit 4/4, light-mode slice B 24/24, document-card audit 7/8.
+  Screenshots in `.tmp/playwright-screenshots/tool-group-*.png` (also written to
+  `.codex/tmp/playwright-screenshots/`, the repo's canonical location per the
+  shared `screenshot()` helper).
+- Every spec matching `grep -l "role: 'tool'"` (excluding `marketing-shots-*` and
+  `staging-*`) was run before and after the change and the failure sets compared:
+  43 failures post-change vs 44 pre-change, a strict subset. All 43 reproduce on
+  `HEAD~1` and are unrelated to grouping — `chat-dom-bound-audit` (12, the chat
+  never mounts under its own mocks), `chat-file-viewer-audit` file-browser / git /
+  search panels (29), and `project-chat-document-card-audit` mobile (2, the first
+  document card is virtualized out at 375×667). Not filed as new backlog tasks
+  because they are pre-existing local-only failures, not regressions from this
+  change; flag if you want them tracked.
+
+### Deferred (unchanged from the research above)
+
+- F5d prepend bookkeeping — idea `01M2RFR5MPQDKVMYB4TKG9QJ05`.
+- F5e level-2 refetch after a collapse — accepted for v1, documented in the card.

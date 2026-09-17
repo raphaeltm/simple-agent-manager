@@ -165,10 +165,22 @@ function ToolCallGroupCardImpl({
 
   return (
     <div className="flex justify-start my-2">
+      {/*
+        Collapsed, the card is capped at the agent bubble's 80% column so it
+        reads as part of the conversation. Expanded, it takes the full message
+        column: the nested `ToolCallCard` header packs a status glyph, a kind
+        chip, a byte count and a chevron around its `truncate` title, and at
+        375px the 80% cap left roughly 37px for the title ("Ba…"). The full
+        column restores exactly the width a standalone tool card had before
+        grouping. The width change only happens on an explicit tap, never while
+        streaming.
+      */}
       <div
         data-testid="tool-call-group"
         data-expanded={isExpanded ? 'true' : 'false'}
-        className="w-full max-w-[80%] min-w-0 glass-surface rounded-lg border border-border-default overflow-hidden"
+        className={`w-full min-w-0 glass-surface rounded-lg border border-border-default overflow-hidden${
+          isExpanded ? '' : ' max-w-[80%]'
+        }`}
       >
         <button
           type="button"
@@ -196,7 +208,7 @@ function ToolCallGroupCardImpl({
         </button>
 
         {isExpanded && (
-          <div className="border-t border-border-default px-3 py-1 min-w-0">
+          <div className="border-t border-border-default px-2 py-1 min-w-0">
             {group.items.map((item) => (
               <AbsorbedConversationItemView
                 key={item.id}

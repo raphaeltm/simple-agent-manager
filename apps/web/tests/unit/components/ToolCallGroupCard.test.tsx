@@ -11,8 +11,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ToolCallGroupCard } from '../../../src/components/project-message-view/ToolCallGroupCard';
 import type { ToolCallGroupItem } from '../../../src/components/project-message-view/tool-call-groups';
+import { ToolCallGroupCard } from '../../../src/components/project-message-view/ToolCallGroupCard';
 
 function toolCall(overrides: Partial<ToolCallItem> & { id: string }): ToolCallItem {
   return {
