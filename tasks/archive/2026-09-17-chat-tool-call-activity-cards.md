@@ -321,6 +321,21 @@ completedCount, liveTitle?: string, liveKind: 'tool' | 'thinking' | null }` used
       ring, status conveyed in text (T2).
 - [x] A9. Public chat docs describe the behaviour (C7).
 
+## Staging verification (orchestrator, 2026-09-17)
+
+Deploys: run 35282965545 (56333eda1) and run 35286256430 (final runtime head 6f8e01cd4), both green; served bundle checked before (0 markers) and after (markers in the project-chat, shared, and workspace chunks). Later commits (4e4abe1ac) are spec-only.
+
+`staging-tool-group-verify.spec.ts` against `app.sammy.party`, iPhone SE + Desktop, real session `a5b33d02…` in project `01KJNR9R3TEN3KX1ETE33852R8`:
+
+- Collapsed by default, per-call titles hidden, prose visible, no overflow — PASS ×2 → **A1, A5, A7, A8**
+- Expand → per-call cards → real `tool-content` request (200) → output rendered — PASS ×2 → **A4**
+- Deep link to an absorbed `tool_call_update` row id flashes the highlight on the group row inside the viewport — PASS ×2 (after the alias fix f41db09cd; failed before it) → **A6**
+- Live run (opt-in): real Instant session, `running_observed=true` with "3 tool calls · working" spinner while `date -u`, `ls /`, `uname -a` ran; after "TOOLS DONE" all glyphs settled to done → **A2, A3** (failed calls covered by the mock audit). The spec's cleanup assertion failed once on a transient 500 from `POST …/stop` (session and workspace still ended `stopped`; retry 200) — filed as idea `01M2RWMDZJ4JGAJ0TEKSNJ186X`. Sessions used: bf08eee5…, dd7124a2…, d58693bc… — all stopped; no VM provisioned.
+
+Evidence images (downscaled) live in `tasks/evidence/2026-09-17-chat-tool-call-activity-cards/`.
+
+Unrelated observations filed as SAM ideas: orphaned staging Hetzner nodes (`01M2RSNGE0M47PHA82BP89FR7E`), prepend bookkeeping (`01M2RFR5MPQDKVMYB4TKG9QJ05`), workspace tool-only activity asymmetry (`01M2RRZJS84N8ZRHTEPV24ZMB1`).
+
 ## References
 
 - Idea `01M27M6BDJCRVE1FFQA5BXAQ5D` (design + correctness traps), knowledge `UIUX`, policy
