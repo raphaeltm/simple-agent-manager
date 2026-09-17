@@ -155,16 +155,14 @@ export async function* compactRawChunks(
     .toArray()[0];
   if (!target) throw new Error('Compact archive target missing');
   const perChunkMs = filter.perChunkTimeoutMs;
-  const deadline = perChunkMs
-    ? undefined
-    : (filter.deadline ?? Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS));
+  const sharedDeadline = filter.deadline ?? Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
   let cursor: number | null = null;
   for (;;) {
     const { query, params } = compactChunkQuery(sessionId, cursor, filter);
     const row = sql.exec(query, ...params).toArray()[0];
     if (!row) return;
     cursor = Number(row.ordinal);
-    const chunkTimeout = perChunkMs ?? (deadline! - Date.now());
+    const chunkTimeout = perChunkMs ?? (sharedDeadline - Date.now());
     if (chunkTimeout <= 0) throw new Error('Compact archive operation deadline exceeded');
     const chunk = await readCompactChunk(
       bucket(env),
