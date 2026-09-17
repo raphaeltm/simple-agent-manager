@@ -20,21 +20,14 @@ import { AcpConversationItemView } from '../../components/project-message-view/A
 import { FollowUpInput } from '../../components/project-message-view/FollowUpInput';
 import type { DisplayItem } from '../../components/project-message-view/tool-call-groups';
 import { groupToolCallItems } from '../../components/project-message-view/tool-call-groups';
-import type { AgentActivityState } from '../../components/project-message-view/types';
 import {
   chatMessagesToConversationItems,
   deriveSessionState,
-  isWorkingActivity,
   VIRTUAL_START,
 } from '../../components/project-message-view/types';
-import { useActivityVerifyTimer } from '../../components/project-message-view/useActivityVerifyTimer';
 import { useCancelAgentPrompt } from '../../components/project-message-view/useCancelAgentPrompt';
 import { useCompletionDockWorking } from '../../components/project-message-view/useCompletionDockWorking';
-import {
-  isToolCallGroupExpanded,
-  useToolCallGroupExpansion,
-} from '../../components/project-message-view/useToolCallGroupExpansion';
-import { useChatWebSocket } from '../../hooks/useChatWebSocket';
+import { useToolCallGroupRowState } from '../../components/project-message-view/useToolCallGroupRowState';
 import {
   getChatSession,
   getTranscribeApiUrl,
@@ -46,12 +39,9 @@ import type {
   ChatMessageResponse,
   ChatSessionDetailResponse,
   ChatSessionResponse,
-  SessionStateSnapshot,
 } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
-
-/** Seconds of silence after last assistant message before returning to idle. */
-const IDLE_TIMEOUT_MS = 3000;
+import { useWorkspaceChatSocket } from './useWorkspaceChatSocket';
 
 interface WorkspaceChatViewProps {
   projectId: string;
@@ -81,9 +71,6 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // ── Agent activity state (derived from message flow) ──
-  const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
-
   // ── Scroll ──
   const [firstItemIndex, setFirstItemIndex] = useState(VIRTUAL_START);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -91,84 +78,19 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   const sessionState = session ? deriveSessionState(session) : 'terminated';
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
-  const clearActivity = useCallback(() => {
-    setAgentActivity('idle');
-  }, []);
-
-  const { startVerifyDecayTimer, stopVerifyDecayTimer } = useActivityVerifyTimer({
+  const {
+    connectionState,
+    wsRef,
+    agentActivity,
+    setAgentActivity,
+    hydrateActivity,
+    stopVerifyDecayTimer,
+  } = useWorkspaceChatSocket({
     projectId,
     sessionId,
-    delayMs: IDLE_TIMEOUT_MS,
-    logMessage: 'Workspace chat activity verify failed; re-arming timer',
-    onVerifiedIdle: clearActivity,
-  });
-
-  const hydrateActivity = useCallback(
-    (state: SessionStateSnapshot | null | undefined) => {
-      if (!state) return;
-      if (isWorkingActivity(state.activity)) {
-        setAgentActivity(state.activity);
-        startVerifyDecayTimer();
-      } else {
-        clearActivity();
-        stopVerifyDecayTimer();
-      }
-    },
-    [clearActivity, startVerifyDecayTimer, stopVerifyDecayTimer]
-  );
-
-  // ── DO WebSocket for real-time message updates (SOLE message source) ──
-  const { connectionState, wsRef } = useChatWebSocket({
-    projectId,
-    sessionId,
-    enabled: session?.status === 'active',
-    onMessage: useCallback(
-      (msg: ChatMessageResponse) => {
-        setMessages((prev) => mergeMessages(prev, [msg], 'append'));
-
-        // Transition to 'responding' on any assistant message (covers prompting→responding
-        // and also idle→responding on reconnect with in-progress agent output)
-        if (msg.role === 'assistant') {
-          setAgentActivity('responding');
-          startVerifyDecayTimer();
-        }
-      },
-      [startVerifyDecayTimer]
-    ),
-    onSessionStopped: useCallback(() => {
-      setSession((prev) => (prev ? { ...prev, status: 'stopped' } : prev));
-      setAgentActivity('idle');
-    }, []),
-    onCatchUp: useCallback(
-      (
-        catchUpMsgs: ChatMessageResponse[],
-        catchUpSession: ChatSessionResponse,
-        state?: SessionStateSnapshot | null
-      ) => {
-        setSession(catchUpSession);
-        setMessages((prev) => mergeMessages(prev, catchUpMsgs, 'replace'));
-        hydrateActivity(state);
-      },
-      [hydrateActivity]
-    ),
-    onAgentCompleted: useCallback((agentCompletedAt: number) => {
-      setSession((prev) =>
-        prev ? ({ ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse) : prev
-      );
-      setAgentActivity('idle');
-    }, []),
-    onAgentActivity: useCallback(
-      (activity: 'prompting' | 'idle' | 'recovering' | 'error') => {
-        if (activity === 'prompting' || activity === 'recovering') {
-          setAgentActivity(activity);
-          startVerifyDecayTimer();
-        } else {
-          clearActivity();
-          stopVerifyDecayTimer();
-        }
-      },
-      [clearActivity, startVerifyDecayTimer, stopVerifyDecayTimer]
-    ),
+    sessionStatus: session?.status,
+    setMessages,
+    setSession,
   });
 
   // ── Load session data ──
@@ -207,26 +129,20 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     return groupToolCallItems(chatMessagesToConversationItems(messages));
   }, [messages]);
 
-  // Expansion lives here, not in the card: Virtuoso unmounts rows outside its
-  // overscan window, so card-local state would collapse on scroll.
-  const groupExpansion = useToolCallGroupExpansion();
-  const onToggleGroup = groupExpansion.toggleGroup;
   /*
-   * Same signal the project-chat dock uses — anything `!== 'idle'` plus a 1s idle
-   * stabiliser — so the two surfaces agree on "the agent is busy".
+   * Expansion lives here, not in the card: Virtuoso unmounts rows outside its
+   * overscan window, so card-local state would collapse on scroll. Shared with
+   * project chat so the two surfaces cannot drift again (`.claude/rules/24`);
+   * see the hook's doc comment for why the working signal is
+   * `useCompletionDockWorking` and not `isWorkingActivity`.
    *
-   * `isWorkingActivity` would be wrong: it covers only `prompting`/`recovering`,
-   * and THIS view reaches `responding` from an assistant row in `onMessage`
-   * (below) and from the `getChatSession` state snapshot. A prompting-only
-   * predicate settles the glyph for the whole of a streaming turn.
-   *
-   * Note this view's `onMessage` moves activity for `role === 'assistant'` ONLY,
-   * where project chat moves it for every non-user row — so a tool-only burst
-   * does not mark this surface working at all. That asymmetry predates grouping
-   * and is recorded in the task file rather than changed here.
+   * Known gap on THIS surface: `onMessage` below marks activity for
+   * `role === 'assistant'` only, where project chat marks it for every non-user
+   * row — so a tool-only burst never lights the indicator here. Pre-existing and
+   * orthogonal to grouping; deferred to idea `01M2RRZJS84N8ZRHTEPV24ZMB1`.
    */
   const agentIsWorking = useCompletionDockWorking(agentActivity);
-  const lastDisplayId = conversationItems[conversationItems.length - 1]?.id ?? null;
+  const groupRowState = useToolCallGroupRowState(conversationItems, agentIsWorking);
 
   // Stable identity: an inline arrow gives Virtuoso a new `itemContent` on every
   // parent render, re-rendering every windowed row and defeating
@@ -238,22 +154,20 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
           item={item}
           projectId={projectId}
           groupExpanded={
-            item.kind === 'tool_call_group'
-              ? isToolCallGroupExpanded(groupExpansion, item.id)
-              : undefined
+            item.kind === 'tool_call_group' ? groupRowState.groupExpandedFor(item.id) : undefined
           }
-          onToggleGroup={onToggleGroup}
-          groupLive={agentIsWorking && item.id === lastDisplayId}
+          onToggleGroup={groupRowState.onToggleGroup}
+          groupLive={groupRowState.groupLiveFor(item.id)}
         />
       </div>
     ),
-    [projectId, groupExpansion, onToggleGroup, agentIsWorking, lastDisplayId]
+    [projectId, groupRowState]
   );
 
   // ── Cancel the current in-flight prompt ──
   // Shares one implementation with the project-chat dock so the two surfaces
   // cannot drift apart again (.claude/rules/24).
-  const onCancelled = useCallback(() => setAgentActivity('idle'), []);
+  const onCancelled = useCallback(() => setAgentActivity('idle'), [setAgentActivity]);
   const {
     cancelling,
     cancelError,
@@ -333,7 +247,16 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     } finally {
       setSendingFollowUp(false);
     }
-  }, [followUp, sendingFollowUp, sessionState, projectId, sessionId, wsRef, clearCancelError]);
+  }, [
+    followUp,
+    sendingFollowUp,
+    sessionState,
+    projectId,
+    sessionId,
+    wsRef,
+    clearCancelError,
+    setAgentActivity,
+  ]);
 
   // ── Upload files ──
   const handleUploadFiles = useCallback(

@@ -551,6 +551,66 @@ SAM_STAGING_LIVE_TOOL_GROUP=1 PLAYWRIGHT_BASE_URL=https://app.sammy.party \
   --project="iPhone SE (375x667)" --project="Desktop (1280x800)"
 ```
 
+## Round 3b (2026-09-17, shared row state + file split)
+
+Task-completion validator advisories.
+
+### MEDIUM (rule 18) — duplication removed rather than excepted
+
+The tool-group row wiring existed twice (`index.tsx` and `WorkspaceChatView.tsx` each
+derived the expansion lookup, the toggle, the tail id and the working flag). Extracted
+`useToolCallGroupRowState(displayItems, agentIsWorking)` →
+`{ groupExpandedFor, onToggleGroup, groupLiveFor }` in
+`apps/web/src/components/project-message-view/useToolCallGroupRowState.ts`, used by both
+surfaces. `useSearchParams` stays inside `useToolCallGroupExpansion`. Identities change
+exactly when a row's answer can change, so the row renderers' `useCallback` deps shrink
+to the single returned object and `AcpConversationItemView`'s memo is unaffected
+(rule 64). The long rationale for `completionDockWorking` vs `isWorkingActivity` now
+lives once, in the shared hook's doc comment.
+
+That alone left `WorkspaceChatView.tsx` at 512 lines, so its DO-socket + activity
+wiring also moved to `apps/web/src/pages/workspace/useWorkspaceChatSocket.ts` — the
+small sibling of `useSessionLifecycle`, owning the socket, `agentActivity` and the
+verify-before-decay timer, while message/session state stays in the view because the
+composer, pagination and upload all write to it. **No file-size exception was added.**
+
+| File                                                                       | origin/main | before 3b | after 3b                         |
+| -------------------------------------------------------------------------- | ----------- | --------- | -------------------------------- |
+| `apps/web/src/pages/workspace/WorkspaceChatView.tsx`                       | 403         | 523       | **446**                          |
+| `apps/web/src/components/project-message-view/index.tsx`                   | 804         | 852       | **834** (pre-existing exception) |
+| `apps/web/src/pages/workspace/useWorkspaceChatSocket.ts`                   | —           | —         | 146 (new)                        |
+| `apps/web/src/components/project-message-view/useToolCallGroupRowState.ts` | —           | —         | 73 (new)                         |
+
+For the record on the 403 → 523 growth: `prettier --parser typescript` on
+`origin/main`'s **untouched** copy of that file already yields 509 lines, so ~106 of
+those 120 lines were formatting of code this change never edited. The split was still
+worth doing on its own merits.
+
+`pnpm quality:file-sizes` passes; no new file is over 500.
+
+**Extraction verified non-hollowing:** breaking `groupLiveFor` in the shared hook
+reddens exactly the two live tests, one per surface —
+`puts the TAIL group in motion once the agent is responding` and
+`keeps the tail group in motion while the agent is mid-turn, and settles when idle` —
+with the other 74 in those files green.
+
+### LOW (rule 09) — asymmetry deferral recorded
+
+The workspace surface's `onMessage` marks activity for `role === 'assistant'` only, so
+a tool-only burst never lights the indicator there. **Deferred to idea
+`01M2RRZJS84N8ZRHTEPV24ZMB1`** ("Workspace chat view: tool-only bursts never mark the
+agent as working"), and that id is now cited in the comment above the derivation in
+`WorkspaceChatView.tsx` as well as here.
+
+### Verification
+
+- `pnpm --filter @simple-agent-manager/web test` — 313 files / 3791 tests passed, 0
+  failed, 0 skipped.
+- Typecheck clean; lint 0 errors / 3 pre-existing warnings; format ratchet passed;
+  `pnpm quality:file-sizes` passed.
+- Playwright `project-chat-tool-group-audit`: 16/16 under
+  `CI=true … --project='iPhone 14 (390x844)'` after the wiring moved.
+
 ## Round 3 (2026-09-17, test + comment only)
 
 Test-engineer re-review: the HIGH fix was confirmed PASS, but the workspace-surface

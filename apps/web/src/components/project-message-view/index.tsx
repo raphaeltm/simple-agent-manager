@@ -48,7 +48,7 @@ import { chatMessagesToConversationItems } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
 import { useSessionTimeline } from './useSessionTimeline';
 import { useSessionTools } from './useSessionTools';
-import { isToolCallGroupExpanded, useToolCallGroupExpansion } from './useToolCallGroupExpansion';
+import { useToolCallGroupRowState } from './useToolCallGroupRowState';
 import { WakeProgressBanner } from './WakeProgressBanner';
 
 // Re-export utilities used by external consumers
@@ -331,10 +331,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     return -1;
   }, [displayItems]);
 
-  // Expanded tool-call groups are parent state so they survive virtualization.
-  const groupExpansion = useToolCallGroupExpansion();
-  const onToggleGroup = groupExpansion.toggleGroup;
-
   // A jump can target an absorbed tool id, which resolves to its GROUP's row.
   // Resolve it to the row's own id (not an index): `itemContent`'s `index` is
   // Virtuoso's firstItemIndex-offset coordinate, so comparing indices here would
@@ -346,21 +342,12 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   }, [highlightedItemId, itemIndexById, displayItems]);
 
   /*
-   * Statuses flip per call, so a purely status-derived glyph would flash
-   * check → spinner between calls. The tail row stays "live" for as long as the
-   * agent is mid-turn.
-   *
-   * `completionDockWorking` is that signal — NOT `isWorkingActivity`. The latter
-   * is true only for `prompting`/`recovering`, but `useSessionLifecycle`'s
-   * `onMessage` sets `responding` for every non-user row (every tool_call and
-   * tool_call_update included), so between "call A completed" and the next row
-   * `isWorkingActivity` is false and the glyph would flash settled — the exact
-   * flicker this prop exists to prevent. The dock's signal treats anything
-   * `!== 'idle'` as working AND carries a 1s idle stabiliser, so both surfaces
-   * read one source of truth for "the agent is busy" (`.claude/rules/24`).
+   * Expansion survives virtualization because it lives here, and the live-tail
+   * glyph keys on `completionDockWorking` rather than `isWorkingActivity`. Both
+   * chat surfaces share this hook; see its doc comment for why that signal is
+   * the correct one (`.claude/rules/24`).
    */
-  const lastDisplayId = displayItems[displayItems.length - 1]?.id ?? null;
-  const agentIsWorking = lc.completionDockWorking;
+  const groupRowState = useToolCallGroupRowState(displayItems, lc.completionDockWorking);
 
   // Only pass a file-click handler through when the session can actually serve
   // files; hoisted so `renderConversationItem` has a stable dependency instead of
@@ -436,12 +423,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           animationTargetIdx={animationTargetIdx}
           commentState={commentUi.rowState}
           groupExpanded={
-            item.kind === 'tool_call_group'
-              ? isToolCallGroupExpanded(groupExpansion, item.id)
-              : undefined
+            item.kind === 'tool_call_group' ? groupRowState.groupExpandedFor(item.id) : undefined
           }
-          onToggleGroup={onToggleGroup}
-          groupLive={agentIsWorking && item.id === lastDisplayId}
+          onToggleGroup={groupRowState.onToggleGroup}
+          groupLive={groupRowState.groupLiveFor(item.id)}
         />
       );
     },
@@ -456,10 +441,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       animatedUserMsgIds,
       canWriteSession,
       commentUi.rowState,
-      groupExpansion,
-      onToggleGroup,
-      agentIsWorking,
-      lastDisplayId,
+      groupRowState,
     ]
   );
 
