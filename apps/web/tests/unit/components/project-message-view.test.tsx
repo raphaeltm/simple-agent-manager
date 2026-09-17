@@ -2955,6 +2955,57 @@ describe('ProjectMessageView — tool call activity groups', () => {
     expect(document.querySelector('[data-comment-anchor="msg-assistant-1"]')).toBeTruthy();
   });
 
+  /*
+   * F5b, through the REAL trigger (rule 62).
+   *
+   * Statuses flip per call, so between "call A completed" and the next row every
+   * call in the tail group reads `completed`. The only thing that can keep the
+   * motion indicator on is the session's working signal — and the production way
+   * that signal moves is the DO WebSocket: `useSessionLifecycle`'s `onMessage`
+   * sets `agentActivity = 'responding'` for every non-user row.
+   *
+   * The pushed row is a status-only `tool_call_update` that stays `completed`, so
+   * nothing in the group's own statuses can produce the running glyph. If the
+   * `live` predicate is wrong, the glyph stays settled and this fails.
+   */
+  it('keeps the tail group in motion while the agent is mid-turn, and settles when idle', async () => {
+    const sid = 'session-live-group';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'active'),
+      messages: [
+        makeTextMessage('msg-user-1', sid, 'user', 'Run the checks please.', 1_000),
+        makeToolMessage('msg-tool-1', sid, 2_000, { title: 'Bash: pnpm lint' }),
+        makeToolMessage('msg-tool-2', sid, 3_000, { title: 'Bash: pnpm typecheck' }),
+        makeToolMessage('msg-tool-3', sid, 4_000, { title: 'Bash: pnpm test' }),
+      ],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    // Control: the group is the tail row, every call has settled, and the agent
+    // is idle — so the glyph must read settled. Without this the "running"
+    // assertion below could pass for a component that is always in motion.
+    const glyph = await waitFor(() => screen.getByTestId('tool-group-glyph'));
+    expect(glyph).toHaveAttribute('data-state', 'done');
+    expect(screen.queryByText('· working')).toBeNull();
+
+    // The real trigger: a status-only tool update arriving over the DO socket.
+    await act(async () => {
+      capturedWsOnMessage!(
+        makeToolMessage('msg-tool-3-update', sid, 5_000, {
+          toolCallId: 'tc-msg-tool-3',
+          status: 'completed',
+        }) as unknown as ReturnType<typeof makeMessage>
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tool-group-glyph')).toHaveAttribute('data-state', 'running');
+    });
+    expect(screen.getByText('· working')).toBeTruthy();
+  });
+
   // A deep link (Project → Comments, or any URL target) can point at a tool
   // message id that is now absorbed into a group. `itemIndexById` registers
   // every absorbed id against its GROUP's row index, so the jump lands on a row

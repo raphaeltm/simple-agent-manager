@@ -44,7 +44,7 @@ import { nearestItemId } from './timeline-jump';
 import type { TimelineJumpTarget } from './timeline-types';
 import type { DisplayItem } from './tool-call-groups';
 import { groupToolCallItems } from './tool-call-groups';
-import { chatMessagesToConversationItems, isWorkingActivity } from './types';
+import { chatMessagesToConversationItems } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
 import { useSessionTimeline } from './useSessionTimeline';
 import { useSessionTools } from './useSessionTools';
@@ -345,11 +345,22 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     return index === undefined ? null : (displayItems[index]?.id ?? null);
   }, [highlightedItemId, itemIndexById, displayItems]);
 
-  // Statuses flip per call, so a purely status-derived glyph would flash
-  // check → spinner between calls. The tail row stays "live" for as long as the
-  // agent is mid-turn.
+  /*
+   * Statuses flip per call, so a purely status-derived glyph would flash
+   * check → spinner between calls. The tail row stays "live" for as long as the
+   * agent is mid-turn.
+   *
+   * `completionDockWorking` is that signal — NOT `isWorkingActivity`. The latter
+   * is true only for `prompting`/`recovering`, but `useSessionLifecycle`'s
+   * `onMessage` sets `responding` for every non-user row (every tool_call and
+   * tool_call_update included), so between "call A completed" and the next row
+   * `isWorkingActivity` is false and the glyph would flash settled — the exact
+   * flicker this prop exists to prevent. The dock's signal treats anything
+   * `!== 'idle'` as working AND carries a 1s idle stabiliser, so both surfaces
+   * read one source of truth for "the agent is busy" (`.claude/rules/24`).
+   */
   const lastDisplayId = displayItems[displayItems.length - 1]?.id ?? null;
-  const agentIsWorking = isWorkingActivity(lc.agentActivity);
+  const agentIsWorking = lc.completionDockWorking;
 
   // Only pass a file-click handler through when the session can actually serve
   // files; hoisted so `renderConversationItem` has a stable dependency instead of
