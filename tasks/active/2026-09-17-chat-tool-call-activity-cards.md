@@ -728,3 +728,81 @@ asserted; the session is `stopped` on staging).
   failure, reproduced on `HEAD~1`).
 - The staging spec collects (4 tests/project) and skips cleanly without the token; it
   was **not** executed from here.
+
+## Rounds 3e / 3f (2026-09-17, spec-only) — staging verification now GREEN
+
+### 3e — phase 3 asserted before the turn had ended
+
+The live run reached phases 1 and 2 (`running_observed=true`, screenshot showing
+"3 tool calls · working" with the spinner) and failed phase 3 with
+`glyph states after completion: done, running`. The app was right: after the
+assistant said "TOOLS DONE" the agent made one more tool call (ToolSearch →
+get_instructions, pending 23:38:15.123 → completed 23:38:15.612), so a second tail
+group was legitimately `running` when the single-shot assertion fired. **The
+assistant's closing text is not the end of the turn.**
+
+Phase 3 is now a bounded `expect.poll` (`LIVE_SETTLE_TIMEOUT_MS`, default 90 s via
+`SAM_STAGING_LIVE_SETTLE_TIMEOUT_MS`, at `LIVE_POLL_INTERVAL_MS`) requiring both:
+
+- every mounted glyph is `done`/`failed`, with `length > 0` as the liveness half
+  (rule 62 — "all settled" is also satisfied by no glyphs); and
+- the session's own activity snapshot says the turn ended —
+  `GET …/sessions/:id/state` → `state.activity` outside `{prompting, recovering}`.
+
+Chose the server snapshot over the composer placeholder: the placeholder is derived
+from the CLIENT's `agentActivity`, which lags through the verify-before-decay timer,
+and has five branches whose non-working text varies by session state
+(`index.tsx:779`). Waiting on a lagging signal is exactly the bug being fixed. The
+server union has no `responding` (client-only), so "not prompting/recovering" is
+unambiguous.
+
+Each iteration re-scrolls before reading, because `followOutput` pulls the list back
+to the bottom whenever another row arrives and can unmount the group again;
+`scrollToFirstGroup` returns immediately when one is mounted, so it is cheap after
+the first pass. Final glyph states, the last activity value and the settle duration
+are annotated in a `finally`, **so a failure records what it observed** — the
+previous run's failure had no such record, which is why this exists.
+
+### 3f — the observer could only ever see the failure case
+
+The deep-link test failed with "no row ever flashed highlighted" on both projects.
+The reviewer's diagnosis was exact: the target group sits mid-conversation while
+Virtuoso mounts at the bottom, so `scrollToIndex` + `highlightedRowId` mount that row
+**fresh with `sam-message-highlight` already in its className**. No attribute ever
+changes, so the attributes-only `MutationObserver` reported nothing. It could observe
+only the fallback case (an already-mounted last row gaining the class) — never the
+success case.
+
+The observer now also watches `childList` and, for every added node, records the node
+itself (`matches`) or its first matching descendant (`querySelectorAll`). The
+attribute path is retained for the fallback case.
+
+**Proven discriminating against real staging**, not argued: with the added-node
+branch disabled and `childList` removed, the Desktop test fails with exactly
+`no row ever flashed highlighted` (the reported symptom); with it restored, both
+projects pass.
+
+### Staging verification result (read-only, run from this session)
+
+```
+PLAYWRIGHT_BASE_URL=https://app.sammy.party npx playwright test staging-tool-group-verify \
+  --project="iPhone SE (375x667)" --project="Desktop (1280x800)"
+  -> 6 passed, 2 skipped (the live test, correctly gated off)
+```
+
+| Test                                                              | iPhone SE | Desktop |
+| ----------------------------------------------------------------- | --------- | ------- |
+| groups collapsed by default, per-call titles hidden               | PASS      | PASS    |
+| expand + real `messages/*/tool-content` lazy load                 | PASS      | PASS    |
+| deep link to an absorbed tool row lands on + highlights the group | PASS      | PASS    |
+
+That closes the staging debt recorded against **A1, A3, A4, A5, A6, A7 and A8** —
+including A6, which jsdom cannot prove, and which also confirms the round-3c runtime
+fix (a deep link to a `tool_call_update` row) works end-to-end on staging. **A2** was
+confirmed by the coordinator's live run (`running_observed=true` plus the
+"· working" screenshot); the remainder of that test's phase 3 is what 3e fixes and is
+pending a re-run.
+
+Gates: spec lints clean, type-checks clean (`tests/` is outside `apps/web/tsconfig.json`,
+so it is checked standalone with `tsc --strict`), prettier clean, format ratchet passed.
+No runtime code changed in either round.

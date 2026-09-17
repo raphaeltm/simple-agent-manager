@@ -84,6 +84,19 @@ const LIVE_RUN_TIMEOUT_MS = Number.parseInt(
   process.env.SAM_STAGING_LIVE_RUN_TIMEOUT_MS ?? String(DEFAULT_LIVE_RUN_TIMEOUT_MS),
   10
 );
+/**
+ * How long the run gets to SETTLE after the agent's closing text.
+ *
+ * Separate from `LIVE_RUN_TIMEOUT_MS` because it measures a different thing: the
+ * assistant's marker is not the end of the turn — an agent can make further tool
+ * calls after its closing message, and the first live run did exactly that
+ * (ToolSearch -> get_instructions landed ~0.5 s after "TOOLS DONE").
+ */
+const DEFAULT_LIVE_SETTLE_TIMEOUT_MS = 90_000;
+const LIVE_SETTLE_TIMEOUT_MS = Number.parseInt(
+  process.env.SAM_STAGING_LIVE_SETTLE_TIMEOUT_MS ?? String(DEFAULT_LIVE_SETTLE_TIMEOUT_MS),
+  10
+);
 const DEFAULT_LIVE_POLL_INTERVAL_MS = 3_000;
 const LIVE_POLL_INTERVAL_MS = Number.parseInt(
   process.env.SAM_STAGING_LIVE_POLL_INTERVAL_MS ?? String(DEFAULT_LIVE_POLL_INTERVAL_MS),
@@ -102,6 +115,16 @@ const LIVE_POLL_INTERVAL_MS = Number.parseInt(
 function assistantDoneMarker(page: Page) {
   return page.locator('.glass-msg-assistant', { hasText: LIVE_DONE_MARKER });
 }
+
+/**
+ * Server-side activity values that mean the turn is still running.
+ *
+ * `SessionStateSnapshot['activity']` is `idle | prompting | recovering | error |
+ * stopped` (`apps/web/src/lib/api/sessions.ts`) — there is no `responding`, which
+ * is a client-only derivation. So anything outside this set means the agent is no
+ * longer working.
+ */
+const SERVER_WORKING_ACTIVITY = new Set(['prompting', 'recovering']);
 
 const GROUP = '[data-testid="tool-call-group"]';
 const GLYPH = '[data-testid="tool-group-glyph"]';
@@ -300,6 +323,26 @@ async function fetchSessionMessages(page: Page): Promise<StagingMessage[]> {
   expect(res.status(), `session fetch failed: ${await res.text()}`).toBe(200);
   const body = (await res.json()) as { messages?: StagingMessage[] };
   return body.messages ?? [];
+}
+
+/**
+ * The session's own activity snapshot — the authoritative "is the turn over"
+ * signal, and the same one the UI hydrates from (`getChatSessionState`,
+ * `GET …/sessions/:id/state`).
+ *
+ * Chosen over the composer placeholder: that string is derived from the CLIENT's
+ * `agentActivity`, which lags behind through the verify-before-decay timer, and it
+ * has five branches whose non-working text differs by session state
+ * (`index.tsx:779`) — brittle to assert on, and a lagging signal is exactly what
+ * this poll must not wait on. Returns null when the DO holds no snapshot.
+ */
+async function sessionActivity(page: Page, sessionId: string): Promise<string | null> {
+  const res = await page.request.get(
+    `${STAGING_API}/api/projects/${PROJECT_ID}/sessions/${sessionId}/state`
+  );
+  if (res.status() !== 200) return null;
+  const body = (await res.json()) as { state?: { activity?: string } | null };
+  return body.state?.activity ?? null;
 }
 
 /** Role histogram for a session, for failure reports. */
@@ -582,13 +625,35 @@ test.describe('Staging — tool activity cards', () => {
       };
       const observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
+          // Path A: an already-mounted row GAINS the class. This is the fallback
+          // case (the jump target was the last row, so it was never unmounted).
           const el = mutation.target as Element;
           if (el.classList?.contains('sam-message-highlight')) record(el);
+
+          /*
+           * Path B: the row is INSERTED with the class already on it — the success
+           * case, and the one the attribute filter alone can never see. The jump
+           * target sits mid-conversation while Virtuoso mounts at the bottom, so
+           * `scrollToIndex` + `highlightedRowId` mount that row FRESH with
+           * `sam-message-highlight` already in its className. No attribute ever
+           * changes, so an attributes-only observer reports nothing and a
+           * successful jump reads as "no row ever flashed highlighted".
+           */
+          for (const node of Array.from(mutation.addedNodes)) {
+            const added = node as Element;
+            if (added.matches?.('.sam-message-highlight')) {
+              record(added);
+              continue;
+            }
+            const nested = added.querySelectorAll?.('.sam-message-highlight');
+            if (nested && nested.length > 0) record(nested[0]!);
+          }
         }
       });
       const start = () =>
         observer.observe(document.documentElement, {
           subtree: true,
+          childList: true,
           attributes: true,
           attributeFilter: ['class'],
         });
@@ -726,12 +791,47 @@ test.describe('Staging — tool activity cards, live run', () => {
         });
       }
       expect(found, 'the live run produced no activity card').toBe(true);
-      const states = await glyphStates(page);
-      expect(states.length).toBeGreaterThan(0);
-      expect(
-        states.every((state) => state === 'done' || state === 'failed'),
-        `glyph states after completion: ${states.join(', ')}`
-      ).toBe(true);
+      /*
+       * The assistant's marker is NOT the end of the turn, so a single-shot read
+       * here asserts too early: the first live run made one more tool call after
+       * its closing text, and that second tail group was legitimately `running`
+       * when the assertion fired ("glyph states after completion: done, running").
+       *
+       * Poll until the rendered glyphs AND the session's own activity snapshot
+       * agree the turn is over. Re-scroll each iteration because `followOutput`
+       * pulls the list back to the bottom whenever another row arrives, which can
+       * unmount the group again; `scrollToFirstGroup` returns immediately when one
+       * is already mounted, so this is cheap after the first pass.
+       */
+      const settleStartedAt = Date.now();
+      let lastStates: Array<string | null> = [];
+      let lastActivity: string | null = null;
+      try {
+        await expect
+          .poll(
+            async () => {
+              await scrollToFirstGroup(page);
+              lastStates = await glyphStates(page);
+              lastActivity = await sessionActivity(page, liveSessionId!);
+              // `length > 0` is the liveness half: "every glyph settled" is also
+              // satisfied by no glyphs at all (`.claude/rules/62`).
+              const glyphsSettled =
+                lastStates.length > 0 &&
+                lastStates.every((state) => state === 'done' || state === 'failed');
+              const turnEnded = lastActivity !== null && !SERVER_WORKING_ACTIVITY.has(lastActivity);
+              return glyphsSettled && turnEnded;
+            },
+            { timeout: LIVE_SETTLE_TIMEOUT_MS, intervals: [LIVE_POLL_INTERVAL_MS] }
+          )
+          .toBe(true);
+      } finally {
+        // Annotated on failure too — the last run failed with no record of what it
+        // had actually observed, which is why this exists.
+        test.info().annotations.push({
+          type: 'live-settle-result',
+          description: `glyphs=[${lastStates.join(', ')}] activity=${lastActivity} after ${Date.now() - settleStartedAt}ms`,
+        });
+      }
 
       await assertGroupCardNotClipped(page);
       await assertNoOverflow(page);
