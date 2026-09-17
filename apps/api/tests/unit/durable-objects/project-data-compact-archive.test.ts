@@ -284,7 +284,9 @@ describe('compact archive migration compatibility', () => {
           const originalGet = bucket.get;
           let clock = Date.now();
           const date = vi.spyOn(Date, 'now').mockImplementation(() => clock);
-          const deadlineEnv = { ...env, PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS: '10' };
+          // Per-chunk timeout: each chunk gets its own budget, so each read
+          // must individually exceed the timeout to trigger the error.
+          const deadlineEnv = { ...env, PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS: '3' };
           bucket.get = ((key: string) => {
             clock += 4;
             return originalGet.call(bucket, key);

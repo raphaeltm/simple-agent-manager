@@ -112,6 +112,7 @@ type CompactRawFilter = {
   messageId?: string;
   order?: 'asc' | 'desc';
   deadline?: number;
+  perChunkTimeoutMs?: number;
 };
 
 function compactChunkQuery(sessionId: string, cursor: number | null, filter: CompactRawFilter) {
@@ -153,16 +154,18 @@ export async function* compactRawChunks(
     .exec('SELECT * FROM project_data_archive_target_sessions WHERE session_id = ?', sessionId)
     .toArray()[0];
   if (!target) throw new Error('Compact archive target missing');
-  const deadline =
-    filter.deadline ?? Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
+  const perChunkMs = filter.perChunkTimeoutMs;
+  const deadline = perChunkMs
+    ? undefined
+    : (filter.deadline ?? Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS));
   let cursor: number | null = null;
   for (;;) {
     const { query, params } = compactChunkQuery(sessionId, cursor, filter);
     const row = sql.exec(query, ...params).toArray()[0];
     if (!row) return;
     cursor = Number(row.ordinal);
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error('Compact archive operation deadline exceeded');
+    const chunkTimeout = perChunkMs ?? (deadline! - Date.now());
+    if (chunkTimeout <= 0) throw new Error('Compact archive operation deadline exceeded');
     const chunk = await readCompactChunk(
       bucket(env),
       reference(row),
@@ -174,7 +177,7 @@ export async function* compactRawChunks(
         targetGeneration: Number(target.generation),
         ordinal: cursor,
       },
-      remaining
+      chunkTimeout
     );
     if (
       (await canonicalRowsSha256(PROJECT_DATA_ARCHIVE_MESSAGE_COLUMNS, chunk.rows)) !== chunk.sha256
@@ -189,12 +192,16 @@ export async function compactRawDigest(
   sql: SqlStorage,
   env: Env,
   sessionId: string,
-  deadline?: number
+  deadlineOrPerChunkMs?: number,
+  options?: { perChunk?: boolean }
 ) {
   const hasher = createCanonicalRowsHasher(PROJECT_DATA_ARCHIVE_MESSAGE_COLUMNS);
   let lastMessageAt: number | null = null;
   let ordinal = 0;
-  for await (const chunk of compactRawChunks(sql, env, sessionId, { deadline })) {
+  const filter: CompactRawFilter = options?.perChunk
+    ? { perChunkTimeoutMs: deadlineOrPerChunkMs }
+    : { deadline: deadlineOrPerChunkMs };
+  for await (const chunk of compactRawChunks(sql, env, sessionId, filter)) {
     if (chunk.ordinal !== ordinal++) throw new Error('Compact archive chunk inventory gap');
     for (const row of chunk.rows) {
       hasher.update(row);

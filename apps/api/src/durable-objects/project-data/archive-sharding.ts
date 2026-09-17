@@ -851,6 +851,7 @@ export type ComputeTerminalVersionOptions = {
   hashPageRows?: number;
   compactEnv?: Env;
   compactDeadline?: number;
+  compactPerChunkTimeoutMs?: number;
 };
 
 export async function computeTerminalVersion(
@@ -867,7 +868,11 @@ export async function computeTerminalVersion(
     );
   }
   const raw = options.compactEnv && compactArchive.isCompactArchive(sql, sessionId)
-    ? await compactArchive.compactRawDigest(sql, options.compactEnv, sessionId, options.compactDeadline) : null;
+    ? await compactArchive.compactRawDigest(
+        sql, options.compactEnv, sessionId,
+        options.compactPerChunkTimeoutMs ?? options.compactDeadline,
+        options.compactPerChunkTimeoutMs ? { perChunk: true } : undefined
+      ) : null;
   const messageCount = raw?.messageCount ?? countRows(
     sql,
     'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
@@ -1516,13 +1521,13 @@ function chunkId(
 }
 
 async function readValidatedSeal(
-  sql: SqlStorage, input: ArchiveTargetSealInput, env: Env | undefined, compactDeadline: number
+  sql: SqlStorage, input: ArchiveTargetSealInput, env: Env | undefined, compactPerChunkTimeoutMs: number
 ): Promise<ArchiveTargetSealResult> {
   const row = readTargetSession(sql, input.sessionId);
   // A resumed coordinator must not delete the root copy using a historical seal
   // if an external R2 loss occurred while the migration was paused.
   if (env && compactArchive.isCompactArchive(sql, input.sessionId)) {
-    const verified = await computeTerminalVersion(sql, input.sessionId, { compactEnv: env, compactDeadline, hashPageRows: input.hashPageRows });
+    const verified = await computeTerminalVersion(sql, input.sessionId, { compactEnv: env, compactPerChunkTimeoutMs, hashPageRows: input.hashPageRows });
     if (verified.sha256 !== input.terminalVersionSha256 || verified.sha256 !== row?.terminal_version_sha256) {
       throw new ProjectDataArchiveInvariantError('target_terminal_version_mismatch', 'Compact archive recovery proof no longer matches');
     }
@@ -1553,7 +1558,7 @@ export async function sealArchiveTarget(
   input: ArchiveTargetSealInput,
   env?: Env
 ): Promise<ArchiveTargetSealResult> {
-  const compactDeadline = Date.now() + compactArchiveTimeout(env?.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
+  const compactPerChunkTimeoutMs = compactArchiveTimeout(env?.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
   const state = validateTargetOwner(readTargetSession(sql, input.sessionId), {
     projectId: input.projectId,
     sessionId: input.sessionId,
@@ -1563,7 +1568,7 @@ export async function sealArchiveTarget(
   });
   if (compactArchive.isCompactArchive(sql, input.sessionId) && !env) throw new Error('Compact archive environment required');
   if (state === 'sealed' || state === 'published') {
-    return readValidatedSeal(sql, input, env, compactDeadline);
+    return readValidatedSeal(sql, input, env, compactPerChunkTimeoutMs);
   }
   if (state !== 'copying' && state !== 'prepared') {
     throw new ProjectDataArchiveInvariantError(
@@ -1572,7 +1577,7 @@ export async function sealArchiveTarget(
     );
   }
   const hashPageRows = resolveHashPageRows(input.hashPageRows);
-  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, { hashPageRows, compactEnv: env, compactDeadline });
+  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, { hashPageRows, compactEnv: env, compactPerChunkTimeoutMs });
   if (terminalVersion.sha256 !== input.terminalVersionSha256) {
     throw new ProjectDataArchiveInvariantError(
       'target_terminal_version_mismatch',
@@ -1606,7 +1611,7 @@ export async function sealArchiveTarget(
       `terminal:${input.terminalVersionSha256}`,
       `chunks:${committedChunkHashes.join(',')}`,
       `messages:${env && compactArchive.isCompactArchive(sql, input.sessionId)
-        ? (await compactArchive.compactRawDigest(sql, env, input.sessionId, compactDeadline)).sha256
+        ? (await compactArchive.compactRawDigest(sql, env, input.sessionId, compactPerChunkTimeoutMs, { perChunk: true })).sha256
         : await tableAggregateSha256(sql, 'chat_messages', input.sessionId, hashPageRows)}`,
       `grouped:${await tableAggregateSha256(sql, 'chat_messages_grouped', input.sessionId, hashPageRows)}`,
       `tool_payload_archives:${await tableAggregateSha256(sql, 'tool_payload_archives', input.sessionId, hashPageRows)}`,
