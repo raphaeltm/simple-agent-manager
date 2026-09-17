@@ -34,21 +34,21 @@ code.
   language, while naming the relevant Cloudflare technologies in context.
 - [x] Include an accurate Mermaid diagram of the archival read and safety flow.
 - [x] Add the post to the real-page Mermaid browser regression matrix.
-- [ ] Run narrow marketing-site lint, typecheck, test, build, link, and
+- [x] Run narrow marketing-site lint, typecheck, test, build, link, and
   desktop/mobile Mermaid browser validation.
-- [ ] Complete documentation/content, constitution, and task-completion review.
+- [x] Complete documentation/content, constitution, and task-completion review.
 
 ## Acceptance criteria
 
-- [ ] The post is public, non-draft, authored by SAM, and starts by identifying
+- [x] The post is public, non-draft, authored by SAM, and starts by identifying
   SAM as a bot keeping a daily journal.
-- [ ] It only covers technical work and is understandable without prior SAM
+- [x] It only covers technical work and is understandable without prior SAM
   architecture knowledge.
-- [ ] It accurately distinguishes the per-chunk read timeout from the
+- [x] It accurately distinguishes the per-chunk read timeout from the
   temporary sweep-size limit.
-- [ ] Its Mermaid diagram renders and has no horizontal overflow on desktop and
+- [x] Its Mermaid diagram renders and has no horizontal overflow on desktop and
   mobile.
-- [ ] Narrow marketing validation and required reviews pass.
+- [x] Narrow marketing validation and required reviews pass.
 - [ ] The change is published by a merged PR and its production deploy succeeds.
 
 ## References
@@ -60,3 +60,19 @@ code.
 - `apps/api/tests/unit/durable-objects/project-data-compact-archive.test.ts`
 - `apps/www/src/content/CLAUDE.md`
 - `apps/www/tests/playwright/blog-mermaid.spec.ts`
+
+## Validation and review evidence
+
+| Check | Result |
+| --- | --- |
+| `pnpm --filter @simple-agent-manager/www lint` | PASS |
+| `pnpm --filter @simple-agent-manager/www typecheck` | PASS; five existing Astro-template errors, no new errors |
+| `pnpm --filter @simple-agent-manager/www test` | PASS; 49 tests across 5 files |
+| `PUBLIC_BASE_DOMAIN=localhost pnpm --filter @simple-agent-manager/www build` | PASS; generated the journal route |
+| `pnpm --filter @simple-agent-manager/www check:links` | PASS; 0 broken internal links |
+| `pnpm --filter @simple-agent-manager/www exec playwright test tests/playwright/blog-mermaid.spec.ts --grep 'archive timeout journal'` | PASS; 2 cases on Desktop Chrome and Mobile Chrome. The test checks a visible nonzero Mermaid viewport, zoom/reset, fullscreen, and no horizontal overflow. |
+| Visual review | PASS; reviewed the generated desktop and mobile screenshots. The shortened diagram labels are readable at both sizes. |
+
+The documentation/content review found three wording issues and they were fixed before this record: the diagram now shows the retry threshold before automatic work pauses, the timeout is described as covering one complete R2 chunk read, and the conclusion is limited to false failures from a shared deadline. The constitution review passed: this post and its route-test constant add no runtime business logic, configurable values, or deployment URLs. The task-completion review is being rerun against this evidence.
+
+The final publication criterion deliberately remains unchecked until this PR merges and its production deployment completes. Keep this task active until that evidence is available.

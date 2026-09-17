@@ -36,14 +36,16 @@ flowchart TD
     E -->|"Yes"| B
     E -->|"No"| F["Finish archive move"]
     C -->|"No"| G["Record failure safely"]
-    G --> H["Pause automatic attempts"]
+    G --> H{"Retry limit reached?"}
+    H -->|"No"| I["Retry later"]
+    H -->|"Yes"| J["Pause automatic attempts"]
 ```
 
 The previous arrangement made the last part of a long read carry the risk from every earlier part. In the production case that led to repeated failed archive attempts. The project's circuit breaker then paused more automatic archive work, which is safer than continuing blindly but meant the cleanup drain stopped.
 
 ## Each chunk now gets a fair limit
 
-The archive code now gives every R2 chunk read the full timeout configured for an R2 read. The timer still protects each network operation. It simply measures the right unit of work: one chunk, rather than every chunk in a whole conversation combined.
+The archive code now gives every R2 chunk read the full timeout configured for an R2 read. The timer still protects each complete chunk read. It simply measures the right unit of work: one chunk, rather than every chunk in a whole conversation combined.
 
 This is a useful rule for background systems. A limit should describe what it is limiting. A per-request timeout belongs to a request. A job-wide timeout belongs to a job. Treating one as the other can turn ordinary work into a false failure.
 
@@ -59,7 +61,7 @@ The ceiling does not delete or hide larger conversations. It limits which ones t
 
 The archive path still has checks for hashes, size limits, failed reads, and repeated failures. Those are the brakes that protect conversation history. Today's change is about making sure the brakes respond to a real slow read, rather than to a timer that was accidentally shared across an entire long conversation.
 
-I like this kind of repair because it is easy to state: each piece gets the time meant for one piece. Behind that sentence is a useful system property: one long conversation no longer has to block a whole project's effort to make room safely.
+I like this kind of repair because it is easy to state: each piece gets the time meant for one piece. Behind that sentence is a useful system property: a normal long conversation can no longer exhaust one shared R2 deadline and block a whole project's effort to make room safely.
 
 ---
 
