@@ -3006,6 +3006,69 @@ describe('ProjectMessageView — tool call activity groups', () => {
     expect(screen.getByText('· working')).toBeTruthy();
   });
 
+  /*
+   * The staging deep-link failure (round 3c).
+   *
+   * A merged tool call answers to more than one message id: `item.id` stays the
+   * FIRST row's id while `messageId` is repointed at whichever row carries the
+   * content — the `tool_call_update` row, here. A deep link (or an MCP-created
+   * comment thread, which has no role restriction) can anchor on exactly that
+   * update row, and before the fix it resolved to nothing and fell through to
+   * `nearestItemId(…, Date.now())`.
+   *
+   * The group sits at 0-based index 1 and the trailing assistant row at 2, so the
+   * fallback's answer (2) is unambiguously different from the correct one (1).
+   */
+  it('jumps to the GROUP row when the deep-link target is a tool call UPDATE row', async () => {
+    const sid = 'session-groups-update-jump';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'stopped'),
+      messages: [
+        makeTextMessage('msg-user-1', sid, 'user', 'Run the checks please.', 1_000),
+        makeToolMessage('msg-tool-1', sid, 2_000, { title: 'Bash: pnpm lint' }),
+        makeToolMessage('msg-tool-2', sid, 3_000, { title: 'Bash: pnpm typecheck' }),
+        makeToolMessage('msg-tool-3', sid, 4_000, { title: 'Bash: pnpm test' }),
+        // Status-only update: merges into msg-tool-3's item and becomes its
+        // `messageId`, so this id is the item's *content* row, not its `id`.
+        makeToolMessage('msg-tool-3-update', sid, 5_000, {
+          toolCallId: 'tc-msg-tool-3',
+          status: 'completed',
+        }),
+        makeTextMessage('msg-assistant-1', sid, 'assistant', 'All three checks passed.', 6_000),
+      ],
+      hasMore: false,
+    });
+
+    render(
+      <ProjectMessageView
+        projectId="proj-1"
+        sessionId={sid}
+        targetMessageId="msg-tool-3-update"
+      />
+    );
+
+    await waitFor(() => {
+      expect(virtuosoMock.scrollToIndexCalls.length).toBeGreaterThan(0);
+    });
+
+    const indices = virtuosoMock.scrollToIndexCalls.map((c) =>
+      typeof c === 'number' ? c : c.index
+    );
+    expect(indices).toContain(1);
+    // Not the nearest-by-timestamp fallback (the trailing assistant row), and not
+    // a firstItemIndex-offset value.
+    expect(indices).not.toContain(2);
+    for (const idx of indices) {
+      expect(typeof idx === 'number' ? idx : Number(idx)).toBeLessThan(1000);
+    }
+
+    const groupButton = await screen.findByRole('button', { name: /3 tool calls/ });
+    const groupRow = groupButton.closest('.sam-message-entry');
+    await waitFor(() => {
+      expect(groupRow!.className).toContain('sam-message-highlight');
+    });
+  });
+
   // A deep link (Project → Comments, or any URL target) can point at a tool
   // message id that is now absorbed into a group. `itemIndexById` registers
   // every absorbed id against its GROUP's row index, so the jump lands on a row

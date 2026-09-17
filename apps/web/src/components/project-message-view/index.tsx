@@ -42,7 +42,7 @@ import { SessionToolRail } from './SessionToolRail';
 import { StaleActivityNotice } from './StaleActivityNotice';
 import { nearestItemId } from './timeline-jump';
 import type { TimelineJumpTarget } from './timeline-types';
-import type { DisplayItem } from './tool-call-groups';
+import type { DisplayItem, GroupedItem } from './tool-call-groups';
 import { groupToolCallItems } from './tool-call-groups';
 import { chatMessagesToConversationItems } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
@@ -179,14 +179,38 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   // (virtualized) sessions. jsdom renders all rows, which hid this locally.
   // Absorbed tool/thinking ids map to their GROUP's row index, so a timeline
   // jump to a tool message still lands on a row that exists.
+  //
+  // A merged tool call answers to MORE THAN ONE message id, and every one of them
+  // can be a jump target (`.claude/rules/44` — enumerate every consumer of the
+  // id). `chatMessagesToConversationItems` keeps the FIRST row's id as `item.id`
+  // and repoints `messageId` at whichever row carries the content, so a
+  // `tool_call_update` row id appears in neither place unless it is registered
+  // explicitly. Deep links and MCP-created comment threads can anchor on exactly
+  // that row, and an unresolvable anchor silently falls through to
+  // `nearestItemId(…, Date.now())` — i.e. the bottom of the conversation.
+  //
+  // Aliases are registered in a second pass and never overwrite a real item id,
+  // so a canonical row can't be shadowed by another row's alias.
   const itemIndexById = useMemo(() => {
     const map = new Map<string, number>();
+    const aliases: Array<[string, number]> = [];
+
+    const collect = (item: DisplayItem | GroupedItem, index: number) => {
+      map.set(item.id, index);
+      if (item.kind === 'tool_call' && item.messageId && item.messageId !== item.id) {
+        aliases.push([item.messageId, index]);
+      }
+    };
+
     displayItems.forEach((item, i) => {
-      map.set(item.id, i);
+      collect(item, i);
       if (item.kind === 'tool_call_group') {
-        for (const inner of item.items) map.set(inner.id, i);
+        for (const inner of item.items) collect(inner, i);
       }
     });
+    for (const [alias, index] of aliases) {
+      if (!map.has(alias)) map.set(alias, index);
+    }
     return map;
   }, [displayItems]);
 
