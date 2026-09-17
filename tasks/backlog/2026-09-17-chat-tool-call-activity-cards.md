@@ -1,0 +1,321 @@
+# Group consecutive tool calls into a collapsed activity card in project chat
+
+**SAM task**: `01M2REWZ876HJ1RCX7C0WSHGKE`
+**Idea**: `01M27M6BDJCRVE1FFQA5BXAQ5D` (Phase 2 of that idea — the UI slice; server-side delta
+grouping is out of scope here)
+**Output branch**: `sam/optimize-ui-chat-sessions-wshgke`
+**Delegation**: the orchestrating session designs and manages; a local Opus 5 subagent writes the
+code (policy `336207db`).
+
+## Problem
+
+A chat session with an active agent renders every tool call as its own full-width card
+(`packages/acp-client/src/components/ToolCallCard.tsx`). A typical turn is text → 5–40 tool
+calls → text, so the assistant's actual prose is buried between long runs of cards. Raphaël
+(2026-09-11, knowledge `UIUX`): tool calls should collapse by default into an inline card that
+states the count ("3 tool calls"), tapping it expands the list, and tapping an individual call
+fetches its output. ~99% of users never expand either level; seeing that tools *are* being called
+is enough reassurance that something is happening.
+
+Goal: readability first (see the assistant text between tool runs), reassurance second (a live
+"working" signal while a run is in progress), payload reduction not in scope (tool rows are ~16%
+of bytes; that is the idea's Phase 1).
+
+## Research findings
+
+### F1. Where tool calls become items (client-side, per token)
+
+- `apps/web/src/components/project-message-view/types.ts:230` `chatMessagesToConversationItems()`
+  converts DO-persisted `ChatMessageResponse[]` into `ConversationItem[]`. Tool rows (`role:
+  'tool'`) become `ToolCallItem` (`kind: 'tool_call'`), and `tool_call_update` rows are merged
+  into the existing item by `toolCallId` (status/title/locations/rawOutput updated in place,
+  `types.ts:366-392`). Consecutive `assistant` rows merge into one `agent_message`; consecutive
+  `thinking` rows merge into one `thinking` item.
+- It is called from `apps/web/src/components/project-message-view/index.tsx:167` inside a
+  `useMemo([lc.messages])`, and from `apps/web/src/pages/workspace/WorkspaceChatView.tsx:162`.
+  Every item object is rebuilt on every incoming token (documented at
+  `AcpConversationItemView.tsx:213-237`); grouping must be a cheap O(n) pass in the same memo.
+- Live rows arrive through the DO WebSocket (`useSessionLifecycle.ts:221` `onMessage` →
+  `mergeMessages(prev, [msg], 'append')`) and are normalised to the same lazy-load pointer as
+  history rows (`types.ts:356-363`), so a group must work identically for history and live tail.
+  → **C1, C2**
+
+### F2. How a tool call renders today
+
+- `AcpConversationItemView.tsx:180-199`: `tool_call` → `matchToolCard(item)`
+  (`tool-cards/registry.ts:28`) returns a typed card (`DocumentCard` for `display_from_library` /
+  `upload_to_library` style tools, policy `bb0b7af1`) or `null` → generic `AcpToolCallCard`.
+- `ToolCallCard` is already the second level: collapsed by default, `role="button"`
+  `aria-expanded`, on expand it calls `onLoadContent(messageId)` when `contentLoaded === false`
+  (`ToolCallCard.tsx:71-98`). `index.tsx:290` `handleLoadToolContent` fetches
+  `GET …/messages/:messageId/tool-content`. **The group must reuse `ToolCallCard` unchanged for
+  level 2** so lazy loading, diff/terminal rendering, and the existing audit spec keep working.
+- Typed cards (`DocumentCard`) are user-facing content the agent chose to show. They must NOT be
+  swallowed by a group. → **C2, C6**
+
+### F3. Rows, virtualization, jump-to-message
+
+- `index.tsx:635-649` renders `<Virtuoso data={conversationItems} …
+  initialTopMostItemIndex={conversationItems.length - 1}>` with `itemContent=
+  renderConversationItem` (`index.tsx:384`) → `CommentableConversationItem`
+  (`comments/CommentableConversationItem.tsx`) → `AcpConversationItemView`.
+- `itemIndexById` (`index.tsx:179`) maps **every** item id → zero-based data index; timeline jumps
+  (`scrollAndHighlight`, `index.tsx:205`) and `nearestItemId(conversationItems, ts)`
+  (`timeline-jump.ts:8`) resolve through it. `animationTargetIdx` (`index.tsx:322`) uses
+  `conversationItems.length - 1`. All four must use the **display** (grouped) array, and the id
+  map must include the ids of every tool call / thinking item absorbed into a group, pointing at
+  the group's index, so a timeline jump to a tool message still lands (rule 17, virtualized-list
+  section: assert the exact `scrollToIndex` index in jsdom). → **C3, T5**
+- Virtuoso unmounts rows outside `overscan={200}`, so a group's expanded state must be held by
+  the parent (like `commentState`) or it collapses when the user scrolls away and back. → **C4**
+
+### F4. Comments
+
+- `CommentableConversationItem.tsx:57-58`: only `agent_message` and non-system `user_message`
+  are commentable; tool/thinking items never carry `data-comment-anchor`. Grouping them cannot
+  orphan a thread. No change needed; add a unit assertion that a group row renders no comment
+  action row. → **T4**
+
+### F5. Thinking blocks
+
+- `packages/acp-client/src/components/ThinkingBlock.tsx`: "Thinking..." (auto-expanded while
+  `active`), collapses to a one-line "Thought ▾" when done. Claude turns interleave thinking and
+  tool calls (`think → tool → think → tool`); if thinking broke groups the result would be
+  `[Thought][1 tool call][Thought][2 tool calls]`, which defeats the readability goal. Decision:
+  a group is a maximal run of `tool_call` (non-typed) and `thinking` items that contains at least
+  one tool call; a run of only thinking items stays as-is. The count label counts tool calls only;
+  while the newest absorbed item is an active thinking block the live line reads "Thinking…".
+  → **C1**
+
+### F5b. Between-call flicker and the "live" signal
+
+- Statuses flip per call: after call A completes and before call B's row arrives, every call in the
+  tail group is `completed`, so a purely status-derived glyph would flash check → spinner on every
+  call. `CommentableConversationItem` already receives `agentActivity` (`index.tsx:398`) and
+  `isWorkingActivity()` (`types.ts:54`) says whether the agent is mid-turn. Decision: the card gets
+  a `live` boolean = (this group is the last display item) && `isWorkingActivity(agentActivity)`;
+  while `live` and no call is running it still shows the spinner with the text `· working`. The
+  `useCompletionDockWorking` 1 s stabiliser is the precedent for not flickering. → **C2, C4**
+
+### F5c. Dead code on this path
+
+- `groupMessages()` / `MessageGroup` (`types.ts:171-201`) have **zero call sites**; only re-exported
+  at `index.tsx:56`. This PR introduces the real grouping, so remove the dead helper and its export
+  in the same change (CLAUDE.md "No dead code"). → **C10**
+
+### F5d. Prepend bookkeeping (deferred)
+
+- `useSessionLifecycle.ts:640/690` decrement Virtuoso's `firstItemIndex` by the number of *messages*
+  prepended, not rendered rows; already inaccurate for merged assistant tokens, slightly more so
+  with groups. Pre-existing and orthogonal. **Deferred** to idea
+  `01M2RFR5MPQDKVMYB4TKG9QJ05` ("Chat virtual list: prepend bookkeeping subtracts messages, not
+  rendered rows"); not fixed here.
+
+### F5e. Level-2 state on collapse
+
+- `ToolCallCard` owns its fetched content state (`ToolCallCard.tsx:66-68`). Collapsing a group
+  unmounts its cards, so re-expanding refetches a call's output on the next tap. Accepted for v1
+  (level 2 is opt-in and the endpoint is cheap); do not keep collapsed bodies mounted inside
+  virtualized rows. Document in the card's comment. → **C2**
+
+### F6. Existing tests and specs that will change
+
+- Unit: `tests/unit/components/chatMessagesToConversationItems.test.ts` (conversion — should not
+  change), `project-message-view.test.tsx` (renders the view from messages; add group cases),
+  `acp-conversation-item-memo.test.tsx`, `plan-status-indicator.test.tsx`, `DocumentCard.test.tsx`.
+- Playwright: `project-chat-tool-call-audit.spec.ts` asserts the tool title is visible on load and
+  clicks the per-call button — it must now expand the group first (and keep asserting the lazy
+  `…/messages/msg-tool-done/tool-content` request). `project-chat-document-card-audit.spec.ts`
+  must still pass unchanged (typed cards stay standalone). Also run every spec matching
+  `grep -l "role: 'tool'" apps/web/tests/playwright/*.spec.ts` (`chat-file-viewer-audit`,
+  `file-preview-modal-audit`, `library-file-comments-audit`, `light-mode-slice-b-audit`) and fix
+  assertions that relied on an always-visible per-call card. Marketing shot specs are not in CI.
+- Shared mock helper: `tests/playwright/audit-helpers.ts:522` `setupProjectChatMocks()`;
+  `assertNoOverflow` (includes the clipped-overflow walk, rule 56) and `screenshot()`.
+
+### F7. Design tokens and primitives
+
+- Tokens in `packages/ui/src/tokens/theme.css`: `--sam-color-fg-muted`, `--sam-color-fg-primary`,
+  `--sam-color-border-default`, `--sam-color-bg-surface`, `--sam-color-success-fg`,
+  `--sam-color-danger-fg`, `--sam-color-warning-fg`, `--sam-color-*-tint`. Project chat wraps the
+  generic card in `glass-surface rounded-md border-border-default` (`AcpConversationItemView.tsx:
+  192-196`). `packages/ui` has `Spinner`, `StatusBadge`; `ToolCallCard` has its own spinner ring
+  (`animate-spin`). `usePrefersReducedMotion` exists in acp-client.
+- Assistant bubbles are `flex justify-start` + `max-w-[80%]` (`MessageBubble.tsx:315-317`); the
+  group card should sit in the same column and never exceed the bubble edge.
+
+### F8. Docs to sync
+
+- `apps/www/src/content/docs/docs/guides/chat-features.md:22` ("Click file references in tool-call
+  cards…") and `:88` (document cards). Add a short "Tool activity cards" paragraph: grouped by
+  default, tap to expand the list, tap a call to load its output, document cards always shown,
+  `?tools=expanded` for debugging.
+
+## Design
+
+### Variants considered (rule 04 §7)
+
+| | Variant | Tradeoff |
+|---|---|---|
+| **A (chosen)** | One-line inline card between text blocks: status glyph + "N tool calls" + live line while running + chevron. Expands to a bordered list of the existing `ToolCallCard`s (level 2 unchanged). | Lowest visual weight; matches the stated preference verbatim; no layout jump while streaming (header height is constant); mobile-safe. |
+| B | Vertical activity rail: one dot per call, coloured by status, with a summary. | Nice "activity" feel on desktop, but 40 dots on a 375px screen is noise, status becomes colour-only, and it is a new visual language for one surface. |
+| C | Auto-expand while running, collapse when done. | Shows activity richly but the row height changes every call, fighting `followOutput` and the scroll-to-bottom button, and it contradicts "collapsed by default". |
+
+A takes B's "something is happening" signal as a single live line instead of a rail.
+
+### Card spec (Variant A)
+
+Collapsed header — a real `<button type="button" aria-expanded>` spanning the message column
+(`flex justify-start`, `max-w-[80%] w-full` like agent bubbles; `min-w-0` everywhere):
+
+- **Glyph** (left, `shrink-0`): running → spinning ring (`animate-spin motion-reduce:animate-none`
+  plus `aria-hidden`), all done → check, any failed → cross. Reuse the SVG/ring style from
+  `ToolCallCard.StatusIcon` (extract it rather than copy it if that is clean).
+- **Label**: `1 tool call` / `N tool calls` (`text-sm font-medium`, `--sam-color-fg-primary`).
+- **Status text**, never colour-only (`text-xs`, `--sam-color-fg-muted`):
+  - running: `· running` followed by the newest pending/in-progress call's `title`, one line,
+    `truncate min-w-0` (secondary content, allowed by rule 56 §4); if the newest absorbed item is an
+    active thinking block, show `· thinking…` instead.
+  - failures: `· K failed` in `--sam-color-danger-fg` (text carries the meaning).
+  - done with no failures: nothing extra.
+- **Chevron** (right, `shrink-0`, rotates when expanded).
+- Accessible name is the visible text, e.g. "3 tool calls · running Bash: pnpm test". Keyboard:
+  native button (Enter/Space). Focus ring: `focus-visible:ring-2 focus-visible:ring-focus-ring`
+  like `CollapsedInjectedMessage`.
+- Container: `glass-surface rounded-lg border border-border-default overflow-hidden`; header
+  `px-3 py-2 gap-2`; compact, not enlarged.
+
+Expanded body: `border-t border-border-default`, then each absorbed item in order, rendered
+through the existing per-item components (`ToolCallCard` for calls — with the same `className`
+and `onLoadContent` wiring as today — `ThinkingBlock` for thinking). Nothing about level 2 changes.
+
+Expanded state: `Set<string>` of group ids held in `ProjectMessageView` state and passed down
+through `renderConversationItem` → `CommentableConversationItem` → `AcpConversationItemView`
+(same plumbing shape as `commentState`). `ToolCallGroupCard` accepts `expanded` + `onToggle`
+(controlled) and falls back to internal state when they are omitted (`WorkspaceChatView`).
+A `?tools=expanded` URL flag on the chat route seeds every group expanded (developer escape
+hatch from the idea; no settings UI in v1).
+
+Live behaviour: statuses already update in place by `toolCallId`, so a group at the tail shows the
+spinner and the newest running title as rows stream in; when the run finishes the glyph flips to a
+check with no height change. New calls appended while a group is expanded appear in the list.
+
+### Grouping rules (`groupToolCallItems`, pure)
+
+Input `ConversationItem[]`, output `DisplayItem[]` where
+`DisplayItem = ConversationItem | ToolCallGroupItem` and
+
+```ts
+interface ToolCallGroupItem {
+  kind: 'tool_call_group';
+  id: string;            // id of the first absorbed item — stable as the group grows
+  items: Array<ToolCallItem | ThinkingItem>; // chronological
+  timestamp: number;     // first item's timestamp (nearestItemId compatibility)
+}
+```
+
+1. Walk items in order. A `tool_call` whose `matchToolCard(item)` is `null` and any `thinking`
+   item are *absorbable*; everything else (agent text, user, plan, system, typed-card tool calls,
+   crash reports, raw fallback) is a boundary and is emitted as-is.
+2. A maximal run of absorbable items that contains **at least one tool call** becomes one group.
+   A run of only thinking items is emitted unchanged (existing behaviour).
+3. Summary helper `summarizeToolCallGroup(group)` → `{ toolCallCount, runningCount, failedCount,
+   completedCount, liveTitle?: string, liveKind: 'tool' | 'thinking' | null }` used by the card;
+   never recomputed in render bodies without `useMemo`.
+4. The pass lives in `apps/web/src/components/project-message-view/tool-call-groups.ts` and is
+   applied inside the same `useMemo` as the conversion in both `index.tsx` and
+   `WorkspaceChatView.tsx`. `chatMessagesToConversationItems` itself does not change.
+
+## Implementation checklist
+
+- [ ] C1. `tool-call-groups.ts`: `ToolCallGroupItem`, `DisplayItem`, `groupToolCallItems()`,
+      `summarizeToolCallGroup()` per the rules above; no hardcoded thresholds.
+- [ ] C2. `ToolCallGroupCard.tsx` (project-message-view): collapsed header per spec, expanded body
+      renders absorbed items via the existing `ToolCallCard` / `ThinkingBlock` with the existing
+      props (`onFileClick`, `onLoadToolContent`, project-chat `className`); controlled +
+      uncontrolled expansion; tokens only, no `gray-*` classes; reduced-motion safe.
+- [ ] C3. `index.tsx`: `displayItems = groupToolCallItems(chatMessagesToConversationItems(...))`
+      in the same memo; Virtuoso `data`, `initialTopMostItemIndex`, `animationTargetIdx`,
+      `itemIndexById` (inner ids → group index), `nearestItemId` target resolution, and
+      `scrollAndHighlight` all work on `displayItems`; `highlighted` applies to the group row when
+      the jump target is an inner id.
+- [ ] C4. Expanded-group state lifted into `ProjectMessageView` (`Set<string>` + stable toggle),
+      threaded through `renderConversationItem` → `CommentableConversationItem` →
+      `AcpConversationItemView` without breaking the `React.memo` boundary (stable callback,
+      per-row boolean); `?tools=expanded` seeds all groups expanded.
+- [ ] C5. `AcpConversationItemView`: accept `DisplayItem`, add the `tool_call_group` case; keep the
+      `tool_call` case for standalone typed cards.
+- [ ] C6. `WorkspaceChatView.tsx`: apply `groupToolCallItems` (uncontrolled card) so both chat
+      surfaces behave the same (rule 24).
+- [ ] C7. Update `apps/www/src/content/docs/docs/guides/chat-features.md` in the same commit (F8).
+- [ ] C8. Update existing Playwright specs that assumed per-call cards (F6) and add the new audit
+      spec (T6); run all of them locally on both projects; store screenshots in
+      `.tmp/playwright-screenshots/`.
+- [ ] C9. `pnpm lint && pnpm typecheck && pnpm test` green in `apps/web`; file-size limits respected
+      (`index.tsx` is already over the limit and carries an exception — do not grow it beyond the
+      minimal wiring; put logic in new modules).
+- [ ] C10. Remove the dead `groupMessages()` / `MessageGroup` from `types.ts` and its re-export in
+      `index.tsx` (F5c).
+- [ ] C11. The card's `live` prop (F5b) is derived in the row renderer from `agentActivity` and
+      "is last display item"; `chat-dom-bound-audit.spec.ts` (bounded row count + timeline jump)
+      and `project-chat-document-card-audit.spec.ts` still pass unchanged.
+
+## Tests
+
+- [ ] T1. `tool-call-groups.test.ts`: consecutive tool calls merge; a typed-card tool call
+      (`display_from_library` shape) breaks the run and is emitted standalone; agent text breaks
+      the run; thinking between calls is absorbed; thinking-only runs are untouched; single call →
+      group of 1; group id/timestamp = first item; summary counts (running / failed / completed,
+      liveTitle picks the newest running call, liveKind 'thinking' when the tail is active
+      thinking); empty input.
+- [ ] T2. `ToolCallGroupCard.test.tsx` (behavioural, rendered): collapsed by default shows the
+      count and no per-call cards; running group shows the spinner and the live title; failed
+      count text present; click and keyboard expand reveal the per-call `ToolCallCard`s; clicking a
+      revealed call invokes `onLoadToolContent` with that call's `messageId` (through the real
+      `ToolCallCard`, not a stub); re-rendering with an extra call while expanded shows the new
+      call (liveness); controlled mode calls `onToggle` and does not flip on its own; `live`
+      with every call completed still shows the motion glyph and the text "working", and
+      `live=false` with every call completed shows the settled check (F5b, discriminating pair).
+- [ ] T3. `project-message-view.test.tsx`: feed `messages` with `user → tool ×3 → assistant` and
+      assert one group row with "3 tool calls" and the assistant text visible, no per-call titles
+      until expanded; a `display_from_library` tool row between them stays a standalone card.
+      Enter through the real `messages` prop (rule 62), not by constructing items.
+- [ ] T4. Group rows render no comment action row / `data-comment-anchor` (F4).
+- [ ] T5. Timeline jump to an inner tool message id calls `scrollToIndex` with the **group's**
+      zero-based index (place the group at index ≥ 1, assert the exact index and `< 1000`), and
+      the group row gets `sam-message-highlight` (rule 17, virtualized section; the existing
+      Virtuoso mock must expose `scrollToIndex`).
+- [ ] T6. Playwright `project-chat-tool-group-audit.spec.ts` (mobile + desktop, `assertNoOverflow`
+      on every scenario, screenshots): (a) text → 3 calls (one failed) → text; (b) 40-call run;
+      (c) running run whose live title is 220+ chars and contains an unbroken 120-char token;
+      (d) single call; (e) document card between two runs stays standalone; (f) expand → click a
+      call → lazy `tool-content` request asserted and output visible; (g) `?tools=expanded`.
+      Coordinates: assert the collapsed card's right edge ≤ the agent bubble column edge.
+
+## Acceptance criteria
+
+- [ ] A1. In a session with text → tool calls → text, the default view shows the two text blocks
+      with exactly one compact card between them stating the number of tool calls (T3, T6a).
+- [ ] A2. While the agent is running tools, the card shows a motion indicator and the current
+      tool's title without expanding; when the run completes the indicator settles (T2, T6c,
+      staging).
+- [ ] A3. Failures are announced in text on the collapsed card (T2, T6a).
+- [ ] A4. Tapping the card expands the list; tapping a call loads its output through the existing
+      lazy path; expanded groups survive scrolling away and back (T2, T6f, staging).
+- [ ] A5. Document/library cards are never hidden inside a group (T1, T3, T6e; existing
+      document-card audit unchanged).
+- [ ] A6. Timeline jump to a tool message lands on and highlights the group (T5, staging in a real
+      browser).
+- [ ] A7. No horizontal overflow or clipped content at 375px and 1280px with a 40-call run and a
+      220-char running title (T6).
+- [ ] A8. Keyboard and screen-reader accessible: native button, `aria-expanded`, visible focus
+      ring, status conveyed in text (T2).
+- [ ] A9. Public chat docs describe the behaviour (C7).
+
+## References
+
+- Idea `01M27M6BDJCRVE1FFQA5BXAQ5D` (design + correctness traps), knowledge `UIUX`, policy
+  `bb0b7af1` (library cards by visible tool name)
+- `.claude/rules/17-ui-visual-testing.md` (screenshots, virtualized jump), `56` (clipped
+  overflow), `62` (real trigger), `64` (stable identities), `48` (no hiding), `24` (one
+  implementation), `18` (file sizes), `04` (UI standards)
