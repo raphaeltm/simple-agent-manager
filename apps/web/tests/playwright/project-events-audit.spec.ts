@@ -750,7 +750,7 @@ test.describe('Project Events real-router audit', () => {
     await expect(drawer.getByRole('heading', { name: 'Events', exact: true })).toBeVisible();
     await screenshot(page, 'project-events-drawer-subscriptions');
     await drawer.getByRole('tab', { name: 'Schedules' }).click();
-    await expect(drawer.getByText('Schedules')).toBeVisible();
+    await expect(drawer.getByRole('heading', { name: 'Schedules' })).toBeVisible();
     expect(
       calls.some((c) => c.path === `${BASE}/schedules` && c.search.includes(`sessionId=${SESSION}`))
     ).toBe(true);
