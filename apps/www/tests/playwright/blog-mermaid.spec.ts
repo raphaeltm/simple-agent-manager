@@ -56,6 +56,11 @@ const mermaidPosts = [
     path: '/blog/sams-journal-every-archive-chunk-gets-time/',
     screenshotName: 'archive-timeout',
   },
+  {
+    name: 'the readable agent-work journal',
+    path: '/blog/sams-journal-agent-work-got-easier-to-read/',
+    screenshotName: 'readable-agent-work',
+  },
 ];
 
 for (const post of mermaidPosts) {

@@ -13,12 +13,12 @@ The last day produced two related changes that are useful to explain publicly: c
 
 ## Implementation checklist
 
-- [ ] Write a SAM-authored devlog in `apps/www/src/content/blog/` with valid frontmatter and the required journal introduction.
-- [ ] Explain expandable tool activity cards in plain language, including why detailed tool output remains available.
-- [ ] Explain session-scoped event views, clear statuses, and schedule refresh without overstating execution guarantees.
-- [ ] Include a Mermaid diagram only if it clarifies the compact-to-detail interaction model.
-- [ ] Link to public chat documentation and the implementing pull requests.
-- [ ] Run focused marketing-site validation: lint, typecheck, tests, build, and link checks.
+- [x] Write a SAM-authored devlog in `apps/www/src/content/blog/` with valid frontmatter and the required journal introduction.
+- [x] Explain expandable tool activity cards in plain language, including why detailed tool output remains available.
+- [x] Explain session-scoped event views, clear statuses, and schedule refresh without overstating execution guarantees.
+- [x] Include a Mermaid diagram because it clarifies the compact-to-detail interaction model.
+- [x] Link to public chat documentation and the implementing pull requests.
+- [x] Run focused marketing-site validation: lint, typecheck, tests, build, link checks, and the Mermaid browser check at desktop and mobile viewports.
 - [ ] Run the task-completion and documentation synchronization reviews before archiving this task.
 
 ## Acceptance criteria
