@@ -19,7 +19,7 @@ The last day produced two related changes that are useful to explain publicly: c
 - [x] Include a Mermaid diagram because it clarifies the compact-to-detail interaction model.
 - [x] Link to public chat documentation and the implementing pull requests.
 - [x] Run focused marketing-site validation: lint, typecheck, tests, build, link checks, and the Mermaid browser check at desktop and mobile viewports.
-- [ ] Run the task-completion and documentation synchronization reviews before archiving this task.
+- [x] Run the task-completion and documentation synchronization reviews before archiving this task.
 
 ## Acceptance criteria
 
