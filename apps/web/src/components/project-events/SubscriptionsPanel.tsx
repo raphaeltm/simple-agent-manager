@@ -222,6 +222,7 @@ export function SubscriptionsPanel({
         pending={query.isPending}
         error={query.error}
         empty={!subscriptions.length}
+        emptyMessage="No event subscriptions found. Agents create subscriptions through MCP tools when they need to react to project events."
         onRetry={() => void query.refetch()}
       >
         <div className="grid gap-4">

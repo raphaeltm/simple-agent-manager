@@ -4,6 +4,8 @@ import type { ReactNode } from 'react';
 import { useId, useState } from 'react';
 import { Link } from 'react-router';
 
+import { stateTone } from '../../lib/event-state-tone';
+
 export const controlClass =
   'w-full min-w-0 min-h-11 rounded-md border border-border-default bg-inset px-3 py-2 text-sm text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus-ring';
 export const cardClass =
@@ -69,12 +71,14 @@ export function QueryState({
   pending,
   error,
   empty,
+  emptyMessage,
   onRetry,
   children,
 }: {
   pending: boolean;
   error: unknown;
   empty: boolean;
+  emptyMessage?: ReactNode;
   onRetry: () => void;
   children: ReactNode;
 }) {
@@ -95,15 +99,17 @@ export function QueryState({
     );
   if (empty)
     return (
-      <p className="rounded-lg border border-dashed border-border-default p-6 text-sm text-fg-muted">
-        Nothing here yet. New records will appear after they are created.
-      </p>
+      <div className="rounded-lg border border-dashed border-border-default p-6 text-sm text-fg-muted">
+        {emptyMessage ?? 'Nothing here yet. New records will appear after they are created.'}
+      </div>
     );
   return <>{children}</>;
 }
 export function StateBadge({ state }: { state: string }) {
   return (
-    <span className="inline-flex rounded-md border border-border-default bg-inset px-2 py-1 text-xs font-medium text-fg-primary">
+    <span
+      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${stateTone(state)}`}
+    >
       {state.replaceAll('_', ' ')}
     </span>
   );
