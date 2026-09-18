@@ -148,6 +148,7 @@ vi.mock('react-virtuoso', async () => {
 // assert the exact coordinate the component asked for.
 const virtuosoMock = {
   scrollToIndexCalls: (await import('../../helpers/virtuoso-mock')).scrollToIndexCalls,
+  lastProps: (await import('../../helpers/virtuoso-mock')).virtuosoLastProps,
   reset: (await import('../../helpers/virtuoso-mock')).resetVirtuosoMock,
 };
 
@@ -197,6 +198,7 @@ import {
   chatMessagesToConversationItems,
   ProjectMessageView,
 } from '../../../src/components/project-message-view';
+import { VIRTUAL_START } from '../../../src/components/project-message-view/types';
 
 beforeEach(() => {
   mockWsConnectionState = 'connected';
@@ -2784,6 +2786,139 @@ describe('ProjectMessageView — timeline jump-to-message', () => {
   });
 });
 
+describe('ProjectMessageView — prepend anchors on rendered rows, not messages', () => {
+  /*
+   * Virtuoso's `firstItemIndex` must move by the number of rows added at the
+   * FRONT of the data array, and with grouping that is not the message count.
+   * Two consumers depend on it: the list itself (a wrong delta shifts every
+   * existing row's absolute index and jumps the reader's scroll position) and
+   * `CommentableConversationItem`'s `index - firstItemIndex === animationTargetIdx`,
+   * which compares against a 0-based DISPLAY index.
+   *
+   * Entered through the real "Load earlier messages" control (rule 62), so the
+   * whole `loadMore` -> `mergeMessages` -> `countDisplayRows` path runs.
+   */
+  function toolRow(id: string, title: string, createdAt: number) {
+    return {
+      id,
+      sessionId: 'session-prepend',
+      role: 'tool' as const,
+      content: '(tool call)',
+      toolMetadata: { toolCallId: `tc-${id}`, title, kind: 'execute', status: 'completed' },
+      createdAt,
+      sequence: null,
+    };
+  }
+  function textRow(id: string, role: 'user' | 'assistant', content: string, createdAt: number) {
+    return { id, sessionId: 'session-prepend', role, content, toolMetadata: null, createdAt };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    virtuosoMock.reset();
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+    mocks.listMessageComments.mockResolvedValue({ comments: [] });
+  });
+
+  async function loadEarlier() {
+    fireEvent.click(await screen.findByText('Load earlier messages'));
+  }
+
+  it('decrements firstItemIndex by the ROW delta, not the message count', async () => {
+    const sid = 'session-prepend';
+    // Existing window: a user message then an agent message -> 2 rows.
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: makeSession(sid, 'stopped'),
+      messages: [
+        textRow('u1', 'user', 'What did you do?', 2_000),
+        textRow('m1', 'assistant', 'Quite a lot.', 2_100),
+      ],
+      hasMore: true,
+    });
+    // Older page: 3 assistant tokens fold into ONE bubble and 6 tool calls fold
+    // into ONE group -> 9 messages, 2 rows. The trailing tool row is adjacent to
+    // the existing USER message, so nothing merges across the boundary.
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: makeSession(sid, 'stopped'),
+      messages: [
+        textRow('a1', 'assistant', 'Starting. ', 1_000),
+        textRow('a2', 'assistant', 'Still going. ', 1_100),
+        textRow('a3', 'assistant', 'Nearly there.', 1_200),
+        toolRow('t1', 'Bash: one', 1_300),
+        toolRow('t2', 'Bash: two', 1_400),
+        toolRow('t3', 'Bash: three', 1_500),
+        toolRow('t4', 'Bash: four', 1_600),
+        toolRow('t5', 'Bash: five', 1_700),
+        toolRow('t6', 'Bash: six', 1_800),
+      ],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+    await waitFor(() => {
+      expect(virtuosoMock.lastProps.dataLength).toBe(2);
+    });
+    const before = virtuosoMock.lastProps.firstItemIndex!;
+    expect(before).toBe(VIRTUAL_START);
+
+    await loadEarlier();
+
+    // 4 rows now: [agent bubble][tool group][user][agent bubble].
+    await waitFor(() => {
+      expect(virtuosoMock.lastProps.dataLength).toBe(4);
+    });
+    // Exactly 2 — the rows actually added. NOT 9, the messages added.
+    expect(before - virtuosoMock.lastProps.firstItemIndex!).toBe(2);
+    expect(virtuosoMock.lastProps.firstItemIndex).toBe(VIRTUAL_START - 2);
+    // Liveness: the older page really did render, so the delta is not 2 because
+    // the prepend silently failed.
+    expect(await screen.findByRole('button', { name: /6 tool calls/ })).toBeTruthy();
+  });
+
+  it('leaves firstItemIndex untouched when the older page merges into the first group', async () => {
+    const sid = 'session-prepend';
+    // Existing window is a single group of 2 tool calls -> 1 row.
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: makeSession(sid, 'stopped'),
+      messages: [toolRow('tA', 'Bash: alpha', 2_000), toolRow('tB', 'Bash: bravo', 2_100)],
+      hasMore: true,
+    });
+    // Older page is one more tool call, which joins that same run: still 1 row.
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: makeSession(sid, 'stopped'),
+      messages: [toolRow('tC', 'Bash: charlie', 1_000)],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+    await screen.findByRole('button', { name: /2 tool calls/ });
+    const before = virtuosoMock.lastProps.firstItemIndex!;
+
+    await loadEarlier();
+
+    // The group absorbed the older call, so the row count is unchanged...
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /3 tool calls/ })).toBeTruthy();
+    });
+    expect(virtuosoMock.lastProps.dataLength).toBe(1);
+    // ...and therefore the anchor must not move at all. The message-count version
+    // decrements by 1 here and shifts a row that was never added.
+    expect(virtuosoMock.lastProps.firstItemIndex).toBe(before);
+  });
+});
+
 describe('ProjectMessageView — tool call activity groups', () => {
   function makeToolMessage(
     id: string,
@@ -3040,11 +3175,7 @@ describe('ProjectMessageView — tool call activity groups', () => {
     });
 
     render(
-      <ProjectMessageView
-        projectId="proj-1"
-        sessionId={sid}
-        targetMessageId="msg-tool-3-update"
-      />
+      <ProjectMessageView projectId="proj-1" sessionId={sid} targetMessageId="msg-tool-3-update" />
     );
 
     await waitFor(() => {

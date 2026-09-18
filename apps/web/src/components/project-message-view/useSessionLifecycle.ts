@@ -35,11 +35,10 @@ import {
   mergeSessionDetailMessages,
   parsePlanContent,
 } from './session-lifecycle-helpers';
-import { groupToolCallItems } from './tool-call-groups';
+import { countDisplayRows } from './tool-call-groups';
 import type { AgentActivityState } from './types';
 import {
   CHAT_FALLBACK_POLL_MS,
-  chatMessagesToConversationItems,
   deriveSessionState,
   IDLE_TIMEOUT_MS,
   isWorkingActivity,
@@ -641,11 +640,11 @@ export function useSessionLifecycle(
       });
       setMessages((prev) => {
         const merged = mergeMessages(prev, data.messages, 'prepend');
-        // Offset in display-row units (after grouping), not raw message count,
-        // because consecutive tool calls fold into a single row.
-        const oldRows = groupToolCallItems(chatMessagesToConversationItems(prev)).length;
-        const newRows = groupToolCallItems(chatMessagesToConversationItems(merged)).length;
-        const displayRowsAdded = newRows - oldRows;
+        // Virtuoso's anchor moves by RENDERED ROWS, not messages: a page of tool
+        // calls folds into one group row, and a page whose trailing call merges
+        // into the existing first group adds none. See `countDisplayRows`. The
+        // guard covers the boundary-dedup case where `prepend` can drop a row.
+        const displayRowsAdded = countDisplayRows(merged) - countDisplayRows(prev);
         if (displayRowsAdded > 0) {
           setFirstItemIndex((fi) => fi - displayRowsAdded);
         }
@@ -696,9 +695,8 @@ export function useSessionLifecycle(
         if (accumulated.length > 0) {
           setMessages((prev) => {
             const merged = mergeMessages(prev, accumulated, 'prepend');
-            const oldRows = groupToolCallItems(chatMessagesToConversationItems(prev)).length;
-            const newRows = groupToolCallItems(chatMessagesToConversationItems(merged)).length;
-            const displayRowsAdded = newRows - oldRows;
+            // Same rendered-row accounting as `loadMore` above.
+            const displayRowsAdded = countDisplayRows(merged) - countDisplayRows(prev);
             if (displayRowsAdded > 0) {
               setFirstItemIndex((fi) => fi - displayRowsAdded);
             }

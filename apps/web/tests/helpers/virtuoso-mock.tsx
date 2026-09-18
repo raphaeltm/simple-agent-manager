@@ -36,12 +36,40 @@ export interface ScrollToIndexCall {
 /** Every `scrollToIndex` call made through the mock, in order. Reset with `resetVirtuosoMock()`. */
 export const scrollToIndexCalls: Array<ScrollToIndexCall | number> = [];
 
+/**
+ * The latest props the mock was rendered with.
+ *
+ * `firstItemIndex` is Virtuoso's prepend anchor: prepending older history must
+ * decrease it by the number of rows added at the FRONT of the data array, or
+ * every existing row's absolute index shifts and the reader's scroll position
+ * jumps. With tool-call grouping the row count is not the message count, so this
+ * is the only value that discriminates a correct prepend from a plausible-looking
+ * one. Assigned during render, which is idempotent.
+ */
+export const virtuosoLastProps: {
+  firstItemIndex?: number;
+  dataLength: number;
+  /**
+   * Real Virtuoso invokes this when the user scrolls to the top of the list, so
+   * calling it is how a test reaches a "load earlier" path that has no button
+   * (the workspace chat surface paginates on scroll only).
+   */
+  startReached?: () => void;
+} = {
+  dataLength: 0,
+};
+
 export function resetVirtuosoMock(): void {
   scrollToIndexCalls.length = 0;
+  virtuosoLastProps.firstItemIndex = undefined;
+  virtuosoLastProps.dataLength = 0;
+  virtuosoLastProps.startReached = undefined;
 }
 
 interface MockVirtuosoProps {
   data?: unknown[];
+  firstItemIndex?: number;
+  startReached?: () => void;
   itemContent?: (index: number, item: never) => React.ReactNode;
   style?: React.CSSProperties;
   components?: {
@@ -52,9 +80,13 @@ interface MockVirtuosoProps {
 }
 
 export const MockVirtuoso = React.forwardRef<unknown, MockVirtuosoProps>(function MockVirtuoso(
-  { data, itemContent, style, components, context },
+  { data, firstItemIndex, startReached, itemContent, style, components, context },
   ref
 ) {
+  virtuosoLastProps.firstItemIndex = firstItemIndex;
+  virtuosoLastProps.dataLength = data?.length ?? 0;
+  virtuosoLastProps.startReached = startReached;
+
   React.useImperativeHandle(
     ref,
     () => ({

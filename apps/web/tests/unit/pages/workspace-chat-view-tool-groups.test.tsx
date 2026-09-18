@@ -54,6 +54,11 @@ vi.mock('react-virtuoso', async () => {
   return createVirtuosoModuleMock();
 });
 
+const virtuosoMock = {
+  lastProps: (await import('../../helpers/virtuoso-mock')).virtuosoLastProps,
+  reset: (await import('../../helpers/virtuoso-mock')).resetVirtuosoMock,
+};
+
 // The generic tool card is stubbed to its title so "hidden while collapsed" is
 // unambiguous; the real card is exercised in ToolCallGroupCard.test.tsx.
 vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
@@ -70,6 +75,7 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
 });
 
 const { WorkspaceChatView } = await import('../../../src/pages/workspace/WorkspaceChatView');
+const { VIRTUAL_START } = await import('../../../src/components/project-message-view/types');
 
 const SESSION_ID = 'ws-session-1';
 
@@ -98,6 +104,7 @@ function renderView(ui: ReactElement) {
 describe('WorkspaceChatView — tool activity cards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    virtuosoMock.reset();
     capturedWsOnMessage = null;
     mocks.getChatSessionState.mockResolvedValue({
       state: null,
@@ -190,6 +197,76 @@ describe('WorkspaceChatView — tool activity cards', () => {
     // Liveness: the row in motion is the absorbed tail group, still one card.
     expect(screen.getByRole('button', { name: /4 tool calls/ })).toBeTruthy();
     expect(screen.getAllByTestId('tool-call-group')).toHaveLength(1);
+  });
+
+  /*
+   * The same rendered-row prepend accounting as project chat, on this surface.
+   * There is no "load earlier" button here — pagination fires from Virtuoso's
+   * `startReached` when the reader scrolls to the top — so the test invokes that
+   * callback, which is exactly what real Virtuoso does.
+   */
+  it('decrements firstItemIndex by the ROW delta when older history is prepended', async () => {
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: {
+        id: SESSION_ID,
+        workspaceId: 'ws-1',
+        topic: 'Workspace chat',
+        status: 'active',
+        messageCount: 2,
+        createdAt: 1_000,
+        endedAt: null,
+      },
+      messages: [
+        textMessage('u1', 'user', 'What did you do?', 2_000),
+        textMessage('m1', 'assistant', 'Quite a lot.', 2_100),
+      ],
+      hasMore: true,
+    });
+    // 3 assistant tokens fold into one bubble, 6 tool calls into one group:
+    // 9 messages, 2 rows.
+    mocks.getChatSession.mockResolvedValueOnce({
+      session: {
+        id: SESSION_ID,
+        workspaceId: 'ws-1',
+        topic: 'Workspace chat',
+        status: 'active',
+        messageCount: 11,
+        createdAt: 1_000,
+        endedAt: null,
+      },
+      messages: [
+        textMessage('a1', 'assistant', 'Starting. ', 1_000),
+        textMessage('a2', 'assistant', 'Still going. ', 1_100),
+        textMessage('a3', 'assistant', 'Nearly there.', 1_200),
+        toolMessage('t1', 'Bash: one', 1_300),
+        toolMessage('t2', 'Bash: two', 1_400),
+        toolMessage('t3', 'Bash: three', 1_500),
+        toolMessage('t4', 'Bash: four', 1_600),
+        toolMessage('t5', 'Bash: five', 1_700),
+        toolMessage('t6', 'Bash: six', 1_800),
+      ],
+      hasMore: false,
+    });
+
+    renderView(<WorkspaceChatView projectId="proj-1" sessionId={SESSION_ID} />);
+    await waitFor(() => {
+      expect(virtuosoMock.lastProps.dataLength).toBe(2);
+    });
+    const before = virtuosoMock.lastProps.firstItemIndex!;
+    expect(before).toBe(VIRTUAL_START);
+
+    // Real trigger: Virtuoso reports the reader hit the top of the list.
+    await act(async () => {
+      virtuosoMock.lastProps.startReached!();
+    });
+
+    await waitFor(() => {
+      expect(virtuosoMock.lastProps.dataLength).toBe(4);
+    });
+    // Exactly the rows added, not the 9 messages added.
+    expect(before - virtuosoMock.lastProps.firstItemIndex!).toBe(2);
+    // Liveness: the older page really rendered.
+    expect(screen.getByRole('button', { name: /6 tool calls/ })).toBeTruthy();
   });
 
   /*

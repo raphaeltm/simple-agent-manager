@@ -17,7 +17,9 @@ import type {
   ToolCallItem,
 } from '@simple-agent-manager/acp-client';
 
+import type { ChatMessageResponse } from '../../lib/api/sessions';
 import { matchToolCard } from './tool-cards';
+import { chatMessagesToConversationItems } from './types';
 
 /** An item absorbed into a group: a generic tool call or an interleaved thinking block. */
 export type GroupedItem = ToolCallItem | ThinkingItem;
@@ -139,4 +141,27 @@ export function summarizeToolCallGroup(group: ToolCallGroupItem): ToolCallGroupS
   }
 
   return { toolCallCount, runningCount, failedCount, completedCount, liveTitle, liveKind };
+}
+
+/**
+ * How many rows the virtualized list will render for `messages`.
+ *
+ * Virtuoso's `firstItemIndex` is the prepend anchor: when older history is
+ * prepended it must be decreased by the number of rows added AT THE FRONT of the
+ * data array, and that data array is the GROUPED one. Counting raw messages
+ * over-counts badly — a page of 6 tool calls plus 3 assistant tokens is 9
+ * messages but only 2 rows — and Virtuoso then shifts every existing row's
+ * absolute index, which jumps the reader's scroll position on every "load
+ * earlier". Conversely a page whose trailing tool call merges into the existing
+ * first group adds no row at all, and the anchor must not move.
+ *
+ * Both chat surfaces call this, so the two cannot compute the anchor differently
+ * (`.claude/rules/24`).
+ *
+ * COST: O(n) over the whole loaded history. Deliberately called only on PREPEND —
+ * once per "load earlier" page — never on the streaming append path, which
+ * already rebuilds the display array in its own memo.
+ */
+export function countDisplayRows(messages: readonly ChatMessageResponse[]): number {
+  return groupToolCallItems(chatMessagesToConversationItems([...messages])).length;
 }

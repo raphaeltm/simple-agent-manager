@@ -103,13 +103,14 @@ renderConversationItem` (`index.tsx:384`) → `CommentableConversationItem`
   at `index.tsx:56`. This PR introduces the real grouping, so remove the dead helper and its export
   in the same change (CLAUDE.md "No dead code"). → **C10**
 
-### F5d. Prepend bookkeeping (deferred)
+### F5d. Prepend bookkeeping (IMPLEMENTED — Round 5)
 
-- `useSessionLifecycle.ts:640/690` decrement Virtuoso's `firstItemIndex` by the number of _messages_
-  prepended, not rendered rows; already inaccurate for merged assistant tokens, slightly more so
-  with groups. Pre-existing and orthogonal. **Deferred** to idea
-  `01M2RFR5MPQDKVMYB4TKG9QJ05` ("Chat virtual list: prepend bookkeeping subtracts messages, not
-  rendered rows"); not fixed here.
+- `useSessionLifecycle.ts` (`loadMore` and `loadUntil`) and `WorkspaceChatView.tsx` (`loadMore`)
+  decremented Virtuoso's `firstItemIndex` by the number of _messages_ prepended, not rendered
+  rows; already inaccurate for merged assistant tokens, and materially worse with groups.
+  Originally deferred to idea `01M2RFR5MPQDKVMYB4TKG9QJ05` ("Chat virtual list: prepend
+  bookkeeping subtracts messages, not rendered rows"). **Implemented in this PR (Round 5)** via
+  the shared `countDisplayRows()` helper — see Round 5 below.
 
 ### F5e. Level-2 state on collapse
 
@@ -334,7 +335,7 @@ Deploys: run 35282965545 (56333eda1) and run 35286256430 (final runtime head 6f8
 
 Evidence images (downscaled) live in `tasks/evidence/2026-09-17-chat-tool-call-activity-cards/`.
 
-Unrelated observations filed as SAM ideas: orphaned staging Hetzner nodes (`01M2RSNGE0M47PHA82BP89FR7E`), prepend bookkeeping (`01M2RFR5MPQDKVMYB4TKG9QJ05`), workspace tool-only activity asymmetry (`01M2RRZJS84N8ZRHTEPV24ZMB1` — **implemented in this PR (CodeRabbit round)**, see Round 4).
+Unrelated observations filed as SAM ideas: orphaned staging Hetzner nodes (`01M2RSNGE0M47PHA82BP89FR7E`), prepend bookkeeping (`01M2RFR5MPQDKVMYB4TKG9QJ05` — **implemented in this PR (Round 5)**), workspace tool-only activity asymmetry (`01M2RRZJS84N8ZRHTEPV24ZMB1` — **implemented in this PR (CodeRabbit round)**, see Round 4).
 
 ## References
 
@@ -448,7 +449,8 @@ separates the inner-id map from the timestamp fallback.
 
 ### Deferred (unchanged from the research above)
 
-- F5d prepend bookkeeping — idea `01M2RFR5MPQDKVMYB4TKG9QJ05`.
+- F5d prepend bookkeeping — **no longer deferred; implemented in Round 5**
+  (idea `01M2RFR5MPQDKVMYB4TKG9QJ05`).
 - F5e level-2 refetch after a collapse — accepted for v1, documented in the card.
 
 ## Review fix round (2026-09-17)
@@ -887,8 +889,10 @@ rather than of whichever project runs it.
 
 - **`min-h-14` on the card button** — declined under rule 17, which explicitly says not
   to mandate minimum pixel sizes and to prefer compact, information-dense controls.
-- **Pagination `firstItemIndex` bookkeeping** — pre-existing and orthogonal; tracked in
-  idea `01M2RFR5MPQDKVMYB4TKG9QJ05`.
+- **Pagination `firstItemIndex` bookkeeping** — declined in Round 4 as pre-existing and
+  orthogonal (idea `01M2RFR5MPQDKVMYB4TKG9QJ05`). **Superseded in Round 5:** a second agent
+  had already implemented it on the branch, and on review it is the correct fix, so it was
+  kept and reworked rather than reverted.
 
 ### Reddened-test proof
 
@@ -908,3 +912,77 @@ rather than of whichever project runs it.
 - Playwright `project-chat-tool-group-audit`: 32/32 on
   `iPhone SE (375x667)` + `Desktop (1280x800)`, and 16/16 under
   `CI=true … --project='iPhone 14 (390x844)'`.
+
+## Round 5 (2026-09-18) — reconciling a second agent's push
+
+A separate SAM agent (PR Shepherd task `01M2RYEH1YKFR5WAAVXAEKYGDR`) pushed
+`63807241d` onto this branch on top of `c82864b07` and was then told to stand down.
+Its commit message claimed six changes, but four of them (the a11y region, the
+workspace role allow-set, the mobile viewport pin, the archive update) were already
+`c82864b07`; the actual diff was three things. Reconciled in one commit on top, with
+no history rewrite.
+
+### Reverted: `min-h-14` on the disclosure button
+
+Declined in the CodeRabbit thread and re-declined here, under rule 17 — which
+explicitly says not to mandate minimum pixel sizes and to prefer compact,
+information-dense controls. The button is byte-identical to `c82864b07` again.
+
+### Kept and reworked: the display-row prepend anchor
+
+The other agent's substance was right, and it is the correct fix for F5d. Virtuoso's
+`firstItemIndex` is the prepend anchor: it must move by the rows added at the FRONT of
+the data array, and with grouping that is not the message count. A page of 6 tool calls
+plus 3 assistant tokens is 9 messages but 2 rows, and a page whose trailing tool call
+merges into the existing first group adds no row at all.
+
+Reworked to be ours:
+
+1. **One helper instead of two inline copies** (rule 24):
+   `countDisplayRows(messages)` in `tool-call-groups.ts`, beside `groupToolCallItems`
+   and `DisplayItem`, called from all three prepend sites
+   (`useSessionLifecycle.loadMore`, `useSessionLifecycle.loadUntil`,
+   `WorkspaceChatView.loadMore`).
+2. **Cost is documented at the definition**: O(n) over loaded history, called only on
+   PREPEND — once per "load earlier" page — never on the streaming append path, which
+   already rebuilds the display array in its own memo.
+3. The `> 0` guard is kept, with a comment: prepending can only add or merge rows, so
+   a negative delta is only reachable through `mergeMessages`' boundary dedup.
+
+**A second consumer was silently wrong before this.**
+`CommentableConversationItem` computes
+`index - firstItemIndex === animationTargetIdx`, and `animationTargetIdx` is a 0-based
+index into the DISPLAY array. With a message-count anchor that comparison drifted after
+any prepend, so the typewriter animation could target the wrong bubble. The row-based
+anchor is what makes the two agree. Both `<Virtuoso firstItemIndex>` consumers and this
+one were audited.
+
+**No import cycle introduced.** `tool-call-groups.ts` now imports `./types`; there is no
+path back. `npx madge --circular --extensions ts,tsx src` reports 7 circular
+dependencies both before and after this change — the same 7, all pre-existing and
+unrelated (acp-client `dist`, `AgentContextPage` tabs, `task-hierarchy`,
+`project-chat/submitRequest`).
+
+### Reddened-test proof
+
+The shared Virtuoso mock now records the `firstItemIndex` it was rendered with (and
+`startReached`, so a surface that paginates on scroll can be driven the way real
+Virtuoso drives it). Each test below was proven red against the raw-message-count
+version, with the exact wrong value observed:
+
+| Test                                                                              | Surface                                                   | Red value → expected          |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------- | ----------------------------- |
+| `decrements firstItemIndex by the ROW delta, not the message count`               | project chat, via the real "Load earlier messages" button | `expected 9 to be 2`          |
+| `leaves firstItemIndex untouched when the older page merges into the first group` | project chat                                              | `expected 99999 to be 100000` |
+| `decrements firstItemIndex by the ROW delta when older history is prepended`      | workspace chat, via `startReached`                        | `expected 9 to be 2`          |
+
+Each carries a liveness assertion (the prepended page's `6 tool calls` group is
+actually rendered), so a passing delta cannot mean the prepend silently failed.
+
+### Verification
+
+- `pnpm --filter @simple-agent-manager/web test` — 313 files / 3803 tests passed, 0
+  failed, 0 skipped.
+- Typecheck clean; lint 0 errors / 3 pre-existing warnings; format ratchet passed.
+- `CI=true npx playwright test tests/playwright/project-chat-tool-group-audit.spec.ts
+--project='iPhone 14 (390x844)'` — 16/16.

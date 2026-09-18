@@ -19,7 +19,10 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { AcpConversationItemView } from '../../components/project-message-view/AcpConversationItemView';
 import { FollowUpInput } from '../../components/project-message-view/FollowUpInput';
 import type { DisplayItem } from '../../components/project-message-view/tool-call-groups';
-import { groupToolCallItems } from '../../components/project-message-view/tool-call-groups';
+import {
+  countDisplayRows,
+  groupToolCallItems,
+} from '../../components/project-message-view/tool-call-groups';
 import {
   chatMessagesToConversationItems,
   deriveSessionState,
@@ -295,11 +298,9 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
       });
       setMessages((prev) => {
         const merged = mergeMessages(prev, data.messages, 'prepend');
-        // Offset must be in display-row units (after grouping), not raw message
-        // count, because consecutive tool calls fold into a single row.
-        const oldRows = groupToolCallItems(chatMessagesToConversationItems(prev)).length;
-        const newRows = groupToolCallItems(chatMessagesToConversationItems(merged)).length;
-        const displayRowsAdded = newRows - oldRows;
+        // Rendered rows, not messages — same accounting as project chat. See
+        // `countDisplayRows`.
+        const displayRowsAdded = countDisplayRows(merged) - countDisplayRows(prev);
         if (displayRowsAdded > 0) {
           setFirstItemIndex((fi) => fi - displayRowsAdded);
         }
