@@ -360,6 +360,7 @@ test.describe('Session tool rail — discoverability', () => {
       'files',
       'git',
       'timeline',
+      'events',
       'comments',
       'retry',
       'fork',
@@ -385,6 +386,7 @@ test.describe('Session tool rail — discoverability', () => {
       ['files', 'Browse workspace files'],
       ['git', 'Review uncommitted changes'],
       ['timeline', 'Jump through session history'],
+      ['events', 'Session events and schedules'],
       ['comments', 'Open comment threads on this session'],
       ['retry', 'Retry — re-run this task'],
       ['fork', 'Fork — start a new task from this session'],
@@ -589,7 +591,7 @@ test.describe('Session tool rail — layout', () => {
     if (metrics.scrollHeight <= metrics.clientHeight) {
       // Everything fits: nothing to scroll to, so assert the strong property instead —
       // every tool is already on screen.
-      for (const id of ['files', 'git', 'timeline']) {
+      for (const id of ['files', 'git', 'timeline', 'events']) {
         await expect(page.getByTestId(`session-tool-${id}`)).toBeInViewport();
       }
       return;
@@ -597,7 +599,7 @@ test.describe('Session tool rail — layout', () => {
 
     // Report/Complete/Details are pinned outside this scroller — covered separately by
     // 'Report, Complete and Details stay pinned above the fold'.
-    for (const id of ['files', 'git', 'timeline']) {
+    for (const id of ['files', 'git', 'timeline', 'events']) {
       const tool = page.getByTestId(`session-tool-${id}`);
       await tool.scrollIntoViewIfNeeded();
       await expect(tool).toBeInViewport();

@@ -734,58 +734,31 @@ test.describe('Project Events real-router audit', () => {
       calls.filter((call) => call.method === 'POST' && call.path.startsWith(BASE))
     ).toHaveLength(0);
   });
-  test('session header enters contextual Events and preserves scope across tabs', async ({
+  test('session tool rail opens Events drawer with session scope', async ({
     page,
   }) => {
     const { calls } = await mocks(page);
     await page.goto(`/projects/${PROJECT}/chat/${SESSION}`);
-    const entry = page.getByRole('link', { name: 'Events & schedules' });
+    const entry = page.getByTestId('session-tool-events');
     await expect(entry).toBeVisible({ timeout: 20_000 });
-    await expect(entry).toBeInViewport();
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, 'project-events-session-entry');
     await entry.click();
-    await expect(page.getByRole('heading', { name: 'Events', exact: true })).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`events\\?sessionId=${SESSION}`));
-    await audit(page, 'session-scoped');
-    await page.getByRole('button', { name: 'Schedules', exact: true }).click();
-    await page.getByRole('button', { name: 'Schedule once', exact: true }).click();
-    await expect(page.getByLabel('Target session')).toHaveValue(SESSION);
+    const drawer = page.getByRole('dialog', { name: 'Session events' });
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole('heading', { name: 'Events', exact: true })).toBeVisible();
+    await screenshot(page, 'project-events-drawer-subscriptions');
+    await drawer.getByRole('tab', { name: 'Schedules' }).click();
+    await expect(drawer.getByText('Schedules')).toBeVisible();
     expect(
       calls.some((c) => c.path === `${BASE}/schedules` && c.search.includes(`sessionId=${SESSION}`))
     ).toBe(true);
-    await page.getByRole('button', { name: 'Standing watches', exact: true }).click();
-    await expect(
-      page.getByText('Scoped to', { exact: false })
-    ).toBeVisible();
-    await page.getByRole('button', { name: 'Create watch', exact: true }).click();
-    await expect(page.getByLabel('Target session')).toHaveValue(SESSION);
-    await page.getByRole('button', { name: 'Schedules', exact: true }).click();
-    await page.getByRole('button', { name: 'Show whole project' }).click();
-    await expect(page).not.toHaveURL(/sessionId=/);
-    await expect(page.getByRole('heading', { name: 'Schedules', exact: true })).toBeVisible();
-    await expect(page.locator('form')).toHaveCount(0);
-    await page.getByRole('link', { name: 'Open triggers and webhook audit' }).click();
-    await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT}/triggers`));
-    if (page.viewportSize()!.width < 768) {
-      await page.getByRole('button', { name: 'Open navigation menu' }).click();
-      await expect(page.getByRole('dialog', { name: 'Navigation menu' })).toBeInViewport();
-      await expect(
-        page
-          .getByRole('dialog', { name: 'Navigation menu' })
-          .getByRole('button', { name: 'Events', exact: true })
-      ).toBeInViewport();
-      await assertNoOverflow(page);
-      await assertNoClippedOverflow(page);
-      await screenshot(page, 'project-events-navigation-drawer');
-      await page
-        .getByRole('dialog', { name: 'Navigation menu' })
-        .getByRole('button', { name: 'Events', exact: true })
-        .click();
-    } else {
-      await page.getByRole('link', { name: 'Events', exact: true }).click();
-    }
-    await expect(page.getByRole('heading', { name: 'Events', exact: true })).toBeVisible();
+    await drawer.getByRole('tab', { name: 'Watches' }).click();
+    await expect(drawer.getByText('Standing watches')).toBeVisible();
+    await expect(drawer.getByRole('link', { name: 'View full page' })).toBeVisible();
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'project-events-drawer-watches');
   });
 });

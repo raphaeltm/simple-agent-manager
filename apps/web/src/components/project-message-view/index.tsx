@@ -20,6 +20,7 @@ import { getMessageToolContent } from '../../lib/api/sessions';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
 import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
+import { SessionEventsDrawer } from '../chat/SessionEventsDrawer';
 import { ReportIssueDialog } from '../ReportIssueDialog';
 import { type CommentInboxItem, countBuckets, toInboxItem } from './comments/comment-inbox';
 import { CommentableConversationItem } from './comments/CommentableConversationItem';
@@ -123,11 +124,13 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
   const [showComments, setShowComments] = useState(false);
+  const [showEvents, setShowEvents] = useState(false);
   const openComments = useCallback(() => setShowComments(true), []);
   const closeComments = useCallback(() => setShowComments(false), []);
   // Stable identity matters: this feeds `useSessionTools`' memoized action array, and an
   // inline arrow would rebuild it on every render (rule 64).
   const openTimeline = useCallback(() => setShowTimeline(true), []);
+  const openEvents = useCallback(() => setShowEvents(true), []);
 
   const messageComments = useMessageComments(projectId, sessionId, Boolean(projectId && sessionId));
   const { user } = useAuth();
@@ -402,6 +405,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     onOpenFiles: lc.handleOpenFileBrowser,
     onOpenGit: lc.handleOpenGitChanges,
     onOpenTimeline: openTimeline,
+    onOpenEvents: openEvents,
     onOpenComments: openComments,
     onRetry,
     onFork,
@@ -836,6 +840,14 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         onReopen={messageComments.reopen}
         onSendToAgent={(threadId) => messageComments.sendToAgent({ commentId: threadId })}
       />
+
+      {showEvents && (
+        <SessionEventsDrawer
+          projectId={projectId}
+          sessionId={sessionId}
+          onClose={() => setShowEvents(false)}
+        />
+      )}
 
       {/* Dialogs for the rail's Report and Complete actions. They live here rather than
           in `SessionHeader` because the actions that open them do. */}

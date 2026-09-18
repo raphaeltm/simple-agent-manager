@@ -113,6 +113,7 @@ describe('buildSessionToolActions — group assignment', () => {
     hasFilesHandler: true,
     hasGitHandler: true,
     hasTimelineHandler: true,
+    hasEventsHandler: true,
     hasCommentsHandler: true,
     hasRetryHandler: true,
     hasForkHandler: true,
@@ -128,7 +129,7 @@ describe('buildSessionToolActions — group assignment', () => {
   it('assigns each tool to the group its builder owns', () => {
     const byId = new Map(buildSessionToolActions(fullInput()).map((a) => [a.id, a.group]));
 
-    for (const id of ['files', 'git', 'timeline', 'comments'] as const) {
+    for (const id of ['files', 'git', 'timeline', 'events', 'comments'] as const) {
       expect(byId.get(id)).toBe('workspace');
     }
     for (const id of ['retry', 'fork'] as const) {

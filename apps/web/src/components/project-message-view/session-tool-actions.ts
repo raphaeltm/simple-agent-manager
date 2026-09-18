@@ -8,6 +8,7 @@
  */
 import type { LucideIcon } from 'lucide-react';
 import {
+  CalendarClock,
   CheckCircle2,
   Clock,
   Flag,
@@ -58,6 +59,7 @@ export type SessionToolId =
   | 'files'
   | 'git'
   | 'timeline'
+  | 'events'
   | 'comments'
   | 'retry'
   | 'fork'
@@ -105,6 +107,7 @@ export interface BuildSessionToolActionsInput {
   hasFilesHandler: boolean;
   hasGitHandler: boolean;
   hasTimelineHandler: boolean;
+  hasEventsHandler: boolean;
   hasCommentsHandler: boolean;
   hasRetryHandler: boolean;
   hasForkHandler: boolean;
@@ -151,6 +154,7 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
     hasFilesHandler,
     hasGitHandler,
     hasTimelineHandler,
+    hasEventsHandler,
     hasCommentsHandler,
   } = input;
 
@@ -182,6 +186,15 @@ function buildWorkspaceGroup(input: BuildSessionToolActionsInput): SessionToolSp
       label: 'Timeline',
       hint: 'Jump through session history',
       icon: Clock,
+    });
+  }
+
+  if (hasEventsHandler) {
+    actions.push({
+      id: 'events',
+      label: 'Events',
+      hint: 'Session events and schedules',
+      icon: CalendarClock,
     });
   }
 

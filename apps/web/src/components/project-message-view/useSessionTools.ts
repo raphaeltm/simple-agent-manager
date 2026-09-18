@@ -53,6 +53,7 @@ export interface UseSessionToolsInput {
   onOpenFiles?: () => void;
   onOpenGit?: () => void;
   onOpenTimeline?: () => void;
+  onOpenEvents?: () => void;
   onOpenComments?: () => void;
   onRetry?: () => void;
   onFork?: () => void;
@@ -87,6 +88,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     onOpenFiles,
     onOpenGit,
     onOpenTimeline,
+    onOpenEvents,
     onOpenComments,
     onRetry,
     onFork,
@@ -160,6 +162,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
       hasFilesHandler: !!onOpenFiles,
       hasGitHandler: !!onOpenGit,
       hasTimelineHandler: !!onOpenTimeline,
+      hasEventsHandler: !!onOpenEvents,
       hasCommentsHandler: !!onOpenComments,
       hasRetryHandler: !!onRetry,
       hasForkHandler: !!onFork,
@@ -176,6 +179,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
     onOpenFiles,
     onOpenGit,
     onOpenTimeline,
+    onOpenEvents,
     onOpenComments,
     onRetry,
     onFork,
@@ -194,6 +198,9 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
           break;
         case 'timeline':
           onOpenTimeline?.();
+          break;
+        case 'events':
+          onOpenEvents?.();
           break;
         case 'comments':
           onOpenComments?.();
@@ -220,7 +227,7 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
           assertNeverToolId(id);
       }
     },
-    [onOpenFiles, onOpenGit, onOpenTimeline, onOpenComments, onRetry, onFork]
+    [onOpenFiles, onOpenGit, onOpenTimeline, onOpenEvents, onOpenComments, onRetry, onFork]
   );
 
   const closeReport = useCallback(() => setReportOpen(false), []);
