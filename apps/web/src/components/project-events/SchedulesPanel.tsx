@@ -321,6 +321,8 @@ export function SchedulesPanel({
     queryKey: ['auth', scope, 'events', projectId, 'schedules', sessionId, cursor],
     queryFn: () => listSchedules(projectId, cursor, sessionId),
     enabled: Boolean(scope),
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
   return (
     <section className="space-y-4" aria-label="Schedules">
@@ -370,6 +372,7 @@ export function SchedulesPanel({
         pending={query.isPending}
         error={query.error}
         empty={!query.data?.schedules.length}
+        emptyMessage={<>No scheduled actions. Use the &ldquo;Schedule once&rdquo; button to run a one-shot action at a future time.</>}
         onRetry={() => void query.refetch()}
       >
         <div className="grid gap-4">

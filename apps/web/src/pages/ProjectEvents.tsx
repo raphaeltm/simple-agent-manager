@@ -1,5 +1,7 @@
 import { Button } from '@simple-agent-manager/ui';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Clock, Eye, MessageSquare, Radio } from 'lucide-react';
+import type { ComponentType, SVGProps } from 'react';
 import { Link, useSearchParams } from 'react-router';
 
 import { ChannelsPanel } from '../components/project-events/ChannelsPanel';
@@ -12,11 +14,15 @@ import { getProjectMembers } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
 const sections = [
-  { id: 'subscriptions', label: 'Subscriptions' },
-  { id: 'schedules', label: 'Schedules' },
-  { id: 'watches', label: 'Standing watches' },
-  { id: 'channels', label: 'Channels' },
-] as const;
+  { id: 'subscriptions', label: 'Subscriptions', Icon: Radio },
+  { id: 'schedules', label: 'Schedules', Icon: Clock },
+  { id: 'watches', label: 'Standing watches', Icon: Eye },
+  { id: 'channels', label: 'Channels', Icon: MessageSquare },
+] as const satisfies readonly {
+  id: string;
+  label: string;
+  Icon: ComponentType<SVGProps<SVGSVGElement>>;
+}[];
 
 export function ProjectEvents() {
   const { projectId, project } = useProjectContext();
@@ -37,6 +43,25 @@ export function ProjectEvents() {
     const creator = members.data?.members.find((item) => item.userId === id);
     return creator?.user?.name || (id === scope ? 'You' : id);
   };
+
+  const queryClient = useQueryClient();
+  const sectionCounts: Record<string, number | undefined> = {};
+  for (const s of sections) {
+    const key = s.id === 'channels' ? 'channels' : s.id;
+    const cached = queryClient.getQueriesData<Record<string, unknown[]>>({
+      queryKey: ['auth', scope, 'events', projectId, key],
+      exact: false,
+    });
+    const last = cached[cached.length - 1];
+    if (last) {
+      const data = last[1];
+      if (data) {
+        const list = data[key];
+        sectionCounts[s.id] = Array.isArray(list) ? list.length : undefined;
+      }
+    }
+  }
+
   return (
     <div className="w-full min-w-0 space-y-5">
       <header className="space-y-2">
@@ -46,9 +71,9 @@ export function ProjectEvents() {
         </p>
       </header>
       {sessionId && (
-        <div className="glass-surface rounded-lg border border-border-default p-3 space-y-2">
-          <p className="m-0 text-sm break-words">
-            Subscriptions, schedules, and standing watches are scoped to{' '}
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-info/30 bg-info-tint px-4 py-3">
+          <p className="m-0 flex-1 text-sm text-info-fg break-words">
+            Scoped to{' '}
             <Link className={linkClass} to={`/projects/${projectId}/chat/${sessionId}`}>
               session {sessionId.slice(0, 8)}
             </Link>
@@ -78,23 +103,32 @@ export function ProjectEvents() {
       )}
       <Feedback error={members.error} />
       <nav aria-label="Event sections" className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-        {sections.map((item) => (
-          <Button
-            key={item.id}
-            variant={item.id === section ? 'primary' : 'secondary'}
-            aria-pressed={item.id === section}
-            className="min-w-0 !whitespace-normal"
-            onClick={() =>
-              setParams((previous) => {
-                const next = new URLSearchParams(previous);
-                next.set('section', item.id);
-                return next;
-              })
-            }
-          >
-            {item.label}
-          </Button>
-        ))}
+        {sections.map((item) => {
+          const count = sectionCounts[item.id];
+          return (
+            <Button
+              key={item.id}
+              variant={item.id === section ? 'primary' : 'secondary'}
+              aria-pressed={item.id === section}
+              className="min-w-0 !whitespace-normal"
+              onClick={() =>
+                setParams((previous) => {
+                  const next = new URLSearchParams(previous);
+                  next.set('section', item.id);
+                  return next;
+                })
+              }
+            >
+              <item.Icon className="size-4 shrink-0" aria-hidden />
+              {item.label}
+              {count !== undefined && count > 0 && (
+                <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-surface-secondary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-fg-muted">
+                  {count}
+                </span>
+              )}
+            </Button>
+          );
+        })}
       </nav>
       <div key={`${projectId}:${scope}:${sessionId ?? ''}:${section}`}>
         {section === 'subscriptions' && (

@@ -428,6 +428,7 @@ export function StandingWatchesPanel({
         pending={query.isPending}
         error={query.error}
         empty={!query.data?.watches.length}
+        emptyMessage="No standing watches configured. A watch runs a bounded action whenever matching events arrive, with cooldown and concurrency controls."
         onRetry={() => void query.refetch()}
       >
         <div className="grid gap-4">

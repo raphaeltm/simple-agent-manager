@@ -144,6 +144,7 @@ export function ChannelsPanel({ projectId }: { projectId: string }) {
         pending={query.isPending}
         error={query.error}
         empty={!query.data?.channels.length}
+        emptyMessage="No channels published yet. Agents publish messages to named channels through their event tools."
         onRetry={() => void query.refetch()}
       >
         <div className="grid gap-3 sm:grid-cols-2">
