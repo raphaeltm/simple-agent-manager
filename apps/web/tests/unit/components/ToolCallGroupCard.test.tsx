@@ -142,6 +142,121 @@ describe('ToolCallGroupCard — collapsed header', () => {
   });
 });
 
+describe('ToolCallGroupCard — screen-reader status region', () => {
+  function status(): HTMLElement | null {
+    return screen.queryByRole('status');
+  }
+
+  it('announces that activity started while the run is in motion', () => {
+    render(
+      <ToolCallGroupCard
+        group={makeGroup([
+          toolCall({ id: 't1', status: 'completed' }),
+          toolCall({ id: 't2', status: 'in_progress', title: 'Bash: pnpm test' }),
+        ])}
+      />
+    );
+
+    expect(status()).toBeTruthy();
+    expect(status()).toHaveTextContent('Tool activity in progress');
+    expect(status()).toHaveAttribute('aria-live', 'polite');
+    expect(status()).toHaveAttribute('aria-atomic', 'true');
+    // Visually hidden — the sighted user already has the header.
+    expect(status()).toHaveClass('sr-only');
+    // NOT a mirror of the visible line: the running title stays out of it.
+    expect(status()).not.toHaveTextContent('Bash: pnpm test');
+  });
+
+  it('does not change the announcement when only the running title changes', () => {
+    // The whole point of the constant in-motion text: a 40-call run must not emit
+    // an announcement per call (rule 62 — driven through a real re-render).
+    const first = makeGroup([toolCall({ id: 't1', status: 'in_progress', title: 'Bash: one' })]);
+    const { rerender } = render(<ToolCallGroupCard group={first} />);
+    const before = status()!.textContent;
+
+    const second = makeGroup([
+      toolCall({ id: 't1', status: 'completed', title: 'Bash: one' }),
+      toolCall({ id: 't2', status: 'in_progress', title: 'Bash: two' }),
+    ]);
+    rerender(<ToolCallGroupCard group={second} />);
+
+    // Still in motion, different call, different count -> same announcement.
+    expect(status()!.textContent).toBe(before);
+    expect(status()).toHaveTextContent('Tool activity in progress');
+    // Control: the VISIBLE line did follow the new call, so the card really did
+    // re-render and this is not a stale-render false pass.
+    expect(screen.getByText('· running Bash: two')).toBeTruthy();
+  });
+
+  it('announces the completed count once the run settles', () => {
+    const group = makeGroup([
+      toolCall({ id: 't1', status: 'in_progress' }),
+      toolCall({ id: 't2', status: 'completed' }),
+    ]);
+    const { rerender } = render(<ToolCallGroupCard group={group} />);
+    expect(status()).toHaveTextContent('Tool activity in progress');
+
+    rerender(
+      <ToolCallGroupCard
+        group={makeGroup([
+          toolCall({ id: 't1', status: 'completed' }),
+          toolCall({ id: 't2', status: 'completed' }),
+        ])}
+      />
+    );
+
+    expect(status()).toHaveTextContent('2 tool calls completed');
+  });
+
+  it('announces the failure count alongside the completed count', () => {
+    const running = makeGroup([
+      toolCall({ id: 't1', status: 'failed' }),
+      toolCall({ id: 't2', status: 'failed' }),
+      toolCall({ id: 't3', status: 'in_progress' }),
+    ]);
+    const { rerender } = render(<ToolCallGroupCard group={running} />);
+
+    rerender(
+      <ToolCallGroupCard
+        group={makeGroup([
+          toolCall({ id: 't1', status: 'failed' }),
+          toolCall({ id: 't2', status: 'failed' }),
+          toolCall({ id: 't3', status: 'completed' }),
+        ])}
+      />
+    );
+
+    expect(status()).toHaveTextContent('3 tool calls completed, 2 failed');
+  });
+
+  it('uses the singular form for a one-call run', () => {
+    const { rerender } = render(
+      <ToolCallGroupCard group={makeGroup([toolCall({ id: 't1', status: 'in_progress' })])} />
+    );
+    rerender(
+      <ToolCallGroupCard group={makeGroup([toolCall({ id: 't1', status: 'completed' })])} />
+    );
+
+    expect(status()).toHaveTextContent('1 tool call completed');
+  });
+
+  it('renders no live region for a run that was already settled when it mounted', () => {
+    // History scrolling back into Virtuoso's window has no transition to report,
+    // and inserting a populated live region is announced by some screen readers.
+    render(<ToolCallGroupCard group={makeGroup([toolCall({ id: 't1' })])} />);
+
+    expect(status()).toBeNull();
+    // Liveness: the card itself did render.
+    expect(screen.getByRole('button', { name: /1 tool call/ })).toBeTruthy();
+  });
+
+  it('keeps the region while `live` holds it in motion between calls', () => {
+    render(<ToolCallGroupCard live group={makeGroup([toolCall({ id: 't1' })])} />);
+
+    expect(status()).toHaveTextContent('Tool activity in progress');
+  });
+});
+
 describe('ToolCallGroupCard — expansion (uncontrolled)', () => {
   it('reveals the per-call cards on click and hides them again on a second click', async () => {
     const user = userEvent.setup();

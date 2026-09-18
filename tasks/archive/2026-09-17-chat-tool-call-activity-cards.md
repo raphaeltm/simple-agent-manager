@@ -334,7 +334,7 @@ Deploys: run 35282965545 (56333eda1) and run 35286256430 (final runtime head 6f8
 
 Evidence images (downscaled) live in `tasks/evidence/2026-09-17-chat-tool-call-activity-cards/`.
 
-Unrelated observations filed as SAM ideas: orphaned staging Hetzner nodes (`01M2RSNGE0M47PHA82BP89FR7E`), prepend bookkeeping (`01M2RFR5MPQDKVMYB4TKG9QJ05`), workspace tool-only activity asymmetry (`01M2RRZJS84N8ZRHTEPV24ZMB1`).
+Unrelated observations filed as SAM ideas: orphaned staging Hetzner nodes (`01M2RSNGE0M47PHA82BP89FR7E`), prepend bookkeeping (`01M2RFR5MPQDKVMYB4TKG9QJ05`), workspace tool-only activity asymmetry (`01M2RRZJS84N8ZRHTEPV24ZMB1` — **implemented in this PR (CodeRabbit round)**, see Round 4).
 
 ## References
 
@@ -361,7 +361,7 @@ Implemented by a local Opus 5 subagent on 2026-09-17. Branch
 | `apps/web/src/components/project-message-view/comments/CommentableConversationItem.tsx` | threads `groupExpanded` / `onToggleGroup` / `groupLive` (C4)                                                                              |
 | `apps/web/src/components/project-message-view/timeline-jump.ts`                         | `nearestItemId` now takes `DisplayItem[]` (C3)                                                                                            |
 | `apps/web/src/components/project-message-view/types.ts`                                 | dead `groupMessages()` / `MessageGroup` removed (C10)                                                                                     |
-| `apps/web/src/pages/workspace/WorkspaceChatView.tsx`                                    | same grouping, uncontrolled card (C6)                                                                                                     |
+| `apps/web/src/pages/workspace/WorkspaceChatView.tsx`                                    | same grouping; controlled card + live state via the shared `useToolCallGroupRowState` hook (C6, revised in the fix round)                 |
 | `apps/www/src/content/docs/docs/guides/chat-features.md`                                | new "Tool Activity Cards" section (C7, A9)                                                                                                |
 
 Tests: `tests/unit/components/tool-call-groups.test.ts` (T1, 14),
@@ -609,13 +609,15 @@ reddens exactly the two live tests, one per surface —
 `keeps the tail group in motion while the agent is mid-turn, and settles when idle` —
 with the other 74 in those files green.
 
-### LOW (rule 09) — asymmetry deferral recorded
+### LOW (rule 09) — asymmetry deferral recorded, then IMPLEMENTED IN THIS PR
 
-The workspace surface's `onMessage` marks activity for `role === 'assistant'` only, so
-a tool-only burst never lights the indicator there. **Deferred to idea
-`01M2RRZJS84N8ZRHTEPV24ZMB1`** ("Workspace chat view: tool-only bursts never mark the
-agent as working"), and that id is now cited in the comment above the derivation in
-`WorkspaceChatView.tsx` as well as here.
+The workspace surface's `onMessage` marked activity for `role === 'assistant'` only, so
+a tool-only burst never lit the indicator there. Originally deferred to idea
+`01M2RRZJS84N8ZRHTEPV24ZMB1` ("Workspace chat view: tool-only bursts never mark the
+agent as working"); **implemented in this PR (CodeRabbit round)** — see "Round 4"
+below. The deferral comments in `WorkspaceChatView.tsx`,
+`useWorkspaceChatSocket.ts` and `useToolCallGroupRowState.ts` are removed, since the
+gap no longer exists.
 
 ### Verification
 
@@ -821,3 +823,88 @@ pending a re-run.
 Gates: spec lints clean, type-checks clean (`tests/` is outside `apps/web/tsconfig.json`,
 so it is checked standalone with `tsc --strict`), prettier clean, format ratchet passed.
 No runtime code changed in either round.
+
+## Round 4 (2026-09-18, CodeRabbit review on PR #2096)
+
+Three findings implemented; two declined by Raphaël and recorded here so they are not
+re-raised.
+
+### 1. Workspace socket marked activity for assistant rows only
+
+Accepted the CodeRabbit thread and closed idea `01M2RRZJS84N8ZRHTEPV24ZMB1` in the same
+change. `useWorkspaceChatSocket`'s `onMessage` now treats an explicit
+`AGENT_OUTPUT_ROLES = {assistant, thinking, tool}` set as responding activity, so a
+tool-only burst — the common shape of a long turn — lights the indicator and the tail
+activity card shows motion.
+
+Deliberately an allow-set rather than project chat's `msg.role !== 'user'`: that
+negation also admits `system` rows, which are SAM-injected lifecycle and build-log
+messages, and one arriving after `onSessionStopped` would re-light the indicator on a
+stopped session. `plan` needs no entry — a plan row only ever arrives alongside the
+thinking/tool rows of the same turn. Both halves are pinned by tests, so neither
+"simplification" can be made silently.
+
+The verify-before-decay timer is unchanged: every newly-covered role arms the shared
+timer exactly as assistant rows did, so a long tool call still cannot flip the UI to
+idle underneath itself.
+
+### 2. Activity cards were silent to assistive technology
+
+`ToolCallGroupCard` gains a visually-hidden
+`<span role="status" aria-live="polite" aria-atomic="true" className="sr-only">` whose
+text changes only on meaningful transitions: `Tool activity in progress` while in
+motion, then `N tool call(s) completed` (plus `, K failed`) once settled. It is
+deliberately NOT a mirror of the visible header — that line changes on every token and
+every call, and a 40-call run would emit 40 announcements over whatever the user is
+reading. "The agent is busy" is already announced by the completion dock's own status
+region, so this one is scoped to tool activity.
+
+One addition beyond the review: the region is only rendered for a card that has
+actually been in motion during its current mount. Virtuoso mounts and unmounts rows as
+the user scrolls, and inserting a populated live region is announced by some screen
+readers — so settled history scrolling back into view would read out
+"7 tool calls completed" unprompted. A card with no transition to report renders no
+region at all.
+
+### 3. Audit screenshots could overwrite each other across projects
+
+The mobile describe was unpinned while the desktop one pinned 1280x800, so running the
+spec on two projects produced two captures at identical sizes and the second silently
+overwrote the first — a screenshot review would then inspect only whichever ran last.
+The mobile describe now pins `375x667 / isMobile / hasTouch`, and captures go through
+`screenshot(page, name, { scopeToProject: true })`, which prefixes the slugified
+Playwright project name. The option is opt-in on the shared helper (not a second
+implementation, and default-off because the other ~40 audit specs' filenames are cited
+from PR evidence). Verified: the two-project run now writes **44** distinct files where
+it previously wrote 22.
+
+Under `iPhone 14 (390x844)` the mobile describe now renders at 375x667. That is
+intended — 375 is the narrowest supported width and the one the layout assertions were
+written against, and pinning makes a scenario's geometry a property of the describe
+rather than of whichever project runs it.
+
+### Declined (recorded so they are not re-raised)
+
+- **`min-h-14` on the card button** — declined under rule 17, which explicitly says not
+  to mandate minimum pixel sizes and to prefer compact, information-dense controls.
+- **Pagination `firstItemIndex` bookkeeping** — pre-existing and orthogonal; tracked in
+  idea `01M2RFR5MPQDKVMYB4TKG9QJ05`.
+
+### Reddened-test proof
+
+| Revert                                                                         | Tests that went red                                                                                                     | Tests that stayed green                                                     |
+| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `AGENT_OUTPUT_ROLES.has(msg.role)` → `msg.role === 'assistant'`                | 2: `lights the TAIL group from a tool-only burst`, `marks the agent working for agent rows but not for SAM system rows` | the other 2 in the file                                                     |
+| `AGENT_OUTPUT_ROLES.has(msg.role)` → `msg.role !== 'user'`                     | 1: `marks the agent working for agent rows but not for SAM system rows`                                                 | the other 3                                                                 |
+| `useCompletionDockWorking(agentActivity)` → `isWorkingActivity(agentActivity)` | 1: `lights the TAIL group from a tool-only burst`                                                                       | the other 3                                                                 |
+| status region removed                                                          | 6 of the 7 new a11y tests                                                                                               | `renders no live region for a run that was already settled when it mounted` |
+| in-motion latch removed (region always rendered)                               | 1: `renders no live region for a run that was already settled when it mounted`                                          | the other 6                                                                 |
+
+### Verification
+
+- `pnpm --filter @simple-agent-manager/web test` — 313 files / 3800 tests passed, 0
+  failed, 0 skipped.
+- Typecheck clean; lint 0 errors / 3 pre-existing warnings; format ratchet passed.
+- Playwright `project-chat-tool-group-audit`: 32/32 on
+  `iPhone SE (375x667)` + `Desktop (1280x800)`, and 16/16 under
+  `CI=true … --project='iPhone 14 (390x844)'`.

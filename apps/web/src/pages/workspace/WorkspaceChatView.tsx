@@ -135,11 +135,6 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
    * project chat so the two surfaces cannot drift again (`.claude/rules/24`);
    * see the hook's doc comment for why the working signal is
    * `useCompletionDockWorking` and not `isWorkingActivity`.
-   *
-   * Known gap on THIS surface: `onMessage` below marks activity for
-   * `role === 'assistant'` only, where project chat marks it for every non-user
-   * row — so a tool-only burst never lights the indicator here. Pre-existing and
-   * orthogonal to grouping; deferred to idea `01M2RRZJS84N8ZRHTEPV24ZMB1`.
    */
   const agentIsWorking = useCompletionDockWorking(agentActivity);
   const groupRowState = useToolCallGroupRowState(conversationItems, agentIsWorking);

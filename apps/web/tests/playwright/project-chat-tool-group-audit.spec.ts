@@ -11,6 +11,15 @@ import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, screenshot, setupProjectChatMocks } from './audit-helpers';
 
+/**
+ * Captures are prefixed with the Playwright project name. Both describes pin a
+ * viewport, so the width/height suffix is identical across projects and two
+ * projects would otherwise overwrite each other's screenshots.
+ */
+function shot(page: Page, name: string) {
+  return screenshot(page, name, { scopeToProject: true });
+}
+
 const PROJECT_ID = 'proj-test-1';
 const SESSION_ID = 'sess-tool-groups';
 
@@ -306,13 +315,13 @@ function suite(label: string) {
     await expect(page.getByText('Bash: pnpm typecheck')).toHaveCount(0);
 
     await assertCardWithinBubbleColumn(page);
-    await screenshot(page, 'tool-group-three-calls-one-failed');
+    await shot(page, 'tool-group-three-calls-one-failed');
     await assertNoOverflow(page);
 
     await header.click();
     await expect(header).toHaveAttribute('aria-expanded', 'true');
     await expect(page.getByText('Bash: pnpm typecheck')).toBeVisible();
-    await screenshot(page, 'tool-group-three-calls-expanded');
+    await shot(page, 'tool-group-three-calls-expanded');
     await assertNoOverflow(page);
   });
 
@@ -327,12 +336,12 @@ function suite(label: string) {
     await expect(page.getByTestId('tool-call-group')).toHaveCount(1);
 
     await assertCardWithinBubbleColumn(page);
-    await screenshot(page, 'tool-group-forty-calls');
+    await shot(page, 'tool-group-forty-calls');
     await assertNoOverflow(page);
 
     await header.click();
     await expect(page.getByText('Read: packages/module-40/src/index.ts')).toBeVisible();
-    await screenshot(page, 'tool-group-forty-calls-expanded');
+    await shot(page, 'tool-group-forty-calls-expanded');
     await assertNoOverflow(page);
   });
 
@@ -352,7 +361,7 @@ function suite(label: string) {
     expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
     await assertCardWithinBubbleColumn(page);
 
-    await screenshot(page, 'tool-group-running-long-title');
+    await shot(page, 'tool-group-running-long-title');
     await assertNoOverflow(page);
   });
 
@@ -364,7 +373,7 @@ function suite(label: string) {
     await expect(page.getByTestId('tool-group-glyph')).toHaveAttribute('data-state', 'done');
 
     await assertCardWithinBubbleColumn(page);
-    await screenshot(page, 'tool-group-single-call');
+    await shot(page, 'tool-group-single-call');
     await assertNoOverflow(page);
   });
 
@@ -381,7 +390,7 @@ function suite(label: string) {
       false
     );
 
-    await screenshot(page, 'tool-group-document-standalone');
+    await shot(page, 'tool-group-document-standalone');
     await assertNoOverflow(page);
   });
 
@@ -402,7 +411,7 @@ function suite(label: string) {
       expect.stringContaining('/messages/msg-tool-3/tool-content'),
     ]);
 
-    await screenshot(page, 'tool-group-call-output-loaded');
+    await shot(page, 'tool-group-call-output-loaded');
     await assertNoOverflow(page);
   });
 
@@ -426,7 +435,7 @@ function suite(label: string) {
     await expect(page.getByText(XSS_AGENT_TEXT_RENDERED)).toBeVisible();
 
     await assertCardWithinBubbleColumn(page);
-    await screenshot(page, 'tool-group-special-characters');
+    await shot(page, 'tool-group-special-characters');
     await assertNoOverflow(page);
 
     await header.click();
@@ -443,7 +452,7 @@ function suite(label: string) {
     expect(dialogs, 'a dialog means the injected script executed').toEqual([]);
     expect(await page.locator('.sam-message-entry script').count()).toBe(0);
 
-    await screenshot(page, 'tool-group-special-characters-expanded');
+    await shot(page, 'tool-group-special-characters-expanded');
     await assertNoOverflow(page);
   });
 
@@ -462,12 +471,20 @@ function suite(label: string) {
     await headers.nth(0).click();
     await expect(headers.nth(0)).toHaveAttribute('aria-expanded', 'false');
 
-    await screenshot(page, 'tool-group-tools-expanded-flag');
+    await shot(page, 'tool-group-tools-expanded-flag');
     await assertNoOverflow(page);
   });
 }
 
+/*
+ * Both describes pin their viewport so a scenario's geometry is a property of the
+ * describe, not of whichever Playwright project happens to run it. Under
+ * `iPhone 14 (390x844)` the mobile describe therefore still renders at 375x667 —
+ * intended: 375 is the narrowest supported width and the one the layout
+ * assertions were written against.
+ */
 test.describe('Project Chat Tool Activity Cards — Mobile', () => {
+  test.use({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
   suite('mobile');
 });
 

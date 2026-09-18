@@ -154,22 +154,22 @@ describe('WorkspaceChatView — tool activity cards', () => {
   });
 
   /*
-   * F5b on this surface, made DISCRIMINATING.
+   * F5b on this surface, made DISCRIMINATING — and now through the shape that
+   * actually dominates a long turn: a TOOL-ONLY burst.
    *
-   * An earlier version hydrated `agentActivity='prompting'`, which
-   * `isWorkingActivity` and `completionDockWorking` BOTH report as working — so
-   * it passed against either predicate and proved nothing. `responding` is the
-   * state that separates them, and the only way this view reaches it is an
-   * assistant row through `onMessage` (this surface, unlike project chat, does
-   * not move activity for tool rows).
+   * This is discriminating in two directions at once, because the pushed row is
+   * a tool row whose call is already `completed`:
    *
-   * So: push assistant text (-> responding), then a further tool row, which
-   * starts a NEW run and therefore a new TAIL group whose single call is already
-   * `completed`. Nothing in that group's statuses can produce the running glyph;
-   * only `groupLive` can. The settled first group is the built-in control that
-   * `groupLive` stays scoped to the tail row.
+   * - if `onMessage`'s role check goes back to `role === 'assistant'`, activity
+   *   never leaves `idle` and the glyph stays settled;
+   * - if `groupLive` goes back to `isWorkingActivity`, `responding` is not
+   *   covered and the glyph stays settled.
+   *
+   * Nothing in the group's own statuses can produce the running glyph, so only
+   * the `live` prop can — and the idle assertion first is the control that the
+   * card is not simply always in motion.
    */
-  it('puts the TAIL group in motion once the agent is responding', async () => {
+  it('lights the TAIL group from a tool-only burst', async () => {
     renderView(<WorkspaceChatView projectId="proj-1" sessionId={SESSION_ID} />);
 
     // Control: agent idle, every call settled -> the one glyph reads done.
@@ -177,26 +177,57 @@ describe('WorkspaceChatView — tool activity cards', () => {
     expect(glyph).toHaveAttribute('data-state', 'done');
     expect(screen.queryByText('· working')).toBeNull();
 
-    // Real trigger #1: assistant text moves this surface to `responding`.
+    // The real trigger: one more tool row over the socket. No assistant text at
+    // any point, which is exactly the case that used to leave this surface dark.
     await act(async () => {
-      capturedWsOnMessage!(textMessage('m-a1', 'assistant', 'Running a few more checks.', 5_000));
-    });
-    // Real trigger #2: the next tool row opens a new run after that text, so the
-    // tail display row is a group again.
-    await act(async () => {
-      capturedWsOnMessage!(toolMessage('m-t4', 'Bash: pnpm build', 6_000));
+      capturedWsOnMessage!(toolMessage('m-t4', 'Bash: pnpm build', 5_000));
     });
 
     await waitFor(() => {
-      const states = screen
-        .getAllByTestId('tool-group-glyph')
-        .map((el) => el.getAttribute('data-state'));
-      expect(states).toEqual(['done', 'running']);
+      expect(screen.getByTestId('tool-group-glyph')).toHaveAttribute('data-state', 'running');
     });
     expect(screen.getByText('· working')).toBeTruthy();
-    // Liveness: the tail really is the new single-call group, not a re-render of
-    // the first one.
-    expect(screen.getByRole('button', { name: /1 tool call/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /3 tool calls/ })).toBeTruthy();
+    // Liveness: the row in motion is the absorbed tail group, still one card.
+    expect(screen.getByRole('button', { name: /4 tool calls/ })).toBeTruthy();
+    expect(screen.getAllByTestId('tool-call-group')).toHaveLength(1);
+  });
+
+  /*
+   * Pins the allow-set itself, independently of any group geometry.
+   *
+   * Project chat uses `msg.role !== 'user'`; this surface uses an explicit
+   * `{assistant, thinking, tool}` set so SAM-injected `system` rows (lifecycle
+   * notices, build logs) cannot light the indicator — notably right after
+   * `onSessionStopped` has set it idle. Asserted on the "Agent is working..."
+   * region rather than the card, because a `system` row also appends a display
+   * row and would push the group off the tail, which would make a glyph-based
+   * assertion pass for the wrong reason.
+   *
+   * Reverting the check to `=== 'assistant'` reddens the positive half;
+   * widening it to `!== 'user'` reddens the negative half.
+   */
+  it('marks the agent working for agent rows but not for SAM system rows', async () => {
+    renderView(<WorkspaceChatView projectId="proj-1" sessionId={SESSION_ID} />);
+    await screen.findByRole('button', { name: /3 tool calls/ });
+    expect(screen.queryByText('Agent is working...')).toBeNull();
+
+    await act(async () => {
+      capturedWsOnMessage!({
+        id: 'm-sys',
+        sessionId: SESSION_ID,
+        role: 'system',
+        content: 'Workspace stopped.',
+        toolMetadata: null,
+        createdAt: 5_000,
+      });
+    });
+    expect(screen.queryByText('Agent is working...')).toBeNull();
+
+    await act(async () => {
+      capturedWsOnMessage!(toolMessage('m-t4', 'Bash: pnpm build', 6_000));
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Agent is working...')).toBeTruthy();
+    });
   });
 });

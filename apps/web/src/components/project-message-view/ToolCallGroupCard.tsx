@@ -17,7 +17,7 @@ import {
   ToolCallCard as AcpToolCallCard,
 } from '@simple-agent-manager/acp-client';
 import { ChevronDown } from 'lucide-react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 
 import type { GroupedItem, ToolCallGroupItem } from './tool-call-groups';
 import { summarizeToolCallGroup } from './tool-call-groups';
@@ -154,6 +154,34 @@ function ToolCallGroupCardImpl({
   const glyphState: GlyphState = inMotion ? 'running' : summary.failedCount > 0 ? 'failed' : 'done';
 
   const countLabel = `${summary.toolCallCount} ${summary.toolCallCount === 1 ? 'tool call' : 'tool calls'}`;
+
+  /*
+   * Screen-reader announcement for the run's lifecycle — deliberately NOT a
+   * mirror of the visible header.
+   *
+   * The visible line changes on every token and every call (the running title is
+   * the newest unfinished call), and a 40-call run would emit 40 announcements
+   * over the top of whatever the user is reading. So this region carries only the
+   * transitions that matter: the run starts, the run settles, and how many calls
+   * failed. The text is CONSTANT for the whole of the in-motion phase, which is
+   * what keeps it quiet. "The agent is busy" itself is already announced by the
+   * completion dock's own status region, so this one is scoped to tool activity.
+   */
+  const statusAnnouncement = inMotion
+    ? 'Tool activity in progress'
+    : `${countLabel} completed${summary.failedCount > 0 ? `, ${summary.failedCount} failed` : ''}`;
+
+  /*
+   * Only cards that have actually been in motion during this mount carry the
+   * region. Virtuoso mounts and unmounts rows as the user scrolls, and inserting
+   * a populated live region is announced by some screen readers — so a settled
+   * card scrolling into view would read out "7 tool calls completed" for history
+   * the user never asked about. A card that was already settled when it mounted
+   * has no transition to report, so it renders no region at all; one that
+   * transitions running → settled keeps its region and announces the completion.
+   */
+  const wasInMotionRef = useRef(inMotion);
+  if (inMotion) wasInMotionRef.current = true;
   // Status is carried by TEXT, never by colour alone.
   const liveText = thinking
     ? '· thinking…'
@@ -182,6 +210,11 @@ function ToolCallGroupCardImpl({
           isExpanded ? '' : ' max-w-[80%]'
         }`}
       >
+        {wasInMotionRef.current && (
+          <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+            {statusAnnouncement}
+          </span>
+        )}
         <button
           type="button"
           aria-expanded={isExpanded}

@@ -18,7 +18,7 @@
  *   `tool_call` and `tool_call_update` included), so between "call A completed"
  *   and the next row a prompting-only predicate goes false and the glyph flashes
  *   settled — the exact per-call flicker `groupLive` exists to prevent;
- * - the workspace view reaches `responding` from assistant rows and from the
+ * - the workspace view reaches `responding` from any agent row and from the
  *   hydrated session-state snapshot, so the same reasoning applies for the whole
  *   of a streaming turn.
  *

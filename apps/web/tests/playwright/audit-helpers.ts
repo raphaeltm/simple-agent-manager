@@ -38,14 +38,37 @@ export function makeMockUser({ email, name, role = 'user', sessionId, userId }: 
   };
 }
 
-export async function screenshot(page: Page, name: string) {
+/** `iPhone SE (375x667)` -> `iphone-se-375x667`. */
+function slugifyProjectName(projectName: string): string {
+  return projectName
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+}
+
+/**
+ * `scopeToProject` prefixes the Playwright project name.
+ *
+ * The `-{width}x{height}` suffix alone does NOT make a filename unique: a
+ * `test.use`-pinned describe renders at the same size under every project, so
+ * running one spec on two projects has them overwrite each other's captures and
+ * a screenshot review silently inspects only whichever ran last. Opt-in rather
+ * than automatic, because the existing audit specs' filenames are referenced
+ * from PR evidence.
+ */
+export async function screenshot(
+  page: Page,
+  name: string,
+  options: { scopeToProject?: boolean } = {}
+) {
   await page.waitForTimeout(600);
   const viewport = page.viewportSize();
   const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
+  const prefix = options.scopeToProject ? `${slugifyProjectName(test.info().project.name)}-` : '';
   const screenshotDir = resolve(process.cwd(), DEFAULT_SCREENSHOT_DIR);
   mkdirSync(screenshotDir, { recursive: true });
   await page.screenshot({
-    path: `${screenshotDir}/${name}${suffix}.png`,
+    path: `${screenshotDir}/${prefix}${name}${suffix}.png`,
     fullPage: true,
   });
 }

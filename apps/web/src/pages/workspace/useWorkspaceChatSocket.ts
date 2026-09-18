@@ -24,8 +24,18 @@ import type {
 } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
 
-/** Seconds of silence after last assistant message before returning to idle. */
+/** Seconds of silence after last agent row before returning to idle. */
 const IDLE_TIMEOUT_MS = 3000;
+
+/**
+ * Message roles that prove the agent is producing output.
+ *
+ * Project chat uses `msg.role !== 'user'` for the same purpose
+ * (`useSessionLifecycle.ts`). An explicit allow-set is used here because that
+ * negation also admits `system` rows, which are SAM-injected lifecycle/log
+ * messages rather than agent output.
+ */
+const AGENT_OUTPUT_ROLES = new Set(['assistant', 'thinking', 'tool']);
 
 interface UseWorkspaceChatSocketOptions {
   projectId: string;
@@ -92,9 +102,23 @@ export function useWorkspaceChatSocket({
       (msg: ChatMessageResponse) => {
         setMessages((prev) => mergeMessages(prev, [msg], 'append'));
 
-        // Transition to 'responding' on any assistant message (covers prompting→responding
-        // and also idle→responding on reconnect with in-progress agent output)
-        if (msg.role === 'assistant') {
+        /*
+         * Any agent output means the agent is working — not just its prose.
+         * This used to key on `role === 'assistant'` alone, so a tool-only burst
+         * (the common shape of a long turn: think → tool → think → tool) never
+         * lit the indicator here, and the tail activity card never showed motion
+         * even while calls were streaming in.
+         *
+         * `system` and `user` rows stay out deliberately. `system` rows are
+         * SAM-injected lifecycle and build-log messages, not agent output, and
+         * one arriving after `onSessionStopped` would re-light the indicator on
+         * a stopped session. `plan` needs no entry of its own: a plan row only
+         * ever arrives alongside the thinking/tool rows of the same turn.
+         *
+         * Still arms the SHARED verify-before-decay timer rather than a blind
+         * decay, so a long tool call cannot flip the UI to idle underneath it.
+         */
+        if (AGENT_OUTPUT_ROLES.has(msg.role)) {
           setAgentActivity('responding');
           startVerifyDecayTimer();
         }
