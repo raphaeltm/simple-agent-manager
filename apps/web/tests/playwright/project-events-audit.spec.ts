@@ -424,7 +424,7 @@ test.describe('Project Events real-router audit', () => {
     await open(page);
     for (const [id, label] of sections) {
       await page.getByRole('button', { name: label, exact: true }).click();
-      await expect(page.getByText('Nothing here yet.', { exact: false })).toBeVisible();
+      await expect(page.getByText(/No (event subscriptions|scheduled actions|standing watches|channels)/)).toBeVisible();
       await audit(page, `${id}-empty`);
       state.error = true;
       await page
@@ -437,7 +437,7 @@ test.describe('Project Events real-router audit', () => {
       await audit(page, `${id}-error`);
       state.error = false;
       await page.getByRole('button', { name: 'Try again' }).click();
-      await expect(page.getByText('Nothing here yet.', { exact: false })).toBeVisible();
+      await expect(page.getByText(/No (event subscriptions|scheduled actions|standing watches|channels)/)).toBeVisible();
     }
   });
   test('ordinary member creates both schedule actions, handles conflict, reschedules and cancels', async ({
@@ -757,9 +757,7 @@ test.describe('Project Events real-router audit', () => {
     ).toBe(true);
     await page.getByRole('button', { name: 'Standing watches', exact: true }).click();
     await expect(
-      page.getByText('Subscriptions, schedules, and standing watches are scoped to', {
-        exact: false,
-      })
+      page.getByText('Scoped to', { exact: false })
     ).toBeVisible();
     await page.getByRole('button', { name: 'Create watch', exact: true }).click();
     await expect(page.getByLabel('Target session')).toHaveValue(SESSION);

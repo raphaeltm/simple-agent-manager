@@ -122,7 +122,10 @@ export function ProjectEvents() {
               <item.Icon className="size-4 shrink-0" aria-hidden />
               {item.label}
               {count !== undefined && count > 0 && (
-                <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-surface-secondary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-fg-muted">
+                <span
+                  aria-hidden
+                  className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-surface-secondary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-fg-muted"
+                >
                   {count}
                 </span>
               )}
