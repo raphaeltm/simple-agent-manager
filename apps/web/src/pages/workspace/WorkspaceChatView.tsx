@@ -295,9 +295,13 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
       });
       setMessages((prev) => {
         const merged = mergeMessages(prev, data.messages, 'prepend');
-        const actualAdded = merged.length - prev.length;
-        if (actualAdded > 0) {
-          setFirstItemIndex((fi) => fi - actualAdded);
+        // Offset must be in display-row units (after grouping), not raw message
+        // count, because consecutive tool calls fold into a single row.
+        const oldRows = groupToolCallItems(chatMessagesToConversationItems(prev)).length;
+        const newRows = groupToolCallItems(chatMessagesToConversationItems(merged)).length;
+        const displayRowsAdded = newRows - oldRows;
+        if (displayRowsAdded > 0) {
+          setFirstItemIndex((fi) => fi - displayRowsAdded);
         }
         return merged;
       });

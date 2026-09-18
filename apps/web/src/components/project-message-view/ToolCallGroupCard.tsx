@@ -219,7 +219,7 @@ function ToolCallGroupCardImpl({
           type="button"
           aria-expanded={isExpanded}
           onClick={handleToggle}
-          className="w-full min-w-0 flex items-center gap-2 px-3 py-2 text-left bg-transparent border-0 cursor-pointer hover:bg-surface-hover transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring"
+          className="w-full min-w-0 min-h-14 flex items-center gap-2 px-3 py-2 text-left bg-transparent border-0 cursor-pointer hover:bg-surface-hover transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring"
         >
           <span className="shrink-0 flex items-center">
             <GroupGlyph state={glyphState} />

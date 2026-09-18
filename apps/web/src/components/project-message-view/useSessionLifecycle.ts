@@ -35,9 +35,11 @@ import {
   mergeSessionDetailMessages,
   parsePlanContent,
 } from './session-lifecycle-helpers';
+import { groupToolCallItems } from './tool-call-groups';
 import type { AgentActivityState } from './types';
 import {
   CHAT_FALLBACK_POLL_MS,
+  chatMessagesToConversationItems,
   deriveSessionState,
   IDLE_TIMEOUT_MS,
   isWorkingActivity,
@@ -639,8 +641,14 @@ export function useSessionLifecycle(
       });
       setMessages((prev) => {
         const merged = mergeMessages(prev, data.messages, 'prepend');
-        const actualAdded = merged.length - prev.length;
-        setFirstItemIndex((fi) => fi - actualAdded);
+        // Offset in display-row units (after grouping), not raw message count,
+        // because consecutive tool calls fold into a single row.
+        const oldRows = groupToolCallItems(chatMessagesToConversationItems(prev)).length;
+        const newRows = groupToolCallItems(chatMessagesToConversationItems(merged)).length;
+        const displayRowsAdded = newRows - oldRows;
+        if (displayRowsAdded > 0) {
+          setFirstItemIndex((fi) => fi - displayRowsAdded);
+        }
         return merged;
       });
       updateCachedMessages(data.messages, 'prepend');
@@ -688,8 +696,12 @@ export function useSessionLifecycle(
         if (accumulated.length > 0) {
           setMessages((prev) => {
             const merged = mergeMessages(prev, accumulated, 'prepend');
-            const actualAdded = merged.length - prev.length;
-            setFirstItemIndex((fi) => fi - actualAdded);
+            const oldRows = groupToolCallItems(chatMessagesToConversationItems(prev)).length;
+            const newRows = groupToolCallItems(chatMessagesToConversationItems(merged)).length;
+            const displayRowsAdded = newRows - oldRows;
+            if (displayRowsAdded > 0) {
+              setFirstItemIndex((fi) => fi - displayRowsAdded);
+            }
             return merged;
           });
           updateCachedMessages(accumulated, 'prepend');
