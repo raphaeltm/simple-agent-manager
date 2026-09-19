@@ -323,6 +323,7 @@ describe('D1 migration safety gates', () => {
         'DATABASE.diagnostic_reconciliation_state',
         'DATABASE.session_snapshots',
         'DATABASE.project_files',
+        'DATABASE.vm_provisioning_leases',
       ])
     );
     expect(parseChurningTableSelectors(undefined)).toContain(
@@ -353,6 +354,7 @@ describe('D1 migration safety gates', () => {
     'diagnostic_reconciliation_state',
     'session_snapshots',
     'project_files',
+    'vm_provisioning_leases',
   ])('accepts routine retention churn for reviewed DATABASE.%s', (table) => {
     expect(() =>
       verifyNoUnexpectedProtectedTableDecrease(

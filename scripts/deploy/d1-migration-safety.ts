@@ -76,6 +76,7 @@ export const DEFAULT_D1_MIGRATION_CHURNING_TABLES = [
   'DATABASE.trial_waitlist',
   'DATABASE.trigger_executions',
   'DATABASE.verifications',
+  'DATABASE.vm_provisioning_leases',
   'DATABASE.webhook_deliveries',
   'OBSERVABILITY_DATABASE.platform_errors',
 ] as const;
