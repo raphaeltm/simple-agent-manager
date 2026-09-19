@@ -17,6 +17,78 @@ function env() {
   } as any;
 }
 
+/**
+ * A fake Cloudflare DNS zone keyed by record name.
+ *
+ * Shared by the two fan-out tests so the interleaving decides the winner rather than a
+ * pre-scripted call sequence. Both differ only in their seed and in one lookup hook, so
+ * factoring this out makes that difference visible instead of burying it in two
+ * near-identical 40-line mocks.
+ *
+ * `onLookup` models a stale read: returning `[]` once for a name that IS in the store
+ * reproduces "the record existed by create-time but not at lookup-time", which is the exact
+ * TOCTOU window the tolerance exists for.
+ */
+type FakeRecord = { id: string; name: string; type: string; content: string };
+
+function fakeCloudflareZone(options?: {
+  seed?: FakeRecord[];
+  idPrefix?: string;
+  onLookup?: (name: string) => FakeRecord[] | null;
+}) {
+  const store = new Map<string, FakeRecord>();
+  for (const record of options?.seed ?? []) store.set(record.name, record);
+  const prefix = options?.idPrefix ?? 'dns';
+  let nextId = 1;
+
+  const fetchMock = vi.fn(async (url: any, init: any) => {
+    const u = new URL(String(url));
+    const method = init?.method ?? 'GET';
+    // Yield so concurrent callers genuinely interleave across the await boundary.
+    await Promise.resolve();
+
+    if (method === 'GET') {
+      const name = u.searchParams.get('name')!;
+      const override = options?.onLookup?.(name);
+      if (override) return new Response(JSON.stringify({ result: override }), { status: 200 });
+      const hit = store.get(name);
+      return new Response(JSON.stringify({ result: hit ? [hit] : [] }), { status: 200 });
+    }
+
+    if (method === 'POST') {
+      const body = JSON.parse(init.body);
+      if (store.has(body.name)) {
+        // Cloudflare enforces uniqueness; the loser gets 81058.
+        return new Response(
+          JSON.stringify({ errors: [{ code: 81058, message: 'An identical record already exists.' }] }),
+          { status: 400 }
+        );
+      }
+      const rec = { id: `${prefix}-${nextId++}`, name: body.name, type: 'A', content: body.content };
+      store.set(body.name, rec);
+      return new Response(JSON.stringify({ result: { id: rec.id } }), { status: 200 });
+    }
+
+    if (method === 'PUT') {
+      // Route by record id, not a catch-all, so a future third case cannot silently pass by
+      // matching the wrong record.
+      const id = u.pathname.split('/').pop()!;
+      const rec = [...store.values()].find((r) => r.id === id);
+      if (!rec) {
+        return new Response(
+          JSON.stringify({ errors: [{ code: 81044, message: 'Record not found.' }] }),
+          { status: 404 }
+        );
+      }
+      rec.content = JSON.parse(init.body).content;
+      return new Response(JSON.stringify({ result: { id: rec.id } }), { status: 200 });
+    }
+    throw new Error(`unexpected method ${method}`);
+  });
+
+  return { store, fetchMock };
+}
+
 let warnSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
@@ -262,45 +334,7 @@ describe('upsertAppRouteDNSRecord', () => {
     // script — decides who wins, and both callers must converge on one record id.
     it('two concurrent callers for the SAME hostname converge on one record', async () => {
       const HOST = 'r1-web.apps.example.com';
-      const store = new Map<string, { id: string; name: string; type: string; content: string }>();
-      let nextId = 1;
-
-      const fetchMock = vi.fn(async (url: any, init: any) => {
-        const u = new URL(String(url));
-        const method = init?.method ?? 'GET';
-        // Yield so the two callers genuinely interleave across the await boundary.
-        await Promise.resolve();
-
-        if (method === 'GET') {
-          const name = u.searchParams.get('name')!;
-          const hit = store.get(name);
-          return new Response(JSON.stringify({ result: hit ? [hit] : [] }), { status: 200 });
-        }
-
-        if (method === 'POST') {
-          const body = JSON.parse(init.body);
-          if (store.has(body.name)) {
-            // Cloudflare enforces uniqueness; the loser gets 81058.
-            return new Response(JSON.stringify({
-              errors: [{ code: 81058, message: 'An identical record already exists.' }],
-            }), { status: 400 });
-          }
-          const rec = { id: `dns-${nextId++}`, name: body.name, type: 'A', content: body.content };
-          store.set(body.name, rec);
-          return new Response(JSON.stringify({ result: { id: rec.id } }), { status: 200 });
-        }
-
-        if (method === 'PUT') {
-          // Route by record id, not a catch-all, so a future third case cannot
-          // silently pass by matching the wrong record.
-          const id = u.pathname.split('/').pop()!;
-          const rec = [...store.values()].find((r) => r.id === id);
-          if (!rec) return new Response(JSON.stringify({ errors: [{ code: 81044, message: 'Record not found.' }] }), { status: 404 });
-          rec.content = JSON.parse(init.body).content;
-          return new Response(JSON.stringify({ result: { id: rec.id } }), { status: 200 });
-        }
-        throw new Error(`unexpected method ${method}`);
-      });
+      const { store, fetchMock } = fakeCloudflareZone();
       vi.stubGlobal('fetch', fetchMock);
 
       const ids = await Promise.all([
@@ -318,59 +352,35 @@ describe('upsertAppRouteDNSRecord', () => {
     // does it: one member losing the race must not reject the batch that gates the
     // node's release payload.
     it('a losing route does not fail the Promise.all batch that gates the release fetch', async () => {
-      const store = new Map<string, { id: string; name: string; type: string; content: string }>();
-      // r2 is already claimed by a concurrent caller before either of our creates.
-      store.set('r2-api.apps.example.com', {
-        id: 'dns-b-winner', name: 'r2-api.apps.example.com', type: 'A', content: '203.0.113.10',
-      });
-      const seenGet = new Set<string>();
-      let nextId = 1;
-
-      const fetchMock = vi.fn(async (url: any, init: any) => {
-        const u = new URL(String(url));
-        const method = init?.method ?? 'GET';
-        await Promise.resolve();
-
-        if (method === 'GET') {
-          const name = u.searchParams.get('name')!;
-          // First lookup for r2 races ahead of the winner's write, so our caller
-          // believes the record is absent and takes the create path.
-          if (name === 'r2-api.apps.example.com' && !seenGet.has(name)) {
-            seenGet.add(name);
-            return new Response(JSON.stringify({ result: [] }), { status: 200 });
+      const WINNER: FakeRecord = {
+        id: 'dns-b-winner',
+        name: 'r2-api.apps.example.com',
+        type: 'A',
+        content: '203.0.113.10',
+      };
+      // r2 is already claimed by a concurrent caller, but our FIRST lookup for it races ahead
+      // of that write, so our caller believes it is absent and takes the create path.
+      const stale = new Set<string>();
+      const { fetchMock } = fakeCloudflareZone({
+        seed: [WINNER],
+        idPrefix: 'dns-a',
+        onLookup: (name) => {
+          if (name === WINNER.name && !stale.has(name)) {
+            stale.add(name);
+            return [];
           }
-          const hit = store.get(name);
-          return new Response(JSON.stringify({ result: hit ? [hit] : [] }), { status: 200 });
-        }
-        if (method === 'POST') {
-          const body = JSON.parse(init.body);
-          if (store.has(body.name)) {
-            return new Response(JSON.stringify({
-              errors: [{ code: 81058, message: 'An identical record already exists.' }],
-            }), { status: 400 });
-          }
-          const rec = { id: `dns-a-${nextId++}`, name: body.name, type: 'A', content: body.content };
-          store.set(body.name, rec);
-          return new Response(JSON.stringify({ result: { id: rec.id } }), { status: 200 });
-        }
-        if (method === 'PUT') {
-          const id = u.pathname.split('/').pop()!;
-          const rec = [...store.values()].find((r) => r.id === id);
-          if (!rec) return new Response(JSON.stringify({ errors: [{ code: 81044, message: 'Record not found.' }] }), { status: 404 });
-          rec.content = JSON.parse(init.body).content;
-          return new Response(JSON.stringify({ result: { id: rec.id } }), { status: 200 });
-        }
-        throw new Error(`unexpected method ${method}`);
+          return null;
+        },
       });
       vi.stubGlobal('fetch', fetchMock);
 
       const ids = await Promise.all([
         upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()),
-        upsertAppRouteDNSRecord('r2-api.apps.example.com', '203.0.113.10', env()),
+        upsertAppRouteDNSRecord(WINNER.name, '203.0.113.10', env()),
       ]);
 
       expect(ids[0]).toBe('dns-a-1');
-      expect(ids[1]).toBe('dns-b-winner');
+      expect(ids[1]).toBe(WINNER.id);
     });
   });
 });
