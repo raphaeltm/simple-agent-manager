@@ -344,15 +344,10 @@ func logFallbackSuccess(row outboxRow, candidateIndex int) {
 }
 
 func (r *Reporter) contextUntilStop() (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		select {
-		case <-r.stopC:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
-	return ctx, cancel
+	if r == nil || r.stopCtx == nil {
+		return context.WithCancel(context.Background())
+	}
+	return context.WithCancel(r.stopCtx)
 }
 
 func (r *Reporter) sizeFallbackCandidates(row outboxRow) []apiMessage {
