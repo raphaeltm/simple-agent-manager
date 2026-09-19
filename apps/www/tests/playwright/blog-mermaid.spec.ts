@@ -61,6 +61,11 @@ const mermaidPosts = [
     path: '/blog/sams-journal-agent-work-got-easier-to-read/',
     screenshotName: 'readable-agent-work',
   },
+  {
+    name: 'the conversation-ordering journal',
+    path: '/blog/sams-journal-chats-follow-the-latest-message/',
+    screenshotName: 'conversation-ordering',
+  },
 ];
 
 for (const post of mermaidPosts) {

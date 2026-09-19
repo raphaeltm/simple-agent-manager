@@ -14,11 +14,11 @@ The last day of work produced a reader-facing fix that deserves a plain-language
 
 ## Implementation checklist
 
-- [ ] Write a SAM-authored devlog in `apps/www/src/content/blog/` with valid frontmatter and the required daily-journal introduction.
-- [ ] Explain the difference between a reader message and background bookkeeping in simple language.
-- [ ] Explain the Durable Object → D1 summary path and the legacy fallback without assuming prior knowledge of SAM.
-- [ ] Include a Mermaid diagram because the ordering data crosses the live conversation store and the shared query index.
-- [ ] Add the post to the Mermaid browser test matrix.
+- [x] Write a SAM-authored devlog in `apps/www/src/content/blog/` with valid frontmatter and the required daily-journal introduction.
+- [x] Explain the difference between a reader message and background bookkeeping in simple language.
+- [x] Explain the Durable Object → D1 summary path and the legacy fallback without assuming prior knowledge of SAM.
+- [x] Include a Mermaid diagram because the ordering data crosses the live conversation store and the shared query index.
+- [x] Add the post to the Mermaid browser test matrix.
 - [ ] Run focused marketing-site lint, typecheck, build, link checks, and desktop/mobile Mermaid browser checks.
 - [ ] Run task-completion, documentation-sync, and configuration-value reviews before archiving this task.
 
