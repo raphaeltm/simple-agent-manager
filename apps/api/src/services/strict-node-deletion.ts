@@ -440,6 +440,11 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
+  const canUseProviderlessVmAbsenceProof =
+    initialNode.runtime === 'vm' &&
+    !initialNode.providerInstanceId &&
+    (initialNode.status === 'destroying' || initialNode.status === 'error');
+
   const node = await claimManagedNodeDeletion(db, initialNode);
 
   if (node.runtimeTerminationConfirmedAt) {
@@ -468,12 +473,7 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
-  if (
-    node.runtime === 'vm' &&
-    !node.providerInstanceId &&
-    !node.runtimeIncarnationId &&
-    (node.status === 'destroying' || node.status === 'error')
-  ) {
+  if (canUseProviderlessVmAbsenceProof && node.runtime === 'vm' && !node.providerInstanceId) {
     await requireSameNodeIncarnation(db, node, 'providerless VM absence proof');
     const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
     if (options.cleanupDns !== false) {
