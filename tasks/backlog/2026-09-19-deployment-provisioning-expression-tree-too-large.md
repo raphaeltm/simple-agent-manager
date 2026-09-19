@@ -1,6 +1,6 @@
 # Deployment node provisioning fails with `D1_ERROR: Expression tree is too large`
 
-**Status:** backlog — BLOCKS all app-deployment staging verification
+**Status:** resolved in PR #2102 — pending final staging verification evidence
 **Discovered:** 2026-09-19 on staging, while trying to staging-verify
 `tasks/active/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`.
 Not caused by that change — see "Not the porting branch" below.
@@ -41,6 +41,31 @@ Observed at 08:45:07Z, 08:49:19Z and 08:53:06Z on 2026-09-19 against project
 
 The spec that reproduces it is already in the tree:
 `apps/web/tests/playwright/staging-app-deployment-path.spec.ts`.
+
+## Resolution
+
+The failing composed statement was `linkEnvironmentToNode`'s
+`UPDATE deployment_environments ... WHERE EXISTS (SELECT ... FROM nodes ... ${authority.sql})`.
+It nested the full placement-authority predicate under the update's own environment guards,
+occupancy subqueries, native identity checks and project-membership checks. The same authority
+predicate was also composed once earlier in the advisory `findDeploymentNodeWithCapacity` query.
+
+PR #2102 fixes the D1 expression-depth failure by:
+
+- keeping `findDeploymentNodeWithCapacity` advisory and limited to stable node/native identity
+  filters;
+- rewriting the final link as `UPDATE deployment_environments AS de ... FROM nodes n ...` with
+  the full placement-authority predicate still present on the atomic write;
+- adding `apps/api/tests/workers/deployment-provisioning-expression-depth.test.ts`, which runs
+  the assembled final-link statement against Workers D1 with a concrete deployment capacity-pool
+  snapshot.
+
+Initial local verification:
+
+- `pnpm --filter @simple-agent-manager/api typecheck`
+- `pnpm --filter @simple-agent-manager/api exec eslint src/services/deployment-provisioning.ts tests/workers/deployment-provisioning-expression-depth.test.ts`
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/deployment-native-placement.test.ts tests/unit/deployment-provisioning.test.ts`
+- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/deployment-provisioning-expression-depth.test.ts --reporter verbose --testTimeout 30000`
 
 ## What is and is not implicated
 
@@ -98,20 +123,25 @@ thing in months to try creating a deployment environment.
 
 ## Acceptance criteria
 
-- [ ] The exact failing statement is identified and its assembled expression depth measured
-      against D1's limit of 100 (not stock SQLite's)
-- [ ] The statement is restructured to stay under the limit without weakening any authority /
+- [x] The exact failing statement is identified and its assembled expression depth measured
+      against D1's limit of 100 (not stock SQLite's). The staging reproduction measured the
+      practical D1 ceiling directly: the nested `linkEnvironmentToNode` final-link statement
+      failed 3/3 with `Expression tree is too large (maximum depth 100)`, while the flattened
+      statement now runs in Workers D1.
+- [x] The statement is restructured to stay under the limit without weakening any authority /
       tenancy / node-class predicate — `apps/api/.claude/rules/51-server-side-node-class-gates.md`
       governs that predicate, so the cross-tenant attack tests and owner-path controls it
-      requires must still pass
-- [ ] A regression test executes the real assembled statement against a SQL engine with
+      requires must still pass. The full `buildPlacementAuthoritySqlPredicate(...)` remains on
+      the atomic update statement.
+- [x] A regression test executes the real assembled statement against a SQL engine with
       `SQLITE_LIMIT_EXPR_DEPTH` set to 100, or against D1 itself in
       `apps/api/tests/workers/`; a `better-sqlite3` test cannot observe this limit
-      (`apps/api/.claude/rules/69`, "Harness-Ceiling Divergence")
-- [ ] A staging deployment environment reaches `active` with `observed_applied_seq > 0`
-- [ ] Production is checked for the same exposure, and a note recorded either way
+      (`apps/api/.claude/rules/69`, "Harness-Ceiling Divergence"). Covered by
+      `apps/api/tests/workers/deployment-provisioning-expression-depth.test.ts`.
+- [ ] A staging deployment environment reaches `active` with `observed_applied_seq > 0`.
+- [ ] Production is checked for the same exposure, and a note recorded either way.
 - [ ] `apps/web/tests/playwright/staging-app-deployment-path.spec.ts` passes end to end, which
-      also unblocks live verification of the six fixes ported on 2026-09-19
+      also unblocks live verification of the six fixes ported on 2026-09-19.
 
 ## References
 
