@@ -210,22 +210,21 @@ PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS = "1"
 # Only `migrating` fences per tick; the real throughput bound is _DAILY_WRITE_BUDGET. Each
 # fenced session costs ~3 D1 writes plus an unbounded chunk copy, and the tick's wall-time
 # gate is only checked BETWEEN candidates. A refused candidate opens no fence and consumes
-# no slot. Target: ~100k msgs/day ÷ 24 hourly ticks ≈ 4167 msgs/tick; 4 sessions × ~1250
-# avg msgs each is the expected shape.
-PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "4"
-# Cumulative message_count of NEW candidates one tick may journal. 3000/tick × 24 ticks =
-# 72k msgs/day capacity, above the ~50 MB/day growth rate at ~1.28 KB/msg. With
+# no slot. Raised to 8 on 2026-09-19 (was 4): DO storage at 99.4% capacity requires faster
+# drain. Code default is 10; 8 is conservative. Target: ~120k msgs/day ÷ 24 ticks ≈ 5000
+# msgs/tick; 8 sessions × ~625 avg msgs each is the expected shape.
+PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "8"
+# Cumulative message_count of NEW candidates one tick may journal. 5000/tick × 24 ticks =
+# 120k msgs/day capacity, well above the ~50 MB/day growth rate at ~1.28 KB/msg. With
 # _DAILY_WRITE_BUDGET=800000 and _WRITE_ESTIMATE_FACTOR=2 the derived affordability ceiling
-# is ~199750 messages; this 3000 is the smaller of the two and is what actually binds.
+# is ~199750 messages; this 5000 is the smaller of the two and is what actually binds.
 #
 # This budget is ALSO the per-candidate ceiling (`sweepMessageCeiling` = min(this, derived
-# affordability)), so it caps the maximum session size the sweep will attempt. Lowered from
-# 5000 to 3000 on 2026-09-17: sessions above ~4000 messages can exceed the per-chunk R2
-# timeout during seal, poisoning and opening the project circuit breaker. 3,115 eligible
-# sessions are at or below 3000 messages (~2.5M messages, ~3 GB reclaimable). The per-chunk
-# deadline fix (compact-archive.ts perChunkTimeoutMs) makes larger sessions safe; once
-# deployed and verified, this can be raised back.
-PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "3000"
+# affordability)), so it caps the maximum session size the sweep will attempt. Restored to
+# 5000 on 2026-09-19 (was 3000 from 2026-09-17): the per-chunk deadline fix
+# (compact-archive.ts perChunkTimeoutMs) is deployed and verified, making larger sessions
+# safe again. DO storage at 99.4% capacity requires increased drain throughput.
+PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "5000"
 # Assumed percentage by which a session's write estimate exceeds its message_count (archived
 # tool payloads, grouped rows and FTS units). Reserved as headroom when the per-candidate
 # selection ceiling is derived from _DAILY_WRITE_BUDGET; 100 means "units may be up to 2x
