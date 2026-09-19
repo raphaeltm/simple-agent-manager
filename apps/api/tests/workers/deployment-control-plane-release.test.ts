@@ -133,7 +133,12 @@ describe('deployment release heartbeat reconciliation', () => {
       pendingReleaseSeq?: number;
     };
     expect(body.deployment?.pendingReleases).toEqual([{ environmentId, seq: 2 }]);
-    expect(body.pendingReleaseSeq).toBe(2);
+    // The legacy top-level copy is NOT sent. The VM agent used to append it to the
+    // list above whenever ENVIRONMENT_ID was set — which cloud-init always sets — so
+    // one pending release produced two apply goroutines per heartbeat tick.
+    // Production showed this as an exact 2:1 ratio of deployment.apply.fetch_started
+    // to deployment.apply.started, with the pair 4 ms apart.
+    expect(body.pendingReleaseSeq).toBeUndefined();
     expect(await releaseStatuses(environmentId)).toEqual([
       { version: 1, status: 'failed' },
       { version: 2, status: 'created' },
