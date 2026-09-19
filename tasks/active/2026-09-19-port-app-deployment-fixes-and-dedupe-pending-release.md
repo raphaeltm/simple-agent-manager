@@ -324,3 +324,28 @@ deployment node rows (none had a `provider_instance_id`, so no Hetzner VM was ev
 them), and 1 provider volume. Confirmed zero `pw-deploy-%` environments, zero deployment-role
 nodes and zero recent volumes remain. The 3 workspace nodes still on staging belong to another
 agent and were left untouched.
+
+## Sources consulted (all fetched and 200 before citing)
+
+Context7 was unavailable in this environment, so official primary documentation was used
+(`.claude/rules/05-preflight.md`). Recorded here as well as in the PR body so the evidence
+survives the PR.
+
+- Cloudflare DNS API, record create — <https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/create/>;
+  DNS docs root <https://developers.cloudflare.com/dns/>. Basis for tolerating `81057`/`81058`
+  ("this exact record already exists") while excluding `81053` (a different-type collision on
+  the host, which retrying cannot fix), and for requiring a unique match on the node-backend
+  conflict lookup — Cloudflare permits several A records per name for round-robin.
+- Cloudflare API reference root — <https://developers.cloudflare.com/api/>. Confirms an error
+  response carries a numeric `code` beside `message`, which is why `readCloudflareErrorDetail`
+  reads both in one pass: a `Response` body can be consumed only once.
+- Go `os/exec` — <https://pkg.go.dev/os/exec>, <https://pkg.go.dev/os/exec#Cmd.Wait>. A
+  non-`*os.File` `Stderr` is written by a single copier goroutine that `Wait` blocks on, which
+  is what makes `livenessWriter` safe without a lock and makes post-`Run` reads safe.
+- Cloudflare D1 platform limits — <https://developers.cloudflare.com/d1/platform/limits/> — and
+  SQLite implementation limits — <https://www.sqlite.org/limits.html> (`SQLITE_MAX_EXPR_DEPTH`).
+  Consulted while diagnosing the staging blocker: the depth ceiling is a platform limit set far
+  below stock SQLite's default, which is why `better-sqlite3` suites cannot observe it.
+- Fork PR under port — <https://github.com/DefangLabs/simple-agent-manager/pull/45> — fetched as
+  the local ref `defang-pr45` and diffed against its own base `339b013256a7`, so the deliberate
+  divergences are differences from real code rather than from its description.
