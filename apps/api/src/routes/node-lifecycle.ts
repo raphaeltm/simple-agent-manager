@@ -768,22 +768,13 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
 
       if (pendingReleases.length > 0) {
         // `deployment.pendingReleases` is the ONLY advertisement of a pending
-        // release. The legacy top-level `pendingReleaseSeq` used to carry a copy
-        // of the lone entry, and the VM agent appends that copy to this same list
-        // whenever ENVIRONMENT_ID is set — which cloud-init always sets — so a
-        // single pending release produced two apply goroutines from one heartbeat
-        // tick. Production showed the resulting duplication as an exact 2:1 ratio
-        // of `deployment.apply.fetch_started` to `deployment.apply.started`, with
-        // the two fetches 4 ms apart. It was also mis-attributed: the agent files
-        // the legacy seq under its own cloud-init ENVIRONMENT_ID, so on a node
-        // hosting more than one environment a release for environment B was also
-        // applied against environment A's engine.
-        //
-        // Removing it is rollout-safe: `deployment.pendingReleases` was added to
-        // the agent and to this response in the same commit (703b8b56f,
-        // 2026-06-21), so every agent that can parse this block understands the
-        // structured list. The agent keeps the legacy field as a fallback for an
-        // older control plane (see health.go).
+        // release. The legacy top-level `pendingReleaseSeq` carried a duplicate of
+        // the lone entry, which health.go appended to this same list under its own
+        // cloud-init ENVIRONMENT_ID — two apply goroutines per tick, mis-attributed
+        // on multi-environment nodes. Rollout-safe to drop: the agent gained
+        // `pendingReleases` in the same commit that started emitting it (703b8b56f,
+        // 2026-06-21), and it still honours the legacy field as a fallback when this
+        // list is absent.
         response.deployment = {
           ...(response.deployment as Record<string, unknown>),
           pendingReleases,

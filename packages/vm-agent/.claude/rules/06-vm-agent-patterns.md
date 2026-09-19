@@ -80,3 +80,15 @@ VM images, that is Dash rather than Bash.
 When VM-agent bootstrap code needs to write system Git config inside a devcontainer, use the shared `configureSystemGit()` helper (`packages/vm-agent/internal/bootstrap/bootstrap.go:2126`) instead of invoking `git config --system` directly. Both `ensureGitCredentialHelper()` (credential helper setup) and `ensureGitIdentity()` (user.email / user.name) already route through this helper.
 
 Direct `git config --system` calls can fail provisioning when `/etc/gitconfig.lock` is left behind by a concurrent or interrupted config write (`isGitConfigLockError()` at `bootstrap.go:2205` detects this). The shared helper retries with backoff, checks for an active `git config` process before treating the lock as stale, and removes the lock only when safe. See the retained incident lesson in this rule.
+
+## Progress Watchdogs Must Observe Their Longest Step
+
+Any idle/progress watchdog in this package must be fed by a signal the work it guards
+actually emits. The apply watchdog was fed only by persisted `ApplyProgressEvent`s, which
+`docker compose up` emits once at start and then never — so slow image pulls were SIGKILLed
+as hung applies. `runCompose` now treats compose stderr as the liveness signal
+(`internal/deploy/compose.go`, `livenessWriter`), mirroring `newIdleProgressReader` in
+`internal/deploy/artifact_client.go`.
+
+Full rule, including the tail-retention and cancel-cause traps:
+`apps/api/.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md` §5c.
