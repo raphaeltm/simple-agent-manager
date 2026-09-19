@@ -73,13 +73,15 @@ export const dnsRecordIdResponseSchema = v.object({
 });
 
 export const dnsRecordListResponseSchema = v.object({
-  result: v.array(v.object({
-    id: v.string(),
-    name: v.string(),
-    type: v.string(),
-    content: v.optional(v.string()),
-    proxied: v.optional(v.boolean()),
-  })),
+  result: v.array(
+    v.object({
+      id: v.string(),
+      name: v.string(),
+      type: v.string(),
+      content: v.optional(v.string()),
+      proxied: v.optional(v.boolean()),
+    })
+  ),
 });
 
 /**
@@ -114,8 +116,8 @@ export async function readCloudflareError(response: Response, fallback: string):
  */
 export function getDnsTTL(env?: { DNS_TTL_SECONDS?: string }): number {
   if (env?.DNS_TTL_SECONDS) {
-    const ttl = parseInt(env.DNS_TTL_SECONDS, 10);
-    if (!isNaN(ttl) && ttl > 0) {
+    const ttl = Number.parseInt(env.DNS_TTL_SECONDS, 10);
+    if (!Number.isNaN(ttl) && ttl > 0) {
       return ttl;
     }
   }
@@ -148,7 +150,7 @@ export interface DNSServiceInterface {
  * Cloudflare DNS Service implementation
  */
 export class DNSService implements DNSServiceInterface {
-  constructor(private env: Env) {}
+  constructor(private readonly env: Env) {}
 
   async createRecord(workspaceId: string, ip: string, _baseDomain: string): Promise<DNSRecord> {
     const id = await createDNSRecord(workspaceId, ip, this.env);
@@ -181,11 +183,7 @@ export class DNSService implements DNSServiceInterface {
  * Create a DNS A record for a workspace.
  * Uses Cloudflare proxy for automatic HTTPS.
  */
-export async function createDNSRecord(
-  workspaceId: string,
-  ip: string,
-  env: Env
-): Promise<string> {
+export async function createDNSRecord(workspaceId: string, ip: string, env: Env): Promise<string> {
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records`,
@@ -207,10 +205,16 @@ export async function createDNSRecord(
   );
 
   if (!response.ok) {
-    throw new Error(await readCloudflareError(response, `Failed to create DNS record: ${response.status}`));
+    throw new Error(
+      await readCloudflareError(response, `Failed to create DNS record: ${response.status}`)
+    );
   }
 
-  const data = await readResponseJson(response, dnsRecordIdResponseSchema, 'cloudflare.dns.create_record');
+  const data = await readResponseJson(
+    response,
+    dnsRecordIdResponseSchema,
+    'cloudflare.dns.create_record'
+  );
   return data.result.id;
 }
 
@@ -232,7 +236,8 @@ export async function deleteDNSRecord(
         Authorization: `Bearer ${env.CF_API_TOKEN}`,
       },
     },
-    timeoutMs, signal
+    timeoutMs,
+    signal
   );
 
   // The background caller's deadline must also cover a stalled error body after
@@ -240,18 +245,19 @@ export async function deleteDNSRecord(
   const readableResponse = signal ? await completeAbortableResponse(response, signal) : response;
   // Ignore 404 errors (record already deleted)
   if (!readableResponse.ok && readableResponse.status !== 404) {
-    throw new Error(await readCloudflareError(readableResponse, `Failed to delete DNS record: ${readableResponse.status}`));
+    throw new Error(
+      await readCloudflareError(
+        readableResponse,
+        `Failed to delete DNS record: ${readableResponse.status}`
+      )
+    );
   }
 }
 
 /**
  * Update a DNS record with a new IP address.
  */
-export async function updateDNSRecord(
-  recordId: string,
-  ip: string,
-  env: Env
-): Promise<void> {
+export async function updateDNSRecord(recordId: string, ip: string, env: Env): Promise<void> {
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${recordId}`,
@@ -269,7 +275,9 @@ export async function updateDNSRecord(
   );
 
   if (!response.ok) {
-    throw new Error(await readCloudflareError(response, `Failed to update DNS record: ${response.status}`));
+    throw new Error(
+      await readCloudflareError(response, `Failed to update DNS record: ${response.status}`)
+    );
   }
 }
 
@@ -292,22 +300,33 @@ export interface DNSRecordMatch {
 export async function findDNSRecordMatchesByName(
   recordName: string,
   env: Env,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<DNSRecordMatch[]> {
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?type=A&name=${encodeURIComponent(recordName)}`;
-  const response = await fetchWithTimeout(searchUrl, {
-    headers: {
-      Authorization: `Bearer ${env.CF_API_TOKEN}`,
+  const response = await fetchWithTimeout(
+    searchUrl,
+    {
+      headers: {
+        Authorization: `Bearer ${env.CF_API_TOKEN}`,
+      },
     },
-  }, timeoutMs, signal);
+    timeoutMs,
+    signal
+  );
   const readable = signal ? await completeAbortableResponse(response, signal) : response;
 
   if (!readable.ok) {
-    throw new Error(await readCloudflareError(readable, `Failed to find DNS record: ${response.status}`));
+    throw new Error(
+      await readCloudflareError(readable, `Failed to find DNS record: ${response.status}`)
+    );
   }
 
-  const data = await readResponseJson(readable, dnsRecordListResponseSchema, 'cloudflare.dns.find_record_by_name');
+  const data = await readResponseJson(
+    readable,
+    dnsRecordListResponseSchema,
+    'cloudflare.dns.find_record_by_name'
+  );
   return data.result;
 }
 
@@ -315,10 +334,11 @@ export async function findDNSRecordByName(
   recordName: string,
   env: Env,
   signal?: AbortSignal,
-  requireUnique = false,
+  requireUnique = false
 ): Promise<DNSRecordMatch | null> {
   const matches = await findDNSRecordMatchesByName(recordName, env, signal);
-  if (requireUnique && matches.length > 1) throw new Error('Multiple DNS records match the node backend hostname');
+  if (requireUnique && matches.length > 1)
+    throw new Error('Multiple DNS records match the node backend hostname');
   return matches[0] ?? null;
 }
 /**

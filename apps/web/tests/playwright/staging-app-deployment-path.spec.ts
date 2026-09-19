@@ -225,7 +225,8 @@ test('a real release applies end to end, exercising both DNS create paths and th
   await page.goto(`${STAGING_APP}/projects/${projectId}/deployments/${envId}`, {
     waitUntil: 'domcontentloaded',
   });
-  await page.waitForTimeout(4000);
+  await expect(page.getByRole('heading', { name: ENV_NAME })).toBeVisible();
+  await expect(page.getByText('Public Routes')).toBeVisible();
   await page.screenshot({
     path: `${SCREENSHOT_DIR}/staging-app-deployment-applied.png`,
     fullPage: true,

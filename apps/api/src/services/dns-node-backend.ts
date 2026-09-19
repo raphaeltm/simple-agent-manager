@@ -84,7 +84,8 @@ export async function createNodeBackendDNSRecord(
         proxied: true, // Orange-clouded — CF edge terminates TLS, re-encrypts to Origin CA
       }),
     },
-    timeoutMs, signal
+    timeoutMs,
+    signal
   );
 
   const readable = signal ? await completeAbortableResponse(response, signal) : response;
@@ -102,39 +103,88 @@ export async function createNodeBackendDNSRecord(
     // later heartbeat retried the same losing POST forever, and node deletion
     // (which deletes by that id) left the real record orphaned in the zone.
     // Resolving the winner lets the id be persisted, which fixes both.
-    if (isDuplicateRecordConflict(detail.code)) {
-      const existing = await findRecordAfterConflict(hostname, env, signal);
-      if (existing) {
-        if (recoverExisting) {
-          // The durable provisioning path already refused a pre-existing record
-          // that is not exactly this allocation's. A conflict that lands AFTER
-          // that pre-check must be held to the same standard — converging it
-          // silently would delete that refusal (rules 63 / 71).
-          assertRecoveredBackendDNSIdentity(existing, hostname, ip);
-        } else if (existing.content !== ip) {
-          // 81057 does not guarantee matching content, and the two creators can
-          // legitimately disagree on the IP (provisioning uses the provider's
-          // allocation, the heartbeat backfill uses the reported address). The
-          // caller is the later writer, so converge before handing back an id it
-          // will treat as authoritative. updateDNSRecord takes no signal, so
-          // re-check the deadline rather than starting a write past it.
-          if (signal?.aborted) throw signal.reason;
-          await updateDNSRecord(existing.id, ip, env);
-        }
-        log.info('dns.node_backend_create_race_resolved', {
-          nodeId,
-          recordId: existing.id,
-          code: detail.code,
-        });
-        return existing.id;
-      }
-    }
+    const recoveredId = await recoverBackendDNSCreateConflict({
+      detailCode: detail.code,
+      env,
+      hostname,
+      ip,
+      nodeId,
+      recoverExisting,
+      signal,
+    });
+    if (recoveredId) return recoveredId;
 
     throw new Error(detail.message);
   }
 
-  const data = await readResponseJson(readable, dnsRecordIdResponseSchema, 'cloudflare.dns.create_backend_record');
+  const data = await readResponseJson(
+    readable,
+    dnsRecordIdResponseSchema,
+    'cloudflare.dns.create_backend_record'
+  );
   return data.result.id;
+}
+
+interface BackendDNSCreateConflictContext {
+  detailCode: number | null;
+  env: Env;
+  hostname: string;
+  ip: string;
+  nodeId: string;
+  recoverExisting: boolean;
+  signal?: AbortSignal;
+}
+
+async function recoverBackendDNSCreateConflict({
+  detailCode,
+  env,
+  hostname,
+  ip,
+  nodeId,
+  recoverExisting,
+  signal,
+}: BackendDNSCreateConflictContext): Promise<string | null> {
+  if (!isDuplicateRecordConflict(detailCode)) return null;
+
+  const existing = await findRecordAfterConflict(hostname, env, signal);
+  if (!existing) return null;
+
+  await reconcileRecoveredBackendRecord(existing, hostname, ip, env, signal, recoverExisting);
+  log.info('dns.node_backend_create_race_resolved', {
+    nodeId,
+    recordId: existing.id,
+    code: detailCode,
+  });
+  return existing.id;
+}
+
+async function reconcileRecoveredBackendRecord(
+  existing: { id: string; name: string; type: string; content?: string; proxied?: boolean },
+  hostname: string,
+  ip: string,
+  env: Env,
+  signal: AbortSignal | undefined,
+  recoverExisting: boolean
+): Promise<void> {
+  if (recoverExisting) {
+    // The durable provisioning path already refused a pre-existing record that
+    // is not exactly this allocation's. A conflict that lands AFTER that
+    // pre-check must be held to the same standard — converging it silently would
+    // delete that refusal (rules 63 / 71).
+    assertRecoveredBackendDNSIdentity(existing, hostname, ip);
+    return;
+  }
+
+  if (existing.content === ip) return;
+
+  // 81057 does not guarantee matching content, and the two creators can
+  // legitimately disagree on the IP (provisioning uses the provider's
+  // allocation, the heartbeat backfill uses the reported address). The caller is
+  // the later writer, so converge before handing back an id it will treat as
+  // authoritative. updateDNSRecord takes no signal, so re-check the deadline
+  // rather than starting a write past it.
+  if (signal?.aborted) throw signal.reason;
+  await updateDNSRecord(existing.id, ip, env);
 }
 
 /**

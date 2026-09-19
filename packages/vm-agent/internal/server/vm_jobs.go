@@ -101,7 +101,9 @@ func (s *Server) persistApplyProgress(_ context.Context, event deploy.ApplyProgr
 // not protection against a panic that cannot currently be survived.)
 func (s *Server) claimJob(jobID string) (release func(), claimed bool) {
 	if s == nil {
-		return func() {}, true
+		return func() {
+			// Nil receivers do not record a claim, so there is nothing to release.
+		}, true
 	}
 	s.inFlightJobsMu.Lock()
 	defer s.inFlightJobsMu.Unlock()
@@ -109,7 +111,9 @@ func (s *Server) claimJob(jobID string) (release func(), claimed bool) {
 		s.inFlightJobs = make(map[string]struct{})
 	}
 	if _, exists := s.inFlightJobs[jobID]; exists {
-		return func() {}, false
+		return func() {
+			// The caller did not claim this duplicate job, so it must not release the active owner.
+		}, false
 	}
 	s.inFlightJobs[jobID] = struct{}{}
 	var once sync.Once
