@@ -14,20 +14,18 @@
  *   4.   `docker compose up` pulls the image, which used to emit no progress events and get
  *        SIGKILLed by the 15-minute idle watchdog.
  *
- * NOTE: the named volume was REMOVED from this fixture. With a volume declared, staging
- * provisioning fails before the node is created with a pre-existing
- * `D1_ERROR: Expression tree is too large (maximum depth 100)` out of
- * `provisionDeploymentNode` — a defect in `deployment-provisioning.ts` /
- * `placement-authority.ts`, neither of which this change touches. Volume status (fix 5) is
- * therefore covered by unit tests plus production evidence rather than here. See
- * `tasks/backlog/2026-09-19-deployment-provisioning-expression-tree-too-large.md`.
+ * Includes a named volume on purpose. The PR was previously parked because this staging
+ * path failed inside `provisionDeploymentNode` with
+ * `D1_ERROR: Expression tree is too large (maximum depth 100)` during environment
+ * placement when a release declared a volume. Keeping the volume here makes the staging
+ * gate exercise that formerly blocked apply path and cleanup.
  *
  * Deliberately uses a public image rather than `build_and_publish`, so the flow does not need a
  * second workspace to build in — the control-plane and agent paths under test are identical
  * either way.
  *
- * Cleans up the environment (and therefore its node and volume) in `afterAll`. Staging must run
- * zero VMs at rest: the Hetzner account's 10-server limit is shared with production.
+ * Cleans up the environment and therefore its deployment node and volume in `afterAll`. The
+ * staging Hetzner account is shared, so this test must not leave deployment VMs or volumes behind.
  */
 import {
   type APIRequestContext,
@@ -65,6 +63,10 @@ const COMPOSE_YAML = `services:
     image: mirror.gcr.io/library/nginx:alpine
     ports:
       - "80:80"
+    volumes:
+      - app-data:/usr/share/nginx/html/data
+volumes:
+  app-data:
 `;
 
 let projectId = '';
