@@ -529,6 +529,7 @@ describe('node resource deletion services', () => {
         status: 'destroying',
         providerInstanceId: null,
         runtimeIncarnationId: 'runtime-incarnation-without-provider-id',
+        runtimeTerminationConfirmedAt: '2026-09-19T17:00:00.000Z',
         cloudProvider: 'hetzner',
       })
     );
@@ -542,7 +543,9 @@ describe('node resource deletion services', () => {
 
     expect(createProviderForUser).not.toHaveBeenCalled();
     expect(providerDeleteVM).not.toHaveBeenCalled();
-    expect(updateCalls).toContainEqual({ runtimeTerminationConfirmedAt: expect.any(String) });
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({ runtimeDeletionProof: 'node_runtime_terminated' })
+    );
   });
 
   it('does not write termination proof when provider deletion races a new VM incarnation', async () => {

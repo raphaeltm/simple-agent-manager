@@ -85,7 +85,6 @@ export const DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT = 50;
 const REVIEWED_CHURNING_TABLES = new Set<string>(DEFAULT_D1_MIGRATION_CHURNING_TABLES);
 
 export class MigrationSafetyError extends Error {}
-
 /**
  * Wrangler 4.118 can append a human-readable diagnostic after a valid `--json`
  * response. Keep the migration gate fail-closed for leading garbage and

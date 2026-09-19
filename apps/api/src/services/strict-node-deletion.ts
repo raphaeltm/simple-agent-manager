@@ -443,6 +443,7 @@ export async function deleteNodeResourcesStrict(
   const canUseProviderlessVmAbsenceProof =
     initialNode.runtime === 'vm' &&
     !initialNode.providerInstanceId &&
+    !!initialNode.runtimeTerminationConfirmedAt &&
     (initialNode.status === 'destroying' || initialNode.status === 'error');
 
   const node = await claimManagedNodeDeletion(db, initialNode);
