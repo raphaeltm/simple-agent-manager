@@ -468,6 +468,31 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
+  if (
+    node.runtime === 'vm' &&
+    !node.providerInstanceId &&
+    !node.runtimeIncarnationId &&
+    (node.status === 'destroying' || node.status === 'error')
+  ) {
+    await requireSameNodeIncarnation(db, node, 'providerless VM absence proof');
+    const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
+    if (options.cleanupDns !== false) {
+      await deleteStrictNodeDnsRecord(
+        node,
+        userId,
+        env,
+        options.requestDeadlineMs,
+        options.providerRequestContext?.signal
+      );
+    }
+    return {
+      providerVm: 'no-instance',
+      runtimeTerminationConfirmedAt,
+      runtimeIncarnationId: node.runtimeIncarnationId,
+      providerInstanceId: node.providerInstanceId,
+    };
+  }
+
   const providerVm = await deleteStrictProviderInstance(db, node, userId, env, options.providerRequestContext);
   const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
   if (options.cleanupDns !== false) {

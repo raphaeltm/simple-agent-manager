@@ -522,6 +522,29 @@ describe('node resource deletion services', () => {
     ]);
   });
 
+  it('confirms absence for a managed VM placeholder that never received runtime identity', async () => {
+    nodeRows.push(
+      managedPoolNode({
+        id: 'placeholder-node',
+        status: 'destroying',
+        providerInstanceId: null,
+        runtimeIncarnationId: null,
+        cloudProvider: 'hetzner',
+      })
+    );
+
+    await expect(deleteNodeResourcesStrict('placeholder-node', 'user-1', ENV)).resolves.toEqual({
+      providerVm: 'no-instance',
+      runtimeTerminationConfirmedAt: expect.any(String),
+      runtimeIncarnationId: null,
+      providerInstanceId: null,
+    });
+
+    expect(createProviderForUser).not.toHaveBeenCalled();
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(updateCalls).toContainEqual({ runtimeTerminationConfirmedAt: expect.any(String) });
+  });
+
   it('does not write termination proof when provider deletion races a new VM incarnation', async () => {
     nodeRows.push(managedPoolNode());
     let releaseProviderDelete: (() => void) | undefined;
