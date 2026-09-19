@@ -338,6 +338,7 @@ func Load() (*Config, error) {
 		DeployArtifactResponseHeaderTimeout: getEnvDuration("DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT", DefaultDeployArtifactResponseHeaderTimeout),
 		DeployArtifactIdleTimeout:           getEnvDuration("DEPLOY_ARTIFACT_IDLE_TIMEOUT", DefaultDeployArtifactIdleTimeout),
 		DeployApplyIdleTimeout:              getEnvDuration("DEPLOY_APPLY_IDLE_TIMEOUT", DefaultDeployApplyIdleTimeout),
+		ComposeOutputRetentionBytes:         getEnvInt64("COMPOSE_OUTPUT_RETENTION_BYTES", DefaultComposeOutputRetentionBytes),
 		DeployBuildPublishTimeout:           getEnvDuration("DEPLOY_BUILD_PUBLISH_TIMEOUT", DefaultDeployBuildPublishTimeout),
 		DeployPreflightCommandTimeout:       getEnvDuration("DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", DefaultDeployPreflightCommandTimeout),
 	}

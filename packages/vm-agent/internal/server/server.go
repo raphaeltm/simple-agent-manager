@@ -726,11 +726,12 @@ func (s *Server) ensureDeployEngine(environmentID string) *deploy.Engine {
 			TLSHandshakeTimeout:   s.config.DeployArtifactTLSHandshakeTimeout,
 			ResponseHeaderTimeout: s.config.DeployArtifactResponseHeaderTimeout,
 		}),
-		ArtifactIdleTimeout: s.config.DeployArtifactIdleTimeout,
-		ApplyProgress:       s.persistApplyProgress,
-		ApplyLiveness:       s.signalApplyLiveness,
-		ACMEEmail:           s.config.DeployACMEEmail,
-		ACMECA:              s.config.DeployACMECA,
+		ArtifactIdleTimeout:         s.config.DeployArtifactIdleTimeout,
+		ApplyProgress:               s.persistApplyProgress,
+		ApplyLiveness:               s.signalApplyLiveness,
+		ComposeOutputRetentionBytes: s.config.ComposeOutputRetentionBytes,
+		ACMEEmail:                   s.config.DeployACMEEmail,
+		ACMECA:                      s.config.DeployACMECA,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

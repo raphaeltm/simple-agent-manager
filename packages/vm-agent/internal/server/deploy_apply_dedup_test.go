@@ -180,6 +180,40 @@ func TestRunDetachedDeploymentRouteApplySkipsDuplicateInFlightJob(t *testing.T) 
 	wg.Wait()
 }
 
+// Discriminating control for the route-config path, mirroring
+// TestRunDetachedDeploymentApplyAllowsDifferentSeq: a genuinely different
+// revision must NOT be skipped, or the guard would stall every subsequent
+// route-config update.
+func TestRunDetachedDeploymentRouteApplyAllowsDifferentRevision(t *testing.T) {
+	h := newApplyDedupHarness(t)
+	close(h.release) // let fetches return immediately
+
+	h.server.runDetachedDeploymentRouteApply("env-1", 3, h.engine)
+	h.server.runDetachedDeploymentRouteApply("env-1", 4, h.engine)
+
+	if got := h.fetches.Load(); got != 2 {
+		t.Fatalf("route-config fetches = %d, want 2 (distinct revisions must both run)", got)
+	}
+}
+
+// The claim must be released when a route-config apply finishes, or a retry
+// of the same revision after a transient failure would be skipped forever.
+// Mirrors TestRunDetachedDeploymentApplyReleasesClaimOnCompletion — the
+// route-config path claims and releases independently and had no equivalent
+// coverage: a leaked claim here (e.g. dropping the `defer releaseClaim()` in
+// runDetachedDeploymentRouteApply) passes every other test in this package.
+func TestRunDetachedDeploymentRouteApplyReleasesClaimOnCompletion(t *testing.T) {
+	h := newApplyDedupHarness(t)
+	close(h.release)
+
+	h.server.runDetachedDeploymentRouteApply("env-1", 3, h.engine)
+	h.server.runDetachedDeploymentRouteApply("env-1", 3, h.engine)
+
+	if got := h.fetches.Load(); got != 2 {
+		t.Fatalf("route-config fetches = %d, want 2 (claim must be released after completion)", got)
+	}
+}
+
 // claimJob is reached from many heartbeat goroutines at once; it must hand out
 // exactly one claim per id under -race.
 func TestClaimJobIsExclusiveUnderConcurrency(t *testing.T) {

@@ -284,6 +284,12 @@ func (c *Config) Validate() error {
 			c.HeartbeatWorkspaceMetricsMaxOutputBytes,
 		))
 	}
+	if c.ComposeOutputRetentionBytes < 1024 || c.ComposeOutputRetentionBytes > 1048576 {
+		errs = append(errs, fmt.Errorf(
+			"COMPOSE_OUTPUT_RETENTION_BYTES must be 1024-1048576, got %d",
+			c.ComposeOutputRetentionBytes,
+		))
+	}
 	if c.WorkspaceBuildQueueDepth < 1 || c.WorkspaceBuildQueueDepth > MaxWorkspaceBuildQueueDepth {
 		errs = append(errs, fmt.Errorf(
 			"WORKSPACE_BUILD_QUEUE_DEPTH must be 1-%d, got %d",

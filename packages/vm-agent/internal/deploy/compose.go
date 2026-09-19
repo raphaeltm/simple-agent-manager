@@ -11,13 +11,9 @@ import (
 	"slices"
 	"strings"
 	"time"
-)
 
-// composeOutputRetentionBytes caps how much compose output is kept for the error
-// message. A long pull can emit megabytes of progress lines; the tail is what
-// matters diagnostically and the whole thing would otherwise be embedded in an
-// error string and a DB column.
-const composeOutputRetentionBytes = 64 * 1024
+	"github.com/workspace/vm-agent/internal/config"
+)
 
 func (e *Engine) composeConfigPreflight(ctx context.Context, composeFile string, interpolationEnv map[string]string) error {
 	return e.runCompose(ctx, composeFile, interpolationEnv, "config", "-q")
@@ -73,6 +69,16 @@ func (e *Engine) setActiveApplySeq(seq int64) func() {
 		e.activeSeq = previous
 		e.activeSeqMu.Unlock()
 	}
+}
+
+// composeOutputRetentionBytes resolves the retained-output cap, defaulting when the
+// engine was constructed without one (tests, and any caller that does not thread
+// the vm-agent config through).
+func (e *Engine) composeOutputRetentionBytes() int {
+	if e == nil || e.cfg.ComposeOutputRetentionBytes <= 0 {
+		return int(config.DefaultComposeOutputRetentionBytes)
+	}
+	return int(e.cfg.ComposeOutputRetentionBytes)
 }
 
 // signalLiveness pokes the apply watchdog without persisting a release event.
@@ -150,7 +156,7 @@ func (e *Engine) runCompose(ctx context.Context, composeFile string, interpolati
 	cmd.Env = mergeEnv(os.Environ(), interpolationEnv)
 	// Compose streams pull/extract progress to stderr. Treat every write as proof
 	// of life so a slow-but-progressing pull is not mistaken for a hung apply.
-	stderr := &livenessWriter{signal: e.signalLiveness, limit: composeOutputRetentionBytes}
+	stderr := &livenessWriter{signal: e.signalLiveness, limit: e.composeOutputRetentionBytes()}
 	cmd.Stderr = stderr
 	redactor := newEnvRedactor(interpolationEnv)
 

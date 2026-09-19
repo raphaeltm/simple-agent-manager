@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { log } from '../../../src/lib/logger';
 import {
   cleanupAppRouteDNSRecords,
   createNodeBackendDNSRecord,
@@ -15,6 +16,16 @@ function env() {
     BASE_DOMAIN: 'example.com',
   } as any;
 }
+
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
+beforeEach(() => {
+  warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  warnSpy.mockRestore();
+});
 
 describe('upsertAppRouteDNSRecord', () => {
   afterEach(() => {
@@ -102,6 +113,54 @@ describe('upsertAppRouteDNSRecord', () => {
         });
       });
     }
+
+    // The sibling asymmetry, deliberately resolved the other way. The node-backend
+    // conflict lookup uses `requireUnique` and lets an ambiguous zone surface the
+    // original conflict, because it resolves an id the caller PERSISTS. Here nothing
+    // is persisted and this upsert gates a node's whole release fetch, so failing it
+    // would reinstate the 500-wedge this function exists to remove. It converges the
+    // first match and records the anomaly instead (rule 75 §1 vs §8).
+    it('converges the first match and records the anomaly when the zone holds several', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          result: [
+            { id: 'dns-current', name: 'r1-web.apps.example.com', type: 'A', content: '203.0.113.10', proxied: false },
+            { id: 'dns-stale-migration', name: 'r1-web.apps.example.com', type: 'A', content: '198.51.100.7', proxied: false },
+          ],
+        }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-current' } }), { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      // Liveness: the upsert still succeeds, which is the whole point — a stale
+      // sibling record must not wedge the deployment.
+      await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
+        .resolves.toBe('dns-current');
+      expect(fetchMock.mock.calls[1]![1].method).toBe('PUT');
+
+      // And the anomaly is recorded with both record ids so the stale one is findable.
+      expect(warnSpy).toHaveBeenCalledWith(
+        'dns.app_route_ambiguous_records',
+        expect.objectContaining({
+          hostname: 'r1-web.apps.example.com',
+          matchCount: 2,
+          recordIds: ['dns-current', 'dns-stale-migration'],
+        })
+      );
+    });
+
+    // Control: a single match must NOT log the anomaly, or the warning is noise.
+    it('does not record an anomaly for the ordinary single-record case', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          result: [{ id: 'dns-only', name: 'r1-web.apps.example.com', type: 'A', content: '198.51.100.2', proxied: false }],
+        }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-only' } }), { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
+        .resolves.toBe('dns-only');
+      expect(warnSpy).not.toHaveBeenCalledWith('dns.app_route_ambiguous_records', expect.anything());
+    });
 
     // Discriminating control for the `!existing` guard specifically. Without this,
     // deleting `!existing &&` from the predicate — a one-token diff that widens the

@@ -147,8 +147,11 @@ Tells:
   (DefangLabs/simple-agent-manager PR #45) and confirmed on this install
 - Implementation: `apps/api/src/services/dns.ts` (`upsertAppRouteDNSRecord`,
   `createNodeBackendDNSRecord`, `CF_DNS_DUPLICATE_RECORD_CODES`,
-  `assertRecoveredBackendDNSIdentity`); the `Promise.all` fan-out call sites are the
-  route-target and custom-domain upserts in `apps/api/src/routes/deploy-release-callback.ts`
+  `assertRecoveredBackendDNSIdentity`); the `Promise.all` fan-out call sites are the two
+  route-target upserts in `apps/api/src/routes/deploy-release-callback.ts` (the
+  compose-publish path and the manifest path). Verified custom domains are deliberately
+  EXCLUDED from that upsert — the user owns their own custom hostname's DNS record — so
+  they are not a third racing call site
 - Tests: `apps/api/tests/unit/services/dns-app-routes.test.ts`,
   `apps/api/tests/unit/routes/deploy-release-callback.test.ts`
 - The caller-side dedup this rule's §"Class of Bug" prefers:

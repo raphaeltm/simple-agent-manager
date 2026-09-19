@@ -532,22 +532,38 @@ func (s *Server) runDetachedDeploymentApply(environmentID string, seq int64, eng
 			cancel(stallErr)
 			applyErr := <-done
 
-			// The child's error is a CONSEQUENCE of the cancel above — compose
-			// reports `signal: killed` because we killed it. Reporting only that
-			// discards the diagnosis and makes a self-inflicted timeout
-			// indistinguishable from an OOM kill, which is exactly how the
-			// 2026-09-05 incident presented. Keep the stall as the primary cause
-			// and carry the child's output as context.
-			err := stallErr
-			if applyErr != nil {
-				err = fmt.Errorf("%w (child result: %v)", stallErr, applyErr)
+			succeeded, failure := stalledApplyResult(stallErr, applyErr)
+			if succeeded {
+				s.persistVMJobComplete(jobID, vmJobStatusSucceeded, "succeeded", "", map[string]any{"seq": seq})
+				return
 			}
-			s.persistVMJobComplete(jobID, vmJobStatusFailed, "stalled", err.Error(), nil)
+			s.persistVMJobComplete(jobID, vmJobStatusFailed, "stalled", failure.Error(), nil)
 			slog.Error("deploy: fetch and apply stalled",
-				"environmentId", environmentID, "seq", seq, "error", err)
+				"environmentId", environmentID, "seq", seq, "error", failure)
 			return
 		}
 	}
+}
+
+// stalledApplyResult decides what a fired apply idle timer actually means, once
+// the child has reported back.
+//
+// Two distinct lies are possible here and this is where both are prevented:
+//
+//   - `done` is buffered, so select can pick the timer case even when the apply
+//     had ALREADY SUCCEEDED and both cases were ready. Recording that as
+//     "stalled" would fail a deployment that worked, so a nil child result means
+//     believe the apply over our own timer.
+//   - When the child really did fail, its error is a CONSEQUENCE of our cancel —
+//     compose reports `signal: killed` because we killed it. Reporting only that
+//     discards the diagnosis and makes a self-inflicted timeout indistinguishable
+//     from an OOM kill, which is how the 2026-09-05 incident presented. So the
+//     stall stays the primary cause with the child's output as context.
+func stalledApplyResult(stallErr, applyErr error) (succeeded bool, failure error) {
+	if applyErr == nil {
+		return true, nil
+	}
+	return false, fmt.Errorf("%w (child result: %v)", stallErr, applyErr)
 }
 
 func (s *Server) runDetachedDeploymentRouteApply(environmentID string, revision int64, engine *deploy.Engine) {
