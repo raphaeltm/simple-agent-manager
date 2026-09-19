@@ -204,8 +204,8 @@ export function createSession(
   const id = generateId();
   const now = Date.now();
   sql.exec(
-    `INSERT INTO chat_sessions (id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'active', 0, ?, ?, ?)`,
+    `INSERT INTO chat_sessions (id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, created_at, updated_at, last_message_at)
+     VALUES (?, ?, ?, ?, ?, 'active', 0, ?, ?, ?, ?)`,
     id,
     workspaceId,
     taskId,
@@ -213,6 +213,8 @@ export function createSession(
     topic,
     now,
     now,
+    now,
+    // Sidebar ordering key: a never-messaged session orders by its own start.
     now
   );
 
@@ -256,13 +258,14 @@ export function createReservedTaskSession(
 
   const now = Date.now();
   sql.exec(
-    `INSERT INTO chat_sessions (id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'active', 0, ?, ?, ?)`,
+    `INSERT INTO chat_sessions (id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, created_at, updated_at, last_message_at)
+     VALUES (?, ?, ?, ?, ?, 'active', 0, ?, ?, ?, ?)`,
     input.sessionId,
     input.workspaceId,
     input.taskId,
     input.createdByUserId,
     input.topic,
+    now,
     now,
     now,
     now
@@ -458,7 +461,7 @@ export function listSessions(
 
   const rows = sql
     .exec(
-      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at FROM chat_sessions ${whereClause} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
+      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, last_message_at FROM chat_sessions ${whereClause} ORDER BY COALESCE(last_message_at, updated_at) DESC LIMIT ? OFFSET ?`,
       ...params,
       limit,
       offset
@@ -528,10 +531,10 @@ export function getSessionsByTaskIds(
   const placeholders = taskIds.map(() => '?').join(', ');
   const rows = sql
     .exec(
-      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at
+      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at, last_message_at
        FROM chat_sessions
        WHERE task_id IN (${placeholders})
-       ORDER BY updated_at DESC`,
+       ORDER BY COALESCE(last_message_at, updated_at) DESC`,
       ...taskIds
     )
     .toArray();
@@ -545,7 +548,7 @@ export function getSession(sql: SqlStorage, sessionId: string): Record<string, u
     .exec(
       `SELECT cs.id, cs.workspace_id, cs.task_id, cs.topic, cs.status,
               cs.created_by_user_id, cs.message_count, cs.started_at, cs.ended_at, cs.created_at,
-              cs.updated_at, cs.agent_completed_at,
+              cs.updated_at, cs.agent_completed_at, cs.last_message_at,
               ics.cleanup_at
        FROM chat_sessions cs
        LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id

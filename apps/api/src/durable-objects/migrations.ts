@@ -2225,6 +2225,50 @@ export const MIGRATIONS: Migration[] = [
         FROM project_event_wake_scheduler_state LIMIT 0`);
     },
   },
+  {
+    name: '057-chat-sessions-last-message-at',
+    run: (sql) => {
+      // Sidebar ordering key: the last REAL (non-system) message time, distinct
+      // from `updated_at`, which lifecycle transitions (sleep/wake/stop/link)
+      // bump for the delta-sync watermark. Without this column every lifecycle
+      // stop re-sorted the session to the top of the sidebar.
+      try {
+        sql.exec('ALTER TABLE chat_sessions ADD COLUMN last_message_at INTEGER');
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !error.message.toLowerCase().includes('duplicate column name: last_message_at')
+        )
+          throw error;
+      }
+      sql.exec(`SELECT last_message_at FROM chat_sessions LIMIT 0`);
+      // Backfill, archive-aware and system-role-excluding:
+      //  1. archive_last_message_at — captured when the transcript was archived
+      //     (chat_messages rows deleted), so the subquery below would find nothing;
+      //  2. the newest non-system chat_messages row — `role != 'system'` keeps the
+      //     idle-cleanup notice from dating the session "now";
+      //  3. started_at — a never-messaged session orders by its own start, so a
+      //     fresh empty session still appears at the top where the user expects it.
+      sql.exec(`
+        UPDATE chat_sessions
+           SET last_message_at = COALESCE(
+                archive_last_message_at,
+                (
+                  SELECT MAX(m.created_at)
+                    FROM chat_messages m
+                   WHERE m.session_id = chat_sessions.id
+                     AND m.role != 'system'
+                ),
+                started_at
+              )
+         WHERE last_message_at IS NULL
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chat_sessions_last_message_at
+        ON chat_sessions(COALESCE(last_message_at, updated_at) DESC)
+      `);
+    },
+  },
 ];
 
 /**

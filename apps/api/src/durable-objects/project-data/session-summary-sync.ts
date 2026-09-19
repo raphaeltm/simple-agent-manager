@@ -93,8 +93,14 @@ export async function syncSessionSummariesToD1(
           `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
                   started_at, ended_at, created_at, updated_at, agent_completed_at,
                   COALESCE(
+                    last_message_at,
                     archive_last_message_at,
-                    (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id)
+                    (
+                      SELECT MAX(m.created_at)
+                        FROM chat_messages m
+                       WHERE m.session_id = chat_sessions.id
+                         AND m.role != 'system'
+                    )
                   ) as last_message_at
            FROM chat_sessions
            WHERE updated_at >= ?
@@ -155,7 +161,9 @@ export async function syncSessionSummariesToD1(
       row.workspace_id as string | null,
       row.message_count as number,
       row.started_at as number,
-      (row.last_message_at as number | null) ?? null,
+      // Never null: falls back to `updated_at` so the D1 sort key is complete
+      // even for a row the DO backfill has not touched.
+      (row.last_message_at as number | null) ?? (row.updated_at as number),
       row.agent_completed_at as number | null,
       row.ended_at as number | null,
       row.updated_at as number,
@@ -215,8 +223,14 @@ function readBackfillPage(
   const select = `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
                          started_at, ended_at, created_at, updated_at, agent_completed_at,
                          COALESCE(
+                           last_message_at,
                            archive_last_message_at,
-                           (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id)
+                           (
+                             SELECT MAX(m.created_at)
+                               FROM chat_messages m
+                              WHERE m.session_id = chat_sessions.id
+                                AND m.role != 'system'
+                           )
                          ) as last_message_at
                   FROM chat_sessions`;
   if (coverage?.backfill_cursor_updated_at !== null && coverage?.backfill_cursor_id) {

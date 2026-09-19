@@ -130,11 +130,29 @@ export function insertNewMessage(
     now,
     sequence
   );
-  sql.exec(
-    `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?`,
-    now,
-    sessionId
-  );
+  // `last_message_at` is the sidebar ordering key and must only advance on
+  // REAL conversation messages — a `system`-role row (e.g. the idle-cleanup
+  // notice) must not re-sort the session to the top of the list.
+  // `MAX(COALESCE(last_message_at, 0), ?)` is monotonic: an out-of-order
+  // backfill timestamp can never move the key backwards.
+  if (role !== 'system') {
+    sql.exec(
+      `UPDATE chat_sessions
+          SET message_count = message_count + 1,
+              updated_at = ?,
+              last_message_at = MAX(COALESCE(last_message_at, 0), ?)
+        WHERE id = ?`,
+      now,
+      now,
+      sessionId
+    );
+  } else {
+    sql.exec(
+      `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?`,
+      now,
+      sessionId
+    );
+  }
 
   if (role === 'user') {
     const session = sql

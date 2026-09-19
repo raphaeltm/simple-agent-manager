@@ -20,6 +20,15 @@ chatsRoutes.use('/*', requireAuth(), requireApproved());
 const DEFAULT_STALE_THRESHOLD_MS = 3 * 60 * 60 * 1000;
 
 /**
+ * Sidebar/recency sort key: the last REAL message time, not `updated_at`.
+ * Lifecycle transitions (sleep, wake, stop, task link) bump `updated_at` for
+ * the delta-sync watermark; ordering on it resurrects long-idle sessions at
+ * the top of the list. `updated_at` remains the fallback for legacy rows that
+ * never got a `last_message_at`.
+ */
+const LAST_ACTIVITY_SORT_KEY = 'COALESCE(ss.last_message_at, ss.updated_at)';
+
+/**
  * GET /api/chats/recent
  * Single D1 query for the recent chats popover.
  * Returns active, non-stale sessions sorted by recency + totalActive count.
@@ -35,7 +44,9 @@ chatsRoutes.get('/recent', async (c) => {
 
   const db = c.env.DATABASE;
 
-  // Single query: recent active sessions for this user
+  // Single query: recent active sessions for this user. The staleness filter
+  // uses the same activity key as the sort so a lifecycle-only `updated_at`
+  // bump cannot make a quiet session look fresh.
   const sessionsResult = await db
     .prepare(
       `SELECT ss.*, p.name AS project_name
@@ -43,8 +54,8 @@ chatsRoutes.get('/recent', async (c) => {
        JOIN projects p ON p.id = ss.project_id
        WHERE ss.user_id = ?
          AND ss.status NOT IN ('stopped', 'failed')
-         AND ss.updated_at > ?
-       ORDER BY ss.updated_at DESC
+         AND ${LAST_ACTIVITY_SORT_KEY} > ?
+       ORDER BY ${LAST_ACTIVITY_SORT_KEY} DESC
        LIMIT ?`
     )
     .bind(userId, cutoff, limit)
@@ -54,14 +65,13 @@ chatsRoutes.get('/recent', async (c) => {
   const countResult = await db
     .prepare(
       `SELECT COUNT(*) as cnt
-       FROM session_summaries
-       WHERE user_id = ?
-         AND status NOT IN ('stopped', 'failed')
-         AND updated_at > ?`
+       FROM session_summaries ss
+       WHERE ss.user_id = ?
+         AND ss.status NOT IN ('stopped', 'failed')
+         AND ${LAST_ACTIVITY_SORT_KEY} > ?`
     )
     .bind(userId, cutoff)
     .first<{ cnt: number }>();
-
   return c.json({
     sessions: (sessionsResult.results ?? []).map(mapSessionSummaryRow),
     totalActive: countResult?.cnt ?? 0,
@@ -104,7 +114,7 @@ chatsRoutes.get('/', async (c) => {
        FROM session_summaries ss
        JOIN projects p ON p.id = ss.project_id
        WHERE ${whereClause}
-       ORDER BY ss.updated_at DESC
+       ORDER BY ${LAST_ACTIVITY_SORT_KEY} DESC
        LIMIT ? OFFSET ?`
     )
     .bind(...params, limit, offset)

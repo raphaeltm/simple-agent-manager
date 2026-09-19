@@ -3259,6 +3259,18 @@ export const sessionSummaries = sqliteTable(
       table.updatedAt,
       table.id
     ),
+    // Expression indexes for the sidebar/recency sort
+    // `ORDER BY COALESCE(last_message_at, updated_at) DESC` (migration 0165):
+    // `updated_at` is the delta-sync watermark, so lifecycle-only bumps must
+    // not re-sort the list.
+    projectLastMessageIdx: index('idx_session_summaries_project_last_message').on(
+      table.projectId,
+      sql`COALESCE(${table.lastMessageAt}, ${table.updatedAt}) DESC`
+    ),
+    userLastMessageIdx: index('idx_session_summaries_user_last_message').on(
+      table.userId,
+      sql`COALESCE(${table.lastMessageAt}, ${table.updatedAt}) DESC`
+    ),
   })
 );
 

@@ -273,12 +273,33 @@ export function persistMessageBatch(
   const hadTopic = !!session.topic;
 
   if (persisted > 0) {
-    sql.exec(
-      `UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ? WHERE id = ?`,
-      persisted,
-      now,
-      sessionId
+    // Same ordering-key contract as insertNewMessage: only REAL (non-system)
+    // messages may advance `last_message_at`, so a batch that carries nothing
+    // but system notices leaves the sidebar position untouched.
+    const latestNonSystemAt = persistedMessages.reduce(
+      (latest, message) => (message.role !== 'system' ? Math.max(latest, message.createdAt) : latest),
+      0
     );
+    if (latestNonSystemAt > 0) {
+      sql.exec(
+        `UPDATE chat_sessions
+            SET message_count = message_count + ?,
+                updated_at = ?,
+                last_message_at = MAX(COALESCE(last_message_at, 0), ?)
+          WHERE id = ?`,
+        persisted,
+        now,
+        latestNonSystemAt,
+        sessionId
+      );
+    } else {
+      sql.exec(
+        `UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ? WHERE id = ?`,
+        persisted,
+        now,
+        sessionId
+      );
+    }
 
     if (!session.topic) {
       const firstUserMsg = messages.find(
@@ -684,6 +705,9 @@ export function persistSystemMessage(
       now,
       sessionId
     );
+    // Deliberately does NOT touch `last_message_at`: a system notice (e.g. the
+    // idle-cleanup explanation) is not conversation activity and must never
+    // re-sort the session to the top of the sidebar.
     return { id, now, sequence };
   } catch (e) {
     log.warn('project_data.system_message_insert_failed', { sessionId, error: String(e) });

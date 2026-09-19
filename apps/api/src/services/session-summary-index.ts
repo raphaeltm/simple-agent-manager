@@ -91,6 +91,9 @@ const SessionSummaryRowSchema = v.object({
   created_at: v.nullable(v.number()),
   updated_at: v.number(),
   agent_completed_at: v.nullable(v.number()),
+  // Nullable: pre-0165 rows and legacy writers may not carry it; `updated_at`
+  // is the fallback in both the mapper and the SQL-side COALESCE sort.
+  last_message_at: v.nullable(v.number()),
   attention_json: v.nullable(v.string()),
 });
 
@@ -99,10 +102,13 @@ const SessionSummaryRowSchema = v.object({
  *
  * Two details here are load-bearing and must not be "simplified":
  *
- *  - `lastMessageAt` comes from `updated_at`, NOT from the `last_message_at`
- *    column. The DO's row mapper sets `lastMessageAt: r.updated_at`, and
- *    `session_summaries` happens to carry both, so reading the intuitively-named
- *    column would make the two paths disagree about ordering.
+ *  - `lastMessageAt` comes from `last_message_at` (the last REAL message
+ *    time), NOT from `updated_at`. The DO's row mapper derives it from its
+ *    maintained `chat_sessions.last_message_at` column, and ordering on both
+ *    paths uses `COALESCE(last_message_at, updated_at)` — `updated_at` is only
+ *    the fallback for legacy rows, because lifecycle transitions (sleep, wake,
+ *    stop, link) bump it for the delta-sync watermark and must not re-sort the
+ *    sidebar.
  *  - `cleanupAt` is always null. The DO's LIST query does not join
  *    `idle_cleanup_schedule` (only its single-session `getSession` does), so
  *    null is what the DO path returns here too.
@@ -136,7 +142,7 @@ function mapIndexRow(raw: unknown, baseDomain: string | undefined): Record<strin
     endedAt: row.ended_at,
     createdAt: row.created_at,
     agentCompletedAt: row.agent_completed_at,
-    lastMessageAt: row.updated_at,
+    lastMessageAt: row.last_message_at ?? row.updated_at,
     isIdle: row.status === 'active' && row.agent_completed_at != null,
     isTerminated: row.status === 'stopped' || row.status === 'failed',
     workspaceUrl:
@@ -224,10 +230,11 @@ async function readIndex(
     db
       .prepare(
         `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
-                started_at, ended_at, created_at, updated_at, agent_completed_at, attention_json
+                started_at, ended_at, created_at, updated_at, agent_completed_at,
+                last_message_at, attention_json
          FROM session_summaries
          WHERE ${whereClause}
-         ORDER BY updated_at DESC
+         ORDER BY COALESCE(last_message_at, updated_at) DESC
          LIMIT ? OFFSET ?`
       )
       .bind(...params, query.limit, query.offset)
