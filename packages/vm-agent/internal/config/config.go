@@ -132,6 +132,14 @@ const (
 	// no progress events have been emitted. Override via DEPLOY_APPLY_IDLE_TIMEOUT.
 	DefaultDeployApplyIdleTimeout = 15 * time.Minute
 
+	// DefaultComposeOutputRetentionBytes caps how much compose output is retained
+	// for an apply's error message. A long pull can emit megabytes of progress
+	// lines; only the tail is diagnostically useful, and the whole thing would
+	// otherwise be embedded in an error string and a DB column. The liveness signal
+	// keeps firing past the cap, so a chatty pull is never killed as stalled merely
+	// because its output stopped being recorded.
+	DefaultComposeOutputRetentionBytes int64 = 64 * 1024
+
 	// DefaultDeployBuildPublishTimeout bounds host build + push + release publish
 	// work. Override via DEPLOY_BUILD_PUBLISH_TIMEOUT.
 	DefaultDeployBuildPublishTimeout = 20 * time.Minute
@@ -456,6 +464,7 @@ type Config struct {
 	DeployArtifactResponseHeaderTimeout time.Duration // Response-header timeout for artifact downloads (env: DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT)
 	DeployArtifactIdleTimeout           time.Duration // Max no-progress body read interval for artifact downloads (env: DEPLOY_ARTIFACT_IDLE_TIMEOUT)
 	DeployApplyIdleTimeout              time.Duration // Max no-progress interval for detached apply goroutines (env: DEPLOY_APPLY_IDLE_TIMEOUT)
+	ComposeOutputRetentionBytes         int64         // Max compose output bytes retained (tail) for apply error messages (env: COMPOSE_OUTPUT_RETENTION_BYTES)
 	DeployBuildPublishTimeout           time.Duration // Max host build/push/release publish duration (env: DEPLOY_BUILD_PUBLISH_TIMEOUT)
 	DeployPreflightCommandTimeout       time.Duration // Max deployment preflight diagnostic command duration (env: DEPLOY_PREFLIGHT_COMMAND_TIMEOUT)
 }

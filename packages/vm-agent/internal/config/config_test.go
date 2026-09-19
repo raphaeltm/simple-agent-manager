@@ -532,10 +532,14 @@ func TestHeartbeatWorkspaceMetricDefaultsAndOverrides(t *testing.T) {
 	if cfg.HeartbeatWorkspaceMetricsMaxOutputBytes != 64*1024 {
 		t.Fatalf("HeartbeatWorkspaceMetricsMaxOutputBytes = %d, want %d", cfg.HeartbeatWorkspaceMetricsMaxOutputBytes, int64(64*1024))
 	}
+	if cfg.ComposeOutputRetentionBytes != DefaultComposeOutputRetentionBytes {
+		t.Fatalf("ComposeOutputRetentionBytes = %d, want %d", cfg.ComposeOutputRetentionBytes, DefaultComposeOutputRetentionBytes)
+	}
 
 	t.Setenv("HEARTBEAT_DOCKER_STATS_TIMEOUT", "1500ms")
 	t.Setenv("HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS", "4")
 	t.Setenv("HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES", "32768")
+	t.Setenv("COMPOSE_OUTPUT_RETENTION_BYTES", "4096")
 	cfg, err = Load()
 	if err != nil {
 		t.Fatalf("Load() override error = %v", err)
@@ -548,6 +552,23 @@ func TestHeartbeatWorkspaceMetricDefaultsAndOverrides(t *testing.T) {
 	}
 	if cfg.HeartbeatWorkspaceMetricsMaxOutputBytes != 32768 {
 		t.Fatalf("HeartbeatWorkspaceMetricsMaxOutputBytes = %d, want 32768", cfg.HeartbeatWorkspaceMetricsMaxOutputBytes)
+	}
+	if cfg.ComposeOutputRetentionBytes != 4096 {
+		t.Fatalf("ComposeOutputRetentionBytes = %d, want 4096", cfg.ComposeOutputRetentionBytes)
+	}
+}
+
+func TestLoadRejectsMalformedComposeOutputRetentionBytes(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("COMPOSE_OUTPUT_RETENTION_BYTES", "not-a-number")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() succeeded with malformed COMPOSE_OUTPUT_RETENTION_BYTES")
+	}
+	if !strings.Contains(err.Error(), "COMPOSE_OUTPUT_RETENTION_BYTES") {
+		t.Fatalf("Load() error = %v, want COMPOSE_OUTPUT_RETENTION_BYTES context", err)
 	}
 }
 
@@ -1070,6 +1091,7 @@ func validConfig() *Config {
 		HeartbeatDockerStatsTimeout:             2 * time.Second,
 		HeartbeatWorkspaceMetricsMaxContainers:  8,
 		HeartbeatWorkspaceMetricsMaxOutputBytes: 64 * 1024,
+		ComposeOutputRetentionBytes:             DefaultComposeOutputRetentionBytes,
 		DevcontainerCachePushTimeout:            DefaultDevcontainerCachePushTimeout,
 		WorkspaceBuildQueueDepth:                DefaultWorkspaceBuildQueueDepth,
 		DeployPreflightCommandTimeout:           DefaultDeployPreflightCommandTimeout,
@@ -1247,6 +1269,8 @@ func TestValidateHeartbeatWorkspaceMetricBounds(t *testing.T) {
 		{"excess container bound", func(cfg *Config) { cfg.HeartbeatWorkspaceMetricsMaxContainers = 129 }, "HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS"},
 		{"low output bound", func(cfg *Config) { cfg.HeartbeatWorkspaceMetricsMaxOutputBytes = 1023 }, "HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES"},
 		{"high output bound", func(cfg *Config) { cfg.HeartbeatWorkspaceMetricsMaxOutputBytes = 1048577 }, "HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES"},
+		{"low compose retention bound", func(cfg *Config) { cfg.ComposeOutputRetentionBytes = 1023 }, "COMPOSE_OUTPUT_RETENTION_BYTES"},
+		{"high compose retention bound", func(cfg *Config) { cfg.ComposeOutputRetentionBytes = 1048577 }, "COMPOSE_OUTPUT_RETENTION_BYTES"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

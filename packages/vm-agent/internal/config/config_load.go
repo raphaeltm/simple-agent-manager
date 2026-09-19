@@ -58,6 +58,10 @@ func Load() (*Config, error) {
 	}
 	persistenceDBPath := getEnv("PERSISTENCE_DB_PATH", "/var/lib/vm-agent/state.db")
 	persistenceDir := filepath.Dir(persistenceDBPath)
+	composeOutputRetentionBytes, err := getEnvInt64Strict("COMPOSE_OUTPUT_RETENTION_BYTES", DefaultComposeOutputRetentionBytes)
+	if err != nil {
+		return nil, err
+	}
 
 	cfg := &Config{
 		// Node role
@@ -338,6 +342,7 @@ func Load() (*Config, error) {
 		DeployArtifactResponseHeaderTimeout: getEnvDuration("DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT", DefaultDeployArtifactResponseHeaderTimeout),
 		DeployArtifactIdleTimeout:           getEnvDuration("DEPLOY_ARTIFACT_IDLE_TIMEOUT", DefaultDeployArtifactIdleTimeout),
 		DeployApplyIdleTimeout:              getEnvDuration("DEPLOY_APPLY_IDLE_TIMEOUT", DefaultDeployApplyIdleTimeout),
+		ComposeOutputRetentionBytes:         composeOutputRetentionBytes,
 		DeployBuildPublishTimeout:           getEnvDuration("DEPLOY_BUILD_PUBLISH_TIMEOUT", DefaultDeployBuildPublishTimeout),
 		DeployPreflightCommandTimeout:       getEnvDuration("DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", DefaultDeployPreflightCommandTimeout),
 	}

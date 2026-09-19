@@ -80,6 +80,21 @@ export interface DeploymentProvisionContext {
   projectId?: string | null;
 }
 
+function isProviderCreateRejectedBeforeVmIdentity(providerName: string, err: unknown): boolean {
+  if (
+    providerName !== 'hetzner' ||
+    !(err instanceof ProviderError) ||
+    err.providerName !== 'hetzner' ||
+    err.statusCode === undefined
+  ) {
+    return false;
+  }
+
+  return (
+    err.statusCode === 412 || isTransientCapacityError(err) || err.category === 'quota_exceeded'
+  );
+}
+
 export interface ProvisionNodeOptions {
   /**
    * When true, re-throw provider failures (preserving `ProviderError.category` and
@@ -439,12 +454,10 @@ export async function provisionNode(
       // transport failure has no HTTP status and cannot prove absence. Keep
       // this at the create boundary: later failures and multi-step providers
       // can occur after allocation even when no VM identity reached the caller.
-      providerAllocationRejected =
-        providerResult.providerName === 'hetzner' &&
-        err instanceof ProviderError &&
-        err.providerName === 'hetzner' &&
-        err.statusCode !== undefined &&
-        (err.statusCode === 412 || isTransientCapacityError(err));
+      providerAllocationRejected = isProviderCreateRejectedBeforeVmIdentity(
+        providerResult.providerName,
+        err
+      );
       if (durable && !providerAllocationRejected) {
         throw new NodeAllocationUncertainError();
       }
@@ -665,10 +678,10 @@ export async function provisionNode(
     const isCapacityFailure = err instanceof ProviderError && isTransientCapacityError(err);
 
     // Descent-loop mode: re-throw so the caller can branch on the error category.
-    // On a transient_capacity failure, delete the failed node row first so failed
-    // size attempts leave no orphaned `error` rows (decision #1).
+    // Delete the failed node row when the create boundary proved the provider rejected
+    // allocation before returning a VM identity; there is no runtime to tear down.
     if (options?.rethrowProviderError) {
-      if (isCapacityFailure) {
+      if (isCapacityFailure || providerAllocationRejected) {
         await db
           .delete(schema.nodes)
           .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))

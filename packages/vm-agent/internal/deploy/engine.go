@@ -40,12 +40,28 @@ type Engine struct {
 	// Observed state (thread-safe reads)
 	observedMu sync.RWMutex
 	observed   ObservedState
+
+	// Seq of the apply currently running. Read from the goroutine draining a
+	// child process's output, written by Apply, so it needs its own guard.
+	activeSeqMu sync.RWMutex
+	activeSeq   int64
 }
 
 // DockerLoginFunc is the signature for authenticating to a container registry.
 type DockerLoginFunc func(ctx context.Context, registry, username, password string) error
 
 type ApplyProgressFunc func(ctx context.Context, event ApplyProgressEvent)
+
+// ApplyLivenessFunc reports that a long-running apply step is still doing work,
+// WITHOUT persisting a release event.
+//
+// The apply watchdog is an idle timer fed by ApplyProgressFunc, i.e. by the same
+// events that become deployment_release_events rows. `docker compose up` emits
+// one event when it starts and then nothing until it returns, so a legitimately
+// slow image pull looked identical to a hung apply and got SIGKILLed at the idle
+// timeout. Compose reports pull/extract progress on stderr continuously, so that
+// output is the liveness signal — but it is far too chatty to persist as events.
+type ApplyLivenessFunc func(environmentID string, seq int64)
 
 type ApplyProgressEvent struct {
 	EnvironmentID string
@@ -177,6 +193,12 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 		return fmt.Errorf("apply in progress")
 	}
 	defer e.applyMu.Unlock()
+
+	// Address liveness signals from child processes (compose) to this release's
+	// watchdog for the duration of the apply, including the revert path.
+	if payload != nil {
+		defer e.setActiveApplySeq(payload.Seq)()
+	}
 
 	// Get current applied seq for verification
 	currentSeq, err := e.disk.CurrentSeq()

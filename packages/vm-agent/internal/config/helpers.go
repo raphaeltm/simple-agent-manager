@@ -66,6 +66,21 @@ func getEnvInt64(key string, defaultValue int64) int64 {
 	return defaultValue
 }
 
+// getEnvInt64Strict returns an int64 environment variable or a default. Unlike
+// getEnvInt64, a present-but-malformed value is rejected so operators do not
+// unknowingly run with a smaller safety cap than they configured.
+func getEnvInt64Strict(key string, defaultValue int64) (int64, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue, nil
+	}
+	i, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a base-10 integer: %w", key, err)
+	}
+	return i, nil
+}
+
 // getEnvBool returns a boolean environment variable or a default.
 func getEnvBool(key string, defaultValue bool) bool {
 	if value := os.Getenv(key); value != "" {
@@ -282,6 +297,12 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf(
 			"HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES must be 1024-1048576, got %d",
 			c.HeartbeatWorkspaceMetricsMaxOutputBytes,
+		))
+	}
+	if c.ComposeOutputRetentionBytes < 1024 || c.ComposeOutputRetentionBytes > 1048576 {
+		errs = append(errs, fmt.Errorf(
+			"COMPOSE_OUTPUT_RETENTION_BYTES must be 1024-1048576, got %d",
+			c.ComposeOutputRetentionBytes,
 		))
 	}
 	if c.WorkspaceBuildQueueDepth < 1 || c.WorkspaceBuildQueueDepth > MaxWorkspaceBuildQueueDepth {

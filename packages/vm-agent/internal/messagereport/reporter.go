@@ -1,6 +1,7 @@
 package messagereport
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -58,8 +59,10 @@ type Reporter struct {
 	// are held. Acquiring mu first would risk deadlock with flush().
 	flushMu sync.Mutex
 
-	stopC chan struct{}
-	doneC chan struct{}
+	stopC      chan struct{}
+	stopCtx    context.Context
+	stopCancel context.CancelFunc
+	doneC      chan struct{}
 }
 
 // New creates a Reporter backed by the given SQLite database.
@@ -113,6 +116,8 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 		return nil, fmt.Errorf("messagereport: migrate outbox: %w", err)
 	}
 
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+
 	r := &Reporter{
 		cfg:           cfg,
 		db:            db,
@@ -121,6 +126,8 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 		sessionID:     cfg.SessionID,
 		terminalWakeC: make(chan struct{}, 1),
 		stopC:         make(chan struct{}),
+		stopCtx:       stopCtx,
+		stopCancel:    stopCancel,
 		doneC:         make(chan struct{}),
 	}
 
@@ -303,6 +310,9 @@ func (r *Reporter) Enqueue(msg Message) error {
 func (r *Reporter) Shutdown() {
 	if r == nil {
 		return
+	}
+	if r.stopCancel != nil {
+		r.stopCancel()
 	}
 	close(r.stopC)
 	<-r.doneC

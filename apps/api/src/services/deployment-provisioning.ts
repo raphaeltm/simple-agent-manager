@@ -161,17 +161,11 @@ export async function findDeploymentNodeWithCapacity(
     DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT
   );
 
-  const authority = buildPlacementAuthoritySqlPredicate({
-    nodeAlias: 'n',
-    userId,
-    projectId: placement.projectId,
-    nodeRole: 'deployment',
-    workloadRole: 'deployment',
-    capacityPlacementSnapshot: placement.capacityPlacementSnapshot,
-    requireProjectMembership: true,
-  });
-
   const nativeIdentity = deploymentNativeIdentityPredicate(placement);
+  // Candidate selection is advisory; linkEnvironmentToNode rechecks the full
+  // placement authority atomically before it writes the environment link.
+  // Keeping this read to stable node attributes avoids composing the large
+  // authority predicate twice on D1's shallow expression tree limit.
   const nodes = await env.DATABASE.prepare(
     `SELECT n.id, n.last_metrics
      FROM nodes n
@@ -182,15 +176,13 @@ export async function findDeploymentNodeWithCapacity(
        AND COALESCE(n.node_mode, 'shared') = 'shared'
        AND n.cloud_provider = ?
        AND n.vm_location = ?
-       ${nativeIdentity.sql}
-       ${authority.sql}`
+       ${nativeIdentity.sql}`
   )
     .bind(
       userId,
       placement.provider,
       placement.location,
-      ...nativeIdentity.binds,
-      ...authority.binds
+      ...nativeIdentity.binds
     )
     .all<DeploymentNodeCandidate>();
 
@@ -272,30 +264,28 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
           DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE
         );
   const result = await env.DATABASE.prepare(
-    `UPDATE deployment_environments
+    `UPDATE deployment_environments AS de
      SET node_id = ?, provider = ?, location = ?, updated_at = ?
-     WHERE id = ?
-       AND node_id IS NULL
-       AND EXISTS (
-         SELECT 1 FROM nodes n
-         WHERE n.id = ?
-           AND n.user_id = ?
-           AND n.status = ?
-           AND n.node_role = 'deployment'
-           AND n.cloud_provider = ?
-           AND n.vm_location = ?
-           ${nativeIdentity.sql}
-           AND COALESCE(n.node_mode, 'shared') = ?
-           AND (SELECT COUNT(*) FROM deployment_environments occupied WHERE occupied.node_id = n.id) < ?
-           AND (
-             COALESCE(n.node_mode, 'shared') = 'shared'
-             OR NOT EXISTS (
-               SELECT 1 FROM deployment_environments existing
-               WHERE existing.node_id = n.id
-             )
-           )
-           ${authority.sql}
-       )`
+     FROM nodes n
+     WHERE de.id = ?
+       AND de.node_id IS NULL
+       AND n.id = ?
+       AND n.user_id = ?
+       AND n.status = ?
+       AND n.node_role = 'deployment'
+       AND n.cloud_provider = ?
+       AND n.vm_location = ?
+       ${nativeIdentity.sql}
+       AND COALESCE(n.node_mode, 'shared') = ?
+       AND (SELECT COUNT(*) FROM deployment_environments occupied WHERE occupied.node_id = n.id) < ?
+       AND (
+         COALESCE(n.node_mode, 'shared') = 'shared'
+         OR NOT EXISTS (
+           SELECT 1 FROM deployment_environments existing
+           WHERE existing.node_id = n.id
+         )
+       )
+       ${authority.sql}`
   )
     .bind(
       nodeId,

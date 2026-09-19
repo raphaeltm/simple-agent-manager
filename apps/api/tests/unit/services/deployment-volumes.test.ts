@@ -82,6 +82,30 @@ function makeVolumeInstance(overrides?: Partial<VolumeInstance>): VolumeInstance
   };
 }
 
+/**
+ * A detached, ready-to-attach volume row.
+ *
+ * The attach tests all need the same shape and differ only in a field or two, so a factory
+ * keeps the difference visible and the fixture in one place.
+ */
+function makeDetachedVolumeRow(overrides?: Partial<MockRow>): MockRow {
+  return {
+    id: 'vol-1',
+    environmentId: 'env-001',
+    name: 'data',
+    providerVolumeId: 'prov-vol-1',
+    providerName: 'hetzner',
+    sizeGb: 10,
+    location: 'nbg1',
+    status: 'available',
+    attachedServerId: null,
+    linuxDevice: null,
+    createdAt: '2026-06-12T00:00:00Z',
+    updatedAt: '2026-06-12T00:00:00Z',
+    ...overrides,
+  };
+}
+
 function makeMockProvider(overrides?: {
   caps?: Partial<VolumeCapabilities>;
   createResult?: VolumeInstance;
@@ -813,12 +837,58 @@ describe('attachEnvironmentVolumes', () => {
     // D1 was updated
     expect(db.update).toHaveBeenCalled();
 
-    // Returned results reflect attached state
+    // Returned results reflect attached state. The status is the settled SAM-side
+    // fact ('attached'), not the provider's transient snapshot — see the
+    // regression test below for why.
     expect(results).toHaveLength(1);
-    expect(results[0].status).toBe('in-use');
+    expect(results[0].status).toBe('attached');
     expect(results[0].attachedServerId).toBe('srv-target');
     expect(results[0].linuxDevice).toBe('/dev/sdb');
   });
+
+  // Regression: Hetzner's attach is an async action, so the volume it reports back at
+  // the instant attach returns is commonly still `creating` or `available`, and nothing
+  // ever re-polls this row — the only other writer is the detach path. Persisting the
+  // provider's snapshot left attached, mounted, fully working volumes reading `creating`
+  // forever. Confirmed in production (sam-prod deployment_volumes): volume
+  // 01KXAR1S83QNZN32M8SKHPPB6G has read `creating` since 2026-07-12 while holding an
+  // attached_server_id and a linux_device, and it misdirected the stuck-deployment
+  // investigation.
+  for (const transient of ['creating', 'available'] as const) {
+    it(`persists a settled status when the provider still reports '${transient}'`, async () => {
+      const provider = makeMockProvider({
+        attachResult: makeVolumeInstance({
+          status: transient,
+          attachedServerId: 'srv-target',
+          linuxDevice: '/dev/sdb',
+        }),
+      });
+      setupProvider(provider);
+
+      const db = createMockDb([makeDetachedVolumeRow({ name: 'pgdata' })]);
+
+      const results = await attachEnvironmentVolumes(
+        db as any,
+        mockEnv,
+        'user-1',
+        'env-001',
+        'srv-target',
+        'nbg1'
+      );
+
+      expect(results[0].status).toBe('attached');
+      expect(results[0].status).not.toBe(transient);
+      // Liveness: the attach really happened, so a passing test cannot mean the
+      // whole path short-circuited.
+      expect(results[0].attachedServerId).toBe('srv-target');
+      expect(results[0].linuxDevice).toBe('/dev/sdb');
+
+      // The row D1 receives must carry the settled status too, not just the
+      // returned object — the frozen value is what production reads back.
+      const persisted = (db.update as any).mock.results[0].value.set.mock.calls[0][0];
+      expect(persisted.status).toBe('attached');
+    });
+  }
 
   it('resolves the provider from volume rows when attaching non-default provider volumes', async () => {
     const provider = makeMockProvider();

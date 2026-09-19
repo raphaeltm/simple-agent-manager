@@ -133,6 +133,14 @@ type Server struct {
 	workspaceLifecycleMu    sync.Mutex
 	workspaceLifecycleLocks map[string]*workspaceLifecycleEntry
 
+	// inFlightJobs dedupes detached deployment work by job id. The heartbeat
+	// re-advertises a pending release on every tick until observed.AppliedSeq
+	// catches up, and that only happens after a full successful apply — so
+	// without this, any release slower than one heartbeat interval spawns another
+	// concurrent apply per tick, each re-running the whole control-plane fetch.
+	inFlightJobsMu sync.Mutex
+	inFlightJobs   map[string]struct{}
+
 	// Deployment mode — one Engine per placed deployment environment.
 	deployMu       sync.Mutex
 	deployEngines  map[string]*deploy.Engine
@@ -593,6 +601,7 @@ func New(cfg *config.Config) (*Server, error) {
 		done:                make(chan struct{}),
 		publishJobs:         make(map[string]publishJobState),
 		applyWatchdogs:      make(map[string]chan struct{}),
+		inFlightJobs:        make(map[string]struct{}),
 		deployEngines:       make(map[string]*deploy.Engine),
 		deployRetiring:      make(map[string]bool),
 	}
@@ -717,10 +726,12 @@ func (s *Server) ensureDeployEngine(environmentID string) *deploy.Engine {
 			TLSHandshakeTimeout:   s.config.DeployArtifactTLSHandshakeTimeout,
 			ResponseHeaderTimeout: s.config.DeployArtifactResponseHeaderTimeout,
 		}),
-		ArtifactIdleTimeout: s.config.DeployArtifactIdleTimeout,
-		ApplyProgress:       s.persistApplyProgress,
-		ACMEEmail:           s.config.DeployACMEEmail,
-		ACMECA:              s.config.DeployACMECA,
+		ArtifactIdleTimeout:         s.config.DeployArtifactIdleTimeout,
+		ApplyProgress:               s.persistApplyProgress,
+		ApplyLiveness:               s.signalApplyLiveness,
+		ComposeOutputRetentionBytes: s.config.ComposeOutputRetentionBytes,
+		ACMEEmail:                   s.config.DeployACMEEmail,
+		ACMECA:                      s.config.DeployACMECA,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

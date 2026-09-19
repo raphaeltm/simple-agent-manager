@@ -65,9 +65,9 @@ const D1_MIGRATION_ALIAS_REPAIRS: readonly D1MigrationAliasRepair[] = [
 ] as const;
 
 const SYSTEM_TABLES = new Set(['_cf_KV', D1_MIGRATIONS_TABLE, 'sqlite_sequence']);
-
 export const DEFAULT_D1_MIGRATION_CHURNING_TABLES = [
   'DATABASE.deployment_releases',
+  'DATABASE.diagnostic_reconciliation_state',
   'DATABASE.github_webhook_deliveries',
   'DATABASE.project_files',
   'DATABASE.registry_credential_rate_limits',
@@ -76,6 +76,7 @@ export const DEFAULT_D1_MIGRATION_CHURNING_TABLES = [
   'DATABASE.trial_waitlist',
   'DATABASE.trigger_executions',
   'DATABASE.verifications',
+  'DATABASE.vm_provisioning_leases',
   'DATABASE.webhook_deliveries',
   'OBSERVABILITY_DATABASE.platform_errors',
 ] as const;
@@ -84,7 +85,6 @@ export const DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT = 50;
 const REVIEWED_CHURNING_TABLES = new Set<string>(DEFAULT_D1_MIGRATION_CHURNING_TABLES);
 
 export class MigrationSafetyError extends Error {}
-
 /**
  * Wrangler 4.118 can append a human-readable diagnostic after a valid `--json`
  * response. Keep the migration gate fail-closed for leading garbage and

@@ -162,6 +162,13 @@ function placementError(): ProviderError {
   });
 }
 
+function accountLimitError(): ProviderError {
+  return new ProviderError('hetzner', 403, 'hetzner API error (403): server limit reached', {
+    providerCode: 'server_limit_exceeded',
+    category: 'quota_exceeded',
+  });
+}
+
 function invalidConfigError(): ProviderError {
   return new ProviderError('hetzner', 400, 'Bad VM config', {
     providerCode: 'invalid_input',
@@ -875,6 +882,18 @@ describe('provisionNode rethrowProviderError', () => {
   // Hetzner rejected the create, so no paid VM is orphaned.
   it('deletes the failed node row on a Hetzner 412 placement failure', async () => {
     const err = placementError();
+    createVM.mockRejectedValue(err);
+
+    await expect(
+      provisionNode('node-1', ENV, undefined, { rethrowProviderError: true })
+    ).rejects.toBe(err);
+
+    expect(ops.some((o) => o.kind === 'delete')).toBe(true);
+    expect(ops.some((o) => o.kind === 'update' && o.set?.status === 'error')).toBe(false);
+  });
+
+  it('deletes the failed node row on a Hetzner account-limit rejection', async () => {
+    const err = accountLimitError();
     createVM.mockRejectedValue(err);
 
     await expect(

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/workspace/vm-agent/internal/deploy"
 	"github.com/workspace/vm-agent/internal/persistence"
@@ -80,6 +81,58 @@ func (s *Server) persistApplyProgress(_ context.Context, event deploy.ApplyProgr
 	}); err != nil {
 		slog.Warn("vm job: persist apply event failed", "jobId", jobID, "eventType", event.EventType, "error", err)
 	}
+}
+
+// claimJob reserves a detached-deployment job id, returning a release function
+// and whether the claim succeeded. A false claim means an identical job is
+// already running and this invocation must be skipped.
+//
+// The heartbeat re-advertises a pending release on every tick until
+// observed.AppliedSeq advances, which only happens after a full successful
+// apply. Any release slower than one heartbeat interval therefore used to spawn
+// another concurrent apply per tick, each re-running the whole control-plane
+// fetch: re-decrypting secrets, re-minting a registry credential, regenerating
+// presigned artifact URLs, re-signing the payload, and racing on app-route DNS
+// creation (the failure loud enough to 500 — see .claude/rules/75).
+//
+// The release is invoked via defer so it runs on every exit path. (This codebase
+// has no recover() anywhere, so a panic would take the process down and clear the
+// map regardless — the defer is defence for future call sites that return early,
+// not protection against a panic that cannot currently be survived.)
+func (s *Server) claimJob(jobID string) (release func(), claimed bool) {
+	if s == nil {
+		return func() {
+			// Nil receivers do not record a claim, so there is nothing to release.
+		}, true
+	}
+	s.inFlightJobsMu.Lock()
+	defer s.inFlightJobsMu.Unlock()
+	if s.inFlightJobs == nil {
+		s.inFlightJobs = make(map[string]struct{})
+	}
+	if _, exists := s.inFlightJobs[jobID]; exists {
+		return func() {
+			// The caller did not claim this duplicate job, so it must not release the active owner.
+		}, false
+	}
+	s.inFlightJobs[jobID] = struct{}{}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.inFlightJobsMu.Lock()
+			delete(s.inFlightJobs, jobID)
+			s.inFlightJobsMu.Unlock()
+		})
+	}, true
+}
+
+// signalApplyLiveness feeds the apply watchdog from a long-running child process
+// without persisting a release event. See deploy.ApplyLivenessFunc.
+func (s *Server) signalApplyLiveness(environmentID string, seq int64) {
+	if s == nil || strings.TrimSpace(environmentID) == "" {
+		return
+	}
+	s.signalApplyProgress(applyJobID(environmentID, seq))
 }
 
 func (s *Server) registerApplyWatchdog(jobID string) func() {

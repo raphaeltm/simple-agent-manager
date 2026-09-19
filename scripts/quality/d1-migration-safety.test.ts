@@ -320,8 +320,10 @@ describe('D1 migration safety gates', () => {
     expect(parseChurningTableSelectors(undefined)).toEqual(
       expect.arrayContaining([
         'DATABASE.deployment_releases',
+        'DATABASE.diagnostic_reconciliation_state',
         'DATABASE.session_snapshots',
         'DATABASE.project_files',
+        'DATABASE.vm_provisioning_leases',
       ])
     );
     expect(parseChurningTableSelectors(undefined)).toContain(
@@ -347,20 +349,23 @@ describe('D1 migration safety gates', () => {
     expect(() => parseChurningTableMaxDecreasePercent('not-a-number')).toThrow(/between 0 and 100/);
   });
 
-  it.each(['deployment_releases', 'session_snapshots', 'project_files'])(
-    'accepts routine retention churn for reviewed DATABASE.%s',
-    (table) => {
-      expect(() =>
-        verifyNoUnexpectedProtectedTableDecrease(
-          [count('main', 'DATABASE', table, 10)],
-          [count('main', 'DATABASE', table, 5)],
-          [],
-          [`DATABASE.${table}`],
-          50
-        )
-      ).not.toThrow();
-    }
-  );
+  it.each([
+    'deployment_releases',
+    'diagnostic_reconciliation_state',
+    'session_snapshots',
+    'project_files',
+    'vm_provisioning_leases',
+  ])('accepts routine retention churn for reviewed DATABASE.%s', (table) => {
+    expect(() =>
+      verifyNoUnexpectedProtectedTableDecrease(
+        [count('main', 'DATABASE', table, 10)],
+        [count('main', 'DATABASE', table, 5)],
+        [],
+        [`DATABASE.${table}`],
+        50
+      )
+    ).not.toThrow();
+  });
 
   it('blocks a churning-table decrease above the configured percentage limit', () => {
     expect(() =>

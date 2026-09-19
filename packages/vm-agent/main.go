@@ -203,8 +203,9 @@ func runDeploymentMode(cfg *config.Config) {
 	srv.SendNodeReady()
 
 	// Wait for shutdown signal or fatal server error.
-	// The heartbeat loop (started by the server) checks for pendingReleaseSeq
-	// and triggers FetchAndApply via the deploy engine.
+	// The heartbeat loop (started by the server) checks for pending releases
+	// advertised in the heartbeat response and triggers FetchAndApply via the
+	// deploy engine.
 	select {
 	case err := <-errCh:
 		slog.Error("Server error", "error", err)

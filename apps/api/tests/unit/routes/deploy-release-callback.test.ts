@@ -335,6 +335,54 @@ describe('deploy release callback route', () => {
     vi.unstubAllGlobals();
   });
 
+  // Vertical-slice regression for the DNS create race. Two overlapping deploy-release
+  // fetches both upsert the same route list via Promise.all; both saw "no record", both
+  // POSTed, and Cloudflare rejected the loser with 81058. That threw out of Promise.all
+  // and 500'd this endpoint, so the node never got its release payload and the
+  // deployment stalled before any DNS/cert work.
+  //
+  // The helper-level tests in dns-app-routes.test.ts cannot observe this: on the pre-fix
+  // dns.ts every other test in THIS file still passes, so only a route-level test proves
+  // the endpoint itself survives. See .claude/rules/35 and .claude/rules/75.
+  it('still returns 200 when a concurrent caller wins the DNS create race (regression)', async () => {
+    stubHappyPathDb();
+
+    // Route 1 creates normally. Route 2 loses the race: its POST is rejected as a
+    // duplicate, then the re-resolve finds the winner's record and the PUT succeeds.
+    const fetchMock = vi
+      .fn()
+      // two lookups (Promise.all, both empty)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
+      // route 1 create succeeds
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 }))
+      // route 2 create loses the race
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        errors: [{ code: 81058, message: 'An identical record already exists.' }],
+      }), { status: 400 }))
+      // route 2 re-resolve now sees the winner's record
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        result: [{ id: 'dns-r2-winner', name: 'r2-api-8080-env-1.apps.sammy.party', type: 'A', content: '203.0.113.10', proxied: false }],
+      }), { status: 200 }))
+      // route 2 updates it in place
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r2-winner' } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await requestDeployRelease();
+    const body = await response.json();
+
+    // The payload the node needs is delivered, not a 500.
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(body.routes).toHaveLength(2);
+    expect(body.signature).toBeDefined();
+
+    // The loser really did take the recovery path (6 calls, not 4).
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    const [retryUrl, retryInit] = fetchMock.mock.calls[5]!;
+    expect(String(retryUrl)).toContain('/dns_records/dns-r2-winner');
+    expect(retryInit.method).toBe('PUT');
+  });
+
   it('returns signed route targets, publishes loopback Compose ports, and creates grey-cloud DNS records', async () => {
     const dateNow = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
     stubHappyPathDb();
