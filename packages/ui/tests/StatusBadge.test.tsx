@@ -10,6 +10,7 @@ describe('StatusBadge', () => {
     // off the raw status string rather than a resolved config entry.
     it.each([
       ['active', 'Active'],
+      ['attached', 'Attached'],
       ['evicted', 'Evicted'],
       ['paused', 'Paused'],
       ['disabled', 'Disabled'],

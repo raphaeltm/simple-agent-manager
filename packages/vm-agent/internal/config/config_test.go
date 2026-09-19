@@ -558,6 +558,20 @@ func TestHeartbeatWorkspaceMetricDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsMalformedComposeOutputRetentionBytes(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("COMPOSE_OUTPUT_RETENTION_BYTES", "not-a-number")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() succeeded with malformed COMPOSE_OUTPUT_RETENTION_BYTES")
+	}
+	if !strings.Contains(err.Error(), "COMPOSE_OUTPUT_RETENTION_BYTES") {
+		t.Fatalf("Load() error = %v, want COMPOSE_OUTPUT_RETENTION_BYTES context", err)
+	}
+}
+
 func TestOperationalTimeoutOverrides(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")

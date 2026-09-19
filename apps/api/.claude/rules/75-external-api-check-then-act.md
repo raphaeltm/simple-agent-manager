@@ -7,8 +7,8 @@ uniqueness constraint** — Cloudflare DNS records, cloud provider resources wit
 names, registry tags, Stripe idempotency keys, GitHub labels/branches. The shape is:
 
 ```ts
-const existing = await find(name);        // CHECK
-await (existing ? update(existing) : create());  // ACT  — await in the gap
+const existing = await find(name); // CHECK
+await (existing ? update(existing) : create()); // ACT  — await in the gap
 ```
 
 It applies with full force when the call site is a fan-out (`Promise.all`, a sweep, a
@@ -38,11 +38,11 @@ race, had not.
 fatal.** This is the cross-isolate sibling of `.claude/rules/45` (Durable Object
 check-then-act across `await`).
 
-A mutex is usually the *wrong* remedy here, but not an impossible one — a Durable Object
+A mutex is usually the _wrong_ remedy here, but not an impossible one — a Durable Object
 keyed on the resource can serialize callers across isolates. Reject it deliberately rather
 than by assumption: it adds a hop, a failure mode, and a hot key to a path that the remote
 API already adjudicates correctly and in one round trip. Where a cheap in-process dedup
-already exists on the *caller* side, though, preventing the overlap is strictly better than
+already exists on the _caller_ side, though, preventing the overlap is strictly better than
 tolerating it — it removes all the other duplicated work too, not just the one operation
 loud enough to fail. Check for that before settling for tolerance, and record which you
 chose and why.
@@ -63,7 +63,7 @@ Tells:
 
 2. **Distinguish "someone beat me to it" from "this can never work".** Branch on the
    provider's numeric/typed error code, not on message text. An identical-record conflict is
-   recoverable; a *different-type* collision (Cloudflare 81053: an A/AAAA/CNAME already
+   recoverable; a _different-type_ collision (Cloudflare 81053: an A/AAAA/CNAME already
    occupies that host), a quota error, or an auth error is not, and must keep surfacing.
    Enumerate the tolerated codes explicitly and comment why each neighbour is excluded
    (`.claude/rules/67`).
@@ -96,10 +96,14 @@ Tells:
    (`.claude/rules/63`, `.claude/rules/71`). `createNodeBackendDNSRecord` is the worked
    example: `recoverExisting` refuses a differing record, the ordinary path converges it.
 
-8. **Resolve the winner unambiguously.** Cloudflare permits several A records for one name
-   (round-robin), so "take the first match" would persist one id and orphan the rest. Use the
-   unique-match lookup and let an ambiguous zone surface the original conflict rather than
-   picking arbitrarily.
+8. **Resolve persisted winners unambiguously; document convergence exceptions.** Cloudflare permits
+   several A records for one name (round-robin), so "take the first match" would persist one id and
+   orphan the rest when the id is later used for mutation/deletion. For persisted identifiers such as
+   `createNodeBackendDNSRecord` in `dns-node-backend.ts`, use the unique-match lookup and let an
+   ambiguous zone surface the original conflict rather than picking arbitrarily. App-route DNS is the
+   documented exception: `upsertAppRouteDNSRecord` in `dns-app-routes.ts` may converge onto the first
+   matching record and log `dns.app_route_ambiguous_records`, because release route fetches must stay
+   idempotent and the app-route path does not persist a single DNS record id as the owner.
 
 9. **Prefer prior art in this repo over a new invention.** `ensureBranchExists`
    (`apps/api/src/services/github-app.ts`) already solved this class against the GitHub API,
@@ -113,14 +117,14 @@ Tells:
 - **A control per excluded neighbour:** the different-type collision and an unrelated
   failure (auth/quota) must still throw, with **no** retry attempted.
 - **Boundedness:** a create that keeps conflicting surfaces the error after one retry.
-- **The `!create`-path guard has its own control.** Assert the *update* path still throws on
+- **The `!create`-path guard has its own control.** Assert the _update_ path still throws on
   the same code. Without it, deleting the `!existing &&` conjunct — a one-token diff that
   widens the tolerance exactly as requirement 4 forbids — leaves the suite fully green.
 - **The real call-site shape:** run the helper through the same `Promise.all` fan-out
   production uses, with one member losing the race, and assert the whole batch resolves.
   Drive it against a small shared fake store keyed by resource name, so the interleaving
   decides the winner rather than a pre-scripted call sequence; a scripted "loser" over two
-  *different* resources proves only that there is no cross-call state leakage.
+  _different_ resources proves only that there is no cross-call state leakage.
 - **A route/handler-level test at the real entry point.** Testing the helper alone does not
   prove the endpoint survives: on the pre-fix code every one of the 31 existing tests for
   the affected route passed while production was returning 500 (rule 35, rule 62).
@@ -136,7 +140,8 @@ Tells:
 - [ ] The error body is read once for both code and message
 - [ ] Sibling operations in the module were checked for the same asymmetry
 - [ ] No stricter sibling guard on the same path was relaxed by the recovery
-- [ ] The winner lookup is unambiguous; an ambiguous match surfaces the conflict
+- [ ] Persisted-id recovery uses an unambiguous winner lookup; documented convergence exceptions
+      explain their keys and ambiguity handling
 - [ ] Race tests, per-neighbour controls, boundedness, and a fan-out test all exist
 - [ ] The race tests were verified to fail with the tolerance removed
 
@@ -145,9 +150,10 @@ Tells:
 - Task: `tasks/active/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`
   (moves to `tasks/archive/` on completion); originally found on the DefangLabs fork
   (DefangLabs/simple-agent-manager PR #45) and confirmed on this install
-- Implementation: `apps/api/src/services/dns.ts` (`upsertAppRouteDNSRecord`,
-  `createNodeBackendDNSRecord`, `CF_DNS_DUPLICATE_RECORD_CODES`,
-  `assertRecoveredBackendDNSIdentity`); the `Promise.all` fan-out call sites are the two
+- Implementation: `apps/api/src/services/dns-app-routes.ts` (`upsertAppRouteDNSRecord` and
+  `dns.app_route_ambiguous_records`), `apps/api/src/services/dns-node-backend.ts`
+  (`createNodeBackendDNSRecord`, `assertRecoveredBackendDNSIdentity`), and
+  `apps/api/src/services/dns-core.ts` (`CF_DNS_DUPLICATE_RECORD_CODES`); the `Promise.all` fan-out call sites are the two
   route-target upserts in `apps/api/src/routes/deploy-release-callback.ts` (the
   compose-publish path and the manifest path). Verified custom domains are deliberately
   EXCLUDED from that upsert — the user owns their own custom hostname's DNS record — so
@@ -158,7 +164,7 @@ Tells:
   `packages/vm-agent/internal/server/vm_jobs.go` (`claimJob`) plus the control plane no
   longer advertising one pending release twice (`apps/api/src/routes/node-lifecycle.ts`)
 - `apps/api/.claude/rules/45-durable-object-concurrency-mutex.md` — the same bug within one DO, where
-  a mutex *is* the remedy
+  a mutex _is_ the remedy
 - `apps/api/.claude/rules/67-shared-predicates-that-trigger-actions.md` — keep the tolerated set no
   coarser than the evidence
 - `.claude/rules/11-fail-fast-patterns.md` — fail closed, but only on genuinely fatal conditions

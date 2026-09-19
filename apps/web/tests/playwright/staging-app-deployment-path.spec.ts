@@ -29,7 +29,12 @@
  * Cleans up the environment (and therefore its node and volume) in `afterAll`. Staging must run
  * zero VMs at rest: the Hetzner account's 10-server limit is shared with production.
  */
-import { type APIRequestContext, expect, request as playwrightRequest, test } from '@playwright/test';
+import {
+  type APIRequestContext,
+  expect,
+  request as playwrightRequest,
+  test,
+} from '@playwright/test';
 
 const STAGING_APP = 'https://app.sammy.party';
 const STAGING_API = 'https://api.sammy.party';
@@ -134,7 +139,9 @@ test.afterAll(async () => {
   for (const nodeId of seenNodeIds) {
     const nodeDel = await api.delete(`${STAGING_API}/api/nodes/${nodeId}`);
     // eslint-disable-next-line no-console
-    console.log(`[staging] cleanup node=${nodeId} status=${nodeDel.status()} body=${await nodeDel.text()}`);
+    console.log(
+      `[staging] cleanup node=${nodeId} status=${nodeDel.status()} body=${await nodeDel.text()}`
+    );
   }
   await api.dispose();
 });
@@ -157,9 +164,7 @@ test('a real release applies end to end, exercising both DNS create paths and th
   let envState: Record<string, unknown> = {};
   let lastLogged = '';
   while (Date.now() < deadline) {
-    const resp = await api.get(
-      `${STAGING_API}/api/projects/${projectId}/environments/${envId}`
-    );
+    const resp = await api.get(`${STAGING_API}/api/projects/${projectId}/environments/${envId}`);
     if (resp.status() === 200) {
       envState = await resp.json();
       const summary = JSON.stringify({
@@ -201,10 +206,20 @@ test('a real release applies end to end, exercising both DNS create paths and th
 
   // --- The routes the release generated must exist, which means app-route DNS was upserted. ---
   const routesResp = await api.get(
-    `${STAGING_API}/api/projects/${projectId}/environments/${envId}/routes`
+    `${STAGING_API}/api/projects/${projectId}/environments/${envId}/public-routes`
   );
+  const routesBody = await routesResp.text();
   // eslint-disable-next-line no-console
-  console.log(`[staging] routes status=${routesResp.status()} body=${await routesResp.text()}`);
+  console.log(`[staging] routes status=${routesResp.status()} body=${routesBody}`);
+  expect(routesResp.status(), `route list failed: ${routesBody}`).toBe(200);
+
+  const routesJson = JSON.parse(routesBody) as { publicRoutes?: unknown; routes?: unknown };
+  const publicRoutes = Array.isArray(routesJson.publicRoutes)
+    ? routesJson.publicRoutes
+    : Array.isArray(routesJson.routes)
+      ? routesJson.routes
+      : [];
+  expect(publicRoutes.length, `no public routes returned: ${routesBody}`).toBeGreaterThan(0);
 
   // --- And the UI shows the applied environment, as a user would see it. ---
   await page.goto(`${STAGING_APP}/projects/${projectId}/deployments/${envId}`, {

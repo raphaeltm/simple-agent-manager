@@ -168,7 +168,7 @@ func TestHeartbeatDoesNotMisattributeLegacySeqToConfiguredEnvironment(t *testing
 // Control for the fallback itself: an older control plane that sends ONLY the legacy
 // field must still get its release applied, under the configured environment id.
 // Without this, dropping the legacy branch entirely would look like the fix.
-func TestHeartbeatHonoursLegacyPendingReleaseSeqWhenStructuredListEmpty(t *testing.T) {
+func TestHeartbeatHonoursLegacyPendingReleaseSeqWhenStructuredListAbsent(t *testing.T) {
 	h := newPendingReleaseHarness(t, "env-a", heartbeatResponse{
 		Status:            "running",
 		HealthStatus:      "healthy",
@@ -181,6 +181,24 @@ func TestHeartbeatHonoursLegacyPendingReleaseSeqWhenStructuredListEmpty(t *testi
 
 	if got := h.releaseFetches(); len(got) != 1 || got[0] != "env-a@4" {
 		t.Fatalf("release fetches = %v, want exactly [env-a@4] (legacy fallback must still work)", got)
+	}
+}
+
+func TestHeartbeatIgnoresLegacyPendingReleaseSeqWhenStructuredListExplicitlyEmpty(t *testing.T) {
+	h := newPendingReleaseHarness(t, "env-a", heartbeatResponse{
+		Status:            "running",
+		HealthStatus:      "healthy",
+		PendingReleaseSeq: 4,
+		Deployment: deploymentHeartbeatResponse{
+			PendingReleases: []deploymentPendingReleaseResponse{},
+		},
+	})
+
+	h.server.sendNodeHeartbeat()
+	h.waitForQuiescence(t, 0)
+
+	if got := h.releaseFetches(); len(got) != 0 {
+		t.Fatalf("release fetches = %v, want none when structured pendingReleases is explicitly empty", got)
 	}
 }
 

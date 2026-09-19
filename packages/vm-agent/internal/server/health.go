@@ -139,7 +139,7 @@ type deploymentPendingRouteConfigResponse struct {
 type deploymentHeartbeatResponse struct {
 	Environments        *[]deploymentEnvironmentResponse       `json:"environments,omitempty"`
 	RetireEnvironments  []deploymentEnvironmentResponse        `json:"retireEnvironments,omitempty"`
-	PendingReleases     []deploymentPendingReleaseResponse     `json:"pendingReleases,omitempty"`
+	PendingReleases     []deploymentPendingReleaseResponse     `json:"pendingReleases"`
 	PendingRouteConfigs []deploymentPendingRouteConfigResponse `json:"pendingRouteConfigs,omitempty"`
 	DeployPubKey        string                                 `json:"deployPubKey,omitempty"`
 }
@@ -323,7 +323,7 @@ func (s *Server) sendNodeHeartbeat() {
 		// environment a release for environment B was also applied against
 		// environment A's engine. claimJob cannot dedupe that — the job ids differ.
 		pendingReleases := hbResp.Deployment.PendingReleases
-		if len(pendingReleases) == 0 && hbResp.PendingReleaseSeq > 0 && s.config.EnvironmentID != "" {
+		if pendingReleases == nil && hbResp.PendingReleaseSeq > 0 && s.config.EnvironmentID != "" {
 			pendingReleases = []deploymentPendingReleaseResponse{{
 				EnvironmentID: s.config.EnvironmentID,
 				Seq:           hbResp.PendingReleaseSeq,

@@ -181,6 +181,39 @@ func TestLivenessWriterRetainsTailNotHead(t *testing.T) {
 	}
 }
 
+func TestLivenessWriterRedactsSecretAcrossRetentionBoundary(t *testing.T) {
+	secret := "SECRET-VALUE-123456"
+	redactor := newEnvRedactor(map[string]string{"DATABASE_URL": secret})
+	w := &livenessWriter{limit: 16, redactionOverlap: redactor.maxValueLen()}
+
+	w.Write([]byte("progress "))
+	w.Write([]byte(secret[:10]))
+	w.Write([]byte(secret[10:]))
+	w.Write([]byte(" tail"))
+
+	got := w.RedactedString(redactor)
+	if len(got) > 16 {
+		t.Fatalf("retained %d bytes, want <= 16", len(got))
+	}
+	if strings.Contains(got, secret) || strings.Contains(got, "123456") {
+		t.Fatalf("redacted output leaked secret fragment: %q", got)
+	}
+	if !strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("redacted output did not redact boundary-spanning secret: %q", got)
+	}
+}
+
+func TestLivenessWriterStringKeepsConfiguredTailCapWithRedactionOverlap(t *testing.T) {
+	w := &livenessWriter{limit: 8, redactionOverlap: 32}
+
+	w.Write([]byte("0123456789abcdef"))
+
+	got := w.String()
+	if got != "89abcdef" {
+		t.Fatalf("String() = %q, want tail capped to the configured limit", got)
+	}
+}
+
 // End-to-end through the real child process, emitting well over the 64 KiB
 // retention cap so the trimming path is actually exercised: a compose run that
 // emits a lot of progress and then fails must surface the failing line.
