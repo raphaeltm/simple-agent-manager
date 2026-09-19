@@ -357,6 +357,20 @@ func TestRunDetachedDeploymentApplyCancelsAfterIdleProgress(t *testing.T) {
 	if job == nil || job.Status != vmJobStatusFailed || !strings.Contains(job.ErrorMessage, "no progress") {
 		t.Fatalf("expected durable stalled apply failure, got %+v", job)
 	}
+
+	// The stall must be the PRIMARY cause, not something buried inside the child's
+	// error. The child fails BECAUSE we cancelled it, so reporting only its error
+	// (`signal: killed` for compose) makes a self-inflicted timeout
+	// indistinguishable from an OOM kill — which is exactly how the 2026-09-05
+	// incident presented. A Contains() check cannot see this: the cancel cause
+	// propagates into the child's error text, so it passes either way. Anchoring on
+	// the prefix is what discriminates.
+	if !strings.HasPrefix(job.ErrorMessage, "deployment apply stalled:") {
+		t.Fatalf("stall must lead the error message, got %q", job.ErrorMessage)
+	}
+	if !strings.Contains(job.ErrorMessage, "child result:") {
+		t.Fatalf("child result must be retained as context, got %q", job.ErrorMessage)
+	}
 }
 
 func TestCallbackTokenRefreshUsesNewTokenForSubsequentRequests(t *testing.T) {

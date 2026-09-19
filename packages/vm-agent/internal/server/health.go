@@ -313,14 +313,21 @@ func (s *Server) sendNodeHeartbeat() {
 			}
 		}
 
+		// `deployment.pendingReleases` is authoritative and complete when present.
+		// The legacy top-level `pendingReleaseSeq` is a FALLBACK for a control
+		// plane old enough not to send the structured list at all — it must never
+		// be merged alongside it. Appending it unconditionally is what turned a
+		// single pending release into two apply goroutines from one heartbeat
+		// tick, and it is also mis-attributed: the seq gets filed under this
+		// node's own cloud-init ENVIRONMENT_ID, so on a node hosting more than one
+		// environment a release for environment B was also applied against
+		// environment A's engine. claimJob cannot dedupe that — the job ids differ.
 		pendingReleases := hbResp.Deployment.PendingReleases
-		if hbResp.PendingReleaseSeq > 0 {
-			if s.config.EnvironmentID != "" {
-				pendingReleases = append(pendingReleases, deploymentPendingReleaseResponse{
-					EnvironmentID: s.config.EnvironmentID,
-					Seq:           hbResp.PendingReleaseSeq,
-				})
-			}
+		if len(pendingReleases) == 0 && hbResp.PendingReleaseSeq > 0 && s.config.EnvironmentID != "" {
+			pendingReleases = []deploymentPendingReleaseResponse{{
+				EnvironmentID: s.config.EnvironmentID,
+				Seq:           hbResp.PendingReleaseSeq,
+			}}
 		}
 
 		for _, pending := range pendingReleases {
@@ -469,6 +476,18 @@ func workspaceRuntimeReportsAdmissionMetrics(status string) bool {
 
 func (s *Server) runDetachedDeploymentApply(environmentID string, seq int64, engine *deploy.Engine) {
 	jobID := applyJobID(environmentID, seq)
+
+	// Skip if an identical apply is already running. Deferred so the claim is
+	// released even if the apply panics — otherwise this job id stays wedged and
+	// the node stops applying that release entirely.
+	releaseClaim, claimed := s.claimJob(jobID)
+	if !claimed {
+		slog.Info("deploy: apply already in flight; skipping duplicate",
+			"environmentId", environmentID, "seq", seq)
+		return
+	}
+	defer releaseClaim()
+
 	s.persistVMJobStart(jobID, vmJobKindApply, environmentID, vmJobStatusStarting, "accepted")
 	cleanup := s.registerApplyWatchdog(jobID)
 	defer cleanup()
@@ -509,11 +528,19 @@ func (s *Server) runDetachedDeploymentApply(environmentID string, seq int64, eng
 			}
 			timer.Reset(idleTimeout)
 		case <-timer.C:
-			err := fmt.Errorf("deployment apply stalled: no progress for %s", idleTimeout)
-			cancel(err)
+			stallErr := fmt.Errorf("deployment apply stalled: no progress for %s", idleTimeout)
+			cancel(stallErr)
 			applyErr := <-done
+
+			// The child's error is a CONSEQUENCE of the cancel above — compose
+			// reports `signal: killed` because we killed it. Reporting only that
+			// discards the diagnosis and makes a self-inflicted timeout
+			// indistinguishable from an OOM kill, which is exactly how the
+			// 2026-09-05 incident presented. Keep the stall as the primary cause
+			// and carry the child's output as context.
+			err := stallErr
 			if applyErr != nil {
-				err = applyErr
+				err = fmt.Errorf("%w (child result: %v)", stallErr, applyErr)
 			}
 			s.persistVMJobComplete(jobID, vmJobStatusFailed, "stalled", err.Error(), nil)
 			slog.Error("deploy: fetch and apply stalled",
@@ -525,6 +552,17 @@ func (s *Server) runDetachedDeploymentApply(environmentID string, seq int64, eng
 
 func (s *Server) runDetachedDeploymentRouteApply(environmentID string, revision int64, engine *deploy.Engine) {
 	jobID := routeConfigJobID(environmentID, revision)
+
+	// Same duplicate-spawn guard as the apply path: pending route configs are
+	// re-advertised every heartbeat until observed.RoutingRevision catches up.
+	releaseClaim, claimed := s.claimJob(jobID)
+	if !claimed {
+		slog.Info("deploy: route config apply already in flight; skipping duplicate",
+			"environmentId", environmentID, "revision", revision)
+		return
+	}
+	defer releaseClaim()
+
 	s.persistVMJobStart(jobID, vmJobKindRouteConfig, environmentID, vmJobStatusStarting, "accepted")
 
 	idleTimeout := s.config.DeployApplyIdleTimeout

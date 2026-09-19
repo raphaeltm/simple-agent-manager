@@ -14,9 +14,47 @@ const DEFAULT_DNS_TTL = 60;
 /** Default timeout for Cloudflare API calls (per Constitution Principle XI) */
 const DEFAULT_CF_API_TIMEOUT_MS = 30_000;
 
+// `code` is deliberately `unknown` rather than `v.optional(v.number())`. Valibot's
+// optional() only bypasses a missing/undefined key, so `code: null` or a stringified
+// code would fail the whole entry — and readCloudflareErrorDetail swallows parse
+// failures and falls back to a generic message. That would silently discard
+// Cloudflare's real error text for every caller, including the ones that never asked
+// to branch on the code at all. Parse permissively; narrow to a number at use.
 const cloudflareErrorSchema = v.object({
-  errors: v.optional(v.array(v.object({ message: v.string() }))),
+  errors: v.optional(
+    v.array(
+      v.object({
+        code: v.optional(v.unknown()),
+        message: v.string(),
+      })
+    )
+  ),
 });
+
+/**
+ * Cloudflare DNS API error codes meaning "this exact record already exists".
+ *
+ * Raised when a concurrent caller created the record between our lookup and our
+ * create. Recoverable: re-resolve and converge on the winner's record.
+ *
+ * Deliberately EXCLUDES 81053 ("An A, AAAA, or CNAME record with that host
+ * already exists"), which reports a different-type collision — a real
+ * misconfiguration that retrying cannot fix and must keep surfacing.
+ */
+const CF_DNS_DUPLICATE_RECORD_CODES = new Set([81057, 81058]);
+
+/**
+ * Attempts for a create that lost a duplicate-record race: the original, plus one
+ * re-resolve-and-update. Not env-exposed — this bounds an internal recovery loop
+ * against a constraint that resolves in a single round trip, not a caller-facing
+ * retry policy.
+ */
+const DNS_UPSERT_RACE_MAX_RETRIES = 1;
+
+/** True when a failed create can be recovered by resolving the winner's record. */
+function isDuplicateRecordConflict(code: number | null): boolean {
+  return code !== null && CF_DNS_DUPLICATE_RECORD_CODES.has(code);
+}
 
 const dnsRecordIdResponseSchema = v.object({
   result: v.object({ id: v.string() }),
@@ -32,13 +70,31 @@ const dnsRecordListResponseSchema = v.object({
   })),
 });
 
-async function readCloudflareError(response: Response, fallback: string): Promise<string> {
+/**
+ * Read the first Cloudflare API error as a `{ code, message }` pair.
+ *
+ * A Response body can only be consumed once, so callers that need to branch on
+ * the numeric code must read both together rather than calling
+ * {@link readCloudflareError} and then re-reading the body.
+ */
+async function readCloudflareErrorDetail(
+  response: Response,
+  fallback: string
+): Promise<{ code: number | null; message: string }> {
   try {
     const error = await readResponseJson(response, cloudflareErrorSchema, 'cloudflare.dns.error');
-    return error.errors?.[0]?.message || fallback;
+    const first = error.errors?.[0];
+    // Only a real number is usable for branching; anything else is treated as
+    // "no code", which keeps the message intact and excludes it from any retry.
+    const code = typeof first?.code === 'number' ? first.code : null;
+    return { code, message: first?.message || fallback };
   } catch {
-    return fallback;
+    return { code: null, message: fallback };
   }
+}
+
+async function readCloudflareError(response: Response, fallback: string): Promise<string> {
+  return (await readCloudflareErrorDetail(response, fallback)).message;
 }
 
 /**
@@ -240,37 +296,62 @@ export async function upsertAppRouteDNSRecord(
   ip: string,
   env: Env,
 ): Promise<string> {
-  const existing = await findDNSRecordByName(hostname, env);
-  const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
-  const body = JSON.stringify({
-    type: 'A',
-    name: hostname,
-    content: ip,
-    ttl: getDnsTTL(env),
-    proxied: false,
-  });
+  // Check-then-act across an await: concurrent callers can both observe "no
+  // record" and both POST, and Cloudflare rejects the loser as a duplicate.
+  // This is reachable in production — `deploy-release-callback.ts` upserts every
+  // route through Promise.all, and overlapping node release fetches run that
+  // whole handler concurrently. The loser used to throw, which failed the node's
+  // release fetch with a 500 and wedged the deployment before any cert work.
+  // Re-resolve once and update in place so the loser converges instead.
+  for (let attempt = 0; attempt <= DNS_UPSERT_RACE_MAX_RETRIES; attempt++) {
+    const existing = await findDNSRecordByName(hostname, env);
+    const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
+    const body = JSON.stringify({
+      type: 'A',
+      name: hostname,
+      content: ip,
+      ttl: getDnsTTL(env),
+      proxied: false,
+    });
 
-  const response = await fetchWithTimeout(
-    existing
-      ? `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${existing.id}`
-      : `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records`,
-    {
-      method: existing ? 'PUT' : 'POST',
-      headers: {
-        Authorization: `Bearer ${env.CF_API_TOKEN}`,
-        'Content-Type': 'application/json',
+    const response = await fetchWithTimeout(
+      existing
+        ? `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${existing.id}`
+        : `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records`,
+      {
+        method: existing ? 'PUT' : 'POST',
+        headers: {
+          Authorization: `Bearer ${env.CF_API_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body,
       },
-      body,
-    },
-    timeoutMs,
-  );
+      timeoutMs,
+    );
 
-  if (!response.ok) {
-    throw new Error(await readCloudflareError(response, `Failed to upsert app route DNS record: ${response.status}`));
+    if (response.ok) {
+      const data = await readResponseJson(response, dnsRecordIdResponseSchema, 'cloudflare.dns.upsert_app_route_record');
+      return data.result.id;
+    }
+
+    const detail = await readCloudflareErrorDetail(
+      response,
+      `Failed to upsert app route DNS record: ${response.status}`
+    );
+
+    // `!existing` is load-bearing: only the create path can lose this race. On the
+    // update path the same code means something else, and widening the tolerance
+    // there would retry a PUT against a record we already resolved (rule 75 §4).
+    const lostCreateRace = !existing && isDuplicateRecordConflict(detail.code);
+    if (!lostCreateRace || attempt === DNS_UPSERT_RACE_MAX_RETRIES) {
+      throw new Error(detail.message);
+    }
+
+    log.info('dns.app_route_upsert_race_retry', { hostname, code: detail.code });
   }
 
-  const data = await readResponseJson(response, dnsRecordIdResponseSchema, 'cloudflare.dns.upsert_app_route_record');
-  return data.result.id;
+  // Unreachable: the loop either returns or throws on its final attempt.
+  throw new Error(`Failed to upsert app route DNS record for ${hostname}`);
 }
 
 /**
@@ -409,13 +490,11 @@ export async function createNodeBackendDNSRecord(
   recoverExisting = false
 ): Promise<string> {
   if (signal?.aborted) throw signal.reason;
+  const hostname = getNodeBackendHostname(nodeId, env.BASE_DOMAIN);
   if (recoverExisting) {
-    const hostname = getNodeBackendHostname(nodeId, env.BASE_DOMAIN);
     const existing = await findDNSRecordByName(hostname, env, signal, true);
     if (existing) {
-      if (existing.name !== hostname || existing.type !== 'A' || existing.content !== ip || existing.proxied !== true) {
-        throw new Error('Existing backend DNS identity differs from the recovered allocation');
-      }
+      assertRecoveredBackendDNSIdentity(existing, hostname, ip);
       return existing.id;
     }
   }
@@ -441,11 +520,104 @@ export async function createNodeBackendDNSRecord(
 
   const readable = signal ? await completeAbortableResponse(response, signal) : response;
   if (!readable.ok) {
-    throw new Error(await readCloudflareError(readable, `Failed to create backend DNS record: ${response.status}`));
+    const detail = await readCloudflareErrorDetail(
+      readable,
+      `Failed to create backend DNS record: ${response.status}`
+    );
+
+    // Same concurrent-create race as upsertAppRouteDNSRecord, and the reason this
+    // sibling is fixed alongside it (rule 75 §6). Two paths create this record —
+    // node provisioning (services/node-provisioning.ts) and the heartbeat backfill
+    // (routes/node-lifecycle.ts) — and the loser used to throw. That path only
+    // stamps nodes.error_message and leaves backend_dns_record_id NULL, so every
+    // later heartbeat retried the same losing POST forever, and node deletion
+    // (which deletes by that id) left the real record orphaned in the zone.
+    // Resolving the winner lets the id be persisted, which fixes both.
+    if (isDuplicateRecordConflict(detail.code)) {
+      const existing = await findRecordAfterConflict(hostname, env, signal);
+      if (existing) {
+        if (recoverExisting) {
+          // The durable provisioning path already refused a pre-existing record
+          // that is not exactly this allocation's. A conflict that lands AFTER
+          // that pre-check must be held to the same standard — converging it
+          // silently would delete that refusal (rules 63 / 71).
+          assertRecoveredBackendDNSIdentity(existing, hostname, ip);
+        } else if (existing.content !== ip) {
+          // 81057 does not guarantee matching content, and the two creators can
+          // legitimately disagree on the IP (provisioning uses the provider's
+          // allocation, the heartbeat backfill uses the reported address). The
+          // caller is the later writer, so converge before handing back an id it
+          // will treat as authoritative. updateDNSRecord takes no signal, so
+          // re-check the deadline rather than starting a write past it.
+          if (signal?.aborted) throw signal.reason;
+          await updateDNSRecord(existing.id, ip, env);
+        }
+        log.info('dns.node_backend_create_race_resolved', {
+          nodeId,
+          recordId: existing.id,
+          code: detail.code,
+        });
+        return existing.id;
+      }
+    }
+
+    throw new Error(detail.message);
   }
 
   const data = await readResponseJson(readable, dnsRecordIdResponseSchema, 'cloudflare.dns.create_backend_record');
   return data.result.id;
+}
+
+/**
+ * Assert that an already-present backend record is exactly the one this call
+ * intended to create.
+ *
+ * One predicate shared by the two places that can meet an existing record on the
+ * durable provisioning path — the `recoverExisting` pre-check and the
+ * duplicate-conflict recovery below it. Keeping them on one predicate is what
+ * stops the conflict path from quietly accepting a record the pre-check would
+ * have rejected.
+ */
+function assertRecoveredBackendDNSIdentity(
+  existing: { name: string; type: string; content?: string; proxied?: boolean },
+  hostname: string,
+  ip: string
+): void {
+  if (
+    existing.name !== hostname ||
+    existing.type !== 'A' ||
+    existing.content !== ip ||
+    existing.proxied !== true
+  ) {
+    throw new Error('Existing backend DNS identity differs from the recovered allocation');
+  }
+}
+
+/**
+ * Resolve the record a duplicate-create conflict refers to, or null.
+ *
+ * `requireUnique` is deliberate: Cloudflare permits several A records for one
+ * name (round-robin), so adopting "the first" would persist one id and orphan the
+ * rest. An ambiguous zone is a real problem and must surface as the original
+ * conflict rather than being silently resolved.
+ *
+ * A failed lookup is likewise not allowed to mask the original conflict, so it
+ * degrades to null and the caller surfaces the create error it already has.
+ */
+async function findRecordAfterConflict(
+  hostname: string,
+  env: Env,
+  signal?: AbortSignal
+): Promise<{ id: string; name: string; type: string; content?: string; proxied?: boolean } | null> {
+  try {
+    return await findDNSRecordByName(hostname, env, signal, true);
+  } catch (err) {
+    // A cancelled request is not a resolvable conflict: the caller's deadline has
+    // passed, so it must see the abort rather than a DNS error it cannot act on.
+    if (signal?.aborted) throw err;
+    log.warn('dns.conflict_lookup_failed', { hostname, error: String(err) });
+    return null;
+  }
 }
 
 /**

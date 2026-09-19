@@ -28,6 +28,7 @@ type EngineConfig struct {
 	ArtifactIdleTimeout     time.Duration
 	PreflightCommandTimeout time.Duration
 	ApplyProgress           ApplyProgressFunc
+	ApplyLiveness           ApplyLivenessFunc
 	DockerLogin             DockerLoginFunc // defaults to cache.DockerLogin if nil
 	MountChecker            MountChecker    // defaults to RealMountChecker if nil
 	VolumeMounter           VolumeMounter   // defaults to RealVolumeMounter if nil

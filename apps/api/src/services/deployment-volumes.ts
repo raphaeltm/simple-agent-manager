@@ -577,10 +577,22 @@ export async function attachEnvironmentVolumes(
       location: vol.location,
     });
 
+    // Persist the settled SAM-side fact, not the provider's transient snapshot.
+    // Hetzner's attach is an async action, so the volume it reports back at the
+    // instant attach returns is commonly still `creating` or `available` — and
+    // NOTHING ever re-polls this row; the only other writer is the detach path,
+    // which already writes a settled `available` the same way. Persisting that
+    // snapshot left attached, mounted, fully working volumes reading `creating`
+    // forever, which is exactly the false signal that misdirected the 2026-09-05
+    // stuck-deployment investigation. The attach call returned successfully and we
+    // hold a server id, so `attached` is the true and stable statement about this
+    // row.
+    const settledStatus = 'attached';
+
     await db
       .update(schema.deploymentVolumes)
       .set({
-        status: attached.status,
+        status: settledStatus,
         attachedServerId: attached.attachedServerId ?? serverId,
         linuxDevice: attached.linuxDevice ?? null,
         updatedAt: now,
@@ -589,7 +601,7 @@ export async function attachEnvironmentVolumes(
 
     results.push({
       ...vol,
-      status: attached.status,
+      status: settledStatus,
       attachedServerId: attached.attachedServerId ?? serverId,
       linuxDevice: attached.linuxDevice ?? null,
       updatedAt: now,
