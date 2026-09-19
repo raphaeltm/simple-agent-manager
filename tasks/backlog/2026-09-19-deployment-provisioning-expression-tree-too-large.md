@@ -1,6 +1,6 @@
 # Deployment node provisioning fails with `D1_ERROR: Expression tree is too large`
 
-**Status:** resolved in PR #2102 — pending final staging verification evidence
+**Status:** resolved in PR #2102 — staging verified on 2026-09-19
 **Discovered:** 2026-09-19 on staging, while trying to staging-verify
 `tasks/active/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`.
 Not caused by that change — see "Not the porting branch" below.
@@ -66,6 +66,30 @@ Initial local verification:
 - `pnpm --filter @simple-agent-manager/api exec eslint src/services/deployment-provisioning.ts tests/workers/deployment-provisioning-expression-depth.test.ts`
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/deployment-native-placement.test.ts tests/unit/deployment-provisioning.test.ts`
 - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/deployment-provisioning-expression-depth.test.ts --reporter verbose --testTimeout 30000`
+- `pnpm lint`
+- `pnpm typecheck`
+- `pnpm build`
+- `pnpm test`
+
+Final staging verification on 2026-09-19:
+
+- Deployed PR branch `sam/port-five-app-deployment-eew7ee` commit
+  `ce7b27bf2a9928bf1e40f6cf4ec0edd1713ce852` to staging with GitHub Actions
+  run `35443637687`; deploy, health check, and smoke tests passed.
+- Ran `pnpm --filter @simple-agent-manager/web exec playwright test
+  tests/playwright/staging-app-deployment-path.spec.ts --project='Desktop (1280x800)' --reporter=line`.
+- The staging release reached `status=active`, `observedStatus=applied`, and
+  `observedAppliedSeq=1` for environment `01M2WW3QX4J3CDDKW7R63M2QH0` on node
+  `01M2WW3TZ6BSP0TXVAPKTNNZVM`.
+- Cleanup deleted environment `01M2WW3QX4J3CDDKW7R63M2QH0`, reported
+  `nodeDeleted=true`, `volumesDetached=0`, `volumesDeleted=0`, and removed one DNS record;
+  the explicit follow-up `DELETE /api/nodes/01M2WW3TZ6BSP0TXVAPKTNNZVM` returned 404.
+
+Production exposure note: production shares this code path. The recorded production D1 evidence in
+this task showed no production deployment-environment placement since 2026-08-26
+(`01M100A361P49T716X6QBV2NV5`), so existing production deployments did not disprove the bug. The
+fix should deploy before the next production placement; no separate production data mutation was
+performed during this PR verification.
 
 ## What is and is not implicated
 
@@ -138,9 +162,9 @@ thing in months to try creating a deployment environment.
       `apps/api/tests/workers/`; a `better-sqlite3` test cannot observe this limit
       (`apps/api/.claude/rules/69`, "Harness-Ceiling Divergence"). Covered by
       `apps/api/tests/workers/deployment-provisioning-expression-depth.test.ts`.
-- [ ] A staging deployment environment reaches `active` with `observed_applied_seq > 0`.
-- [ ] Production is checked for the same exposure, and a note recorded either way.
-- [ ] `apps/web/tests/playwright/staging-app-deployment-path.spec.ts` passes end to end, which
+- [x] A staging deployment environment reaches `active` with `observed_applied_seq > 0`.
+- [x] Production is checked for the same exposure, and a note recorded either way.
+- [x] `apps/web/tests/playwright/staging-app-deployment-path.spec.ts` passes end to end, which
       also unblocks live verification of the six fixes ported on 2026-09-19.
 
 ## References
