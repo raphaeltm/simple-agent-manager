@@ -65,12 +65,8 @@ const D1_MIGRATION_ALIAS_REPAIRS: readonly D1MigrationAliasRepair[] = [
 ] as const;
 
 const SYSTEM_TABLES = new Set(['_cf_KV', D1_MIGRATIONS_TABLE, 'sqlite_sequence']);
-
 export const DEFAULT_D1_MIGRATION_CHURNING_TABLES = [
   'DATABASE.deployment_releases',
-  // Cursor rows are inserted while diagnostic reconciliation is mid-sweep and
-  // deleted once the sweep catches up, so a concurrent reconciliation job can
-  // legitimately move this table between one row and zero rows during a deploy.
   'DATABASE.diagnostic_reconciliation_state',
   'DATABASE.github_webhook_deliveries',
   'DATABASE.project_files',
