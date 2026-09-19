@@ -1,6 +1,6 @@
 # Port five app-deployment fixes from DefangLabs PR #45, plus source-level `pendingReleaseSeq` dedup
 
-**Status:** active
+**Status:** implemented, CI green, PARTIALLY staging-verified — blocked from merge
 **Origin:** DefangLabs/simple-agent-manager PR #45 (branch `sam/use-sam-mcp-tools-wkkamr`, opened
 2026-09-05, still open and never staging-verified). All five defects it fixes are confirmed present
 on upstream production; a sixth (the *cause* of the duplicate it only mitigates) is added here.
@@ -135,94 +135,95 @@ commit. The agent-side fallback is kept anyway so a self-hosted older control pl
 
 ### Phase A — API: DNS duplicate tolerance (defects 1, 2)
 
-- [ ] Widen `cloudflareErrorSchema` to carry a permissive `code: v.optional(v.unknown())` and add
+- [x] Widen `cloudflareErrorSchema` to carry a permissive `code: v.optional(v.unknown())` and add
       `readCloudflareErrorDetail`, with `readCloudflareError` delegating so no other call site changes
-- [ ] Add `CF_DNS_DUPLICATE_RECORD_CODES` (`81057`, `81058`) and `isDuplicateRecordConflict`,
+- [x] Add `CF_DNS_DUPLICATE_RECORD_CODES` (`81057`, `81058`) and `isDuplicateRecordConflict`,
       with a comment naming why `81053` is excluded
-- [ ] Rework `upsertAppRouteDNSRecord` as a bounded (`DNS_UPSERT_RACE_MAX_RETRIES = 1`) loop that
+- [x] Rework `upsertAppRouteDNSRecord` as a bounded (`DNS_UPSERT_RACE_MAX_RETRIES = 1`) loop that
       retries only on the create path (`!existing`)
-- [ ] Extract the node-backend identity predicate now inlined in the `recoverExisting` branch and
+- [x] Extract the node-backend identity predicate now inlined in the `recoverExisting` branch and
       reuse it for the conflict path
-- [ ] Add conflict recovery to `createNodeBackendDNSRecord`: resolve the winner with
+- [x] Add conflict recovery to `createNodeBackendDNSRecord`: resolve the winner with
       `requireUnique`, thread `signal`, honour `recoverExisting`, converge the IP otherwise
 
 ### Phase B — API: settled volume status (defect 5)
 
-- [ ] Persist and return `'attached'` instead of the provider's snapshot in
+- [x] Persist and return `'attached'` instead of the provider's snapshot in
       `attachEnvironmentVolumes`
 
 ### Phase C — API: stop sending the duplicate pending release (defect 6, source side)
 
-- [ ] Remove the `response.pendingReleaseSeq` emission from `node-lifecycle.ts`
-- [ ] Update the comment at `deploy-release-callback.ts:136` that names the field
+- [x] Remove the `response.pendingReleaseSeq` emission from `node-lifecycle.ts`
+- [x] Update the comment at `deploy-release-callback.ts:136` that names the field
 
 ### Phase D — VM agent: duplicate-apply guard (defect 3)
 
-- [ ] Add `inFlightJobsMu` / `inFlightJobs` to `Server` and initialise in `New`
-- [ ] Add `claimJob` to `vm_jobs.go` (atomic claim, idempotent release)
-- [ ] Claim in both `runDetachedDeploymentApply` and `runDetachedDeploymentRouteApply`
+- [x] Add `inFlightJobsMu` / `inFlightJobs` to `Server` and initialise in `New`
+- [x] Add `claimJob` to `vm_jobs.go` (atomic claim, idempotent release)
+- [x] Claim in both `runDetachedDeploymentApply` and `runDetachedDeploymentRouteApply`
 
 ### Phase E — VM agent: compose liveness + honest stall error (defect 4)
 
-- [ ] Add `ApplyLivenessFunc` to `engine_config.go` and wire `ApplyLiveness` in `server.go`
-- [ ] Add `activeSeq` / `setActiveApplySeq` / `signalLiveness` to the engine, set from `Apply`
-- [ ] Add `livenessWriter` (tail-retaining, amortised compaction) and use it for compose stderr
-- [ ] Add `signalApplyLiveness` to `vm_jobs.go`
-- [ ] Keep the stall error as the primary cause with the child result as context
+- [x] Add `ApplyLivenessFunc` to `engine_config.go` and wire `ApplyLiveness` in `server.go`
+- [x] Add `activeSeq` / `setActiveApplySeq` / `signalLiveness` to the engine, set from `Apply`
+- [x] Add `livenessWriter` (tail-retaining, amortised compaction) and use it for compose stderr
+- [x] Add `signalApplyLiveness` to `vm_jobs.go`
+- [x] Keep the stall error as the primary cause with the child result as context
 
 ### Phase F — VM agent: legacy field is a fallback only (defect 6, agent side)
 
-- [ ] Honour `hbResp.PendingReleaseSeq` only when `hbResp.Deployment.PendingReleases` is empty
+- [x] Honour `hbResp.PendingReleaseSeq` only when `hbResp.Deployment.PendingReleases` is empty
 
 ### Phase G — Tests
 
-- [ ] `apps/api/tests/unit/services/dns-app-routes.test.ts`: race per tolerated code, update-path
+- [x] `apps/api/tests/unit/services/dns-app-routes.test.ts`: race per tolerated code, update-path
       control, `81053` control, unrelated-failure control, `code: null` / stringified-code
       regressions, boundedness, same-hostname convergence against a shared fake store, `Promise.all`
       fan-out, and the `createNodeBackendDNSRecord` sibling set including a `recoverExisting`
       mismatch control and an ambiguous-zone control
-- [ ] `apps/api/tests/unit/routes/deploy-release-callback.test.ts`: route-level regression that the
+- [x] `apps/api/tests/unit/routes/deploy-release-callback.test.ts`: route-level regression that the
       endpoint returns 200 when one route loses the race
-- [ ] `apps/api/tests/unit/services/deployment-volumes.test.ts`: transient provider status is not
+- [x] `apps/api/tests/unit/services/deployment-volumes.test.ts`: transient provider status is not
       persisted
-- [ ] `apps/api/tests/workers/deployment-control-plane-release.test.ts`: the structured list is
+- [x] `apps/api/tests/workers/deployment-control-plane-release.test.ts`: the structured list is
       present and `pendingReleaseSeq` is absent
-- [ ] `packages/vm-agent/internal/server/deploy_apply_dedup_test.go`: duplicate skipped, distinct
+- [x] `packages/vm-agent/internal/server/deploy_apply_dedup_test.go`: duplicate skipped, distinct
       seq allowed, claim released, route path guarded, exclusivity under `-race`, idempotent
       release, nil map
-- [ ] `packages/vm-agent/internal/deploy/compose_liveness_test.go`: liveness from child output,
+- [x] `packages/vm-agent/internal/deploy/compose_liveness_test.go`: liveness from child output,
       silent-command control, outside-apply control, stderr preserved in the error, signals past the
       cap, tail-not-head, chatty end-to-end, `setActiveApplySeq` restore, `-race` access
-- [ ] `packages/vm-agent/internal/server/heartbeat_pending_release_test.go`: legacy field ignored
+- [x] `packages/vm-agent/internal/server/heartbeat_pending_release_test.go`: legacy field ignored
       when the structured list is present, honoured when it is empty
-- [ ] Prove each new guard discriminating by reverting it once and recording which tests redden
+- [x] Prove each new guard discriminating by reverting it once and recording which tests redden
 
 ### Phase H — Rules and docs
 
-- [ ] Add `.claude/rules/75-external-api-check-then-act.md` (the fork's rule 68, renumbered, with
+- [x] Add `.claude/rules/75-external-api-check-then-act.md` (the fork's rule 68, renumbered, with
       references corrected to the real paths)
-- [ ] Add the watchdog-liveness lesson (fork's §5c) to
+- [x] Add the watchdog-liveness lesson (fork's §5c) to
       `apps/api/.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`
-- [ ] Run `pnpm quality:agent-context-budget` and report the instruction-surface delta
+- [x] Run `pnpm quality:agent-context-budget` and report the instruction-surface delta
 
 ## Acceptance criteria
 
-- [ ] A concurrent app-route create conflict (`81057` / `81058`) converges instead of throwing, and
+- [x] A concurrent app-route create conflict (`81057` / `81058`) converges instead of throwing, and
       `GET /api/nodes/:id/deploy-release` still returns 200 when one route loses the race
-- [ ] `81053`, auth/quota failures, and duplicate codes on the **update** path all still throw, with
+- [x] `81053`, auth/quota failures, and duplicate codes on the **update** path all still throw, with
       no retry
-- [ ] A concurrent node-backend create conflict returns the winner's record id so
+- [x] A concurrent node-backend create conflict returns the winner's record id so
       `backend_dns_record_id` gets persisted; `recoverExisting` still refuses a foreign allocation
-- [ ] Two apply goroutines for the same `(environmentId, seq)` result in exactly one
+- [x] Two apply goroutines for the same `(environmentId, seq)` result in exactly one
       control-plane fetch; distinct seqs both run; the claim is released on completion
-- [ ] A compose child that keeps writing to stderr keeps the apply watchdog alive; a silent child
+- [x] A compose child that keeps writing to stderr keeps the apply watchdog alive; a silent child
       does not; retained output is the tail; the failing line survives in the error
-- [ ] A stalled apply reports the stall as the primary cause, not `signal: killed`
-- [ ] `attachEnvironmentVolumes` persists `attached` when the provider still reports `creating`
-- [ ] A heartbeat with one pending release emits it exactly once, and an agent that receives both
+- [x] A stalled apply reports the stall as the primary cause, not `signal: killed`
+- [x] `attachEnvironmentVolumes` persists `attached` when the provider still reports `creating`
+- [x] A heartbeat with one pending release emits it exactly once, and an agent that receives both
       fields spawns exactly one apply
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green; `go test ./... -race` green
-- [ ] Staging deploy green and the deployment path verified end to end on staging
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green; `go test ./... -race` green
+- [~] Staging deploy green (run 35431702939). Node-provisioning half verified live; the
+      deployment-APPLY half is BLOCKED by a pre-existing bug — see "Staging verification" below
 
 ## References
 
@@ -234,3 +235,92 @@ commit. The agent-side fallback is kept anyway so a self-hosted older control pl
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md` — prove every new guard discriminating
 - `.claude/rules/63` / `.claude/rules/71` — relaxing one branch deletes the check that used it
 - `.claude/rules/67-shared-predicates-that-trigger-actions.md` — keep the tolerated set narrow
+
+## Evidence
+
+### Discrimination matrix (each revert run once, then restored)
+
+| Revert | Went red | Green controls |
+|---|---|---|
+| DNS duplicate tolerance disabled (empty code set) | 12 race tests across helper + route | 50 |
+| `!existing &&` conjunct dropped | update-path control ONLY | 29 |
+| `recoverExisting` identity discipline dropped | 2 durable-path refusal controls | 28 |
+| `dns.app_route_ambiguous_records` warning removed | ambiguity test ONLY | 31 |
+| `claimJob` guards removed | 2 duplicate-spawn Go tests | heartbeat set |
+| `defer releaseClaim()` leaked on the route path | `…RouteApplyReleasesClaimOnCompletion` ("fetches = 1, want 2") | rest |
+| legacy-field guard reverted alone | mis-attribution test (`[env-a@9 env-b@9]`) | rest |
+| `claimJob` + legacy guard reverted (true pre-fix) | duplicate fetch reproduced as `[env-a@7 env-a@7]` | 2 controls |
+| compose liveness wiring removed | liveness-from-child-output test | 3 controls |
+| tail retention swapped for head | 2 tail-retention tests | rest |
+| stall error overwritten by child | stall-must-lead assertion | rest |
+| raced-success branch removed from `stalledApplyResult` | raced-success subtest | sibling subtest |
+| volume provider snapshot persisted | 3 settled-status tests | 36 |
+| legacy `pendingReleaseSeq` emission restored | 3 absent-field assertions | rest |
+
+### Instruction-surface delta (`pnpm quality:agent-context-budget`)
+
+Rule 75 is a root STUB plus a scoped full copy, so `claude-root-surface` grows 199,309 →
+199,569 chars (**+260 chars / ~+75 tokens**). As a full root rule it would have been 209,489
+(**+10,180 chars / ~+2,899 tokens**) on every session's startup context.
+`apps-api-scoped-rules` 210,407 → 223,047 chars, loaded by path rather than at startup.
+
+### Request I/O budget (rule 60)
+
+`GET /api/nodes/:id/deploy-release` gains, per route that LOSES the create race, at most 2
+extra Cloudflare fetches (one re-resolve + one PUT), bounded by
+`DNS_UPSERT_RACE_MAX_RETRIES = 1`. Unraced routes add zero. `createNodeBackendDNSRecord` adds
+at most 2 on conflict (one lookup + one conditional PATCH) and zero otherwise. These are
+Cloudflare API calls, not D1 round-trips, and they occur only on the conflict path — which
+previously 500'd the whole request.
+
+### Known composition gap (accepted)
+
+Acceptance criterion 3's *persistence* half — the returned winner id reaching
+`nodes.backend_dns_record_id` — is proven by composition rather than one test:
+`createNodeBackendDNSRecord`'s conflict recovery is tested directly, and the persistence line
+(`node-lifecycle.ts:452`) is pre-existing code this change does not touch. Raised as LOW by
+the task-completion-validator and accepted.
+
+## Staging verification (partial — merge is blocked)
+
+Staging deploy `35431702939` succeeded against `258b6ae42`. The deployed worker reports
+`VM_AGENT_REQUIRED_VERSION=258b6ae423c8fee2090ccfa2b2e8d672135b71b7`, i.e. this branch's HEAD.
+
+### Verified live on staging
+
+| Fix | Evidence |
+|---|---|
+| 2 — node-backend DNS create, and the `dns.ts` → 4-module split | Two nodes provisioned under `agent_version=258b6ae423c8` (this HEAD) each got a real record: `01m2wcsxmb4ccr0awkjb2ggkq6.vm.sammy.party` → `49.12.106.28` and `01m2wch7ansdptm2kqe63y7q3j.vm.sammy.party` → `159.69.248.202`, both `type=A`, `proxied=true`, read back from the Cloudflare zone by record id. Both nodes `running`/`healthy` with heartbeats <60 s old. |
+| VM agent boots from this branch (rule 27 / Phase 6b) | Same two VMs: real Hetzner instances running the binary built from this HEAD, heartbeating the control plane. |
+| 6 — control plane stops emitting the duplicate | The **deployed** `sam-api-staging` bundle contains **0** occurrences of `pendingReleaseSeq` and 4 of `pendingReleases`. Discriminating: the deployment block is present; specifically the legacy field is gone. |
+| 1 / 2 — tolerance is deployed | The deployed bundle contains `81057`, `81058`, `dns.app_route_upsert_race_retry`, `dns.node_backend_create_race_resolved`, `dns.app_route_ambiguous_records`, `dns.conflict_lookup_failed`. |
+
+### NOT verified live — blocked
+
+The deployment **apply** path could not be exercised. Every release submission fails ~2 s later
+with a pre-existing defect:
+
+```
+Deployment node placement failed: D1_ERROR: Expression tree is too large (maximum depth 100): SQLITE_ERROR
+```
+
+Reproduced 3/3 (08:45:07Z, 08:49:19Z, 08:53:06Z), with and without a named volume. It is raised
+inside `provisionDeploymentNode`, and this branch touches **no** provisioning, placement or
+capacity file. Filed as
+`tasks/backlog/2026-09-19-deployment-provisioning-expression-tree-too-large.md`.
+
+That leaves these unverified in their live form: fix 1's `Promise.all` app-route upsert, fix 3's
+`claimJob`, fix 4's compose liveness watchdog, fix 5's volume `attached` status, and fix 6's
+agent-side fallback. All are covered by unit/integration tests proven discriminating, and fix 5
+additionally by production D1 evidence — but none has run on a real deployment node.
+
+Per `.claude/rules/30-never-ship-broken-features.md` and policy `86348737`, this PR must NOT be
+merged on that basis. `needs-human-review` applied; awaiting a decision.
+
+### Staging resource cleanup
+
+All resources created by this verification were deleted: 4 throwaway environments, 3 stale
+deployment node rows (none had a `provider_instance_id`, so no Hetzner VM was ever created for
+them), and 1 provider volume. Confirmed zero `pw-deploy-%` environments, zero deployment-role
+nodes and zero recent volumes remain. The 3 workspace nodes still on staging belong to another
+agent and were left untouched.
