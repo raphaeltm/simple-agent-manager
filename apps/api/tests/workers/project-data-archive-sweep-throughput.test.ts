@@ -21,6 +21,10 @@
  * same-role runs exist so `chat_messages_grouped` is actually populated. Uniform 20-byte
  * alternating rows would put the chunker on different byte and row boundaries than production
  * and would understate the write estimate that gates the reservation.
+ *
+ * Bodies are deterministic but VARIED, not a repeated character. `'a'.repeat(2048)` gzips to
+ * almost nothing, which would shrink every R2 chunk and understate both the compression cost
+ * and the bytes moved — the opposite of what a capacity fixture should do.
  */
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
@@ -57,6 +61,34 @@ type SeededMessage = {
 };
 
 /**
+ * Deterministic pseudo-random prose, seeded per row.
+ *
+ * A repeated character compresses roughly a thousand to one; real agent output compresses
+ * about three or four to one. Using the former would let every chunk hold far more rows than
+ * production and quietly turn a capacity fixture into a trivial one. A tiny LCG over a small
+ * vocabulary is reproducible across runs (so failures are debuggable) while still producing
+ * entropy in the range gzip actually sees.
+ */
+const VOCAB = [
+  'workspace', 'session', 'archive', 'chunk', 'migration', 'durable', 'object', 'storage',
+  'reclaim', 'ceiling', 'budget', 'candidate', 'transcript', 'sweep', 'shard', 'manifest',
+];
+
+function variedBody(seed: number, approxBytes: number): string {
+  let state = (seed * 2_654_435_761) % 2_147_483_647;
+  const words: string[] = [];
+  let length = 0;
+  while (length < approxBytes) {
+    state = (state * 1_103_515_245 + 12_345) % 2_147_483_647;
+    const word = VOCAB[state % VOCAB.length];
+    const suffix = state % 97;
+    words.push(`${word}${suffix}`);
+    length += word.length + 3;
+  }
+  return words.join(' ');
+}
+
+/**
  * Production-shaped rows: a short user turn, then a run of two long assistant turns (so
  * grouping has consecutive same-role rows to merge), with a tool call carrying real JSON
  * every `TOOL_EVERY` rows. Assistant bodies are ~2 KB, which is the order of magnitude the
@@ -74,7 +106,7 @@ function messagesFor(prefix: string, count: number): SeededMessage[] {
         content: `${prefix} tool call ${index}`,
         toolMetadata: JSON.stringify({
           title: `Read file ${index}`,
-          content: [{ type: 'text', text: `${prefix} tool result ${index} ${'r'.repeat(400)}` }],
+          content: [{ type: 'text', text: `${prefix} tool result ${index} ${variedBody(index * 7 + 1, 400)}` }],
         }),
         timestamp: new Date(3_000_000 + index * 1_000).toISOString(),
         sequence: index + 1,
@@ -85,7 +117,7 @@ function messagesFor(prefix: string, count: number): SeededMessage[] {
       role: isUser ? ('user' as const) : ('assistant' as const),
       content: isUser
         ? `${prefix} user turn ${index}`
-        : `${prefix} assistant turn ${index} ${'a'.repeat(2_048)}`,
+        : `${prefix} assistant turn ${index} ${variedBody(index, 2_048)}`,
       toolMetadata: null,
       timestamp: new Date(3_000_000 + index * 1_000).toISOString(),
       sequence: index + 1,
@@ -249,19 +281,37 @@ async function expectTranscriptPreserved(
   expect(read.map((row) => String(row.content))).toEqual(seeded.map((message) => message.content));
 
   // Tool payloads travel with the transcript rather than being dropped on the way to R2.
+  //
+  // The count assertion covers every tool row; the payload fetch samples FIRST, MIDDLE and LAST
+  // rather than all of them. That is a deliberate bound, not full coverage: one R2 read per tool
+  // would be thousands of reads for a ceiling-sized session. Three samples spanning the whole
+  // session cross distinct chunks (chunks hold at most CHUNK_ROWS=500 rows), so a chunk-boundary
+  // defect that dropped or misordered payloads in the middle of the session is still caught.
   const seededTools = seeded.filter((message) => message.toolMetadata !== null);
   expect(seededTools.length).toBeGreaterThan(0);
   const readTools = read.filter((row) => row.role === 'tool');
   expect(readTools).toHaveLength(seededTools.length);
-  const firstArchivedTool = await projectDataService.getMessageToolContent(
-    testEnv,
-    projectId,
-    sessionId,
-    seededTools[0].messageId
-  );
-  expect(firstArchivedTool).toMatchObject({
-    content: JSON.parse(seededTools[0].toolMetadata as string).content,
-  });
+
+  const sampledTools = [
+    seededTools[0],
+    seededTools[Math.floor(seededTools.length / 2)],
+    seededTools[seededTools.length - 1],
+  ];
+  // The samples must genuinely land in different chunks, or "first/middle/last" proves nothing
+  // more than "first" does. Chunks hold at most CHUNK_ROWS=500 rows, so a session spanning more
+  // than two chunks puts its first, middle and last rows in three distinct ones.
+  expect(seeded.length).toBeGreaterThan(2 * 500);
+  for (const tool of sampledTools) {
+    const archived = await projectDataService.getMessageToolContent(
+      testEnv,
+      projectId,
+      sessionId,
+      tool.messageId
+    );
+    expect(archived).toMatchObject({
+      content: JSON.parse(tool.toolMetadata as string).content,
+    });
+  }
 
   // Search resolves through the archive shard, session-scoped and project-wide.
   const scoped = await projectDataService.searchMessages(
