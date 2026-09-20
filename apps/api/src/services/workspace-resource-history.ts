@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: cohesive resource-history storage/read service; split after first production hardening pass when the chunk codecs and D1/R2 repository boundaries settle.
 import { and, desc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 

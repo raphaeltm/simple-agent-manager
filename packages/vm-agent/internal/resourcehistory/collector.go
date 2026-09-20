@@ -1,5 +1,7 @@
 package resourcehistory
 
+// FILE SIZE EXCEPTION: cohesive VM resource-history collector covering sampling, chunking, spool, and upload; split after production validation fixes settle the collector boundary.
+
 import (
 	"bytes"
 	"compress/gzip"

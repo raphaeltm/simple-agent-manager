@@ -60,7 +60,7 @@ The implementation must not repeat current ProjectData storage problems. Raw sam
 - [x] Benchmark compression ratio, bytes per workspace-hour, write/read request estimates, bounded D1 growth, collector CPU overhead, and failure cases.
 - [x] Run relevant quality checks: VM-agent Go tests, API unit/integration tests, web typecheck/tests, lint/typecheck/build as appropriate.
 - [x] Run local specialist reviews: test-engineer, go-specialist, cloudflare-specialist, security-auditor, ui-ux-specialist, constitution-validator/env/doc checks as applicable. Findings were addressed in code and tests before staging.
-- [ ] Coordinate staging, deploy branch, run a real VM telemetry/upload/read/tool-span scenario, capture desktop/mobile Playwright evidence, and clean up staging resources. *(Deploy and real VM scenario complete; cleanup of empty node `01M2YZJN7Z4XZCZYPFVD29FRS8` is pending token-login rate-limit reset.)*
+- [x] Coordinate staging, deploy branch, run a real VM telemetry/upload/read/tool-span scenario, capture desktop/mobile Playwright evidence, and clean up staging resources.
 - [ ] Create PR, wait for CI, request CodeRabbit once via label, address feedback, merge under normal gates, monitor production deploy, and verify production behavior.
 
 ## Implementation Evidence (2026-09-20)
