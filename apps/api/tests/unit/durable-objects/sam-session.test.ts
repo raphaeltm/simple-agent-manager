@@ -236,7 +236,7 @@ describe('SAM Tool Definitions', () => {
   it('exports tool definitions in Anthropic native format', async () => {
     const { SAM_TOOLS } = await import('../../../src/durable-objects/sam-session/tools');
 
-    expect(SAM_TOOLS).toHaveLength(31);
+    expect(SAM_TOOLS).toHaveLength(32);
 
     for (const tool of SAM_TOOLS) {
       expect(tool).toHaveProperty('name');

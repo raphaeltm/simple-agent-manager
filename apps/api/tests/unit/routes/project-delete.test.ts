@@ -130,6 +130,10 @@ describe('DELETE /api/projects/:id', () => {
       list: vi.fn().mockResolvedValue({ objects: [], truncated: false }),
       delete: vi.fn().mockResolvedValue(undefined),
     } as any,
+    PROJECT_DATA_ARCHIVE_R2: {
+      list: vi.fn().mockResolvedValue({ objects: [], truncated: false }),
+      delete: vi.fn().mockResolvedValue(undefined),
+    } as any,
   } as Env;
 
   it('returns 200 and success when project is deleted', async () => {
