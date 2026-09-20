@@ -1,8 +1,8 @@
 import { Button, Spinner } from '@simple-agent-manager/ui';
+import { useQuery } from '@tanstack/react-query';
 import { Activity, AlertTriangle, Cpu, Database, HardDrive, MemoryStick, X } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useQuery } from '@tanstack/react-query';
 
 import {
   getSessionResourceHistory,
@@ -171,8 +171,8 @@ function ResourceSparkline({
         ))}
       </svg>
       <div className="mt-2 grid gap-1 text-xs text-fg-muted">
-        <span>CPU: green solid line, normalized to this chunk's CPU peak.</span>
-        <span>RAM: purple dashed line, normalized to this chunk's RAM peak.</span>
+        <span>CPU: green solid line, normalized to the CPU peak for this chunk.</span>
+        <span>RAM: purple dashed line, normalized to the RAM peak for this chunk.</span>
         <span>
           Blue bands: concurrent tool windows. Dashed markers: gaps, counter resets, or OOM samples.
         </span>

@@ -1,7 +1,7 @@
 import type { MessageCommentAction } from '../../lib/api/comments';
 import { ChatTimelineDrawer } from '../chat/ChatTimelineDrawer';
-import { SessionResourceHistoryDrawer } from '../chat/SessionResourceHistoryDrawer';
 import { SessionCommentsDrawer } from '../chat/SessionCommentsDrawer';
+import { SessionResourceHistoryDrawer } from '../chat/SessionResourceHistoryDrawer';
 import type { CommentInboxItem } from './comments/comment-inbox';
 import type { TimelineEntry, TimelineJumpTarget } from './timeline-types';
 
