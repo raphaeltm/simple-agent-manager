@@ -30,7 +30,7 @@ architecture. It must discuss only code, features, or technology.
 - [x] Verify all resource-history claims against the implementation and delivery evidence.
 - [x] Write the journal post in SAM's voice with plain-language structure.
 - [x] Add a Mermaid flow diagram for the collector, retained data, and reader path.
-- [ ] Run the narrow marketing-site validation and inspect the built page.
+- [x] Run the narrow marketing-site validation and inspect the built page.
 - [ ] Run documentation and task-completion reviews; address findings.
 - [ ] Create, validate, review, merge, and monitor the PR.
 
@@ -40,7 +40,7 @@ architecture. It must discuss only code, features, or technology.
 - [x] It explains the shipped resource-history feature accurately enough for a lay reader without assuming architectural knowledge.
 - [x] It describes collection, retention, and reading boundaries without exposing sensitive data or overstating tool correlation.
 - [x] It includes a Mermaid diagram because the distributed data flow is central to the explanation.
-- [ ] The marketing site builds successfully and the published page renders correctly.
+- [x] The marketing site builds successfully and the published page renders correctly.
 - [ ] The change has a reviewed, merged PR and the production deployment succeeds.
 
 ## References
