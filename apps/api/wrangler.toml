@@ -215,13 +215,17 @@ PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS = "1"
 # 2026-09-20: Raised to 12 (was 8). DO storage at 99.74% capacity (~17h to hard limit),
 # Step 2 throughput (8 sessions × 5000 budget) insufficient to outpace +35.6 MB/day ingest.
 # Code default is 10; 12 exceeds it but is well within safe operating range.
-# Target: 20000 msgs/tick × 24 ticks = 480k msgs/day drain capacity;
-# 12 sessions × ~1667 avg msgs each is the expected shape.
+# Target shape: up to 12 candidates per tick, each no larger than the per-candidate
+# message ceiling below. Actual daily drain depends on candidate shape because write
+# reservations include a fixed 1000-unit charge per session plus ancillary rows.
 PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "12"
-# Cumulative message_count of NEW candidates one tick may journal. 20000/tick × 24 ticks =
-# 480k msgs/day capacity, a 4x increase over Step 2's 120k/day. With
-# _DAILY_WRITE_BUDGET=800000 and _WRITE_ESTIMATE_FACTOR=2 the derived affordability ceiling
-# is ~199750 messages; this 20000 is the smaller of the two and is what actually binds.
+# Cumulative message_count of NEW candidates one tick may journal. This is a selector
+# ceiling, not an exact throughput promise: reserveArchiveWrites reserves the
+# estimateArchiveWrites result, computed as 1000 + factor * inventory units per session.
+# Inventory units include raw messages, tool-payload rows, grouped rows, and grouped FTS bytes.
+# With _DAILY_WRITE_BUDGET=800000, _WRITE_ESTIMATE_FACTOR=2, and 100% overhead headroom,
+# the derived per-candidate message ceiling is much higher than 20000 for ordinary
+# candidates, so this explicit sweep budget is the smaller limit and is what binds.
 #
 # This budget is ALSO the per-candidate ceiling (`sweepMessageCeiling` = min(this, derived
 # affordability)), so it caps the maximum session size the sweep will attempt.
