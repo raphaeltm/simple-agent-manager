@@ -212,29 +212,49 @@ PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS = "1"
 # gate is only checked BETWEEN candidates. A refused candidate opens no fence and consumes
 # no slot.
 #
-# 2026-09-20: Raised to 12 (was 8). DO storage at 99.74% capacity (~17h to hard limit),
-# Step 2 throughput (8 sessions × 5000 budget) insufficient to outpace +35.6 MB/day ingest.
-# Code default is 10; 12 exceeds it but is well within safe operating range.
-# Target shape: up to 12 candidates per tick, each no larger than the per-candidate
-# message ceiling below. Actual daily drain depends on candidate shape because write
-# reservations include a fixed 1000-unit charge per session plus ancillary rows.
+# 2026-09-20: Raised to 12 (was 8). Headroom only — this value does NOT currently bind, and
+# raising it buys no throughput on its own. Measured in production the same day: largest-first
+# selection under a cumulative message budget fences ONE candidate that consumes nearly the
+# whole budget, and that candidate takes 20-37s (`project_data_archive_candidate_migrated`
+# totalMs), so the 10s _WALL_TIME_MS gate ends the tick before a second candidate is reached.
+# What 12 does change is the reclaimable-migration limit and the candidate over-fetch LIMIT
+# (min(limit, _SWEEP_PROJECTS * this) + _SWEEP_FALLTHROUGH_DEPTH), i.e. how much in-flight work
+# one tick can resume. Code default is 10. Do not cite this value as a throughput lever without
+# first raising _WALL_TIME_MS above a single candidate's real duration.
 PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "12"
 # Cumulative message_count of NEW candidates one tick may journal. This is a selector
 # ceiling, not an exact throughput promise: reserveArchiveWrites reserves the
 # estimateArchiveWrites result, computed as 1000 + factor * inventory units per session.
 # Inventory units include raw messages, tool-payload rows, grouped rows, and grouped FTS bytes.
-# With _DAILY_WRITE_BUDGET=800000, _WRITE_ESTIMATE_FACTOR=2, and 100% overhead headroom,
-# the derived per-candidate message ceiling is much higher than 20000 for ordinary
-# candidates, so this explicit sweep budget is the smaller limit and is what binds.
+# With _DAILY_WRITE_BUDGET=800000, _WRITE_ESTIMATE_FACTOR=2 and 100% overhead headroom the
+# derived per-candidate ceiling is 199750 messages, so this explicit sweep budget is the
+# smaller limit and is what selects.
 #
 # This budget is ALSO the per-candidate ceiling (`sweepMessageCeiling` = min(this, derived
-# affordability)), so it caps the maximum session size the sweep will attempt.
+# affordability)), and when _COMPACT_ENABLED is true selectCandidates binds it into
+# `AND ss.message_count <= ?`. A session larger than this is therefore not deferred — it is
+# INVISIBLE to every tick until the budget is raised.
 #
-# 2026-09-20: Raised to 20000 (was 5000). DO storage at 99.74% capacity (~17h to hard
-# limit), Step 2 throughput insufficient. This matches the code default
-# (PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET = 20_000). The per-chunk deadline fix
-# (compact-archive.ts perChunkTimeoutMs) is deployed and verified, making larger budgets
-# safe. MAX is 5_000_000.
+# 2026-09-20: Raised to 20000 (was 5000), matching the code default
+# (PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET). MAX is 5_000_000.
+# Measured in production D1 the same morning, root ProjectData at 9.98 GB / 10 GB:
+#   - 306 eligible SAM sessions holding 2,341,731 messages sat in the 5k-20k band, i.e. 40%
+#     of that project's eligible backlog, unreachable at 5000 for as long as it stood.
+#   - Root-DO ingest 36.0 MB/day and reclaim ~364 bytes per archived message, both from a
+#     least-squares fit over 98 hourly project_data_storage_telemetry_history intervals.
+#   - The fixed 1000-unit per-session charge amortises over 4x more messages, so bigger
+#     sessions are the better buy per write. At the measured 2.17 units/message a ceiling-sized
+#     candidate reserves ~87,800 writes, so the 800000 allowance now admits ~9 sessions/day —
+#     fewer than the 24 hourly ticks, so _DAILY_WRITE_BUDGET becomes the binding constraint and
+#     the back half of the day reports `window_exhausted` (normal backpressure, not an alert).
+#     Daily ceiling moves from 24x5000 = 120k to ~9x20000 = 180k messages. Pinned by
+#     tests/unit/project-data-archive/sweep-message-budget-shipped.test.ts.
+# Safety: 20000 is ~4x the largest compact (r2-gzip-v1) session production had ever published
+# (4,994). A ceiling-sized session is proven to complete copy/seal/manifest/finalize against
+# real R2 and DO SQLite in tests/workers/project-data-archive-sweep-throughput.test.ts. The
+# deployed per-chunk R2 deadline (compact-archive.ts perChunkTimeoutMs, PR #2094) is what makes
+# the ~40 chunks safe. Extrapolating the production phase timings (totalMs ~= 5783 + 6.0 *
+# messages) puts a ceiling-sized tick at ~126s against _LEASE_MS = 300000.
 PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "20000"
 # Assumed percentage by which a session's write estimate exceeds its message_count (archived
 # tool payloads, grouped rows and FTS units). Reserved as headroom when the per-candidate

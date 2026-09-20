@@ -9,15 +9,30 @@
  *
  * Run: pnpm test:workers
  */
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
+import * as TOML from '@iarna/toml';
 import { defineConfig } from 'vitest/config';
 
 const d1Migrations = await readD1Migrations(resolve(__dirname, './src/db/migrations'));
 const observabilityD1Migrations = await readD1Migrations(
   resolve(__dirname, './src/db/migrations/observability')
 );
+
+/**
+ * The checked-in top-level `[vars]` table, so a Worker test can assert against the value this
+ * repository actually SHIPS instead of a number retyped into the test. `node:fs` is unavailable
+ * inside workerd, so the read has to happen here and travel through `provide`. Same file and
+ * same structural parse that `scripts/deploy/sync-wrangler-config.ts` uses, so a reflow or an
+ * inline comment cannot change what a test sees (`.claude/rules/70`).
+ */
+const shippedWorkerVars = (
+  TOML.parse(readFileSync(resolve(__dirname, './wrangler.toml'), 'utf-8')) as {
+    vars?: Record<string, unknown>;
+  }
+).vars ?? {};
 
 export default defineConfig({
   resolve: {
@@ -151,6 +166,7 @@ export default defineConfig({
     provide: {
       D1_MIGRATIONS_JSON: JSON.stringify(d1Migrations),
       OBSERVABILITY_D1_MIGRATIONS_JSON: JSON.stringify(observabilityD1Migrations),
+      SHIPPED_WORKER_VARS_JSON: JSON.stringify(shippedWorkerVars),
     },
     // Recovery sweeps perform real DO + D1 + waitUntil cleanup work; keep this
     // bounded explicitly instead of relying on Vitest's 5s unit-test default.
