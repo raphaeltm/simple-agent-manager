@@ -25,6 +25,18 @@ export const SHIPPED_SWEEP_MESSAGE_BUDGET = 10_000;
 export const PREVIOUS_SWEEP_MESSAGE_BUDGET = 5_000;
 
 /**
+ * The per-tick session slot count `apps/api/wrangler.toml` ships.
+ *
+ * Bound to the shipped value for the same reason the ceiling is: the Worker test's `sweepEnv`
+ * has to reproduce the deployed configuration, and a hardcoded copy would let a later edit
+ * leave the suite green while it exercised a shape that is no longer shipped
+ * (`.claude/rules/70`). Note this value does NOT currently bind throughput — the wall-time
+ * gate ends the tick after the first candidate — so it is pinned for fidelity, not because
+ * changing it would change the drain.
+ */
+export const SHIPPED_SWEEP_SESSIONS = 8;
+
+/**
  * A candidate size beyond the shipped ceiling, run as an experiment rather than as a claim
  * about shipped config. It exists to measure whether the compact state machine stays
  * correct at 4x the largest session production has ever published (4,994), so a later

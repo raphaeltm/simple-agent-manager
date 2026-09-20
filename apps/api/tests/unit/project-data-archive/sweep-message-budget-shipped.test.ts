@@ -45,6 +45,7 @@ import {
 import {
   PREVIOUS_SWEEP_MESSAGE_BUDGET,
   SHIPPED_SWEEP_MESSAGE_BUDGET,
+  SHIPPED_SWEEP_SESSIONS,
 } from '../../helpers/archive-sweep-ceiling';
 import { readShippedVar, shippedBudgetEnv } from '../../helpers/shipped-archive-budget';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -109,6 +110,16 @@ describe('shipped archive sweep message budget', () => {
     // ceiling (`.claude/rules/70`).
     expect(Number(readShippedVar('PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET'))).toBe(
       SHIPPED_SWEEP_MESSAGE_BUDGET
+    );
+  });
+
+  it('pins the session slot count the Worker tests reproduce', () => {
+    // `sweepEnv` in the Worker test has to stand in for the deployed configuration, and every
+    // value in it that is hardcoded rather than derived is a value a later `wrangler.toml` edit
+    // can silently desynchronise. The message budget already had this guard; the slot count did
+    // not, which is the gap CodeRabbit caught on 2026-09-20.
+    expect(Number(readShippedVar('PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS'))).toBe(
+      SHIPPED_SWEEP_SESSIONS
     );
   });
 
