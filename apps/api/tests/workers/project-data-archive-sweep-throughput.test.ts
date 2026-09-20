@@ -1,27 +1,38 @@
 /**
  * The sweep message budget is a SELECTION PREDICATE, not just a pacing knob.
  *
- * `selectCandidates` binds `config.sweepMessageCeiling` into
- * `AND ss.message_count <= ?` whenever `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED` is `true`, so a
- * session larger than the budget is not deferred — it is invisible to every tick for as long
- * as the budget stands. Measured in production D1 on 2026-09-20 while the root ProjectData
- * object sat at 9.98 GB of its 10 GB configured limit: at the then-deployed budget of 5000,
- * 306 eligible SAM sessions holding 2,341,731 messages (40% of that project's eligible
- * backlog) could never be selected at all.
+ * `selectCandidates` binds `config.sweepMessageCeiling` into `AND ss.message_count <= ?`
+ * whenever `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED` is `true`, so a session larger than the
+ * budget is not deferred — it is invisible to every tick for as long as the budget stands.
+ * Both cases here drive the real `runProjectDataArchiveSharding` against real DO SQLite, real
+ * D1 and the real R2 binding. Neither tells the sweep which candidate to take: selection,
+ * estimation, reservation, chunking and the source-deletion proof all run for themselves
+ * (`.claude/rules/62`).
  *
- * Both cases below drive the real `runProjectDataArchiveSharding` against real DO SQLite, real
- * D1 and the real R2 binding, over ONE fixture, and differ only in the shipped budget value
- * (`.claude/rules/62`, `.claude/rules/74`). Neither tells the sweep which candidate to take:
- * selection, estimation, reservation, chunking and the source-deletion proof all run for
- * themselves. The first case is the divergence proof — it must fail if the ceiling stops
- * excluding the band — and it carries a liveness assertion beside its absence assertion, so a
- * sweep that migrated nothing at all cannot pass it.
+ * What "it archived" is asserted to mean here is deliberately strict, because the weaker
+ * form — a non-empty hash, a chunk count and a zero source count — is satisfied by an archive
+ * that lost or reordered the transcript. Each case reads the whole conversation back through
+ * the production service path (`projectDataService.getMessages`, which resolves the archive
+ * shard via `resolveExactReadOwner`) and compares it to what was seeded, id for id, in order,
+ * with content and tool payloads intact, then exercises search over the archived copy.
+ *
+ * Fixtures use production-shaped payloads rather than uniform tiny rows: assistant turns carry
+ * multi-KB bodies, a minority of rows are tool calls with JSON `toolMetadata`, and consecutive
+ * same-role runs exist so `chat_messages_grouped` is actually populated. Uniform 20-byte
+ * alternating rows would put the chunker on different byte and row boundaries than production
+ * and would understate the write estimate that gates the reservation.
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, inject,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
 import { runProjectDataArchiveSharding } from '../../src/scheduled/project-data-archive-sharding';
+import * as projectDataService from '../../src/services/project-data';
+import {
+  PREVIOUS_SWEEP_MESSAGE_BUDGET,
+  SHIPPED_SWEEP_MESSAGE_BUDGET,
+  SWEEP_CEILING_EXPERIMENT,
+} from '../helpers/archive-sweep-ceiling';
 import { projectDataStub, readLocation, withArchiveEnv } from './helpers/archive-fixtures';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
@@ -30,71 +41,68 @@ const testEnv = env as unknown as WorkerEnv;
 const OWNER = 'archive-throughput-owner';
 const INSTALLATION = 'archive-throughput-installation';
 
-/**
- * The checked-in `[vars]` table, injected by `vitest.workers.config.ts` because `node:fs` does
- * not exist inside workerd. Reading the shipped value rather than retyping it is what keeps
- * this pair honest: a test that pins a hand-copied 20000 stays green after someone edits
- * `wrangler.toml` (`.claude/rules/70`). Both vars read here were verified absent from the
- * `production` and `staging` GitHub Environments on 2026-09-20, so the checked-in value IS the
- * deployed value.
- */
-const SHIPPED_VARS = JSON.parse(inject<string>('SHIPPED_WORKER_VARS_JSON')) as Record<
-  string,
-  unknown
->;
-
-function shippedVar(name: string): string {
-  const value = SHIPPED_VARS[name];
-  if (typeof value !== 'string') {
-    throw new Error(`${name} is not a string in the [vars] table of apps/api/wrangler.toml`);
-  }
-  return value;
-}
-
-/** The budget production ran until 2026-09-20, and the ceiling that hid the band. */
-const PREVIOUS_SWEEP_MESSAGE_BUDGET = '5000';
-
-/**
- * A session sized to the shipped ceiling itself, not merely somewhere inside the band.
- *
- * The largest compact (`r2-gzip-v1`) session production had ever published as of 2026-09-20
- * was 4,994 messages, so the raised budget is a 4x extrapolation past anything that has run.
- * Seeding the ceiling exactly means the copy/seal/manifest/finalize state machine is exercised
- * at the size the sweep will now actually select — roughly 40 R2 chunks at CHUNK_ROWS=500,
- * against the real binding.
- *
- * What this does NOT establish: workerd under Miniflare has no Cloudflare CPU accounting and
- * no real R2 latency, so a green run here proves correctness at this size (no chunk gaps, hash
- * agreement, complete source deletion) but licenses no claim about the deployed tick's wall
- * clock or `cpu_ms` budget. That question is answered from production `phaseDurationsMs`
- * telemetry and recorded in the task file.
- */
-const BAND_MESSAGE_COUNT = 20_000;
-
-/** Liveness control: comfortably under BOTH budgets, so it moves whatever the ceiling is. */
+/** Liveness control: comfortably under every budget, so it moves whatever the ceiling is. */
 const SMALL_MESSAGE_COUNT = 40;
 
-function messagesFor(prefix: string, count: number) {
-  return Array.from({ length: count }, (_, index) => ({
-    messageId: `${prefix}-${String(index).padStart(5, '0')}`,
-    role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
-    content: `${prefix} payload ${index}`,
-    toolMetadata: null,
-    timestamp: new Date(3_000_000 + index * 1_000).toISOString(),
-    sequence: index + 1,
-  }));
+/** Every 7th row is a tool call, so tool payloads travel with the transcript. */
+const TOOL_EVERY = 7;
+
+type SeededMessage = {
+  messageId: string;
+  role: 'user' | 'assistant' | 'tool';
+  content: string;
+  toolMetadata: string | null;
+  timestamp: string;
+  sequence: number;
+};
+
+/**
+ * Production-shaped rows: a short user turn, then a run of two long assistant turns (so
+ * grouping has consecutive same-role rows to merge), with a tool call carrying real JSON
+ * every `TOOL_EVERY` rows. Assistant bodies are ~2 KB, which is the order of magnitude the
+ * production `r2-gzip-v1` chunker sees; the 2 MiB compact chunk cap and the 500-row cap then
+ * both matter, as they do in production.
+ */
+function messagesFor(prefix: string, count: number): SeededMessage[] {
+  return Array.from({ length: count }, (_, index) => {
+    const isTool = index % TOOL_EVERY === TOOL_EVERY - 1;
+    const isUser = index % 3 === 0;
+    if (isTool) {
+      return {
+        messageId: `${prefix}-${String(index).padStart(5, '0')}`,
+        role: 'tool' as const,
+        content: `${prefix} tool call ${index}`,
+        toolMetadata: JSON.stringify({
+          title: `Read file ${index}`,
+          content: [{ type: 'text', text: `${prefix} tool result ${index} ${'r'.repeat(400)}` }],
+        }),
+        timestamp: new Date(3_000_000 + index * 1_000).toISOString(),
+        sequence: index + 1,
+      };
+    }
+    return {
+      messageId: `${prefix}-${String(index).padStart(5, '0')}`,
+      role: isUser ? ('user' as const) : ('assistant' as const),
+      content: isUser
+        ? `${prefix} user turn ${index}`
+        : `${prefix} assistant turn ${index} ${'a'.repeat(2_048)}`,
+      toolMetadata: null,
+      timestamp: new Date(3_000_000 + index * 1_000).toISOString(),
+      sequence: index + 1,
+    };
+  });
 }
 
 async function seedTerminalSession(
   source: DurableObjectStub<ProjectDataTestDouble>,
   prefix: string,
   count: number
-): Promise<{ sessionId: string; messageCount: number }> {
+): Promise<{ sessionId: string; messageCount: number; seeded: SeededMessage[] }> {
   const sessionId = await source.createSession(null, prefix);
-  // Persist in slices: one 20000-row RPC argument exceeds the DO RPC size budget.
-  const messages = messagesFor(prefix, count);
-  for (let offset = 0; offset < messages.length; offset += 500) {
-    await source.persistMessageBatch(sessionId, messages.slice(offset, offset + 500));
+  const seeded = messagesFor(prefix, count);
+  // Persist in slices: one full-session RPC argument exceeds the DO RPC size budget.
+  for (let offset = 0; offset < seeded.length; offset += 250) {
+    await source.persistMessageBatch(sessionId, seeded.slice(offset, offset + 250));
   }
   await source.stopSession(sessionId);
   await source.runSummarySyncForTest();
@@ -104,7 +112,7 @@ async function seedTerminalSession(
     .bind(sessionId)
     .first<{ message_count: number }>();
   if (!row) throw new Error(`No session_summaries row for ${prefix}`);
-  return { sessionId, messageCount: row.message_count };
+  return { sessionId, messageCount: row.message_count, seeded };
 }
 
 /**
@@ -131,10 +139,11 @@ async function isolateSweepFixture(projectId: string): Promise<void> {
 }
 
 /**
- * The shipped production shape, minus the two values under test. The grace period is the one
- * deliberate divergence: production holds sessions for 7 days and a test cannot wait.
+ * The shipped production shape, minus the budget under test. The grace period and cadence are
+ * the deliberate divergences: production holds sessions for 7 days and sweeps hourly, and a
+ * test cannot wait for either.
  */
-function sweepEnv(messageBudget: string, sweepSessions: string) {
+function sweepEnv(messageBudget: number) {
   return {
     PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
     PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
@@ -142,8 +151,8 @@ function sweepEnv(messageBudget: string, sweepSessions: string) {
     PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
     PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS: '1',
     PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS: '1',
-    PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: sweepSessions,
-    PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: messageBudget,
+    PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '8',
+    PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: String(messageBudget),
     PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: '100',
     PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: '2',
     PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '800000',
@@ -165,76 +174,242 @@ async function countTargetRawChunks(ownerName: string, sessionId: string): Promi
   );
 }
 
-describe('archive sweep message budget as a selection ceiling', () => {
-  it('hides a 5k-20k band session at the previous 5000 budget and migrates it at the shipped budget', async () => {
-    const projectId = `archive-throughput-${crypto.randomUUID()}`;
-    await seedUser(OWNER);
-    await seedInstallation(INSTALLATION, OWNER);
-    await seedProject(projectId, OWNER, INSTALLATION, { name: `Archive Throughput ${projectId}` });
-    const source = projectDataStub(projectId);
-    await source.ensureProjectId(projectId);
+/**
+ * Bytes the root object's own SQLite reports.
+ *
+ * `getMessageCount(...) === 0` proves the ROWS were deleted; it says nothing about whether
+ * the object gave the space back. workerd's `getDatabaseSize` (`src/workerd/api/sql.c++`)
+ * subtracts `pragma_freelist_count` from `page_count` before multiplying by the page size, so
+ * this does fall when pages are freed — the same metric `project_data_storage_telemetry` reports
+ * in production, which is what makes a before/after comparison here meaningful rather than
+ * decorative.
+ */
+async function databaseSizeBytes(ownerName: string): Promise<number> {
+  const stub = projectDataStub(ownerName);
+  return runInDurableObject(stub, async (_instance, state) => Number(state.storage.sql.databaseSize));
+}
 
-    const band = await seedTerminalSession(source, 'band', BAND_MESSAGE_COUNT);
-    const small = await seedTerminalSession(source, 'small', SMALL_MESSAGE_COUNT);
-    await isolateSweepFixture(projectId);
+/**
+ * Read the whole conversation back through the production service path, oldest first, PAGING
+ * the way a client has to.
+ *
+ * A single-call read is not an option and the failure is instructive: a 20000-message session
+ * with production-shaped bodies exceeds the Durable Object RPC serialization budget, and
+ * `messages.rpc_size_guard_truncated` silently trims the page (observed at 12,035 of 20,000
+ * rows / 31.4 MB). That guard is the documented behaviour of `.claude/rules/50`, not an
+ * archive defect — but a test that asked for everything at once would have mistaken it for
+ * data loss. `after` is a real cursor (keyed on `createdAt`), so unlike an offset it can
+ * resume the trimmed tail.
+ */
+const TRANSCRIPT_PAGE_LIMIT = 2_000;
 
-    // Fixture preconditions. Without these the pair could stop discriminating — if the band
-    // session ever fell under the previous budget, the first tick would migrate it and the
-    // second case would prove nothing.
-    expect(band.messageCount).toBeGreaterThan(Number(PREVIOUS_SWEEP_MESSAGE_BUDGET));
-    expect(band.messageCount).toBe(BAND_MESSAGE_COUNT);
-    expect(small.messageCount).toBe(SMALL_MESSAGE_COUNT);
-
-    // --- Tick 1: the previous budget. The band session is excluded by the SQL ceiling. ---
-    await withArchiveEnv(sweepEnv(PREVIOUS_SWEEP_MESSAGE_BUDGET, '8'), async () => {
-      const stats = await runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000));
-
-      expect(stats).toMatchObject({ skipped: false, failed: 0 });
-      expect(stats.messageCeiling).toBe(Number(PREVIOUS_SWEEP_MESSAGE_BUDGET));
-      // Absence: the band session did not move and is still readable in root.
-      expect(await readLocation(projectId, band.sessionId)).toBeNull();
-      expect(await source.getMessageCount(band.sessionId)).toBe(BAND_MESSAGE_COUNT);
-      // Liveness beside it (`.claude/rules/62`): the tick was not merely dead. It selected,
-      // reserved and published the one candidate the ceiling did admit.
-      expect(stats.migrated).toBe(1);
-      expect(await readLocation(projectId, small.sessionId)).toMatchObject({
-        location_state: 'archive_shard',
-      });
-      // The exclusion is the SELECTOR, not the write budget: the band session never reached
-      // `reserveArchiveWrites`, so no refusal was recorded for it.
-      expect(stats.budgetUnaffordable).toBe(0);
-      expect(stats.budgetWindowExhausted).toBe(0);
-    });
-
-    // --- Tick 2: the shipped budget, same fixture. Only the budget changed. ---
-    const shippedBudget = shippedVar('PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET');
-    // The shipped budget must actually admit the band, or this half proves nothing.
-    expect(Number(shippedBudget)).toBeGreaterThanOrEqual(BAND_MESSAGE_COUNT);
-
-    await withArchiveEnv(
-      sweepEnv(shippedBudget, shippedVar('PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS')),
-      async () => {
-      const stats = await runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 120_000));
-
-      expect(stats).toMatchObject({ skipped: false, migrated: 1, failed: 0, refused: 0 });
-      expect(stats.messageCeiling).toBe(Number(shippedBudget));
-
-      const location = await readLocation(projectId, band.sessionId);
-      expect(location).toMatchObject({ location_state: 'archive_shard' });
-      // Published means the whole state machine ran: intent, chunk copy, seal, recovery
-      // manifest, source deletion proof, publish. An aggregate hash only exists after seal.
-      expect(location?.target_aggregate_sha256).toMatch(/^[0-9a-f]{64}$/);
-      // The source object actually gave the bytes back — the point of the whole sweep.
-      expect(await source.getMessageCount(band.sessionId)).toBe(0);
-      // Chunked rather than moved in one oversized RPC: 20000 rows at CHUNK_ROWS=500.
-      expect(
-        await countTargetRawChunks(location?.owner_name ?? '', band.sessionId)
-      ).toBeGreaterThanOrEqual(BAND_MESSAGE_COUNT / 500);
-      }
+async function readArchivedTranscript(projectId: string, sessionId: string, expected: number) {
+  const rows: Record<string, unknown>[] = [];
+  let after: number | null = null;
+  // Bounded so a cursor that stops advancing fails the test instead of hanging the suite.
+  for (let page = 0; page <= Math.ceil(expected / TRANSCRIPT_PAGE_LIMIT) + 1; page += 1) {
+    const result = await projectDataService.getMessages(
+      testEnv,
+      projectId,
+      sessionId,
+      TRANSCRIPT_PAGE_LIMIT,
+      null,
+      after,
+      undefined,
+      false,
+      'asc'
     );
-    // The small session from tick 1 is still archived — tick 2 did not disturb it.
+    if (result.messages.length === 0) return rows;
+    rows.push(...result.messages);
+    const last = result.messages.at(-1);
+    const next = Number(last?.createdAt);
+    if (!Number.isFinite(next) || next === after) return rows;
+    after = next;
+  }
+  throw new Error(`transcript paging did not terminate for ${sessionId}`);
+}
+
+/**
+ * The assertion that makes "archived" mean "the conversation survived".
+ *
+ * Compares the post-archive read against the seeded transcript id for id, in order, with
+ * content and tool payloads. A hash-only or count-only check passes for an archive that
+ * dropped the middle of a session or reordered it; this does not.
+ */
+async function expectTranscriptPreserved(
+  projectId: string,
+  sessionId: string,
+  seeded: SeededMessage[]
+): Promise<void> {
+  const read = await readArchivedTranscript(projectId, sessionId, seeded.length);
+
+  expect(read).toHaveLength(seeded.length);
+  expect(read.map((row) => String(row.id))).toEqual(seeded.map((message) => message.messageId));
+  expect(read.map((row) => String(row.role))).toEqual(seeded.map((message) => message.role));
+  expect(read.map((row) => String(row.content))).toEqual(seeded.map((message) => message.content));
+
+  // Tool payloads travel with the transcript rather than being dropped on the way to R2.
+  const seededTools = seeded.filter((message) => message.toolMetadata !== null);
+  expect(seededTools.length).toBeGreaterThan(0);
+  const readTools = read.filter((row) => row.role === 'tool');
+  expect(readTools).toHaveLength(seededTools.length);
+  const firstArchivedTool = await projectDataService.getMessageToolContent(
+    testEnv,
+    projectId,
+    sessionId,
+    seededTools[0].messageId
+  );
+  expect(firstArchivedTool).toMatchObject({
+    content: JSON.parse(seededTools[0].toolMetadata as string).content,
+  });
+
+  // Search resolves through the archive shard, session-scoped and project-wide.
+  const scoped = await projectDataService.searchMessages(
+    testEnv,
+    projectId,
+    'assistant',
+    sessionId
+  );
+  expect(scoped.length).toBeGreaterThan(0);
+  const projectWide = await projectDataService.searchMessages(testEnv, projectId, 'assistant');
+  expect(projectWide.some((row) => row.sessionId === sessionId)).toBe(true);
+}
+
+async function newArchiveProject(prefix: string) {
+  const projectId = `${prefix}-${crypto.randomUUID()}`;
+  await seedUser(OWNER);
+  await seedInstallation(INSTALLATION, OWNER);
+  await seedProject(projectId, OWNER, INSTALLATION, { name: `Archive Throughput ${projectId}` });
+  const source = projectDataStub(projectId);
+  await source.ensureProjectId(projectId);
+  return { projectId, source };
+}
+
+/**
+ * One fixture, two ticks of the real sweep, differing only in the budget. Returns the
+ * source object's database size before and after so the caller can assert physical reclaim.
+ */
+async function runCeilingCase(prefix: string, ceiling: number) {
+  const { projectId, source } = await newArchiveProject(prefix);
+  const band = await seedTerminalSession(source, `${prefix}-band`, ceiling);
+  const small = await seedTerminalSession(source, `${prefix}-small`, SMALL_MESSAGE_COUNT);
+  await isolateSweepFixture(projectId);
+
+  // Fixture preconditions. Without these the pair could stop discriminating — if the band
+  // session ever fell under the previous budget, the first tick would migrate it.
+  expect(band.messageCount).toBe(ceiling);
+  expect(band.messageCount).toBeGreaterThan(PREVIOUS_SWEEP_MESSAGE_BUDGET);
+  expect(small.messageCount).toBe(SMALL_MESSAGE_COUNT);
+
+  // --- Tick 1: the previous budget. The band session is excluded by the SQL ceiling. ---
+  await withArchiveEnv(sweepEnv(PREVIOUS_SWEEP_MESSAGE_BUDGET), async () => {
+    const stats = await runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000));
+
+    expect(stats).toMatchObject({ skipped: false, failed: 0 });
+    expect(stats.messageCeiling).toBe(PREVIOUS_SWEEP_MESSAGE_BUDGET);
+    // Absence: the band session did not move and is still readable in root.
+    expect(await readLocation(projectId, band.sessionId)).toBeNull();
+    expect(await source.getMessageCount(band.sessionId)).toBe(ceiling);
+    // Liveness beside it (`.claude/rules/62`): the tick was not merely dead. It selected,
+    // reserved and published the one candidate the ceiling did admit.
+    expect(stats.migrated).toBe(1);
     expect(await readLocation(projectId, small.sessionId)).toMatchObject({
       location_state: 'archive_shard',
     });
-  }, 180_000);
+    // The exclusion is the SELECTOR, not the write budget: the band session never reached
+    // `reserveArchiveWrites`, so no refusal was recorded for it.
+    expect(stats.budgetUnaffordable).toBe(0);
+    expect(stats.budgetWindowExhausted).toBe(0);
+  });
+
+  // --- Tick 2: the larger budget, same fixture. Only the budget changed. ---
+  //
+  // The retrieval assertions run INSIDE this block on purpose. `resolveExactReadOwner` is
+  // gated on `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED`, so reading outside it routes back to
+  // the root object and fails closed on the source's archive intent — which is a fixture
+  // artefact, not a product behaviour. Production always has the flag on when it reads an
+  // archived session, so the assertions belong where the flag is on (`.claude/rules/62`).
+  const sizeBefore = await databaseSizeBytes(projectId);
+  const startedAt = Date.now();
+  const result = await withArchiveEnv(sweepEnv(ceiling), async () => {
+    const stats = await runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 120_000));
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(stats).toMatchObject({ skipped: false, migrated: 1, failed: 0, refused: 0 });
+    expect(stats.messageCeiling).toBe(ceiling);
+
+    const resolved = await readLocation(projectId, band.sessionId);
+    expect(resolved).toMatchObject({ location_state: 'archive_shard' });
+    // Published means the whole state machine ran: intent, chunk copy, seal, recovery
+    // manifest, source deletion proof, publish. An aggregate hash only exists after seal.
+    expect(resolved?.target_aggregate_sha256).toMatch(/^[0-9a-f]{64}$/);
+    // Chunked rather than moved in one oversized RPC.
+    expect(
+      await countTargetRawChunks(resolved?.owner_name ?? '', band.sessionId)
+    ).toBeGreaterThanOrEqual(ceiling / 500);
+
+    // The rows left the source object...
+    expect(await source.getMessageCount(band.sessionId)).toBe(0);
+    // ...and the conversation is intact on the other side, read the way the app reads it.
+    await expectTranscriptPreserved(projectId, band.sessionId, band.seeded);
+    // ...and the small session archived in tick 1 was not disturbed.
+    expect(await readLocation(projectId, small.sessionId)).toMatchObject({
+      location_state: 'archive_shard',
+    });
+
+    return { elapsedMs, location: resolved };
+  });
+
+  return {
+    projectId,
+    sizeBefore,
+    sizeAfter: await databaseSizeBytes(projectId),
+    elapsedMs: result.elapsedMs,
+    location: result.location,
+  };
+}
+
+describe('archive sweep message budget as a selection ceiling', () => {
+  it(
+    'hides a session above the previous budget and archives it intact at the shipped ceiling',
+    async () => {
+      const result = await runCeilingCase('shipped', SHIPPED_SWEEP_MESSAGE_BUDGET);
+
+      // Physical reclaim, not just row deletion. `getMessageCount === 0` is satisfied by a
+      // delete that never returned pages; `databaseSize` subtracts the freelist, so this
+      // asserts the root object actually shrank — the property production is buying.
+      expect(result.sizeAfter).toBeLessThan(result.sizeBefore);
+    },
+    180_000
+  );
+
+  /**
+   * EXPERIMENT, not a claim about shipped config.
+   *
+   * 20000 is ~4x the largest compact (`r2-gzip-v1`) session production had ever published
+   * (4,994 as of 2026-09-20). This case exists so a later promotion of the shipped ceiling
+   * rests on evidence that the state machine stays correct at that size — roughly 40 R2
+   * chunks, a seal read-back over all of them, and a source deletion proof.
+   *
+   * It does NOT license the promotion on its own. workerd under Miniflare has no Cloudflare
+   * CPU accounting and no real R2 latency, so this says nothing about the deployed tick's
+   * `cpu_ms` or wall clock. Those have to come from a real compact-path run.
+   */
+  it(
+    'keeps a 20000-message session correct end to end (experiment, above the shipped ceiling)',
+    async () => {
+      expect(SWEEP_CEILING_EXPERIMENT).toBeGreaterThan(SHIPPED_SWEEP_MESSAGE_BUDGET);
+
+      const result = await runCeilingCase('experiment', SWEEP_CEILING_EXPERIMENT);
+
+      expect(result.sizeAfter).toBeLessThan(result.sizeBefore);
+      // Recorded for the rollout evidence, not asserted as a production bound: Miniflare
+      // timings are not Cloudflare timings.
+      console.log(
+        `[archive-throughput] ${SWEEP_CEILING_EXPERIMENT}-message migration: ` +
+          `${result.elapsedMs} ms local, root databaseSize ${result.sizeBefore} -> ${result.sizeAfter} bytes`
+      );
+    },
+    300_000
+  );
 });
