@@ -54,9 +54,9 @@ The implementation must not repeat current ProjectData storage problems. Raw sam
 ### Tests And Verification
 
 - [ ] Unit-test cgroup parsing, counter resets, weighted means, percentiles from raw samples, gaps, OOM event handling, compression, checksum, and unsupported fields. *(Partial: cgroup parsing/counters, upload compression/checksum metadata, secret canary, and downsampling spike preservation covered.)*
-- [ ] Unit/integration-test callback auth, tenant isolation, upload abuse, retries/duplicates, truncation, retention, and secret canaries. *(Partial: callback scope binding, invalid upload shape, and raw tool-ID canary covered.)*
-- [ ] Add vertical slice test from VM-style upload through R2/D1 indexing to read API response with realistic multi-tenant state.
-- [ ] Add UI tests and Playwright screenshots for desktop and mobile.
+- [ ] Unit/integration-test callback auth, tenant isolation, upload abuse, retries/duplicates, truncation, retention, and secret canaries. *(Partial: callback scope binding, invalid upload shape, service-level session scoping/idempotent indexing, post-upload R2 cleanup on D1 failure, and raw tool-ID canary covered; retention sweep scenarios still pending.)*
+- [ ] Add vertical slice test from VM-style upload through R2/D1 indexing to read API response with realistic multi-tenant state. *(Partial: SQLite-backed D1/R2 service slice covers upload storage, session-scoped summaries, chunk indexes, and R2 cleanup; route-level read response and VM-agent-to-API end-to-end still pending.)*
+- [x] Add UI tests and Playwright screenshots for desktop and mobile.
 - [x] Benchmark compression ratio, bytes per workspace-hour, write/read request estimates, bounded D1 growth, collector CPU overhead, and failure cases.
 - [x] Run relevant quality checks: VM-agent Go tests, API unit/integration tests, web typecheck/tests, lint/typecheck/build as appropriate.
 - [ ] Run local specialist reviews: task-completion-validator, go-specialist, cloudflare-specialist, security-auditor, ui-ux-specialist, test-engineer, constitution-validator, env-validator, doc-sync-validator as applicable.
@@ -72,6 +72,27 @@ The implementation must not repeat current ProjectData storage problems. Raw sam
 - Benchmark: representative 720-sample/40-tool-span one-hour JSON payload compressed from 106,968 B to 6,299 B (16.98×), about 6.3 KB/workspace-hour and 96 R2 writes/workspace-day at 15-minute chunks.
 - Benchmark: `go test ./internal/resourcehistory -run Test -bench BenchmarkReadCgroupCounters -benchtime=2s` measured cgroup counter reads at ~50,969 ns/op on this VM after adding `pids.current`.
 - Checks: API typecheck; web typecheck; API resource-history unit/route tests; VM-agent `resourcehistory`, `acp`, and `server` tests.
+
+
+## Review Fix Evidence (2026-09-20)
+
+- Packed-node fix: VM-agent resource history now uses a per-workspace collector manager with workspace-scoped spool directories and per-session ACP tool observers, so warm packed nodes do not mix boot workspace telemetry/tool spans with later workspace sessions.
+- Capture robustness: cgroup discovery retries until the workspace container exists, then caches the resolved cgroup path; an early container-not-found no longer permanently marks collection unsupported.
+- Storage scoping: API summary IDs are scoped to session, then task, then workspace; idempotent retries return the persisted summary scope.
+- Orphan cleanup: if R2 upload succeeds but D1 indexing fails, the service now best-effort deletes the just-written R2 object and logs cleanup failure.
+- Storage tests: `apps/api/tests/unit/workspace-resource-history.test.ts` now uses real SQLite-backed D1 tables plus an R2 fake to prove reused-workspace session summaries stay separate and post-upload D1 failures delete R2 objects.
+- R2 docs: added `resource-history/` to reserved application namespace and lifecycle tables.
+
+## UI Visual Evidence (2026-09-20)
+
+- Added resource drawer audit to `apps/web/tests/playwright/session-tool-rail-audit.spec.ts`. It opens the real session rail Resources action, verifies summary state, loads lazy detail, and uses existing overflow/clipping assertions.
+- Command: `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/session-tool-rail-audit.spec.ts --project='iPhone SE (375x667)' --project='Desktop (1280x800)' --grep 'Session resource history drawer'`
+- Screenshots captured:
+  - `.codex/tmp/playwright-screenshots/resource-history-summary-375-375x667.png`
+  - `.codex/tmp/playwright-screenshots/resource-history-detail-375-375x667.png`
+  - `.codex/tmp/playwright-screenshots/resource-history-summary-1280-1280x800.png`
+  - `.codex/tmp/playwright-screenshots/resource-history-detail-1280-1280x800.png`
+- UI/UX rubric: visual hierarchy 4/5, interaction clarity 4/5, mobile usability 4/5, accessibility 4/5, system consistency 4/5.
 
 ## Acceptance Criteria
 
