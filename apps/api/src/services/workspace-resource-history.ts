@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parseJsonRecord } from '../lib/runtime-validation';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { AppError, errors } from '../middleware/error';
 
@@ -291,13 +292,49 @@ async function readBoundedGzipJson(
     offset += chunk.byteLength;
   }
   try {
+    const record = parseJsonRecord(
+      new TextDecoder().decode(merged),
+      'workspace_resource_history.chunk'
+    );
     return {
-      value: JSON.parse(new TextDecoder().decode(merged)) as WorkspaceResourceChunkPayload,
+      value: normalizeChunkPayload(record),
       byteLength: total,
     };
   } catch {
     throw errors.badRequest('Resource history chunk must contain gzip-compressed JSON');
   }
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isResourceSamplePoint(value: unknown): value is ResourceSamplePoint {
+  if (!isJsonObject(value)) return false;
+  return typeof value.t === 'number' && Number.isFinite(value.t);
+}
+
+function isResourceToolSpan(value: unknown): value is ResourceToolSpan {
+  if (!isJsonObject(value)) return false;
+  return typeof value.startedAt === 'number' && Number.isFinite(value.startedAt);
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+function normalizeChunkPayload(record: Record<string, unknown>): WorkspaceResourceChunkPayload {
+  const payload: WorkspaceResourceChunkPayload = { ...record };
+  payload.samples = Array.isArray(record.samples)
+    ? record.samples.filter(isResourceSamplePoint)
+    : undefined;
+  payload.toolSpans = Array.isArray(record.toolSpans)
+    ? record.toolSpans.filter(isResourceToolSpan)
+    : undefined;
+  payload.gaps = Array.isArray(record.gaps) ? record.gaps.filter(isJsonObject) : undefined;
+  payload.notes = stringArray(record.notes);
+  return payload;
 }
 
 function resourceScopeKey(input: { sessionId?: string | null; taskId?: string | null }): string {
