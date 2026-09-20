@@ -99,14 +99,46 @@ The durations above are **wall time**. On CPU:
   days: **594,725 invocations, outcomes only `success` / `clientDisconnected` /
   `responseStreamDisconnected`, no `exceededCpu`, max `cpuTimeP99` 128 ms.** No invocation was
   CPU-killed at the current 5000 ceiling.
-- **The gap.** That figure is an aggregate across all requests, so it cannot isolate the one
-  hourly archive tick. It matters because `writeCompactChunk`
-  (`apps/api/src/project-data-archive/compact-r2.ts`) runs gzip + SHA-256 + gunzip + SHA-256 +
-  `JSON.parse` in the **coordinator's** isolate, inside the single `scheduled()` invocation, with
-  no per-chunk CPU reset — unlike the DO side. At the measured density that is ~25-27 chunks at
-  10,000 (versus ~12 today), so roughly 2x today's coordinator CPU for the copy phase.
-  Before promoting to 20000, pull the coordinator's own scheduled-invocation CPU for the first
-  ticks that pick up a >5000-message candidate rather than relying on the DO-namespace figure.
+- **Per-invocation scheduled CPU — MEASURED, method below.** The aggregate figure above cannot
+  isolate the hourly archive tick, and an aggregate request P99 is not an acceptable substitute
+  (coordinator-side `writeCompactChunk` runs gzip + SHA-256 + gunzip + SHA-256 + `JSON.parse`
+  inside the single `scheduled()` invocation with no per-chunk CPU reset, unlike the DO side).
+
+  `workersInvocationsAdaptive` has NO trigger/event-type dimension — verified by GraphQL
+  introspection, the dimensions are `cacheStatus, coloCode, datetime*, dispatchNamespaceName,
+  environmentName, isDispatcher, isPreview, previewSlug, scriptName, scriptTag, scriptVersion,
+  status, usageModel`. So scheduled invocations cannot be filtered directly. They CAN be
+  attributed, because the archive tick is identifiable by an covariate no HTTP request in this
+  Worker comes near: **wall time**.
+
+  **Method.** Bucket by `datetimeMinute`, select `max { cpuTime wallTime }` and
+  `sum { requests subrequests }`, and key to the minute the
+  `project_data_archive_candidate_migrated` log reports (buckets are by invocation START, so a
+  long tick lands one or two minutes before its completion log). Every neighbouring minute is a
+  control, because the sweep is hourly.
+
+  **Result, 2026-09-20 production, `sam-api-prod`:**
+
+  | Minute | maxWallTime | maxCpuTime | subrequests | migration logged |
+  | --- | --- | --- | --- | --- |
+  | 08:25 | **76 s** | **518 ms** | 300 | 08:26:31, 4,650 msgs, totalMs 23,981 |
+  | 08:22-08:28 controls | 2 s | 15-64 ms | 83-234 | — |
+  | 05:10 | **113 s** | **652 ms** | 138 | 05:12:49, 4,658 msgs, totalMs 37,513 |
+  | 05:11-05:14 controls | 0-1 s | 14-33 ms | 22-38 | — |
+
+  So a ~4,650-message compact migration costs the coordinator **518-652 ms of CPU against the
+  30,000 ms limit — under 2.2%** — and adds roughly 100-160 subrequests for ~12 chunks, against
+  a 10,000-per-invocation ceiling.
+
+  **Caveats.** `workersInvocationsAdaptive` is an ADAPTIVE (sampled) dataset: 2 of the 4 recent
+  ticks surfaced clearly, the other two did not appear above their controls. `max` is a maximum
+  over the bucket, so attribution is an upper bound on that minute rather than a direct
+  per-invocation read. Two samples at one size are a data point, not a curve.
+
+  **Extrapolation, explicitly not a bound.** If CPU scales with chunks, ~26 chunks at 10,000
+  gives ~1.1-1.4 s (~4.7% of budget) and ~52 chunks at 20,000 gives ~2.2-2.8 s (~9%). That is a
+  linear guess from two samples at ~4,650 messages; it is the reason to ship 10000 and measure,
+  not a substitute for measuring.
 
 ### Reclaim rate — NOT validated, do not cite as a forecast
 
