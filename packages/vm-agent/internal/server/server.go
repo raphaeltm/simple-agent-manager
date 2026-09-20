@@ -34,6 +34,7 @@ import (
 	"github.com/workspace/vm-agent/internal/ports"
 	"github.com/workspace/vm-agent/internal/pty"
 	"github.com/workspace/vm-agent/internal/publish"
+	"github.com/workspace/vm-agent/internal/resourcehistory"
 	"github.com/workspace/vm-agent/internal/resourcemon"
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
@@ -90,6 +91,7 @@ type Server struct {
 	resourceMonitor       *resourcemon.Monitor
 	resourceGuard         *resourcemon.ResourceGuard
 	resourceEviction      *resourcemon.EvictionController
+	resourceHistory       *resourcehistory.Collector
 	agentSessions         *agentsessions.Manager
 	acpConfig             acp.GatewayConfig
 	sessionHostMu         sync.Mutex
@@ -605,6 +607,37 @@ func New(cfg *config.Config) (*Server, error) {
 		deployEngines:       make(map[string]*deploy.Engine),
 		deployRetiring:      make(map[string]bool),
 	}
+	if cfg.WorkspaceID != "" && cfg.ProjectID != "" {
+		var containerID func(context.Context) (string, error)
+		if containerDiscoveryInstance != nil {
+			containerID = func(context.Context) (string, error) {
+				return containerDiscoveryInstance.GetContainerID()
+			}
+		}
+		s.resourceHistory = resourcehistory.New(resourcehistory.Config{
+			ControlPlaneURL: cfg.ControlPlaneURL,
+			ProjectID:       cfg.ProjectID,
+			WorkspaceID:     cfg.WorkspaceID,
+			NodeID:          cfg.NodeID,
+			SessionID:       cfg.ChatSessionID,
+			TaskID:          cfg.TaskID,
+			AgentType:       "",
+			Runtime:         "vm",
+			SampleInterval:  cfg.ResourceHistorySampleInterval,
+			ChunkInterval:   cfg.ResourceHistoryChunkInterval,
+			UploadTimeout:   cfg.ResourceHistoryUploadTimeout,
+			SpoolDir:        cfg.ResourceHistorySpoolDir,
+			SpoolMaxBytes:   cfg.ResourceHistorySpoolMaxBytes,
+			MaxSamples:      cfg.ResourceHistoryMaxSamples,
+			ContainerID:     containerID,
+			CallbackToken: func() string {
+				return s.callbackTokenForWorkspace(cfg.WorkspaceID)
+			},
+			HTTPClient: config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
+			Logger:     slog.Default(),
+		})
+		s.acpConfig.ToolLifecycleObserver = s.resourceHistory
+	}
 	if resourceGuard != nil {
 		evictionController, evictionErr := s.newResourceEvictionController()
 		if evictionErr != nil {
@@ -1011,6 +1044,9 @@ func (s *Server) Start() error {
 	s.startNodeHealthReporter()
 	s.startAcpHeartbeatReporter()
 	s.startResourceGuard()
+	if s.resourceHistory != nil {
+		s.resourceHistory.Start(context.Background())
+	}
 
 	// Start error reporter background flush
 	s.errorReporter.Start()
@@ -1114,6 +1150,9 @@ func (s *Server) Stop(ctx context.Context) error {
 	s.stopOnce.Do(func() {
 		// Signal background goroutines to stop.
 		close(s.done)
+		if s.resourceHistory != nil {
+			s.resourceHistory.Stop(ctx)
+		}
 
 		// Stop all port scanners
 		s.stopAllPortScanners()

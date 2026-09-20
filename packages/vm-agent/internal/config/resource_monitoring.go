@@ -25,6 +25,18 @@ const (
 	EnvDefaultEvictionCallbackRetryMaxSeconds = "DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS"
 	// EnvDefaultEvictionResolveTimeoutSeconds bounds Docker label resolution before eviction.
 	EnvDefaultEvictionResolveTimeoutSeconds = "DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS"
+	// EnvResourceHistorySampleInterval configures retained resource telemetry sampling cadence.
+	EnvResourceHistorySampleInterval = "RESOURCE_HISTORY_SAMPLE_INTERVAL"
+	// EnvResourceHistoryChunkInterval configures retained resource telemetry chunk duration.
+	EnvResourceHistoryChunkInterval = "RESOURCE_HISTORY_CHUNK_INTERVAL"
+	// EnvResourceHistorySpoolDir configures the node-local retry spool directory.
+	EnvResourceHistorySpoolDir = "RESOURCE_HISTORY_SPOOL_DIR"
+	// EnvResourceHistorySpoolMaxBytes configures the maximum local retry spool size.
+	EnvResourceHistorySpoolMaxBytes = "RESOURCE_HISTORY_SPOOL_MAX_BYTES"
+	// EnvResourceHistoryUploadTimeout configures each telemetry upload request deadline.
+	EnvResourceHistoryUploadTimeout = "RESOURCE_HISTORY_UPLOAD_TIMEOUT"
+	// EnvResourceHistoryMaxSamples configures maximum samples per uploaded chunk.
+	EnvResourceHistoryMaxSamples = "RESOURCE_HISTORY_MAX_SAMPLES"
 )
 
 const (
@@ -52,6 +64,12 @@ const (
 	DefaultEvictionCallbackRetryMaxSeconds = 300
 	// DefaultEvictionResolveTimeoutSeconds is the default pressure target resolution deadline.
 	DefaultEvictionResolveTimeoutSeconds = 5
+	// DefaultResourceHistorySpoolMaxBytes is the bounded telemetry retry spool size.
+	DefaultResourceHistorySpoolMaxBytes int64 = 20 * 1024 * 1024
+	// DefaultResourceHistoryMaxSamples bounds one telemetry chunk.
+	DefaultResourceHistoryMaxSamples = 4096
+	// MaxResourceHistoryMaxSamples is the operator-tunable ceiling for one telemetry chunk.
+	MaxResourceHistoryMaxSamples = 32768
 )
 
 // IsValidPSIThreshold accepts finite stall percentages in (0, 100].

@@ -142,6 +142,98 @@ export interface ChatSessionStateResponse {
   agentType: string | null;
 }
 
+export interface WorkspaceResourceSummary {
+  id: string;
+  projectId: string;
+  workspaceId: string;
+  sessionId: string | null;
+  taskId: string | null;
+  nodeId: string | null;
+  agentProfileId: string | null;
+  skillId: string | null;
+  agentType: string | null;
+  runtime: string;
+  sourceVersion: number;
+  startedAt: number;
+  endedAt: number;
+  sampleCount: number;
+  gapCount: number;
+  toolSpanCount: number;
+  cpuMeanMillis: number | null;
+  cpuPeakMillis: number | null;
+  memoryMeanBytes: number | null;
+  memoryPeakBytes: number | null;
+  memoryKernelPeakBytes: number | null;
+  ioReadBytes: number | null;
+  ioWriteBytes: number | null;
+  oomCount: number;
+  completeness: unknown;
+  summary: unknown;
+  firstChunkId: string | null;
+  latestChunkId: string | null;
+}
+
+export interface WorkspaceResourceChunk {
+  id: string;
+  workspaceId: string;
+  sessionId: string | null;
+  taskId: string | null;
+  nodeId: string | null;
+  chunkSequence: number;
+  sourceVersion: number;
+  storageFormat: string;
+  compressedBytes: number;
+  uncompressedBytes: number;
+  sha256: string;
+  startedAt: number;
+  endedAt: number;
+  sampleCount: number;
+  gapCount: number;
+  toolSpanCount: number;
+  completeness: unknown;
+  summary: unknown;
+  expiresAt: number;
+}
+
+export interface WorkspaceResourceSample {
+  t: number;
+  intervalMillis?: number;
+  cpuMillis?: number;
+  memoryBytes?: number;
+  memoryPeakBytes?: number;
+  ioReadBytes?: number;
+  ioWriteBytes?: number;
+  oom?: number;
+  oomKill?: number;
+  pidsCurrent?: number;
+  counterReset?: boolean;
+  unsupported?: string;
+  gap?: boolean;
+}
+
+export interface WorkspaceResourceToolSpan {
+  id: string;
+  kind: string;
+  startedAt: number;
+  endedAt?: number;
+  concurrency?: number;
+  approximate?: boolean;
+}
+
+export interface WorkspaceResourceHistoryResponse {
+  summary: WorkspaceResourceSummary | null;
+  chunks: WorkspaceResourceChunk[];
+  detail?: {
+    chunkId: string;
+    samples: WorkspaceResourceSample[];
+    toolSpans: WorkspaceResourceToolSpan[];
+    gaps: Array<Record<string, unknown>>;
+    originalSampleCount: number;
+    downsampled: boolean;
+    downsampleLimit: number;
+  };
+}
+
 export interface ChatMessagesListResponse {
   messages: ChatMessageResponse[];
   hasMore: boolean;
@@ -207,6 +299,21 @@ export async function getRecentChats(
 
   const qs = searchParams.toString();
   return request<RecentChatsApiResponse>(qs ? `/api/chats/recent?${qs}` : '/api/chats/recent');
+}
+
+export async function getSessionResourceHistory(
+  projectId: string,
+  sessionId: string,
+  params: { chunkId?: string | null } = {}
+): Promise<WorkspaceResourceHistoryResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.chunkId) searchParams.set('chunkId', params.chunkId);
+  const qs = searchParams.toString();
+  return request<WorkspaceResourceHistoryResponse>(
+    qs
+      ? `/api/projects/${projectId}/sessions/${sessionId}/resource-history?${qs}`
+      : `/api/projects/${projectId}/sessions/${sessionId}/resource-history`
+  );
 }
 
 /** Fetch all sessions across all projects with pagination (single D1 query). */

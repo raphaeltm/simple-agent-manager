@@ -616,6 +616,12 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_STORAGE_EMERGENCY_BATCH_ROWS?: string;
   PROJECT_DATA_STORAGE_EMERGENCY_MAX_BATCHES?: string;
   PROJECT_DATA_STORAGE_GROWTH_LOOKBACK_DAYS?: string;
+  WORKSPACE_RESOURCE_RAW_RETENTION_DAYS?: string; // Retention for compressed raw resource chunks in private R2 (default: 90)
+  WORKSPACE_RESOURCE_SUMMARY_RETENTION_DAYS?: string; // Retention for D1 resource summaries (default: 180)
+  WORKSPACE_RESOURCE_UPLOAD_MAX_BYTES?: string; // Max compressed resource chunk upload body bytes (default: 2097152)
+  WORKSPACE_RESOURCE_DETAIL_MAX_POINTS?: string; // Max points returned from a detail chunk read (default: 720)
+  WORKSPACE_RESOURCE_LIST_LIMIT?: string; // Max chunk indexes returned by detail list (default: 24)
+  WORKSPACE_RESOURCE_CLEANUP_BATCH_SIZE?: string; // Max expired chunks/summaries cleaned per sweep (default: 250)
   PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_DEFAULT?: string;
   PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED?: string;

@@ -1507,6 +1507,127 @@ export const workspaceCallbackSignalClaims = sqliteTable(
 );
 
 // =============================================================================
+// Workspace Resource History
+// =============================================================================
+export const workspaceResourceSummaries = sqliteTable(
+  'workspace_resource_summaries',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id'),
+    taskId: text('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+    nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    agentProfileId: text('agent_profile_id').references(() => agentProfiles.id, {
+      onDelete: 'set null',
+    }),
+    skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
+    agentType: text('agent_type'),
+    runtime: text('runtime').notNull().default('vm'),
+    sourceVersion: integer('source_version').notNull(),
+    startedAt: integer('started_at').notNull(),
+    endedAt: integer('ended_at').notNull(),
+    sampleCount: integer('sample_count').notNull(),
+    gapCount: integer('gap_count').notNull().default(0),
+    cpuMeanMillis: real('cpu_mean_millis'),
+    cpuPeakMillis: real('cpu_peak_millis'),
+    memoryMeanBytes: integer('memory_mean_bytes'),
+    memoryPeakBytes: integer('memory_peak_bytes'),
+    memoryKernelPeakBytes: integer('memory_kernel_peak_bytes'),
+    ioReadBytes: integer('io_read_bytes'),
+    ioWriteBytes: integer('io_write_bytes'),
+    oomCount: integer('oom_count').notNull().default(0),
+    toolSpanCount: integer('tool_span_count').notNull().default(0),
+    completenessJson: text('completeness_json').notNull(),
+    summaryJson: text('summary_json').notNull(),
+    firstChunkId: text('first_chunk_id'),
+    latestChunkId: text('latest_chunk_id'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    projectSessionIdx: index('idx_workspace_resource_summaries_project_session').on(
+      table.projectId,
+      table.sessionId,
+      table.endedAt
+    ),
+    projectWorkspaceIdx: index('idx_workspace_resource_summaries_project_workspace').on(
+      table.projectId,
+      table.workspaceId,
+      table.endedAt
+    ),
+    projectTaskIdx: index('idx_workspace_resource_summaries_project_task').on(
+      table.projectId,
+      table.taskId,
+      table.endedAt
+    ),
+  })
+);
+
+export type WorkspaceResourceSummaryRow = typeof workspaceResourceSummaries.$inferSelect;
+
+export const workspaceResourceChunks = sqliteTable(
+  'workspace_resource_chunks',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    summaryId: text('summary_id').references(() => workspaceResourceSummaries.id, {
+      onDelete: 'set null',
+    }),
+    sessionId: text('session_id'),
+    taskId: text('task_id').references(() => tasks.id, { onDelete: 'set null' }),
+    nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    chunkSequence: integer('chunk_sequence').notNull(),
+    sourceVersion: integer('source_version').notNull(),
+    r2Key: text('r2_key').notNull().unique(),
+    storageFormat: text('storage_format').notNull(),
+    compressedBytes: integer('compressed_bytes').notNull(),
+    uncompressedBytes: integer('uncompressed_bytes').notNull(),
+    sha256: text('sha256').notNull(),
+    startedAt: integer('started_at').notNull(),
+    endedAt: integer('ended_at').notNull(),
+    sampleCount: integer('sample_count').notNull(),
+    gapCount: integer('gap_count').notNull().default(0),
+    toolSpanCount: integer('tool_span_count').notNull().default(0),
+    completenessJson: text('completeness_json').notNull(),
+    summaryJson: text('summary_json').notNull(),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    uploadedByNodeId: text('uploaded_by_node_id'),
+  },
+  (table) => ({
+    identityIdx: uniqueIndex('idx_workspace_resource_chunks_identity').on(
+      table.projectId,
+      table.workspaceId,
+      table.chunkSequence,
+      table.sourceVersion
+    ),
+    projectSessionIdx: index('idx_workspace_resource_chunks_project_session').on(
+      table.projectId,
+      table.sessionId,
+      table.startedAt
+    ),
+    projectWorkspaceIdx: index('idx_workspace_resource_chunks_project_workspace').on(
+      table.projectId,
+      table.workspaceId,
+      table.startedAt
+    ),
+    expiresIdx: index('idx_workspace_resource_chunks_expires').on(table.expiresAt),
+  })
+);
+
+export type WorkspaceResourceChunkRow = typeof workspaceResourceChunks.$inferSelect;
+
+// =============================================================================
 // Agent Sessions
 // =============================================================================
 export const agentSessions = sqliteTable(

@@ -125,11 +125,13 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [showTimeline, setShowTimeline] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
+  const [showResources, setShowResources] = useState(false);
   const openComments = useCallback(() => setShowComments(true), []);
   const closeComments = useCallback(() => setShowComments(false), []);
   // Stable identity matters: this feeds `useSessionTools`' memoized action array, and an
   // inline arrow would rebuild it on every render (rule 64).
   const openTimeline = useCallback(() => setShowTimeline(true), []);
+  const openResources = useCallback(() => setShowResources(true), []);
   const openEvents = useCallback(() => setShowEvents(true), []);
 
   const messageComments = useMessageComments(projectId, sessionId, Boolean(projectId && sessionId));
@@ -405,6 +407,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     onOpenFiles: lc.handleOpenFileBrowser,
     onOpenGit: lc.handleOpenGitChanges,
     onOpenTimeline: openTimeline,
+    onOpenResources: openResources,
     onOpenEvents: openEvents,
     onOpenComments: openComments,
     onRetry,
@@ -821,11 +824,15 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
 
       <ProjectMessageViewDrawers
         showTimeline={showTimeline}
+        projectId={projectId}
+        sessionId={sessionId}
         timelineEntries={timeline.entries}
         timelineLoading={timeline.loading}
         showTimelineContext={timeline.showContext}
         onToggleTimelineContext={() => timeline.setShowContext(!timeline.showContext)}
         onCloseTimeline={() => setShowTimeline(false)}
+        showResources={showResources}
+        onCloseResources={() => setShowResources(false)}
         showComments={showMobileCommentsDrawer}
         commentItems={commentInbox}
         commentsLoading={messageComments.loading}

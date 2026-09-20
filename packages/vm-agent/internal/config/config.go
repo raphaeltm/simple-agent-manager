@@ -358,6 +358,12 @@ type Config struct {
 	EvictionDockerStopTimeout        time.Duration // Graceful docker stop timeout for evictions (env: DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS, default: 10s)
 	EvictionCallbackRetryMaxInterval time.Duration // Durable callback retry backoff cap (env: DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS, default: 300s)
 	EvictionResolveTimeout           time.Duration // Docker label resolution timeout for evictions (env: DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS, default: 5s)
+	ResourceHistorySampleInterval    time.Duration // Retained per-workspace resource sampling cadence (env: RESOURCE_HISTORY_SAMPLE_INTERVAL, default: 5s)
+	ResourceHistoryChunkInterval     time.Duration // Retained resource chunk duration (env: RESOURCE_HISTORY_CHUNK_INTERVAL, default: 15m)
+	ResourceHistorySpoolDir          string        // Node-local retry spool directory (env: RESOURCE_HISTORY_SPOOL_DIR)
+	ResourceHistorySpoolMaxBytes     int64         // Node-local retry spool size (env: RESOURCE_HISTORY_SPOOL_MAX_BYTES, default: 20MiB)
+	ResourceHistoryUploadTimeout     time.Duration // Upload request timeout (env: RESOURCE_HISTORY_UPLOAD_TIMEOUT, default: 10s)
+	ResourceHistoryMaxSamples        int           // Max samples per chunk (env: RESOURCE_HISTORY_MAX_SAMPLES, default: 4096)
 
 	// Git integration settings - configurable per constitution principle XI
 	GitCredentialTimeout     time.Duration // Timeout for credential-helper callbacks (env: GIT_CREDENTIAL_TIMEOUT, default: 5s)

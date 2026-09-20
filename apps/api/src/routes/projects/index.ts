@@ -12,6 +12,7 @@ import { fileProxyRoutes } from './files';
 import { projectMembersRoutes } from './members';
 import { repoBrowseRoutes } from './repo-browse';
 import { repositoryAccessRoutes } from './repository-access';
+import { projectResourceHistoryRoutes } from './workspace-resource-history';
 
 const projectsRoutes = new Hono<{ Bindings: Env }>();
 projectsRoutes.use('/*', requireAuth(), requireApproved());
@@ -25,5 +26,6 @@ projectsRoutes.route('/', devcontainerConfigRoutes);
 projectsRoutes.route('/', repositoryAccessRoutes);
 projectsRoutes.route('/', projectMembersRoutes);
 projectsRoutes.route('/', repoBrowseRoutes);
+projectsRoutes.route('/', projectResourceHistoryRoutes);
 
 export { projectsRoutes };

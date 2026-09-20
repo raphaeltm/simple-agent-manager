@@ -93,6 +93,13 @@ type MessageReporter interface {
 	Enqueue(msg MessageReportEntry) error
 }
 
+// ToolLifecycleObserver observes sanitized ACP tool-call lifecycle edges.
+// Implementations must not persist raw prompts, arguments, outputs, commands, paths, or env.
+type ToolLifecycleObserver interface {
+	RecordACPToolCall(toolCallID string, status string, at time.Time)
+	ReconcileACPToolCalls(at time.Time)
+}
+
 // MessageReportEntry is the data needed to enqueue a chat message.
 // It mirrors messagereport.Message but lives in the acp package to avoid
 // circular imports.
@@ -235,6 +242,8 @@ type GatewayConfig struct {
 	// MessageReporter enqueues chat messages for batched delivery to the
 	// control plane. When nil, message persistence is a no-op.
 	MessageReporter MessageReporter
+	// ToolLifecycleObserver records sanitized tool-call overlap windows for resource history.
+	ToolLifecycleObserver ToolLifecycleObserver
 	// OnPromptComplete is called after a prompt finishes (success or failure).
 	// Used by task-driven workspaces to report completion back to the control plane.
 	// When nil, no callback fires. The string arg is the stop reason (e.g. "end_turn", "error").

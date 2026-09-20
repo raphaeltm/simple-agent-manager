@@ -305,6 +305,14 @@ func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status *acpsdk.T
 	if toolCallID == "" {
 		return false
 	}
+	now := h.now()
+	if h.config.ToolLifecycleObserver != nil {
+		statusText := ""
+		if status != nil {
+			statusText = string(*status)
+		}
+		h.config.ToolLifecycleObserver.RecordACPToolCall(toolCallID, statusText, now)
+	}
 
 	h.harnessWorkMu.Lock()
 	defer h.harnessWorkMu.Unlock()
@@ -344,7 +352,7 @@ func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status *acpsdk.T
 
 	h.harnessWork.State = state
 	h.harnessWork.Count = count
-	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
+	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLockedAt(now)
 	if state == harnessWorkActive {
 		h.startHarnessWorkRereportLocked()
 	} else {
@@ -390,7 +398,11 @@ func (h *SessionHost) reconcileHarnessWorkAtPromptTurnEnd() {
 	h.harnessTaskIDs = nil
 	h.harnessWork.State = harnessWorkSettling
 	h.harnessWork.Count = 0
-	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
+	now := h.now()
+	if h.config.ToolLifecycleObserver != nil {
+		h.config.ToolLifecycleObserver.ReconcileACPToolCalls(now)
+	}
+	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLockedAt(now)
 }
 
 // addHarnessTaskLocked bounds cumulative edge messages as well as the
@@ -415,7 +427,10 @@ func (h *SessionHost) addHarnessTaskLocked(taskID string) bool {
 // this value to reject an older runtime-work snapshot while accepting same-
 // version heartbeat rereports that refresh the finite lease.
 func (h *SessionHost) nextHarnessWorkProgressAtLocked() time.Time {
-	now := h.now()
+	return h.nextHarnessWorkProgressAtLockedAt(h.now())
+}
+
+func (h *SessionHost) nextHarnessWorkProgressAtLockedAt(now time.Time) time.Time {
 	if !h.harnessWork.ProgressAt.IsZero() && !now.After(h.harnessWork.ProgressAt) {
 		return h.harnessWork.ProgressAt.Add(time.Millisecond)
 	}

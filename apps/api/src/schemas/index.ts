@@ -118,6 +118,9 @@ export {
   CreateAcpSessionSchema,
 } from './acp-sessions';
 
+// Workspace resource history schemas
+export { WorkspaceResourceUploadSchema } from './workspace-resource-history';
+
 // Message-anchored comment schemas
 export {
   CommentStatusMutationSchema,

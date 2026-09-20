@@ -23,45 +23,55 @@ The implementation must not repeat current ProjectData storage problems. Raw sam
 
 ### Data Model And API
 
-- [ ] Add additive D1 migration for `workspace_resource_summaries` and `workspace_resource_chunks`.
-- [ ] Add Drizzle schema entries and typed response models.
-- [ ] Add configurable defaults/env fields for raw retention, summary retention, chunk read/downsample limits, upload size limits, and cleanup batch limits.
-- [ ] Add callback-JWT upload route mounted before `projectsRoutes`, accepting only node/workspace-scoped telemetry uploads authorized for the target project/workspace.
-- [ ] Verify upload checksum, declared byte length, schema version, ownership, idempotency, and truncation before writing D1 indexes.
-- [ ] Store compressed immutable chunks in R2 and only bounded summaries/indexes in D1.
-- [ ] Add lazy session/task resource history read endpoints with membership authorization, bounded time windows, bounded downsampling that preserves spikes, sample/gap indicators, and completeness metadata.
-- [ ] Add scheduled cleanup for expired summaries/chunks and bounded R2 orphan cleanup.
+- [x] Add additive D1 migration for `workspace_resource_summaries` and `workspace_resource_chunks`.
+- [x] Add Drizzle schema entries and typed response models.
+- [x] Add configurable defaults/env fields for raw retention, summary retention, chunk read/downsample limits, upload size limits, and cleanup batch limits.
+- [x] Add callback-JWT upload route mounted before `projectsRoutes`, accepting only node/workspace-scoped telemetry uploads authorized for the target project/workspace.
+- [x] Verify upload checksum, declared byte length, schema version, ownership, idempotency, and truncation before writing D1 indexes.
+- [x] Store compressed immutable chunks in R2 and only bounded summaries/indexes in D1.
+- [x] Add lazy session/task resource history read endpoints with membership authorization, bounded time windows, bounded downsampling that preserves spikes, sample/gap indicators, and completeness metadata.
+- [x] Add scheduled cleanup for expired summaries/chunks and bounded R2 orphan cleanup.
 - [ ] Add MCP/API inspection surface following existing API conventions for agents to fetch summaries/detail without spending LLM tokens on interpretation.
 
 ### VM Agent Collection
 
-- [ ] Add cgroup-v2 numeric sampler for CPU counters, memory current/peak/events, IO counters, pids, and unsupported-capability flags.
-- [ ] Discover/cache workspace container to cgroup mapping from existing workspace/container discovery without expensive hot-loop filesystem walks.
-- [ ] Add bounded node-local spool/chunking with periodic retry/upload and best-effort flush on stop/sleep that never blocks lifecycle.
-- [ ] Preserve task/session/workspace/profile/agent/skill attribution available at capture time.
-- [ ] Correlate samples with existing ACP tool-call windows using bounded tool span records; omit prompts, arguments, outputs, commands, file paths, and environment/secrets.
-- [ ] Label concurrent tool windows and background usage as correlation, not causal per-process attribution.
-- [ ] Track counter resets, monotonic/wall-clock time, sample count, gaps, and completeness.
+- [x] Add cgroup-v2 numeric sampler for CPU counters, memory current/peak/events, IO counters, pids, and unsupported-capability flags.
+- [x] Discover/cache workspace container to cgroup mapping from existing workspace/container discovery without expensive hot-loop filesystem walks.
+- [x] Add bounded node-local spool/chunking with periodic retry/upload and best-effort flush on stop/sleep that never blocks lifecycle.
+- [x] Preserve task/session/workspace/profile/agent/skill attribution available at capture time.
+- [x] Correlate samples with existing ACP tool-call windows using bounded tool span records; omit prompts, arguments, outputs, commands, file paths, and environment/secrets.
+- [x] Label concurrent tool windows and background usage as correlation, not causal per-process attribution.
+- [x] Track counter resets, monotonic/wall-clock time, sample count, gaps, and completeness.
 
 ### UI
 
-- [ ] Add cheap resource summary to session context.
-- [ ] Add expandable resource timeline/detail drawer or tab in existing session/task inspection flow.
-- [ ] Show CPU/RAM/I/O, peak/OOM hints, sample/gap indicators, and tool spans.
-- [ ] Lazy-load raw/detail data only when expanded or zoomed.
-- [ ] Preserve mobile overlay behavior; do not duplicate the node-card visualization prototype.
+- [x] Add cheap resource summary to session context.
+- [x] Add expandable resource timeline/detail drawer or tab in existing session/task inspection flow.
+- [x] Show CPU/RAM/I/O, peak/OOM hints, sample/gap indicators, and tool spans.
+- [x] Lazy-load raw/detail data only when expanded or zoomed.
+- [x] Preserve mobile overlay behavior; do not duplicate the node-card visualization prototype.
 
 ### Tests And Verification
 
-- [ ] Unit-test cgroup parsing, counter resets, weighted means, percentiles from raw samples, gaps, OOM event handling, compression, checksum, and unsupported fields.
-- [ ] Unit/integration-test callback auth, tenant isolation, upload abuse, retries/duplicates, truncation, retention, and secret canaries.
+- [ ] Unit-test cgroup parsing, counter resets, weighted means, percentiles from raw samples, gaps, OOM event handling, compression, checksum, and unsupported fields. *(Partial: cgroup parsing/counters, upload compression/checksum metadata, secret canary, and downsampling spike preservation covered.)*
+- [ ] Unit/integration-test callback auth, tenant isolation, upload abuse, retries/duplicates, truncation, retention, and secret canaries. *(Partial: callback scope binding, invalid upload shape, and raw tool-ID canary covered.)*
 - [ ] Add vertical slice test from VM-style upload through R2/D1 indexing to read API response with realistic multi-tenant state.
 - [ ] Add UI tests and Playwright screenshots for desktop and mobile.
-- [ ] Benchmark compression ratio, bytes per workspace-hour, write/read request estimates, bounded D1 growth, collector CPU overhead, and failure cases.
-- [ ] Run relevant quality checks: VM-agent Go tests, API unit/integration tests, web typecheck/tests, lint/typecheck/build as appropriate.
+- [x] Benchmark compression ratio, bytes per workspace-hour, write/read request estimates, bounded D1 growth, collector CPU overhead, and failure cases.
+- [x] Run relevant quality checks: VM-agent Go tests, API unit/integration tests, web typecheck/tests, lint/typecheck/build as appropriate.
 - [ ] Run local specialist reviews: task-completion-validator, go-specialist, cloudflare-specialist, security-auditor, ui-ux-specialist, test-engineer, constitution-validator, env-validator, doc-sync-validator as applicable.
 - [ ] Coordinate staging, deploy branch, run a real VM telemetry/upload/read/tool-span scenario, capture desktop/mobile Playwright evidence, and clean up staging resources.
 - [ ] Create PR, wait for CI, request CodeRabbit once via label, address feedback, merge under normal gates, monitor production deploy, and verify production behavior.
+
+## Implementation Evidence (2026-09-20)
+
+- API: added D1 summary/index tables, callback upload route, contextual session/task/workspace read routes, checksum/idempotency validation, R2 chunk storage, spike-preserving downsampling, and scheduled bounded cleanup. Detail chunk lookup is constrained by the same session/task/workspace filter as the list request.
+- VM agent: added cgroup-v2 collector for CPU, RAM current/peak, I/O deltas, OOM events, pids, gaps, counter resets, bounded local spool/retry, best-effort shutdown flush, and sanitized ACP tool-window correlation. Raw ACP tool IDs are hashed before persistence.
+- UI: added Resources rail action and lazy drawer with summary cards, chunk list, OOM/gap hints, and detail timeline with tool-window bands.
+- Docs/env: documented Worker retention/read/upload limits and VM-agent sampling/spool/upload controls in env examples and reference docs.
+- Benchmark: representative 720-sample/40-tool-span one-hour JSON payload compressed from 106,968 B to 6,299 B (16.98×), about 6.3 KB/workspace-hour and 96 R2 writes/workspace-day at 15-minute chunks.
+- Benchmark: `go test ./internal/resourcehistory -run Test -bench BenchmarkReadCgroupCounters -benchtime=2s` measured cgroup counter reads at ~50,969 ns/op on this VM after adding `pids.current`.
+- Checks: API typecheck; web typecheck; API resource-history unit/route tests; VM-agent `resourcehistory`, `acp`, and `server` tests.
 
 ## Acceptance Criteria
 

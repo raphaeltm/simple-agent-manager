@@ -458,6 +458,11 @@ export type {
   SessionSummaryResponse,
   StartInstantChatSessionRequest,
   StartInstantChatSessionResponse,
+  WorkspaceResourceChunk,
+  WorkspaceResourceHistoryResponse,
+  WorkspaceResourceSample,
+  WorkspaceResourceSummary,
+  WorkspaceResourceToolSpan,
 } from './sessions';
 export {
   cancelAgentPrompt,
@@ -465,6 +470,7 @@ export {
   getAllChats,
   getChatSession,
   getChatSessionState,
+  getSessionResourceHistory,
   getRecentChats,
   listActivityEvents,
   listChatMessages,

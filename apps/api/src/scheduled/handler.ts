@@ -8,6 +8,7 @@ import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-re
 import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
+import { runWorkspaceResourceHistoryCleanup } from '../services/workspace-resource-history';
 import { runAnalyticsForwardJob } from './analytics-forward';
 import { runScheduledCapacityPoolReconciliation } from './capacity-pool-reconciliation';
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
@@ -180,6 +181,10 @@ export async function scheduled(
   // The D1 sweep owns exact snapshot expiry and deletes the matching R2 objects.
   const sessionSnapshotPurge = await sweeps.isolate('session_snapshot_purge', () =>
     runScheduledSessionSnapshotPurge(env)
+  );
+  const workspaceResourceHistoryCleanup = await sweeps.isolate(
+    'workspace_resource_history_cleanup',
+    () => runWorkspaceResourceHistoryCleanup(env)
   );
   const composeArtifactCleanup = await sweeps.isolate('compose_artifact_cleanup', () =>
     runScheduledComposeImageArtifactCleanup(env)
@@ -369,6 +374,14 @@ export async function scheduled(
     sessionSnapshotPurgeDeleted: sessionSnapshotPurge?.deletedSnapshots,
     sessionSnapshotObjectsDeleted: sessionSnapshotPurge?.deletedObjects,
     sessionSnapshotPurgeErrors: sessionSnapshotPurge?.errors,
+    workspaceResourceHistoryExpiredChunksSelected:
+      workspaceResourceHistoryCleanup?.expiredChunksSelected,
+    workspaceResourceHistoryExpiredChunksDeleted:
+      workspaceResourceHistoryCleanup?.expiredChunksDeleted,
+    workspaceResourceHistoryExpiredChunkDeleteErrors:
+      workspaceResourceHistoryCleanup?.expiredChunkDeleteErrors,
+    workspaceResourceHistorySummariesSelected: workspaceResourceHistoryCleanup?.summariesSelected,
+    workspaceResourceHistorySummariesDeleted: workspaceResourceHistoryCleanup?.summariesDeleted,
     composeArtifactCleanupSkipped: composeArtifactCleanup?.skipped,
     composeArtifactCleanupSkipReason: composeArtifactCleanup?.skipReason,
     composeArtifactCleanupScanned: composeArtifactCleanup?.scannedObjects,

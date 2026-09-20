@@ -240,6 +240,12 @@ func Load() (*Config, error) {
 		EvictionDockerStopTimeout:        time.Duration(getEnvInt(EnvDefaultEvictionDockerStopTimeoutSeconds, DefaultEvictionDockerStopTimeoutSeconds)) * time.Second,
 		EvictionCallbackRetryMaxInterval: time.Duration(getEnvInt(EnvDefaultEvictionCallbackRetryMaxSeconds, DefaultEvictionCallbackRetryMaxSeconds)) * time.Second,
 		EvictionResolveTimeout:           time.Duration(getEnvInt(EnvDefaultEvictionResolveTimeoutSeconds, DefaultEvictionResolveTimeoutSeconds)) * time.Second,
+		ResourceHistorySampleInterval:    getEnvDuration(EnvResourceHistorySampleInterval, 5*time.Second),
+		ResourceHistoryChunkInterval:     getEnvDuration(EnvResourceHistoryChunkInterval, 15*time.Minute),
+		ResourceHistorySpoolDir:          getEnv(EnvResourceHistorySpoolDir, "/var/lib/vm-agent/resource-history"),
+		ResourceHistorySpoolMaxBytes:     getEnvInt64(EnvResourceHistorySpoolMaxBytes, DefaultResourceHistorySpoolMaxBytes),
+		ResourceHistoryUploadTimeout:     getEnvDuration(EnvResourceHistoryUploadTimeout, 10*time.Second),
+		ResourceHistoryMaxSamples:        getBoundedPositiveEnvInt(EnvResourceHistoryMaxSamples, DefaultResourceHistoryMaxSamples, MaxResourceHistoryMaxSamples),
 
 		// Git integration settings - configurable per constitution principle XI
 		GitCredentialTimeout:     getEnvDuration("GIT_CREDENTIAL_TIMEOUT", DefaultGitCredentialTimeout),

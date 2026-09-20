@@ -952,6 +952,12 @@ An out-of-range weight makes the unit fail to load, which would take the slice h
 | `DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS` | `10`                                   | Grace period passed to `docker stop --time` during ResourceGuard eviction |
 | `DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS` | `300` | Backoff cap for durable eviction callback retries, in seconds; the operation lease is a lower bound and can exceed this cap. Delivery starts on a later heartbeat |
 | `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS`     | `5`                                    | Docker label resolution deadline before ResourceGuard eviction            |
+| `RESOURCE_HISTORY_SAMPLE_INTERVAL`             | `5s`                                   | VM-agent retained resource-history cgroup sampling cadence                |
+| `RESOURCE_HISTORY_CHUNK_INTERVAL`              | `15m`                                  | VM-agent retained resource-history chunk duration before upload           |
+| `RESOURCE_HISTORY_SPOOL_DIR`                   | `/var/lib/vm-agent/resource-history`   | Node-local retry spool for resource-history chunks                        |
+| `RESOURCE_HISTORY_SPOOL_MAX_BYTES`             | `20971520`                             | Max node-local resource-history retry spool bytes                         |
+| `RESOURCE_HISTORY_UPLOAD_TIMEOUT`              | `10s`                                  | VM-agent deadline for one resource-history upload callback                |
+| `RESOURCE_HISTORY_MAX_SAMPLES`                 | `4096`                                 | Max resource samples packed into one uploaded chunk                       |
 
 ## Platform Limits
 
@@ -1093,6 +1099,12 @@ An out-of-range weight makes the unit fail to load, which would take the slice h
 | `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS`                     | `3`                             | Failed archive-sharding attempts before the migration is poisoned and the project circuit breaker opens                                                                                                                                                  |
 | `PROJECT_DATA_ARCHIVE_R2_PREFIX`                                 | `project-data/session-archives` | Private R2 prefix for terminal-session archive recovery chunks and manifests                                                                                                                                                                             |
 | `PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS`                         | `4`                             | Maximum archive-shard owners queried for one project-wide message search before results report explicit partial metadata                                                                                                                                 |
+| `WORKSPACE_RESOURCE_RAW_RETENTION_DAYS`                          | `90`                            | Retention for immutable raw resource-history gzip chunks in the private archive R2 binding                                                                                                                        |
+| `WORKSPACE_RESOURCE_SUMMARY_RETENTION_DAYS`                      | `180`                           | Retention for bounded D1 workspace resource summary rows                                                                                                                                                         |
+| `WORKSPACE_RESOURCE_UPLOAD_MAX_BYTES`                            | `2097152`                       | Max compressed resource-history chunk bytes accepted by the callback upload route                                                                                                                                |
+| `WORKSPACE_RESOURCE_DETAIL_MAX_POINTS`                           | `720`                           | Max samples returned by one raw detail read after spike-preserving downsampling                                                                                                                                  |
+| `WORKSPACE_RESOURCE_LIST_LIMIT`                                  | `24`                            | Max resource-history chunk index rows returned for one contextual read                                                                                                                                           |
+| `WORKSPACE_RESOURCE_CLEANUP_BATCH_SIZE`                          | `50`                            | Max expired resource-history chunks and summaries processed per scheduled cleanup sweep                                                                                                                          |
 
 :::caution[`PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS` means two different things]
 This one variable gates two different paths, and the same value has opposite effects on
