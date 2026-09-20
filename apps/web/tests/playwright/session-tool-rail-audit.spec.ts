@@ -1028,10 +1028,10 @@ test.describe('Session resource history drawer', () => {
     await page.getByRole('button', { name: 'Load detail timeline' }).click();
     await expect(page.getByRole('img', { name: 'CPU and memory resource timeline' })).toBeVisible();
     await expect(
-      page.getByText("CPU: green solid line, normalized to this chunk's CPU peak.")
+      page.getByText("CPU: green solid line, normalized to the CPU peak for this chunk.")
     ).toBeVisible();
     await expect(
-      page.getByText("RAM: purple dashed line, normalized to this chunk's RAM peak.")
+      page.getByText("RAM: purple dashed line, normalized to the RAM peak for this chunk.")
     ).toBeVisible();
     await expect(page.getByText(/Blue bands: concurrent tool windows/)).toBeVisible();
     await expect(page.getByText('Tool windows', { exact: true })).toBeVisible();
