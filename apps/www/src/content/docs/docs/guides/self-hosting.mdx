@@ -182,7 +182,7 @@ queries after the first can be served by a nearby replica instead of crossing to
 region. This is safe by construction: the session is anchored `first-primary`, so a request never
 sees data older than its own start and cannot miss a write that completed before it began, and
 queries that do not open a session always go to the primary. (It does not promise that a write
-landing *during* a request is visible to that request's later queries — that is the ordinary
+landing _during_ a request is visible to that request's later queries — that is the ordinary
 two-non-atomic-reads race, unchanged by replication and now with a shorter window.) Scheduled sweeps and Durable Objects keep the unsessioned binding. Set
 `D1_READ_REPLICATION_MODE=disabled` to remove the replicas (Cloudflare takes up to 24 hours to
 stop routing to them) or `D1_SESSION_MODE=disabled` to keep the replicas but route every Worker
@@ -257,7 +257,7 @@ See [Configuration → Analytics](/docs/reference/configuration/#analytics) for 
 
 ## Step 7: Deploy
 
-Go to Actions → Deploy Production → Run workflow. Choose the `main` branch. You may leave `target_commit_sha` empty to deploy the current `main` tip, or paste an exact 40-character commit SHA if you need to target a specific commit. No additional commit is needed after the environment is configured.
+Go to Actions → Deploy Production → Run workflow. Choose the `main` branch. You may leave `target_commit_sha` empty to deploy the current `main` tip, or paste the current `main` tip's exact 40-character commit SHA. Historical commits and non-`main` commits are rejected. No additional commit is needed after the environment is configured.
 
 The workflow:
 
@@ -355,7 +355,7 @@ If your fork has local commits that are not in the upstream release, the workflo
 
 1. Sync your fork's `main` branch with upstream (e.g. via GitHub's "Sync fork" button or `git fetch upstream && git merge upstream/main`).
 2. Open **Actions → Deploy Production → Run workflow** in your fork.
-3. Choose the `main` branch and leave `target_commit_sha` empty (it defaults to the current `main` tip). Optionally paste a specific 40-character SHA if needed. Leave `dry_run` disabled.
+3. Choose the `main` branch and leave `target_commit_sha` empty (it defaults to the current `main` tip). Optionally paste the current `main` tip's exact 40-character SHA. Historical commits are rejected. Leave `dry_run` disabled.
 4. Wait for the workflow to finish, then re-run the health check above.
 
 Use the manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.

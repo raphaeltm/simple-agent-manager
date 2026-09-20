@@ -306,6 +306,10 @@ describe('deployment workflow safety wiring', () => {
     expect(deploy).toContain(
       "target_commit_sha: ${{ github.event_name == 'workflow_dispatch' && needs.validate-manual-dispatch.outputs.deploy_sha || needs.validate-automatic-dispatch.outputs.deploy_sha }}"
     );
+    expect(deploy).toContain('Record successful production deployment');
+    expect(deploy).toContain('inputs.dry_run != true');
+    expect(deploy).toContain('"workflow": "deploy.yml"');
+    expect(deploy).toContain('"dry_run": false');
   });
 
   it('preserves successful automatic deployment path from workflow_run CI success', () => {
@@ -507,9 +511,19 @@ describe('deployment workflow safety wiring', () => {
     expect(release).toContain("cron: '0 6 * * *'");
     expect(release).toContain('workflow_dispatch');
     expect(release).toContain("github.repository == 'raphaeltm/simple-agent-manager'");
-    expect(release).toContain('deploy.yml/runs?branch=main&status=success');
+    expect(release).toContain('deployments: read');
+    expect(release).toContain(
+      'gh api --paginate "repos/${GH_REPOSITORY}/deployments?environment=production&per_page=100"'
+    );
+    expect(release).toContain(
+      '(.payload | type) == "object" and .payload.workflow == "deploy.yml" and .payload.dry_run == false'
+    );
+    expect(release).toContain('statuses?per_page=1');
+    expect(release).toContain('No successful non-dry-run production deployment marker found');
+    expect(release).toContain('gh release view "$TAG_NAME"');
     expect(release).toContain('git tag -a');
     expect(release).toContain('gh release create');
+    expect(release).toContain('--verify-tag');
     expect(release).toContain('--generate-notes');
     expect(release).toContain('--latest');
   });
@@ -517,11 +531,15 @@ describe('deployment workflow safety wiring', () => {
   it('update-self-hosted.yml fast-forwards fork main to upstream release and triggers deploy', () => {
     const update = workflow('update-self-hosted.yml');
 
-    expect(update).toContain("github.repository != 'raphaeltm/simple-agent-manager'");
+    expect(update).toContain(
+      "github.repository != 'raphaeltm/simple-agent-manager' && github.ref == 'refs/heads/main'"
+    );
     expect(update).toContain('git remote add upstream');
     expect(update).toContain('gh release view');
     expect(update).toContain('git merge --ff-only');
-    expect(update).toContain('gh workflow run deploy.yml --ref main');
+    expect(update).toContain(
+      'gh workflow run deploy.yml --ref main -f target_commit_sha="$TAG_SHA"'
+    );
     expect(update).toContain("default: 'latest'");
     expect(update).toContain('contents: write');
     expect(update).toContain('actions: write');

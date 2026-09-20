@@ -60,7 +60,7 @@ The deployment workflow:
 - Runs database migrations
 - Verifies with a health check
 
-For future updates, run the **Update Self-Hosted Instance** workflow to automatically sync the latest upstream release and deploy, or manually sync your fork's `main` branch and run **Deploy Production** (SHA is optional). Pushing to `main` alone does not update a self-hosted instance.
+For future updates, run the **Update Self-Hosted Instance** workflow to automatically sync the latest upstream release and deploy, or manually sync your fork's `main` branch and run **Deploy Production** (SHA is optional and must be the current `main` tip when supplied). Pushing to `main` alone does not update a self-hosted instance.
 
 For detailed step-by-step instructions, see the [Self-Hosting Guide](/docs/guides/self-hosting/).
 

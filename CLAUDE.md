@@ -100,7 +100,7 @@ Full local-development guide: `apps/www/src/content/docs/docs/guides/local-devel
 
 ## Deployment
 
-Merging to `main` in the canonical repository automatically deploys to production after CI succeeds. The **Create Release** workflow (`release.yml`) tags each successful production deploy with a daily CalVer tag (`vYYYY.MM.DD`). Self-host forks do not update from a push alone; operators run the **Update Self-Hosted Instance** workflow to sync the latest upstream release and deploy, or manually run **Deploy Production** on `main` (the `target_commit_sha` input is optional and defaults to the current `main` tip).
+Merging to `main` in the canonical repository automatically deploys to production after CI succeeds. The **Create Release** workflow (`release.yml`) tags the latest successful production deployment with a daily CalVer tag (`vYYYY.MM.DD`). Self-host forks do not update from a push alone; operators run the **Update Self-Hosted Instance** workflow to sync the latest upstream release and deploy, or manually run **Deploy Production** on `main` (the `target_commit_sha` input is optional and defaults to the current `main` tip).
 
 - **CI** (`ci.yml`): lint, typecheck, test, build on pull requests and canonical `main` pushes; fork `main` pushes are intentionally skipped
 - **Deploy Staging** (`deploy-staging.yml`): manual trigger only (`workflow_dispatch`) — agents trigger this explicitly during `/do` Phase 6

@@ -16,7 +16,7 @@ permissions:
 jobs:
   update:
     name: Sync upstream release and deploy
-    if: github.repository != 'raphaeltm/simple-agent-manager'
+    if: github.repository != 'raphaeltm/simple-agent-manager' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -107,7 +107,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_SERVER_URL: ${{ github.server_url }}
           GH_REPOSITORY: ${{ github.repository }}
+          TAG_SHA: ${{ steps.resolve.outputs.tag_sha }}
         run: |
-          gh workflow run deploy.yml --ref main
-          echo "Triggered Deploy Production workflow on main."
+          gh workflow run deploy.yml --ref main -f target_commit_sha="$TAG_SHA"
+          echo "Triggered Deploy Production workflow on main for $TAG_SHA."
           echo "Monitor progress at: ${GH_SERVER_URL}/${GH_REPOSITORY}/actions/workflows/deploy.yml"

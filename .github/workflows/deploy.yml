@@ -30,6 +30,7 @@ on:
 permissions:
   contents: read
   actions: read
+  deployments: write
 
 # Serialize only trusted production candidates. Every no-op/untrusted event gets
 # a unique group so it cannot replace GitHub's single pending production run.
@@ -134,3 +135,46 @@ jobs:
       skip_agent: ${{ inputs.skip_agent || false }}
       dry_run: ${{ inputs.dry_run || false }}
     secrets: inherit
+
+  mark-production-deployment:
+    name: Record successful production deployment
+    needs: [validate-manual-dispatch, validate-automatic-dispatch, deploy]
+    if: >-
+      github.repository == 'raphaeltm/simple-agent-manager' &&
+      needs.deploy.result == 'success' &&
+      inputs.dry_run != true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record production deployment marker
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          DEPLOY_SHA: ${{ github.event_name == 'workflow_dispatch' && needs.validate-manual-dispatch.outputs.deploy_sha || needs.validate-automatic-dispatch.outputs.deploy_sha }}
+          DEPLOYMENT_ENVIRONMENT: production
+        run: |
+          request_file=$(mktemp)
+          cat > "$request_file" <<JSON
+          {
+            "ref": "${DEPLOY_SHA}",
+            "environment": "${DEPLOYMENT_ENVIRONMENT}",
+            "description": "SAM production deployment",
+            "auto_merge": false,
+            "required_contexts": [],
+            "payload": {
+              "workflow": "deploy.yml",
+              "dry_run": false
+            }
+          }
+          JSON
+
+          deployment_id=$(gh api "repos/${GH_REPOSITORY}/deployments" \
+            --method POST \
+            --input "$request_file" \
+            --jq '.id')
+
+          gh api "repos/${GH_REPOSITORY}/deployments/${deployment_id}/statuses" \
+            -f state=success \
+            -f environment="$DEPLOYMENT_ENVIRONMENT" \
+            -f description="Production deployment completed"
+
+          echo "Recorded production deployment marker for ${DEPLOY_SHA}."
