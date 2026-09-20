@@ -149,8 +149,8 @@ func (s *Server) updateResourceHistoryAttribution(workspaceID, projectID, sessio
 		if strings.TrimSpace(taskID) != "" {
 			rt.TaskID = strings.TrimSpace(taskID)
 		}
-		copy := *rt
-		snapshot = &copy
+		runtimeCopy := *rt
+		snapshot = &runtimeCopy
 	}
 	s.workspaceMu.Unlock()
 	if snapshot != nil {
@@ -188,8 +188,8 @@ func (s *Server) startAllResourceHistoryCollectors(ctx context.Context) {
 	s.workspaceMu.RLock()
 	runtimes := make([]*WorkspaceRuntime, 0, len(s.workspaces))
 	for _, rt := range s.workspaces {
-		copy := *rt
-		runtimes = append(runtimes, &copy)
+		runtimeCopy := *rt
+		runtimes = append(runtimes, &runtimeCopy)
 	}
 	s.workspaceMu.RUnlock()
 	for _, rt := range runtimes {

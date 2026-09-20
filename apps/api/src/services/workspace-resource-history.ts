@@ -223,7 +223,7 @@ function jsonParseOrNull(value: string): unknown {
 
 function normalizeNullable(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
+  return trimmed || null;
 }
 
 function assertFiniteInteger(value: number, field: string, min = 0): void {
@@ -244,7 +244,7 @@ function decodeBase64(value: string): Uint8Array {
   try {
     const binary = atob(value);
     const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.codePointAt(i) ?? 0;
     return bytes;
   } catch {
     throw errors.badRequest('compressedBase64 must be valid base64');
@@ -339,12 +339,12 @@ function normalizeChunkPayload(record: Record<string, unknown>): WorkspaceResour
 
 function resourceScopeKey(input: { sessionId?: string | null; taskId?: string | null }): string {
   const sessionId = normalizeNullable(input.sessionId);
+  if (sessionId) return `session/${encodeURIComponent(sessionId)}`;
+
   const taskId = normalizeNullable(input.taskId);
-  return sessionId
-    ? `session/${encodeURIComponent(sessionId)}`
-    : taskId
-      ? `task/${encodeURIComponent(taskId)}`
-      : 'workspace';
+  if (taskId) return `task/${encodeURIComponent(taskId)}`;
+
+  return 'workspace';
 }
 
 function buildR2Key(input: {
@@ -364,22 +364,27 @@ function summaryIdFor(input: {
   taskId?: string | null;
 }): string {
   const sessionId = normalizeNullable(input.sessionId);
+  if (sessionId) return `workspace:${input.projectId}:${input.workspaceId}:session:${sessionId}`;
+
   const taskId = normalizeNullable(input.taskId);
-  const scope = sessionId ? `session:${sessionId}` : taskId ? `task:${taskId}` : 'workspace';
-  return `workspace:${input.projectId}:${input.workspaceId}:${scope}`;
+  if (taskId) return `workspace:${input.projectId}:${input.workspaceId}:task:${taskId}`;
+
+  return `workspace:${input.projectId}:${input.workspaceId}:workspace`;
+}
+
+interface WorkspaceUploadRow {
+  id: string;
+  project_id: string | null;
+  node_id: string | null;
+  chat_session_id: string | null;
+  agent_profile_hint: string | null;
 }
 
 async function loadWorkspaceForUpload(
   env: Env,
   projectId: string,
   workspaceId: string
-): Promise<{
-  id: string;
-  project_id: string | null;
-  node_id: string | null;
-  chat_session_id: string | null;
-  agent_profile_hint: string | null;
-}> {
+): Promise<WorkspaceUploadRow> {
   const row = await env.DATABASE.prepare(
     `SELECT id, project_id, node_id, chat_session_id, agent_profile_hint
        FROM workspaces
@@ -387,39 +392,40 @@ async function loadWorkspaceForUpload(
       LIMIT 1`
   )
     .bind(workspaceId, projectId)
-    .first<{
-      id: string;
-      project_id: string | null;
-      node_id: string | null;
-      chat_session_id: string | null;
-      agent_profile_hint: string | null;
-    }>();
+    .first<WorkspaceUploadRow>();
   if (!row || row.id !== workspaceId || row.project_id !== projectId) {
     throw errors.notFound('Workspace');
   }
   return row;
 }
 
-export async function storeWorkspaceResourceChunk(
-  env: Env,
-  projectId: string,
+function validateWorkspaceUploadIdentity(
+  workspace: WorkspaceUploadRow,
   body: WorkspaceResourceUploadBody,
   uploadedByNodeId: string | null
-): Promise<{ summaryId: string; chunkId: string; idempotent: boolean }> {
-  const workspaceId = body.workspaceId.trim();
-  if (!workspaceId) throw errors.badRequest('workspaceId is required');
-
-  const workspace = await loadWorkspaceForUpload(env, projectId, workspaceId);
-  const nodeId = normalizeNullable(body.nodeId) ?? workspace.node_id;
-  if (normalizeNullable(body.nodeId) && body.nodeId !== workspace.node_id) {
+): string | null {
+  const requestedNodeId = normalizeNullable(body.nodeId);
+  const nodeId = requestedNodeId ?? workspace.node_id;
+  if (requestedNodeId && requestedNodeId !== workspace.node_id) {
     throw errors.forbidden('Node identity does not match workspace');
   }
   if (uploadedByNodeId && nodeId && uploadedByNodeId !== nodeId) {
     throw errors.forbidden('Callback token is not authorized for this workspace node');
   }
-  if (body.sessionId && workspace.chat_session_id && body.sessionId !== workspace.chat_session_id) {
+
+  const requestedSessionId = normalizeNullable(body.sessionId);
+  if (
+    requestedSessionId &&
+    workspace.chat_session_id &&
+    requestedSessionId !== workspace.chat_session_id
+  ) {
     throw errors.forbidden('Session identity does not match workspace');
   }
+
+  return nodeId;
+}
+
+function assertWorkspaceResourceUploadMetadata(body: WorkspaceResourceUploadBody): void {
   assertFiniteInteger(body.sourceVersion, 'sourceVersion', 1);
   assertFiniteInteger(body.chunkSequence, 'chunkSequence', 0);
   assertFiniteInteger(body.startedAt, 'startedAt', 1);
@@ -434,7 +440,12 @@ export async function storeWorkspaceResourceChunk(
   ) {
     throw errors.badRequest(`storageFormat must be ${WORKSPACE_RESOURCE_STORAGE_FORMAT}`);
   }
+}
 
+async function validateWorkspaceResourceChunkBytes(
+  env: Env,
+  body: WorkspaceResourceUploadBody
+): Promise<{ bytes: Uint8Array; actualSha: string }> {
   const bytes = decodeBase64(body.compressedBase64);
   if (bytes.byteLength !== body.compressedBytes) {
     throw errors.badRequest('compressedBytes does not match decoded payload size');
@@ -442,6 +453,7 @@ export async function storeWorkspaceResourceChunk(
   if (bytes.byteLength > getWorkspaceResourceUploadMaxBytes(env)) {
     throw errors.badRequest('Resource history chunk exceeds configured upload limit');
   }
+
   const actualSha = await sha256Hex(bytes);
   if (actualSha !== body.sha256.toLowerCase()) {
     throw errors.badRequest('Resource history chunk checksum mismatch');
@@ -449,10 +461,28 @@ export async function storeWorkspaceResourceChunk(
   if (body.uncompressedBytes > uncompressedMaxBytes(env)) {
     throw errors.badRequest('Resource history chunk exceeds configured uncompressed limit');
   }
+
   const decodedChunk = await readBoundedGzipJson(bytes, uncompressedMaxBytes(env));
   if (decodedChunk.byteLength !== body.uncompressedBytes) {
     throw errors.badRequest('uncompressedBytes does not match decoded payload size');
   }
+
+  return { bytes, actualSha };
+}
+
+export async function storeWorkspaceResourceChunk(
+  env: Env,
+  projectId: string,
+  body: WorkspaceResourceUploadBody,
+  uploadedByNodeId: string | null
+): Promise<{ summaryId: string; chunkId: string; idempotent: boolean }> {
+  const workspaceId = body.workspaceId.trim();
+  if (!workspaceId) throw errors.badRequest('workspaceId is required');
+
+  const workspace = await loadWorkspaceForUpload(env, projectId, workspaceId);
+  const nodeId = validateWorkspaceUploadIdentity(workspace, body, uploadedByNodeId);
+  assertWorkspaceResourceUploadMetadata(body);
+  const { bytes, actualSha } = await validateWorkspaceResourceChunkBytes(env, body);
 
   const db = drizzle(env.DATABASE, { schema });
   const now = Date.now();
@@ -721,7 +751,7 @@ export function downsamplePreservingSpikes(
   if (samples.length <= maxPoints) return { samples, downsampled: false };
   if (maxPoints < 3) return { samples: samples.slice(0, maxPoints), downsampled: true };
   const first = samples[0];
-  const last = samples[samples.length - 1];
+  const last = samples.at(-1);
   if (!first || !last) return { samples: [], downsampled: false };
   const buckets = maxPoints - 2;
   const middle = samples.slice(1, -1);
@@ -732,7 +762,10 @@ export function downsamplePreservingSpikes(
     const bucketFirst = bucket[0];
     if (!bucketFirst) continue;
     selected.push(
-      bucket.reduce((best, sample) => (sampleScore(sample) > sampleScore(best) ? sample : best))
+      bucket.reduce(
+        (best, sample) => (sampleScore(sample) > sampleScore(best) ? sample : best),
+        bucketFirst
+      )
     );
   }
   selected.push(last);

@@ -89,7 +89,6 @@ type Collector struct {
 	activeToolKind map[string]string
 	closed         bool
 
-	ctx    context.Context
 	cancel context.CancelFunc
 }
 
@@ -250,7 +249,8 @@ func (c *Collector) Start(parent context.Context) {
 		c.mu.Unlock()
 		return
 	}
-	c.ctx, c.cancel = context.WithCancel(parent)
+	runCtx, cancel := context.WithCancel(parent)
+	c.cancel = cancel
 	c.started = true
 	c.chunkStartedAt = c.cfg.Now()
 	c.mu.Unlock()
@@ -258,7 +258,7 @@ func (c *Collector) Start(parent context.Context) {
 	if err := os.MkdirAll(c.cfg.SpoolDir, 0o700); err != nil {
 		c.cfg.Logger.Warn("resourcehistory: create spool directory failed", "error", err)
 	}
-	go c.loop()
+	go c.loop(runCtx)
 }
 
 func (c *Collector) Stop(ctx context.Context) {
@@ -322,21 +322,21 @@ func (c *Collector) ReconcileACPToolCalls(at time.Time) {
 	c.activeToolKind = make(map[string]string)
 }
 
-func (c *Collector) loop() {
+func (c *Collector) loop(ctx context.Context) {
 	ticker := time.NewTicker(c.cfg.SampleInterval)
 	defer ticker.Stop()
-	c.sample(c.ctx)
-	c.retrySpool(c.ctx)
+	c.sample(ctx)
+	c.retrySpool(ctx)
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			c.sample(c.ctx)
+			c.sample(ctx)
 			if c.shouldFlush() {
-				c.flush(c.ctx, false)
+				c.flush(ctx, false)
 			}
-			c.retrySpool(c.ctx)
+			c.retrySpool(ctx)
 		}
 	}
 }
@@ -714,7 +714,7 @@ type errCgroupPathFound struct{ path string }
 
 func (e errCgroupPathFound) Error() string { return e.path }
 
-func ResolveCgroupPath(ctx context.Context, cgroupRoot, procRoot, containerID string) (string, error) {
+func normalizeCgroupRoots(cgroupRoot, procRoot string) (string, string) {
 	cgroupRoot = strings.TrimSpace(cgroupRoot)
 	if cgroupRoot == "" {
 		cgroupRoot = "/sys/fs/cgroup"
@@ -723,21 +723,35 @@ func ResolveCgroupPath(ctx context.Context, cgroupRoot, procRoot, containerID st
 	if procRoot == "" {
 		procRoot = "/proc"
 	}
-	shortID := containerID
-	if len(shortID) > 12 {
-		shortID = shortID[:12]
+	return cgroupRoot, procRoot
+}
+
+func shortContainerID(containerID string) string {
+	if len(containerID) <= 12 {
+		return containerID
 	}
-	candidates := []string{
+	return containerID[:12]
+}
+
+func cgroupPathCandidates(cgroupRoot, containerID, shortID string) []string {
+	return []string{
 		filepath.Join(cgroupRoot, "docker", containerID),
 		filepath.Join(cgroupRoot, "docker", shortID),
 		filepath.Join(cgroupRoot, "system.slice", "docker-"+containerID+".scope"),
 		filepath.Join(cgroupRoot, "system.slice", "docker-"+shortID+".scope"),
 	}
+}
+
+func firstExistingCgroupPath(candidates []string) string {
 	for _, p := range candidates {
 		if hasCgroupFiles(p) {
-			return p, nil
+			return p
 		}
 	}
+	return ""
+}
+
+func walkCgroupPath(ctx context.Context, cgroupRoot, containerID, shortID string) (string, error) {
 	visited := 0
 	walkErr := filepath.WalkDir(cgroupRoot, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -755,11 +769,8 @@ func ResolveCgroupPath(ctx context.Context, cgroupRoot, procRoot, containerID st
 		if !d.IsDir() {
 			return nil
 		}
-		name := d.Name()
-		if strings.Contains(name, containerID) || strings.Contains(name, shortID) {
-			if hasCgroupFiles(p) {
-				return errCgroupPathFound{path: p}
-			}
+		if cgroupEntryMatches(d.Name(), containerID, shortID) && hasCgroupFiles(p) {
+			return errCgroupPathFound{path: p}
 		}
 		return nil
 	})
@@ -769,6 +780,22 @@ func ResolveCgroupPath(ctx context.Context, cgroupRoot, procRoot, containerID st
 	}
 	if walkErr != nil && !errors.Is(walkErr, filepath.SkipAll) {
 		return "", walkErr
+	}
+	return "", nil
+}
+
+func cgroupEntryMatches(name, containerID, shortID string) bool {
+	return strings.Contains(name, containerID) || strings.Contains(name, shortID)
+}
+
+func ResolveCgroupPath(ctx context.Context, cgroupRoot, procRoot, containerID string) (string, error) {
+	cgroupRoot, _ = normalizeCgroupRoots(cgroupRoot, procRoot)
+	shortID := shortContainerID(containerID)
+	if path := firstExistingCgroupPath(cgroupPathCandidates(cgroupRoot, containerID, shortID)); path != "" {
+		return path, nil
+	}
+	if path, err := walkCgroupPath(ctx, cgroupRoot, containerID, shortID); path != "" || err != nil {
+		return path, err
 	}
 	return "", fmt.Errorf("cgroup v2 path not found for container %s", shortID)
 }

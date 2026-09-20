@@ -7,7 +7,9 @@ import { createPortal } from 'react-dom';
 import {
   getSessionResourceHistory,
   type WorkspaceResourceChunk,
+  type WorkspaceResourceHistoryResponse,
   type WorkspaceResourceSample,
+  type WorkspaceResourceSummary,
   type WorkspaceResourceToolSpan,
 } from '../../lib/api';
 import { useDialogFocusTrap } from './useDialogFocusTrap';
@@ -96,7 +98,7 @@ function ResourceSparkline({
   }
 
   const start = samples[0]?.t ?? 0;
-  const end = samples[samples.length - 1]?.t ?? start;
+  const end = samples.at(-1)?.t ?? start;
   const spanWidth = Math.max(1, end - start);
 
   return (
@@ -229,6 +231,135 @@ function StatCard({
   );
 }
 
+function formatCpuPeak(summary: WorkspaceResourceSummary): string {
+  if (summary.cpuPeakMillis == null) return '—';
+  return `${Math.round(summary.cpuPeakMillis)} ms/sample`;
+}
+
+function detailPointLabel(detail: WorkspaceResourceHistoryResponse['detail']): string {
+  if (!detail) return '';
+  if (detail.downsampled) return `${detail.samples.length}/${detail.originalSampleCount} points`;
+  return `${detail.samples.length} points`;
+}
+
+function ResourceHistoryContent({
+  isLoading,
+  isError,
+  isFetching,
+  history,
+  summary,
+  effectiveChunkId,
+  detail,
+  onSelectChunk,
+}: Readonly<{
+  isLoading: boolean;
+  isError: boolean;
+  isFetching: boolean;
+  history: WorkspaceResourceHistoryResponse | undefined;
+  summary: WorkspaceResourceSummary | null | undefined;
+  effectiveChunkId: string | null;
+  detail: WorkspaceResourceHistoryResponse['detail'];
+  onSelectChunk: (chunkId: string) => void;
+}>) {
+  if (isLoading && !history) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Spinner size="sm" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="rounded-lg border border-danger/30 bg-danger-tint p-3 text-sm text-danger-fg">
+        Resource history could not be loaded.
+      </div>
+    );
+  }
+
+  if (!summary) {
+    return (
+      <div className="rounded-lg border border-border-default bg-bg-surface p-4 text-sm text-fg-muted">
+        No retained resource history is available for this session yet.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-2">
+        <StatCard icon={Cpu} label="CPU peak" value={formatCpuPeak(summary)} />
+        <StatCard
+          icon={MemoryStick}
+          label="RAM peak"
+          value={formatBytes(summary.memoryPeakBytes)}
+        />
+        <StatCard
+          icon={HardDrive}
+          label="I/O total"
+          value={`${formatBytes(summary.ioReadBytes)} read · ${formatBytes(summary.ioWriteBytes)} write`}
+        />
+        <StatCard
+          icon={Database}
+          label="Samples"
+          value={`${summary.sampleCount} · ${summary.gapCount} gaps`}
+        />
+      </div>
+
+      {summary.oomCount > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-tint p-3 text-sm text-warning-fg">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <span>
+            {summary.oomCount} OOM event{summary.oomCount === 1 ? '' : 's'} observed in retained
+            samples.
+          </span>
+        </div>
+      )}
+
+      <div className="rounded-lg border border-border-default bg-bg-surface p-3 text-xs text-fg-muted">
+        Correlation is based on concurrent tool windows and background resource usage. It is not
+        per-process causal attribution. Disk space is not sampled on the hot loop.
+      </div>
+
+      <section className="space-y-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Chunks</h3>
+        {history?.chunks.map((chunk) => (
+          <ChunkButton
+            key={chunk.id}
+            chunk={chunk}
+            selected={effectiveChunkId === chunk.id}
+            onSelect={() => onSelectChunk(chunk.id)}
+          />
+        ))}
+      </section>
+
+      {effectiveChunkId && !detail && (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="w-full"
+          onClick={() => onSelectChunk(effectiveChunkId)}
+          disabled={isFetching}
+        >
+          {isFetching ? 'Loading detail…' : 'Load detail timeline'}
+        </Button>
+      )}
+
+      {detail && (
+        <section className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
+              Detail timeline
+            </h3>
+            <span className="text-xs text-fg-muted">{detailPointLabel(detail)}</span>
+          </div>
+          <ResourceSparkline samples={detail.samples} toolSpans={detail.toolSpans} />
+        </section>
+      )}
+    </>
+  );
+}
+
 function ChunkButton({
   chunk,
   selected,
@@ -259,7 +390,7 @@ export function SessionResourceHistoryDrawer({
   sessionId,
   onClose,
 }: SessionResourceHistoryDrawerProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDialogElement>(null);
   useDialogFocusTrap(panelRef, onClose);
   const [selectedChunkId, setSelectedChunkId] = useState<string | null>(null);
 
@@ -282,11 +413,11 @@ export function SessionResourceHistoryDrawer({
         onClick={onClose}
         aria-hidden="true"
       />
-      <div
-        className="fixed z-50 rounded-l-[20px] bg-bg-surface rounded-r-none border-y-0 border-r-0 flex flex-col shadow-xl overflow-hidden inset-0 md:inset-y-0 md:left-auto md:right-0 md:w-[min(460px,55vw)] before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(96,165,250,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
+      <dialog
+        open
+        className="fixed z-50 m-0 max-h-none max-w-none p-0 rounded-l-[20px] bg-bg-surface rounded-r-none border-y-0 border-r-0 flex flex-col shadow-xl overflow-hidden inset-0 md:inset-y-0 md:left-auto md:right-0 md:w-[min(460px,55vw)] before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(96,165,250,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
         ref={panelRef}
         tabIndex={-1}
-        role="dialog"
         aria-modal="true"
         aria-label="Session resources"
       >
@@ -304,107 +435,18 @@ export function SessionResourceHistoryDrawer({
         </header>
 
         <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
-          {query.isPending && !history ? (
-            <div className="flex items-center justify-center py-8">
-              <Spinner size="sm" />
-            </div>
-          ) : query.isError ? (
-            <div className="rounded-lg border border-danger/30 bg-danger-tint p-3 text-sm text-danger-fg">
-              Resource history could not be loaded.
-            </div>
-          ) : !summary ? (
-            <div className="rounded-lg border border-border-default bg-bg-surface p-4 text-sm text-fg-muted">
-              No retained resource history is available for this session yet.
-            </div>
-          ) : (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <StatCard
-                  icon={Cpu}
-                  label="CPU peak"
-                  value={
-                    summary.cpuPeakMillis == null
-                      ? '—'
-                      : `${Math.round(summary.cpuPeakMillis)} ms/sample`
-                  }
-                />
-                <StatCard
-                  icon={MemoryStick}
-                  label="RAM peak"
-                  value={formatBytes(summary.memoryPeakBytes)}
-                />
-                <StatCard
-                  icon={HardDrive}
-                  label="I/O total"
-                  value={`${formatBytes(summary.ioReadBytes)} read · ${formatBytes(summary.ioWriteBytes)} write`}
-                />
-                <StatCard
-                  icon={Database}
-                  label="Samples"
-                  value={`${summary.sampleCount} · ${summary.gapCount} gaps`}
-                />
-              </div>
-
-              {summary.oomCount > 0 && (
-                <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-tint p-3 text-sm text-warning-fg">
-                  <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-                  <span>
-                    {summary.oomCount} OOM event{summary.oomCount === 1 ? '' : 's'} observed in
-                    retained samples.
-                  </span>
-                </div>
-              )}
-
-              <div className="rounded-lg border border-border-default bg-bg-surface p-3 text-xs text-fg-muted">
-                Correlation is based on concurrent tool windows and background resource usage. It is
-                not per-process causal attribution. Disk space is not sampled on the hot loop.
-              </div>
-
-              <section className="space-y-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
-                  Chunks
-                </h3>
-                {history?.chunks.map((chunk) => (
-                  <ChunkButton
-                    key={chunk.id}
-                    chunk={chunk}
-                    selected={effectiveChunkId === chunk.id}
-                    onSelect={() => setSelectedChunkId(chunk.id)}
-                  />
-                ))}
-              </section>
-
-              {effectiveChunkId && !detail && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => setSelectedChunkId(effectiveChunkId)}
-                  disabled={query.isFetching}
-                >
-                  {query.isFetching ? 'Loading detail…' : 'Load detail timeline'}
-                </Button>
-              )}
-
-              {detail && (
-                <section className="space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
-                      Detail timeline
-                    </h3>
-                    <span className="text-xs text-fg-muted">
-                      {detail.downsampled
-                        ? `${detail.samples.length}/${detail.originalSampleCount} points`
-                        : `${detail.samples.length} points`}
-                    </span>
-                  </div>
-                  <ResourceSparkline samples={detail.samples} toolSpans={detail.toolSpans} />
-                </section>
-              )}
-            </>
-          )}
+          <ResourceHistoryContent
+            isLoading={query.isPending}
+            isError={query.isError}
+            isFetching={query.isFetching}
+            history={history}
+            summary={summary}
+            effectiveChunkId={effectiveChunkId}
+            detail={detail}
+            onSelectChunk={setSelectedChunkId}
+          />
         </div>
-      </div>
+      </dialog>
     </>,
     document.body
   );

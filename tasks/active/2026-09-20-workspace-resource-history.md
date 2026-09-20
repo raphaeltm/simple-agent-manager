@@ -109,7 +109,19 @@ The implementation must not repeat current ProjectData storage problems. Raw sam
   - `.codex/tmp/staging-resource-history-desktop-detail.png`
   - `.codex/tmp/staging-resource-history-mobile-drawer.png`
   - `.codex/tmp/staging-resource-history-mobile-detail.png`
-- Cleanup: session stop returned `{"status":"stopped","workspaceDeleted":true}`. Final deletion of the now-empty node `01M2YZJN7Z4XZCZYPFVD29FRS8` is pending because repeated staging `token-login` calls returned `429 RATE_LIMIT_EXCEEDED`; retry before PR merge.
+- Cleanup: session stop returned `{"status":"stopped","workspaceDeleted":true}`. The now-empty node `01M2YZJN7Z4XZCZYPFVD29FRS8` was deleted successfully, and follow-up reads showed no active staging nodes or running workspaces from the scenario.
+
+## SonarCloud Follow-up Evidence (2026-09-20)
+
+- Refactored the PR #2110 Sonar findings without changing feature behavior: upload identity/metadata/chunk validation now live in focused API helpers; scoped resource IDs avoid nested ternaries; downsampling uses explicit `.at(-1)` and a reduce initial value; the resource drawer uses a native `<dialog>` and extracted content helpers; the drawer Playwright screenshot path no longer uses a fixed wait; Go resource history no longer stores `context.Context`, cgroup discovery is split into small helpers, and shadowing `copy` locals are renamed.
+- Validation passed after the refactor:
+  - `pnpm --filter @simple-agent-manager/api typecheck`
+  - `pnpm --filter @simple-agent-manager/web typecheck`
+  - `cd packages/vm-agent && go test ./internal/resourcehistory ./internal/server`
+  - `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/workspace-resource-history.test.ts tests/unit/workspace-resource-history-callback.test.ts tests/unit/resource-history-tools.test.ts tests/unit/routes/workspace-resource-history-routes.test.ts tests/unit/durable-objects/sam-session.test.ts tests/unit/routes/project-delete.test.ts`
+  - `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/session-tool-rail-audit.spec.ts --project='iPhone 14 (390x844)' --grep 'Session resource history drawer'`
+  - `pnpm --filter @simple-agent-manager/api lint`
+  - `pnpm --filter @simple-agent-manager/web lint` passed with three existing warnings outside this feature path.
 
 ## Acceptance Criteria
 

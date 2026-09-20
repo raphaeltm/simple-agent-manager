@@ -317,8 +317,8 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		if metadataChanged && runtime.Repository != "" && !runtime.MetadataUnavailable {
 			s.persistWorkspaceMetadata(runtime)
 		}
-		copy := *runtime
-		resourceHistorySnapshot = &copy
+		runtimeCopy := *runtime
+		resourceHistorySnapshot = &runtimeCopy
 		return runtime
 	}
 
@@ -423,8 +423,8 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		PTY:                    manager,
 	}
 	s.workspaces[workspaceID] = runtime
-	copy := *runtime
-	resourceHistorySnapshot = &copy
+	runtimeCopy := *runtime
+	resourceHistorySnapshot = &runtimeCopy
 
 	if effectiveRepo != "" && !metadataUnavailable {
 		s.persistWorkspaceMetadata(runtime)

@@ -177,6 +177,12 @@ const RESOURCE_HISTORY_CHUNKS = [
   },
 ];
 
+function resourceHistoryCpuMillis(index: number): number {
+  if (index === 14) return 410;
+  if (index % 7 === 0) return 160;
+  return 32 + (index % 5) * 9;
+}
+
 const RESOURCE_HISTORY_DETAIL = {
   chunkId: 'wrchunk-rail-2',
   originalSampleCount: 180,
@@ -184,7 +190,7 @@ const RESOURCE_HISTORY_DETAIL = {
   downsampleLimit: 720,
   samples: Array.from({ length: 36 }, (_, i) => ({
     t: NOW - 1_800_000 + i * 25_000,
-    cpuMillis: i === 14 ? 410 : i % 7 === 0 ? 160 : 32 + (i % 5) * 9,
+    cpuMillis: resourceHistoryCpuMillis(i),
     memoryBytes: i === 24 ? 1_342_177_280 : 410_000_000 + i * 12_000_000,
     memoryPeakBytes: i >= 24 ? 1_342_177_280 : 610_000_000 + i * 8_000_000,
     ioReadBytes: i % 8 === 0 ? 1_048_576 : 16_384,
@@ -1028,17 +1034,19 @@ test.describe('Session resource history drawer', () => {
     await page.getByRole('button', { name: 'Load detail timeline' }).click();
     await expect(page.getByRole('img', { name: 'CPU and memory resource timeline' })).toBeVisible();
     await expect(
-      page.getByText("CPU: green solid line, normalized to the CPU peak for this chunk.")
+      page.getByText('CPU: green solid line, normalized to the CPU peak for this chunk.')
     ).toBeVisible();
     await expect(
-      page.getByText("RAM: purple dashed line, normalized to the RAM peak for this chunk.")
+      page.getByText('RAM: purple dashed line, normalized to the RAM peak for this chunk.')
     ).toBeVisible();
     await expect(page.getByText(/Blue bands: concurrent tool windows/)).toBeVisible();
     await expect(page.getByText('Tool windows', { exact: true })).toBeVisible();
-    await page.locator('[role="dialog"] .overflow-y-auto').evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-    });
-    await page.waitForTimeout(300);
+    await page
+      .getByRole('dialog', { name: 'Session resources' })
+      .locator('.overflow-y-auto')
+      .evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
     await capture(page, `resource-history-detail-${page.viewportSize()?.width ?? 'viewport'}`);
   });
 });
