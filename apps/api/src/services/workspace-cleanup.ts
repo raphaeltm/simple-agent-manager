@@ -6,7 +6,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { deleteSessionSnapshotState } from './session-snapshots';
-import { deleteWorkspaceResourceHistoryObjectsForWorkspace } from './workspace-resource-history';
 import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionSnapshot,
@@ -14,6 +13,7 @@ import {
   type WorkspaceDeletionOutcome,
   type WorkspaceDeletionSnapshot,
 } from './workspace-deletion';
+import { deleteWorkspaceResourceHistoryObjectsForWorkspace } from './workspace-resource-history';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 

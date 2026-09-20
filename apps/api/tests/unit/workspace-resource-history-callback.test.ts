@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { handleAppError } from '../../src/middleware/app-error-handler';
+import { workspaceResourceHistoryCallbackRoute } from '../../src/routes/projects/workspace-resource-history-callback';
 import { verifyCallbackToken } from '../../src/services/jwt';
 import { storeWorkspaceResourceChunk } from '../../src/services/workspace-resource-history';
-import { workspaceResourceHistoryCallbackRoute } from '../../src/routes/projects/workspace-resource-history-callback';
 
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(),

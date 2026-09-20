@@ -6,9 +6,9 @@ import type { Env } from '../../src/env';
 import {
   downsamplePreservingSpikes,
   getWorkspaceResourceHistory,
+  type ResourceSamplePoint,
   runWorkspaceResourceHistoryCleanup,
   storeWorkspaceResourceChunk,
-  type ResourceSamplePoint,
   type WorkspaceResourceUploadBody,
 } from '../../src/services/workspace-resource-history';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
