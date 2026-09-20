@@ -11,7 +11,7 @@ import {
   runScopedProjectDataArchiveCanary,
 } from '../../src/scheduled/project-data-archive-sharding';
 import * as projectDataService from '../../src/services/project-data';
-import { countTargetMessages, projectDataStub, readLocation,seedMessages, withArchiveEnv } from './helpers/archive-fixtures';
+import { countTargetMessages, isolateSweepFixture,projectDataStub, readLocation,seedMessages, withArchiveEnv } from './helpers/archive-fixtures';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import {
   captureProjectDataExpectedError,
@@ -851,18 +851,6 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
    * the first draft was not — a failure upstream perturbed them into failing for unrelated
    * reasons, which is exactly the sort of coupling that makes a red suite unreadable.
    */
-  async function isolateSweepFixture(projectId: string): Promise<void> {
-    await env.DATABASE.batch([
-      env.DATABASE.prepare('DELETE FROM session_summaries WHERE project_id != ?').bind(projectId),
-      env.DATABASE.prepare('DELETE FROM project_data_archive_migrations WHERE project_id != ?').bind(
-        projectId
-      ),
-      env.DATABASE.prepare(
-        'DELETE FROM project_data_session_locations WHERE project_id != ?'
-      ).bind(projectId),
-      env.DATABASE.prepare('DELETE FROM project_data_archive_write_budget'),
-    ]);
-  }
 
   async function readCadence() {
     return env.DATABASE.prepare(

@@ -37,7 +37,12 @@ import {
   SHIPPED_SWEEP_MESSAGE_BUDGET,
   SWEEP_CEILING_EXPERIMENT,
 } from '../helpers/archive-sweep-ceiling';
-import { projectDataStub, readLocation, withArchiveEnv } from './helpers/archive-fixtures';
+import {
+  isolateSweepFixture,
+  projectDataStub,
+  readLocation,
+  withArchiveEnv,
+} from './helpers/archive-fixtures';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
@@ -148,29 +153,6 @@ async function seedTerminalSession(
 }
 
 /**
- * Every input `selectMigrationWork` reads is global — candidate ranking, reclaimable
- * migrations and the single `'global'` write-budget row — so a leftover fixture from another
- * file competes for this tick's one session slot. Clearing them is fixture hygiene, not
- * hand-feeding: within the project the sweep still sees a mix and chooses for itself.
- */
-async function isolateSweepFixture(projectId: string): Promise<void> {
-  await env.DATABASE.batch([
-    env.DATABASE.prepare('DELETE FROM session_summaries WHERE project_id != ?').bind(projectId),
-    env.DATABASE.prepare('DELETE FROM project_data_archive_migrations WHERE project_id != ?').bind(
-      projectId
-    ),
-    env.DATABASE.prepare('DELETE FROM project_data_session_locations WHERE project_id != ?').bind(
-      projectId
-    ),
-    env.DATABASE.prepare('DELETE FROM project_data_archive_write_budget'),
-    env.DATABASE.prepare(
-      `DELETE FROM project_data_archive_global_sweep_cadence
-       WHERE sweep_name = 'archive_sharding_global_sweep'`
-    ),
-  ]);
-}
-
-/**
  * The shipped production shape, minus the budget under test. The grace period and cadence are
  * the deliberate divergences: production holds sessions for 7 days and sweeps hourly, and a
  * test cannot wait for either.
@@ -267,6 +249,16 @@ async function readArchivedTranscript(projectId: string, sessionId: string, expe
  * Compares the post-archive read against the seeded transcript id for id, in order, with
  * content and tool payloads. A hash-only or count-only check passes for an archive that
  * dropped the middle of a session or reordered it; this does not.
+ *
+ * SCOPE, because this is the strongest claim in the file and it is narrower than it looks:
+ * it holds for transcripts whose rows have DISTINCT `created_at`, which is all this fixture
+ * can produce (`messagesFor` spaces timestamps 1000 ms apart). Both read paths filter the
+ * `after` cursor on `created_at` alone — `matchesRawPage` in `compact-archive.ts` and the
+ * `AND created_at > ?` in `messages.ts` — so rows SHARING a `created_at` across a page
+ * boundary are dropped from every later page. That is a pre-existing read-pagination defect,
+ * not something this change introduces, and it is tracked in
+ * `tasks/backlog/2026-09-20-message-pagination-drops-tied-timestamps.md`. Do not read a green
+ * run here as proof that tied timestamps survive; no fixture here can falsify that.
  */
 async function expectTranscriptPreserved(
   projectId: string,
@@ -343,7 +335,7 @@ async function runCeilingCase(prefix: string, ceiling: number) {
   const { projectId, source } = await newArchiveProject(prefix);
   const band = await seedTerminalSession(source, `${prefix}-band`, ceiling);
   const small = await seedTerminalSession(source, `${prefix}-small`, SMALL_MESSAGE_COUNT);
-  await isolateSweepFixture(projectId);
+  await isolateSweepFixture(projectId, { clearCadence: true });
 
   // Fixture preconditions. Without these the pair could stop discriminating — if the band
   // session ever fell under the previous budget, the first tick would migrate it.
