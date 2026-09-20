@@ -393,7 +393,10 @@ async function loadWorkspaceForUpload(
   )
     .bind(workspaceId, projectId)
     .first<WorkspaceUploadRow>();
-  if (!row || row.id !== workspaceId || row.project_id !== projectId) {
+  if (!row) {
+    throw errors.notFound('Workspace');
+  }
+  if (row.id !== workspaceId || row.project_id !== projectId) {
     throw errors.notFound('Workspace');
   }
   return row;
