@@ -30,7 +30,6 @@ on:
 permissions:
   contents: read
   actions: read
-  deployments: write
 
 # Serialize only trusted production candidates. Every no-op/untrusted event gets
 # a unique group so it cannot replace GitHub's single pending production run.
@@ -144,6 +143,8 @@ jobs:
       needs.deploy.result == 'success' &&
       inputs.dry_run != true
     runs-on: ubuntu-latest
+    permissions:
+      deployments: write
     steps:
       - name: Record production deployment marker
         env:
