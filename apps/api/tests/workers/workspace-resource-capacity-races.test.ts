@@ -649,7 +649,6 @@ describe('workspace resource capacity final reservation CAS', () => {
       metrics: Record<string, number>;
     }> = [
       { name: 'cpu', metrics: { cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 } },
-      { name: 'memory', metrics: { cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10 } },
       {
         name: 'creating',
         metrics: { cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
@@ -705,6 +704,36 @@ describe('workspace resource capacity final reservation CAS', () => {
         )
       ).resolves.toBe(false);
     }
+  });
+
+  it('keeps live memory percentage advisory at the final reservation boundary', async () => {
+    const userId = 'user-wrc-memory-advisory';
+    const installationId = 'installation-wrc-memory-advisory';
+    const projectId = 'project-wrc-memory-advisory';
+    const nodeId = 'node-wrc-memory-advisory';
+    await seedUser(userId);
+    await seedInstallation(installationId, userId, {
+      installationIdValue: 'inst-wrc-memory-advisory',
+      accountName: 'test-user-wrc-memory-advisory',
+    });
+    await seedProject(projectId, userId, installationId);
+    await makeReadyNode(nodeId, userId, 'medium');
+    await seedWorkspace('workspace-wrc-memory-active', nodeId, userId, {
+      projectId,
+      status: 'running',
+      resolvedReservationJson: JSON.stringify(reservation()),
+    });
+    await env.DATABASE.prepare(`UPDATE nodes SET last_metrics = ? WHERE id = ?`)
+      .bind(JSON.stringify({ cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10 }), nodeId)
+      .run();
+
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-wrc-memory-admitted', nodeId, { userId, projectId, installationId }),
+        admissionPolicy({ memoryThresholdPercent: 1 })
+      )
+    ).resolves.toBe(true);
   });
 
   it('fails closed for malformed active snapshots and unknown observed hardware', async () => {

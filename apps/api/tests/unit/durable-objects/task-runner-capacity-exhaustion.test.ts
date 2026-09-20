@@ -284,6 +284,7 @@ function capacityPoolSelection(): NonNullable<TaskRunnerState['config']['capacit
     revision: 2,
     strategy: 'pack',
     exhaustionPolicy: 'fail',
+    maxNodes: 3,
     capacityPoolProjectId: null,
     workloadRole: 'workspace',
     poolSnapshot: { ...snapshot, capacitySourceId: null, capacityPoolCandidateId: null },
@@ -321,6 +322,7 @@ function capacityPoolSelection(): NonNullable<TaskRunnerState['config']['capacit
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resolveCredentialSource.mockReset();
   getRuntimeLimits.mockReturnValue({ nodeHeartbeatStaleSeconds: 180 });
   createNodeRecord.mockImplementation(async (_env: unknown, opts: { vmSize: string }) => ({
     id: `node-${opts.vmSize}`,
@@ -328,6 +330,55 @@ beforeEach(() => {
 });
 
 describe('TaskRunner capacity exhaustion', () => {
+  it('rechecks the pool ceiling after winning the provisioning lease', async () => {
+    let poolCountReads = 0;
+    resolveCredentialSource.mockResolvedValue({
+      credentialSource: 'user',
+      providerName: 'vultr',
+    });
+    const { DATABASE } = createDbMock({
+      firstResolver: (sql) => {
+        if (sql.includes('capacity_pool_id = ?') && sql.includes('COUNT(*) AS count')) {
+          poolCountReads += 1;
+          return { count: poolCountReads === 1 ? 2 : 3 };
+        }
+        return FALLTHROUGH;
+      },
+    });
+    const rc = createContext(DATABASE, { VM_ADMISSION_CONTROL_MODE: 'off' });
+    const state = createState({ capacityPoolSelection: capacityPoolSelection() });
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(poolCountReads).toBeGreaterThanOrEqual(2);
+    expect(createNodeRecord).not.toHaveBeenCalled();
+    expect(provisionNode).not.toHaveBeenCalled();
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+    expect(rc.ctx.storage.setAlarm).toHaveBeenCalled();
+  });
+
+  it('does not call the provider when the atomic pool insert loses a cross-domain race', async () => {
+    const poolLimitError = new Error('Capacity pool node limit reached');
+    poolLimitError.name = 'CapacityPoolNodeLimitExceededError';
+    createNodeRecord.mockRejectedValueOnce(poolLimitError);
+    const { DATABASE } = createDbMock({
+      firstResolver: (sql) =>
+        sql.includes('capacity_pool_id = ?') && sql.includes('COUNT(*) AS count')
+          ? { count: 2 }
+          : FALLTHROUGH,
+    });
+    const rc = createContext(DATABASE);
+    const state = createState({ capacityPoolSelection: capacityPoolSelection() });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: 'Capacity pool node limit (3) reached and no node can fit the request.',
+      permanent: true,
+    });
+
+    expect(createNodeRecord).toHaveBeenCalledOnce();
+    expect(provisionNode).not.toHaveBeenCalled();
+  });
+
   it('does not provision through legacy fallback when the selected pool has no candidates', async () => {
     const { DATABASE } = createDbMock({});
     const rc = createContext(DATABASE);

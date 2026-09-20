@@ -88,7 +88,7 @@ export const dispatchTaskDef: AnthropicToolDef = {
       resourceRequirements: {
         type: 'object',
         description:
-          'Modern workload requirements for this task. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. CPU and memory must be positive; disk may be zero; maxCoTenants must be a positive safe integer. Omitted fields inherit; explicit false is preserved.',
+          'Modern workload requirements for this task. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, and deprecated compatibility metadata maxCoTenants. Placement uses explicit CPU, memory, and disk reservations. Omitted fields inherit; explicit false is preserved.',
         properties: {
           minVcpu: { type: 'number', exclusiveMinimum: 0 },
           minMemoryGb: { type: 'number', exclusiveMinimum: 0 },

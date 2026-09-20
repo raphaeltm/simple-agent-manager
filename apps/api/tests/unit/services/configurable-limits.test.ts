@@ -539,10 +539,10 @@ describe('workspace create — count limit removed', () => {
 });
 
 // =============================================================================
-// Source contract: task-runner DO enforces workspace count limit
+// Source contract: task-runner DO retains legacy limit configuration as metadata
 // =============================================================================
 
-describe('task-runner workspace count limit is configurable', () => {
+describe('task-runner legacy workspace count configuration', () => {
   // The per-node cap and node pressure thresholds moved out of the TaskRunner DO
   // into the shared admission policy, so both advisory selection and the final
   // admission SQL read one configuration. These assertions exercise that resolver
@@ -565,7 +565,7 @@ describe('task-runner workspace count limit is configurable', () => {
     expect(policy.memoryThresholdPercent).toBe(62);
   });
 
-  it('enforces the workspace count limit at the shared capacity evaluator', () => {
+  it('does not enforce the legacy workspace count limit when explicit resources fit', () => {
     const policy = resolveWorkspaceAdmissionPolicy({ MAX_WORKSPACES_PER_NODE: '1' } as never);
     const node = {
       id: 'node-1',
@@ -598,7 +598,7 @@ describe('task-runner workspace count limit is configurable', () => {
       diskMb: 0,
     };
     const result = evaluateWorkspaceReservationCapacity(node, usage, request, policy);
-    expect(result.admitted).toBe(false);
-    expect(result.reasons).toContain('workspace count cap reached');
+    expect(result.admitted).toBe(true);
+    expect(result.reasons).not.toContain('workspace count cap reached');
   });
 });

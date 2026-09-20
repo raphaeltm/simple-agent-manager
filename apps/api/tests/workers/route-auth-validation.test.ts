@@ -105,7 +105,9 @@ type EvictionActivityEvent = {
 };
 
 function getProjectDataStub(projectId: string): DurableObjectStub<ProjectData> {
-  return env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(projectId)) as DurableObjectStub<ProjectData>;
+  return env.PROJECT_DATA.get(
+    env.PROJECT_DATA.idFromName(projectId)
+  ) as DurableObjectStub<ProjectData>;
 }
 
 async function listWorkspaceEvictionActivity(
@@ -275,6 +277,48 @@ beforeAll(async () => {
         'main',
         workspace.status
       )
+      .run();
+  }
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO credentials
+       (id, user_id, provider, credential_type, credential_kind, is_active,
+        encrypted_token, iv, created_at, updated_at)
+     VALUES (?, ?, 'hetzner', 'cloud-provider', 'api-key', 1,
+       'encrypted', 'iv', datetime('now'), datetime('now'))`
+  )
+    .bind(`${TEST_PREFIX}-eviction-credential`, USER_ID)
+    .run();
+
+  for (const [workspaceId, chatSessionId] of [
+    [EVICTION_WORKSPACE_ID, EVICTION_SESSION_ID],
+    [NODE_EVICTION_WORKSPACE_ID, `${EVICTION_SESSION_ID}-node`],
+  ] as const) {
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO session_snapshots
+         (id, workspace_id, node_id, project_id, user_id, chat_session_id, runtime,
+          status, degradation, manifest_r2_key, manifest_json, expires_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'vm', 'available', 'none', ?, '{}',
+         '2099-01-01T00:00:00.000Z', datetime('now'))`
+    )
+      .bind(
+        `${workspaceId}-snapshot`,
+        workspaceId,
+        NODE_ID,
+        PROJECT_ID,
+        USER_ID,
+        chatSessionId,
+        `snapshots/${chatSessionId}/manifest.json`
+      )
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO tasks
+         (id, project_id, user_id, chat_session_id, workspace_id, title, status,
+          priority, task_mode, dispatch_depth, triggered_by, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'Eviction source', 'completed', 0, 'conversation', 0,
+         'mcp', ?, datetime('now'), datetime('now'))`
+    )
+      .bind(`${workspaceId}-source-task`, PROJECT_ID, USER_ID, chatSessionId, workspaceId, USER_ID)
       .run();
   }
 
@@ -526,17 +570,30 @@ describe('workspace eviction callback', () => {
   it('finalizes a confirmed Stop through the real NodeLifecycle RPC and refuses replay', async () => {
     const workspaceId = `${TEST_PREFIX}-confirmed-stop`;
     const claimedAt = new Date().toISOString();
-    await env.DATABASE.prepare(`INSERT INTO workspaces
+    await env.DATABASE.prepare(
+      `INSERT INTO workspaces
       (id, user_id, node_id, name, repository, branch, status, vm_size, vm_location,
        created_at, updated_at, stop_runtime_confirmed_at)
       VALUES (?, ?, ?, 'confirmed stop', 'test-repo', 'main', 'stopping', 'cx22', 'fsn1',
-        datetime('now'), ?, ?)`)
-      .bind(workspaceId, USER_ID, NODE_ID, claimedAt, claimedAt).run();
-    const identity = { workspaceId, userId: USER_ID, nodeId: NODE_ID, generation: null,
-      projectId: null, chatSessionId: null, claimedAt };
+        datetime('now'), ?, ?)`
+    )
+      .bind(workspaceId, USER_ID, NODE_ID, claimedAt, claimedAt)
+      .run();
+    const identity = {
+      workspaceId,
+      userId: USER_ID,
+      nodeId: NODE_ID,
+      generation: null,
+      projectId: null,
+      chatSessionId: null,
+      claimedAt,
+    };
     expect(await finalizeWorkspaceStopOnNode(env as unknown as Env, identity)).toBe(true);
-    expect(await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
-      .bind(workspaceId).first()).toEqual({ status: 'stopped' });
+    expect(
+      await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+        .bind(workspaceId)
+        .first()
+    ).toEqual({ status: 'stopped' });
     expect(await finalizeWorkspaceStopOnNode(env as unknown as Env, identity)).toBe(false);
   });
   it('returns 401 without a callback JWT', async () => {
@@ -620,7 +677,7 @@ describe('workspace eviction callback', () => {
         }),
       }
     );
-    expect(replay.status).toBe(410);
+    expect(replay.status).toBe(204);
     await expect(listWorkspaceEvictionActivity(EVICTION_WORKSPACE_ID)).resolves.toHaveLength(1);
   });
 
@@ -637,7 +694,7 @@ describe('workspace eviction callback', () => {
           nodeId: NODE_ID,
           workspaceId: NODE_EVICTION_WORKSPACE_ID,
           reason: 'oom_kill',
-          snapshotCaptured: false,
+          snapshotCaptured: true,
           containerStopped: true,
         }),
       }
@@ -653,6 +710,42 @@ describe('workspace eviction callback', () => {
       status: 'evicted',
       error_message: 'Workspace evicted after container OOM',
     });
+  });
+
+  it('rejects an active eviction without a restorable snapshot', async () => {
+    await env.DATABASE.prepare(
+      `UPDATE workspaces
+          SET status = 'running', eviction_generation = NULL, eviction_finalized_at = NULL,
+              chat_session_id = ?
+        WHERE id = ?`
+    )
+      .bind(EVICTION_SESSION_ID, EVICTION_WORKSPACE_ID)
+      .run();
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${PROJECT_ID}/workspaces/${EVICTION_WORKSPACE_ID}/eviction`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${evictionWorkspaceCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          nodeId: NODE_ID,
+          workspaceId: EVICTION_WORKSPACE_ID,
+          reason: 'memory_pressure',
+          snapshotCaptured: false,
+          containerStopped: true,
+        }),
+      }
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: 'CONFLICT' });
+    await expect(
+      env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+        .bind(EVICTION_WORKSPACE_ID)
+        .first<{ status: string }>()
+    ).resolves.toEqual({ status: 'running' });
   });
 
   it('returns 401, not 500, when the eviction callback token is expired', async () => {

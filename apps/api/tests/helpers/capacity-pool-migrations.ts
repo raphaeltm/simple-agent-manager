@@ -40,6 +40,7 @@ export const capacityPoolAuthorityGenerationMigrationSql = readDbMigration(
 export const capacityPoolSelectionDigestMigrationSql = readDbMigration(
   '0153_capacity_pool_selection_digest.sql'
 );
+export const capacityPoolMaxNodesMigrationSql = readDbMigration('0167_capacity_pool_max_nodes.sql');
 
 export function applyCapacityPoolSchemaMigrations(database: SqliteMigrationTarget): void {
   database.exec(migrationSql);
@@ -53,4 +54,5 @@ export function applyCapacityPoolSchemaMigrations(database: SqliteMigrationTarge
   database.exec(capacitySourceAuthoritySnapshotsMigrationSql);
   database.exec(capacityPoolAuthorityGenerationMigrationSql);
   database.exec(capacityPoolSelectionDigestMigrationSql);
+  database.exec(capacityPoolMaxNodesMigrationSql);
 }

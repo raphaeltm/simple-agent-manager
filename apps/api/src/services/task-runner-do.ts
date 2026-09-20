@@ -123,6 +123,7 @@ export async function startTaskRunnerDO(
     branch: string;
     defaultBranch?: string;
     preferredNodeId?: string | null;
+    excludedNodeId?: string | null;
     userName?: string | null;
     userEmail?: string | null;
     githubId?: string | null;
@@ -192,6 +193,12 @@ export async function startTaskRunnerDO(
     vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
     /** Existing sleeping chat whose snapshot is restored before queued prompt delivery. */
     resumeSnapshotChatSessionId?: string | null;
+    /** Resource-eviction identity that must remain current through replacement allocation. */
+    evictionFence?: {
+      workspaceId: string;
+      nodeId: string;
+      generation: string | null;
+    } | null;
     /** Original parent whose live status authorizes this snapshot-recovery runner. */
     recoverySourceTaskId?: string | null;
     /** Original attempt whose runtime deletion fences this replacement. */
@@ -226,6 +233,7 @@ export async function startTaskRunnerDO(
       branch: input.branch,
       defaultBranch: input.defaultBranch ?? input.branch,
       preferredNodeId: input.preferredNodeId ?? null,
+      excludedNodeId: input.excludedNodeId ?? null,
       userName: input.userName ?? null,
       userEmail: input.userEmail ?? null,
       githubId: input.githubId ?? null,
@@ -268,6 +276,7 @@ export async function startTaskRunnerDO(
       capacityPoolSelection,
       vmSizeSource: input.vmSizeSource ?? null,
       resumeSnapshotChatSessionId: input.resumeSnapshotChatSessionId ?? null,
+      evictionFence: input.evictionFence ?? null,
       recoverySourceTaskId: input.recoverySourceTaskId ?? null,
       retrySourceTaskId: input.retrySourceTaskId ?? null,
       startGuard: input.startGuard ?? null,

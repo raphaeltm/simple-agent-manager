@@ -197,11 +197,13 @@ export function isResolvedResourceReservation(
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
   return (
-    (record.version === 1 || record.version === 2) &&
+    (record.version === 1 || record.version === 2 || record.version === 3) &&
     positiveInteger(record.cpuMillis) !== null &&
     positiveInteger(record.memoryMb) !== null &&
     nonNegativeInteger(record.diskMb) !== null &&
-    positiveInteger(record.maxCoTenants) !== null &&
+    (record.version === 3
+      ? !Object.hasOwn(record, 'maxCoTenants') || positiveInteger(record.maxCoTenants) !== null
+      : positiveInteger(record.maxCoTenants) !== null) &&
     typeof record.exclusiveNode === 'boolean' &&
     typeof record.source === 'string' &&
     ['task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'].includes(
@@ -424,10 +426,12 @@ function addReservationUsage(usage: ActiveWorkspaceReservationUsage, value: stri
   usage.memoryMb += reservation.memoryMb;
   usage.diskMb += reservation.diskMb;
   if (reservation.exclusiveNode) usage.exclusiveCount += 1;
-  usage.minMaxCoTenants = Math.min(
-    usage.minMaxCoTenants ?? reservation.maxCoTenants,
-    reservation.maxCoTenants
-  );
+  if (reservation.maxCoTenants !== undefined) {
+    usage.minMaxCoTenants = Math.min(
+      usage.minMaxCoTenants ?? reservation.maxCoTenants,
+      reservation.maxCoTenants
+    );
+  }
 }
 
 export function evaluateWorkspaceReservationCapacity(
@@ -442,18 +446,6 @@ export function evaluateWorkspaceReservationCapacity(
 
   if (!isResolvedResourceReservation(request)) {
     reasons.push('requested reservation is malformed');
-  }
-  if (policy.maxWorkspaces < 1) {
-    reasons.push('max workspaces per node must be positive');
-  }
-  if (active.activeCount >= policy.maxWorkspaces) {
-    reasons.push('workspace count cap reached');
-  }
-  if (active.activeCount >= request.maxCoTenants) {
-    reasons.push('requested co-tenant cap reached');
-  }
-  if (active.minMaxCoTenants !== null && active.activeCount >= active.minMaxCoTenants) {
-    reasons.push('existing reservation co-tenant cap reached');
   }
   if (request.exclusiveNode && active.activeCount > 0) {
     reasons.push('requested reservation requires an exclusive node');
@@ -534,9 +526,10 @@ export function usableMemoryMb(memoryMb: number, policy: WorkspaceAdmissionPolic
 /**
  * Live-telemetry admission checks, split by whether the resource is compressible.
  *
- * Memory and disk are NON-COMPRESSIBLE. Oversubscribing them gets processes
- * OOM-killed and wedges the node, and no amount of declared accounting makes a
- * full disk usable, so measured pressure stays a hard veto for both.
+ * Memory and disk are NON-COMPRESSIBLE. Their declared reservations remain hard
+ * budgets. Live memory percentage stays available for scoring and diagnostics,
+ * while disk pressure remains a hard veto because a full filesystem cannot
+ * satisfy even a correctly reserved workload.
  *
  * CPU is COMPRESSIBLE: the kernel time-slices it, so oversubscription makes work
  * slower rather than broken. It is also already accounted for — every co-tenant's
@@ -569,9 +562,6 @@ function measuredAdmissionDiagnostic(
   if (metrics.diskPercent === null) return 'node has no disk pressure telemetry';
   if (metrics.cpuPercent !== null && metrics.cpuPercent >= policy.cpuThresholdPercent) {
     return 'CPU saturation ceiling reached';
-  }
-  if (metrics.memoryPercent >= policy.memoryThresholdPercent) {
-    return 'memory pressure threshold reached';
   }
   if (metrics.diskPercent >= policy.diskPressureThresholdPercent) {
     return 'disk pressure threshold reached';

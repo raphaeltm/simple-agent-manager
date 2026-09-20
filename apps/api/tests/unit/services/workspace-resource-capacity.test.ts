@@ -88,7 +88,7 @@ function observedCapacityNode(overrides: {
 }
 
 describe('workspace resource capacity accounting', () => {
-  it('accepts v1 and v2 reservation snapshots and rejects malformed future snapshots', () => {
+  it('accepts legacy reservations and v3 reservations with or without compatibility metadata', () => {
     expect(isResolvedResourceReservation(reservation())).toBe(true);
     expect(
       isResolvedResourceReservation({
@@ -97,7 +97,11 @@ describe('workspace resource capacity accounting', () => {
         diagnostics: { resolver: 'canonical-a' },
       })
     ).toBe(true);
-    expect(isResolvedResourceReservation(reservation({ version: 3 }))).toBe(false);
+    expect(isResolvedResourceReservation(reservation({ version: 3 }))).toBe(true);
+    const current = reservation({ version: 3 });
+    delete current.maxCoTenants;
+    expect(isResolvedResourceReservation(current)).toBe(true);
+    expect(isResolvedResourceReservation(reservation({ version: 4 }))).toBe(false);
     expect(isResolvedResourceReservation({ ...reservation(), cpuMillis: '1000' })).toBe(false);
   });
 
@@ -187,16 +191,8 @@ describe('workspace resource capacity accounting', () => {
     for (const [metrics, reason] of [
       [{ cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 }, 'CPU saturation ceiling reached'],
       [
-        { cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10 },
-        'memory pressure threshold reached',
-      ],
-      [
         { cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
         WORKSPACE_BUSY_BUILD_QUEUE_REASON,
-      ],
-      [
-        { cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10, creatingWorkspaces: 1 },
-        'memory pressure threshold reached',
       ],
       // A saturated host stays a HARD refusal even while building: busy-build must not
       // absorb CPU saturation and turn a refusal into a deferral (the scheduler would
@@ -401,7 +397,7 @@ describe('workspace resource capacity', () => {
     ).toBe(false);
   });
 
-  it('enforces both the platform count cap and every reservation co-tenant cap', () => {
+  it('ignores legacy project and reservation count caps when explicit resources fit', () => {
     const occupied = aggregateWorkspaceReservationRows([
       { resolvedReservationJson: JSON.stringify({ ...REQUEST, maxCoTenants: 2 }) },
     ]);
@@ -419,7 +415,7 @@ describe('workspace resource capacity', () => {
         REQUEST,
         policy({ maxWorkspaces: 1, hostMemoryReserveMb: 0 })
       )
-    ).toBe(false);
+    ).toBe(true);
     expect(
       hasWorkspaceReservationCapacity(
         largeNode,
@@ -435,7 +431,7 @@ describe('workspace resource capacity', () => {
         { ...REQUEST, maxCoTenants: 1 },
         policy({ maxWorkspaces: 10, hostMemoryReserveMb: 0 })
       )
-    ).toBe(false);
+    ).toBe(true);
     expect(
       hasWorkspaceReservationCapacity(
         largeNode,
@@ -445,7 +441,41 @@ describe('workspace resource capacity', () => {
         REQUEST,
         policy({ maxWorkspaces: 10, hostMemoryReserveMb: 0 })
       )
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it('packs a 32 GB node until explicit resources are exhausted despite maxCoTenants=2', () => {
+    const request = reservation({
+      version: 2,
+      cpuMillis: 400,
+      memoryMb: 800,
+      diskMb: 2048,
+      maxCoTenants: 2,
+    });
+    const node = observedCapacityNode({
+      id: 'large-pack',
+      vcpuCount: 16,
+      memoryMb: 32_768,
+      diskGb: 80,
+    });
+    const admission = policy({
+      maxWorkspaces: 2,
+      hostMemoryReserveMb: 512,
+      memoryThresholdPercent: 1,
+    });
+
+    expect(
+      evaluateWorkspaceReservationCapacity(node, aggregateCopies(request, 39), request, admission)
+        .admitted
+    ).toBe(true);
+    const exhausted = evaluateWorkspaceReservationCapacity(
+      node,
+      aggregateCopies(request, 40),
+      request,
+      admission
+    );
+    expect(exhausted.admitted).toBe(false);
+    expect(exhausted.reasons).toContain('memory budget would be exceeded after host reserve');
   });
 
   it('admits the approved legacy v2 density targets and rejects the next tenant', () => {
@@ -643,21 +673,26 @@ describe('live CPU is a saturation ceiling, not an admission authority', () => {
     expect(result.reasons).toContain('CPU saturation ceiling reached');
   });
 
-  it.each([
-    ['memory', { memoryPercent: 99 }, 'memory pressure threshold reached'],
-    ['disk', { diskPercent: 99 }, 'disk pressure threshold reached'],
-  ])('keeps the non-compressible %s veto at the same pressure', (_label, overrides, reason) => {
-    // Memory and disk oversubscription gets processes OOM-killed and wedges the
-    // node, so neither may follow CPU up to a saturation-only ceiling.
+  it('keeps disk pressure as a hard veto', () => {
     const result = evaluateWorkspaceReservationCapacity(
-      hostAt(10, overrides),
+      hostAt(10, { diskPercent: 99 }),
       oneCoTenant(),
       reservation({ cpuMillis: 1000 }),
       resolveWorkspaceAdmissionPolicy(productionEnv)
     );
 
     expect(result.admitted).toBe(false);
-    expect(result.reasons).toContain(reason);
+    expect(result.reasons).toContain('disk pressure threshold reached');
+  });
+
+  it('uses live memory percentage for scoring without vetoing a fitting reservation', () => {
+    const result = evaluateWorkspaceReservationCapacity(
+      hostAt(10, { memoryPercent: 99 }),
+      oneCoTenant(),
+      reservation({ cpuMillis: 1000 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+    expect(result.admitted).toBe(true);
   });
 
   it('is the only backstop when a co-tenant under-declares, and it holds', () => {

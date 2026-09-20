@@ -17,6 +17,7 @@ import {
 } from '../../services/node-callback-auth';
 import * as projectDataService from '../../services/project-data';
 import { finalizeWorkspaceEvictionOnNode } from '../../services/workspace-eviction-lifecycle';
+import { recoverWorkspaceAfterEviction } from '../../services/workspace-eviction-recovery';
 
 const WORKSPACE_EVICTION_CALLBACK_ACTIVE_STATUS_VALUES = [
   'creating',
@@ -128,6 +129,31 @@ async function finalizeEvictionLifecycle(env: Env, workspace: WorkspaceEvictionR
   }
 }
 
+async function recoverEvictedWorkspace(
+  env: Env,
+  workspace: WorkspaceEvictionResource,
+  body: WorkspaceEvictionBody,
+  projectId: string
+): Promise<void> {
+  if (!body.snapshotCaptured || !workspace.chatSessionId) return;
+  const recovery = await recoverWorkspaceAfterEviction(env, {
+    projectId,
+    workspaceId: workspace.workspaceId,
+    chatSessionId: workspace.chatSessionId,
+    nodeId: body.nodeId,
+    generation: body.evictionGeneration ?? null,
+  });
+  if (recovery.status === 'unavailable') {
+    log.warn('workspace_eviction.recovery_deferred', {
+      projectId,
+      workspaceId: workspace.workspaceId,
+      nodeId: body.nodeId,
+      reason: recovery.reason,
+    });
+    throw errors.conflict(`Evicted workspace recovery is not ready: ${recovery.reason}`);
+  }
+}
+
 function rejectMissingWorkspaceCallback(
   payload: CallbackTokenPayload,
   workspaceId: string,
@@ -197,11 +223,8 @@ async function evictionTerminalResponse(
   // already moved into a terminal lifecycle state.
   if (workspace.status === 'evicted') {
     await finalizeEvictionLifecycle(c.env, workspace);
-    return terminalResourceResponse('workspace_eviction.terminal_workspace', {
-      projectId,
-      workspaceId,
-      status: workspace.status,
-    });
+    await recoverEvictedWorkspace(c.env, workspace, body, projectId);
+    return c.body(null, 204);
   }
 
   if (
@@ -247,6 +270,10 @@ workspaceEvictionCallbackRoute.post(
     assertEvictionIdentity(payload, workspace, body, projectId, workspaceId);
     const terminal = await evictionTerminalResponse(c, workspace, body, projectId, workspaceId);
     if (terminal) return terminal;
+
+    if (!body.snapshotCaptured) {
+      throw errors.conflict('Workspace eviction requires a restorable snapshot');
+    }
 
     if (!body.containerStopped) {
       throw errors.conflict('Workspace container must be stopped before eviction is recorded');
@@ -322,6 +349,12 @@ workspaceEvictionCallbackRoute.post(
     }
 
     await finalizeEvictionLifecycle(c.env, workspace);
+    await recoverEvictedWorkspace(
+      c.env,
+      { ...workspace, status: 'evicted', updatedAt: now },
+      body,
+      projectId
+    );
 
     c.executionCtx.waitUntil(
       projectDataService

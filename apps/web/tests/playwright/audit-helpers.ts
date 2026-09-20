@@ -88,6 +88,7 @@ type MutableCapacitySummary = {
     id: string;
     strategy: string;
     exhaustionPolicy: string;
+    maxNodes?: number;
     revision: number;
   };
   candidates: MutableCapacityCandidate[];
@@ -100,7 +101,7 @@ type MutableCapacityDefaultsResponse = {
 };
 
 export type MockCapacityDefaultsUpdate = {
-  policy?: { strategy?: string; exhaustionPolicy?: string };
+  policy?: { strategy?: string; exhaustionPolicy?: string; maxNodes?: number };
   candidates?: MutableCapacityCandidate[];
   catalogAdditions?: Array<{
     sourceId: string;
@@ -123,6 +124,7 @@ export function applyMockCapacityDefaultsUpdate<T extends MutableCapacityDefault
   if (update.policy?.exhaustionPolicy) {
     summary.pool.exhaustionPolicy = update.policy.exhaustionPolicy;
   }
+  if (update.policy?.maxNodes) summary.pool.maxNodes = update.policy.maxNodes;
   for (const candidateUpdate of update.candidates ?? []) {
     const candidate = summary.candidates.find((item) => item.id === candidateUpdate.id);
     if (candidate) candidate.status = candidateUpdate.status;

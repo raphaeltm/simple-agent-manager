@@ -118,6 +118,7 @@ export function toCapacityPool(row: schema.CapacityPool): CapacityPoolDto {
       row.exhaustionPolicy,
       isCapacityExhaustionPolicy
     ),
+    maxNodes: row.maxNodes,
     lastReconciledAt: row.lastReconciledAt,
     migrationVersion: row.migrationVersion,
     migrationState: row.migrationState,

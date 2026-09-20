@@ -175,12 +175,12 @@ SAM keeps the two workload roles in sync behind it.
 **Strategy** decides the order SAM considers machines in — both existing nodes it could reuse and
 fresh offerings it could provision. New pools default to **Balanced**.
 
-| Strategy                 | What it does                                                                                                                                     |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Balanced** _(default)_ | **Lowest projected utilization first.** Spreads work over the machines you already pay for, leaving headroom on each.                            |
-| **Pack**                 | **Highest projected utilization that still fits, first.** Fills one host before opening another, keeping the machine count — and the bill — low. |
-| **Spread**               | **Fewest neighbouring workspaces first.** Buys isolation and predictable performance at the cost of running more machines.                       |
-| **Smallest fit**         | **Smallest sufficient capacity first.** Puts small work on cheap machines and keeps the big ones free for work that needs them.                  |
+| Strategy                 | What it does                                                                                                                                                      |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Balanced** _(default)_ | **Lowest projected utilization first.** Spreads work over the machines you already pay for, leaving headroom on each.                                             |
+| **Pack**                 | **Highest projected utilization that still fits, first.** Fills an existing host before opening another; when provisioning, chooses the largest allowed offering. |
+| **Spread**               | **Fewest neighbouring workspaces first.** Buys isolation and predictable performance at the cost of running more machines.                                        |
+| **Smallest fit**         | **Smallest sufficient capacity first.** Chooses the smallest, then cheapest, sufficient offering and keeps bigger machines free for work that needs them.         |
 
 A few things worth knowing:
 
@@ -237,13 +237,13 @@ _needs_. SAM resolves them, then keeps only the offerings and nodes that satisfy
 
 ### The fields
 
-| Field              | Meaning                                                                                          | Platform default |
-| ------------------ | ------------------------------------------------------------------------------------------------ | ---------------- |
-| **vCPU**           | Minimum vCPU                                                                                     | 2                |
-| **Memory (GB)**    | Minimum RAM                                                                                      | 4                |
-| **Disk (GB)**      | Minimum disk                                                                                     | 40               |
-| **Exclusive node** | The work must have the machine to itself                                                         | Off              |
-| `maxCoTenants`     | Maximum workspaces allowed to share the machine. Not in the form — set it through the API or MCP | 4                |
+| Field              | Meaning                                                                                                   | Platform default |
+| ------------------ | --------------------------------------------------------------------------------------------------------- | ---------------- |
+| **vCPU**           | Minimum vCPU                                                                                              | 2                |
+| **Memory (GB)**    | Minimum RAM                                                                                               | 4                |
+| **Disk (GB)**      | Minimum disk                                                                                              | 40               |
+| **Exclusive node** | The work must have the machine to itself                                                                  | Off              |
+| `maxCoTenants`     | Deprecated compatibility metadata. Accepted for old clients and audit records, but does not cap placement | 4                |
 
 Every field is optional. Leave a field blank and it **inherits** — it is resolved from the next
 level down, field by field. Setting vCPU without setting memory is fine and normal.
@@ -308,12 +308,11 @@ A node accepts additional work only if **all** of these hold:
   fits the machine's real hardware. By default only memory holds headroom back for the host
   itself (512 MB); CPU may be committed up to 100% of the machine, and disk is compared
   against the whole disk, unless the deployment configures otherwise.
-- The workspace count is under **Max Workspaces Per Node** (3 by default) and under the co-tenant
-  cap requested by this work _and_ by everything already on the node.
 - Nothing on the node asked for an exclusive machine, and this work is not asking for one.
-- A node that is **already hosting work** is reporting fresh health telemetry, and its memory and
-  disk pressure are below their thresholds (50% memory, 90% disk by default). A brand-new machine
-  that has not reported yet is not held back by this.
+- A node that is **already hosting work** is reporting fresh health telemetry, and its disk
+  pressure is below its threshold (90% by default). Live memory percentage is used for ranking;
+  explicit reserved memory and the host reserve control admission. A brand-new machine that has
+  not reported yet is not held back by this.
 - Live CPU is treated differently from memory and disk. CPU is shared out by the kernel, so a busy
   machine runs work more slowly rather than breaking, and each workspace's CPU is already reserved
   from the machine's budget above. Measured CPU therefore only blocks placement once the machine is
@@ -324,11 +323,14 @@ A node accepts additional work only if **all** of these hold:
 If a node's real hardware is unknown, or a busy node's telemetry is missing, malformed, or stale,
 SAM refuses it rather than guessing. A machine SAM cannot measure is never given work.
 
-**Max Workspaces Per Node**, **Node CPU Threshold**, and **Node Memory Threshold** are per-project
-overrides in **Scaling & Scheduling → Node Scheduling**; leave a field blank to use the platform
-default shown as its placeholder. Raise them to pack machines harder and spend less, lower them for
-more headroom per workspace. The disk-pressure threshold has no per-project control and is set by
-the deployment.
+**Node CPU Threshold** is a per-project overload-backpressure override in **Scaling & Scheduling →
+Node Scheduling**. Legacy workspace-count and memory-threshold values remain readable for
+compatibility, but do not gate placement. The disk-pressure threshold is deployment-controlled.
+
+Each compute pool also has a **Maximum nodes per user** setting. Managed workspace nodes are
+user-isolated, so **Spread** provisions separate nodes for that user until their pool usage reaches
+the limit, then packs further sessions onto those nodes. **Pack** chooses the largest allowed
+offering and fills it densely; **Smallest fit** chooses the smallest or cheapest sufficient offering.
 
 ### Warm reuse
 
@@ -370,12 +372,12 @@ remove it so a lower scope applies.
 | "Waiting for capacity" that never clears                       | The pool's allowed offerings are sold out in the chosen region. Allow more offerings or regions, or switch the policy to **Fallback chain**.                                                  |
 | Work fails immediately with a capacity error                   | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                                                                           |
 | No offering satisfies the request                              | Requirements exceed every allowed machine — remember the host memory reserve, so a 4 GiB offering tops out at a 3584 MiB reservation. Lower the requirements or allow a bigger instance type. |
-| A new machine is provisioned for every task                    | Requirements ask for an exclusive node, `maxCoTenants` is 1, or each request is large enough to fill a machine.                                                                               |
+| A new machine is provisioned for every task                    | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's maximum-node limit.                                                            |
 | Machines are bigger or pricier than expected                   | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor.                                                           |
 | Editing is disabled                                            | Project pools need owner or admin (`secret:write`); maintainers can view and reconcile but not edit.                                                                                          |
 | The project ignores your personal pool                         | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                               |
 | Everything lands on one cloud although the pool allows several | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                 |
-| Too many, or too few, workspaces share a machine               | Adjust **Max Workspaces Per Node** and the CPU/memory thresholds in Scaling & Scheduling, or set a co-tenant cap on the work itself.                                                          |
+| Too many, or too few, workspaces share a machine               | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and maximum-node limit.                                                 |
 | Work waits for capacity even though the policy is **Fail**     | The provider reported account-wide exhaustion, which always retries. Check your provider account's server limit.                                                                              |
 
 ## Where to look when you want the details

@@ -1370,6 +1370,9 @@ export const nodes = sqliteTable(
     capacityPoolIdx: index('idx_nodes_capacity_pool')
       .on(table.capacityPoolId)
       .where(sql`capacity_pool_id IS NOT NULL`),
+    capacityPoolUserStatusIdx: index('idx_nodes_capacity_pool_user_status')
+      .on(table.capacityPoolId, table.userId, table.status)
+      .where(sql`capacity_pool_id IS NOT NULL`),
     capacitySourceIdx: index('idx_nodes_capacity_source')
       .on(table.capacitySourceId)
       .where(sql`capacity_source_id IS NOT NULL`),
@@ -1668,6 +1671,9 @@ export const sessionSnapshots = sqliteTable(
     recoveryAttempts: integer('recovery_attempts').notNull().default(0),
     recoveryError: text('recovery_error'),
     recoveryClaimedAt: text('recovery_claimed_at'),
+    evictionRecoveryWorkspaceId: text('eviction_recovery_workspace_id'),
+    evictionRecoveryNodeId: text('eviction_recovery_node_id'),
+    evictionRecoveryGeneration: text('eviction_recovery_generation'),
     /**
      * When a wake attempt last reported failure, as a canonical
      * `toISOString()` value — the decay predicate compares it lexicographically
@@ -2895,6 +2901,7 @@ export const capacityPools = sqliteTable(
     configurationState: text('configuration_state').notNull().default('configured-ready'),
     strategy: text('strategy').notNull().default('balanced'),
     exhaustionPolicy: text('exhaustion_policy').notNull().default('queue'),
+    maxNodes: integer('max_nodes').notNull().default(3),
     lastReconciledAt: text('last_reconciled_at'),
     /**
      * Digest of the pool's selection-affecting candidate state. Reconciliation bumps

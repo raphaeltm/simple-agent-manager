@@ -32,6 +32,7 @@ export interface DefaultCapacityPoolUpdateInput extends DefaultPoolScopeIdentity
   policy?: {
     strategy?: CapacityPoolStrategy;
     exhaustionPolicy?: CapacityExhaustionPolicy;
+    maxNodes?: number;
   };
   candidates?: { id: string; status: CapacityPoolStatus }[];
   catalogAdditions?: DefaultCapacityPoolCandidateCatalogAddition[];
@@ -565,6 +566,9 @@ function resolvePolicyUpdate(
   }
   if (policy?.exhaustionPolicy !== undefined && policy.exhaustionPolicy !== pool.exhaustionPolicy) {
     values.exhaustionPolicy = policy.exhaustionPolicy;
+  }
+  if (policy?.maxNodes !== undefined && policy.maxNodes !== pool.maxNodes) {
+    values.maxNodes = policy.maxNodes;
   }
 
   return { changed: Object.keys(values).length > 0, values };

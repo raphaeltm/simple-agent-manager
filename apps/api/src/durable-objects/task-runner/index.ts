@@ -50,6 +50,7 @@ import {
   isSessionRecoveryTaskAndEventAuthorized,
   SessionRecoveryAuthorityRevokedError,
 } from '../../services/session-recovery-authority';
+import { evictionRecoveryFenceMatches } from '../../services/session-recovery-eviction';
 import { assertTaskRunnerStartGuard } from '../../services/task-runner-start-guard';
 import { handleAgentSession } from './agent-session-step';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
@@ -453,6 +454,7 @@ export class TaskRunner extends DurableObject<Env> {
     raw.workspaceDispatchLastError ??= null;
     raw.workspaceDispatchAckedAt ??= null;
     raw.config.resumeSnapshotChatSessionId ??= null;
+    raw.config.evictionFence ??= null;
     raw.config.recoverySourceTaskId ??= null;
     raw.config.retrySourceTaskId ??= null;
     raw.config.startGuard ??= null;
@@ -504,6 +506,15 @@ export class TaskRunner extends DurableObject<Env> {
     input: StartTaskInput | TaskRunnerState,
     options: { requireStartGuardQueued?: boolean } = {}
   ): Promise<void> {
+    const evictionFence = input.config.evictionFence ?? null;
+    if (
+      evictionFence &&
+      !(await evictionRecoveryFenceMatches(this.env as unknown as Env, evictionFence))
+    ) {
+      throw Object.assign(new Error('Eviction generation changed before replacement allocation'), {
+        permanent: true,
+      });
+    }
     const deletionSourceTaskId =
       input.config.retrySourceTaskId ?? input.config.recoverySourceTaskId ?? null;
     if (deletionSourceTaskId) {

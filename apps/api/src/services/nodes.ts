@@ -74,47 +74,77 @@ export interface ProvisionedNode {
   updatedAt: string;
 }
 
+export class CapacityPoolNodeLimitExceededError extends Error {
+  constructor() {
+    super('Capacity pool node limit reached');
+    this.name = 'CapacityPoolNodeLimitExceededError';
+  }
+}
+
+function isCapacityPoolNodeLimitViolation(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current; depth += 1) {
+    if (current instanceof Error && current.message.includes('capacity_pool_node_limit')) {
+      return true;
+    }
+    current =
+      typeof current === 'object' && 'cause' in current
+        ? (current as { cause?: unknown }).cause
+        : undefined;
+  }
+  return false;
+}
+
 export async function createNodeRecord(env: Env, input: CreateNodeInput): Promise<ProvisionedNode> {
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
   const nodeId = ulid();
   const capacitySnapshotValues = capacityPlacementSnapshotDbValues(input.capacityPlacementSnapshot);
 
-  await db.insert(schema.nodes).values({
-    id: nodeId,
-    userId: input.userId,
-    credentialAttributionUserId: input.credentialAttributionUserId ?? input.userId,
-    credentialAttributionProjectId:
-      input.credentialAttributionSource === 'project'
-        ? (input.credentialAttributionProjectId ?? null)
-        : null,
-    credentialAttributionSource: input.credentialAttributionSource ?? 'user',
-    name: input.name,
-    status: 'creating',
-    vmSize: input.vmSize,
-    vmLocation: input.vmLocation,
-    cloudProvider: input.cloudProvider ?? null,
-    healthStatus: 'stale',
-    heartbeatStaleAfterSeconds: input.heartbeatStaleAfterSeconds,
-    nodeRole: input.nodeRole ?? 'workspace',
-    nodeMode: input.nodeMode ?? 'shared',
-    runtime: input.runtime ?? 'vm',
-    runtimeIncarnationId: crypto.randomUUID(),
-    // This newly inserted VM placeholder has never reached a provider. The
-    // provisioner's incarnation claim clears this proof before external create.
-    // Container allocation follows a separate path without that claim.
-    runtimeTerminationConfirmedAt: (input.runtime ?? 'vm') === 'vm' ? now : null,
-    ...capacitySnapshotValues,
-    providerInstanceType: input.providerInstanceType ?? capacitySnapshotValues.providerInstanceType,
-    providerInstanceBootDiskSizeGb:
-      input.providerInstanceBootDiskSizeGb ?? capacitySnapshotValues.providerInstanceBootDiskSizeGb,
-    providerInstanceImage:
-      input.providerInstanceImage ?? capacitySnapshotValues.providerInstanceImage,
-    providerInstanceArchitecture:
-      input.providerInstanceArchitecture ?? capacitySnapshotValues.providerInstanceArchitecture,
-    createdAt: now,
-    updatedAt: now,
-  });
+  try {
+    await db.insert(schema.nodes).values({
+      id: nodeId,
+      userId: input.userId,
+      credentialAttributionUserId: input.credentialAttributionUserId ?? input.userId,
+      credentialAttributionProjectId:
+        input.credentialAttributionSource === 'project'
+          ? (input.credentialAttributionProjectId ?? null)
+          : null,
+      credentialAttributionSource: input.credentialAttributionSource ?? 'user',
+      name: input.name,
+      status: 'creating',
+      vmSize: input.vmSize,
+      vmLocation: input.vmLocation,
+      cloudProvider: input.cloudProvider ?? null,
+      healthStatus: 'stale',
+      heartbeatStaleAfterSeconds: input.heartbeatStaleAfterSeconds,
+      nodeRole: input.nodeRole ?? 'workspace',
+      nodeMode: input.nodeMode ?? 'shared',
+      runtime: input.runtime ?? 'vm',
+      runtimeIncarnationId: crypto.randomUUID(),
+      // This newly inserted VM placeholder has never reached a provider. The
+      // provisioner's incarnation claim clears this proof before external create.
+      // Container allocation follows a separate path without that claim.
+      runtimeTerminationConfirmedAt: (input.runtime ?? 'vm') === 'vm' ? now : null,
+      ...capacitySnapshotValues,
+      providerInstanceType:
+        input.providerInstanceType ?? capacitySnapshotValues.providerInstanceType,
+      providerInstanceBootDiskSizeGb:
+        input.providerInstanceBootDiskSizeGb ??
+        capacitySnapshotValues.providerInstanceBootDiskSizeGb,
+      providerInstanceImage:
+        input.providerInstanceImage ?? capacitySnapshotValues.providerInstanceImage,
+      providerInstanceArchitecture:
+        input.providerInstanceArchitecture ?? capacitySnapshotValues.providerInstanceArchitecture,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } catch (error) {
+    if (isCapacityPoolNodeLimitViolation(error)) {
+      throw new CapacityPoolNodeLimitExceededError();
+    }
+    throw error;
+  }
 
   return {
     id: nodeId,

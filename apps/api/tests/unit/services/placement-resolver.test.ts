@@ -1,12 +1,14 @@
 import { DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
+import { rankCapacityCandidatesForRuntime } from '../../../src/services/placement-capacity-ranking';
 import type {
   PlacementProfileDefaults,
   PlacementProjectDefaults,
   TaskStartCapacityPoolSelection,
 } from '../../../src/services/placement-resolver';
 import {
+  directPlacementAuditSnapshot,
   PlacementResolutionError,
   resolveEffectivePlacementRuntime,
   resolvePlacementCredentialAttribution,
@@ -127,6 +129,51 @@ const PROFILE: PlacementProfileDefaults = {
 };
 
 describe('placement resolver parity', () => {
+  it.each([true, false])('persists direct-placement location provenance (%s)', (explicit) => {
+    const snapshot = directPlacementAuditSnapshot({ explicitVmLocation: explicit });
+    expect(snapshot.capacityPoolId).toBeNull();
+    expect(JSON.parse(snapshot.placementExplanationJson ?? '{}')).toMatchObject({
+      kind: 'direct_placement',
+      explicitVmLocation: explicit,
+    });
+  });
+
+  it('makes pack largest-first and smallest-fit cheapest among equal fits', () => {
+    const base = capacitySelection().candidates[0]!;
+    const smaller = {
+      ...base,
+      id: 'candidate-smaller',
+      providerInstanceVcpuCount: 4,
+      providerInstanceMemoryMb: 8192,
+      providerInstanceDiskGb: 80,
+    };
+    const largerExpensive = {
+      ...base,
+      id: 'candidate-larger-expensive',
+      providerInstancePriceMonthlyCents: 5000,
+      providerInstancePriceHourlyMicros: 70_000,
+    };
+    const largerCheap = {
+      ...largerExpensive,
+      id: 'candidate-larger-cheap',
+      providerInstancePriceMonthlyCents: 1000,
+      providerInstancePriceHourlyMicros: 14_000,
+    };
+
+    expect(
+      rankCapacityCandidatesForRuntime([smaller, largerCheap], {
+        strategy: 'pack',
+        reservation: reservation(),
+      }).map((candidate) => candidate.id)
+    ).toEqual(['candidate-larger-cheap', 'candidate-smaller']);
+    expect(
+      rankCapacityCandidatesForRuntime([largerExpensive, largerCheap], {
+        strategy: 'smallest-fit',
+        reservation: reservation(),
+      }).map((candidate) => candidate.id)
+    ).toEqual(['candidate-larger-cheap', 'candidate-larger-expensive']);
+  });
+
   it('matches task submit precedence and inherited parent credential attribution', () => {
     const placement = resolveTaskStartPlacement({
       entryPoint: 'task-submit',

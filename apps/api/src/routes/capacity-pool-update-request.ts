@@ -115,12 +115,29 @@ function parsePolicyUpdate(
     isCapacityExhaustionPolicy,
     'Invalid default capacity pool exhaustion policy'
   );
+  const maxNodes = optionalPositiveInteger(
+    record,
+    'maxNodes',
+    'Default capacity pool maxNodes must be a positive integer'
+  );
 
-  if (!strategy && !exhaustionPolicy) return null;
+  if (!strategy && !exhaustionPolicy && maxNodes === undefined) return null;
   return {
     ...(strategy ? { strategy } : {}),
     ...(exhaustionPolicy ? { exhaustionPolicy } : {}),
+    ...(maxNodes !== undefined ? { maxNodes } : {}),
   };
+}
+
+function optionalPositiveInteger(
+  record: Record<string, unknown>,
+  field: string,
+  message: string
+): number | undefined {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) throw errors.badRequest(message);
+  return value as number;
 }
 
 function parseCandidateUpdates(value: unknown): DefaultCapacityPoolCandidateStatusUpdate[] {

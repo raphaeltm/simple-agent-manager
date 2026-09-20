@@ -83,7 +83,7 @@ export const TRIGGER_TOOLS = [
         resourceRequirements: resourceRequirementsMcpProperty({
           nullable: true,
           description:
-            'Modern workload requirements for this trigger layer. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. CPU and memory must be positive; disk may be zero; maxCoTenants must be a positive safe integer. Omitted fields inherit; explicit false is preserved.',
+            'Modern workload requirements for this trigger layer. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, and deprecated compatibility metadata maxCoTenants. Placement uses explicit CPU, memory, and disk reservations. Omitted fields inherit; explicit false is preserved.',
         }),
         resourceRequirementsJson: {
           type: ['string', 'null'],
@@ -164,7 +164,7 @@ export const TRIGGER_TOOLS = [
         resourceRequirements: resourceRequirementsMcpProperty({
           nullable: true,
           description:
-            'Modern workload requirements for this trigger layer. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. CPU and memory must be positive; disk may be zero; maxCoTenants must be a positive safe integer. Omitted fields inherit; explicit false is preserved. Use null to clear.',
+            'Modern workload requirements for this trigger layer. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, and deprecated compatibility metadata maxCoTenants. Placement uses explicit CPU, memory, and disk reservations. Omitted fields inherit; explicit false is preserved. Use null to clear.',
         }),
         resourceRequirementsJson: {
           type: ['string', 'null'],

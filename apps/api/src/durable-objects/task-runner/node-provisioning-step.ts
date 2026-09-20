@@ -26,14 +26,8 @@ import {
 import {
   capacityPoolNoCandidatesError,
   hasNoCapacityPoolCandidates,
-  rankCapacityCandidatesForRuntime,
   resolveCapacityAwareQuotaCredentialSource,
-  type TaskStartCapacityCandidate,
 } from '../../services/placement-resolver';
-import {
-  buildPlacementLocationInventory,
-  type PlacementLocationInventory,
-} from '../../services/placement-strategy';
 import {
   assertVmProvisioningLease,
   getVmAdmissionConfig,
@@ -45,104 +39,29 @@ import {
   tryAcquireVmProvisioningLease,
   waitForVmAdmissionCapacity,
 } from '../../services/vm-admission-control';
+import {
+  countActiveManagedPoolNodes,
+  effectiveCapacityPoolMaxNodes,
+  shouldProvisionSpreadNode,
+} from './capacity-pool-node-limit';
 import { assertClaimedNodeAvailable } from './claimed-node-availability';
 import { parseEnvInt } from './helpers';
 import {
   buildAdmissionIdentity,
   handleLeaseResult,
   scheduleAdmissionWait,
+  waitOrThrowForCapacityPoolNodeLimit,
 } from './node-provisioning-admission';
 import {
   buildProvisioningExhaustionPlan,
   exhaustionPolicyQueues,
   exhaustionTerminalMessage,
 } from './node-provisioning-exhaustion';
+import { rankProvisioningCandidates } from './node-provisioning-ranking';
+import { trySelectReusableNodeForProvisioning } from './node-provisioning-reuse';
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
-import {
-  findNodeWithCapacity,
-  getTaskReservation,
-  releaseClaimedWarmNode,
-  type ReusableNodeSelection,
-  tryClaimWarmNode,
-  verifyNodeAgentHealthy,
-} from './node-selection';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
-import { taskPlacementStrategy } from './task-placement-strategy';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
-
-async function trySelectReusableNodeForProvisioning(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext
-): Promise<ReusableNodeSelection | null> {
-  const warmNode = await tryClaimWarmNode(state, rc);
-  if (warmNode) {
-    if (await verifyNodeAgentHealthy(warmNode.nodeId, rc)) {
-      return warmNode;
-    }
-    await releaseClaimedWarmNode(state, rc, warmNode.nodeId);
-    log.warn('task_runner_do.node_provisioning.warm_node_unhealthy', {
-      taskId: state.taskId,
-      nodeId: warmNode.nodeId,
-    });
-  }
-
-  const existingNode = await findNodeWithCapacity(state, rc);
-  if (existingNode) {
-    if (await verifyNodeAgentHealthy(existingNode.nodeId, rc)) {
-      return existingNode;
-    }
-    log.warn('task_runner_do.node_provisioning.existing_node_unhealthy', {
-      taskId: state.taskId,
-      nodeId: existingNode.nodeId,
-    });
-  }
-
-  return null;
-}
-
-/**
- * Rank this run's permissible offerings against the caller's live host
- * distribution.
- *
- * The resolver orders candidates with no knowledge of where the caller's
- * existing hosts are, so `pack` (concentrate) and `spread` (distribute) are
- * indistinguishable there. Supplying the inventory here makes both observable.
- * `balanced` and `smallest-fit` ignore the inventory, so their order is
- * byte-identical to the resolver's.
- */
-async function rankProvisioningCandidates(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext
-): Promise<TaskStartCapacityCandidate[]> {
-  const selection = state.config.capacityPoolSelection;
-  const candidates = selection?.candidates ?? [];
-  if (candidates.length <= 1) return [...candidates];
-
-  const strategy = taskPlacementStrategy(state);
-  let locationInventory: PlacementLocationInventory | undefined;
-  if (strategy === 'pack' || strategy === 'spread') {
-    // Only the two distribution-sensitive strategies pay for this read
-    // (`.claude/rules/60`: one extra query, on the provisioning path only).
-    const hosts = await rc.env.DATABASE.prepare(
-      `SELECT cloud_provider AS cloudProvider, vm_location AS vmLocation
-         FROM nodes
-        WHERE user_id = ?
-          AND status IN ('running', 'creating', 'recovery')
-          AND node_role = 'workspace'
-          AND (runtime IS NULL OR runtime != 'cf-container')`
-    )
-      .bind(state.userId)
-      .all<{ cloudProvider: string | null; vmLocation: string | null }>();
-    locationInventory = buildPlacementLocationInventory(hosts.results);
-  }
-
-  return rankCapacityCandidatesForRuntime(candidates, {
-    strategy,
-    reservation: getTaskReservation(state),
-    settings: selection?.selectionSettings,
-    locationInventory,
-  });
-}
 
 export async function handleNodeProvisioning(
   state: TaskRunnerState,
@@ -303,10 +222,11 @@ export async function handleNodeProvisioning(
   }
 
   const admissionIdentity = await buildAdmissionIdentity(state, rc);
+  const spreadNeedsNode = await shouldProvisionSpreadNode(state, rc);
 
   // A waiter woken by capacity changes should try packing onto an existing
   // compatible node before claiming the provisioning lease.
-  if (admissionIdentity) {
+  if (admissionIdentity && !spreadNeedsNode) {
     const reusableNode = await trySelectReusableNodeForProvisioning(state, rc);
     if (reusableNode) {
       state.stepResults.nodeId = reusableNode.nodeId;
@@ -315,6 +235,13 @@ export async function handleNodeProvisioning(
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
+  }
+
+  const poolNodeCount = await countActiveManagedPoolNodes(state, rc);
+  const poolMaxNodes = effectiveCapacityPoolMaxNodes(state);
+  if (poolNodeCount !== null && poolMaxNodes !== null && poolNodeCount >= poolMaxNodes) {
+    await waitOrThrowForCapacityPoolNodeLimit(state, rc, admissionIdentity, poolMaxNodes);
+    return;
   }
 
   // Check user node limit. User-owned (BYO) nodes are excluded — they cost SAM nothing to run, so
@@ -410,21 +337,53 @@ export async function handleNodeProvisioning(
 
     // Re-select after winning the claim. A compatible node may have become
     // reusable while this task was competing for the fenced provisioning lease.
-    const reusableNode = await trySelectReusableNodeForProvisioning(state, rc);
-    if (reusableNode) {
+    // Spread still provisions while below its pool limit; once another lease
+    // holder reaches the limit, it switches to ordinary reuse before allocating.
+    const spreadNeedsNodeAfterLease = await shouldProvisionSpreadNode(state, rc);
+    if (!spreadNeedsNodeAfterLease) {
+      const reusableNode = await trySelectReusableNodeForProvisioning(state, rc);
+      if (reusableNode) {
+        await releaseVmProvisioningLease(
+          rc.env,
+          state.admissionScopeKey,
+          state.taskId,
+          state.admissionLeaseToken,
+          'claim_reselected_existing_node'
+        );
+        state.admissionScopeKey = null;
+        state.admissionLeaseToken = null;
+        state.stepResults.nodeId = reusableNode.nodeId;
+        state.stepResults.capacityPlacementSnapshot = reusableNode.capacityPlacementSnapshot;
+        await persistPlacementDiagnostics(state, rc, { queue: {} });
+        await rc.advanceToStep(state, 'workspace_creation');
+        return;
+      }
+    }
+
+    // The provisioning lease serializes the final pool-count check. Without
+    // this fence, two tasks that both observed maxNodes - 1 could over-provision.
+    const poolNodeCountAfterLease = await countActiveManagedPoolNodes(state, rc);
+    const poolMaxNodesAfterLease = effectiveCapacityPoolMaxNodes(state);
+    if (
+      poolNodeCountAfterLease !== null &&
+      poolMaxNodesAfterLease !== null &&
+      poolNodeCountAfterLease >= poolMaxNodesAfterLease
+    ) {
       await releaseVmProvisioningLease(
         rc.env,
         state.admissionScopeKey,
         state.taskId,
         state.admissionLeaseToken,
-        'claim_reselected_existing_node'
+        'capacity_pool_node_limit'
       );
       state.admissionScopeKey = null;
       state.admissionLeaseToken = null;
-      state.stepResults.nodeId = reusableNode.nodeId;
-      state.stepResults.capacityPlacementSnapshot = reusableNode.capacityPlacementSnapshot;
-      await persistPlacementDiagnostics(state, rc, { queue: {} });
-      await rc.advanceToStep(state, 'workspace_creation');
+      await waitOrThrowForCapacityPoolNodeLimit(
+        state,
+        rc,
+        admissionIdentity,
+        poolMaxNodesAfterLease
+      );
       return;
     }
   }
@@ -485,22 +444,44 @@ export async function handleNodeProvisioning(
       state.admissionLeaseToken
     );
     state.provisioningStartedAt = Date.now();
-    const createdNode = await createNodeRecord(rc.env, {
-      userId: state.userId,
-      credentialAttributionUserId: state.config.credentialAttributionUserId,
-      credentialAttributionProjectId: state.config.credentialAttributionProjectId,
-      credentialAttributionSource: state.config.credentialAttributionSource,
-      name: `Auto: ${state.config.taskTitle.slice(0, 40)}`,
-      vmSize: size,
-      vmLocation: state.config.vmLocation,
-      heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
-      cloudProvider: state.config.cloudProvider ?? undefined,
-      providerInstanceType: state.config.providerInstanceType ?? null,
-      providerInstanceBootDiskSizeGb: state.config.providerInstanceBootDiskSizeGb ?? null,
-      providerInstanceImage: state.config.providerInstanceImage ?? null,
-      providerInstanceArchitecture: state.config.providerInstanceArchitecture ?? null,
-      capacityPlacementSnapshot: state.stepResults.capacityPlacementSnapshot ?? null,
-    });
+    let createdNode;
+    try {
+      createdNode = await createNodeRecord(rc.env, {
+        userId: state.userId,
+        credentialAttributionUserId: state.config.credentialAttributionUserId,
+        credentialAttributionProjectId: state.config.credentialAttributionProjectId,
+        credentialAttributionSource: state.config.credentialAttributionSource,
+        name: `Auto: ${state.config.taskTitle.slice(0, 40)}`,
+        vmSize: size,
+        vmLocation: state.config.vmLocation,
+        heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
+        cloudProvider: state.config.cloudProvider ?? undefined,
+        providerInstanceType: state.config.providerInstanceType ?? null,
+        providerInstanceBootDiskSizeGb: state.config.providerInstanceBootDiskSizeGb ?? null,
+        providerInstanceImage: state.config.providerInstanceImage ?? null,
+        providerInstanceArchitecture: state.config.providerInstanceArchitecture ?? null,
+        capacityPlacementSnapshot: state.stepResults.capacityPlacementSnapshot ?? null,
+      });
+    } catch (error) {
+      if (
+        !(error instanceof Error && error.name === 'CapacityPoolNodeLimitExceededError') ||
+        poolMaxNodes === null
+      ) {
+        throw error;
+      }
+      await releaseVmProvisioningLease(
+        rc.env,
+        state.admissionScopeKey,
+        state.taskId,
+        state.admissionLeaseToken,
+        'capacity_pool_node_limit'
+      );
+      state.admissionScopeKey = null;
+      state.admissionLeaseToken = null;
+      await rc.ctx.storage.put('state', state);
+      await waitOrThrowForCapacityPoolNodeLimit(state, rc, admissionIdentity, poolMaxNodes);
+      return;
+    }
 
     // Store autoProvisionedNodeId on the task
     await rc.env.DATABASE.prepare(

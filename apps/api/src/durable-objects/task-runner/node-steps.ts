@@ -22,6 +22,7 @@ import {
   resolveEffectiveNodeHostMemoryReserveMb,
   trustedWorkspaceNodeCapacityColumnsSql,
 } from '../../services/workspace-resource-capacity';
+import { shouldProvisionSpreadNode } from './capacity-pool-node-limit';
 import { buildAdmissionIdentity, scheduleAdmissionWait } from './node-provisioning-admission';
 import {
   findReusableNodePlacement,
@@ -72,6 +73,11 @@ export async function handleNodeSelection(
   }
 
   if (state.config.preferredNodeId) {
+    if (state.config.preferredNodeId === state.config.excludedNodeId) {
+      throw Object.assign(new Error('Specified node is excluded from this recovery placement'), {
+        permanent: true,
+      });
+    }
     // Validate the preferred node
     const node = await rc.env.DATABASE.prepare(
       `SELECT
@@ -176,6 +182,15 @@ export async function handleNodeSelection(
       nodeId: node.id,
     });
     throw Object.assign(new Error('Specified node is not reachable'), { permanent: true });
+  }
+
+  // Spread deliberately grows the selected pool until its explicit limit. Once
+  // the limit is reached, normal reusable-node ranking packs subsequent work
+  // onto those nodes according to explicit reservations.
+  if (await shouldProvisionSpreadNode(state, rc)) {
+    await persistPlacementDiagnostics(state, rc);
+    await rc.advanceToStep(state, 'node_provisioning');
+    return;
   }
 
   // Try warm pool first

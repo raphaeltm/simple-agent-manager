@@ -12,7 +12,13 @@ export const RESOURCE_REQUIREMENTS_FIELD_PROPERTIES = {
   minMemoryGb: { type: 'number', exclusiveMinimum: 0 },
   minDiskGb: { type: 'number', minimum: 0 },
   exclusiveNode: { type: 'boolean' },
-  maxCoTenants: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+  maxCoTenants: {
+    type: 'integer',
+    minimum: 1,
+    maximum: Number.MAX_SAFE_INTEGER,
+    description:
+      'Deprecated compatibility metadata. Placement uses explicit CPU, memory, and disk reservations instead of this count.',
+  },
 } as const;
 
 export function resourceRequirementsMcpProperty(options: {
@@ -71,7 +77,7 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
     ...resourceRequirementsMcpProperty({
       nullable: true,
       description:
-        'Modern workload requirements for this configuration layer. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. CPU and memory must be positive; disk may be zero; maxCoTenants must be a positive safe integer. Omitted fields inherit; explicit false is preserved. Null clears the value on update.',
+        'Modern workload requirements for this configuration layer. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, and deprecated compatibility metadata maxCoTenants. Placement uses explicit CPU, memory, and disk reservations. Omitted fields inherit; explicit false is preserved. Null clears the value on update.',
     }),
   },
   resourceRequirementsJson: {

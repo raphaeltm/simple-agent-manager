@@ -15,6 +15,7 @@ import type * as schema from '../db/schema';
 import type { Env } from '../env';
 import {
   capacityPlacementSnapshotForCandidate,
+  directPlacementAuditSnapshot,
   hasNoCapacityPoolCandidates,
   type PlacementCredentialAttributionInput,
   type PlacementCredentialProjectPolicy,
@@ -246,7 +247,7 @@ export async function resolveCanonicalVmAllocationPlan(
     quotaCredentialSource: resolveCapacityAwareQuotaCredentialSource(credential, null),
     attribution,
     capacityPoolSelection: null,
-    capacityPlacementSnapshot: null,
+    capacityPlacementSnapshot: directPlacementAuditSnapshot(placement),
     vmSize: placement.vmSize,
     vmLocation: placement.vmLocation,
     native: normalizeNativeRequest(input.explicit?.native),

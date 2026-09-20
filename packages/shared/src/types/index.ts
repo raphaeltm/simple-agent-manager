@@ -80,6 +80,7 @@ export {
   CAPACITY_SOURCE_KINDS,
   CAPACITY_WORKLOAD_ROLES,
   DEFAULT_CAPACITY_POOL_EFFECTIVE_STATES,
+  DEFAULT_CAPACITY_POOL_MAX_NODES,
   isCapacityCredentialSource,
   isCapacityExhaustionPolicy,
   isCapacityPlacementCredentialSource,

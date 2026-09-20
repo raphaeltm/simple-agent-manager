@@ -4,6 +4,7 @@ import {
   type VmAdmissionWait,
   type VmProvisioningLeaseResult,
   type VmTaskAdmissionIdentity,
+  waitForVmAdmissionCapacity,
 } from '../../services/vm-admission-control';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
@@ -78,4 +79,29 @@ export async function buildAdmissionIdentity(
     requestedVmLocation: state.config.vmLocation,
     preferredNodeId: state.config.preferredNodeId,
   };
+}
+
+export async function waitOrThrowForCapacityPoolNodeLimit(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  admissionIdentity: VmTaskAdmissionIdentity | null,
+  poolMaxNodes: number
+): Promise<'waiting'> {
+  if (admissionIdentity) {
+    const waitResult = await waitForVmAdmissionCapacity(
+      rc.env,
+      admissionIdentity,
+      'capacity_pool_node_limit'
+    );
+    if (waitResult.kind !== 'expired') {
+      await scheduleAdmissionWait(state, rc, waitResult);
+      return 'waiting';
+    }
+  }
+  throw Object.assign(
+    new Error(
+      `Capacity pool node limit (${poolMaxNodes}) reached and no node can fit the request.`
+    ),
+    { permanent: true }
+  );
 }

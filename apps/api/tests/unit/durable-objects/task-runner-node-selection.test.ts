@@ -25,6 +25,7 @@ vi.mock('../../../src/services/vm-admission-control', async (importActual) => {
 });
 
 type D1ResultMap = {
+  activePoolNodeCount?: number;
   persistedWarmClaim?: string | null;
   persistedWarmNode?: PlacementRowNodeSource;
   runs?: Array<{ sql: string; bound: unknown[] }>;
@@ -245,6 +246,9 @@ function createStatement(sql: string, results: D1ResultMap) {
       return this;
     },
     first() {
+      if (sql.includes('COUNT(*) AS count') && sql.includes('capacity_pool_id = ?')) {
+        return Promise.resolve({ count: results.activePoolNodeCount ?? 0 });
+      }
       if (sql.includes('claimed_warm_node_id AS claimedWarmNodeId')) {
         const claimedWarmNodeId = results.persistedWarmClaim ?? null;
         return Promise.resolve({
@@ -431,6 +435,8 @@ function capacityPoolSelection(
     vcpuCount?: number;
     memoryMb?: number;
     diskGb?: number | null;
+    strategy?: TaskStartCapacityPoolSelection['strategy'];
+    maxNodes?: number;
   } = {}
 ): TaskStartCapacityPoolSelection {
   const poolId = overrides.poolId ?? `pool-${scope}`;
@@ -488,7 +494,8 @@ function capacityPoolSelection(
     poolId,
     scope,
     revision: 3,
-    strategy: 'balanced',
+    strategy: overrides.strategy ?? 'balanced',
+    maxNodes: overrides.maxNodes ?? 3,
     capacityPoolProjectId: projectId,
     workloadRole: 'workspace',
     poolSnapshot: { ...snapshot, capacitySourceId: null, capacityPoolCandidateId: null },
@@ -1094,6 +1101,104 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     await handleNodeSelection(state, rc);
 
     expect(state.stepResults.nodeId).toBe('node-large');
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('excludes the unhealthy eviction source node from normal replacement placement', async () => {
+    const now = new Date().toISOString();
+    const state = createState({
+      config: { ...createState().config, excludedNodeId: 'node-eviction-source' },
+    });
+    const node = {
+      vm_size: 'large',
+      vm_location: 'fsn1',
+      health_status: 'healthy',
+      last_metrics: JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 10 }),
+      last_heartbeat_at: now,
+      agent_version: 'current-sha',
+    };
+    const rc = createContext({
+      existingNodes: [
+        { ...node, id: 'node-eviction-source' },
+        { ...node, id: 'node-replacement' },
+      ],
+      healthByNode: {
+        'node-replacement': {
+          health_status: 'healthy',
+          last_heartbeat_at: now,
+          agent_ready_at: now,
+          agent_version: 'current-sha',
+        },
+      },
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(state.stepResults.nodeId).toBe('node-replacement');
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('spread provisions separate nodes while the explicit pool limit has room', async () => {
+    const selection = capacityPoolSelection('user', { strategy: 'spread', maxNodes: 3 });
+    const state = createState({
+      config: { ...createState().config, capacityPoolSelection: selection },
+    });
+    const now = new Date().toISOString();
+    const rc = createContext({
+      activePoolNodeCount: 2,
+      existingNodes: [
+        {
+          id: 'node-spread-existing',
+          vm_size: 'large',
+          vm_location: 'fsn1',
+          health_status: 'healthy',
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 10 }),
+          last_heartbeat_at: now,
+          agent_version: 'current-sha',
+          ...nodeCapacityFields(selection),
+        },
+      ],
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(state.stepResults.nodeId).toBeNull();
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
+  });
+
+  it('spread packs onto an existing node after reaching the explicit pool limit', async () => {
+    const selection = capacityPoolSelection('user', { strategy: 'spread', maxNodes: 3 });
+    const state = createState({
+      config: { ...createState().config, capacityPoolSelection: selection },
+    });
+    const now = new Date().toISOString();
+    const rc = createContext({
+      activePoolNodeCount: 3,
+      existingNodes: [
+        {
+          id: 'node-spread-at-limit',
+          vm_size: 'large',
+          vm_location: 'fsn1',
+          health_status: 'healthy',
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 10 }),
+          last_heartbeat_at: now,
+          agent_version: 'current-sha',
+          ...nodeCapacityFields(selection),
+        },
+      ],
+      healthByNode: {
+        'node-spread-at-limit': {
+          health_status: 'healthy',
+          last_heartbeat_at: now,
+          agent_ready_at: now,
+          agent_version: 'current-sha',
+        },
+      },
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(state.stepResults.nodeId).toBe('node-spread-at-limit');
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
   });
 

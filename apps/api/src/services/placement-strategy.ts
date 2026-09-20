@@ -8,7 +8,7 @@
  * It does not re-implement any hard constraint.
  * `evaluateWorkspaceReservationCapacity` (services/workspace-resource-capacity.ts)
  * remains the single admission gate for finite CPU/memory/storage budgets,
- * exclusivity, the co-tenant safety cap, the disk-pressure veto, and the
+ * exclusivity, the disk-pressure veto, and the
  * fail-closed handling of untrusted/stale capacity. This module only ORDERS
  * hosts that gate has already admitted, so a ranking change can never widen
  * admission. See `.claude/rules/24` and `.claude/rules/59`.

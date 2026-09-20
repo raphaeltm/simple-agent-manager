@@ -69,13 +69,25 @@ func (s *Server) captureEvictionSessionSnapshot(ctx context.Context, target reso
 	// Freeze the Docker identity after both waits. The shared snapshot runner
 	// must never rediscover a successor container for this eviction's snapshot.
 	input.containerTarget, err = s.resolveContainerSnapshotTarget(ctx, input.runtime)
+	cleanupSnapshotHelper := func() {}
+	usingSnapshotHelper := false
 	if err != nil {
-		return err
+		if target.Reason != resourcemon.EvictionReasonOOMKill {
+			return err
+		}
+		input.containerTarget, cleanupSnapshotHelper, err = s.startExitedEvictionSnapshotHelper(ctx, target, input.runtime)
+		if err != nil {
+			return err
+		}
+		usingSnapshotHelper = true
 	}
-	if !dockerContainerIdentityMatches(input.containerTarget.containerID, target.ContainerID) {
-		return fmt.Errorf("snapshot container no longer matches eviction target")
+	defer cleanupSnapshotHelper()
+	if !usingSnapshotHelper {
+		if !dockerContainerIdentityMatches(input.containerTarget.containerID, target.ContainerID) {
+			return fmt.Errorf("snapshot container no longer matches eviction target")
+		}
+		input.containerTarget.containerID = target.ContainerID
 	}
-	input.containerTarget.containerID = target.ContainerID
 	_, err = s.runSessionSnapshot(ctx, input)
 	return err
 }

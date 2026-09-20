@@ -8,6 +8,7 @@ import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import { isSessionRecoverySourceTaskGuardValid } from '../../src/services/session-recovery-authority';
 import { claimSessionSnapshotRecovery } from '../../src/services/session-snapshot-recovery-lifecycle';
+import { recoverWorkspaceAfterEviction } from '../../src/services/workspace-eviction-recovery';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const { ensureTaskRunnerStartedMock, startTaskRunnerDOMock } = vi.hoisted(() => ({
@@ -166,6 +167,179 @@ describe('session recovery handoff', () => {
     vi.clearAllMocks();
     ensureTaskRunnerStartedMock.mockResolvedValue(false);
     startTaskRunnerDOMock.mockResolvedValue(undefined);
+  });
+
+  it('relocates an evicted workspace through normal placement exactly once', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      sqlite.exec(`
+        UPDATE projects SET default_location = 'hel1' WHERE id = 'project-1';
+        UPDATE tasks
+           SET placement_explanation_json = '{"kind":"direct_placement","explicitVmLocation":false}'
+         WHERE id = 'parent-1';
+        UPDATE workspaces
+           SET status = 'evicted', eviction_generation = 'generation-1'
+         WHERE id = 'workspace-1';
+      `);
+      const database = createSqliteD1(sqlite);
+      const env = { DATABASE: database } as Env;
+      const identity = {
+        projectId: 'project-1',
+        workspaceId: 'workspace-1',
+        chatSessionId: 'chat-1',
+        nodeId: 'node-1',
+        generation: 'generation-1',
+      };
+
+      const first = await recoverWorkspaceAfterEviction(env, identity);
+      const duplicate = await recoverWorkspaceAfterEviction(env, identity);
+
+      expect(first).toMatchObject({ status: 'waking' });
+      expect(duplicate).toEqual(first);
+      expect(startTaskRunnerDOMock).toHaveBeenCalledOnce();
+      expect(startTaskRunnerDOMock).toHaveBeenCalledWith(
+        env,
+        expect.objectContaining({
+          vmLocation: 'hel1',
+          excludedNodeId: 'node-1',
+          evictionFence: {
+            workspaceId: 'workspace-1',
+            nodeId: 'node-1',
+            generation: 'generation-1',
+          },
+        })
+      );
+      expect(
+        sqlite
+          .prepare(`SELECT COUNT(*) AS count FROM tasks WHERE triggered_by = 'session-recovery'`)
+          .get()
+      ).toEqual({ count: 1 });
+
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots
+              SET sleeping_at = NULL, recovery_status = 'restored'
+            WHERE chat_session_id = 'chat-1'`
+        )
+        .run();
+      await expect(recoverWorkspaceAfterEviction(env, identity)).resolves.toEqual(first);
+      expect(startTaskRunnerDOMock).toHaveBeenCalledOnce();
+
+      if (first.status !== 'waking') throw new Error('first eviction did not start recovery');
+      sqlite
+        .prepare(
+          `INSERT INTO workspaces
+             (id, user_id, project_id, node_id, status, branch, vm_size, vm_location,
+              workspace_profile, chat_session_id, eviction_generation, created_at, updated_at)
+           VALUES ('workspace-2', 'user-1', 'project-1', 'node-1', 'evicted', 'main',
+             'small', 'hel1', 'lightweight', 'chat-1', 'generation-2',
+             '2026-08-15T01:00:00.000Z', '2026-08-15T01:00:00.000Z')`
+        )
+        .run();
+      sqlite
+        .prepare(`UPDATE tasks SET status = 'completed', workspace_id = 'workspace-2' WHERE id = ?`)
+        .run(first.taskId);
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots
+              SET workspace_id = 'workspace-2', node_id = 'node-1', sleeping_at = NULL,
+                  recovery_status = 'restored'
+            WHERE chat_session_id = 'chat-1'`
+        )
+        .run();
+
+      const secondIdentity = {
+        ...identity,
+        workspaceId: 'workspace-2',
+        generation: 'generation-2',
+      };
+      const secondEviction = await recoverWorkspaceAfterEviction(env, secondIdentity);
+      expect(secondEviction).toMatchObject({ status: 'waking' });
+      expect(secondEviction).not.toEqual(first);
+      expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(2);
+      expect(
+        sqlite
+          .prepare(`SELECT COUNT(*) AS count FROM tasks WHERE triggered_by = 'session-recovery'`)
+          .get()
+      ).toEqual({ count: 2 });
+      await expect(recoverWorkspaceAfterEviction(env, secondIdentity)).resolves.toEqual(
+        secondEviction
+      );
+      expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(2);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('abandons a claimed eviction wake when its generation changes before runner start', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      sqlite.exec(`
+        UPDATE tasks
+           SET placement_explanation_json = '{"kind":"direct_placement","explicitVmLocation":false}'
+         WHERE id = 'parent-1';
+        UPDATE workspaces
+           SET status = 'evicted', eviction_generation = 'generation-1'
+         WHERE id = 'workspace-1';
+      `);
+      const base = createSqliteD1(sqlite);
+      let fenceReads = 0;
+      const database = {
+        ...base,
+        prepare(sql: string) {
+          const statement = base.prepare(sql);
+          if (!sql.includes('SELECT 1 AS valid') || !sql.includes('eviction_generation')) {
+            return statement;
+          }
+          const originalBind = statement.bind.bind(statement);
+          statement.bind = (...args: unknown[]) => {
+            const bound = originalBind(...args);
+            const originalFirst = bound.first.bind(bound);
+            bound.first = async <T>() => {
+              fenceReads += 1;
+              if (fenceReads === 2) {
+                sqlite
+                  .prepare(
+                    `UPDATE workspaces SET eviction_generation = 'generation-2'
+                      WHERE id = 'workspace-1'`
+                  )
+                  .run();
+              }
+              return originalFirst<T>();
+            };
+            return bound;
+          };
+          return statement;
+        },
+      } as D1Database;
+
+      await expect(
+        recoverWorkspaceAfterEviction({ DATABASE: database } as Env, {
+          projectId: 'project-1',
+          workspaceId: 'workspace-1',
+          chatSessionId: 'chat-1',
+          nodeId: 'node-1',
+          generation: 'generation-1',
+        })
+      ).resolves.toEqual({ status: 'unavailable', reason: 'stale_eviction_generation' });
+
+      expect(fenceReads).toBe(2);
+      expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+      expect(
+        sqlite
+          .prepare(
+            `SELECT recovery_status, recovery_error FROM session_snapshots WHERE id = 'snapshot-1'`
+          )
+          .get()
+      ).toMatchObject({
+        recovery_status: 'failed',
+        recovery_error: 'Eviction generation changed before recovery start',
+      });
+    } finally {
+      sqlite.close();
+    }
   });
 
   it('atomically transfers the session binding to a recovery task linked to its source', async () => {

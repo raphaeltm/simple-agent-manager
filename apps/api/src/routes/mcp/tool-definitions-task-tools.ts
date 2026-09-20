@@ -108,7 +108,7 @@ export const TASK_LIFECYCLE_TOOLS = [
         resourceRequirements: resourceRequirementsMcpProperty({
           nullable: false,
           description:
-            'Modern workload requirements for the dispatched task. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. CPU and memory must be positive; disk may be zero; maxCoTenants must be a positive safe integer. Omitted fields inherit; explicit false is preserved.',
+            'Modern workload requirements for the dispatched task. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, and deprecated compatibility metadata maxCoTenants. Placement uses explicit CPU, memory, and disk reservations. Omitted fields inherit; explicit false is preserved.',
         }),
         runtime: {
           type: 'string',

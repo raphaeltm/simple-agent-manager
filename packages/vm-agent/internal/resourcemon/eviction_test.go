@@ -233,9 +233,11 @@ func TestEvictionControllerSerializesConcurrentEvictions(t *testing.T) {
 	}
 }
 
-func TestEvictionControllerStopsContainerAfterSnapshotTimeout(t *testing.T) {
+func TestEvictionControllerKeepsWorkspaceRecoverableAfterSnapshotTimeout(t *testing.T) {
 	source := newFakePressureSource()
 	var stopped atomic.Bool
+	var marked atomic.Bool
+	var notified atomic.Bool
 	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
 		cfg.SnapshotTimeout = 20 * time.Millisecond
 		cfg.SnapshotWorkspace = func(ctx context.Context, _ EvictionTarget) error {
@@ -246,18 +248,28 @@ func TestEvictionControllerStopsContainerAfterSnapshotTimeout(t *testing.T) {
 			stopped.Store(true)
 			return nil
 		}
+		cfg.MarkWorkspaceEvicted = func(EvictionResult) bool {
+			marked.Store(true)
+			return true
+		}
+		cfg.NotifyEviction = func(context.Context, EvictionResult) error {
+			notified.Store(true)
+			return nil
+		}
 	})
 
 	controller.handleEvent(context.Background(), oomPressureEvent("workspace-1", "container-1"))
 
-	if !stopped.Load() {
-		t.Fatal("container stop was not called after snapshot timeout")
+	if stopped.Load() || marked.Load() || notified.Load() {
+		t.Fatal("snapshot timeout stopped or finalized an unrecoverable eviction")
 	}
 }
 
-func TestEvictionControllerStopsContainerAfterSnapshotFailure(t *testing.T) {
+func TestEvictionControllerKeepsWorkspaceRecoverableAfterSnapshotFailure(t *testing.T) {
 	source := newFakePressureSource()
 	var stopped atomic.Bool
+	var marked atomic.Bool
+	var notified atomic.Bool
 	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
 		cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error {
 			return errors.New("snapshot failed")
@@ -266,12 +278,51 @@ func TestEvictionControllerStopsContainerAfterSnapshotFailure(t *testing.T) {
 			stopped.Store(true)
 			return nil
 		}
+		cfg.MarkWorkspaceEvicted = func(EvictionResult) bool {
+			marked.Store(true)
+			return true
+		}
+		cfg.NotifyEviction = func(context.Context, EvictionResult) error {
+			notified.Store(true)
+			return nil
+		}
 	})
 
 	controller.handleEvent(context.Background(), oomPressureEvent("workspace-1", "container-1"))
 
-	if !stopped.Load() {
-		t.Fatal("container stop was not called after snapshot failure")
+	if stopped.Load() || marked.Load() || notified.Load() {
+		t.Fatal("snapshot failure stopped or notified an unrecoverable eviction")
+	}
+}
+
+func TestEvictionControllerRetriesDieEventAfterOOMSnapshotRace(t *testing.T) {
+	source := newFakePressureSource()
+	var snapshots, stops, notifications int
+	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
+		cfg.DebounceWindow = time.Minute
+		cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error {
+			snapshots++
+			if snapshots == 1 {
+				return errors.New("container still transitioning")
+			}
+			return nil
+		}
+		cfg.StopContainer = func(context.Context, EvictionTarget) error {
+			stops++
+			return nil
+		}
+		cfg.NotifyEviction = func(context.Context, EvictionResult) error {
+			notifications++
+			return nil
+		}
+	})
+
+	event := oomPressureEvent("workspace-1", "container-1")
+	controller.handleEvent(context.Background(), event) // Docker oom
+	controller.handleEvent(context.Background(), event) // Docker die/137
+
+	if snapshots != 2 || stops != 1 || notifications != 1 {
+		t.Fatalf("snapshots=%d stops=%d notifications=%d, want 2/1/1", snapshots, stops, notifications)
 	}
 }
 

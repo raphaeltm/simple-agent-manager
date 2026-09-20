@@ -179,6 +179,7 @@ function capacitySummary(scope: PoolScope) {
       status: 'active',
       strategy: scope === 'user' ? 'smallest-fit' : 'pack',
       exhaustionPolicy: 'queue',
+      maxNodes: 3,
       createdAt: TIMESTAMP,
       updatedAt: TIMESTAMP,
     },
@@ -515,6 +516,7 @@ async function removeAshHilCandidates(
 
   await page.getByRole('button', { name: 'Edit' }).click();
   await expect(page.getByRole('heading', { name: editHeading })).toBeVisible();
+  await page.getByRole('spinbutton', { name: /Maximum nodes/ }).fill('5');
   await expect(
     page.getByRole('heading', { name: 'Not selected or removed instances' })
   ).toBeVisible();

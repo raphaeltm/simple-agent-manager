@@ -1,7 +1,6 @@
 import {
   type AgentProfileRuntime,
   type CredentialSource,
-  DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
   DEFAULT_WORKSPACE_PROFILE,
   VALID_WORKSPACE_PROFILES,
@@ -41,6 +40,11 @@ import {
   isSessionRecoverySourceTaskGuardValid,
 } from './session-recovery-authority';
 import { loadRecoveryContext, type RecoveryContext } from './session-recovery-context';
+import {
+  evictionRecoveryFenceMatches,
+  type SessionRecoveryOptions,
+  sourceTaskExplicitLocationRequirement,
+} from './session-recovery-eviction';
 import { type Db, SourceTaskNotWakeableError } from './session-recovery-task-guard';
 import {
   claimSessionSnapshotRecovery,
@@ -51,8 +55,7 @@ import {
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 
 export type SessionRecoveryResult =
-  | { status: 'waking'; taskId: string }
-  | { status: 'unavailable'; reason: string };
+  { status: 'waking'; taskId: string } | { status: 'unavailable'; reason: string };
 
 type RecoveryPlacementResolution = TaskStartPlacementWithCredential;
 
@@ -417,7 +420,8 @@ async function startRecoveryTask(
   task: schema.Task,
   chatSessionId: string,
   placementResolution: RecoveryPlacementResolution,
-  sourceTaskGuard?: SessionRecoverySourceTaskGuard
+  sourceTaskGuard?: SessionRecoverySourceTaskGuard,
+  options: SessionRecoveryOptions = {}
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   if (['completed', 'failed', 'cancelled'].includes(task.status)) {
@@ -454,16 +458,22 @@ async function startRecoveryTask(
     throw new SourceTaskNotWakeableError();
   }
 
+  if (options.evictionFence && !(await evictionRecoveryFenceMatches(env, options.evictionFence))) {
+    throw Object.assign(new Error('Eviction generation changed before TaskRunner start'), {
+      permanent: true,
+    });
+  }
+
   await startTaskRunnerDO(env, {
     taskId: task.id,
     projectId: context.project.id,
     userId: context.snapshot.userId,
     vmSize: asVmSize(context.workspace.vmSize),
-    vmLocation:
-      context.workspace.vmLocation || context.project.defaultLocation || DEFAULT_VM_LOCATION,
+    vmLocation: placementResolution.placement.vmLocation,
     branch: context.workspace.branch || context.project.defaultBranch,
     defaultBranch: context.project.defaultBranch,
     preferredNodeId: null,
+    excludedNodeId: options.excludedNodeId ?? null,
     userName: context.user.name,
     userEmail: context.user.email,
     githubId: context.user.githubId,
@@ -509,6 +519,7 @@ async function startRecoveryTask(
     capacityPoolSelection: placementResolution.capacityPoolSelection,
     vmSizeSource: placementResolution.placement.vmSizeSource,
     resumeSnapshotChatSessionId: chatSessionId,
+    evictionFence: options.evictionFence ?? null,
     // Unguarded human wakes intentionally do not carry recoverySourceTaskId:
     // that field grants the live-parent revocable-authority contract. Keep the
     // predecessor deletion lineage separately so every TaskRunner boundary can
@@ -524,7 +535,8 @@ async function resolveRecoveryPlacement(
   db: Db,
   env: Env,
   context: RecoveryContext,
-  taskId: string
+  taskId: string,
+  options: SessionRecoveryOptions = {}
 ): Promise<
   RecoveryPlacementResolution | { error: string; errorKind: 'placement' | 'credentials' }
 > {
@@ -612,7 +624,10 @@ async function resolveRecoveryPlacement(
       vmSize: persistedVmSize,
       vmSizeSource: persistedVmSizeSource,
       provider: null,
-      vmLocation: context.workspace.vmLocation,
+      vmLocation:
+        options.evictionFence && sourceTaskExplicitLocationRequirement(sourceTask) === false
+          ? null
+          : context.workspace.vmLocation,
       workspaceProfile: asWorkspaceProfile(context.workspace.workspaceProfile),
       devcontainerConfigName: context.workspace.devcontainerConfigName,
       taskMode: 'conversation',
@@ -651,11 +666,15 @@ export async function ensureSessionRecovery(
   env: Env,
   projectId: string,
   chatSessionId: string,
-  sourceTaskGuard?: SessionRecoverySourceTaskGuard
+  sourceTaskGuard?: SessionRecoverySourceTaskGuard,
+  options: SessionRecoveryOptions = {}
 ): Promise<SessionRecoveryResult> {
   const db = drizzle(env.DATABASE, { schema });
   const context = await loadRecoveryContext(db, projectId, chatSessionId);
   if (!context) return { status: 'unavailable', reason: 'sleeping_snapshot_missing' };
+  if (options.evictionFence && !(await evictionRecoveryFenceMatches(env, options.evictionFence))) {
+    return { status: 'unavailable', reason: 'stale_eviction_generation' };
+  }
   if (context.snapshot.runtime === 'cf-container') {
     return { status: 'unavailable', reason: 'container_runtime_wakes_in_place' };
   }
@@ -683,7 +702,7 @@ export async function ensureSessionRecovery(
   const recoveryTaskId = ulid();
   let placementResolution: RecoveryPlacementResolution;
   try {
-    const resolved = await resolveRecoveryPlacement(db, env, context, recoveryTaskId);
+    const resolved = await resolveRecoveryPlacement(db, env, context, recoveryTaskId, options);
     if ('error' in resolved) {
       return { status: 'unavailable', reason: `session_recovery_placement_${resolved.errorKind}` };
     }
@@ -706,6 +725,17 @@ export async function ensureSessionRecovery(
   if (claim.status === 'unavailable') return claim;
   if (claim.status === 'waking') return claim;
 
+  if (options.evictionFence && !(await evictionRecoveryFenceMatches(env, options.evictionFence))) {
+    await failSessionSnapshotRecovery(
+      db,
+      env,
+      chatSessionId,
+      claim.taskId,
+      'Eviction generation changed before recovery start'
+    );
+    return { status: 'unavailable', reason: 'stale_eviction_generation' };
+  }
+
   let recoveryTask: schema.Task | null = null;
   try {
     recoveryTask = await createRecoveryTask(
@@ -723,7 +753,8 @@ export async function ensureSessionRecovery(
       recoveryTask,
       chatSessionId,
       placementResolution,
-      sourceTaskGuard
+      sourceTaskGuard,
+      options
     );
     log.info('session_recovery.waking', {
       projectId,

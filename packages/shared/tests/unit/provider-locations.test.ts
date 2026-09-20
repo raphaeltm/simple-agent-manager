@@ -1,4 +1,4 @@
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   getDefaultLocationForProvider,
@@ -143,8 +143,8 @@ describe('resolveProjectScalingConfig', () => {
 });
 
 describe('SCALING_PARAMS registry', () => {
-  it('has 9 scaling parameters', () => {
-    expect(SCALING_PARAMS).toHaveLength(9);
+  it('has 7 active scaling parameters after retiring legacy placement gates', () => {
+    expect(SCALING_PARAMS).toHaveLength(7);
   });
 
   it('every param has valid min < max', () => {

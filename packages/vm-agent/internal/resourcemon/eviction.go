@@ -226,7 +226,9 @@ func (c *EvictionController) handleEvent(ctx context.Context, event PressureEven
 		return
 	}
 
-	c.performEviction(ctx, target)
+	if c.performEviction(ctx, target) {
+		c.recordDebounce(target)
+	}
 	if event.Type == PressureEventSystemMemory {
 		c.lastSystemAttempt = c.now()
 	}
@@ -367,11 +369,20 @@ func (c *EvictionController) debounced(target EvictionTarget) bool {
 	if last, ok := c.lastByKey[key]; ok && now.Sub(last) < c.cfg.DebounceWindow {
 		return true
 	}
-	c.lastByKey[key] = now
 	return false
 }
 
-func (c *EvictionController) performEviction(ctx context.Context, target EvictionTarget) {
+func (c *EvictionController) recordDebounce(target EvictionTarget) {
+	key := evictionDebounceKey(target)
+	if key == "" {
+		return
+	}
+	c.debounceMu.Lock()
+	c.lastByKey[key] = c.now()
+	c.debounceMu.Unlock()
+}
+
+func (c *EvictionController) performEviction(ctx context.Context, target EvictionTarget) bool {
 	result := EvictionResult{
 		Target:    target,
 		StartedAt: c.now(),
@@ -380,23 +391,24 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 	snapshotCtx, cancel := context.WithTimeout(ctx, c.cfg.SnapshotTimeout)
 	if err := c.cfg.SnapshotWorkspace(snapshotCtx, target); err != nil {
 		result.SnapshotError = err
-		c.logger.Warn("resourcemon: eviction snapshot failed; proceeding to docker stop",
+		cancel()
+		c.logger.Warn("resourcemon: eviction snapshot failed; leaving workspace recoverable",
 			"workspaceId", target.WorkspaceID,
 			"containerId", target.ContainerID,
 			"containerName", target.ContainerName,
 			"reason", target.Reason,
 			"error", err,
 		)
-	} else {
-		result.SnapshotCaptured = true
+		return false // Never acknowledge or deliberately stop work without a restorable snapshot.
 	}
+	result.SnapshotCaptured = true
 	cancel()
 
 	if ctx.Err() != nil {
-		return // Shutdown must not start new destructive side effects.
+		return false // Shutdown must not start new destructive side effects.
 	}
 	if target.Reason == EvictionReasonMemoryPressure && c.cfg.Source.CurrentPressure().Level != PressureLevelCritical {
-		return // Pressure can recover while a slow snapshot is being captured.
+		return false // Pressure can recover while a slow snapshot is being captured.
 	}
 	if err := c.cfg.StopContainer(ctx, target); err != nil {
 		result.ContainerStopError = err
@@ -407,13 +419,13 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 			"reason", target.Reason,
 			"error", err,
 		)
-		return // Leave the workspace eligible for a later pressure retry.
+		return false // Leave the workspace eligible for a later pressure retry.
 	}
 	result.ContainerStopped = true
 
 	result.CompletedAt = c.now()
 	if !c.cfg.MarkWorkspaceEvicted(result) {
-		return // A concurrent lifecycle change superseded this eviction.
+		return false // A concurrent lifecycle change superseded this eviction.
 	}
 	if err := c.cfg.NotifyEviction(ctx, result); err != nil {
 		result.NotifyError = err
@@ -425,6 +437,7 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 			"error", err,
 		)
 	}
+	return true
 }
 
 func (c *EvictionController) now() time.Time {

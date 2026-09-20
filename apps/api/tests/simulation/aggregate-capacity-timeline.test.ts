@@ -72,6 +72,31 @@ describe('aggregate capacity deterministic virtual timeline', () => {
     world.assertSafety();
   });
 
+  it('packs many small legacy reservations until explicit memory is exhausted', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-large-pack', {
+      ...LARGE_NODE,
+      observedProviderInstanceVcpuCount: 16,
+      observedProviderInstanceMemoryMb: 32_768,
+    });
+    const small = {
+      ...HALF_NODE,
+      cpuMillis: 400,
+      memoryMb: 800,
+      diskMb: 2_048,
+      maxCoTenants: 2,
+    };
+    for (let index = 0; index < 40; index += 1) {
+      world.submit(`small-${index}`, small, { preferredNodeId: 'node-large-pack' });
+      world.runUntilIdle();
+    }
+    expect(world.activeWorkspaces('node-large-pack')).toHaveLength(40);
+    world.submit('small-overflow', small, { preferredNodeId: 'node-large-pack' });
+    world.runUntilIdle();
+    expect(world.tasks.get('small-overflow')?.status).toBe('retry-wait');
+    world.assertSafety();
+  });
+
   it('rejects planned capacity without verified observed hardware, even on an empty node', () => {
     const world = new AggregateCapacityTimeline();
     world.addNode('node-unverified', {

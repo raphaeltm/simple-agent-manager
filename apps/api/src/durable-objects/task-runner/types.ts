@@ -53,6 +53,8 @@ export interface TaskRunConfig {
   vmLocation: VMLocation;
   branch: string;
   preferredNodeId: string | null;
+  /** Node that must not be reused for this run, e.g. the source of a resource eviction. */
+  excludedNodeId?: string | null;
   userName: string | null;
   userEmail: string | null;
   githubId: string | null;
@@ -128,6 +130,12 @@ export interface TaskRunConfig {
   vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
   /** Existing sleeping chat whose R2 snapshot must be strictly restored instead of starting fresh. */
   resumeSnapshotChatSessionId?: string | null;
+  /** Resource-eviction identity that must remain current through replacement allocation. */
+  evictionFence?: {
+    workspaceId: string;
+    nodeId: string;
+    generation: string | null;
+  } | null;
   /** Live source parent that revocably authorizes a snapshot-recovery TaskRunner. */
   recoverySourceTaskId?: string | null;
   /** Failed/stopped predecessor whose workspace deletion must be confirmed before replacement. */

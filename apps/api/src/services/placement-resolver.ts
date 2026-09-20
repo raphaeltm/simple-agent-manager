@@ -31,6 +31,7 @@ import { resolveEffectiveDefaultCapacityPoolSummary } from './default-capacity-p
 import {
   buildCapacityPoolSelection,
   capacityPlacementSnapshotForTaskStart,
+  directPlacementAuditSnapshot,
   hasNoCapacityPoolCandidates,
 } from './placement-resolver-capacity';
 import type {
@@ -68,6 +69,7 @@ export {
   capacityPoolNoCandidatesError,
   capacityPoolNoCandidatesMessage,
   capacityPoolSnapshotForPool,
+  directPlacementAuditSnapshot,
   hasNoCapacityPoolCandidates,
   rankCapacityCandidatesForRuntime,
   resolveReusableNodeCapacitySnapshot,
@@ -466,7 +468,9 @@ export async function resolveTaskStartPlacementCredentialAttributionFromPlacemen
       credential,
       capacityPoolSelection
     ),
-    capacityPlacementSnapshot: capacityPlacementSnapshotForTaskStart(capacityPoolSelection),
+    capacityPlacementSnapshot:
+      capacityPlacementSnapshotForTaskStart(capacityPoolSelection) ??
+      directPlacementAuditSnapshot(placement),
     ...(capacityCandidate
       ? resolveCapacityPlacementCredentialAttribution(placement, capacityCandidate)
       : resolvePlacementCredentialAttribution(placement, credential)),

@@ -42,6 +42,7 @@ export type VmAdmissionReason =
   | 'provider_account_capacity'
   | 'provider_transient_capacity'
   | 'user_node_limit'
+  | 'capacity_pool_node_limit'
   | 'lease_expired_recovered'
   | 'provisioning_lease_held'
   | 'provisioning_started'

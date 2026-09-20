@@ -11,13 +11,19 @@ const {
 } = vi.hoisted(() => {
   const selectQueue: unknown[] = [];
   let batchInsertChanges = 1;
+  let evictionFenceValid = true;
   const nextSelectedRow = async () => {
     const next = selectQueue.shift();
     return next ?? null;
   };
 
   const databaseMock = {
-    prepare: vi.fn(() => ({ bind: vi.fn(() => ({ kind: 'prepared' })) })),
+    prepare: vi.fn(() => ({
+      bind: vi.fn(() => ({
+        kind: 'prepared',
+        first: vi.fn(async () => (evictionFenceValid ? { valid: 1 } : null)),
+      })),
+    })),
     batch: vi.fn(async () => [
       { meta: { changes: batchInsertChanges } },
       { meta: { changes: batchInsertChanges } },
@@ -27,6 +33,9 @@ const {
     ]),
     setBatchInsertChanges: (changes: number) => {
       batchInsertChanges = changes;
+    },
+    setEvictionFenceValid: (valid: boolean) => {
+      evictionFenceValid = valid;
     },
   };
 
@@ -170,6 +179,7 @@ describe('ensureSessionRecovery', () => {
     vi.clearAllMocks();
     selectQueue.length = 0;
     databaseMock.setBatchInsertChanges(1);
+    databaseMock.setEvictionFenceValid(true);
     claimSessionSnapshotRecoveryMock.mockResolvedValue({
       status: 'claimed',
       taskId: 'recovery-task-1',
@@ -323,10 +333,17 @@ describe('ensureSessionRecovery', () => {
       { id: 'source-task-1' }
     );
 
+    const evictionFence = {
+      workspaceId: 'workspace-sleeping',
+      nodeId: 'node-unhealthy',
+      generation: 'generation-1',
+    };
     const result = await ensureSessionRecovery(
       { DATABASE: databaseMock, BASE_DOMAIN: 'example.test' } as never,
       'project-1',
-      'chat-1'
+      'chat-1',
+      undefined,
+      { excludedNodeId: 'node-unhealthy', evictionFence }
     );
 
     expect(result).toEqual({ status: 'waking', taskId: 'recovery-task-1' });
@@ -345,6 +362,8 @@ describe('ensureSessionRecovery', () => {
         resumeSnapshotChatSessionId: 'chat-1',
         recoverySourceTaskId: null,
         retrySourceTaskId: 'source-task-1',
+        excludedNodeId: 'node-unhealthy',
+        evictionFence,
       })
     );
   });
@@ -416,6 +435,7 @@ describe('session recovery consumes the canonical persisted resource plan', () =
     vi.clearAllMocks();
     selectQueue.length = 0;
     databaseMock.setBatchInsertChanges(1);
+    databaseMock.setEvictionFenceValid(true);
     claimSessionSnapshotRecoveryMock.mockResolvedValue({
       status: 'claimed',
       taskId: 'recovery-task-1',
@@ -457,7 +477,7 @@ describe('session recovery consumes the canonical persisted resource plan', () =
     ...emptyCapacityPlacement,
     userId: 'user-1',
     vmSize: 'small',
-    vmLocation: 'nbg1',
+    vmLocation: 'hel1',
     branch: 'main',
     workspaceProfile: 'lightweight',
     devcontainerConfigName: null,
@@ -476,11 +496,13 @@ describe('session recovery consumes the canonical persisted resource plan', () =
     });
   }
 
-  async function wake() {
+  async function wake(options: Parameters<typeof ensureSessionRecovery>[4] = {}) {
     return ensureSessionRecovery(
       { DATABASE: databaseMock, BASE_DOMAIN: 'example.test' } as never,
       'project-1',
-      'chat-1'
+      'chat-1',
+      undefined,
+      options
     );
   }
 
@@ -491,9 +513,45 @@ describe('session recovery consumes the canonical persisted resource plan', () =
     return mock.mock.calls[0]?.[0] as {
       resourceRequirements: Record<string, unknown>;
       resolvedReservationOverride: unknown;
-      explicit: { vmSize: string; vmSizeSource: string };
+      explicit: { vmSize: string; vmSizeSource: string; vmLocation: string | null };
     };
   }
+
+  const evictionOptions = {
+    excludedNodeId: 'node-unhealthy',
+    evictionFence: {
+      workspaceId: 'workspace-sleeping',
+      nodeId: 'node-unhealthy',
+      generation: 'generation-1',
+    },
+  };
+
+  it('drops an incidental old location so eviction recovery uses normal placement', async () => {
+    queueWake({
+      placementExplanationJson: JSON.stringify({ explicitVmLocation: false }),
+      requestedVmSize: 'small',
+      requestedVmSizeSource: 'task',
+    });
+
+    await wake(evictionOptions);
+
+    expect((await placementInput()).explicit.vmLocation).toBeNull();
+  });
+
+  it.each([
+    ['explicit provenance', JSON.stringify({ explicitVmLocation: true })],
+    ['legacy unknown provenance', null],
+  ])('preserves an old location when required by %s', async (_label, placementExplanationJson) => {
+    queueWake({
+      placementExplanationJson,
+      requestedVmSize: 'small',
+      requestedVmSizeSource: 'task',
+    });
+
+    await wake(evictionOptions);
+
+    expect((await placementInput()).explicit.vmLocation).toBe('hel1');
+  });
 
   it('replays every persisted layer at its original precedence, not just the task layer', async () => {
     queueWake({

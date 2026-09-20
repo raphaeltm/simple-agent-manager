@@ -13,6 +13,7 @@ import type {
 import {
   CAPACITY_EXHAUSTION_POLICIES,
   CAPACITY_POOL_STRATEGIES,
+  DEFAULT_CAPACITY_POOL_MAX_NODES,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -131,7 +132,13 @@ function EffectivePoolCard({
           revision {summary.pool.revision} · {formatLabel(summary.pool.status)}
         </div>
       </div>
-      <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+      <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-4">
+        <div>
+          <div className="text-fg-muted">Node limit per user</div>
+          <div className="font-medium text-fg-primary">
+            {summary.pool.maxNodes ?? DEFAULT_CAPACITY_POOL_MAX_NODES}
+          </div>
+        </div>
         <div>
           <div className="text-fg-muted">Strategy</div>
           <div className="font-medium text-fg-primary">{formatLabel(summary.pool.strategy)}</div>
@@ -245,20 +252,17 @@ function CredentialSetupCard({
       title: hasEffectiveFallback
         ? 'Create a project-scoped infrastructure pool'
         : 'Project compute credentials are required',
-      body:
-        'A project pool needs compute provider credentials that a user connects and grants for this project. It works like project-scoped AI/API keys: the credential is user-managed, but the project can use it for infrastructure placement.',
+      body: 'A project pool needs compute provider credentials that a user connects and grants for this project. It works like project-scoped AI/API keys: the credential is user-managed, but the project can use it for infrastructure placement.',
       action: 'Set up project credentials',
     },
     user: {
       title: 'Personal compute credentials are required',
-      body:
-        'Connect a cloud provider credential before creating your personal infrastructure pool.',
+      body: 'Connect a cloud provider credential before creating your personal infrastructure pool.',
       action: 'Set up cloud provider',
     },
     installation: {
       title: 'Platform compute credentials are required',
-      body:
-        'Add and enable an installation cloud-provider credential before creating the installation fallback pool.',
+      body: 'Add and enable an installation cloud-provider credential before creating the installation fallback pool.',
       action: 'Set up platform credentials',
     },
   };
@@ -312,6 +316,7 @@ function buildUpdateRequest(
   summary: DefaultCapacityPoolSummary,
   draftStrategy: CapacityPoolStrategy,
   draftExhaustionPolicy: CapacityExhaustionPolicy,
+  draftMaxNodes: number,
   draftStatuses: CandidateStatusDraft,
   draftCatalogAdditions: CatalogAdditionDraft
 ): DefaultCapacityPoolUpdateRequest | null {
@@ -319,6 +324,9 @@ function buildUpdateRequest(
   if (draftStrategy !== summary.pool.strategy) policy.strategy = draftStrategy;
   if (draftExhaustionPolicy !== summary.pool.exhaustionPolicy) {
     policy.exhaustionPolicy = draftExhaustionPolicy;
+  }
+  if (draftMaxNodes !== (summary.pool.maxNodes ?? DEFAULT_CAPACITY_POOL_MAX_NODES)) {
+    policy.maxNodes = draftMaxNodes;
   }
 
   const candidates = summary.candidates.flatMap((candidate) => {
@@ -328,7 +336,7 @@ function buildUpdateRequest(
   });
 
   const request: DefaultCapacityPoolUpdateRequest = {};
-  if (policy.strategy || policy.exhaustionPolicy) request.policy = policy;
+  if (policy.strategy || policy.exhaustionPolicy || policy.maxNodes) request.policy = policy;
   if (candidates.length > 0) request.candidates = candidates;
   const catalogAdditions = Object.values(draftCatalogAdditions);
   if (catalogAdditions.length > 0) request.catalogAdditions = catalogAdditions;
@@ -377,6 +385,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
   const [draftExhaustionPolicy, setDraftExhaustionPolicy] = useState<CapacityExhaustionPolicy>(
     CAPACITY_EXHAUSTION_POLICIES[0]
   );
+  const [draftMaxNodes, setDraftMaxNodes] = useState(DEFAULT_CAPACITY_POOL_MAX_NODES);
   const [draftCandidateStatuses, setDraftCandidateStatuses] = useState<CandidateStatusDraft>({});
   const [draftCatalogAdditions, setDraftCatalogAdditions] = useState<CatalogAdditionDraft>({});
 
@@ -418,6 +427,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
     if (!ownedDefault) return;
     setDraftStrategy(ownedDefault.pool.strategy);
     setDraftExhaustionPolicy(ownedDefault.pool.exhaustionPolicy);
+    setDraftMaxNodes(ownedDefault.pool.maxNodes ?? DEFAULT_CAPACITY_POOL_MAX_NODES);
     setDraftCandidateStatuses(
       Object.fromEntries(
         ownedDefault.candidates.map((candidate) => [candidate.id, candidate.status])
@@ -433,6 +443,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
       ownedDefault,
       draftStrategy,
       draftExhaustionPolicy,
+      draftMaxNodes,
       draftCandidateStatuses,
       draftCatalogAdditions
     );
@@ -529,7 +540,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
                 </p>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 md:grid-cols-3">
                 <PolicySelect
                   label="Strategy"
                   value={draftStrategy}
@@ -542,6 +553,21 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
                   options={CAPACITY_EXHAUSTION_POLICIES}
                   onChange={setDraftExhaustionPolicy}
                 />
+                <label className="grid gap-1 text-xs text-fg-muted">
+                  Maximum nodes per user
+                  <input
+                    className="min-h-10 rounded-md border border-border-default bg-bg-card px-3 text-sm text-fg-primary"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={draftMaxNodes}
+                    onChange={(event) => {
+                      const value = Number.parseInt(event.currentTarget.value, 10);
+                      if (Number.isSafeInteger(value) && value > 0) setDraftMaxNodes(value);
+                    }}
+                  />
+                  <span>Spread creates separate nodes up to this limit, then packs.</span>
+                </label>
               </div>
 
               <div className="grid gap-2 min-w-0">

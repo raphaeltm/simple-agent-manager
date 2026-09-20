@@ -39,9 +39,7 @@ export type PlacementEntryPoint =
   | 'orchestration-retry';
 
 export type PlacementCredentialProjectPolicy =
-  | 'current-project'
-  | 'current-project-unless-inherited'
-  | 'inherited-or-none';
+  'current-project' | 'current-project-unless-inherited' | 'inherited-or-none';
 
 export type PlacementTaskModeDefault = 'task' | 'workspace-profile';
 export type PlacementProfileVmSizeSource = Extract<
@@ -210,6 +208,9 @@ export interface TaskStartCapacityPoolSelection {
   revision: number;
   strategy: CapacityPoolStrategy;
   exhaustionPolicy: CapacityExhaustionPolicy;
+  maxNodes?: number;
+  /** Whether the caller explicitly constrained the original request to a location. */
+  explicitVmLocation?: boolean;
   effectiveState: DefaultCapacityPoolEffectiveState;
   selectionSettings: CapacityPoolPlacementSettings;
   capacityPoolProjectId: string | null;

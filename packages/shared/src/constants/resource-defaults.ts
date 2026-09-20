@@ -20,7 +20,7 @@ import type { VMSize } from '../types/workspace';
 // =============================================================================
 
 /** Current schema version for ResolvedResourceReservation. Bump when fields change. */
-export const RESOURCE_RESERVATION_VERSION = 2;
+export const RESOURCE_RESERVATION_VERSION = 3;
 
 export const LEGACY_VM_SIZE_WORKLOAD_ADAPTER = 'legacy-vm-size-workload';
 export const LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION = 2;
@@ -307,6 +307,7 @@ export function resolveResourceReservation(
     memoryMb,
     diskMb,
     exclusiveNode: resolved['exclusiveNode'] as boolean,
+    // Retained as compatibility/audit metadata. Placement intentionally ignores it.
     maxCoTenants: resolved['maxCoTenants'] as number,
     source: winningSource,
     sourceId: winningSourceId,

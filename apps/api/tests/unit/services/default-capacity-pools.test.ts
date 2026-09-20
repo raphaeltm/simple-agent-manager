@@ -4815,7 +4815,7 @@ describe('capacity pool review findings', () => {
         scope: 'user',
         ownerUserId: 'user-1',
         ownerProjectId: null,
-        policy: { strategy: 'smallest-fit', exhaustionPolicy: 'fail' },
+        policy: { strategy: 'smallest-fit', exhaustionPolicy: 'fail', maxNodes: 7 },
         candidates: [{ id: ids[0], status: 'disabled' }],
       });
 
@@ -4823,6 +4823,7 @@ describe('capacity pool review findings', () => {
       expect(result.summary?.pool).toMatchObject({
         strategy: 'smallest-fit',
         exhaustionPolicy: 'fail',
+        maxNodes: 7,
         revision: revisionBefore + 1,
       });
       expect(candidateRow(ids[0])?.status).toBe('disabled');

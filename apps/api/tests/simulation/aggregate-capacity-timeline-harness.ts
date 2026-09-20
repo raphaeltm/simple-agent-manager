@@ -11,13 +11,7 @@ import {
 } from '../../src/services/workspace-resource-capacity';
 
 type TaskStatus =
-  | 'queued'
-  | 'provisioning'
-  | 'reserving'
-  | 'running'
-  | 'retry-wait'
-  | 'cancelled'
-  | 'failed';
+  'queued' | 'provisioning' | 'reserving' | 'running' | 'retry-wait' | 'cancelled' | 'failed';
 
 type WorkspaceStatus = 'creating' | 'running' | 'deleted' | 'failed';
 
@@ -454,17 +448,11 @@ export class AggregateCapacityTimeline {
         resolvedReservationJson: workspace.resolvedReservationJson,
       }))
     );
-    if (usage.activeCount > this.maxWorkspaces) {
-      this.failInvariant(`workspace count exceeded on ${node.id}`);
-    }
     if (usage.activeCount > 1 && usage.invalidCount > 0) {
       this.failInvariant(`unknown reservation was co-tenanted on ${node.id}`);
     }
     if (usage.activeCount > 1 && usage.exclusiveCount > 0) {
       this.failInvariant(`exclusive reservation was co-tenanted on ${node.id}`);
-    }
-    if (usage.minMaxCoTenants !== null && usage.activeCount > usage.minMaxCoTenants) {
-      this.failInvariant(`co-tenant cap exceeded on ${node.id}`);
     }
     const capacity = resolveTrustedWorkspaceNodeCapacity(this.resourceNode(node));
     if (capacity.source === null) this.failInvariant(`untrusted capacity on ${node.id}`);

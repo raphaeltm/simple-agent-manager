@@ -144,6 +144,81 @@ func TestCaptureEvictionSessionSnapshotRequiresChatSessionID(t *testing.T) {
 	}
 }
 
+func TestCaptureOOMEvictionSnapshotsExitedVictimThroughIsolatedHelper(t *testing.T) {
+	s := newEvictionTestServer()
+	helperID := strings.Repeat("b", 64)
+	logPath := setupExitedEvictionDocker(t, evictionTestContainerID, helperID)
+	session, _, err := s.agentSessions.Create("workspace-1", "agent-session-1", "Agent", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.agentSessions.UpdateAcpSessionID("workspace-1", session.ID, "acp-session-1", "openai-codex"); err != nil {
+		t.Fatal(err)
+	}
+
+	var captured *containerSnapshotTarget
+	s.sessionSnapshotRunner = func(_ context.Context, input *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
+		captured = input.containerTarget
+		return map[string]interface{}{"status": "available"}, nil
+	}
+	err = s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
+		WorkspaceID:    "workspace-1",
+		ContainerID:    evictionTestContainerID,
+		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Reason:         resourcemon.EvictionReasonOOMKill,
+	})
+	if err != nil {
+		t.Fatalf("captureEvictionSessionSnapshot: %v", err)
+	}
+	if captured == nil || captured.containerID != helperID || captured.workDir != "/workspaces/repo" || captured.user != "node" {
+		t.Fatalf("snapshot helper target = %#v", captured)
+	}
+
+	calls, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"commit " + evictionTestContainerID,
+		"--volumes-from " + evictionTestContainerID,
+		"--label devcontainer.local_folder=sam-eviction-snapshot-helper",
+		"--network none --cap-drop ALL --security-opt no-new-privileges",
+		"start " + helperID,
+		"rm --force --volumes sam-eviction-snapshot-",
+		"image rm --force sam-eviction-snapshot:",
+	} {
+		if !strings.Contains(string(calls), want) {
+			t.Fatalf("missing %q in Docker calls:\n%s", want, calls)
+		}
+	}
+}
+
+func TestCaptureOOMEvictionRefusesHelperForRunningContainer(t *testing.T) {
+	s := newEvictionTestServer()
+	logPath := setupExitedEvictionDocker(t, evictionTestContainerID, strings.Repeat("b", 64))
+	t.Setenv("SAM_EVICTION_TEST_CONTAINER_STATE", "true false 0")
+	if _, _, err := s.agentSessions.Create("workspace-1", "agent-session-1", "Agent", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	err := s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
+		WorkspaceID:    "workspace-1",
+		ContainerID:    evictionTestContainerID,
+		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Reason:         resourcemon.EvictionReasonOOMKill,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not an exited OOM container") {
+		t.Fatalf("captureEvictionSessionSnapshot error = %v", err)
+	}
+	calls, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(calls), "commit ") || strings.Contains(string(calls), "create ") {
+		t.Fatalf("running container reached helper creation:\n%s", calls)
+	}
+}
+
 func TestMarkWorkspaceEvictedUpdatesRuntimeAndAgentSessions(t *testing.T) {
 	s := newEvictionTestServer()
 	initializeEvictionTestStore(t, s)
@@ -324,6 +399,36 @@ esac
 	}
 	t.Setenv("SAM_DOCKER_CLI_PATH", command)
 	t.Setenv("SAM_EVICTION_TEST_CURRENT_ID", currentID)
+	t.Setenv("SAM_EVICTION_TEST_CALLS", logPath)
+	return logPath
+}
+
+func setupExitedEvictionDocker(t *testing.T, currentID, helperID string) string {
+	t.Helper()
+	dir := t.TempDir()
+	command := filepath.Join(dir, "docker")
+	logPath := filepath.Join(dir, "calls")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$SAM_EVICTION_TEST_CALLS"
+case "$1" in
+  ps)
+    case " $* " in
+      *" --all "*) printf '%s\n' "$SAM_EVICTION_TEST_CURRENT_ID" ;;
+    esac ;;
+  inspect) printf '%s\n' "$SAM_EVICTION_TEST_CONTAINER_STATE" ;;
+  commit|start|rm) exit 0 ;;
+  create) printf '%s\n' "$SAM_EVICTION_TEST_HELPER_ID" ;;
+  image) exit 0 ;;
+  *) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(command, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SAM_DOCKER_CLI_PATH", command)
+	t.Setenv("SAM_EVICTION_TEST_CURRENT_ID", currentID)
+	t.Setenv("SAM_EVICTION_TEST_HELPER_ID", helperID)
+	t.Setenv("SAM_EVICTION_TEST_CONTAINER_STATE", "false true 137")
 	t.Setenv("SAM_EVICTION_TEST_CALLS", logPath)
 	return logPath
 }

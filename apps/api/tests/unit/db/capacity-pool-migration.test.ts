@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  applyCapacityPoolSchemaMigrations,
   candidateCatalogMetadataMigrationSql,
   candidateSnapshotMigrationSql,
   capacityPoolAuthorityGenerationMigrationSql,
@@ -1338,5 +1339,49 @@ describe('0148_capacity_source_authority_snapshots migration', () => {
     expect(sql).not.toContain('DELETE FROM');
     expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
     expect(sql).toContain('ALTER TABLE NODES ADD COLUMN CAPACITY_SOURCE_GENERATION');
+  });
+});
+
+describe('0167_capacity_pool_max_nodes migration', () => {
+  it('atomically rejects a managed workspace node above the per-user pool ceiling', () => {
+    const database = db();
+    applyCapacityPoolSchemaMigrations(database);
+    database.exec(`
+      INSERT INTO capacity_pools
+        (id, scope, owner_user_id, name, is_default, status, strategy, exhaustion_policy, max_nodes)
+      VALUES ('pool-limit', 'user', 'user-1', 'Limited', 1, 'active', 'spread', 'queue', 2);
+
+      INSERT INTO nodes (id, user_id, name, status, capacity_pool_id)
+      VALUES
+        ('pool-node-1', 'user-1', 'Pool node 1', 'running', 'pool-limit'),
+        ('pool-node-2', 'user-1', 'Pool node 2', 'creating', 'pool-limit');
+    `);
+
+    expect(() =>
+      database
+        .prepare(
+          `INSERT INTO nodes (id, user_id, name, status, capacity_pool_id)
+           VALUES ('pool-node-3', 'user-1', 'Pool node 3', 'creating', 'pool-limit')`
+        )
+        .run()
+    ).toThrow('capacity_pool_node_limit');
+
+    database
+      .prepare(
+        `INSERT INTO nodes (id, user_id, name, status, capacity_pool_id)
+         VALUES ('other-user-node', 'user-2', 'Other user node', 'creating', 'pool-limit')`
+      )
+      .run();
+    expect(
+      database
+        .prepare(
+          `SELECT user_id, COUNT(*) AS count FROM nodes
+            WHERE capacity_pool_id = 'pool-limit' GROUP BY user_id ORDER BY user_id`
+        )
+        .all()
+    ).toEqual([
+      { user_id: 'user-1', count: 2 },
+      { user_id: 'user-2', count: 1 },
+    ]);
   });
 });

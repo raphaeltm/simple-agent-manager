@@ -42,6 +42,9 @@ export type DefaultCapacityPoolEffectiveState =
 export const CAPACITY_POOL_STRATEGIES = ['balanced', 'pack', 'spread', 'smallest-fit'] as const;
 export type CapacityPoolStrategy = (typeof CAPACITY_POOL_STRATEGIES)[number];
 
+/** Default maximum number of managed workspace nodes per user in one capacity pool. */
+export const DEFAULT_CAPACITY_POOL_MAX_NODES = 3;
+
 export const CAPACITY_EXHAUSTION_POLICIES = ['queue', 'fail', 'fallback-chain'] as const;
 export type CapacityExhaustionPolicy = (typeof CAPACITY_EXHAUSTION_POLICIES)[number];
 
@@ -89,6 +92,8 @@ export interface CapacityPool {
   configurationState?: CapacityPoolConfigurationState;
   strategy: CapacityPoolStrategy;
   exhaustionPolicy: CapacityExhaustionPolicy;
+  /** Per-user managed workspace-node ceiling. Spread provisions until this limit, then packs. */
+  maxNodes?: number;
   lastReconciledAt?: string | null;
   migrationVersion?: string | null;
   migrationState?: string | null;
@@ -279,6 +284,7 @@ export interface DefaultCapacityPoolScopeSummary {
 export interface DefaultCapacityPoolPolicyUpdate {
   strategy?: CapacityPoolStrategy;
   exhaustionPolicy?: CapacityExhaustionPolicy;
+  maxNodes?: number;
 }
 
 export interface DefaultCapacityPoolCandidateStatusUpdate {

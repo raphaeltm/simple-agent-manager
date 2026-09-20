@@ -16,9 +16,7 @@ import {
   type CapacityAwareNodePlacementRow,
   resolveReusableNodeCapacitySnapshot,
 } from '../../services/placement-resolver';
-import {
-  comparePlacementRolloutHosts,
-} from '../../services/placement-rollout';
+import { comparePlacementRolloutHosts } from '../../services/placement-rollout';
 import {
   comparePlacementHostsByStrategy,
   normalizePlacementHostSignals,
@@ -39,10 +37,7 @@ import {
   type TrustedWorkspaceNodeCapacityRow,
 } from '../../services/workspace-resource-capacity';
 import type { NodeLifecycle } from '../node-lifecycle';
-import {
-  evaluateReusableNodeCandidate,
-  type RankedReusableNode,
-} from './node-placement-candidate';
+import { evaluateReusableNodeCandidate, type RankedReusableNode } from './node-placement-candidate';
 import {
   type DeferrableReusableNodeCandidate,
   type ReusableNodePlacementResult,
@@ -633,6 +628,7 @@ function resolveReusableNodeSelection(
   state: TaskRunnerState,
   node: NodePlacementFields
 ): ReusableNodeSelection | null {
+  if (node.id === state.config.excludedNodeId) return null;
   const capacityPlacementSnapshot = resolveReusableNodeCapacitySnapshot({
     selection: state.config.capacityPoolSelection,
     node: node as CapacityAwareNodePlacementRow,

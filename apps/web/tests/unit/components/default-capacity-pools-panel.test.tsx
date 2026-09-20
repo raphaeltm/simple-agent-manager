@@ -65,9 +65,9 @@ vi.mock('../../../src/lib/api/capacity-pools', () => ({
 
 function renderPanel(
   props:
-    | { scope?: 'project'; projectId: string }
-    | { scope: 'user' }
-    | { scope: 'installation' } = { projectId: 'project-1' }
+    { scope?: 'project'; projectId: string } | { scope: 'user' } | { scope: 'installation' } = {
+    projectId: 'project-1',
+  }
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -574,13 +574,16 @@ describe('DefaultCapacityPoolsPanel', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
     fireEvent.change(screen.getByLabelText('Strategy'), { target: { value: 'pack' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: /Maximum nodes/ }), {
+      target: { value: '5' },
+    });
     fireEvent.click(screen.getByRole('button', { name: /Remove Hetzner ash cpx31/ }));
     fireEvent.click(screen.getByRole('button', { name: /Add back Hetzner hil ccx33/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() =>
       expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
-        policy: { strategy: 'pack' },
+        policy: { strategy: 'pack', maxNodes: 5 },
         candidates: [
           { id: 'candidate-project-ash-cpx31', status: 'deleted' },
           { id: 'candidate-project-hil-ccx33', status: 'active' },

@@ -149,7 +149,7 @@ be served by any replica that has caught up to the bookmark the first query retu
 therefore pays one long round trip instead of one per query, while still observing a snapshot at
 least as fresh as its own start — so no write that completed before the request began can be
 missed, and writes in a session always go to the primary and are visible to later reads in the
-same session. (It does not promise that a write landing *during* the request is visible to that
+same session. (It does not promise that a write landing _during_ the request is visible to that
 request's later queries; that is the ordinary two-non-atomic-reads race, unchanged by this and
 now with a shorter window.)
 
@@ -421,10 +421,10 @@ the last capacity.
 `apps/api/src/services/workspace-resource-capacity.ts` makes legacy capacity intentionally
 conservative: both empty and occupied nodes require verified observed CPU, memory, and disk
 capacity. An occupied node also requires valid active reservations and fresh resource telemetry.
-Host memory reserve and measured pressure further constrain admission. Exclusive requests
-require an empty node, and an active exclusive workspace prevents any additional placement.
-`MAX_WORKSPACES_PER_NODE` remains an
-additional hard safety cap rather than the primary capacity model.
+The host memory reserve constrains admission; live memory percentage affects ranking only. CPU
+saturation and disk pressure remain live overload vetoes. Exclusive requests require an empty
+node, and an active exclusive workspace prevents any additional placement. Legacy workspace-count
+and co-tenant settings remain compatible audit data but do not block placement.
 
 ## ACP Session Lifecycle
 

@@ -57,6 +57,7 @@ export function capacityPoolSnapshotForPool(
     | 'scope'
     | 'revision'
     | 'strategy'
+    | 'explicitVmLocation'
     | 'exhaustionPolicy'
     | 'effectiveState'
     | 'selectionSettings'
@@ -99,6 +100,31 @@ export function capacityPlacementSnapshotForTaskStart(
   return candidate
     ? capacityPlacementSnapshotForCandidate(selection, candidate)
     : selection.poolSnapshot;
+}
+
+/** Persist placement provenance even when no compute pool applies. */
+export function directPlacementAuditSnapshot(
+  placement: Pick<TaskStartPlacement, 'explicitVmLocation'>
+): CapacityPlacementSnapshot {
+  return {
+    placementPlanVersion: CAPACITY_PLACEMENT_PLAN_VERSION,
+    capacityPoolId: null,
+    capacityPoolScope: null,
+    capacityPoolRevision: null,
+    capacitySourceId: null,
+    capacitySourceGeneration: null,
+    capacitySourceExternalRef: null,
+    capacityPoolCandidateId: null,
+    placementCredentialSource: null,
+    placementCredentialReference: null,
+    placementCredentialVersion: null,
+    capacityPoolProjectId: null,
+    workloadRole: null,
+    placementExplanationJson: JSON.stringify({
+      kind: 'direct_placement',
+      explicitVmLocation: placement.explicitVmLocation === true,
+    }),
+  };
 }
 
 export function hasNoCapacityPoolCandidates(
@@ -243,6 +269,8 @@ export function buildCapacityPoolSelection(
     revision: pool.revision,
     strategy: pool.strategy,
     exhaustionPolicy: pool.exhaustionPolicy,
+    maxNodes: pool.maxNodes,
+    explicitVmLocation: placement.explicitVmLocation === true,
     effectiveState: summary.effectiveState ?? 'configured-ready',
     selectionSettings: settings,
     capacityPoolProjectId:
@@ -451,6 +479,7 @@ function normalizeCapacityCandidate(
           scope: pool.scope,
           revision: pool.revision,
           strategy: pool.strategy,
+          explicitVmLocation: placement.explicitVmLocation === true,
           exhaustionPolicy: pool.exhaustionPolicy,
           effectiveState,
           selectionSettings: settings,
@@ -626,6 +655,7 @@ function buildCapacityPlacementExplanation(
     | 'scope'
     | 'revision'
     | 'strategy'
+    | 'explicitVmLocation'
     | 'exhaustionPolicy'
     | 'effectiveState'
     | 'selectionSettings'
@@ -665,6 +695,7 @@ function buildCapacityPlacementExplanation(
     scope: selection.scope,
     revision: selection.revision,
     strategy: selection.strategy,
+    explicitVmLocation: selection.explicitVmLocation === true,
     capacityPoolProjectId: selection.capacityPoolProjectId,
     workloadRole: selection.workloadRole,
     capacitySourceId: candidate?.capacitySourceId ?? null,

@@ -407,18 +407,15 @@ function buildWorkspaceAdmissionSql(
            ? AS cpu_millis,
            ? AS memory_mb,
            ? AS disk_mb,
-           ? AS exclusive_node,
-           ? AS max_co_tenants
+           ? AS exclusive_node
        ),
        admission_policy AS (
          SELECT
-           ? AS max_workspaces,
            ? AS cpu_share_budget_percent,
            ? AS host_memory_reserve_mb,
            ? AS disk_pressure_threshold_percent,
            ? AS metrics_ttl_ms,
-           ? AS cpu_threshold_percent,
-           ? AS memory_threshold_percent
+           ? AS cpu_threshold_percent
        ),
        active_reservations AS (
          SELECT
@@ -431,10 +428,6 @@ function buildWorkspaceAdmissionSql(
              WHEN ${validReservationJsonSql('w.resolved_reservation_json')}
               AND json_extract(w.resolved_reservation_json, '$.exclusiveNode')
              THEN 1 ELSE 0 END), 0) AS exclusive_count,
-           MIN(CASE
-             WHEN ${validReservationJsonSql('w.resolved_reservation_json')}
-             THEN CAST(json_extract(w.resolved_reservation_json, '$.maxCoTenants') AS INTEGER)
-             ELSE NULL END) AS min_max_co_tenants,
            COALESCE(SUM(CASE
              WHEN ${validReservationJsonSql('w.resolved_reservation_json')}
              THEN CAST(json_extract(w.resolved_reservation_json, '$.cpuMillis') AS INTEGER)
@@ -462,23 +455,17 @@ function buildWorkspaceAdmissionSql(
       resolvedReservation.memoryMb,
       resolvedReservation.diskMb,
       resolvedReservation.exclusiveNode ? 1 : 0,
-      resolvedReservation.maxCoTenants,
-      policy.maxWorkspaces,
       policy.cpuShareBudgetPercent,
       policy.hostMemoryReserveMb,
       policy.diskPressureThresholdPercent,
       policy.metricsTtlMs,
       policy.cpuThresholdPercent,
-      policy.memoryThresholdPercent,
     ],
   };
 }
 
 function workspaceAdmissionEligibilitySql(): string {
-  return `active.active_count < policy.max_workspaces
-         AND active.active_count < requested.max_co_tenants
-         AND (active.min_max_co_tenants IS NULL OR active.active_count < active.min_max_co_tenants)
-         AND active.exclusive_count = 0
+  return `active.exclusive_count = 0
          AND (requested.exclusive_node = 0 OR active.active_count = 0)
          AND ${trustedHardwareCapacitySql()}
          AND ${finalMeasuredPressurePredicateSql()}
@@ -525,15 +512,23 @@ function legacyWorkspaceAdmissionPolicy(maxWorkspaces: number): WorkspaceAdmissi
 function validReservationJsonSql(expression: string): string {
   return `(json_valid(${expression})
     AND json_type(${expression}, '$.version') = 'integer'
-    AND json_extract(${expression}, '$.version') IN (1, 2)
+    AND json_extract(${expression}, '$.version') IN (1, 2, 3)
     AND json_type(${expression}, '$.cpuMillis') = 'integer'
     AND json_extract(${expression}, '$.cpuMillis') > 0
     AND json_type(${expression}, '$.memoryMb') = 'integer'
     AND json_extract(${expression}, '$.memoryMb') > 0
     AND json_type(${expression}, '$.diskMb') = 'integer'
     AND json_extract(${expression}, '$.diskMb') >= 0
-    AND json_type(${expression}, '$.maxCoTenants') = 'integer'
-    AND json_extract(${expression}, '$.maxCoTenants') > 0
+    AND (
+      (json_extract(${expression}, '$.version') IN (1, 2)
+        AND json_type(${expression}, '$.maxCoTenants') = 'integer'
+        AND json_extract(${expression}, '$.maxCoTenants') > 0)
+      OR
+      (json_extract(${expression}, '$.version') = 3
+        AND (json_type(${expression}, '$.maxCoTenants') IS NULL
+          OR (json_type(${expression}, '$.maxCoTenants') = 'integer'
+            AND json_extract(${expression}, '$.maxCoTenants') > 0)))
+    )
     AND json_type(${expression}, '$.exclusiveNode') IN ('true', 'false')
     AND json_type(${expression}, '$.source') = 'text'
     AND json_extract(${expression}, '$.source') IN (${RESOURCE_REQUIREMENTS_SOURCE_SQL}))`;
@@ -610,8 +605,6 @@ function finalMeasuredPressurePredicateSql(): string {
         ((CAST(json_extract(n.metrics_json, '$.cpuLoadAvg1') AS REAL) / n.trusted_provider_instance_vcpu_count) * 100)
           < policy.cpu_threshold_percent
       )
-      AND CAST(json_extract(n.metrics_json, '$.memoryPercent') AS REAL)
-        < policy.memory_threshold_percent
       AND CAST(json_extract(n.metrics_json, '$.diskPercent') AS REAL)
         < policy.disk_pressure_threshold_percent
     )
