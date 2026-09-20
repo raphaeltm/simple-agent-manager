@@ -28,10 +28,6 @@
  * arguments would return "reserved" no matter what the arithmetic produced
  * (`.claude/rules/28-credential-resolution-fallback-tests.md`).
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-
-import * as TOML from '@iarna/toml';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -40,6 +36,7 @@ import {
   archiveWriteBudgetConfig,
   reserveArchiveWrites,
 } from '../../../src/project-data-archive/write-budget';
+import { shippedBudgetEnv } from '../../helpers/shipped-archive-budget';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 /**
@@ -50,34 +47,6 @@ import { createSqliteD1 } from '../../helpers/sqlite-d1';
  */
 const MEASURED_UNITS_PER_MIGRATION = 8_000;
 const WINDOW_START = Date.UTC(2026, 8, 14, 0, 0, 0);
-
-/**
- * Read a shipped `[vars]` value structurally, the same way `sync-wrangler-config.ts` reads this
- * file. A regex over the raw text would produce failures unrelated to archive throughput the
- * first time someone adds an inline comment or reflows a line.
- */
-function readShippedVar(name: string): string {
-  const parsed = TOML.parse(
-    readFileSync(resolve(import.meta.dirname, '../../../wrangler.toml'), 'utf-8')
-  ) as { vars?: Record<string, unknown> };
-  const value = parsed.vars?.[name];
-  if (typeof value !== 'string') {
-    throw new Error(`${name} is not a string in the [vars] table of apps/api/wrangler.toml`);
-  }
-  return value;
-}
-
-/** The env shape `archiveWriteBudgetConfig` reads, populated from the shipped config. */
-function shippedBudgetEnv() {
-  return {
-    PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: readShippedVar(
-      'PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET'
-    ),
-    PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: readShippedVar(
-      'PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR'
-    ),
-  };
-}
 
 describe('shipped archive write-estimate factor', () => {
   let sqlite: Database.Database;

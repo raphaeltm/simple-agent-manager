@@ -33,10 +33,6 @@
  * The reservation runs against a real SQLite engine through `createSqliteD1`, not a stub,
  * because the thing under test is a conditional UPDATE predicate (`.claude/rules/28`).
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-
-import * as TOML from '@iarna/toml';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -50,6 +46,7 @@ import {
   PREVIOUS_SWEEP_MESSAGE_BUDGET,
   SHIPPED_SWEEP_MESSAGE_BUDGET,
 } from '../../helpers/archive-sweep-ceiling';
+import { readShippedVar, shippedBudgetEnv } from '../../helpers/shipped-archive-budget';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 /**
@@ -63,28 +60,6 @@ const MEASURED_UNITS_PER_MESSAGE = 2.17;
 /** Hourly cadence: `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` is 3600000. */
 const TICKS_PER_DAY = 24;
 const WINDOW_START = Date.UTC(2026, 8, 20, 0, 0, 0);
-
-function readShippedVar(name: string): string {
-  const parsed = TOML.parse(
-    readFileSync(resolve(import.meta.dirname, '../../../wrangler.toml'), 'utf-8')
-  ) as { vars?: Record<string, unknown> };
-  const value = parsed.vars?.[name];
-  if (typeof value !== 'string') {
-    throw new Error(`${name} is not a string in the [vars] table of apps/api/wrangler.toml`);
-  }
-  return value;
-}
-
-function shippedBudgetEnv() {
-  return {
-    PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: readShippedVar(
-      'PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET'
-    ),
-    PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: readShippedVar(
-      'PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR'
-    ),
-  };
-}
 
 const shippedOverheadPercent = () =>
   Number(readShippedVar('PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT'));

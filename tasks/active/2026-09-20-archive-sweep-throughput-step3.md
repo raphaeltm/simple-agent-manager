@@ -59,16 +59,54 @@ Production `project_data_archive_candidate_migrated` events (48h to 2026-09-20):
 | 2938     | 8      | 19,941  | 700     | 11,468 | 2803 | 1228     | 3742     |
 | 2951     | 8      | 28,846  | 1092    | 19,150 | 2988 | 1705     | 3911     |
 
-Least-squares fit: `totalMs ~= 5783 + 6.0 * messages`, i.e. ~66 s at 10,000 and ~126 s at
-20,000 (worst observed slope ~9.8 ms/message gives ~98 s and ~196 s). `_LEASE_MS` is 300000.
-This is **wall time**, and says nothing about CPU: the phases are dominated by R2 and DO RPC
-I/O. No `exceededCpu` / `exceededMemory` / `fatalInternal` errors appear in the ProjectData
-namespace over the sampled window.
+Widening the sample to 16 distinct migrations (24 h window plus the six above) gives
+`totalMs ~= -8194 + 10.47 * messages`: **~97 s at 10,000 and ~201 s at 20,000**. Do not use the
+earlier, narrower fit (`5783 + 6.0 * messages`, ~66 s / ~126 s) — it was fitted on a sample that
+excluded the slow tail.
+
+Duration is only loosely predicted by message count. Thirteen migrations clustered at ~4.7k
+messages span **17,129 ms to 56,034 ms — a 3.3x spread at essentially constant size**, so
+variance is dominated by something other than message count (R2 latency and DO contention are
+the candidates). The worst observed rate is 11.81 ms/message, i.e. **~118 s at 10,000 and ~236 s
+at 20,000**. Against `_LEASE_MS = 300000` that is 2.5x margin at 10,000 and only **1.27x at
+20,000** — an independent reason to stage rather than jump to 20000.
+
+Cron Trigger wall ceiling is 15 minutes, so wall clock is not binding at either size.
+
+### Chunk density — measured, not assumed
+
+Across the same 16 migrations, `chunksCopied` gives **365-397 messages per chunk** (p50 392;
+rows per chunk across all tables 398-448). The 500-row `_CHUNK_ROWS` cap binds, not the 2 MiB
+compact byte cap — production message bodies are small enough that no sampled session was
+byte-dense. A 10,000-message candidate is therefore **~25-27 chunks**, not hundreds.
 
 ### What the largest compact session has ever been
 
-4,994 messages (128 `r2-gzip-v1` publishes). Both 10000 and 20000 are extrapolations past it;
-10000 is a 2x step, 20000 a 4x step.
+**4,994 messages.** (Separately, 128 migrations have published in `r2-gzip-v1` format overall —
+that is a count of publishes, not of chunks. An earlier draft of this file put those two numbers
+in one sentence and a reviewer reasonably read it as "128 chunks for one 4,994-message session",
+which would have implied ~39 messages/chunk and roughly ten times the chunk count measured
+above.) Both 10000 and 20000 are extrapolations past 4,994; 10000 is a 2x step, 20000 a 4x step.
+
+### CPU — measured separately from wall time, with a known gap
+
+The durations above are **wall time**. On CPU:
+
+- **Durable Object CPU.** `durableObjectsPeriodicGroups` for the ProjectData namespace over
+  2026-09-17..20 shows no `exceededCpu`, `exceededMemory` or `fatalInternal`. Each incoming DO
+  RPC gets its own fresh CPU budget, so the per-call risk does not accumulate across a migration.
+- **Coordinator Worker CPU.** `workersInvocationsAdaptive` for `sam-api-prod` over the last 7
+  days: **594,725 invocations, outcomes only `success` / `clientDisconnected` /
+  `responseStreamDisconnected`, no `exceededCpu`, max `cpuTimeP99` 128 ms.** No invocation was
+  CPU-killed at the current 5000 ceiling.
+- **The gap.** That figure is an aggregate across all requests, so it cannot isolate the one
+  hourly archive tick. It matters because `writeCompactChunk`
+  (`apps/api/src/project-data-archive/compact-r2.ts`) runs gzip + SHA-256 + gunzip + SHA-256 +
+  `JSON.parse` in the **coordinator's** isolate, inside the single `scheduled()` invocation, with
+  no per-chunk CPU reset — unlike the DO side. At the measured density that is ~25-27 chunks at
+  10,000 (versus ~12 today), so roughly 2x today's coordinator CPU for the copy phase.
+  Before promoting to 20000, pull the coordinator's own scheduled-invocation CPU for the first
+  ticks that pick up a >5000-message candidate rather than relying on the DO-namespace figure.
 
 ### Reclaim rate — NOT validated, do not cite as a forecast
 
@@ -131,6 +169,19 @@ Post-deploy verification of the deployed value is recorded in the PR body.
   daily-ceiling gain together with the constraint move.
 
 Discrimination proofs recorded in the PR body.
+
+## Follow-ups found during review (not fixed here)
+
+- `sealArchiveTarget` (`apps/api/src/durable-objects/project-data/archive-sharding.ts:1556-1651`)
+  computes the same digest **twice** in one DO invocation: once via `computeTerminalVersion`
+  (line 1580) and again for `aggregateSha256` (lines 1609-1619), over data that
+  `rebuildTargetFts` does not mutate. That is 2x the R2 gunzip/parse/hash work and 4x the
+  grouped/tool-payload table scans per seal. Bounded per-call (each DO RPC has its own CPU
+  budget) and comfortable at 10000, but it should be fixed before 20000 — it is free margin.
+- No baseline failure/poison rate at 5000 has been captured, so the cost of a poisoned
+  candidate (~44,400 estimated units per attempt at 10000, up to ~133,200 for a full
+  three-attempt poison cycle = ~16.7% of the daily allowance) is bounded in magnitude but not in
+  frequency. Worth a `project_data_archive_migrations` state histogram before and after ship.
 
 ## Findings worth keeping
 
