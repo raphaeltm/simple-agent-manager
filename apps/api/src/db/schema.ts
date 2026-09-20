@@ -1605,9 +1605,11 @@ export const workspaceResourceChunks = sqliteTable(
     uploadedByNodeId: text('uploaded_by_node_id'),
   },
   (table) => ({
-    identityIdx: uniqueIndex('idx_workspace_resource_chunks_identity').on(
+    identityIdx: index('idx_workspace_resource_chunks_identity').on(
       table.projectId,
       table.workspaceId,
+      table.sessionId,
+      table.taskId,
       table.chunkSequence,
       table.sourceVersion
     ),

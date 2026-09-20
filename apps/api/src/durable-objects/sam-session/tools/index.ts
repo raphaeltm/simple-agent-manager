@@ -14,6 +14,7 @@ import { getMission, getMissionDef } from './get-mission';
 import { getOrchestratorStatus, getOrchestratorStatusDef } from './get-orchestrator-status';
 import { getProjectKnowledge, getProjectKnowledgeDef } from './get-project-knowledge';
 import { getProjectStatus, getProjectStatusDef } from './get-project-status';
+import { getResourceHistory, getResourceHistoryDef } from './get-resource-history';
 import { getSessionMessages, getSessionMessagesDef } from './get-session-messages';
 import { getTaskDetails, getTaskDetailsDef } from './get-task-details';
 import { listIdeas, listIdeasDef } from './list-ideas';
@@ -64,6 +65,7 @@ export const SAM_TOOLS: AnthropicToolDef[] = [
   listSessionsDef,
   getSessionMessagesDef,
   getArchivedToolPayloadsDef,
+  getResourceHistoryDef,
   searchTaskMessagesDef,
   // Codebase contextual search
   searchCodeDef,
@@ -103,6 +105,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   list_sessions: listSessions as ToolHandler,
   get_session_messages: getSessionMessages as ToolHandler,
   get_archived_tool_payloads: getArchivedToolPayloads as ToolHandler,
+  get_resource_history: getResourceHistory as ToolHandler,
   search_task_messages: searchTaskMessages as ToolHandler,
   // Codebase contextual search
   search_code: searchCode as ToolHandler,

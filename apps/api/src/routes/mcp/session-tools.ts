@@ -5,6 +5,7 @@
  */
 import type { Env } from '../../env';
 import * as projectDataService from '../../services/project-data';
+import { getWorkspaceResourceHistory } from '../../services/workspace-resource-history';
 import {
   getMcpLimits,
   INVALID_PARAMS,
@@ -151,6 +152,67 @@ export async function handleGetSessionMessages(
             messages: result,
             messageCount: result.length,
             hasMore,
+          },
+          null,
+          2
+        ),
+      },
+    ],
+  });
+}
+
+function parseOptionalScope(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+export async function handleGetResourceHistory(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env
+): Promise<JsonRpcResponse> {
+  const explicitSessionId = parseOptionalScope(params.sessionId);
+  const explicitTaskId = parseOptionalScope(params.taskId);
+  const explicitWorkspaceId = parseOptionalScope(params.workspaceId);
+  const hasExplicitScope = Boolean(explicitSessionId || explicitTaskId || explicitWorkspaceId);
+  const sessionId = hasExplicitScope
+    ? explicitSessionId
+    : parseOptionalScope(tokenData.chatSessionId);
+  const taskId = hasExplicitScope ? explicitTaskId : parseOptionalScope(tokenData.taskId);
+  const workspaceId = hasExplicitScope
+    ? explicitWorkspaceId
+    : parseOptionalScope(tokenData.workspaceId);
+  const detailChunkId = parseOptionalScope(params.chunkId);
+
+  if (!sessionId && !taskId && !workspaceId) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Provide sessionId, taskId, or workspaceId, or call from a workspace-scoped MCP token'
+    );
+  }
+
+  const history = await getWorkspaceResourceHistory(env, {
+    projectId: tokenData.projectId,
+    sessionId,
+    taskId,
+    workspaceId,
+    detailChunkId,
+  });
+
+  return jsonRpcSuccess(requestId, {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(
+          {
+            scope: { projectId: tokenData.projectId, sessionId, taskId, workspaceId },
+            ...history,
+            notes: [
+              'Samples are workspace-level cgroup observations, not per-process attribution.',
+              'Tool spans are timestamp correlation windows and may overlap background work.',
+              'Chunk detail is returned only when chunkId is supplied; summary reads stay bounded.',
+            ],
           },
           null,
           2

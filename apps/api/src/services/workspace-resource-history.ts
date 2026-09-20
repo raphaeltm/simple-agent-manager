@@ -5,13 +5,15 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { errors } from '../middleware/error';
+import { AppError, errors } from '../middleware/error';
 
 export const WORKSPACE_RESOURCE_STORAGE_FORMAT = 'resource-history-gzip-json-v1';
 const R2_PREFIX = 'resource-history/v1';
 const DEFAULT_RAW_RETENTION_DAYS = 90;
 const DEFAULT_SUMMARY_RETENTION_DAYS = 180;
 const DEFAULT_UPLOAD_MAX_BYTES = 2 * 1024 * 1024;
+const DEFAULT_UNCOMPRESSED_MAX_BYTES = 8 * 1024 * 1024;
+const DEFAULT_METADATA_MAX_BYTES = 8 * 1024;
 const DEFAULT_DETAIL_MAX_POINTS = 720;
 const DEFAULT_LIST_LIMIT = 24;
 const DEFAULT_CLEANUP_BATCH_SIZE = 50;
@@ -165,6 +167,17 @@ export function getWorkspaceResourceUploadMaxBytes(env: Env): number {
   return parsePositiveInt(env.WORKSPACE_RESOURCE_UPLOAD_MAX_BYTES, DEFAULT_UPLOAD_MAX_BYTES);
 }
 
+function uncompressedMaxBytes(env: Env): number {
+  return parsePositiveInt(
+    env.WORKSPACE_RESOURCE_UNCOMPRESSED_MAX_BYTES,
+    DEFAULT_UNCOMPRESSED_MAX_BYTES
+  );
+}
+
+function metadataMaxBytes(env: Env): number {
+  return parsePositiveInt(env.WORKSPACE_RESOURCE_METADATA_MAX_BYTES, DEFAULT_METADATA_MAX_BYTES);
+}
+
 function retentionDays(env: Env, key: 'raw' | 'summary'): number {
   return key === 'raw'
     ? parsePositiveInt(env.WORKSPACE_RESOURCE_RAW_RETENTION_DAYS, DEFAULT_RAW_RETENTION_DAYS)
@@ -184,6 +197,18 @@ function detailMaxPoints(env: Env): number {
 
 function cleanupBatchSize(env: Env): number {
   return parsePositiveInt(env.WORKSPACE_RESOURCE_CLEANUP_BATCH_SIZE, DEFAULT_CLEANUP_BATCH_SIZE);
+}
+
+function utf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function boundedJsonStringify(value: unknown, field: string, maxBytes: number): string {
+  const json = JSON.stringify(value ?? {});
+  if (utf8ByteLength(json) > maxBytes) {
+    throw errors.badRequest(`${field} exceeds configured metadata byte limit`);
+  }
+  return json;
 }
 
 function jsonParseOrNull(value: string): unknown {
@@ -231,14 +256,67 @@ function hex(bytes: ArrayBuffer): string {
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return hex(await crypto.subtle.digest('SHA-256', bytes));
 }
+async function readBoundedGzipJson(
+  bytes: Uint8Array,
+  maxBytes: number
+): Promise<{ value: WorkspaceResourceChunkPayload; byteLength: number }> {
+  let total = 0;
+  const chunks: Uint8Array[] = [];
+  const reader = new Blob([bytes])
+    .stream()
+    .pipeThrough(new DecompressionStream('gzip'))
+    .getReader();
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        throw errors.badRequest('Resource history chunk exceeds configured uncompressed limit');
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw errors.badRequest('Resource history chunk must contain gzip-compressed JSON');
+  } finally {
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return {
+      value: JSON.parse(new TextDecoder().decode(merged)) as WorkspaceResourceChunkPayload,
+      byteLength: total,
+    };
+  } catch {
+    throw errors.badRequest('Resource history chunk must contain gzip-compressed JSON');
+  }
+}
+
+function resourceScopeKey(input: { sessionId?: string | null; taskId?: string | null }): string {
+  const sessionId = normalizeNullable(input.sessionId);
+  const taskId = normalizeNullable(input.taskId);
+  return sessionId
+    ? `session/${encodeURIComponent(sessionId)}`
+    : taskId
+      ? `task/${encodeURIComponent(taskId)}`
+      : 'workspace';
+}
 
 function buildR2Key(input: {
   projectId: string;
   workspaceId: string;
+  scopeKey: string;
   sourceVersion: number;
   chunkSequence: number;
 }): string {
-  return `${R2_PREFIX}/projects/${input.projectId}/workspaces/${input.workspaceId}/v${input.sourceVersion}/${input.chunkSequence}.json.gz`;
+  return `${R2_PREFIX}/projects/${input.projectId}/workspaces/${input.workspaceId}/${input.scopeKey}/v${input.sourceVersion}/${input.chunkSequence}.json.gz`;
 }
 
 function summaryIdFor(input: {
@@ -289,7 +367,7 @@ export async function storeWorkspaceResourceChunk(
   projectId: string,
   body: WorkspaceResourceUploadBody,
   uploadedByNodeId: string | null
-): Promise<{ summaryId: string; chunkId: string; r2Key: string; idempotent: boolean }> {
+): Promise<{ summaryId: string; chunkId: string; idempotent: boolean }> {
   const workspaceId = body.workspaceId.trim();
   if (!workspaceId) throw errors.badRequest('workspaceId is required');
 
@@ -304,7 +382,6 @@ export async function storeWorkspaceResourceChunk(
   if (body.sessionId && workspace.chat_session_id && body.sessionId !== workspace.chat_session_id) {
     throw errors.forbidden('Session identity does not match workspace');
   }
-
   assertFiniteInteger(body.sourceVersion, 'sourceVersion', 1);
   assertFiniteInteger(body.chunkSequence, 'chunkSequence', 0);
   assertFiniteInteger(body.startedAt, 'startedAt', 1);
@@ -331,20 +408,30 @@ export async function storeWorkspaceResourceChunk(
   if (actualSha !== body.sha256.toLowerCase()) {
     throw errors.badRequest('Resource history chunk checksum mismatch');
   }
+  if (body.uncompressedBytes > uncompressedMaxBytes(env)) {
+    throw errors.badRequest('Resource history chunk exceeds configured uncompressed limit');
+  }
+  const decodedChunk = await readBoundedGzipJson(bytes, uncompressedMaxBytes(env));
+  if (decodedChunk.byteLength !== body.uncompressedBytes) {
+    throw errors.badRequest('uncompressedBytes does not match decoded payload size');
+  }
 
   const db = drizzle(env.DATABASE, { schema });
-  const r2Key = buildR2Key({
-    projectId,
-    workspaceId,
-    sourceVersion: body.sourceVersion,
-    chunkSequence: body.chunkSequence,
-  });
   const now = Date.now();
   const expiresAt = now + retentionDays(env, 'raw') * MS_PER_DAY;
   const sessionId = normalizeNullable(body.sessionId) ?? workspace.chat_session_id;
   const taskId = normalizeNullable(body.taskId);
+  const scopeKey = resourceScopeKey({ sessionId, taskId });
   const summaryId = summaryIdFor({ projectId, workspaceId, sessionId, taskId });
-  const chunkId = `wrchunk:${projectId}:${workspaceId}:${body.sourceVersion}:${body.chunkSequence}`;
+  const chunkScope = scopeKey.replaceAll('/', ':');
+  const chunkId = `wrchunk:${projectId}:${workspaceId}:${chunkScope}:${body.sourceVersion}:${body.chunkSequence}`;
+  const r2Key = buildR2Key({
+    projectId,
+    workspaceId,
+    scopeKey,
+    sourceVersion: body.sourceVersion,
+    chunkSequence: body.chunkSequence,
+  });
   const existing = await db
     .select({
       id: schema.workspaceResourceChunks.id,
@@ -363,7 +450,6 @@ export async function storeWorkspaceResourceChunk(
     return {
       summaryId: existing.summaryId ?? summaryId,
       chunkId: existing.id,
-      r2Key,
       idempotent: true,
     };
   }
@@ -380,8 +466,13 @@ export async function storeWorkspaceResourceChunk(
 
   let r2ObjectIndexed = false;
   try {
-    const completenessJson = JSON.stringify(body.completeness ?? {});
-    const summaryJson = JSON.stringify(body.summary ?? {});
+    const maxMetadataBytes = metadataMaxBytes(env);
+    const completenessJson = boundedJsonStringify(
+      body.completeness ?? {},
+      'completeness',
+      maxMetadataBytes
+    );
+    const summaryJson = boundedJsonStringify(body.summary ?? {}, 'summary', maxMetadataBytes);
     const agentProfileId = normalizeNullable(body.agentProfileId) ?? workspace.agent_profile_hint;
     const skillId = normalizeNullable(body.skillId);
     const agentType = normalizeNullable(body.agentType);
@@ -502,7 +593,7 @@ export async function storeWorkspaceResourceChunk(
     });
 
     r2ObjectIndexed = true;
-    return { summaryId, chunkId, r2Key, idempotent: false };
+    return { summaryId, chunkId, idempotent: false };
   } finally {
     if (!r2ObjectIndexed) {
       try {
@@ -613,7 +704,11 @@ export function downsamplePreservingSpikes(
 async function readChunkPayload(env: Env, chunk: schema.WorkspaceResourceChunkRow) {
   const object = await env.PROJECT_DATA_ARCHIVE_R2.get(chunk.r2Key);
   if (!object) throw errors.notFound('Resource history chunk');
-  const actualSha = await sha256Hex(new Uint8Array(await object.arrayBuffer()));
+  const compressedBytes = new Uint8Array(await object.arrayBuffer());
+  if (compressedBytes.byteLength !== chunk.compressedBytes) {
+    throw errors.internal('Resource history chunk failed size verification');
+  }
+  const actualSha = await sha256Hex(compressedBytes);
   if (actualSha !== chunk.sha256) {
     log.warn('workspace_resource_history.chunk_checksum_mismatch', {
       chunkId: chunk.id,
@@ -622,10 +717,14 @@ async function readChunkPayload(env: Env, chunk: schema.WorkspaceResourceChunkRo
     });
     throw errors.internal('Resource history chunk failed integrity verification');
   }
-  const objectAgain = await env.PROJECT_DATA_ARCHIVE_R2.get(chunk.r2Key);
-  if (!objectAgain) throw errors.notFound('Resource history chunk');
-  const stream = objectAgain.body.pipeThrough(new DecompressionStream('gzip'));
-  const parsed = (await new Response(stream).json()) as WorkspaceResourceChunkPayload;
+  if (chunk.uncompressedBytes > uncompressedMaxBytes(env)) {
+    throw errors.internal('Resource history chunk exceeds configured uncompressed limit');
+  }
+  const decoded = await readBoundedGzipJson(compressedBytes, uncompressedMaxBytes(env));
+  if (decoded.byteLength !== chunk.uncompressedBytes) {
+    throw errors.internal('Resource history chunk failed decoded size verification');
+  }
+  const parsed = decoded.value;
   const samples = Array.isArray(parsed.samples) ? parsed.samples : [];
   const toolSpans = Array.isArray(parsed.toolSpans) ? parsed.toolSpans : [];
   const gaps = Array.isArray(parsed.gaps) ? parsed.gaps : [];
@@ -694,6 +793,68 @@ export async function getWorkspaceResourceHistory(
     chunks: chunks.map(publicChunk),
     ...(selectedChunk ? { detail: await readChunkPayload(env, selectedChunk) } : {}),
   };
+}
+
+export interface WorkspaceResourceObjectCleanupStats {
+  prefix: string;
+  listedObjects: number;
+  deletedObjects: number;
+  truncated: boolean;
+}
+
+async function deleteWorkspaceResourceHistoryObjectsByPrefix(
+  env: Env,
+  prefix: string,
+  limit: number
+): Promise<WorkspaceResourceObjectCleanupStats> {
+  let listedObjects = 0;
+  let deletedObjects = 0;
+  let cursor: string | undefined;
+  let truncated = false;
+
+  while (listedObjects < limit) {
+    const page = await env.PROJECT_DATA_ARCHIVE_R2.list({
+      prefix,
+      cursor,
+      limit: Math.min(1000, limit - listedObjects),
+    });
+    for (const object of page.objects) {
+      listedObjects += 1;
+      await env.PROJECT_DATA_ARCHIVE_R2.delete(object.key);
+      deletedObjects += 1;
+      if (listedObjects >= limit) break;
+    }
+    if (!page.truncated || !page.cursor || listedObjects >= limit) {
+      truncated = Boolean(page.truncated && page.cursor);
+      break;
+    }
+    cursor = page.cursor;
+  }
+
+  return { prefix, listedObjects, deletedObjects, truncated };
+}
+
+export async function deleteWorkspaceResourceHistoryObjectsForProject(
+  env: Env,
+  projectId: string
+): Promise<WorkspaceResourceObjectCleanupStats> {
+  return deleteWorkspaceResourceHistoryObjectsByPrefix(
+    env,
+    `${R2_PREFIX}/projects/${projectId}/`,
+    cleanupBatchSize(env)
+  );
+}
+
+export async function deleteWorkspaceResourceHistoryObjectsForWorkspace(
+  env: Env,
+  projectId: string,
+  workspaceId: string
+): Promise<WorkspaceResourceObjectCleanupStats> {
+  return deleteWorkspaceResourceHistoryObjectsByPrefix(
+    env,
+    `${R2_PREFIX}/projects/${projectId}/workspaces/${workspaceId}/`,
+    cleanupBatchSize(env)
+  );
 }
 
 export async function runWorkspaceResourceHistoryCleanup(

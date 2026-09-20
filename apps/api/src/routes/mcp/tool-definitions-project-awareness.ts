@@ -168,6 +168,34 @@ export const PROJECT_AWARENESS_TOOLS = [
     },
   },
   {
+    name: 'get_resource_history',
+    description:
+      'Inspect bounded workspace resource history for the current project. By default, MCP callers read their current session/task/workspace summary and chunk index. Pass sessionId, taskId, or workspaceId to inspect a related scope. Pass chunkId to lazily load downsampled raw samples and tool-span correlation for that chunk. This reports correlation, not causal per-process attribution, and never includes prompts, commands, tool args/output, file paths, env, or secrets.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        sessionId: {
+          type: 'string',
+          description: 'Optional session scope. Defaults to the caller session when available.',
+        },
+        taskId: {
+          type: 'string',
+          description: 'Optional task scope. Defaults to the caller task when available.',
+        },
+        workspaceId: {
+          type: 'string',
+          description: 'Optional workspace scope. Defaults to the caller workspace when available.',
+        },
+        chunkId: {
+          type: 'string',
+          description:
+            'Optional resource chunk ID to load detailed downsampled samples/tool spans.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'search_messages',
     description:
       'Search messages across all chat sessions in your project by keyword using full-text search. Returns matching message snippets with session context. Useful for finding past discussions about specific topics, decisions, or code. Completed sessions use FTS5 indexing (matches messages containing all search words); active sessions fall back to keyword matching.',

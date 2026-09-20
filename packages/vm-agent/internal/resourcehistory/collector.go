@@ -369,6 +369,12 @@ func (c *Collector) sample(ctx context.Context) {
 	} else {
 		counters, err := readCgroupCounters(path)
 		if err != nil {
+			c.mu.Lock()
+			if c.cgroupPath == path {
+				c.cgroupPath = ""
+			}
+			c.cgroupErr = err.Error()
+			c.mu.Unlock()
 			sample = Sample{T: now.UnixMilli(), Unsupported: err.Error()}
 		} else {
 			sample = c.sampleFromCounters(now, counters)
@@ -702,8 +708,11 @@ func (c *Collector) resolveCgroupPath(ctx context.Context) (string, error) {
 	return ResolveCgroupPath(ctx, c.cfg.CgroupRoot, c.cfg.ProcRoot, containerID)
 }
 
+type errCgroupPathFound struct{ path string }
+
+func (e errCgroupPathFound) Error() string { return e.path }
+
 func ResolveCgroupPath(ctx context.Context, cgroupRoot, procRoot, containerID string) (string, error) {
-	_ = ctx
 	cgroupRoot = strings.TrimSpace(cgroupRoot)
 	if cgroupRoot == "" {
 		cgroupRoot = "/sys/fs/cgroup"
@@ -727,16 +736,37 @@ func ResolveCgroupPath(ctx context.Context, cgroupRoot, procRoot, containerID st
 			return p, nil
 		}
 	}
-	entries, err := os.ReadDir(cgroupRoot)
-	if err == nil {
-		for _, e := range entries {
-			if strings.Contains(e.Name(), containerID) || strings.Contains(e.Name(), shortID) {
-				p := filepath.Join(cgroupRoot, e.Name())
-				if hasCgroupFiles(p) {
-					return p, nil
-				}
+	visited := 0
+	walkErr := filepath.WalkDir(cgroupRoot, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		visited++
+		if visited > 5000 {
+			return filepath.SkipAll
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if strings.Contains(name, containerID) || strings.Contains(name, shortID) {
+			if hasCgroupFiles(p) {
+				return errCgroupPathFound{path: p}
 			}
 		}
+		return nil
+	})
+	var found errCgroupPathFound
+	if errors.As(walkErr, &found) {
+		return found.path, nil
+	}
+	if walkErr != nil && !errors.Is(walkErr, filepath.SkipAll) {
+		return "", walkErr
 	}
 	return "", fmt.Errorf("cgroup v2 path not found for container %s", shortID)
 }

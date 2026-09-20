@@ -148,6 +148,7 @@ import {
 import { handleScheduleTool } from './project-schedule-tools';
 import {
   handleGetArchivedToolPayloads,
+  handleGetResourceHistory,
   handleGetSessionMessages,
   handleListSessions,
   handleSearchMessages,
@@ -432,6 +433,8 @@ mcpRoutes.post('/', async (c) => {
             return c.json(
               await handleGetArchivedToolPayloads(requestId, toolArgs, tokenData, c.env)
             );
+          case 'get_resource_history':
+            return c.json(await handleGetResourceHistory(requestId, toolArgs, tokenData, c.env));
           case 'search_messages':
             return c.json(await handleSearchMessages(requestId, toolArgs, tokenData, c.env));
           case 'update_session_topic':

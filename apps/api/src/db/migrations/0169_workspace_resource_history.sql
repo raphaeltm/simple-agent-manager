@@ -67,8 +67,8 @@ CREATE TABLE workspace_resource_chunks (
   uploaded_by_node_id TEXT
 );
 
-CREATE UNIQUE INDEX idx_workspace_resource_chunks_identity
-  ON workspace_resource_chunks(project_id, workspace_id, chunk_sequence, source_version);
+CREATE INDEX idx_workspace_resource_chunks_identity
+  ON workspace_resource_chunks(project_id, workspace_id, session_id, task_id, chunk_sequence, source_version);
 
 CREATE INDEX idx_workspace_resource_chunks_project_session
   ON workspace_resource_chunks(project_id, session_id, started_at);

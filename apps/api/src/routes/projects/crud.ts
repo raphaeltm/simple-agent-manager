@@ -32,6 +32,7 @@ import {
 import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
 import { getProjectMultiplayerState } from '../../services/project-multiplayer';
+import { deleteWorkspaceResourceHistoryObjectsForProject } from '../../services/workspace-resource-history';
 import {
   buildProjectRuntimeConfigResponse,
   byteLength,
@@ -570,12 +571,31 @@ crudRoutes.delete('/:id', async (c) => {
       });
     });
 
+  const resourceHistoryCleanup = deleteWorkspaceResourceHistoryObjectsForProject(c.env, projectId)
+    .then((stats) => {
+      log.info('project_delete.resource_history_cleanup_completed', {
+        projectId,
+        prefix: stats.prefix,
+        listedObjects: stats.listedObjects,
+        deletedObjects: stats.deletedObjects,
+        truncated: stats.truncated,
+      });
+    })
+    .catch((err) => {
+      log.warn('project_delete.resource_history_cleanup_failed', {
+        projectId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+  const r2Cleanup = Promise.all([libraryCleanup, resourceHistoryCleanup]);
+
   try {
-    c.executionCtx.waitUntil(libraryCleanup);
+    c.executionCtx.waitUntil(r2Cleanup);
   } catch {
     // Hono unit tests do not always provide an execution context. Production Workers
     // always take the waitUntil path; awaiting here keeps the fallback deterministic.
-    await libraryCleanup;
+    await r2Cleanup;
   }
 
   // Artifacts repo count limits are enforced from project rows. If this

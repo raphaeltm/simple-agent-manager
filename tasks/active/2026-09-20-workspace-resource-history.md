@@ -31,7 +31,7 @@ The implementation must not repeat current ProjectData storage problems. Raw sam
 - [x] Store compressed immutable chunks in R2 and only bounded summaries/indexes in D1.
 - [x] Add lazy session/task resource history read endpoints with membership authorization, bounded time windows, bounded downsampling that preserves spikes, sample/gap indicators, and completeness metadata.
 - [x] Add scheduled cleanup for expired summaries/chunks and bounded R2 orphan cleanup.
-- [ ] Add MCP/API inspection surface following existing API conventions for agents to fetch summaries/detail without spending LLM tokens on interpretation.
+- [x] Add MCP/API inspection surface following existing API conventions for agents to fetch summaries/detail without spending LLM tokens on interpretation.
 
 ### VM Agent Collection
 
@@ -53,9 +53,9 @@ The implementation must not repeat current ProjectData storage problems. Raw sam
 
 ### Tests And Verification
 
-- [ ] Unit-test cgroup parsing, counter resets, weighted means, percentiles from raw samples, gaps, OOM event handling, compression, checksum, and unsupported fields. *(Partial: cgroup parsing/counters, upload compression/checksum metadata, secret canary, and downsampling spike preservation covered.)*
-- [ ] Unit/integration-test callback auth, tenant isolation, upload abuse, retries/duplicates, truncation, retention, and secret canaries. *(Partial: callback scope binding, invalid upload shape, service-level session scoping/idempotent indexing, post-upload R2 cleanup on D1 failure, and raw tool-ID canary covered; retention sweep scenarios still pending.)*
-- [ ] Add vertical slice test from VM-style upload through R2/D1 indexing to read API response with realistic multi-tenant state. *(Partial: SQLite-backed D1/R2 service slice covers upload storage, session-scoped summaries, chunk indexes, and R2 cleanup; route-level read response and VM-agent-to-API end-to-end still pending.)*
+- [ ] Unit-test cgroup parsing, counter resets, weighted means, percentiles from raw samples, gaps, OOM event handling, compression, checksum, and unsupported fields. *(Covered: cgroup parsing/counters, short/full Docker cgroup lookup, stale cgroup rediscovery, upload compression/checksum metadata, secret canary, gzip readback, and downsampling spike preservation. Counter-reset percentile aggregation remains mathematically documented and staged for live verification.)*
+- [x] Unit/integration-test callback auth, tenant isolation, upload abuse, retries/duplicates, truncation, retention, and secret canaries. *(Callback scope binding, invalid upload shape, service-level reused-workspace session scoping, idempotent retry before reuse, stale-session rejection after reuse, duplicate checksum conflict, bounded gzip/uncompressed/metadata validation, post-upload R2 cleanup on D1 failure, API access/truncation guards, retention sweep cleanup, and raw tool-ID canary covered.)*
+- [x] Add vertical slice test from VM-style upload through R2/D1 indexing to read API response with realistic multi-tenant state. *(SQLite-backed D1/R2 service slice covers upload storage, reused-workspace session-scoped summaries, scoped chunk identity, idempotent retry before reuse, stale-session rejection after reuse, chunk indexes, gzip detail readback, and R2 cleanup; route-level read coverage verifies authenticated session reads and chunkId bounds. Real VM-agent-to-API scenario remains for staging.)*
 - [x] Add UI tests and Playwright screenshots for desktop and mobile.
 - [x] Benchmark compression ratio, bytes per workspace-hour, write/read request estimates, bounded D1 growth, collector CPU overhead, and failure cases.
 - [x] Run relevant quality checks: VM-agent Go tests, API unit/integration tests, web typecheck/tests, lint/typecheck/build as appropriate.

@@ -42,25 +42,50 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function sampleY(sample: WorkspaceResourceSample): number {
-  return Math.max(Number(sample.memoryBytes ?? 0) / (1024 * 1024), Number(sample.cpuMillis ?? 0));
+function sampleMemoryMiB(sample: WorkspaceResourceSample): number {
+  return Number(sample.memoryBytes ?? 0) / (1024 * 1024);
+}
+
+function sampleCpuMillis(sample: WorkspaceResourceSample): number {
+  return Number(sample.cpuMillis ?? 0);
+}
+
+function seriesPoints(
+  samples: WorkspaceResourceSample[],
+  valueForSample: (sample: WorkspaceResourceSample) => number
+): string {
+  const max = Math.max(1, ...samples.map(valueForSample));
+  return samples
+    .map((sample, index) => {
+      const x = samples.length === 1 ? 0 : (index / (samples.length - 1)) * 100;
+      const y = 100 - (valueForSample(sample) / max) * 84 - 8;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(' ');
+}
+
+function sampleX(samples: WorkspaceResourceSample[], index: number): number {
+  return samples.length === 1 ? 0 : (index / (samples.length - 1)) * 100;
 }
 
 function ResourceSparkline({
   samples,
   toolSpans,
 }: Readonly<{ samples: WorkspaceResourceSample[]; toolSpans: WorkspaceResourceToolSpan[] }>) {
-  const points = useMemo(() => {
-    if (samples.length === 0) return '';
-    const max = Math.max(1, ...samples.map(sampleY));
-    return samples
-      .map((sample, index) => {
-        const x = samples.length === 1 ? 0 : (index / (samples.length - 1)) * 100;
-        const y = 100 - (sampleY(sample) / max) * 88 - 6;
-        return `${x.toFixed(2)},${y.toFixed(2)}`;
-      })
-      .join(' ');
-  }, [samples]);
+  const cpuPoints = useMemo(() => seriesPoints(samples, sampleCpuMillis), [samples]);
+  const memoryPoints = useMemo(() => seriesPoints(samples, sampleMemoryMiB), [samples]);
+  const eventMarkers = useMemo(
+    () =>
+      samples
+        .map((sample, index) => ({ sample, x: sampleX(samples, index) }))
+        .filter(({ sample }) => sample.gap || sample.oom || sample.oomKill || sample.counterReset),
+    [samples]
+  );
+  const chunkIoRead = samples.reduce((total, sample) => total + Number(sample.ioReadBytes ?? 0), 0);
+  const chunkIoWrite = samples.reduce(
+    (total, sample) => total + Number(sample.ioWriteBytes ?? 0),
+    0
+  );
 
   if (samples.length === 0) {
     return (
@@ -102,17 +127,88 @@ function ResourceSparkline({
           );
         })}
         <polyline
-          points={points}
+          points={cpuPoints}
           fill="none"
           stroke="var(--sam-color-success)"
           strokeWidth="2.2"
           vectorEffect="non-scaling-stroke"
         />
+        <polyline
+          points={memoryPoints}
+          fill="none"
+          stroke="var(--sam-color-accent-secondary, #a78bfa)"
+          strokeDasharray="4 3"
+          strokeWidth="2.2"
+          vectorEffect="non-scaling-stroke"
+        />
+        {eventMarkers.map(({ sample, x }) => (
+          <g key={`${sample.t}-${x}`}>
+            <line
+              x1={x}
+              x2={x}
+              y1="5"
+              y2="95"
+              stroke={
+                sample.oom || sample.oomKill
+                  ? 'var(--sam-color-warning)'
+                  : 'var(--sam-color-border-strong)'
+              }
+              strokeDasharray="2 2"
+              strokeWidth="1.4"
+              vectorEffect="non-scaling-stroke"
+            />
+            <circle
+              cx={x}
+              cy={sample.oom || sample.oomKill ? 12 : 88}
+              r="2.4"
+              fill={
+                sample.oom || sample.oomKill
+                  ? 'var(--sam-color-warning)'
+                  : 'var(--sam-color-fg-muted)'
+              }
+            />
+          </g>
+        ))}
       </svg>
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-fg-muted">
-        <span>Green line: CPU delta / memory level scale</span>
-        <span>Blue bands: concurrent tool windows</span>
+      <div className="mt-2 grid gap-1 text-xs text-fg-muted">
+        <span>CPU: green solid line, normalized to this chunk's CPU peak.</span>
+        <span>RAM: purple dashed line, normalized to this chunk's RAM peak.</span>
+        <span>
+          Blue bands: concurrent tool windows. Dashed markers: gaps, counter resets, or OOM samples.
+        </span>
+        <span>
+          Chunk I/O deltas: {formatBytes(chunkIoRead)} read · {formatBytes(chunkIoWrite)} write.
+        </span>
       </div>
+      {toolSpans.length > 0 && (
+        <div className="mt-3 rounded-md border border-border-default bg-bg-surface p-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
+            Tool windows
+          </div>
+          <ul className="mt-1 space-y-1 text-xs text-fg-muted">
+            {toolSpans.slice(0, 6).map((span) => (
+              <li
+                key={`${span.id}-${span.startedAt}`}
+                className="flex items-center justify-between gap-2"
+              >
+                <span className="truncate">
+                  {span.kind || 'tool'} · {formatTime(span.startedAt)}
+                  {span.approximate ? ' · approximate end' : ''}
+                </span>
+                <span className="shrink-0">
+                  {formatDuration(span.startedAt, span.endedAt ?? span.startedAt)}
+                  {span.concurrency ? ` · ${span.concurrency} concurrent` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {toolSpans.length > 6 && (
+            <div className="mt-1 text-xs text-fg-muted">
+              {toolSpans.length - 6} more windows omitted from the compact list.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -187,7 +283,7 @@ export function SessionResourceHistoryDrawer({
         aria-hidden="true"
       />
       <div
-        className="glass-panel-container glass-composited fixed z-50 glass-modal rounded-l-[20px] rounded-r-none border-y-0 border-r-0 flex flex-col shadow-xl overflow-hidden inset-0 md:inset-y-0 md:left-auto md:right-0 md:w-[min(460px,55vw)] before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(96,165,250,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
+        className="fixed z-50 rounded-l-[20px] bg-bg-surface rounded-r-none border-y-0 border-r-0 flex flex-col shadow-xl overflow-hidden inset-0 md:inset-y-0 md:left-auto md:right-0 md:w-[min(460px,55vw)] before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(96,165,250,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
         ref={panelRef}
         tabIndex={-1}
         role="dialog"

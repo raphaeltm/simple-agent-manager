@@ -1027,8 +1027,14 @@ test.describe('Session resource history drawer', () => {
 
     await page.getByRole('button', { name: 'Load detail timeline' }).click();
     await expect(page.getByRole('img', { name: 'CPU and memory resource timeline' })).toBeVisible();
-    await expect(page.getByText('Green line: CPU delta / memory level scale')).toBeVisible();
-    await expect(page.getByText('Blue bands: concurrent tool windows')).toBeVisible();
+    await expect(
+      page.getByText("CPU: green solid line, normalized to this chunk's CPU peak.")
+    ).toBeVisible();
+    await expect(
+      page.getByText("RAM: purple dashed line, normalized to this chunk's RAM peak.")
+    ).toBeVisible();
+    await expect(page.getByText(/Blue bands: concurrent tool windows/)).toBeVisible();
+    await expect(page.getByText('Tool windows', { exact: true })).toBeVisible();
     await page.locator('[role="dialog"] .overflow-y-auto').evaluate((el) => {
       el.scrollTop = el.scrollHeight;
     });

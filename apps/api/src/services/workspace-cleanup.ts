@@ -6,6 +6,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { deleteSessionSnapshotState } from './session-snapshots';
+import { deleteWorkspaceResourceHistoryObjectsForWorkspace } from './workspace-resource-history';
 import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionSnapshot,
@@ -113,6 +114,7 @@ async function claimExplicitWorkspaceDeletion(
 
 async function finishConfirmedWorkspaceCleanup(
   db: Db,
+  env: Env,
   lifecycleStub: NodeLifecycleStub | undefined,
   workspace: schema.Workspace,
   userId: string,
@@ -120,6 +122,29 @@ async function finishConfirmedWorkspaceCleanup(
 ): Promise<void> {
   await lifecycleStub?.confirmWorkspaceDeletion(workspace.id);
   if (!deleteConfirmedRow) return;
+  if (workspace.projectId) {
+    try {
+      const stats = await deleteWorkspaceResourceHistoryObjectsForWorkspace(
+        env,
+        workspace.projectId,
+        workspace.id
+      );
+      log.info('workspace.resource_history_cleanup_completed', {
+        workspaceId: workspace.id,
+        projectId: workspace.projectId,
+        prefix: stats.prefix,
+        listedObjects: stats.listedObjects,
+        deletedObjects: stats.deletedObjects,
+        truncated: stats.truncated,
+      });
+    } catch (error) {
+      log.warn('workspace.resource_history_cleanup_failed', {
+        workspaceId: workspace.id,
+        projectId: workspace.projectId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   await db
     .delete(schema.workspaces)
     .where(
@@ -196,7 +221,14 @@ export async function cleanupWorkspaceForDeletion(
   });
 
   if (outcome.status === 'confirmed') {
-    await finishConfirmedWorkspaceCleanup(db, lifecycleStub, workspace, userId, deleteConfirmedRow);
+    await finishConfirmedWorkspaceCleanup(
+      db,
+      env,
+      lifecycleStub,
+      workspace,
+      userId,
+      deleteConfirmedRow
+    );
     return outcome;
   }
 

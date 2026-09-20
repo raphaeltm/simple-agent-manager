@@ -864,8 +864,9 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Stop port scanner for this workspace.
 	s.stopPortScanner(workspaceID)
 
-	// Shut down per-workspace message reporter (final flush before cleanup).
+	// Shut down per-workspace message reporter and telemetry collectors (final best-effort flush before cleanup).
 	s.shutdownReporter(workspaceID)
+	s.stopResourceHistoryForWorkspace(workspaceID, context.Background())
 
 	// Clear persisted tabs — workspace is stopped, no live sessions remain
 	if s.store != nil {
@@ -970,8 +971,9 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Stop port scanner for this workspace.
 	s.stopPortScanner(workspaceID)
 
-	// Shut down per-workspace message reporter (final flush before cleanup).
+	// Shut down per-workspace message reporter and telemetry collectors (final best-effort flush before cleanup).
 	s.shutdownReporter(workspaceID)
+	s.stopResourceHistoryForWorkspace(workspaceID, context.Background())
 
 	// Remove the devcontainer and its Docker volume.
 	// The container must be removed before the volume (Docker won't remove a volume in use).

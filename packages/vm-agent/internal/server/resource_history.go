@@ -168,7 +168,16 @@ func (s *Server) stopResourceHistoryForWorkspace(workspaceID string, ctx context
 	delete(s.resourceHistories, workspaceID)
 	s.resourceHistoryMu.Unlock()
 	if collector != nil {
-		collector.Stop(ctx)
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		deadline := s.config.ResourceHistoryUploadTimeout
+		if deadline <= 0 {
+			deadline = 10 * time.Second
+		}
+		stopCtx, cancel := context.WithTimeout(ctx, deadline)
+		defer cancel()
+		collector.Stop(stopCtx)
 	}
 }
 

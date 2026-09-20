@@ -53,6 +53,74 @@ func TestResolveCgroupPathFindsDockerScopeAndReadsCounters(t *testing.T) {
 	}
 }
 
+func TestResolveCgroupPathFindsNestedSystemdScopeWithShortContainerID(t *testing.T) {
+	root := t.TempDir()
+	fullID := "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+	shortID := fullID[:12]
+	path := filepath.Join(root, "system.slice", "docker-"+fullID+".scope")
+	writeFile(t, filepath.Join(path, "cpu.stat"), "usage_usec 123456\n")
+	writeFile(t, filepath.Join(path, "memory.current"), "4096\n")
+
+	resolved, err := ResolveCgroupPath(context.Background(), root, t.TempDir(), shortID)
+	if err != nil {
+		t.Fatalf("ResolveCgroupPath: %v", err)
+	}
+	if resolved != path {
+		t.Fatalf("resolved path = %q, want %q", resolved, path)
+	}
+}
+
+func TestCollectorRediscoverCgroupAfterCachedPathDisappears(t *testing.T) {
+	root := t.TempDir()
+	containerID := "abcdef1234567890"
+	oldPath := filepath.Join(root, "docker", containerID)
+	newPath := filepath.Join(root, "system.slice", "docker-"+containerID+".scope")
+	writeFile(t, filepath.Join(oldPath, "cpu.stat"), "usage_usec 100000\n")
+	writeFile(t, filepath.Join(oldPath, "memory.current"), "1000\n")
+	writeFile(t, filepath.Join(oldPath, "memory.peak"), "1200\n")
+	writeFile(t, filepath.Join(oldPath, "io.stat"), "8:0 rbytes=10 wbytes=20\n")
+	writeFile(t, filepath.Join(oldPath, "memory.events"), "oom 0\noom_kill 0\n")
+	writeFile(t, filepath.Join(oldPath, "pids.current"), "5\n")
+
+	now := time.Unix(100, 0)
+	collector := New(Config{
+		ControlPlaneURL: "http://127.0.0.1",
+		ProjectID:       "proj-1",
+		WorkspaceID:     "ws-1",
+		SampleInterval:  time.Second,
+		ChunkInterval:   time.Hour,
+		SpoolDir:        t.TempDir(),
+		CgroupRoot:      root,
+		ContainerID:     func(context.Context) (string, error) { return containerID, nil },
+		Now:             func() time.Time { return now },
+	})
+
+	collector.sample(context.Background())
+	if collector.cgroupPath != oldPath {
+		t.Fatalf("initial cgroupPath = %q, want %q", collector.cgroupPath, oldPath)
+	}
+	if err := os.RemoveAll(oldPath); err != nil {
+		t.Fatalf("remove old cgroup: %v", err)
+	}
+	writeFile(t, filepath.Join(newPath, "cpu.stat"), "usage_usec 175000\n")
+	writeFile(t, filepath.Join(newPath, "memory.current"), "2000\n")
+	writeFile(t, filepath.Join(newPath, "memory.peak"), "2500\n")
+	writeFile(t, filepath.Join(newPath, "io.stat"), "8:0 rbytes=110 wbytes=220\n")
+	writeFile(t, filepath.Join(newPath, "memory.events"), "oom 0\noom_kill 0\n")
+	writeFile(t, filepath.Join(newPath, "pids.current"), "6\n")
+
+	now = now.Add(time.Second)
+	collector.sample(context.Background())
+	if collector.cgroupPath != "" {
+		t.Fatalf("cgroupPath after stale read = %q, want rediscovery reset", collector.cgroupPath)
+	}
+	now = now.Add(time.Second)
+	collector.sample(context.Background())
+	if collector.cgroupPath != newPath {
+		t.Fatalf("rediscovered cgroupPath = %q, want %q", collector.cgroupPath, newPath)
+	}
+}
+
 func TestCollectorUploadsCompressedChunkAndHashesToolIDs(t *testing.T) {
 	var received uploadBody
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

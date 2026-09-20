@@ -78,7 +78,11 @@ workspaceResourceHistoryCallbackRoute.post('/:id/workspace-resource-history', as
   const body = await readUploadBody(c.req.raw, c.env);
   const uploadedByNodeId = authorizedUploader(payload, body);
   const result = await storeWorkspaceResourceChunk(c.env, projectId, body, uploadedByNodeId);
-  return c.json(result);
+  return c.json({
+    summaryId: result.summaryId,
+    chunkId: result.chunkId,
+    idempotent: result.idempotent,
+  });
 });
 
 export { workspaceResourceHistoryCallbackRoute };
