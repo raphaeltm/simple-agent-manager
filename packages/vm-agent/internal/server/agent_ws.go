@@ -302,6 +302,7 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 	cfg.SessionLastPromptManager = s.agentSessions
 	cfg.EventAppender = &serverEventAppender{server: s}
 	cfg.CredentialSyncer = s
+	cfg.ToolLifecycleObserver = s.resourceHistoryObserverForWorkspace(workspaceID)
 	// Disable auto-suspend for both conversation and task mode. Viewer presence
 	// is not the right lifecycle signal — the correct shutdown mechanisms are:
 	// 1. 15-min DO alarm after last agent activity (control-plane side)

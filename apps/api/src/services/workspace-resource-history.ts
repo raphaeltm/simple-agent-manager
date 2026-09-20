@@ -241,8 +241,16 @@ function buildR2Key(input: {
   return `${R2_PREFIX}/projects/${input.projectId}/workspaces/${input.workspaceId}/v${input.sourceVersion}/${input.chunkSequence}.json.gz`;
 }
 
-function summaryIdFor(input: { projectId: string; workspaceId: string }): string {
-  return `workspace:${input.projectId}:${input.workspaceId}`;
+function summaryIdFor(input: {
+  projectId: string;
+  workspaceId: string;
+  sessionId?: string | null;
+  taskId?: string | null;
+}): string {
+  const sessionId = normalizeNullable(input.sessionId);
+  const taskId = normalizeNullable(input.taskId);
+  const scope = sessionId ? `session:${sessionId}` : taskId ? `task:${taskId}` : 'workspace';
+  return `workspace:${input.projectId}:${input.workspaceId}:${scope}`;
 }
 
 async function loadWorkspaceForUpload(
@@ -333,12 +341,15 @@ export async function storeWorkspaceResourceChunk(
   });
   const now = Date.now();
   const expiresAt = now + retentionDays(env, 'raw') * MS_PER_DAY;
-  const summaryId = summaryIdFor({ projectId, workspaceId });
+  const sessionId = normalizeNullable(body.sessionId) ?? workspace.chat_session_id;
+  const taskId = normalizeNullable(body.taskId);
+  const summaryId = summaryIdFor({ projectId, workspaceId, sessionId, taskId });
   const chunkId = `wrchunk:${projectId}:${workspaceId}:${body.sourceVersion}:${body.chunkSequence}`;
   const existing = await db
     .select({
       id: schema.workspaceResourceChunks.id,
       sha256: schema.workspaceResourceChunks.sha256,
+      summaryId: schema.workspaceResourceChunks.summaryId,
     })
     .from(schema.workspaceResourceChunks)
     .where(eq(schema.workspaceResourceChunks.id, chunkId))
@@ -349,7 +360,12 @@ export async function storeWorkspaceResourceChunk(
         'Resource history chunk identity already exists with a different checksum'
       );
     }
-    return { summaryId, chunkId: existing.id, r2Key, idempotent: true };
+    return {
+      summaryId: existing.summaryId ?? summaryId,
+      chunkId: existing.id,
+      r2Key,
+      idempotent: true,
+    };
   }
 
   await env.PROJECT_DATA_ARCHIVE_R2.put(r2Key, bytes, {
@@ -362,130 +378,145 @@ export async function storeWorkspaceResourceChunk(
     },
   });
 
-  const completenessJson = JSON.stringify(body.completeness ?? {});
-  const summaryJson = JSON.stringify(body.summary ?? {});
-  const sessionId = normalizeNullable(body.sessionId) ?? workspace.chat_session_id;
-  const taskId = normalizeNullable(body.taskId);
-  const agentProfileId = normalizeNullable(body.agentProfileId) ?? workspace.agent_profile_hint;
-  const skillId = normalizeNullable(body.skillId);
-  const agentType = normalizeNullable(body.agentType);
-  const runtime = normalizeNullable(body.runtime) ?? 'vm';
-  const values = {
-    id: summaryId,
-    projectId,
-    workspaceId,
-    sessionId,
-    taskId,
-    nodeId,
-    agentProfileId,
-    skillId,
-    agentType,
-    runtime,
-    sourceVersion: body.sourceVersion,
-    startedAt: body.startedAt,
-    endedAt: body.endedAt,
-    sampleCount: body.sampleCount,
-    gapCount: body.gapCount ?? 0,
-    cpuMeanMillis: assertFiniteMetric(body.summary.cpuMeanMillis, 'summary.cpuMeanMillis'),
-    cpuPeakMillis: assertFiniteMetric(body.summary.cpuPeakMillis, 'summary.cpuPeakMillis'),
-    memoryMeanBytes: assertFiniteMetric(body.summary.memoryMeanBytes, 'summary.memoryMeanBytes'),
-    memoryPeakBytes: assertFiniteMetric(body.summary.memoryPeakBytes, 'summary.memoryPeakBytes'),
-    memoryKernelPeakBytes: assertFiniteMetric(
-      body.summary.memoryKernelPeakBytes,
-      'summary.memoryKernelPeakBytes'
-    ),
-    ioReadBytes: assertFiniteMetric(body.summary.ioReadBytes, 'summary.ioReadBytes'),
-    ioWriteBytes: assertFiniteMetric(body.summary.ioWriteBytes, 'summary.ioWriteBytes'),
-    oomCount: Math.trunc(assertFiniteMetric(body.summary.oomCount, 'summary.oomCount') ?? 0),
-    toolSpanCount: body.toolSpanCount ?? 0,
-    completenessJson,
-    summaryJson,
-    firstChunkId: chunkId,
-    latestChunkId: chunkId,
-    createdAt: now,
-    updatedAt: now,
-  };
+  let r2ObjectIndexed = false;
+  try {
+    const completenessJson = JSON.stringify(body.completeness ?? {});
+    const summaryJson = JSON.stringify(body.summary ?? {});
+    const agentProfileId = normalizeNullable(body.agentProfileId) ?? workspace.agent_profile_hint;
+    const skillId = normalizeNullable(body.skillId);
+    const agentType = normalizeNullable(body.agentType);
+    const runtime = normalizeNullable(body.runtime) ?? 'vm';
+    const values = {
+      id: summaryId,
+      projectId,
+      workspaceId,
+      sessionId,
+      taskId,
+      nodeId,
+      agentProfileId,
+      skillId,
+      agentType,
+      runtime,
+      sourceVersion: body.sourceVersion,
+      startedAt: body.startedAt,
+      endedAt: body.endedAt,
+      sampleCount: body.sampleCount,
+      gapCount: body.gapCount ?? 0,
+      cpuMeanMillis: assertFiniteMetric(body.summary.cpuMeanMillis, 'summary.cpuMeanMillis'),
+      cpuPeakMillis: assertFiniteMetric(body.summary.cpuPeakMillis, 'summary.cpuPeakMillis'),
+      memoryMeanBytes: assertFiniteMetric(body.summary.memoryMeanBytes, 'summary.memoryMeanBytes'),
+      memoryPeakBytes: assertFiniteMetric(body.summary.memoryPeakBytes, 'summary.memoryPeakBytes'),
+      memoryKernelPeakBytes: assertFiniteMetric(
+        body.summary.memoryKernelPeakBytes,
+        'summary.memoryKernelPeakBytes'
+      ),
+      ioReadBytes: assertFiniteMetric(body.summary.ioReadBytes, 'summary.ioReadBytes'),
+      ioWriteBytes: assertFiniteMetric(body.summary.ioWriteBytes, 'summary.ioWriteBytes'),
+      oomCount: Math.trunc(assertFiniteMetric(body.summary.oomCount, 'summary.oomCount') ?? 0),
+      toolSpanCount: body.toolSpanCount ?? 0,
+      completenessJson,
+      summaryJson,
+      firstChunkId: chunkId,
+      latestChunkId: chunkId,
+      createdAt: now,
+      updatedAt: now,
+    };
 
-  await db
-    .insert(schema.workspaceResourceSummaries)
-    .values(values)
-    .onConflictDoUpdate({
-      target: schema.workspaceResourceSummaries.id,
-      set: {
-        sessionId,
-        taskId,
-        nodeId,
-        agentProfileId,
-        skillId,
-        agentType,
-        runtime,
-        sourceVersion: body.sourceVersion,
-        startedAt: sql`MIN(${schema.workspaceResourceSummaries.startedAt}, ${body.startedAt})`,
-        endedAt: body.endedAt,
-        sampleCount: sql`${schema.workspaceResourceSummaries.sampleCount} + ${body.sampleCount}`,
-        gapCount: sql`${schema.workspaceResourceSummaries.gapCount} + ${body.gapCount ?? 0}`,
-        cpuMeanMillis:
-          values.cpuMeanMillis == null
-            ? schema.workspaceResourceSummaries.cpuMeanMillis
-            : sql`CASE
+    await db
+      .insert(schema.workspaceResourceSummaries)
+      .values(values)
+      .onConflictDoUpdate({
+        target: schema.workspaceResourceSummaries.id,
+        set: {
+          sessionId,
+          taskId,
+          nodeId,
+          agentProfileId,
+          skillId,
+          agentType,
+          runtime,
+          sourceVersion: body.sourceVersion,
+          startedAt: sql`MIN(${schema.workspaceResourceSummaries.startedAt}, ${body.startedAt})`,
+          endedAt: body.endedAt,
+          sampleCount: sql`${schema.workspaceResourceSummaries.sampleCount} + ${body.sampleCount}`,
+          gapCount: sql`${schema.workspaceResourceSummaries.gapCount} + ${body.gapCount ?? 0}`,
+          cpuMeanMillis:
+            values.cpuMeanMillis == null
+              ? schema.workspaceResourceSummaries.cpuMeanMillis
+              : sql`CASE
                 WHEN ${schema.workspaceResourceSummaries.cpuMeanMillis} IS NULL THEN ${values.cpuMeanMillis}
                 ELSE (
                   (${schema.workspaceResourceSummaries.cpuMeanMillis} * ${schema.workspaceResourceSummaries.sampleCount}) +
                   (${values.cpuMeanMillis} * ${body.sampleCount})
                 ) / (${schema.workspaceResourceSummaries.sampleCount} + ${body.sampleCount})
               END`,
-        cpuPeakMillis: sql`MAX(COALESCE(${schema.workspaceResourceSummaries.cpuPeakMillis}, 0), ${values.cpuPeakMillis ?? 0})`,
-        memoryMeanBytes:
-          values.memoryMeanBytes == null
-            ? schema.workspaceResourceSummaries.memoryMeanBytes
-            : sql`CASE
+          cpuPeakMillis: sql`MAX(COALESCE(${schema.workspaceResourceSummaries.cpuPeakMillis}, 0), ${values.cpuPeakMillis ?? 0})`,
+          memoryMeanBytes:
+            values.memoryMeanBytes == null
+              ? schema.workspaceResourceSummaries.memoryMeanBytes
+              : sql`CASE
                 WHEN ${schema.workspaceResourceSummaries.memoryMeanBytes} IS NULL THEN ${values.memoryMeanBytes}
                 ELSE CAST((
                   (${schema.workspaceResourceSummaries.memoryMeanBytes} * ${schema.workspaceResourceSummaries.sampleCount}) +
                   (${values.memoryMeanBytes} * ${body.sampleCount})
                 ) / (${schema.workspaceResourceSummaries.sampleCount} + ${body.sampleCount}) AS INTEGER)
               END`,
-        memoryPeakBytes: sql`MAX(COALESCE(${schema.workspaceResourceSummaries.memoryPeakBytes}, 0), ${values.memoryPeakBytes ?? 0})`,
-        memoryKernelPeakBytes: sql`MAX(COALESCE(${schema.workspaceResourceSummaries.memoryKernelPeakBytes}, 0), ${values.memoryKernelPeakBytes ?? 0})`,
-        ioReadBytes: sql`COALESCE(${schema.workspaceResourceSummaries.ioReadBytes}, 0) + ${values.ioReadBytes ?? 0}`,
-        ioWriteBytes: sql`COALESCE(${schema.workspaceResourceSummaries.ioWriteBytes}, 0) + ${values.ioWriteBytes ?? 0}`,
-        oomCount: sql`${schema.workspaceResourceSummaries.oomCount} + ${values.oomCount}`,
-        toolSpanCount: sql`${schema.workspaceResourceSummaries.toolSpanCount} + ${body.toolSpanCount ?? 0}`,
-        completenessJson,
-        summaryJson,
-        latestChunkId: chunkId,
-        updatedAt: now,
-      },
+          memoryPeakBytes: sql`MAX(COALESCE(${schema.workspaceResourceSummaries.memoryPeakBytes}, 0), ${values.memoryPeakBytes ?? 0})`,
+          memoryKernelPeakBytes: sql`MAX(COALESCE(${schema.workspaceResourceSummaries.memoryKernelPeakBytes}, 0), ${values.memoryKernelPeakBytes ?? 0})`,
+          ioReadBytes: sql`COALESCE(${schema.workspaceResourceSummaries.ioReadBytes}, 0) + ${values.ioReadBytes ?? 0}`,
+          ioWriteBytes: sql`COALESCE(${schema.workspaceResourceSummaries.ioWriteBytes}, 0) + ${values.ioWriteBytes ?? 0}`,
+          oomCount: sql`${schema.workspaceResourceSummaries.oomCount} + ${values.oomCount}`,
+          toolSpanCount: sql`${schema.workspaceResourceSummaries.toolSpanCount} + ${body.toolSpanCount ?? 0}`,
+          completenessJson,
+          summaryJson,
+          latestChunkId: chunkId,
+          updatedAt: now,
+        },
+      });
+
+    await db.insert(schema.workspaceResourceChunks).values({
+      id: chunkId,
+      projectId,
+      workspaceId,
+      summaryId,
+      sessionId,
+      taskId,
+      nodeId,
+      chunkSequence: body.chunkSequence,
+      sourceVersion: body.sourceVersion,
+      r2Key,
+      storageFormat: WORKSPACE_RESOURCE_STORAGE_FORMAT,
+      compressedBytes: body.compressedBytes,
+      uncompressedBytes: body.uncompressedBytes,
+      sha256: actualSha,
+      startedAt: body.startedAt,
+      endedAt: body.endedAt,
+      sampleCount: body.sampleCount,
+      gapCount: body.gapCount ?? 0,
+      toolSpanCount: body.toolSpanCount ?? 0,
+      completenessJson,
+      summaryJson,
+      createdAt: now,
+      expiresAt,
+      uploadedByNodeId,
     });
 
-  await db.insert(schema.workspaceResourceChunks).values({
-    id: chunkId,
-    projectId,
-    workspaceId,
-    summaryId,
-    sessionId,
-    taskId,
-    nodeId,
-    chunkSequence: body.chunkSequence,
-    sourceVersion: body.sourceVersion,
-    r2Key,
-    storageFormat: WORKSPACE_RESOURCE_STORAGE_FORMAT,
-    compressedBytes: body.compressedBytes,
-    uncompressedBytes: body.uncompressedBytes,
-    sha256: actualSha,
-    startedAt: body.startedAt,
-    endedAt: body.endedAt,
-    sampleCount: body.sampleCount,
-    gapCount: body.gapCount ?? 0,
-    toolSpanCount: body.toolSpanCount ?? 0,
-    completenessJson,
-    summaryJson,
-    createdAt: now,
-    expiresAt,
-    uploadedByNodeId,
-  });
-
-  return { summaryId, chunkId, r2Key, idempotent: false };
+    r2ObjectIndexed = true;
+    return { summaryId, chunkId, r2Key, idempotent: false };
+  } finally {
+    if (!r2ObjectIndexed) {
+      try {
+        await env.PROJECT_DATA_ARCHIVE_R2.delete(r2Key);
+      } catch (deleteError) {
+        log.warn('workspace_resource_history.orphan_cleanup_failed', {
+          projectId,
+          workspaceId,
+          r2Key,
+          error: deleteError instanceof Error ? deleteError.message : String(deleteError),
+        });
+      }
+    }
+  }
 }
 
 function publicSummary(row: schema.WorkspaceResourceSummaryRow): PublicWorkspaceResourceSummary {

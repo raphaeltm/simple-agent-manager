@@ -208,7 +208,13 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		opt = opts[0]
 	}
 	s.workspaceMu.Lock()
-	defer s.workspaceMu.Unlock()
+	var resourceHistorySnapshot *WorkspaceRuntime
+	defer func() {
+		s.workspaceMu.Unlock()
+		if resourceHistorySnapshot != nil {
+			s.ensureResourceHistoryForRuntime(resourceHistorySnapshot)
+		}
+	}()
 
 	if s.workspaces == nil {
 		s.workspaces = make(map[string]*WorkspaceRuntime)
@@ -311,6 +317,8 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		if metadataChanged && runtime.Repository != "" && !runtime.MetadataUnavailable {
 			s.persistWorkspaceMetadata(runtime)
 		}
+		copy := *runtime
+		resourceHistorySnapshot = &copy
 		return runtime
 	}
 
@@ -415,6 +423,8 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		PTY:                    manager,
 	}
 	s.workspaces[workspaceID] = runtime
+	copy := *runtime
+	resourceHistorySnapshot = &copy
 
 	if effectiveRepo != "" && !metadataUnavailable {
 		s.persistWorkspaceMetadata(runtime)
@@ -544,6 +554,7 @@ func (s *Server) casWorkspaceStatus(workspaceID string, expectedStatuses []strin
 }
 
 func (s *Server) removeWorkspaceRuntime(workspaceID string) {
+	s.stopResourceHistoryForWorkspace(workspaceID, context.Background())
 	s.workspaceMu.Lock()
 	defer func() {
 		s.workspaceMu.Unlock()

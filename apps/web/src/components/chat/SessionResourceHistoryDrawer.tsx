@@ -213,7 +213,7 @@ export function SessionResourceHistoryDrawer({
               <Spinner size="sm" />
             </div>
           ) : query.isError ? (
-            <div className="rounded-lg border border-border-danger bg-danger-subtle p-3 text-sm text-danger-fg">
+            <div className="rounded-lg border border-danger/30 bg-danger-tint p-3 text-sm text-danger-fg">
               Resource history could not be loaded.
             </div>
           ) : !summary ? (
@@ -250,7 +250,7 @@ export function SessionResourceHistoryDrawer({
               </div>
 
               {summary.oomCount > 0 && (
-                <div className="flex items-start gap-2 rounded-lg border border-border-warning bg-warning-subtle p-3 text-sm text-warning-fg">
+                <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-tint p-3 text-sm text-warning-fg">
                   <AlertTriangle size={16} className="mt-0.5 shrink-0" />
                   <span>
                     {summary.oomCount} OOM event{summary.oomCount === 1 ? '' : 's'} observed in

@@ -59,6 +59,16 @@ type Config struct {
 	ProcRoot        string
 }
 
+type Attribution struct {
+	ProjectID string
+	SessionID string
+	TaskID    string
+	ProfileID string
+	SkillID   string
+	AgentType string
+	Runtime   string
+}
+
 type Collector struct {
 	cfg Config
 
@@ -193,14 +203,47 @@ func New(cfg Config) *Collector {
 }
 
 func (c *Collector) Enabled() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.enabledLocked()
+}
+
+func (c *Collector) enabledLocked() bool {
 	return strings.TrimSpace(c.cfg.ControlPlaneURL) != "" && strings.TrimSpace(c.cfg.ProjectID) != "" && strings.TrimSpace(c.cfg.WorkspaceID) != "" && c.cfg.CallbackToken != nil
 }
 
+func (c *Collector) UpdateAttribution(attr Attribution) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if value := strings.TrimSpace(attr.ProjectID); value != "" {
+		c.cfg.ProjectID = value
+	}
+	if value := strings.TrimSpace(attr.SessionID); value != "" {
+		c.cfg.SessionID = value
+	}
+	if value := strings.TrimSpace(attr.TaskID); value != "" {
+		c.cfg.TaskID = value
+	}
+	if value := strings.TrimSpace(attr.ProfileID); value != "" {
+		c.cfg.AgentProfileID = value
+	}
+	if value := strings.TrimSpace(attr.SkillID); value != "" {
+		c.cfg.SkillID = value
+	}
+	if value := strings.TrimSpace(attr.AgentType); value != "" {
+		c.cfg.AgentType = value
+	}
+	if value := strings.TrimSpace(attr.Runtime); value != "" {
+		c.cfg.Runtime = value
+	}
+}
+
 func (c *Collector) Start(parent context.Context) {
-	if !c.Enabled() {
+	c.mu.Lock()
+	if !c.enabledLocked() {
+		c.mu.Unlock()
 		return
 	}
-	c.mu.Lock()
 	if c.started {
 		c.mu.Unlock()
 		return
@@ -232,7 +275,7 @@ func (c *Collector) Stop(ctx context.Context) {
 }
 
 func (c *Collector) RecordACPToolCall(toolCallID string, status string, at time.Time) {
-	if strings.TrimSpace(toolCallID) == "" || !c.Enabled() {
+	if strings.TrimSpace(toolCallID) == "" {
 		return
 	}
 	id := hashedToolID(toolCallID)
@@ -240,7 +283,7 @@ func (c *Collector) RecordACPToolCall(toolCallID string, status string, at time.
 	terminal := status == "completed" || status == "failed" || status == "cancelled"
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed {
+	if c.closed || !c.enabledLocked() {
 		return
 	}
 	start, active := c.activeTools[id]
@@ -261,11 +304,11 @@ func (c *Collector) RecordACPToolCall(toolCallID string, status string, at time.
 }
 
 func (c *Collector) ReconcileACPToolCalls(at time.Time) {
-	if !c.Enabled() {
-		return
-	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if !c.enabledLocked() {
+		return
+	}
 	for id, start := range c.activeTools {
 		kind := c.activeToolKind[id]
 		if kind == "" {
@@ -306,14 +349,14 @@ func (c *Collector) sample(ctx context.Context) {
 	now := c.cfg.Now()
 	c.mu.Lock()
 	path := c.cgroupPath
-	hadErr := c.cgroupErr
 	c.mu.Unlock()
-	if path == "" && hadErr == "" {
+	if path == "" {
 		resolved, err := c.resolveCgroupPath(ctx)
 		c.mu.Lock()
 		if err != nil {
 			c.cgroupErr = err.Error()
 		} else {
+			c.cgroupErr = ""
 			c.cgroupPath = resolved
 			path = resolved
 		}
@@ -576,24 +619,34 @@ func (c *Collector) retrySpool(ctx context.Context) {
 }
 
 func (c *Collector) upload(parent context.Context, body uploadBody) error {
-	token := strings.TrimSpace(c.cfg.CallbackToken())
+	c.mu.Lock()
+	callbackToken := c.cfg.CallbackToken
+	controlPlaneURL := c.cfg.ControlPlaneURL
+	projectID := c.cfg.ProjectID
+	uploadTimeout := c.cfg.UploadTimeout
+	httpClient := c.cfg.HTTPClient
+	c.mu.Unlock()
+	if callbackToken == nil {
+		return errors.New("missing callback token")
+	}
+	token := strings.TrimSpace(callbackToken())
 	if token == "" {
 		return errors.New("missing callback token")
 	}
-	ctx, cancel := context.WithTimeout(parent, c.cfg.UploadTimeout)
+	ctx, cancel := context.WithTimeout(parent, uploadTimeout)
 	defer cancel()
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	url := strings.TrimRight(c.cfg.ControlPlaneURL, "/") + "/api/projects/" + c.cfg.ProjectID + "/workspace-resource-history"
+	url := strings.TrimRight(controlPlaneURL, "/") + "/api/projects/" + projectID + "/workspace-resource-history"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := c.cfg.HTTPClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

@@ -327,6 +327,7 @@ prefixes do not have age-only lifecycle rules.
 | `tempUploadTtlDays`         | `1`     | `temp-uploads/`               | Abandoned presigned browser upload retention                       |
 | `ttsTtlDays`                | `30`    | `tts/`                        | Regenerable TTS audio-cache retention                              |
 | n/a                         | n/a     | `project-data/tool-payloads/` | Private ProjectData archive; Worker-owned retention only           |
+| n/a                         | n/a     | `resource-history/`           | Private workspace resource chunks; Worker-owned retention only     |
 
 All TTL options must be positive integers. Set overrides with `pulumi config set`
 against the target stack before running its deployment workflow.
@@ -430,7 +431,7 @@ VM failures use a durable local SQLite outbox and a private R2 artifact. Generat
 
 The VM Agent process accepts the corresponding `ERROR_REPORT_*` overrides for flush interval, batch size/bytes, outbox size and path, SQLite busy timeout, HTTP timeout, retry bounds, attempts, spool path/bytes, artifact bytes, retention, collector timeout/count/concurrency, document bytes, recursive value depth/items, string bytes, structured event limit, response-read bytes, and persisted-error bytes. Generated deployments pass these validated values through cloud-init into the VM Agent systemd service, so overrides apply to newly provisioned nodes. Defaults are listed in `apps/api/.env.example`; the common defaults are a 32 KiB error batch, 1,000-row outbox, 2 MiB artifact, 20 MiB spool, and 24-hour local retention.
 
-Pulumi options `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `diagnosticIncidentTtlDays` (default `7`, any positive integer) configure the private prefix and an independent R2 lifecycle rule. They do not require a separate bucket or manually managed Worker variable. The prefix cannot begin with the application-owned namespaces `agents`, `cli`, `compose-image-artifacts`, `library`, `session-snapshots`, `temp-uploads`, or `tts`, because the lifecycle would otherwise expire unrelated objects.
+Pulumi options `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `diagnosticIncidentTtlDays` (default `7`, any positive integer) configure the private prefix and an independent R2 lifecycle rule. They do not require a separate bucket or manually managed Worker variable. The prefix cannot begin with the application-owned namespaces `agents`, `cli`, `compose-image-artifacts`, `library`, `resource-history`, `session-snapshots`, `temp-uploads`, or `tts`, because the lifecycle would otherwise expire unrelated objects.
 
 ### Platform Feedback Triage
 

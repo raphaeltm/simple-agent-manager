@@ -1169,6 +1169,9 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		if updated != nil && updated.Repository != "" {
 			s.persistWorkspaceMetadata(updated)
 		}
+		if updated != nil {
+			s.ensureResourceHistoryForRuntime(updated)
+		}
 	}
 
 	// Ensure a per-workspace message reporter exists for this workspace.
@@ -1391,6 +1394,9 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		delete(s.sessionTaskCtx, hostKey)
 	}
 	s.sessionHostMu.Unlock()
+	if taskID != "" && projectIDForTask != "" {
+		s.updateResourceHistoryAttribution(workspaceID, projectIDForTask, "", taskID)
+	}
 	s.registerSessionMcpServers(workspaceID, sessionID, mcpServers)
 	if body.Model != "" || body.PermissionMode != "" || body.Effort != "" || body.OpencodeProvider != "" || body.OpencodeBaseURL != "" {
 		slog.Info("Profile overrides registered for agent session",
