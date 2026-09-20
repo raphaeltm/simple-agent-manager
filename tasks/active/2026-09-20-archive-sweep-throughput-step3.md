@@ -177,11 +177,38 @@ Discrimination proofs recorded in the PR body.
   (line 1580) and again for `aggregateSha256` (lines 1609-1619), over data that
   `rebuildTargetFts` does not mutate. That is 2x the R2 gunzip/parse/hash work and 4x the
   grouped/tool-payload table scans per seal. Bounded per-call (each DO RPC has its own CPU
-  budget) and comfortable at 10000, but it should be fixed before 20000 — it is free margin.
-- No baseline failure/poison rate at 5000 has been captured, so the cost of a poisoned
-  candidate (~44,400 estimated units per attempt at 10000, up to ~133,200 for a full
-  three-attempt poison cycle = ~16.7% of the daily allowance) is bounded in magnitude but not in
-  frequency. Worth a `project_data_archive_migrations` state histogram before and after ship.
+  budget) and comfortable at 10000, but it is free margin worth reclaiming before 20000.
+  **Confirmed in code and filed separately by the coordinator. Deliberately NOT fixed in this
+  PR** — a config change does not get to carry a Durable Object refactor.
+
+### Failure/poison baseline — COLLECTED (pre-ship comparison point)
+
+Measured by the coordinator against production D1, cohort boundary = compact migrations
+**created after the 2026-09-18 breaker reset at `1789727663851`**. This is the "current config"
+cohort and the same boundary will be re-measured after the 10000 ship:
+
+| Outcome | Rows | Attempts |
+| --- | --- | --- |
+| published | 42 | 42 total (i.e. one attempt each, no retry ever occurred) |
+| frozen / `precopy_refused` | 2 | 1 each (`active_session_state`; `tool_payload_cleanup_incomplete`) |
+| failed | 0 | — |
+| poisoned | 0 | — |
+
+Three caveats that must travel with these numbers:
+
+1. **The 3 poisoned compact rows in the table overall are NOT in this cohort.** They are
+   pre-#2094 R2-deadline incidents (SAM 09-14/15, other projects 09-16) from before the fix and
+   the reset. Mixing them into a current-config failure rate would be wrong.
+2. **Zero recent failures is a small cohort, not proof of zero risk.** 42 successes does not
+   bound the tail, and every one of them ran under the 5000 ceiling.
+3. **A `frozen`/`precopy_refused` is a pre-copy eligibility refusal, not a failed chunk copy.**
+   The two are different mechanisms with different costs and must not be pooled.
+
+What this does establish for the cost concern above: `attempt_count` is 1 across all 42
+publishes, so the retry-and-re-reserve path — the thing that would spend ~44,400 estimated
+units per extra attempt at 10000, up to ~16.7% of the daily allowance for a full three-attempt
+poison — **has not been exercised at all under the current configuration.** That is reassuring
+about frequency and simultaneously means the cost path is untested rather than proven cheap.
 
 ## Findings worth keeping
 
