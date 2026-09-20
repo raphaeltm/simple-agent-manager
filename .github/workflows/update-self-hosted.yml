@@ -105,7 +105,9 @@ jobs:
       - name: Trigger Deploy Production
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_SERVER_URL: ${{ github.server_url }}
+          GH_REPOSITORY: ${{ github.repository }}
         run: |
           gh workflow run deploy.yml --ref main
           echo "Triggered Deploy Production workflow on main."
-          echo "Monitor progress at: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/deploy.yml"
+          echo "Monitor progress at: ${GH_SERVER_URL}/${GH_REPOSITORY}/actions/workflows/deploy.yml"
