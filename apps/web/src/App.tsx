@@ -144,6 +144,22 @@ const ProjectTriggerDetail = lazyNamed(
 );
 const ProjectTriggers = lazyNamed(() => import('./pages/ProjectTriggers'), 'ProjectTriggers');
 const ProjectEvents = lazyNamed(() => import('./pages/ProjectEvents'), 'ProjectEvents');
+const ResourcePanelPrototypeIndex = lazyNamed(
+  () => import('./pages/resource-panel-prototype'),
+  'ResourcePanelPrototypeIndex'
+);
+const ResourcePanelVariantA = lazyNamed(
+  () => import('./pages/resource-panel-prototype/variant-a'),
+  'ResourcePanelVariantA'
+);
+const ResourcePanelVariantB = lazyNamed(
+  () => import('./pages/resource-panel-prototype/variant-b'),
+  'ResourcePanelVariantB'
+);
+const ResourcePanelVariantC = lazyNamed(
+  () => import('./pages/resource-panel-prototype/variant-c'),
+  'ResourcePanelVariantC'
+);
 const SamPrototype = lazyNamed(() => import('./pages/SamPrototype'), 'SamPrototype');
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
@@ -268,6 +284,23 @@ export default function App() {
                       <>
                         {/* SAM prototype — local/test only, no auth */}
                         <Route path="/sam" element={page(<SamPrototype />)} />
+                        {/* Resources-panel design exploration — local/test only, no auth */}
+                        <Route
+                          path="/prototype/resource-panel"
+                          element={page(<ResourcePanelPrototypeIndex />)}
+                        />
+                        <Route
+                          path="/prototype/resource-panel/a"
+                          element={page(<ResourcePanelVariantA />)}
+                        />
+                        <Route
+                          path="/prototype/resource-panel/b"
+                          element={page(<ResourcePanelVariantB />)}
+                        />
+                        <Route
+                          path="/prototype/resource-panel/c"
+                          element={page(<ResourcePanelVariantC />)}
+                        />
                         {/* Harness for Playwright audits — mounts trial components with mock data */}
                         <Route
                           path="/__test/trial-chat-gate"

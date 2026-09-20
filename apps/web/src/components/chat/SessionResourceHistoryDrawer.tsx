@@ -79,7 +79,7 @@ function seriesPoints(
     .join(' ');
 }
 
-function ResourceSparkline({
+export function ResourceSparkline({
   samples,
   toolSpans,
 }: Readonly<{ samples: WorkspaceResourceSample[]; toolSpans: WorkspaceResourceToolSpan[] }>) {
@@ -112,8 +112,18 @@ function ResourceSparkline({
 
   return (
     <div className="rounded-lg border border-border-default bg-bg-subtle p-3">
+      {/*
+        `preserveAspectRatio="none"`: without it the default `xMidYMid meet`
+        letterboxes the 1:1 viewBox into a centred SQUARE — measured 224px of
+        drawn width inside a 323px card (144px at this `h-36`), so a third of
+        the chart area was empty and the timeline was compressed to a third of
+        its width. Every polyline already carries
+        `vectorEffect="non-scaling-stroke"`, which only matters under
+        non-uniform scaling: stretching was always the intent.
+      */}
       <svg
         viewBox="0 0 100 100"
+        preserveAspectRatio="none"
         className="h-36 w-full overflow-visible"
         role="img"
         aria-label="CPU and memory resource timeline"
@@ -224,7 +234,7 @@ function ResourceSparkline({
   );
 }
 
-function StatCard({
+export function StatCard({
   icon: Icon,
   label,
   value,
@@ -251,7 +261,7 @@ function detailPointLabel(detail: WorkspaceResourceHistoryResponse['detail']): s
   return `${detail.samples.length} points`;
 }
 
-function ResourceHistoryContent({
+export function ResourceHistoryContent({
   isLoading,
   isError,
   isFetching,
@@ -372,7 +382,7 @@ function ResourceHistoryContent({
   );
 }
 
-function ChunkButton({
+export function ChunkButton({
   chunk,
   selected,
   onSelect,
