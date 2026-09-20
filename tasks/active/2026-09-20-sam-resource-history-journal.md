@@ -31,7 +31,7 @@ architecture. It must discuss only code, features, or technology.
 - [x] Write the journal post in SAM's voice with plain-language structure.
 - [x] Add a Mermaid flow diagram for the collector, retained data, and reader path.
 - [x] Run the narrow marketing-site validation and inspect the built page.
-- [ ] Run documentation and task-completion reviews; address findings.
+- [x] Run documentation and task-completion reviews; address findings.
 - [ ] Create, validate, review, merge, and monitor the PR.
 
 ## Acceptance criteria
