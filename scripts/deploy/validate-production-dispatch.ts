@@ -3,6 +3,7 @@ import { appendFileSync } from 'node:fs';
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
 const DEFAULT_OVERRIDE_REASON_MIN_LENGTH = 20;
+const DEFAULT_CANONICAL_REPOSITORY = 'raphaeltm/simple-agent-manager';
 
 export interface ValidationEnv {
   githubEventName?: string;
@@ -11,6 +12,7 @@ export interface ValidationEnv {
   targetCommitSha?: string;
   emergencyOverrideReason?: string;
   overrideReasonMinLength?: string;
+  canonicalRepository?: string;
   githubOutput?: string;
   githubStepSummary?: string;
 }
@@ -69,10 +71,6 @@ export function validateEmergencyOverrideReason(
 
 interface GithubRefResponse {
   object?: { sha?: string };
-}
-
-interface GithubRepositoryResponse {
-  fork?: boolean;
 }
 
 export function selectSuccessfulCiRun(
@@ -184,24 +182,6 @@ async function requireCurrentMainTip(env: ValidationEnv, sha: string): Promise<v
   }
 }
 
-async function getRepositoryMetadata(
-  env: Required<Pick<ValidationEnv, 'githubRepository' | 'githubToken'>>
-): Promise<GithubRepositoryResponse> {
-  const response = await fetch(`https://api.github.com/repos/${env.githubRepository}`, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${env.githubToken}`,
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to resolve repository provenance: HTTP ${response.status}`);
-  }
-
-  return (await response.json()) as GithubRepositoryResponse;
-}
-
 function append(path: string | undefined, content: string): void {
   if (path) {
     appendFileSync(path, content);
@@ -217,7 +197,6 @@ export async function validateProductionDispatch(env: ValidationEnv): Promise<{
     throw new Error('validate-production-dispatch.ts is only for manual workflow_dispatch runs.');
   }
 
-  const sha = normalizeSha(env.targetCommitSha);
   const reason = validateEmergencyOverrideReason(
     env.emergencyOverrideReason,
     parseOverrideReasonMinLength(env.overrideReasonMinLength)
@@ -227,13 +206,10 @@ export async function validateProductionDispatch(env: ValidationEnv): Promise<{
     throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are required to verify CI gates.');
   }
 
-  let repositoryMetadata: GithubRepositoryResponse;
+  const canonicalRepository = env.canonicalRepository || DEFAULT_CANONICAL_REPOSITORY;
+
   let mainTip: string;
   try {
-    repositoryMetadata = await getRepositoryMetadata({
-      githubRepository: env.githubRepository,
-      githubToken: env.githubToken,
-    });
     mainTip = await getCurrentMainTip({
       githubRepository: env.githubRepository,
       githubToken: env.githubToken,
@@ -245,6 +221,10 @@ export async function validateProductionDispatch(env: ValidationEnv): Promise<{
     );
   }
 
+  // When target_commit_sha is omitted, default to the current main tip.
+  const rawSha = (env.targetCommitSha ?? '').trim();
+  const sha = rawSha ? normalizeSha(env.targetCommitSha) : mainTip;
+
   if (sha !== mainTip) {
     throw new Error(
       `target_commit_sha ${sha} does not match the current trusted main tip ${mainTip}. Emergency overrides cannot bypass main-branch provenance. Deployment failed closed before production mutation.`
@@ -253,10 +233,15 @@ export async function validateProductionDispatch(env: ValidationEnv): Promise<{
 
   append(env.githubOutput, `deploy_sha=${sha}\n`);
 
-  if (repositoryMetadata.fork === true) {
+  // Waive CI for non-canonical repositories (forks and imported copies).
+  // This matches how ci.yml skips fork main pushes: compare repository name
+  // against the canonical name rather than relying on the GitHub fork flag,
+  // which misses imported (non-fork) copies.
+  const isNonCanonical = env.githubRepository !== canonicalRepository;
+  if (isNonCanonical) {
     append(
       env.githubStepSummary,
-      `## Manual production deployment gate\n\n- Target commit: \`${sha}\`\n- Repository provenance: verified current \`main\` tip in a fork\n- CI gate: not required because fork main-push CI is intentionally skipped\n`
+      `## Manual production deployment gate\n\n- Target commit: \`${sha}\`\n- Repository provenance: verified current \`main\` tip in a non-canonical repository\n- CI gate: not required because non-canonical main-push CI is intentionally skipped\n`
     );
     return { sha, ciVerified: false, emergencyOverride: false };
   }
@@ -327,6 +312,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       targetCommitSha: process.env.TARGET_COMMIT_SHA,
       emergencyOverrideReason: process.env.EMERGENCY_OVERRIDE_REASON,
       overrideReasonMinLength: process.env.PRODUCTION_DEPLOY_OVERRIDE_REASON_MIN_LENGTH,
+      canonicalRepository: process.env.CANONICAL_REPOSITORY,
       githubOutput: process.env.GITHUB_OUTPUT,
       githubStepSummary: process.env.GITHUB_STEP_SUMMARY,
     };

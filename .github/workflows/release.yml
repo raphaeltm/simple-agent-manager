@@ -1,0 +1,88 @@
+name: Create Release
+
+on:
+  schedule:
+    # Daily at 06:00 UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Tag and release the latest production deploy
+    if: github.repository == 'raphaeltm/simple-agent-manager'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Find latest successful production deploy SHA
+        id: deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Find the most recent successful Deploy Production run on main
+          DEPLOY_SHA=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/deploy.yml/runs?branch=main&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // empty')
+
+          if [ -z "$DEPLOY_SHA" ]; then
+            echo "No successful Deploy Production run found on main. Skipping release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "sha=$DEPLOY_SHA" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "Latest deployed SHA: $DEPLOY_SHA"
+
+      - name: Determine tag name
+        if: steps.deploy.outputs.skip != 'true'
+        id: tag
+        env:
+          DEPLOY_SHA: ${{ steps.deploy.outputs.sha }}
+        run: |
+          TODAY=$(date -u +%Y.%m.%d)
+          BASE_TAG="v${TODAY}"
+
+          # Check if this SHA is already tagged with the latest release
+          LATEST_TAG=$(git tag --points-at "$DEPLOY_SHA" --sort=-version:refname | head -1)
+          if [ -n "$LATEST_TAG" ]; then
+            echo "SHA $DEPLOY_SHA is already tagged as $LATEST_TAG. Skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Find the next available tag for today
+          TAG_NAME="$BASE_TAG"
+          SUFFIX=0
+          while git rev-parse "$TAG_NAME" >/dev/null 2>&1; do
+            SUFFIX=$((SUFFIX + 1))
+            TAG_NAME="${BASE_TAG}.${SUFFIX}"
+          done
+
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "Will create tag: $TAG_NAME"
+
+      - name: Create tag and release
+        if: steps.deploy.outputs.skip != 'true' && steps.tag.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.tag.outputs.tag_name }}
+          DEPLOY_SHA: ${{ steps.deploy.outputs.sha }}
+        run: |
+          git tag -a "$TAG_NAME" "$DEPLOY_SHA" -m "Release $TAG_NAME"
+          git push origin "$TAG_NAME"
+
+          gh release create "$TAG_NAME" \
+            --target "$DEPLOY_SHA" \
+            --generate-notes \
+            --latest \
+            --title "$TAG_NAME"
+
+          echo "Created release $TAG_NAME at $DEPLOY_SHA"

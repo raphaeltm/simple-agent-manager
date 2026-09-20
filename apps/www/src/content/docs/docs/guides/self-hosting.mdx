@@ -257,7 +257,7 @@ See [Configuration → Analytics](/docs/reference/configuration/#analytics) for 
 
 ## Step 7: Deploy
 
-Go to Actions → Deploy Production → Run workflow. Choose the `main` branch and enter the exact 40-character commit SHA currently at your fork's `main` tip as `target_commit_sha`. No additional commit is needed after the environment is configured.
+Go to Actions → Deploy Production → Run workflow. Choose the `main` branch. You may leave `target_commit_sha` empty to deploy the current `main` tip, or paste an exact 40-character commit SHA if you need to target a specific commit. No additional commit is needed after the environment is configured.
 
 The workflow:
 
@@ -338,16 +338,27 @@ If you enabled GitLab in platform configuration, create a test project from a Gi
 
 ## Updating an Existing Self-Hosted Instance
 
-Sync or merge upstream SAM changes into your fork's `main` branch when you want to update. Pushing those changes to the fork does **not** update the running instance by itself. Self-host forks skip the canonical repository's full `main`-push CI path, so the automatic `workflow_run` production deploy is not the update mechanism for forks.
+Pushing upstream changes to your fork's `main` branch does **not** update the running instance by itself. Self-host forks skip the canonical repository's full `main`-push CI path, so the automatic `workflow_run` production deploy is not the update mechanism for forks.
 
-To deploy an update:
+### Option A: Update Self-Hosted Instance workflow (recommended)
 
-1. Sync your fork's `main` branch with upstream.
+The **Update Self-Hosted Instance** workflow (`update-self-hosted.yml`) automates the entire update process. It fetches the upstream release, fast-forwards your fork's `main` branch, and triggers a production deploy automatically.
+
+1. Open **Actions → Update Self-Hosted Instance → Run workflow** in your fork.
+2. Leave `release` as `latest` to use the most recent upstream release, or enter a specific CalVer tag (e.g. `v2026.09.20`).
+3. The workflow fast-forwards `main` to the release commit and triggers Deploy Production.
+4. Wait for the Deploy Production workflow to finish, then re-run the health check above.
+
+If your fork has local commits that are not in the upstream release, the workflow will fail with a fast-forward error. In that case, merge manually and use Option B.
+
+### Option B: Manual deploy
+
+1. Sync your fork's `main` branch with upstream (e.g. via GitHub's "Sync fork" button or `git fetch upstream && git merge upstream/main`).
 2. Open **Actions → Deploy Production → Run workflow** in your fork.
-3. Choose the `main` branch, paste the exact 40-character SHA from that synced commit into `target_commit_sha`, and leave `dry_run` disabled.
+3. Choose the `main` branch and leave `target_commit_sha` empty (it defaults to the current `main` tip). Optionally paste a specific 40-character SHA if needed. Leave `dry_run` disabled.
 4. Wait for the workflow to finish, then re-run the health check above.
 
-Use the same manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.
+Use the manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.
 
 ## First Login & Admin Access
 

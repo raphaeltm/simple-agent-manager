@@ -9,8 +9,8 @@ on:
   workflow_dispatch:
     inputs:
       target_commit_sha:
-        description: 'Exact 40-character commit SHA to deploy'
-        required: true
+        description: 'Commit SHA to deploy (leave empty to deploy current main tip)'
+        required: false
         type: string
       emergency_override_reason:
         description: 'Audited emergency reason to deploy without verified CI on the exact SHA'

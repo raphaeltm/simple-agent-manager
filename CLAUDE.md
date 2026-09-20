@@ -94,17 +94,19 @@ When the user mentions **app, dashboard, projects, settings, or UI** → look in
 2. **Deploy to staging only when local verification is exhausted** — when the remaining work genuinely needs real OAuth, DNS, or VMs. Partial-feature staging deploys are fine for end-to-end plumbing while the rest is still developed locally. Staging deploys take ~7 minutes via `gh workflow run deploy-staging.yml`.
 3. **Query staging directly via Cloudflare API** — use `$CF_TOKEN` to query D1 (SQL), read/write KV, check DNS records, and inspect Workers. This is the fastest way to verify deploys, debug issues, and understand staging state. **Always check infrastructure state via CF API before guessing at fixes.** See `.claude/rules/32-cf-api-debugging.md` for the full cheat sheet.
 4. **When something fails on staging, QUERY THEN READ LOGS before changing any code** — first query D1/KV/DNS via CF API to understand the data state, then use `wrangler tail`, `/admin/logs`, `/admin/errors`, the Node detail page's log stream, `journalctl -u vm-agent` via SSH, `docker logs` for containers. Never guess-and-redeploy. See `.claude/rules/29-local-first-debugging.md` for the log location matrix.
-5. Merge to main — in this canonical repository, successful `main` CI triggers production deployment. Self-host forks update by manually running Deploy Production against the exact synced `main` commit SHA.
+5. Merge to main — in this canonical repository, successful `main` CI triggers production deployment. Self-host forks update by running the **Update Self-Hosted Instance** workflow (which syncs the latest upstream release and triggers Deploy Production), or by manually running Deploy Production on `main` (the SHA input is optional and defaults to the current `main` tip).
 
 Full local-development guide: `apps/www/src/content/docs/docs/guides/local-development.md`.
 
 ## Deployment
 
-Merging to `main` in the canonical repository automatically deploys to production after CI succeeds. Self-host forks do not update from a push alone; operators manually run **Deploy Production** with the exact 40-character commit SHA from their synced `main` branch when they want to deploy.
+Merging to `main` in the canonical repository automatically deploys to production after CI succeeds. The **Create Release** workflow (`release.yml`) tags each successful production deploy with a daily CalVer tag (`vYYYY.MM.DD`). Self-host forks do not update from a push alone; operators run the **Update Self-Hosted Instance** workflow to sync the latest upstream release and deploy, or manually run **Deploy Production** on `main` (the `target_commit_sha` input is optional and defaults to the current `main` tip).
 
 - **CI** (`ci.yml`): lint, typecheck, test, build on pull requests and canonical `main` pushes; fork `main` pushes are intentionally skipped
 - **Deploy Staging** (`deploy-staging.yml`): manual trigger only (`workflow_dispatch`) — agents trigger this explicitly during `/do` Phase 6
-- **Deploy Production** (`deploy.yml`): full Pulumi + Wrangler deployment after successful canonical `main` CI, or manual `workflow_dispatch` for self-host forks that targets an exact commit SHA
+- **Deploy Production** (`deploy.yml`): full Pulumi + Wrangler deployment after successful canonical `main` CI, or manual `workflow_dispatch` for self-host forks (`target_commit_sha` is optional; defaults to current `main` tip)
+- **Create Release** (`release.yml`): daily CalVer tagging of the latest successful production deploy (canonical repo only)
+- **Update Self-Hosted Instance** (`update-self-hosted.yml`): syncs a fork to an upstream release and triggers Deploy Production (fork repos only)
 - **Production Environment branch policy**: GitHub's `production` Environment must allow deployments from the selected `main` branch only. This external secret boundary is required because a workflow dispatched from another ref could remove in-repository branch checks.
 - **Teardown** (`teardown.yml`): manual only — destroys all resources
 - **Generated platform secrets**: deployment-owned signing/encryption keys, including VAPID Web Push keys, are generated and persisted by Pulumi when practical, then copied to Worker secrets. Do not add manual GitHub Environment prerequisites for values SAM can safely create itself; GitHub secrets for generated keys are override/rotation paths only.
