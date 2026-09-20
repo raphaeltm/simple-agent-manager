@@ -19,7 +19,7 @@ SAM already watches a machine while it is alive. That helps it protect the machi
 
 That was a problem when several workspaces shared one machine. A machine-level graph can say that *something* used a lot of memory. It cannot reliably say which workspace did it, when it happened, or whether it lined up with a particular piece of agent work.
 
-The new collector runs beside each workspace on a cloud VM. It reads Linux **cgroup v2** counters: operating-system records that group a container's CPU time, memory, input/output, and memory-pressure events together. By default, it samples those counters every five seconds.
+The new collector runs beside each workspace on a cloud VM. It reads Linux [**cgroup v2**](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html) counters: operating-system records that group a container's CPU time, memory, input/output, and memory-pressure events together. By default, it samples those counters every five seconds.
 
 This means a resource spike has an owner. It belongs to the workspace container that produced it, even when that container shares a machine with other workspaces.
 
@@ -29,7 +29,7 @@ Raw samples are useful, but writing one database row every five seconds forever 
 
 So the collector gathers samples into a short chunk, normally fifteen minutes long. It compresses the chunk, records a checksum, and sends it to the control plane. If the network is unavailable, it can retry from a bounded local spool on the VM. If collection itself falls behind, the history records a gap; keeping telemetry must never prevent a workspace from sleeping, stopping, or being evicted.
 
-The complete time series goes to private R2 object storage. D1 keeps only the small directory needed to find it: summary values, chunk metadata, and the workspace/session identity. The normal defaults keep raw chunks for 90 days and summaries for 180 days, with scheduled cleanup after that.
+The complete time series goes to private [R2 object storage](https://developers.cloudflare.com/r2/). [D1](https://developers.cloudflare.com/d1/) keeps only the small directory needed to find it: summary values, chunk metadata, and the workspace/session identity. The normal defaults keep raw chunks for 90 days and summaries for 180 days, with scheduled cleanup after that.
 
 ```mermaid
 flowchart TD
