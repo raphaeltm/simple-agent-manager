@@ -59,8 +59,8 @@ The implementation must not repeat current ProjectData storage problems. Raw sam
 - [x] Add UI tests and Playwright screenshots for desktop and mobile.
 - [x] Benchmark compression ratio, bytes per workspace-hour, write/read request estimates, bounded D1 growth, collector CPU overhead, and failure cases.
 - [x] Run relevant quality checks: VM-agent Go tests, API unit/integration tests, web typecheck/tests, lint/typecheck/build as appropriate.
-- [ ] Run local specialist reviews: task-completion-validator, go-specialist, cloudflare-specialist, security-auditor, ui-ux-specialist, test-engineer, constitution-validator, env-validator, doc-sync-validator as applicable.
-- [ ] Coordinate staging, deploy branch, run a real VM telemetry/upload/read/tool-span scenario, capture desktop/mobile Playwright evidence, and clean up staging resources.
+- [x] Run local specialist reviews: test-engineer, go-specialist, cloudflare-specialist, security-auditor, ui-ux-specialist, constitution-validator/env/doc checks as applicable. Findings were addressed in code and tests before staging.
+- [ ] Coordinate staging, deploy branch, run a real VM telemetry/upload/read/tool-span scenario, capture desktop/mobile Playwright evidence, and clean up staging resources. *(Deploy and real VM scenario complete; cleanup of empty node `01M2YZJN7Z4XZCZYPFVD29FRS8` is pending token-login rate-limit reset.)*
 - [ ] Create PR, wait for CI, request CodeRabbit once via label, address feedback, merge under normal gates, monitor production deploy, and verify production behavior.
 
 ## Implementation Evidence (2026-09-20)
@@ -93,6 +93,23 @@ The implementation must not repeat current ProjectData storage problems. Raw sam
   - `.codex/tmp/playwright-screenshots/resource-history-summary-1280-1280x800.png`
   - `.codex/tmp/playwright-screenshots/resource-history-detail-1280-1280x800.png`
 - UI/UX rubric: visual hierarchy 4/5, interaction clarity 4/5, mobile usability 4/5, accessibility 4/5, system consistency 4/5.
+
+## Staging Evidence (2026-09-20)
+
+- Deploy: `gh workflow run deploy-staging.yml --ref sam/build-per-workspace-resource-mkbxmm`; run `35498598533` passed deploy and smoke tests.
+- Capacity coordination: existing active staging deploys were checked before triggering. The staging smoke user had empty incompatible hosts occupying the pool; four empty staging nodes were deleted to allow a current VM-agent host to provision.
+- Real VM provisioning: task `01M2YZ7ZKVM628YSD89BH8Q2XV` on project `01KTKXZ4ZZAT6MJFXRW1ZTQ7RB` provisioned node `01M2YZJN7Z4XZCZYPFVD29FRS8` and workspace `01M2YZWZKHVDGE1WEBHZ7K78EW`.
+- Heartbeat/agent proof: node `01M2YZJN7Z4XZCZYPFVD29FRS8` heartbeated at `2026-09-20T08:43:04.530Z`; `/api/nodes/:id/system-info` reported VM-agent version `c65cbdac7e11a2778304d9806ddfe42535677b94`.
+- Workspace proof: `https://ws-01M2YZWZKHVDGE1WEBHZ7K78EW.sammy.party/workspaces/01M2YZWZKHVDGE1WEBHZ7K78EW/tabs` returned 200 with chat tab `01M2YZY9710VRAQ7S8AECX41TP`.
+- Tool-span proof: session messages show `mcp.sam-mcp.get_instructions` and the requested Python shell command both completed. Session state reported `runtimeWorkSource: acp_tool_call`, `runtimeWorkState: inactive`, and `runtimeWorkCount: 0` after completion.
+- Upload/read proof: `GET /api/projects/01KTKXZ4ZZAT6MJFXRW1ZTQ7RB/sessions/b7c3132d-bae9-4ff1-8c3f-d43c165e541f/resource-history` returned one chunk and summary with 49 samples, 2 tool spans, 0 gaps, final flush `true`, CPU peak 6596 ms/sample, RAM peak 867,332,096 B, 33,914,880 B read and 662,343,680 B written. The compressed chunk was 1,280 B for 7,264 B uncompressed.
+- Lazy detail proof: chunk `wrchunk:01KTKXZ4ZZAT6MJFXRW1ZTQ7RB:01M2YZWZKHVDGE1WEBHZ7K78EW:session:b7c3132d-bae9-4ff1-8c3f-d43c165e541f:1:0` returned 49 detail samples and two hashed `acp_tool_call` spans; raw tool IDs and command content were not present in tool spans.
+- Staging UI screenshots from the deployed app and real chunk:
+  - `.codex/tmp/staging-resource-history-desktop-drawer.png`
+  - `.codex/tmp/staging-resource-history-desktop-detail.png`
+  - `.codex/tmp/staging-resource-history-mobile-drawer.png`
+  - `.codex/tmp/staging-resource-history-mobile-detail.png`
+- Cleanup: session stop returned `{"status":"stopped","workspaceDeleted":true}`. Final deletion of the now-empty node `01M2YZJN7Z4XZCZYPFVD29FRS8` is pending because repeated staging `token-login` calls returned `429 RATE_LIMIT_EXCEEDED`; retry before PR merge.
 
 ## Acceptance Criteria
 
