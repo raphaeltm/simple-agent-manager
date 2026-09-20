@@ -101,6 +101,124 @@ function makeChatSession(options: SessionOptions = {}) {
 const LONG_TOKEN =
   'sam/layered-resource-management-with-an-extremely-long-branch-name-that-will-not-wrap-0123456789';
 
+const RESOURCE_HISTORY_SUMMARY = {
+  id: 'workspace:proj-rail-1:ws-rail-1:session:cs-rail-1',
+  projectId: PROJECT_ID,
+  workspaceId: WORKSPACE_ID,
+  sessionId: SESSION_ID,
+  taskId: 'task-rail-1',
+  nodeId: 'node-rail-1',
+  agentProfileId: 'profile-resource-heavy',
+  skillId: 'skill-resource-history',
+  agentType: 'openai-codex',
+  runtime: 'vm',
+  sourceVersion: 1,
+  startedAt: NOW - 1_800_000,
+  endedAt: NOW - 900_000,
+  sampleCount: 180,
+  gapCount: 2,
+  toolSpanCount: 4,
+  cpuMeanMillis: 38,
+  cpuPeakMillis: 410,
+  memoryMeanBytes: 524_288_000,
+  memoryPeakBytes: 1_342_177_280,
+  memoryKernelPeakBytes: 1_610_612_736,
+  ioReadBytes: 18_874_368,
+  ioWriteBytes: 94_371_840,
+  oomCount: 1,
+  completeness: { status: 'partial', nodeLossMayLoseUnflushedWindow: true },
+  summary: { weightedMeanWallMillis: 895_000 },
+  firstChunkId: 'wrchunk-rail-1',
+  latestChunkId: 'wrchunk-rail-2',
+};
+
+const RESOURCE_HISTORY_CHUNKS = [
+  {
+    id: 'wrchunk-rail-2',
+    workspaceId: WORKSPACE_ID,
+    sessionId: SESSION_ID,
+    taskId: 'task-rail-1',
+    nodeId: 'node-rail-1',
+    chunkSequence: 2,
+    sourceVersion: 1,
+    storageFormat: 'resource-history-gzip-json-v1',
+    compressedBytes: 6299,
+    uncompressedBytes: 106_968,
+    sha256: 'a'.repeat(64),
+    startedAt: NOW - 1_800_000,
+    endedAt: NOW - 900_000,
+    sampleCount: 180,
+    gapCount: 2,
+    toolSpanCount: 4,
+    completeness: { status: 'partial' },
+    summary: { cpuPeakMillis: 410 },
+    expiresAt: NOW + 90 * 86_400_000,
+  },
+  {
+    id: 'wrchunk-rail-1',
+    workspaceId: WORKSPACE_ID,
+    sessionId: SESSION_ID,
+    taskId: 'task-rail-1',
+    nodeId: 'node-rail-1',
+    chunkSequence: 1,
+    sourceVersion: 1,
+    storageFormat: 'resource-history-gzip-json-v1',
+    compressedBytes: 5980,
+    uncompressedBytes: 99_000,
+    sha256: 'b'.repeat(64),
+    startedAt: NOW - 2_700_000,
+    endedAt: NOW - 1_800_000,
+    sampleCount: 180,
+    gapCount: 0,
+    toolSpanCount: 3,
+    completeness: { status: 'complete' },
+    summary: { cpuPeakMillis: 205 },
+    expiresAt: NOW + 90 * 86_400_000,
+  },
+];
+
+const RESOURCE_HISTORY_DETAIL = {
+  chunkId: 'wrchunk-rail-2',
+  originalSampleCount: 180,
+  downsampled: true,
+  downsampleLimit: 720,
+  samples: Array.from({ length: 36 }, (_, i) => ({
+    t: NOW - 1_800_000 + i * 25_000,
+    cpuMillis: i === 14 ? 410 : i % 7 === 0 ? 160 : 32 + (i % 5) * 9,
+    memoryBytes: i === 24 ? 1_342_177_280 : 410_000_000 + i * 12_000_000,
+    memoryPeakBytes: i >= 24 ? 1_342_177_280 : 610_000_000 + i * 8_000_000,
+    ioReadBytes: i % 8 === 0 ? 1_048_576 : 16_384,
+    ioWriteBytes: i % 9 === 0 ? 4_194_304 : 65_536,
+    oom: i === 24 ? 1 : 0,
+    gap: i === 20,
+  })),
+  toolSpans: [
+    {
+      id: 'tool-compile',
+      kind: 'acp_tool_call',
+      startedAt: NOW - 1_650_000,
+      endedAt: NOW - 1_520_000,
+      concurrency: 1,
+    },
+    {
+      id: 'tool-tests',
+      kind: 'acp_tool_call',
+      startedAt: NOW - 1_470_000,
+      endedAt: NOW - 1_240_000,
+      concurrency: 2,
+    },
+    {
+      id: 'tool-review',
+      kind: 'acp_tool_call',
+      startedAt: NOW - 1_210_000,
+      endedAt: NOW - 980_000,
+      concurrency: 1,
+      approximate: true,
+    },
+  ],
+  gaps: [{ startedAt: NOW - 1_300_000, endedAt: NOW - 1_250_000, reason: 'sampler_delay' }],
+};
+
 /** Enough messages to overflow any test viewport, so the scroll-to-bottom button appears. */
 function makeManyMessages(count = 60) {
   return {
@@ -224,6 +342,18 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     }
     if (pathname === `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/messages`) {
       await route.fulfill({ json: messages });
+      return;
+    }
+
+    if (pathname === `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/resource-history`) {
+      const includeDetail = new URL(url).searchParams.get('chunkId') === 'wrchunk-rail-2';
+      await route.fulfill({
+        json: {
+          summary: RESOURCE_HISTORY_SUMMARY,
+          chunks: RESOURCE_HISTORY_CHUNKS,
+          ...(includeDetail ? { detail: RESOURCE_HISTORY_DETAIL } : {}),
+        },
+      });
       return;
     }
     if (pathname === `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/state`) {
@@ -360,6 +490,7 @@ test.describe('Session tool rail — discoverability', () => {
       'files',
       'git',
       'timeline',
+      'resources',
       'events',
       'comments',
       'retry',
@@ -386,6 +517,7 @@ test.describe('Session tool rail — discoverability', () => {
       ['files', 'Browse workspace files'],
       ['git', 'Review uncommitted changes'],
       ['timeline', 'Jump through session history'],
+      ['resources', 'Inspect session CPU, memory, I/O and tool-window correlation'],
       ['events', 'Session events and schedules'],
       ['comments', 'Open comment threads on this session'],
       ['retry', 'Retry — re-run this task'],
@@ -877,5 +1009,30 @@ test.describe('Session Details — desktop', () => {
 
   test('Details shows the workspace as plain text and the node as the link', async ({ page }) => {
     await assertDetailsInfrastructure(page, 'desktop');
+  });
+});
+
+test.describe('Session resource history drawer', () => {
+  test('opens contextual summary and lazy detail from the real rail action', async ({ page }) => {
+    await openChat(page, { state: 'active', messagesLong: true });
+    await page.getByTestId('session-tool-resources').click();
+
+    await expect(page.getByRole('dialog', { name: 'Session resources' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Resources' })).toBeVisible();
+    await expect(page.getByText('CPU peak')).toBeVisible();
+    await expect(page.getByText('RAM peak')).toBeVisible();
+    await expect(page.getByText('1 OOM event observed in retained samples.')).toBeVisible();
+    await expect(page.getByText('Correlation is based on concurrent tool windows')).toBeVisible();
+    await capture(page, `resource-history-summary-${page.viewportSize()?.width ?? 'viewport'}`);
+
+    await page.getByRole('button', { name: 'Load detail timeline' }).click();
+    await expect(page.getByRole('img', { name: 'CPU and memory resource timeline' })).toBeVisible();
+    await expect(page.getByText('Green line: CPU delta / memory level scale')).toBeVisible();
+    await expect(page.getByText('Blue bands: concurrent tool windows')).toBeVisible();
+    await page.locator('[role="dialog"] .overflow-y-auto').evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await page.waitForTimeout(300);
+    await capture(page, `resource-history-detail-${page.viewportSize()?.width ?? 'viewport'}`);
   });
 });
