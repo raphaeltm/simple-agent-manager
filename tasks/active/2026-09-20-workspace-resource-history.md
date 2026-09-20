@@ -123,6 +123,20 @@ The implementation must not repeat current ProjectData storage problems. Raw sam
   - `pnpm --filter @simple-agent-manager/api lint`
   - `pnpm --filter @simple-agent-manager/web lint` passed with three existing warnings outside this feature path.
 
+## CodeRabbit Follow-up Evidence (2026-09-20)
+
+- Addressed CodeRabbit final-head review findings: project/workspace R2 prefix cleanup now uses a separate `WORKSPACE_RESOURCE_OBJECT_CLEANUP_LIMIT` budget and relists until the prefix is empty or the safety budget is reached; resource-history fixtures now report metadata consistent with retained samples; the drawer plots samples by timestamps, keeps chunk/detail history visible without a summary, and uses a larger close target; VM-agent retries now drop permanent non-429 4xx spool rejections while preserving retry for transport/5xx/429 failures; chunk sequence state is persisted in the workspace spool directory to avoid restart identity reuse; and the unused server startup context was removed.
+- Added focused coverage for paginated R2 prefix deletion, permanent upload rejection handling, and persisted sequence restart behavior.
+- Validation passed after the fixes:
+  - `pnpm --filter @simple-agent-manager/api typecheck`
+  - `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/workspace-resource-history.test.ts tests/unit/workspace-resource-history-callback.test.ts tests/unit/resource-history-tools.test.ts tests/unit/routes/workspace-resource-history-routes.test.ts tests/unit/durable-objects/sam-session.test.ts tests/unit/routes/project-delete.test.ts`
+  - `pnpm --filter @simple-agent-manager/web typecheck`
+  - `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/session-tool-rail-audit.spec.ts --project='iPhone 14 (390x844)' --grep 'Session resource history drawer'`
+  - `cd packages/vm-agent && go test ./internal/resourcehistory ./internal/server`
+  - Focused ESLint for touched API/web files and `git diff --check`.
+
+Environment variable validation: new Worker variable `WORKSPACE_RESOURCE_OBJECT_CLEANUP_LIMIT` is optional in `apps/api/src/env.ts`, documented in `apps/api/.env.example`, and listed in `apps/www/src/content/docs/docs/reference/configuration.md`; it does not affect GitHub `GH_*` secret mappings or `scripts/deploy/configure-secrets.sh`.
+
 ## Acceptance Criteria
 
 - A running VM workspace emits retained resource history into compressed R2 chunks with D1 summary/index rows and bounded local retry/spool semantics.

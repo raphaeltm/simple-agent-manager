@@ -181,10 +181,7 @@ func (s *Server) stopResourceHistoryForWorkspace(workspaceID string, ctx context
 	}
 }
 
-func (s *Server) startAllResourceHistoryCollectors(ctx context.Context) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
+func (s *Server) startAllResourceHistoryCollectors() {
 	s.workspaceMu.RLock()
 	runtimes := make([]*WorkspaceRuntime, 0, len(s.workspaces))
 	for _, rt := range s.workspaces {

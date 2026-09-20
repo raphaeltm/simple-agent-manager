@@ -624,6 +624,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   WORKSPACE_RESOURCE_DETAIL_MAX_POINTS?: string; // Max points returned from a detail chunk read (default: 720)
   WORKSPACE_RESOURCE_LIST_LIMIT?: string; // Max chunk indexes returned by detail list (default: 24)
   WORKSPACE_RESOURCE_CLEANUP_BATCH_SIZE?: string; // Max expired chunks/summaries cleaned per sweep (default: 50)
+  WORKSPACE_RESOURCE_OBJECT_CLEANUP_LIMIT?: string; // Max R2 objects deleted for one project/workspace resource-history prefix cleanup (default: 5000)
   PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_DEFAULT?: string;
   PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED?: string;

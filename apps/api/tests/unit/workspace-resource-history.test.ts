@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import {
+  deleteWorkspaceResourceHistoryObjectsForWorkspace,
   downsamplePreservingSpikes,
   getWorkspaceResourceHistory,
   type ResourceSamplePoint,
@@ -72,8 +73,8 @@ async function uploadBody(
     chunkSequence: 0,
     startedAt: 1_000,
     endedAt: 2_000,
-    sampleCount: 2,
-    gapCount: 0,
+    sampleCount: 3,
+    gapCount: 1,
     toolSpanCount: 1,
     compressedBase64: base64(compressed),
     compressedBytes: compressed.byteLength,
@@ -81,14 +82,14 @@ async function uploadBody(
     sha256: await sha256Hex(compressed),
     completeness: { status: 'complete' },
     summary: {
-      cpuMeanMillis: 25,
-      cpuPeakMillis: 40,
-      memoryMeanBytes: 1024,
+      cpuMeanMillis: (0 + 40 + 900) / 3,
+      cpuPeakMillis: 900,
+      memoryMeanBytes: 1536,
       memoryPeakBytes: 2048,
       memoryKernelPeakBytes: 4096,
-      ioReadBytes: 10,
-      ioWriteBytes: 20,
-      oomCount: 0,
+      ioReadBytes: 15,
+      ioWriteBytes: 27,
+      oomCount: 1,
     },
     ...overrides,
   };
@@ -165,6 +166,29 @@ describe('workspace resource history', () => {
     expect(result.samples.some((sample) => sample.memoryBytes === 900 * 1024 * 1024)).toBe(true);
   });
 
+  it('deletes every workspace resource R2 object across paginated prefix scans', async () => {
+    const sqlite = new Database(':memory:');
+    const r2 = makeR2();
+    const env = makeEnv(sqlite, r2.binding);
+    for (let index = 0; index < 1001; index += 1) {
+      r2.objects.set(
+        `resource-history/v1/projects/proj-1/workspaces/ws-1/session/sess-1/v1/${index}.json.gz`,
+        new Uint8Array([index % 255])
+      );
+    }
+    r2.objects.set(
+      'resource-history/v1/projects/proj-1/workspaces/ws-2/session/sess-1/v1/0.json.gz',
+      new Uint8Array([1])
+    );
+
+    const stats = await deleteWorkspaceResourceHistoryObjectsForWorkspace(env, 'proj-1', 'ws-1');
+
+    expect(stats).toMatchObject({ listedObjects: 1001, deletedObjects: 1001, truncated: false });
+    expect([...r2.objects.keys()]).toEqual([
+      'resource-history/v1/projects/proj-1/workspaces/ws-2/session/sess-1/v1/0.json.gz',
+    ]);
+  });
+
   it('keeps separate bounded summaries for reused workspace sessions while indexing raw chunks in R2', async () => {
     const sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
@@ -231,7 +255,7 @@ describe('workspace resource history', () => {
     expect(history.summary).toMatchObject({
       id: first.summaryId,
       sessionId: 'session-1',
-      sampleCount: 2,
+      sampleCount: 3,
     });
     expect(history.chunks).toHaveLength(1);
     expect(history.detail).toMatchObject({
@@ -251,8 +275,8 @@ describe('workspace resource history', () => {
       )
       .all() as Array<Record<string, unknown>>;
     expect(summaries).toEqual([
-      expect.objectContaining({ id: first.summaryId, session_id: 'session-1', sample_count: 2 }),
-      expect.objectContaining({ id: second.summaryId, session_id: 'session-2', sample_count: 2 }),
+      expect.objectContaining({ id: first.summaryId, session_id: 'session-1', sample_count: 3 }),
+      expect.objectContaining({ id: second.summaryId, session_id: 'session-2', sample_count: 3 }),
     ]);
     const chunks = sqlite
       .prepare(

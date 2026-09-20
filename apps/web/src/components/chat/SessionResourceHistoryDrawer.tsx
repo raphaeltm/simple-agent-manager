@@ -52,22 +52,31 @@ function sampleCpuMillis(sample: WorkspaceResourceSample): number {
   return Number(sample.cpuMillis ?? 0);
 }
 
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
+
+function sampleX(samples: WorkspaceResourceSample[], sample: WorkspaceResourceSample): number {
+  if (samples.length <= 1) return 0;
+  const start = samples[0]?.t;
+  const end = samples.at(-1)?.t;
+  if (typeof start !== 'number' || typeof end !== 'number') return 0;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+  return clampPercent(((sample.t - start) / (end - start)) * 100);
+}
+
 function seriesPoints(
   samples: WorkspaceResourceSample[],
   valueForSample: (sample: WorkspaceResourceSample) => number
 ): string {
   const max = Math.max(1, ...samples.map(valueForSample));
   return samples
-    .map((sample, index) => {
-      const x = samples.length === 1 ? 0 : (index / (samples.length - 1)) * 100;
+    .map((sample) => {
+      const x = sampleX(samples, sample);
       const y = 100 - (valueForSample(sample) / max) * 84 - 8;
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(' ');
-}
-
-function sampleX(samples: WorkspaceResourceSample[], index: number): number {
-  return samples.length === 1 ? 0 : (index / (samples.length - 1)) * 100;
 }
 
 function ResourceSparkline({
@@ -79,7 +88,7 @@ function ResourceSparkline({
   const eventMarkers = useMemo(
     () =>
       samples
-        .map((sample, index) => ({ sample, x: sampleX(samples, index) }))
+        .map((sample) => ({ sample, x: sampleX(samples, sample) }))
         .filter(({ sample }) => sample.gap || sample.oom || sample.oomKill || sample.counterReset),
     [samples]
   );
@@ -277,7 +286,8 @@ function ResourceHistoryContent({
     );
   }
 
-  if (!summary) {
+  const chunks = history?.chunks ?? [];
+  if (!summary && chunks.length === 0 && !detail) {
     return (
       <div className="rounded-lg border border-border-default bg-bg-surface p-4 text-sm text-fg-muted">
         No retained resource history is available for this session yet.
@@ -287,26 +297,28 @@ function ResourceHistoryContent({
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-2">
-        <StatCard icon={Cpu} label="CPU peak" value={formatCpuPeak(summary)} />
-        <StatCard
-          icon={MemoryStick}
-          label="RAM peak"
-          value={formatBytes(summary.memoryPeakBytes)}
-        />
-        <StatCard
-          icon={HardDrive}
-          label="I/O total"
-          value={`${formatBytes(summary.ioReadBytes)} read · ${formatBytes(summary.ioWriteBytes)} write`}
-        />
-        <StatCard
-          icon={Database}
-          label="Samples"
-          value={`${summary.sampleCount} · ${summary.gapCount} gaps`}
-        />
-      </div>
+      {summary && (
+        <div className="grid grid-cols-2 gap-2">
+          <StatCard icon={Cpu} label="CPU peak" value={formatCpuPeak(summary)} />
+          <StatCard
+            icon={MemoryStick}
+            label="RAM peak"
+            value={formatBytes(summary.memoryPeakBytes)}
+          />
+          <StatCard
+            icon={HardDrive}
+            label="I/O total"
+            value={`${formatBytes(summary.ioReadBytes)} read · ${formatBytes(summary.ioWriteBytes)} write`}
+          />
+          <StatCard
+            icon={Database}
+            label="Samples"
+            value={`${summary.sampleCount} · ${summary.gapCount} gaps`}
+          />
+        </div>
+      )}
 
-      {summary.oomCount > 0 && (
+      {summary && summary.oomCount > 0 && (
         <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-tint p-3 text-sm text-warning-fg">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" />
           <span>
@@ -323,7 +335,7 @@ function ResourceHistoryContent({
 
       <section className="space-y-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Chunks</h3>
-        {history?.chunks.map((chunk) => (
+        {chunks.map((chunk) => (
           <ChunkButton
             key={chunk.id}
             chunk={chunk}
@@ -427,7 +439,7 @@ export function SessionResourceHistoryDrawer({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded hover:bg-bg-hover text-fg-muted hover:text-fg-primary transition-colors"
+            className="min-h-14 min-w-14 p-1.5 rounded hover:bg-bg-hover text-fg-muted hover:text-fg-primary transition-colors"
             aria-label="Close resources"
           >
             <X size={16} />

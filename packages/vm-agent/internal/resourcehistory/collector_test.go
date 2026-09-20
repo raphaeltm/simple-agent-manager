@@ -188,6 +188,73 @@ func TestCollectorUploadsCompressedChunkAndHashesToolIDs(t *testing.T) {
 	}
 }
 
+func TestCollectorRetrySpoolDropsPermanentClientErrorsAndContinues(t *testing.T) {
+	var uploaded []int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var received uploadBody
+		if err := json.Unmarshal(body, &received); err != nil {
+			t.Fatalf("decode upload: %v", err)
+		}
+		if received.ChunkSequence == 0 {
+			http.Error(w, "bad chunk", http.StatusBadRequest)
+			return
+		}
+		uploaded = append(uploaded, received.ChunkSequence)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	spoolDir := t.TempDir()
+	collector := New(Config{
+		ControlPlaneURL: server.URL,
+		ProjectID:       "proj-1",
+		WorkspaceID:     "ws-1",
+		SpoolDir:        spoolDir,
+		CallbackToken:   func() string { return "callback-token" },
+	})
+	if err := collector.writeSpool(uploadBody{WorkspaceID: "ws-1", ChunkSequence: 0}); err != nil {
+		t.Fatalf("write rejected spool: %v", err)
+	}
+	if err := collector.writeSpool(uploadBody{WorkspaceID: "ws-1", ChunkSequence: 1}); err != nil {
+		t.Fatalf("write accepted spool: %v", err)
+	}
+
+	collector.retrySpool(context.Background())
+
+	if len(uploaded) != 1 || uploaded[0] != 1 {
+		t.Fatalf("uploaded sequences = %v, want [1]", uploaded)
+	}
+	if _, err := os.Stat(filepath.Join(spoolDir, "00000000000000000000.json")); !os.IsNotExist(err) {
+		t.Fatalf("permanently rejected spool file still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(spoolDir, "00000000000000000001.json")); !os.IsNotExist(err) {
+		t.Fatalf("uploaded spool file still exists: %v", err)
+	}
+}
+
+func TestCollectorPersistsNextSequenceAcrossRestart(t *testing.T) {
+	spoolDir := t.TempDir()
+	now := time.Unix(10, 0)
+	collector := New(Config{SpoolDir: spoolDir, Now: func() time.Time { return now }})
+	collector.mu.Lock()
+	collector.loadSequenceLocked()
+	first := collector.sequence
+	collector.sequence++
+	collector.persistSequenceLocked()
+	collector.mu.Unlock()
+
+	restarted := New(Config{SpoolDir: spoolDir, Now: func() time.Time { return now }})
+	restarted.mu.Lock()
+	restarted.loadSequenceLocked()
+	next := restarted.sequence
+	restarted.mu.Unlock()
+
+	if next != first+1 {
+		t.Fatalf("restarted sequence = %d, want %d", next, first+1)
+	}
+}
+
 func mustJSON(t *testing.T, value any) []byte {
 	t.Helper()
 	data, err := json.Marshal(value)

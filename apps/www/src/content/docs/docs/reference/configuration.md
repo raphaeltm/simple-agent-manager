@@ -1108,6 +1108,7 @@ An out-of-range weight makes the unit fail to load, which would take the slice h
 | `WORKSPACE_RESOURCE_DETAIL_MAX_POINTS`                           | `720`                           | Max samples returned by one raw detail read after spike-preserving downsampling                                                                                                                                  |
 | `WORKSPACE_RESOURCE_LIST_LIMIT`                                  | `24`                            | Max resource-history chunk index rows returned for one contextual read                                                                                                                                           |
 | `WORKSPACE_RESOURCE_CLEANUP_BATCH_SIZE`                          | `50`                            | Max expired resource-history chunks and summaries processed per scheduled cleanup sweep                                                                                                                          |
+| `WORKSPACE_RESOURCE_OBJECT_CLEANUP_LIMIT`                         | `5000`                          | Max resource-history R2 objects deleted when a project or workspace is deleted; deletion paginates until the prefix is empty or this safety budget is reached                                                    |
 
 :::caution[`PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS` means two different things]
 This one variable gates two different paths, and the same value has opposite effects on

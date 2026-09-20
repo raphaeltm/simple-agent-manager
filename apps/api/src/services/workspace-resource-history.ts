@@ -19,6 +19,7 @@ const DEFAULT_METADATA_MAX_BYTES = 8 * 1024;
 const DEFAULT_DETAIL_MAX_POINTS = 720;
 const DEFAULT_LIST_LIMIT = 24;
 const DEFAULT_CLEANUP_BATCH_SIZE = 50;
+const DEFAULT_OBJECT_CLEANUP_LIMIT = 5000;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export interface WorkspaceResourceUploadBody {
@@ -199,6 +200,13 @@ function detailMaxPoints(env: Env): number {
 
 function cleanupBatchSize(env: Env): number {
   return parsePositiveInt(env.WORKSPACE_RESOURCE_CLEANUP_BATCH_SIZE, DEFAULT_CLEANUP_BATCH_SIZE);
+}
+
+function objectCleanupLimit(env: Env): number {
+  return parsePositiveInt(
+    env.WORKSPACE_RESOURCE_OBJECT_CLEANUP_LIMIT,
+    DEFAULT_OBJECT_CLEANUP_LIMIT
+  );
 }
 
 function utf8ByteLength(value: string): number {
@@ -883,26 +891,25 @@ async function deleteWorkspaceResourceHistoryObjectsByPrefix(
 ): Promise<WorkspaceResourceObjectCleanupStats> {
   let listedObjects = 0;
   let deletedObjects = 0;
-  let cursor: string | undefined;
   let truncated = false;
 
   while (listedObjects < limit) {
-    const page = await env.PROJECT_DATA_ARCHIVE_R2.list({
-      prefix,
-      cursor,
-      limit: Math.min(1000, limit - listedObjects),
-    });
+    const pageLimit = Math.min(1000, limit - listedObjects);
+    const page = await env.PROJECT_DATA_ARCHIVE_R2.list({ prefix, limit: pageLimit });
+    if (page.objects.length === 0) {
+      truncated = Boolean(page.truncated);
+      break;
+    }
     for (const object of page.objects) {
       listedObjects += 1;
       await env.PROJECT_DATA_ARCHIVE_R2.delete(object.key);
       deletedObjects += 1;
       if (listedObjects >= limit) break;
     }
-    if (!page.truncated || !page.cursor || listedObjects >= limit) {
-      truncated = Boolean(page.truncated && page.cursor);
+    if (listedObjects >= limit) {
+      truncated = Boolean(page.truncated);
       break;
     }
-    cursor = page.cursor;
   }
 
   return { prefix, listedObjects, deletedObjects, truncated };
@@ -915,7 +922,7 @@ export async function deleteWorkspaceResourceHistoryObjectsForProject(
   return deleteWorkspaceResourceHistoryObjectsByPrefix(
     env,
     `${R2_PREFIX}/projects/${projectId}/`,
-    cleanupBatchSize(env)
+    objectCleanupLimit(env)
   );
 }
 
@@ -927,7 +934,7 @@ export async function deleteWorkspaceResourceHistoryObjectsForWorkspace(
   return deleteWorkspaceResourceHistoryObjectsByPrefix(
     env,
     `${R2_PREFIX}/projects/${projectId}/workspaces/${workspaceId}/`,
-    cleanupBatchSize(env)
+    objectCleanupLimit(env)
   );
 }
 

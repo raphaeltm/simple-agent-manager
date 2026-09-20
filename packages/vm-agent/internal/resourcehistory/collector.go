@@ -163,6 +163,16 @@ type uploadBody struct {
 	Summary           summaryPayload `json:"summary"`
 }
 
+type permanentUploadError struct{ err error }
+
+func (e permanentUploadError) Error() string { return e.err.Error() }
+func (e permanentUploadError) Unwrap() error { return e.err }
+
+func isPermanentUploadError(err error) bool {
+	var permanent permanentUploadError
+	return errors.As(err, &permanent)
+}
+
 func New(cfg Config) *Collector {
 	if cfg.SampleInterval <= 0 {
 		cfg.SampleInterval = DefaultSampleInterval
@@ -258,6 +268,9 @@ func (c *Collector) Start(parent context.Context) {
 	if err := os.MkdirAll(c.cfg.SpoolDir, 0o700); err != nil {
 		c.cfg.Logger.Warn("resourcehistory: create spool directory failed", "error", err)
 	}
+	c.mu.Lock()
+	c.loadSequenceLocked()
+	c.mu.Unlock()
 	go c.loop(runCtx)
 }
 
@@ -461,8 +474,10 @@ func (c *Collector) buildUpload(final bool) (uploadBody, bool) {
 	samples := append([]Sample(nil), c.samples...)
 	spans := append([]ToolSpan(nil), c.toolSpans...)
 	gaps := append([]map[string]any(nil), c.gaps...)
+	c.loadSequenceLocked()
 	sequence := c.sequence
 	c.sequence++
+	c.persistSequenceLocked()
 	c.samples = nil
 	c.toolSpans = nil
 	c.gaps = nil
@@ -539,6 +554,51 @@ func summarize(samples []Sample, interval time.Duration) summaryPayload {
 		out.OOMCount = &oom
 	}
 	return out
+}
+
+func (c *Collector) sequencePath() string {
+	return filepath.Join(c.cfg.SpoolDir, ".sequence")
+}
+
+func (c *Collector) loadSequenceLocked() {
+	if c.sequence > 0 {
+		return
+	}
+	maxSequence := c.cfg.Now().UnixMilli()
+	if data, err := os.ReadFile(c.sequencePath()); err == nil {
+		if parsed, parseErr := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64); parseErr == nil && parsed > maxSequence {
+			maxSequence = parsed
+		}
+	}
+	entries, err := os.ReadDir(c.cfg.SpoolDir)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			sequenceText := strings.TrimSuffix(entry.Name(), ".json")
+			if parsed, parseErr := strconv.ParseInt(sequenceText, 10, 64); parseErr == nil && parsed >= maxSequence {
+				maxSequence = parsed + 1
+			}
+		}
+	}
+	c.sequence = maxSequence
+}
+
+func (c *Collector) persistSequenceLocked() {
+	if err := os.MkdirAll(c.cfg.SpoolDir, 0o700); err != nil {
+		c.cfg.Logger.Warn("resourcehistory: create sequence directory failed", "error", err)
+		return
+	}
+	path := c.sequencePath()
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(strconv.FormatInt(c.sequence, 10)), 0o600); err != nil {
+		c.cfg.Logger.Warn("resourcehistory: write sequence failed", "error", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		c.cfg.Logger.Warn("resourcehistory: persist sequence failed", "error", err)
+	}
 }
 
 func (c *Collector) writeSpool(body uploadBody) error {
@@ -619,6 +679,11 @@ func (c *Collector) retrySpool(ctx context.Context) {
 			continue
 		}
 		if err := c.upload(ctx, body); err != nil {
+			if isPermanentUploadError(err) {
+				c.cfg.Logger.Warn("resourcehistory: dropping permanently rejected spool file", "file", name, "error", err)
+				_ = os.Remove(path)
+				continue
+			}
 			c.cfg.Logger.Debug("resourcehistory: upload failed", "error", err)
 			return
 		}
@@ -663,7 +728,11 @@ func (c *Collector) upload(parent context.Context, body uploadBody) error {
 		return nil
 	}
 	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-	return fmt.Errorf("control plane status %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+	err = fmt.Errorf("control plane status %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+		return permanentUploadError{err: err}
+	}
+	return err
 }
 
 func gzipBytes(raw []byte) ([]byte, error) {

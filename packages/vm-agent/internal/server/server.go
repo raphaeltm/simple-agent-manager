@@ -1017,7 +1017,7 @@ func (s *Server) Start() error {
 	s.startAcpHeartbeatReporter()
 	s.startResourceGuard()
 	s.resourceHistoryStarted.Store(true)
-	s.startAllResourceHistoryCollectors(context.Background())
+	s.startAllResourceHistoryCollectors()
 
 	// Start error reporter background flush
 	s.errorReporter.Start()
