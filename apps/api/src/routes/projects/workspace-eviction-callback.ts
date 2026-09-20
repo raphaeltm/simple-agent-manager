@@ -53,6 +53,12 @@ type WorkspaceEvictionResource = {
   evictionGeneration: string | null;
 };
 
+const RETRYABLE_EVICTION_RECOVERY_REASONS = new Set([
+  'workspace_deletion_unconfirmed',
+  'session_recovery_placement_placement',
+  'session_recovery_placement_transient',
+]);
+
 /**
  * VM-agent workspace eviction callback — mounted BEFORE projectsRoutes in
  * index.ts so callback JWT bearer tokens are verified here instead of falling
@@ -116,6 +122,12 @@ function workspaceEvictionErrorMessage(reason: WorkspaceEvictionBody['reason']):
     : 'Workspace evicted due to memory pressure';
 }
 
+function evictionRecoveryReasonIsRetryable(reason: string): boolean {
+  return (
+    RETRYABLE_EVICTION_RECOVERY_REASONS.has(reason) || reason.startsWith('recovery_start_failed:')
+  );
+}
+
 async function finalizeEvictionLifecycle(env: Env, workspace: WorkspaceEvictionResource) {
   if (
     !workspace.nodeId ||
@@ -150,7 +162,9 @@ async function recoverEvictedWorkspace(
       nodeId: body.nodeId,
       reason: recovery.reason,
     });
-    throw errors.conflict(`Evicted workspace recovery is not ready: ${recovery.reason}`);
+    if (evictionRecoveryReasonIsRetryable(recovery.reason)) {
+      throw errors.conflict(`Evicted workspace recovery is not ready: ${recovery.reason}`);
+    }
   }
 }
 

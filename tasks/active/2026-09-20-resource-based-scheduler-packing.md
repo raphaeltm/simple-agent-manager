@@ -31,7 +31,8 @@ SAM's node-pool scheduler still applies legacy workspace-count, co-tenant, and l
 - [x] Add deterministic unit, worker, and simulation coverage for all requested cases
 - [x] Run TypeScript validation and affected tests
 - [x] Run required specialist reviews and resolve findings
-- [ ] Open an unmerged PR, pass CI, trigger CodeRabbit once, and resolve its feedback
+- [x] Open an unmerged PR, pass CI, trigger CodeRabbit once, and address its initial feedback
+- [ ] Obtain parent/orchestrator review before merge or deployment
 
 ## Scope and Release Constraints
 
@@ -61,3 +62,4 @@ SAM's node-pool scheduler still applies legacy workspace-count, co-tenant, and l
 - Local screenshots: `.codex/tmp/playwright-screenshots/default-capacity-pools-project-edit-iphone-se-375x667--375x667.png` and `.codex/tmp/playwright-screenshots/default-capacity-pools-project-edit-desktop-1280x800--1280x800.png`.
 - VM-agent resource monitor, server, and persistence tests pass under the repository-pinned Go 1.26.6 toolchain, including race detection; `go vet` and `gofmt -d` are clean.
 - All specialist re-reviews pass: task completion, Cloudflare/D1, test engineering, UI/UX, constitution, documentation, Go, and security.
+- PR #2108 passes all 25 applicable CI and review checks; CodeRabbit was triggered exactly once and its initial findings are addressed in the follow-up commit.

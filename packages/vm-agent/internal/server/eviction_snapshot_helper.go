@@ -12,13 +12,17 @@ import (
 	"github.com/workspace/vm-agent/internal/resourcemon"
 )
 
+func noopSnapshotHelperCleanup() {
+	// No helper resources exist when snapshot-helper setup fails.
+}
+
 // startExitedEvictionSnapshotHelper mounts an exact stopped OOM victim's
 // volumes into a short-lived container created from that victim's writable
 // layer. The original entrypoint never runs, while the ordinary snapshot code
 // can still capture HOME and the worktree through docker exec.
 func (s *Server) startExitedEvictionSnapshotHelper(ctx context.Context, target resourcemon.EvictionTarget, runtime *WorkspaceRuntime) (*containerSnapshotTarget, func(), error) {
 	if err := s.verifyExitedOOMContainer(ctx, target.ContainerID); err != nil {
-		return nil, func() {}, err
+		return nil, noopSnapshotHelperCleanup, err
 	}
 	suffix := randomEventID()
 	image := "sam-eviction-snapshot:" + suffix
@@ -35,7 +39,7 @@ func (s *Server) startExitedEvictionSnapshotHelper(ctx context.Context, target r
 	}
 
 	if _, err := s.runEvictionDockerCommand(ctx, "commit", target.ContainerID, image); err != nil {
-		return nil, func() {}, fmt.Errorf("commit stopped OOM container for snapshot: %w", err)
+		return nil, noopSnapshotHelperCleanup, fmt.Errorf("commit stopped OOM container for snapshot: %w", err)
 	}
 	helperID, err := s.runEvictionDockerCommand(ctx,
 		"create",
@@ -51,16 +55,16 @@ func (s *Server) startExitedEvictionSnapshotHelper(ctx context.Context, target r
 	)
 	if err != nil {
 		cleanup()
-		return nil, func() {}, fmt.Errorf("create stopped OOM snapshot helper: %w", err)
+		return nil, noopSnapshotHelperCleanup, fmt.Errorf("create stopped OOM snapshot helper: %w", err)
 	}
 	helperID = strings.TrimSpace(helperID)
 	if !isValidContainerID(helperID) {
 		cleanup()
-		return nil, func() {}, fmt.Errorf("stopped OOM snapshot helper identity unavailable")
+		return nil, noopSnapshotHelperCleanup, fmt.Errorf("stopped OOM snapshot helper identity unavailable")
 	}
 	if _, err := s.runEvictionDockerCommand(ctx, "start", helperID); err != nil {
 		cleanup()
-		return nil, func() {}, fmt.Errorf("start stopped OOM snapshot helper: %w", err)
+		return nil, noopSnapshotHelperCleanup, fmt.Errorf("start stopped OOM snapshot helper: %w", err)
 	}
 	return &containerSnapshotTarget{
 		containerID: helperID,

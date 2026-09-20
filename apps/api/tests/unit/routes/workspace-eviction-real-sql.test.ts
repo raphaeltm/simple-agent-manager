@@ -338,6 +338,30 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
     });
   });
 
+  it.each(['eviction_snapshot_missing_or_stale', 'source_task_not_wakeable'])(
+    'acknowledges terminal recovery outcome %s and records the eviction activity',
+    async (reason) => {
+      mocks.recoverWorkspaceAfterEviction.mockResolvedValueOnce({ status: 'unavailable', reason });
+
+      expect((await evict()).status).toBe(204);
+      expect(state().workspace).toEqual({ status: 'evicted' });
+      expect(mocks.recordActivityEvent).toHaveBeenCalledOnce();
+    }
+  );
+
+  it.each([
+    'workspace_deletion_unconfirmed',
+    'session_recovery_placement_placement',
+    'session_recovery_placement_transient',
+    'recovery_start_failed:task runner unavailable',
+  ])('keeps retryable recovery outcome %s queued with a conflict', async (reason) => {
+    mocks.recoverWorkspaceAfterEviction.mockResolvedValueOnce({ status: 'unavailable', reason });
+
+    expect((await evict()).status).toBe(409);
+    expect(state().workspace).toEqual({ status: 'evicted' });
+    expect(mocks.recordActivityEvent).not.toHaveBeenCalled();
+  });
+
   it('does not release reservation or billing when the container failed to stop', async () => {
     const before = state();
     expect((await evict({ containerStopped: false })).status).toBe(409);
