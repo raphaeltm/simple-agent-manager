@@ -1,6 +1,6 @@
 # SAM daily journal — resource history
 
-Status: active
+Status: completed
 
 ## Problem
 
@@ -32,7 +32,7 @@ architecture. It must discuss only code, features, or technology.
 - [x] Add a Mermaid flow diagram for the collector, retained data, and reader path.
 - [x] Run the narrow marketing-site validation and inspect the built page.
 - [x] Run documentation and task-completion reviews; address findings.
-- [ ] Create, validate, review, merge, and monitor the PR.
+- [x] Create, validate, review, merge, and monitor the PR.
 
 ## Acceptance criteria
 
@@ -41,7 +41,13 @@ architecture. It must discuss only code, features, or technology.
 - [x] It describes collection, retention, and reading boundaries without exposing sensitive data or overstating tool correlation.
 - [x] It includes a Mermaid diagram because the distributed data flow is central to the explanation.
 - [x] The marketing site builds successfully and the published page renders correctly.
-- [ ] The change has a reviewed, merged PR and the production deployment succeeds.
+- [x] The change has a reviewed, merged PR and the production deployment succeeds.
+
+## Completion evidence
+
+- PR #2111 merged as `8f35f823ce70ba236990d1f7391b7d40dbdc3d71`.
+- CodeRabbit's sole finding added direct cgroup-v2, R2, and D1 documentation links; the fix passed lint, build, and the focused desktop/mobile Mermaid test.
+- The `Deploy Marketing Site` run `35521271708` completed successfully.
 
 ## References
 
