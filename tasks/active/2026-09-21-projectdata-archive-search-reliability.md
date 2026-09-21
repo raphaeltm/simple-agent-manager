@@ -108,14 +108,14 @@ session ownership remain separate follow-ups.
 
 ### Tests and measurement
 
-- [ ] Add meaningful unit and workerd tests for production-shaped long/tool/Unicode/noncompressible
+- [x] Add meaningful unit and workerd tests for production-shaped long/tool/Unicode/noncompressible
   rows, one oversized row, >5k and 10k+ partial indexes, >64 occupied owners, equal timestamps,
   late/out-of-order rows, split terms, grouped-pruned compact sessions, and multiple generations.
-- [ ] Fault inject resets/timeouts after export, PUT, receipt, checkpoint, seal, manifest, verification,
+- [x] Fault inject resets/timeouts after export, PUT, receipt, checkpoint, seal, manifest, verification,
   deletion, and publication; prove resume does not recopy verified prefixes or weaken delete proofs.
-- [ ] Test concurrent migration/search, missing/corrupt R2 objects, target/FTS failures, duplicate
+- [x] Test concurrent migration/search, missing/corrupt R2 objects, target/FTS failures, duplicate
   coordinators, lease theft, membership revocation, cursor tampering, rollback, and legacy formats.
-- [ ] Verify exact transcript text, message IDs/order, tool metadata/output retrieval, counts, hashes,
+- [x] Verify exact transcript text, message IDs/order, tool metadata/output retrieval, counts, hashes,
   complete lexical recall, deterministic top K, and physical source reclamation.
 - [ ] Benchmark complete search cold/warm for empty, rare, common, historical, and filtered queries at
   current 111-owner shape. Capture p50/p95, wall latency, owner/row/R2 operations, billed DO duration

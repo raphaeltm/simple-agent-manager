@@ -31,6 +31,7 @@ import {
   canonicalizeArchiveRow,
   canonicalRowsSha256,
   compareArchiveStrings,
+  createCanonicalRowsChainHasher,
   createCanonicalRowsHasher,
   sha256Hex,
 } from '../../project-data-archive/hashing';
@@ -2033,7 +2034,7 @@ function rebuildTargetFts(sql: SqlStorage, sessionId: string, pageRows: number):
   });
 }
 
-const ARCHIVE_SEARCH_INDEX_VERSION = 1;
+const ARCHIVE_SEARCH_INDEX_VERSION = 2;
 const ARCHIVE_SEARCH_DOCUMENT_COLUMNS = [
   'projection_id',
   'document_id',
@@ -2096,7 +2097,7 @@ function insertArchiveSearchDocument(
   sql: SqlStorage,
   sessionId: string,
   document: PendingArchiveSearchDocument,
-  hasher?: ReturnType<typeof createCanonicalRowsHasher>
+  hasher?: { update(row: Record<string, unknown>): void }
 ): void {
   const row = {
     projection_id: document.projectionId,
@@ -2184,7 +2185,7 @@ async function rebuildArchiveSearchProjection(
   );
   clearArchiveSearchProjection(sql, sessionId, pageRows);
 
-  const hasher = createCanonicalRowsHasher(ARCHIVE_SEARCH_DOCUMENT_COLUMNS);
+  const hasher = createCanonicalRowsChainHasher(ARCHIVE_SEARCH_DOCUMENT_COLUMNS);
   const rawHasher = createCanonicalRowsHasher(validateTableName('chat_messages').columns);
   let rawLastMessageAt: number | null = null;
   let pending: PendingArchiveSearchDocument | null = null;
@@ -2305,7 +2306,7 @@ async function rebuildArchiveSearchProjection(
       'ProjectData archive search projection does not cover every derived document'
     );
   }
-  const sha256 = hasher.digestHex();
+  const sha256 = hasher.digestHex;
   sql.exec(
     `UPDATE project_data_archive_target_sessions
      SET search_index_version = ?, search_index_state = 'complete',
@@ -2369,7 +2370,7 @@ function verifyArchiveSearchProjection(
   expected: ArchiveSearchCoverage,
   pageRows: number
 ): void {
-  const hasher = createCanonicalRowsHasher(ARCHIVE_SEARCH_DOCUMENT_COLUMNS);
+  const hasher = createCanonicalRowsChainHasher(ARCHIVE_SEARCH_DOCUMENT_COLUMNS);
   let documentCount = 0;
   let lastRowid = 0;
   for (;;) {
@@ -2410,7 +2411,7 @@ function verifyArchiveSearchProjection(
     documentCount !== expected.documentCount ||
     indexed !== expected.documentCount ||
     hasher.rowCount !== expected.documentCount ||
-    hasher.digestHex() !== expected.sha256
+    hasher.digestHex !== expected.sha256
   ) {
     throw new ProjectDataArchiveInvariantError(
       'archive_search_index_verification_failed',
@@ -2457,9 +2458,11 @@ function parsePendingArchiveSearchDocument(value: unknown): PendingArchiveSearch
 }
 
 /**
- * Advance lazy compact-index repair by a bounded number of immutable R2 chunks.
- * The target-session row is the durable checkpoint, so a reset replays at most
- * the uncheckpointed chunk and idempotent projection identities prevent drift.
+ * Advance lazy archive-index repair by one bounded source page. Compact raw
+ * history advances by immutable R2 chunk; legacy raw history and grouped
+ * fallback advance by the configured hash-page size. Every phase persists its
+ * cursor, projection commitment and counters, so a reset replays at most one
+ * page and idempotent projection identities prevent drift.
  */
 async function repairArchiveSearchProjectionStep(
   sql: SqlStorage,
@@ -2469,54 +2472,100 @@ async function repairArchiveSearchProjectionStep(
 ): Promise<ArchiveSearchCoverage | null> {
   const existing = readArchiveSearchCoverage(sql, sessionId);
   if (existing) return existing;
-  if (!compactArchive.isCompactArchive(sql, sessionId)) {
-    return ensureArchiveSearchCoverage(sql, env, sessionId, now);
-  }
   const pageRows = resolveHashPageRows(
     Number.parseInt(env.PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS ?? '', 10)
   );
   const maxGroupChars = resolveMaterializationPassConfig(env).maxGroupChars;
   let repair = sql
     .exec(
-      `SELECT search_index_state, search_repair_next_ordinal,
-              search_repair_pending_json, search_repair_message_count
+      `SELECT search_index_state, search_repair_phase, search_repair_next_ordinal,
+              search_repair_raw_cursor, search_repair_grouped_cursor,
+              search_repair_pending_json, search_repair_message_count,
+              search_repair_projection_sha256, search_repair_document_count
        FROM project_data_archive_target_sessions WHERE session_id = ?`,
       sessionId
     )
     .toArray()[0];
   if (repair?.search_index_state !== 'repairing') {
     clearArchiveSearchProjection(sql, sessionId, pageRows);
+    const initialChain = createCanonicalRowsChainHasher(ARCHIVE_SEARCH_DOCUMENT_COLUMNS);
     sql.exec(
       `UPDATE project_data_archive_target_sessions
        SET search_index_version = ?, search_index_state = 'repairing',
            search_index_message_count = NULL, search_index_document_count = NULL,
            search_index_sha256 = NULL, search_indexed_at = NULL,
-           search_repair_next_ordinal = 0, search_repair_pending_json = NULL,
-           search_repair_message_count = 0, updated_at = ?
+           search_repair_phase = 'raw', search_repair_next_ordinal = 0,
+           search_repair_raw_cursor = NULL, search_repair_grouped_cursor = NULL,
+           search_repair_pending_json = NULL, search_repair_message_count = 0,
+           search_repair_projection_sha256 = ?, search_repair_document_count = 0,
+           updated_at = ?
        WHERE session_id = ?`,
       ARCHIVE_SEARCH_INDEX_VERSION,
+      initialChain.digestHex,
       now,
       sessionId
     );
     repair = {
       search_index_state: 'repairing',
+      search_repair_phase: 'raw',
       search_repair_next_ordinal: 0,
+      search_repair_raw_cursor: null,
+      search_repair_grouped_cursor: null,
       search_repair_pending_json: null,
       search_repair_message_count: 0,
+      search_repair_projection_sha256: initialChain.digestHex,
+      search_repair_document_count: 0,
     };
+  }
+
+  let phase = strictString(repair.search_repair_phase, 'archive_search.repair_phase');
+  if (phase !== 'raw' && phase !== 'grouped') {
+    throw new ProjectDataArchiveInvariantError(
+      'archive_search_repair_phase_invalid',
+      'ProjectData archive search repair phase is invalid'
+    );
   }
   let nextOrdinal = strictInteger(
     repair.search_repair_next_ordinal,
     'archive_search.repair_next_ordinal'
   );
+  let rawCursor =
+    repair.search_repair_raw_cursor === null
+      ? null
+      : strictString(repair.search_repair_raw_cursor, 'archive_search.repair_raw_cursor');
+  let groupedCursor =
+    repair.search_repair_grouped_cursor === null
+      ? null
+      : strictString(repair.search_repair_grouped_cursor, 'archive_search.repair_grouped_cursor');
   let messageCount = strictInteger(
     repair.search_repair_message_count,
     'archive_search.repair_message_count'
   );
   let pending = parsePendingArchiveSearchDocument(repair.search_repair_pending_json);
+  const chain = createCanonicalRowsChainHasher(ARCHIVE_SEARCH_DOCUMENT_COLUMNS, {
+    digestHex: strictString(
+      repair.search_repair_projection_sha256,
+      'archive_search.repair_projection_sha256'
+    ),
+    rowCount: strictInteger(
+      repair.search_repair_document_count,
+      'archive_search.repair_document_count'
+    ),
+  });
+  const commitDocument = (document: PendingArchiveSearchDocument) => {
+    insertArchiveSearchDocument(sql, sessionId, document);
+    chain.update({
+      projection_id: document.projectionId,
+      document_id: document.documentId,
+      session_id: sessionId,
+      role: document.role,
+      content: document.content,
+      created_at: document.createdAt,
+    });
+  };
   const flush = () => {
     if (!pending) return;
-    insertArchiveSearchDocument(sql, sessionId, pending);
+    commitDocument(pending);
     pending = null;
   };
   const consume = (row: ProjectDataArchiveRow) => {
@@ -2544,45 +2593,95 @@ async function repairArchiveSearchProjectionStep(
       createdAt,
     };
   };
-  const configuredChunks = Number.parseInt(env.PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS ?? '', 10);
-  const chunkLimit =
-    Number.isSafeInteger(configuredChunks) && configuredChunks > 0
-      ? Math.min(configuredChunks, 64)
-      : 1;
-  let chunksRead = 0;
-  for await (const chunk of compactArchive.compactRawChunks(sql, env, sessionId, {
-    perChunkTimeoutMs: compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS),
-    startAfterOrdinal: nextOrdinal - 1,
-  })) {
-    for (const row of chunk.rows) consume(row);
-    nextOrdinal = chunk.ordinal + 1;
-    chunksRead++;
-    if (chunksRead >= chunkLimit) break;
-  }
-  sql.exec(
-    `UPDATE project_data_archive_target_sessions
-     SET search_repair_next_ordinal = ?, search_repair_pending_json = ?,
-         search_repair_message_count = ?, updated_at = ?
-     WHERE session_id = ?`,
-    nextOrdinal,
-    pending ? JSON.stringify(pending) : null,
-    messageCount,
-    now,
-    sessionId
-  );
-  const maxOrdinal = Number(
-    sql
-      .exec(
-        `SELECT COALESCE(MAX(ordinal), -1) AS max_ordinal
-         FROM project_data_archive_raw_chunks WHERE session_id = ?`,
-        sessionId
-      )
-      .toArray()[0]?.max_ordinal ?? -1
-  );
-  if (nextOrdinal <= maxOrdinal) return null;
+  const persistProgress = () => {
+    sql.exec(
+      `UPDATE project_data_archive_target_sessions
+       SET search_repair_phase = ?, search_repair_next_ordinal = ?,
+           search_repair_raw_cursor = ?, search_repair_grouped_cursor = ?,
+           search_repair_pending_json = ?, search_repair_message_count = ?,
+           search_repair_projection_sha256 = ?, search_repair_document_count = ?,
+           updated_at = ?
+       WHERE session_id = ?`,
+      phase,
+      nextOrdinal,
+      rawCursor,
+      groupedCursor,
+      pending ? JSON.stringify(pending) : null,
+      messageCount,
+      chain.digestHex,
+      chain.rowCount,
+      now,
+      sessionId
+    );
+  };
 
-  flush();
-  forEachGroupedRowPaged(sql, sessionId, pageRows, (row) => {
+  if (phase === 'raw') {
+    let rawComplete = false;
+    if (compactArchive.isCompactArchive(sql, sessionId)) {
+      const configuredChunks = Number.parseInt(
+        env.PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS ?? '',
+        10
+      );
+      const chunkLimit =
+        Number.isSafeInteger(configuredChunks) && configuredChunks > 0
+          ? Math.min(configuredChunks, 64)
+          : 1;
+      let chunksRead = 0;
+      for await (const chunk of compactArchive.compactRawChunks(sql, env, sessionId, {
+        perChunkTimeoutMs: compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS),
+        startAfterOrdinal: nextOrdinal - 1,
+      })) {
+        for (const row of chunk.rows) consume(row);
+        nextOrdinal = chunk.ordinal + 1;
+        chunksRead++;
+        if (chunksRead >= chunkLimit) break;
+      }
+      const maxOrdinal = Number(
+        sql
+          .exec(
+            `SELECT COALESCE(MAX(ordinal), -1) AS max_ordinal
+             FROM project_data_archive_raw_chunks WHERE session_id = ?`,
+            sessionId
+          )
+          .toArray()[0]?.max_ordinal ?? -1
+      );
+      rawComplete = nextOrdinal > maxOrdinal;
+    } else {
+      const spec = validateTableName('chat_messages');
+      let query = `SELECT ${spec.columns.join(', ')} FROM chat_messages WHERE session_id = ?`;
+      const params: Array<string | number> = [sessionId];
+      if (rawCursor) {
+        query += ` AND ${spec.cursorPredicate}`;
+        params.push(...spec.cursorValues(rawCursor));
+      }
+      query += ` ORDER BY ${spec.orderBy} LIMIT ?`;
+      params.push(pageRows);
+      const rows = sql.exec(query, ...params).toArray();
+      for (const row of rows) consume(toArchiveRow(row, spec.columns));
+      const tail = rows[rows.length - 1];
+      if (tail) rawCursor = spec.cursorFromRow(tail);
+      rawComplete = rows.length < pageRows;
+    }
+    if (rawComplete) {
+      flush();
+      phase = 'grouped';
+    }
+    persistProgress();
+    return null;
+  }
+
+  const groupedSpec = validateTableName('chat_messages_grouped');
+  let groupedQuery = `SELECT ${groupedSpec.columns.join(', ')}
+    FROM chat_messages_grouped WHERE session_id = ?`;
+  const groupedParams: Array<string | number> = [sessionId];
+  if (groupedCursor) {
+    groupedQuery += ` AND ${groupedSpec.cursorPredicate}`;
+    groupedParams.push(...groupedSpec.cursorValues(groupedCursor));
+  }
+  groupedQuery += ` ORDER BY ${groupedSpec.orderBy} LIMIT ?`;
+  groupedParams.push(pageRows);
+  const groupedRows = sql.exec(groupedQuery, ...groupedParams).toArray();
+  for (const row of groupedRows) {
     const documentId = strictString(row.id, 'archive_search.grouped_id');
     const content = strictString(row.content, 'archive_search.grouped_content');
     const equivalent = sql
@@ -2594,57 +2693,59 @@ async function repairArchiveSearchProjectionStep(
         content
       )
       .toArray()[0];
-    if (equivalent) return;
-    insertArchiveSearchDocument(sql, sessionId, {
-      projectionId: `grouped:${sessionId}:${documentId}`,
-      documentId,
-      role: strictString(row.role, 'archive_search.grouped_role'),
-      content,
-      createdAt: strictInteger(row.created_at, 'archive_search.grouped_created_at'),
-    });
-  });
-  const hasher = createCanonicalRowsHasher(ARCHIVE_SEARCH_DOCUMENT_COLUMNS);
-  let lastRowid = 0;
-  for (;;) {
-    const rows = sql
-      .exec(
-        `SELECT rowid, projection_id, document_id, session_id, role, content, created_at
-         FROM project_data_archive_search_documents
-         WHERE session_id = ? AND rowid > ? ORDER BY rowid ASC LIMIT ?`,
-        sessionId,
-        lastRowid,
-        pageRows
-      )
-      .toArray();
-    for (const row of rows) {
-      lastRowid = strictInteger(row.rowid, 'archive_search.rowid');
-      hasher.update({
-        projection_id: strictString(row.projection_id, 'archive_search.projection_id'),
-        document_id: strictString(row.document_id, 'archive_search.document_id'),
-        session_id: strictString(row.session_id, 'archive_search.session_id'),
-        role: strictString(row.role, 'archive_search.role'),
-        content: strictString(row.content, 'archive_search.content'),
-        created_at: strictInteger(row.created_at, 'archive_search.created_at'),
+    if (!equivalent) {
+      commitDocument({
+        projectionId: `grouped:${sessionId}:${documentId}`,
+        documentId,
+        role: strictString(row.role, 'archive_search.grouped_role'),
+        content,
+        createdAt: strictInteger(row.created_at, 'archive_search.grouped_created_at'),
       });
     }
-    if (rows.length < pageRows) break;
   }
-  const documentCount = hasher.rowCount;
+  const groupedTail = groupedRows[groupedRows.length - 1];
+  if (groupedTail) groupedCursor = groupedSpec.cursorFromRow(groupedTail);
+  if (groupedRows.length >= pageRows) {
+    persistProgress();
+    return null;
+  }
+
+  const documentCount = countRows(
+    sql,
+    'SELECT COUNT(*) AS count FROM project_data_archive_search_documents WHERE session_id = ?',
+    sessionId
+  );
+  const indexed = countRows(
+    sql,
+    `SELECT COUNT(*) AS count
+     FROM project_data_archive_search_documents_fts f
+     JOIN project_data_archive_search_documents d ON d.rowid = f.rowid
+     WHERE d.session_id = ?`,
+    sessionId
+  );
+  if (documentCount !== chain.rowCount || indexed !== documentCount) {
+    throw new ProjectDataArchiveInvariantError(
+      'archive_search_index_verification_failed',
+      'ProjectData archive search repair failed count and FTS verification'
+    );
+  }
   const coverage: ArchiveSearchCoverage = {
     version: ARCHIVE_SEARCH_INDEX_VERSION,
     state: 'complete',
     messageCount,
     documentCount,
-    sha256: hasher.digestHex(),
+    sha256: chain.digestHex,
   };
-  verifyArchiveSearchProjection(sql, sessionId, coverage, pageRows);
   sql.exec(
     `UPDATE project_data_archive_target_sessions
      SET search_index_version = ?, search_index_state = 'complete',
          search_index_message_count = ?, search_index_document_count = ?,
          search_index_sha256 = ?, search_indexed_at = ?,
-         search_repair_next_ordinal = NULL, search_repair_pending_json = NULL,
-         search_repair_message_count = NULL, updated_at = ?
+         search_repair_phase = NULL, search_repair_next_ordinal = NULL,
+         search_repair_raw_cursor = NULL, search_repair_grouped_cursor = NULL,
+         search_repair_pending_json = NULL, search_repair_message_count = NULL,
+         search_repair_projection_sha256 = NULL, search_repair_document_count = NULL,
+         updated_at = ?
      WHERE session_id = ?`,
     ARCHIVE_SEARCH_INDEX_VERSION,
     messageCount,

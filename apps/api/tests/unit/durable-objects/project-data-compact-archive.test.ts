@@ -8,7 +8,10 @@ import {
   writeCompactChunk,
 } from '../../../src/project-data-archive/compact-r2';
 import type { ProjectDataArchiveChunk } from '../../../src/project-data-archive/contract';
-import { canonicalRowsSha256 } from '../../../src/project-data-archive/hashing';
+import {
+  canonicalRowsSha256,
+  createCanonicalRowsChainHasher,
+} from '../../../src/project-data-archive/hashing';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const columns = [
@@ -357,6 +360,19 @@ describe('compact archive migration compatibility', () => {
           await archive.archiveTargetSearchMessages(target, env, owner, 'consolidated', null, 10)
         ).toHaveLength(1);
         if (!metadataBytes) {
+          const expectedProjection = target
+            .exec(
+              `SELECT projection_id, document_id, session_id, role, content, created_at
+               FROM project_data_archive_search_documents
+               WHERE session_id = 'session' ORDER BY rowid ASC`
+            )
+            .toArray();
+          const expectedCoverage = target
+            .exec(
+              `SELECT search_index_message_count, search_index_document_count, search_index_sha256
+               FROM project_data_archive_target_sessions WHERE session_id = 'session'`
+            )
+            .toArray()[0];
           target.exec('DELETE FROM project_data_archive_search_documents_fts');
           target.exec('DELETE FROM project_data_archive_search_documents');
           target.exec(
@@ -371,7 +387,32 @@ describe('compact archive migration compatibility', () => {
           vi.mocked(bucket.get).mockClear();
           let projectSearch;
           let replayedInterruptedChunk = false;
-          for (let step = 0; step <= rawChunkCount; step++) {
+          const firstObject = [...objects.entries()][0];
+          expect(firstObject).toBeDefined();
+          if (firstObject) objects.delete(firstObject[0]);
+          const corruptSearch = await archive.archiveTargetSearchProjectMessages(
+            target,
+            {
+              ...env,
+              PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS: '1',
+              PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS: '1',
+            },
+            {
+              kind: 'archive_shard',
+              projectId: 'project',
+              ownerName: owner.ownerName,
+              generation: 1,
+            },
+            'Unicode',
+            null,
+            10
+          );
+          expect(corruptSearch.coverage).toMatchObject({
+            sessionsIncomplete: 1,
+            errors: [{ sessionId: 'session', error: 'archive_search_projection_repair_failed' }],
+          });
+          if (firstObject) objects.set(firstObject[0], firstObject[1]);
+          for (let step = 0; step <= rawChunkCount + 2; step++) {
             const beforeGets = vi.mocked(bucket.get).mock.calls.length;
             projectSearch = await archive.archiveTargetSearchProjectMessages(
               target,
@@ -405,9 +446,19 @@ describe('compact archive migration compatibility', () => {
               );
               target.exec(
                 `UPDATE project_data_archive_target_sessions
-                 SET search_repair_next_ordinal = 0, search_repair_pending_json = NULL,
-                     search_repair_message_count = 0
-                 WHERE session_id = 'session'`
+                 SET search_repair_phase = 'raw', search_repair_next_ordinal = 0,
+                     search_repair_raw_cursor = NULL, search_repair_grouped_cursor = NULL,
+                     search_repair_pending_json = NULL, search_repair_message_count = 0,
+                     search_repair_projection_sha256 = ?, search_repair_document_count = 0
+                 WHERE session_id = 'session'`,
+                createCanonicalRowsChainHasher([
+                  'projection_id',
+                  'document_id',
+                  'session_id',
+                  'role',
+                  'content',
+                  'created_at',
+                ]).digestHex
               );
               replayedInterruptedChunk = true;
             }
@@ -418,9 +469,43 @@ describe('compact archive migration compatibility', () => {
             sessionsIndexed: 1,
             sessionsIncomplete: 0,
           });
-          expect(projectSearch?.results.length).toBeGreaterThan(0);
+          expect(projectSearch?.results.map((result) => result.id)).toContain('message-1');
+          expect(
+            (
+              await archive.archiveTargetSearchProjectMessages(
+                target,
+                env,
+                {
+                  kind: 'archive_shard',
+                  projectId: 'project',
+                  ownerName: owner.ownerName,
+                  generation: 1,
+                },
+                'consolidated',
+                null,
+                10
+              )
+            ).results
+          ).toHaveLength(1);
+          expect(
+            target
+              .exec(
+                `SELECT projection_id, document_id, session_id, role, content, created_at
+                 FROM project_data_archive_search_documents
+                 WHERE session_id = 'session' ORDER BY rowid ASC`
+              )
+              .toArray()
+          ).toEqual(expectedProjection);
+          expect(
+            target
+              .exec(
+                `SELECT search_index_message_count, search_index_document_count, search_index_sha256
+                 FROM project_data_archive_target_sessions WHERE session_id = 'session'`
+              )
+              .toArray()[0]
+          ).toEqual(expectedCoverage);
           expect(bucket.get).toHaveBeenCalledTimes(
-            rawChunkCount + (replayedInterruptedChunk ? 1 : 0)
+            rawChunkCount + (replayedInterruptedChunk ? 1 : 0) + 1
           );
         }
         const recovered: unknown[] = [];

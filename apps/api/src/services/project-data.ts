@@ -1651,7 +1651,7 @@ export async function searchMessagesWithArchiveMetadata(
   const indexComplete = complete && cursor.sessionsIncomplete === 0 && cursor.ownersFailed === 0;
   const partial = !complete || !indexComplete || hasErrors;
 
-  const response = {
+  const response: ProjectDataSearchMessagesWithArchiveMetadataResult = {
     results: sortAndLimitSearchResults(cursor.results, limit),
     archiveSearch: {
       partial,

@@ -385,6 +385,165 @@ describe('compact R2 archive rollout', () => {
     );
   });
 
+  it(
+    'completes MCP search across two real archive owners while lazily repairing bounded R2 chunks',
+    { timeout: 120_000 },
+    async () => {
+      const projectId = `compact-search-${crypto.randomUUID()}`;
+      await seedProjectGraph(projectId);
+      const source = projectDataStub(projectId);
+      await source.ensureProjectId(projectId);
+      const archived = new Map<string, { sessionId: string; ownerName: string }>();
+      const deterministicPayload = (seed: number, length: number) => {
+        let state = seed + 1;
+        let result = '';
+        const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        for (let index = 0; index < length; index++) {
+          state = (state * 48271) % 0x7fffffff;
+          result += alphabet[state % alphabet.length];
+        }
+        return result;
+      };
+
+      await withArchiveEnv(
+        {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+          PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '1000000',
+          PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '25',
+          PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: '1',
+          PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY: '1',
+          PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS: '1',
+          PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS: '1',
+        },
+        async () => {
+          for (
+            let attempt = 0;
+            attempt < 6 && new Set([...archived.values()].map((v) => v.ownerName)).size < 2;
+            attempt++
+          ) {
+            const sessionId = await source.createSession(null, `Historical search ${attempt}`);
+            const rows = seedMessages(120).map((message, index) => ({
+              ...message,
+              messageId: `${sessionId}-message-${index}`,
+              content: `${index === 0 ? 'historicalneedle ' : ''}${deterministicPayload(attempt * 1000 + index, 1024)}`,
+            }));
+            await source.persistMessageBatch(sessionId, rows);
+            await source.stopSession(sessionId);
+            await source.runSummarySyncForTest();
+            const migration = await runScopedProjectDataArchiveCanary(testEnv, {
+              projectId,
+              sessionId,
+              dryRun: false,
+              reason: 'worker complete archive search fixture',
+              nowDate: new Date(Date.now() + 60_000 + attempt),
+            });
+            expect(migration.stats).toMatchObject({ migrated: 1, failed: 0 });
+            const location = await readLocation(projectId, sessionId);
+            expect(location?.location_state).toBe('archive_shard');
+            archived.set(sessionId, { sessionId, ownerName: location!.owner_name });
+          }
+
+          expect(
+            new Set([...archived.values()].map((value) => value.ownerName)).size
+          ).toBeGreaterThanOrEqual(2);
+          for (const { sessionId, ownerName } of archived.values()) {
+            await runInDurableObject(projectDataStub(ownerName), async (_instance, state) => {
+              state.storage.sql.exec(
+                'DELETE FROM project_data_archive_search_documents_fts WHERE rowid IN (SELECT rowid FROM project_data_archive_search_documents WHERE session_id = ?)',
+                sessionId
+              );
+              state.storage.sql.exec(
+                'DELETE FROM project_data_archive_search_documents WHERE session_id = ?',
+                sessionId
+              );
+              state.storage.sql.exec(
+                `UPDATE project_data_archive_target_sessions
+                 SET search_index_version = NULL, search_index_state = NULL,
+                     search_index_message_count = NULL, search_index_document_count = NULL,
+                     search_index_sha256 = NULL, search_indexed_at = NULL,
+                     search_repair_phase = NULL, search_repair_next_ordinal = NULL,
+                     search_repair_raw_cursor = NULL, search_repair_grouped_cursor = NULL,
+                     search_repair_pending_json = NULL, search_repair_message_count = NULL,
+                     search_repair_projection_sha256 = NULL, search_repair_document_count = NULL
+                 WHERE session_id = ?`,
+                sessionId
+              );
+            });
+          }
+
+          const token = crypto.randomUUID();
+          await env.KV.put(
+            `mcp:${token}`,
+            JSON.stringify({
+              taskId: '',
+              contextType: 'conversation',
+              taskMode: 'conversation',
+              projectId,
+              userId: OWNER,
+              workspaceId: '',
+              chatSessionId: [...archived.keys()][0],
+              createdAt: new Date().toISOString(),
+            }),
+            { expirationTtl: 3600 }
+          );
+          let continuation: string | undefined;
+          let finalResult:
+            | {
+                results: Array<{ messageId: string; sessionId: string }>;
+                archiveSearch: {
+                  complete: boolean;
+                  continuation: string | null;
+                  archiveOwnerLimit: number;
+                };
+              }
+            | undefined;
+          for (let step = 0; step < 100; step++) {
+            const context = createExecutionContext();
+            const response = await worker.fetch(
+              new Request('https://api.test.example.com/mcp', {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  jsonrpc: '2.0',
+                  id: step + 1,
+                  method: 'tools/call',
+                  params: {
+                    name: 'search_messages',
+                    arguments: {
+                      query: 'historicalneedle',
+                      limit: 20,
+                      ...(continuation ? { continuation } : {}),
+                    },
+                  },
+                }),
+              }),
+              testEnv,
+              context
+            );
+            expect(response.status).toBe(200);
+            const body = (await response.json()) as {
+              error?: unknown;
+              result: { content: Array<{ text: string }> };
+            };
+            expect(body.error).toBeUndefined();
+            await waitOnExecutionContext(context);
+            finalResult = JSON.parse(body.result.content[0]!.text) as typeof finalResult;
+            expect(finalResult?.archiveSearch.archiveOwnerLimit).toBe(1);
+            if (finalResult?.archiveSearch.complete) break;
+            continuation = finalResult?.archiveSearch.continuation ?? undefined;
+            expect(continuation).toEqual(expect.any(String));
+          }
+          expect(finalResult?.archiveSearch).toMatchObject({ complete: true, continuation: null });
+          expect(new Set(finalResult?.results.map((result) => result.sessionId))).toEqual(
+            new Set(archived.keys())
+          );
+        }
+      );
+    }
+  );
+
   it('shares an atomic durable allowance across concurrent attempts, retries and UTC windows', async () => {
     const { reserveArchiveWrites, ARCHIVE_BUDGET_WINDOW_MS } =
       await import('../../src/project-data-archive/write-budget');

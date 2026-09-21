@@ -364,6 +364,74 @@ describe('ProjectData project-wide archive search metadata', () => {
     }
   });
 
+  it('deduplicates equal-timestamp cross-generation results with bounded concurrency', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createLocationTable(sqlite);
+      const insert = sqlite.prepare(
+        `INSERT INTO project_data_session_locations
+           (project_id, session_id, location_state, owner_kind, owner_name,
+            generation, migration_id, routing_schema_version, updated_at)
+         VALUES ('project-search', ?, 'archive_shard', 'archive_shard', ?, ?, ?, 1, 1000)`
+      );
+      const stubs: Record<string, SearchStub> = { 'project-search': stub({}) };
+      let active = 0;
+      let peak = 0;
+      for (let index = 0; index < 4; index++) {
+        const generation = index < 2 ? 2 : 1;
+        const owner = `project-search:archive:g${generation}:s${index}`;
+        insert.run(`location-${index}`, owner, generation, `migration-${index}`);
+        const archive = stub({});
+        archive.archiveTargetSearchProjectMessages.mockImplementation(async () => {
+          active++;
+          peak = Math.max(peak, active);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          active--;
+          return {
+            results: [
+              row(
+                index < 2 ? 'duplicate' : `message-${index}`,
+                index < 2 ? 'shared' : `session-${index}`,
+                500
+              ),
+            ],
+            coverage: {
+              sessionsAvailable: 1,
+              sessionsIndexed: 1,
+              sessionsIncomplete: 0,
+              repairAttempts: 0,
+              sessionsRepaired: 0,
+              errors: [],
+            },
+          };
+        });
+        stubs[owner] = archive;
+      }
+      const result = await searchMessagesWithArchiveMetadata(
+        {
+          ...envForSearch(sqlite, stubs),
+          PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: '4',
+          PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY: '2',
+        } as Env,
+        'project-search',
+        'needle',
+        null,
+        null,
+        10
+      );
+
+      expect(peak).toBe(2);
+      expect(result.archiveSearch).toMatchObject({ complete: true, archiveOwnersQueried: 4 });
+      expect(result.results.map((item) => `${item.sessionId}:${item.id}`)).toEqual([
+        'session-2:message-2',
+        'session-3:message-3',
+        'shared:duplicate',
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('keeps failed and incomplete owners retryable until their coverage is final', async () => {
     const sqlite = new Database(':memory:');
     try {

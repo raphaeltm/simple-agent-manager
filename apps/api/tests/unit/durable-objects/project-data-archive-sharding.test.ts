@@ -26,6 +26,7 @@ import {
 import {
   persistMessage,
   PROJECT_DATA_TRANSCRIPT_WRITE_FENCED,
+  RPC_SIZE_BUDGET_BYTES,
 } from '../../../src/durable-objects/project-data/messages';
 import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
 import {
@@ -840,11 +841,60 @@ describe('ProjectData terminal archive sharding bridge', () => {
           )
           .toArray()[0]
       ).toEqual({ search_index_message_count: 10_001 });
+
+      target.sql.exec('DELETE FROM project_data_archive_search_documents_fts');
+      target.sql.exec('DELETE FROM project_data_archive_search_documents');
+      target.sql.exec(
+        `UPDATE project_data_archive_target_sessions
+         SET search_index_version = NULL, search_index_state = NULL,
+             search_index_message_count = NULL, search_index_document_count = NULL,
+             search_index_sha256 = NULL, search_indexed_at = NULL,
+             search_repair_phase = NULL, search_repair_next_ordinal = NULL,
+             search_repair_raw_cursor = NULL, search_repair_grouped_cursor = NULL,
+             search_repair_pending_json = NULL, search_repair_message_count = NULL,
+             search_repair_projection_sha256 = NULL, search_repair_document_count = NULL
+         WHERE session_id = ?`,
+        sessionId
+      );
+      let repaired;
+      let priorDocuments = 0;
+      for (let step = 0; step < 30; step++) {
+        repaired = await archiveTargetSearchProjectMessages(
+          target.sql,
+          { PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS: '500' } as never,
+          {
+            kind: 'archive_shard',
+            projectId: base.projectId,
+            ownerName: base.targetOwnerName,
+            generation: base.targetGeneration,
+          },
+          'wide payload 10000',
+          null,
+          10
+        );
+        const documents = Number(
+          target.sql
+            .exec(
+              'SELECT COUNT(*) AS count FROM project_data_archive_search_documents WHERE session_id = ?',
+              sessionId
+            )
+            .toArray()[0]?.count ?? 0
+        );
+        expect(documents - priorDocuments).toBeLessThanOrEqual(500);
+        priorDocuments = documents;
+        if (repaired.coverage.sessionsIncomplete === 0) break;
+      }
+      expect(repaired?.coverage).toMatchObject({
+        sessionsAvailable: 1,
+        sessionsIndexed: 1,
+        sessionsIncomplete: 0,
+      });
+      expect(repaired?.results.map((result) => result.id)).toContain(`${sessionId}-message-10000`);
     } finally {
       source.db.close();
       target.db.close();
     }
-  }, 15_000);
+  }, 30_000);
 
   it('returns a typed pre-copy refusal before any write, and throws once an intent exists', async () => {
     const source = makeSql();
@@ -1056,11 +1106,84 @@ describe('ProjectData terminal archive sharding bridge', () => {
         expect(chunk.rows).toHaveLength(1);
         expect(chunk.byteCount).toBeGreaterThan(1);
         expect(chunk.hasMore).toBe(true);
+        const seen = [...chunk.rowIds];
+        let cursor = chunk.cursor;
+        let ordinal = 1;
+        let hasMore = chunk.hasMore;
+        while (hasMore) {
+          const next = await exportArchiveChunk(source.sql, {
+            projectId: 'project-archive',
+            sessionId: 'session-archive',
+            migrationId: 'migration-small-budget',
+            sourceOwnerName: 'project-archive',
+            targetOwnerName: 'project-archive:archive:g1:s1',
+            targetGeneration: 1,
+            sourceIntentToken: 'intent-small-budget',
+            tableName,
+            ordinal,
+            cursor,
+            maxRows: 10,
+            maxBytes: 1,
+          });
+          seen.push(...next.rowIds);
+          cursor = next.cursor;
+          hasMore = next.hasMore;
+          ordinal++;
+          expect(ordinal).toBeLessThan(10);
+        }
+        expect(new Set(seen).size).toBe(seen.length);
       } finally {
         source.db.close();
       }
     }
   );
+
+  it('refuses a single archive row beyond the absolute Durable Object RPC ceiling', async () => {
+    const source = makeSql();
+    try {
+      seedTerminalSession(source.sql);
+      const oversizedId = String(
+        source.sql
+          .exec(
+            "SELECT id FROM chat_messages WHERE session_id = 'session-archive' ORDER BY created_at ASC LIMIT 1"
+          )
+          .toArray()[0]?.id
+      );
+      source.sql.exec(
+        'UPDATE chat_messages SET content = ? WHERE id = ?',
+        'z'.repeat(RPC_SIZE_BUDGET_BYTES + 1),
+        oversizedId
+      );
+      await prepareArchiveSourceIntent(source.sql, {
+        projectId: 'project-archive',
+        sessionId: 'session-archive',
+        migrationId: 'migration-rpc-ceiling',
+        sourceOwnerName: 'project-archive',
+        targetOwnerName: 'project-archive:archive:g1:s1',
+        targetGeneration: 1,
+        sourceIntentToken: 'intent-rpc-ceiling',
+        now: NOW,
+        minTerminalAgeMs: 0,
+      });
+      await expect(
+        exportArchiveChunk(source.sql, {
+          projectId: 'project-archive',
+          sessionId: 'session-archive',
+          migrationId: 'migration-rpc-ceiling',
+          sourceOwnerName: 'project-archive',
+          targetOwnerName: 'project-archive:archive:g1:s1',
+          targetGeneration: 1,
+          sourceIntentToken: 'intent-rpc-ceiling',
+          tableName: 'chat_messages',
+          ordinal: 0,
+          maxRows: 10,
+          maxBytes: 1,
+        })
+      ).rejects.toMatchObject({ reason: 'archive_row_exceeds_chunk_budget' });
+    } finally {
+      source.db.close();
+    }
+  }, 15_000);
 });
 
 /**
