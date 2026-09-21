@@ -159,12 +159,14 @@ function readCandidates(
        WHERE s.status IN ('stopped', 'failed')
          AND s.updated_at <= ?
          AND s.materialized_at IS NOT NULL
-         AND COALESCE(s.search_index_state, '${SEARCH_INDEX_STATE_COMPLETE}') != '${SEARCH_INDEX_STATE_PRUNED}'
+         AND COALESCE(s.search_index_state, ?) != ?
          AND (? IS NULL OR s.id > ?)
        GROUP BY s.id
        ORDER BY s.id ASC
        LIMIT ?`,
       cutoff,
+      SEARCH_INDEX_STATE_COMPLETE,
+      SEARCH_INDEX_STATE_PRUNED,
       cursorSessionId,
       cursorSessionId ?? '',
       config.groupedFtsCleanupBatchSessions + 1
@@ -243,10 +245,11 @@ function deleteGroupedFtsForSession(
      SET materialized_at = NULL,
          materialized_through_created_at = NULL,
          materialized_through_sequence = NULL,
-         search_index_state = '${SEARCH_INDEX_STATE_PRUNED}',
+         search_index_state = ?,
          search_index_updated_at = ?,
          search_index_degradation_reason = ?
      WHERE id = ?`,
+    SEARCH_INDEX_STATE_PRUNED,
     now,
     'Grouped/FTS derived rows were pruned for storage relief; search uses raw-message LIKE fallback for this terminal session.',
     sessionId

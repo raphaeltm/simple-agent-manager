@@ -582,6 +582,20 @@ const PENDING_SESSIONS_PREDICATE = `
   )`;
 
 /**
+ * Composed once at module scope rather than inline at the call site.
+ *
+ * `sql.exec()` must receive a plain string: the AST quality gate rejects any
+ * template expression inside the call, and it also counts `?` placeholders in the
+ * literal parts only, so interpolating a fragment that carries its own `?` reads
+ * as a placeholder/parameter mismatch. Both queries below bind every value.
+ */
+const PENDING_SESSIONS_COUNT_SQL = `${PENDING_SESSIONS_CTE}
+  SELECT COUNT(*) AS count FROM candidates c WHERE ${PENDING_SESSIONS_PREDICATE}`;
+
+const PENDING_SESSIONS_SELECT_SQL = `${PENDING_SESSIONS_CTE}
+  SELECT c.id AS id FROM candidates c WHERE ${PENDING_SESSIONS_PREDICATE} LIMIT ?`;
+
+/**
  * Pending sessions WITHIN the scan window, not the true backlog.
  *
  * `remaining` counts only the `scanLimit` newest-updated candidates, so it can read
@@ -590,13 +604,7 @@ const PENDING_SESSIONS_PREDICATE = `
  * single zero (rule 65: disclose what the cap dropped).
  */
 function countPendingSessions(sql: SqlStorage, scanLimit: number): number {
-  const row = sql
-    .exec(
-      `${PENDING_SESSIONS_CTE}
-       SELECT COUNT(*) AS count FROM candidates c WHERE ${PENDING_SESSIONS_PREDICATE}`,
-      scanLimit
-    )
-    .toArray()[0];
+  const row = sql.exec(PENDING_SESSIONS_COUNT_SQL, scanLimit).toArray()[0];
   return row ? parseCount(row, 'materialization.remaining') : 0;
 }
 
@@ -619,14 +627,7 @@ export function materializePendingSessions(
   scanLimit: number = DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT,
   passConfig?: MaterializationPassConfig
 ): { materialized: number; errors: number; remaining: number } {
-  const sessions = sql
-    .exec(
-      `${PENDING_SESSIONS_CTE}
-       SELECT c.id AS id FROM candidates c WHERE ${PENDING_SESSIONS_PREDICATE} LIMIT ?`,
-      scanLimit,
-      limit
-    )
-    .toArray();
+  const sessions = sql.exec(PENDING_SESSIONS_SELECT_SQL, scanLimit, limit).toArray();
 
   let materialized = 0;
   let errors = 0;
