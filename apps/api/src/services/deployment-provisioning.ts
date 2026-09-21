@@ -11,10 +11,7 @@ import type {
   CapacityPlacementSnapshot,
   CredentialProvider,
   CredentialSource,
-} from '@simple-agent-manager/shared';
-import {
-  DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
-  DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
+  ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
 import { and, eq, ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -30,9 +27,22 @@ import {
 import { createNodeRecord, provisionNode } from './nodes';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
+  resolveReusableNodeCapacitySnapshot,
+  type CapacityAwareNodePlacementRow,
+  type TaskStartCapacityPoolSelection,
+} from './placement-resolver';
+import {
   assertDeploymentProvisioningAuthority,
   cleanupFreshProvisioningNode,
 } from './provisioning-authority';
+import {
+  aggregateWorkspaceReservationRows,
+  evaluateWorkspaceReservationCapacity,
+  resolveTrustedWorkspaceNodeCapacity,
+  resolveWorkspaceAdmissionPolicy,
+  trustedWorkspaceNodeCapacityColumnsSql,
+  type WorkspaceResourceNode,
+} from './workspace-resource-capacity';
 
 type VMArchitecture = NonNullable<NativeVMConfig['architecture']>;
 
@@ -74,40 +84,31 @@ interface DeploymentPlacement {
   providerInstanceImage: string | null;
   providerInstanceArchitecture: VMArchitecture | null;
   capacityPlacementSnapshot: CapacityPlacementSnapshot | null;
+  capacityPoolSelection: TaskStartCapacityPoolSelection | null;
+  reservation: ResolvedResourceReservation;
 }
 
-interface DeploymentNodeCandidate {
+interface DeploymentNodeCandidate extends CapacityAwareNodePlacementRow, WorkspaceResourceNode {
   id: string;
-  last_metrics: string | null;
+  providerInstanceBootDiskSizeGb: number | null;
+  providerInstanceImage: string | null;
+  providerInstanceArchitecture: VMArchitecture | null;
+}
+
+interface DeploymentNodeMatch {
+  nodeId: string;
+  placement: DeploymentPlacement;
 }
 
 interface LinkEnvironmentToNodeOptions {
   env: Env;
-  db: ReturnType<typeof drizzle<typeof schema>>;
+  db: ReturnType<typeof drizzle>;
   envId: string;
   nodeId: string;
   placement: DeploymentPlacement;
   userId: string;
   expectedNodeStatus: 'creating' | 'running';
   nodeMode: 'shared' | 'exclusive';
-}
-
-function parseEnvInt(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function parseMetrics(
-  value: string | null
-): { cpuLoadAvg1?: number; memoryPercent?: number } | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value);
-    return typeof parsed === 'object' && parsed !== null ? parsed : null;
-  } catch {
-    return null;
-  }
 }
 
 /** Native identity is independent of the historical vm_size label. The shared
@@ -131,43 +132,46 @@ export async function findDeploymentNodeWithCapacity(
   env: Env,
   userId: string,
   placement: DeploymentPlacement,
-  requiresVolumes: boolean
-): Promise<string | null> {
-  if (requiresVolumes) {
+  requiresVolumes: boolean,
+  options: { nodeId?: string; excludeEnvironmentId?: string } = {}
+): Promise<DeploymentNodeMatch | null> {
+  if (requiresVolumes || placement.reservation.exclusiveNode) {
     return null;
   }
   if (typeof env.DATABASE.prepare !== 'function') {
     return null;
   }
-  const maxEnvironments = parseEnvInt(
-    env.MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
-    DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE
-  );
-  // NOTE: this reads the SAME env var as workspace admission
-  // (`resolveWorkspaceAdmissionPolicy`) but resolves a DIFFERENT default, and
-  // unlike that path it has no declared-reservation accounting underneath it —
-  // only `maxEnvironments`. Setting TASK_RUN_NODE_CPU_THRESHOLD_PERCENT for the
-  // workspace path therefore also moves this veto, which is the only CPU
-  // protection deployment nodes have. The comparison below is also unit-mixed
-  // (a raw load average against a percent). Both are tracked in SAM idea
-  // 01M27ZBDV1HRDYJMASDGHCAZR3; deliberately not changed here so a workspace
-  // scheduling fix does not silently alter deployment placement.
-  const cpuThreshold = parseEnvInt(
-    env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
-    DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT
-  );
-  const memThreshold = parseEnvInt(
-    env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
-    DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT
-  );
-
-  const nativeIdentity = deploymentNativeIdentityPredicate(placement);
-  // Candidate selection is advisory; linkEnvironmentToNode rechecks the full
-  // placement authority atomically before it writes the environment link.
-  // Keeping this read to stable node attributes avoids composing the large
-  // authority predicate twice on D1's shallow expression tree limit.
+  const policy = resolveWorkspaceAdmissionPolicy(env);
   const nodes = await env.DATABASE.prepare(
-    `SELECT n.id, n.last_metrics
+    `SELECT n.id,
+            n.vm_size AS vmSize,
+            n.vm_location AS vmLocation,
+            n.cloud_provider AS cloudProvider,
+            n.capacity_pool_id AS capacityPoolId,
+            n.capacity_pool_scope AS capacityPoolScope,
+            n.capacity_pool_revision AS capacityPoolRevision,
+            n.capacity_source_id AS capacitySourceId,
+            n.capacity_pool_candidate_id AS capacityPoolCandidateId,
+            n.placement_credential_source AS placementCredentialSource,
+            n.placement_credential_reference AS placementCredentialReference,
+            n.placement_credential_version AS placementCredentialVersion,
+            n.capacity_pool_project_id AS capacityPoolProjectId,
+            n.workload_role AS workloadRole,
+            ${trustedWorkspaceNodeCapacityColumnsSql('n')},
+            n.provider_instance_type AS providerInstanceType,
+            n.provider_instance_vcpu_count AS providerInstanceVcpuCount,
+            n.provider_instance_memory_mb AS providerInstanceMemoryMb,
+            n.provider_instance_disk_gb AS providerInstanceDiskGb,
+            n.provider_instance_boot_disk_size_gb AS providerInstanceBootDiskSizeGb,
+            n.provider_instance_image AS providerInstanceImage,
+            n.provider_instance_architecture AS providerInstanceArchitecture,
+            n.provider_instance_price_display AS providerInstancePriceDisplay,
+            n.provider_instance_price_currency AS providerInstancePriceCurrency,
+            n.provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
+            n.provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
+            n.placement_explanation_json AS placementExplanationJson,
+            n.last_metrics AS lastMetrics,
+            n.last_heartbeat_at AS lastHeartbeatAt
      FROM nodes n
      WHERE n.user_id = ?
        AND n.status = 'running'
@@ -175,15 +179,10 @@ export async function findDeploymentNodeWithCapacity(
        AND n.node_role = 'deployment'
        AND COALESCE(n.node_mode, 'shared') = 'shared'
        AND n.cloud_provider = ?
-       AND n.vm_location = ?
-       ${nativeIdentity.sql}`
+       ${options.nodeId ? 'AND n.id = ?' : ''}
+     ORDER BY n.id`
   )
-    .bind(
-      userId,
-      placement.provider,
-      placement.location,
-      ...nativeIdentity.binds
-    )
+    .bind(userId, placement.provider, ...(options.nodeId ? [options.nodeId] : []))
     .all<DeploymentNodeCandidate>();
 
   const candidates = nodes.results ?? [];
@@ -192,42 +191,109 @@ export async function findDeploymentNodeWithCapacity(
   const nodeIds = candidates.map((node) => node.id);
   const placeholders = nodeIds.map(() => '?').join(',');
   const counts = await env.DATABASE.prepare(
-    `SELECT node_id, COUNT(*) AS c
+    `SELECT id, node_id AS nodeId, resolved_reservation_json AS resolvedReservationJson
      FROM deployment_environments
-     WHERE node_id IN (${placeholders})
-     GROUP BY node_id`
+     WHERE node_id IN (${placeholders})`
   )
     .bind(...nodeIds)
-    .all<{ node_id: string; c: number }>();
-  const countByNode = new Map((counts.results ?? []).map((row) => [row.node_id, row.c]));
+    .all<{ id: string; nodeId: string; resolvedReservationJson: string | null }>();
+  const rowsByNode = new Map<string, Array<{ resolvedReservationJson: string | null }>>();
+  for (const row of counts.results ?? []) {
+    if (row.id === options.excludeEnvironmentId) continue;
+    const rows = rowsByNode.get(row.nodeId) ?? [];
+    rows.push({ resolvedReservationJson: row.resolvedReservationJson });
+    rowsByNode.set(row.nodeId, rows);
+  }
 
-  const scored = candidates
-    .filter((node) => (countByNode.get(node.id) ?? 0) < maxEnvironments)
-    .map((node) => {
-      const metrics = parseMetrics(node.last_metrics);
-      if (!metrics) {
-        return { id: node.id, score: null };
-      }
-      const cpu = metrics.cpuLoadAvg1 ?? 0;
-      const mem = metrics.memoryPercent ?? 0;
-      if (cpu >= cpuThreshold || mem >= memThreshold) return null;
-      return {
-        id: node.id,
-        score: cpu * 0.4 + mem * 0.6,
-      };
-    })
-    .filter((node): node is { id: string; score: number | null } => node !== null);
+  const scored = candidates.flatMap((node) => {
+    const capacityPlacementSnapshot = resolveReusableNodeCapacitySnapshot({
+      selection: placement.capacityPoolSelection,
+      node,
+      projectId: placement.projectId,
+      requestedVmSize: placement.vmSize,
+      requestedReservation: placement.reservation,
+    });
+    if (capacityPlacementSnapshot === undefined) return [];
+    if (
+      placement.capacityPoolSelection === null &&
+      !directDeploymentNodeMatchesPlacement(node, placement)
+    ) {
+      return [];
+    }
+
+    const usage = aggregateWorkspaceReservationRows(rowsByNode.get(node.id) ?? []);
+    const decision = evaluateWorkspaceReservationCapacity(
+      node,
+      usage,
+      placement.reservation,
+      policy
+    );
+    if (!decision.admitted) return [];
+
+    const trusted = resolveTrustedWorkspaceNodeCapacity(node);
+    const remainingCpu =
+      trusted.vcpuCount === null
+        ? Number.MAX_SAFE_INTEGER
+        : trusted.vcpuCount * 1_000 - usage.cpuMillis - placement.reservation.cpuMillis;
+    const remainingMemory =
+      trusted.memoryMb === null
+        ? Number.MAX_SAFE_INTEGER
+        : trusted.memoryMb -
+          policy.hostMemoryReserveMb -
+          usage.memoryMb -
+          placement.reservation.memoryMb;
+    return [
+      {
+        nodeId: node.id,
+        remainingCpu,
+        remainingMemory,
+        placement: deploymentPlacementForNode(placement, node, capacityPlacementSnapshot),
+      },
+    ];
+  });
 
   if (scored.length === 0) return null;
 
   scored.sort((a, b) => {
-    if (a.score === null && b.score === null) return a.id.localeCompare(b.id);
-    if (a.score === null) return 1;
-    if (b.score === null) return -1;
-    return a.score - b.score || a.id.localeCompare(b.id);
+    return (
+      a.remainingMemory - b.remainingMemory ||
+      a.remainingCpu - b.remainingCpu ||
+      a.nodeId.localeCompare(b.nodeId)
+    );
   });
 
-  return scored[0]?.id ?? null;
+  const selected = scored[0];
+  return selected ? { nodeId: selected.nodeId, placement: selected.placement } : null;
+}
+
+function directDeploymentNodeMatchesPlacement(
+  node: DeploymentNodeCandidate,
+  placement: DeploymentPlacement
+): boolean {
+  return (
+    node.vmLocation === placement.location &&
+    node.providerInstanceType === placement.providerInstanceType &&
+    node.providerInstanceBootDiskSizeGb === placement.providerInstanceBootDiskSizeGb &&
+    node.providerInstanceImage === placement.providerInstanceImage &&
+    node.providerInstanceArchitecture === placement.providerInstanceArchitecture
+  );
+}
+
+function deploymentPlacementForNode(
+  request: DeploymentPlacement,
+  node: DeploymentNodeCandidate,
+  capacityPlacementSnapshot: CapacityPlacementSnapshot | null
+): DeploymentPlacement {
+  return {
+    ...request,
+    location: node.vmLocation ?? request.location,
+    vmSize: node.vmSize ?? request.vmSize,
+    providerInstanceType: node.providerInstanceType ?? null,
+    providerInstanceBootDiskSizeGb: node.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: node.providerInstanceImage,
+    providerInstanceArchitecture: node.providerInstanceArchitecture,
+    capacityPlacementSnapshot,
+  };
 }
 
 async function readEnvironmentNodeId(
@@ -245,6 +311,7 @@ async function readEnvironmentNodeId(
 export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promise<boolean> {
   const { env, envId, nodeId, placement, userId, expectedNodeStatus, nodeMode } = opts;
   if (typeof env.DATABASE.prepare !== 'function') return false;
+  if ((nodeMode === 'exclusive') !== placement.reservation.exclusiveNode) return false;
 
   const authority = buildPlacementAuthoritySqlPredicate({
     nodeAlias: 'n',
@@ -256,19 +323,107 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
     requireProjectMembership: true,
   });
   const nativeIdentity = deploymentNativeIdentityPredicate(placement);
-  const maxEnvironments =
-    nodeMode === 'exclusive'
-      ? 1
-      : parseEnvInt(
-          env.MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
-          DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE
-        );
+  const policy = resolveWorkspaceAdmissionPolicy(env);
+  const reservation = placement.reservation;
+  const reservationJson = JSON.stringify(reservation);
+  const otherReservationsSql = `
+    SELECT occupied.resolved_reservation_json
+    FROM deployment_environments occupied
+    WHERE occupied.node_id = n.id AND occupied.id != de.id`;
+  const validReservationSql = `(resolved_reservation_json IS NOT NULL
+    AND json_valid(resolved_reservation_json)
+    AND json_extract(resolved_reservation_json, '$.version') IN (1, 2, 3)
+    AND json_type(resolved_reservation_json, '$.cpuMillis') = 'integer'
+    AND json_extract(resolved_reservation_json, '$.cpuMillis') > 0
+    AND json_type(resolved_reservation_json, '$.memoryMb') = 'integer'
+    AND json_extract(resolved_reservation_json, '$.memoryMb') > 0
+    AND json_type(resolved_reservation_json, '$.diskMb') = 'integer'
+    AND json_extract(resolved_reservation_json, '$.diskMb') >= 0
+    AND json_type(resolved_reservation_json, '$.exclusiveNode') IN ('true', 'false'))`;
+  const runningCapacitySql = `
+       AND n.provider_instance_id IS NOT NULL
+       AND n.observed_hardware_source = 'observed'
+       AND n.observed_provider_instance_vcpu_count > 0
+       AND n.observed_provider_instance_memory_mb > 0
+       AND n.observed_provider_instance_disk_gb > 0
+       AND NOT EXISTS (
+         SELECT 1 FROM (${otherReservationsSql}) existing
+         WHERE NOT ${validReservationSql}
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM (${otherReservationsSql}) existing
+         WHERE json_extract(resolved_reservation_json, '$.exclusiveNode') = 1
+       )
+       AND COALESCE((
+         SELECT SUM(json_extract(resolved_reservation_json, '$.cpuMillis'))
+         FROM (${otherReservationsSql}) existing
+       ), 0) + ? <= (n.observed_provider_instance_vcpu_count * 1000 * ? / 100)
+       AND COALESCE((
+         SELECT SUM(json_extract(resolved_reservation_json, '$.memoryMb'))
+         FROM (${otherReservationsSql}) existing
+       ), 0) + ? <= (n.observed_provider_instance_memory_mb - ?)
+       AND COALESCE((
+         SELECT SUM(json_extract(resolved_reservation_json, '$.diskMb'))
+         FROM (${otherReservationsSql}) existing
+       ), 0) + ? <= (n.observed_provider_instance_disk_gb * 1024)
+       AND (
+         NOT EXISTS (SELECT 1 FROM (${otherReservationsSql}) existing)
+         OR (
+           n.last_metrics IS NOT NULL
+           AND json_valid(n.last_metrics)
+           AND n.last_heartbeat_at >= ?
+           AND n.last_heartbeat_at <= ?
+           AND COALESCE(json_extract(n.last_metrics, '$.version'), 1) = 1
+           AND json_type(n.last_metrics, '$.cpuLoadAvg1') IN ('integer', 'real')
+           AND json_extract(n.last_metrics, '$.cpuLoadAvg1') >= 0
+           AND (json_extract(n.last_metrics, '$.cpuLoadAvg1') * 100.0 /
+                n.observed_provider_instance_vcpu_count) < ?
+           AND json_type(n.last_metrics, '$.memoryPercent') IN ('integer', 'real')
+           AND json_extract(n.last_metrics, '$.memoryPercent') BETWEEN 0 AND 100
+           AND json_type(n.last_metrics, '$.diskPercent') IN ('integer', 'real')
+           AND json_extract(n.last_metrics, '$.diskPercent') >= 0
+           AND json_extract(n.last_metrics, '$.diskPercent') < ?
+           AND (
+             json_type(n.last_metrics, '$.creatingWorkspaces') IS NULL
+             OR (
+               json_type(n.last_metrics, '$.creatingWorkspaces') = 'integer'
+               AND json_extract(n.last_metrics, '$.creatingWorkspaces') >= 0
+             )
+           )
+         )
+       )`;
+  const creatingCapacitySql = `
+       AND NOT EXISTS (SELECT 1 FROM (${otherReservationsSql}) existing)
+       AND n.provider_instance_vcpu_count * 1000 >= ?
+       AND n.provider_instance_memory_mb - ? >= ?
+       AND (n.provider_instance_disk_gb IS NULL OR n.provider_instance_disk_gb * 1024 >= ?)`;
+  const now = new Date();
+  const capacitySql = expectedNodeStatus === 'running' ? runningCapacitySql : creatingCapacitySql;
+  const capacityBinds =
+    expectedNodeStatus === 'running'
+      ? [
+          reservation.cpuMillis,
+          policy.cpuShareBudgetPercent,
+          reservation.memoryMb,
+          policy.hostMemoryReserveMb,
+          reservation.diskMb,
+          new Date(now.getTime() - policy.metricsTtlMs).toISOString(),
+          now.toISOString(),
+          policy.cpuThresholdPercent,
+          policy.diskPressureThresholdPercent,
+        ]
+      : [
+          reservation.cpuMillis,
+          policy.hostMemoryReserveMb,
+          reservation.memoryMb,
+          reservation.diskMb,
+        ];
   const result = await env.DATABASE.prepare(
     `UPDATE deployment_environments AS de
-     SET node_id = ?, provider = ?, location = ?, updated_at = ?
+     SET node_id = ?, provider = ?, location = ?, resolved_reservation_json = ?, updated_at = ?
      FROM nodes n
      WHERE de.id = ?
-       AND de.node_id IS NULL
+       AND (de.node_id IS NULL OR de.node_id = n.id)
        AND n.id = ?
        AND n.user_id = ?
        AND n.status = ?
@@ -277,7 +432,6 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
        AND n.vm_location = ?
        ${nativeIdentity.sql}
        AND COALESCE(n.node_mode, 'shared') = ?
-       AND (SELECT COUNT(*) FROM deployment_environments occupied WHERE occupied.node_id = n.id) < ?
        AND (
          COALESCE(n.node_mode, 'shared') = 'shared'
          OR NOT EXISTS (
@@ -285,12 +439,14 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
            WHERE existing.node_id = n.id
          )
        )
+       ${capacitySql}
        ${authority.sql}`
   )
     .bind(
       nodeId,
       placement.provider,
       placement.location,
+      reservationJson,
       new Date().toISOString(),
       envId,
       nodeId,
@@ -300,7 +456,7 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
       placement.location,
       ...nativeIdentity.binds,
       nodeMode,
-      maxEnvironments,
+      ...capacityBinds,
       ...authority.binds
     )
     .run();
@@ -380,6 +536,7 @@ export async function resolveDeploymentPlacement(
     vmSizeOverride?: string;
     vmLocationOverride?: string;
     providerOverride?: CredentialProvider;
+    reservation?: ResolvedResourceReservation;
   }
 ): Promise<DeploymentPlacement | null> {
   const db = drizzle(env.DATABASE, { schema });
@@ -412,6 +569,7 @@ export async function resolveDeploymentPlacement(
     credentialProjectPolicy: 'current-project',
     taskModeDefault: 'task',
     workloadRole: 'deployment',
+    resolvedReservationOverride: options?.reservation,
   });
   if ('error' in allocation) {
     log.error('deployment_provisioning.no_provider', {
@@ -442,6 +600,8 @@ export async function resolveDeploymentPlacement(
     providerInstanceImage: allocation.providerInstanceImage,
     providerInstanceArchitecture: allocation.providerInstanceArchitecture,
     capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
+    capacityPoolSelection: allocation.eligibleCapacityPoolSelection,
+    reservation: allocation.placement.resolvedReservation,
   };
 }
 
@@ -465,45 +625,52 @@ export async function provisionDeploymentNode(
     vmLocationOverride?: string;
     providerOverride?: CredentialProvider;
     requiresVolumes?: boolean;
+    reservation?: ResolvedResourceReservation;
   }
 ): Promise<DeploymentNodeResult | null> {
   const db = drizzle(env.DATABASE, { schema });
 
   const projectId = _projectId;
-  const placement = await resolveDeploymentPlacement(userId, env, projectId, options);
-  if (!placement) {
+  const resolvedPlacement = await resolveDeploymentPlacement(userId, env, projectId, options);
+  if (!resolvedPlacement) {
     log.error('deployment_provisioning.no_provider', { envId, userId });
     return null;
   }
   const requiresVolumes = options?.requiresVolumes ?? false;
+  const placement = requiresVolumes
+    ? {
+        ...resolvedPlacement,
+        reservation: { ...resolvedPlacement.reservation, exclusiveNode: true },
+      }
+    : resolvedPlacement;
   const nodeMode: 'shared' | 'exclusive' = requiresVolumes ? 'exclusive' : 'shared';
 
-  const existingNodeId = await findDeploymentNodeWithCapacity(
+  const existingNode = await findDeploymentNodeWithCapacity(
     env,
     userId,
     placement,
     requiresVolumes
   );
-  if (existingNodeId) {
+  if (existingNode) {
     const linked = await linkEnvironmentToNode({
       env,
       db,
       envId,
-      nodeId: existingNodeId,
-      placement,
+      nodeId: existingNode.nodeId,
+      placement: existingNode.placement,
       userId,
       expectedNodeStatus: 'running',
       nodeMode: 'shared',
     });
     if (linked) {
       log.info('deployment_provisioning.placed_existing_node', {
-        nodeId: existingNodeId,
+        nodeId: existingNode.nodeId,
         envId,
         provider: placement.provider,
         location: placement.location,
       });
       return {
-        nodeId: existingNodeId,
+        nodeId: existingNode.nodeId,
         provisioningStarted: false,
         provisioningPromise: Promise.resolve(),
       };
@@ -513,7 +680,7 @@ export async function provisionDeploymentNode(
     if (currentNodeId) {
       log.info('deployment_provisioning.concurrent_placement_won', {
         envId,
-        selectedNodeId: existingNodeId,
+        selectedNodeId: existingNode.nodeId,
         currentNodeId,
       });
       return {

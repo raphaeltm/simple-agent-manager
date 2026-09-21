@@ -292,7 +292,12 @@ describe('default capacity pool routes', () => {
       {
         method: 'PATCH',
         body: JSON.stringify({
-          policy: { strategy: 'pack', exhaustionPolicy: 'fail', maxNodes: 7 },
+          policy: {
+            strategy: 'pack',
+            deploymentStrategy: 'balanced',
+            exhaustionPolicy: 'fail',
+            maxNodes: 7,
+          },
           candidates: [{ id: ashCandidate.id, status: 'deleted' }],
         }),
       },
@@ -308,6 +313,7 @@ describe('default capacity pool routes', () => {
       scope: 'user',
       ownerUserId: 'user-1',
       strategy: 'pack',
+      deploymentStrategy: 'balanced',
       exhaustionPolicy: 'fail',
       maxNodes: 7,
       revision: 2,
@@ -321,10 +327,16 @@ describe('default capacity pool routes', () => {
     expect(
       sqlite
         .prepare(
-          `SELECT strategy, exhaustion_policy, max_nodes FROM capacity_pools WHERE scope = 'user'`
+          `SELECT strategy, deployment_strategy, exhaustion_policy, max_nodes
+             FROM capacity_pools WHERE scope = 'user'`
         )
         .get()
-    ).toEqual({ strategy: 'pack', exhaustion_policy: 'fail', max_nodes: 7 });
+    ).toEqual({
+      strategy: 'pack',
+      deployment_strategy: 'balanced',
+      exhaustion_policy: 'fail',
+      max_nodes: 7,
+    });
   });
 
   it('keeps a zero-active user default visible and effective as configured-empty', async () => {

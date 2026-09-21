@@ -31,6 +31,7 @@ type SqliteBatch = [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]];
 export interface DefaultCapacityPoolUpdateInput extends DefaultPoolScopeIdentity {
   policy?: {
     strategy?: CapacityPoolStrategy;
+    deploymentStrategy?: CapacityPoolStrategy;
     exhaustionPolicy?: CapacityExhaustionPolicy;
     maxNodes?: number;
   };
@@ -563,6 +564,12 @@ function resolvePolicyUpdate(
   const values: Partial<PolicyUpdate> = {};
   if (policy?.strategy !== undefined && policy.strategy !== pool.strategy) {
     values.strategy = policy.strategy;
+  }
+  if (
+    policy?.deploymentStrategy !== undefined &&
+    policy.deploymentStrategy !== pool.deploymentStrategy
+  ) {
+    values.deploymentStrategy = policy.deploymentStrategy;
   }
   if (policy?.exhaustionPolicy !== undefined && policy.exhaustionPolicy !== pool.exhaustionPolicy) {
     values.exhaustionPolicy = policy.exhaustionPolicy;

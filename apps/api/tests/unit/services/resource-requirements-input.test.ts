@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createPersistedTaskResourcePlanJson,
   normalizeResourceRequirementsInput,
+  parseStoredResolvedReservationJson,
   parseStoredResourceRequirementsJson,
   readPersistedTaskResourcePlan,
   serializeModernResourceRequirementsInput,
@@ -11,6 +12,27 @@ import {
 } from '../../../src/services/resource-requirements-input';
 
 describe('resource requirements input validation', () => {
+  it('accepts current reservations without deprecated maxCoTenants metadata', () => {
+    expect(
+      parseStoredResolvedReservationJson(
+        JSON.stringify({
+          version: 3,
+          cpuMillis: 250,
+          memoryMb: 256,
+          diskMb: 1_024,
+          exclusiveNode: false,
+          source: 'task',
+          sourceId: 'environment-1',
+        })
+      )
+    ).toMatchObject({
+      cpuMillis: 250,
+      memoryMb: 256,
+      diskMb: 1_024,
+      exclusiveNode: false,
+    });
+  });
+
   it('preserves supported modern fields, explicit false, and disk zero', () => {
     const result = normalizeResourceRequirementsInput({
       minVcpu: 4,

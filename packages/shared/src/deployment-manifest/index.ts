@@ -28,3 +28,9 @@ export {
 } from './schema';
 export type { ManifestError, ManifestValidationResult } from './validate';
 export { validateManifest } from './validate';
+export {
+  DEFAULT_DEPLOYMENT_SERVICE_CPU_MILLIS,
+  DEFAULT_DEPLOYMENT_SERVICE_DISK_MB,
+  DEFAULT_DEPLOYMENT_SERVICE_MEMORY_MB,
+  resolveDeploymentManifestReservation,
+} from './resources';

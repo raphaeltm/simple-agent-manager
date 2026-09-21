@@ -26,6 +26,10 @@ import {
 import { teardownDeploymentEnvironmentOnNode } from '../services/node-agent';
 import { deleteNodeResources, retireDeletedDeploymentNodeRecord } from '../services/nodes';
 import { recordDeploymentEnvironmentLifecycleEventBestEffort } from '../services/project-lifecycle-events';
+import {
+  parseStoredResolvedReservationJson,
+  ResourceRequirementsValidationError,
+} from '../services/resource-requirements-input';
 
 type DeploymentDb = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -638,10 +642,23 @@ async function startDeploymentEnvironment(params: {
   const requiresVolumes = environment.requiresVolumes || volumes.length > 0;
   const previousStatus = environment.status;
 
+  let reservation;
+  try {
+    reservation = parseStoredResolvedReservationJson(environment.resolvedReservationJson);
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      throw errors.conflict(
+        'The stored deployment resource reservation is invalid. Publish a new release before starting this environment.'
+      );
+    }
+    throw err;
+  }
+
   await markEnvironmentStarting(db, envId, latestRelease.id);
 
   const result = await provisionDeploymentNode(envId, projectId, userId, env, {
     requiresVolumes,
+    reservation: reservation ?? undefined,
     providerOverride: volumePlacement?.provider,
     vmLocationOverride: volumePlacement?.location,
   });

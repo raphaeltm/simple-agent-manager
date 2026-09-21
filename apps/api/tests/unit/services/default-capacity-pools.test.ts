@@ -4684,8 +4684,7 @@ describe('capacity pool review findings', () => {
 
   function candidateRow(id: string) {
     return sqlite?.prepare('SELECT * FROM capacity_pool_candidates WHERE id = ?').get(id) as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
   }
 
   function workspaceCandidateIds(): string[] {
@@ -5770,7 +5769,7 @@ describe('workload-role eligibility contract', () => {
     expect(deployment?.candidates[0]?.providerInstanceType).toBe('cx23');
   });
 
-  it('rejects a full-memory request before provisioning while admitting a request that leaves the host reserve', async () => {
+  it('subtracts the host reserve for both workspace and deployment provisioning', async () => {
     const db = await seedRoleCapablePool();
     const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
       userId: 'user-1',
@@ -5782,10 +5781,75 @@ describe('workload-role eligibility contract', () => {
     expect(buildCapacityPoolSelection(summary!, placement, 'workspace')?.candidates).toHaveLength(
       0
     );
+    expect(buildCapacityPoolSelection(summary!, placement, 'deployment')?.candidates).toHaveLength(
+      0
+    );
     placement.resolvedReservation = { ...placement.resolvedReservation, memoryMb: 3584 };
     expect(buildCapacityPoolSelection(summary!, placement, 'workspace')?.candidates).toHaveLength(
       1
     );
+    expect(buildCapacityPoolSelection(summary!, placement, 'deployment')?.candidates).toHaveLength(
+      1
+    );
+  });
+
+  it('keeps workspace pack largest-first while deployments use smallest-fit', async () => {
+    const db = await seedRoleCapablePool([
+      rolePoolOffering({
+        providerInstanceType: 'cx23',
+        displayName: 'CX23',
+        machineSize: 'small',
+        vcpu: 2,
+        memoryMb: 4096,
+        diskGb: 40,
+      }),
+      rolePoolOffering({
+        providerInstanceType: 'cx33',
+        displayName: 'CX33',
+        machineSize: 'medium',
+        vcpu: 4,
+        memoryMb: 8192,
+        diskGb: 80,
+      }),
+      rolePoolOffering({
+        providerInstanceType: 'cx43',
+        displayName: 'CX43',
+        machineSize: 'large',
+        vcpu: 8,
+        memoryMb: 16_384,
+        diskGb: 160,
+      }),
+    ]);
+    sqlite
+      ?.prepare(
+        `UPDATE capacity_pools
+            SET strategy = 'pack', deployment_strategy = 'smallest-fit'
+          WHERE scope = 'user'`
+      )
+      .run();
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      ensure: false,
+      workloadRoles: 'all',
+    });
+    const placement = hetznerTaskStartPlacement();
+    placement.resolvedReservation = {
+      ...placement.resolvedReservation,
+      cpuMillis: 500,
+      memoryMb: 512,
+      diskMb: 1024,
+    };
+
+    expect(
+      buildCapacityPoolSelection(summary!, placement, 'workspace')?.candidates.map(
+        (candidate) => candidate.providerInstanceType
+      )
+    ).toEqual(['cx43', 'cx33', 'cx23']);
+    expect(
+      buildCapacityPoolSelection(summary!, placement, 'deployment')?.candidates.map(
+        (candidate) => candidate.providerInstanceType
+      )
+    ).toEqual(['cx23', 'cx33', 'cx43']);
   });
 
   it('selects the smallest eligible default candidate for legacy v2 reservations after host reserve', async () => {

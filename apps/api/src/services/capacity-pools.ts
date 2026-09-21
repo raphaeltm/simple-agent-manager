@@ -113,6 +113,11 @@ export function toCapacityPool(row: schema.CapacityPool): CapacityPoolDto {
       row.strategy,
       isCapacityPoolStrategy
     ),
+    deploymentStrategy: expectPersistedValue<CapacityPoolStrategy>(
+      'capacity_pools.deployment_strategy',
+      row.deploymentStrategy,
+      isCapacityPoolStrategy
+    ),
     exhaustionPolicy: expectPersistedValue<CapacityExhaustionPolicy>(
       'capacity_pools.exhaustion_policy',
       row.exhaustionPolicy,

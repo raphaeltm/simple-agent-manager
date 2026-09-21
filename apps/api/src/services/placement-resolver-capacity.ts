@@ -255,10 +255,11 @@ export function buildCapacityPoolSelection(
   hostMemoryReserveMb = DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB
 ): TaskStartCapacityPoolSelection | null {
   const pool = summary.pool;
+  const strategy = workloadRole === 'deployment' ? pool.deploymentStrategy : pool.strategy;
   const rollout = resolvePlacementRollout({
     userId: placement.userId,
     poolId: pool.id,
-    strategy: pool.strategy,
+    strategy,
     cohortPercent: settings.rolloutCohortPercent,
   });
   const sourceById = new Map(summary.sources.map((source) => [source.id, source]));
@@ -267,7 +268,7 @@ export function buildCapacityPoolSelection(
     poolId: pool.id,
     scope: pool.scope,
     revision: pool.revision,
-    strategy: pool.strategy,
+    strategy,
     exhaustionPolicy: pool.exhaustionPolicy,
     maxNodes: pool.maxNodes,
     explicitVmLocation: placement.explicitVmLocation === true,
@@ -358,12 +359,9 @@ function normalizeCapacityCandidate(
   ) {
     return null;
   }
-  // Provision only hardware that can pass the final workspace reservation.
+  // Provision only hardware that can pass the final workload reservation.
   // Provider memory includes the host reserve; workload memory does not.
-  if (
-    workloadRole === 'workspace' &&
-    providerInstanceMemoryMb - hostMemoryReserveMb < placement.resolvedReservation.memoryMb
-  ) {
+  if (providerInstanceMemoryMb - hostMemoryReserveMb < placement.resolvedReservation.memoryMb) {
     return null;
   }
   // Keep the candidate aligned with the resolved placement: reject a candidate
@@ -478,7 +476,7 @@ function normalizeCapacityCandidate(
           poolId: pool.id,
           scope: pool.scope,
           revision: pool.revision,
-          strategy: pool.strategy,
+          strategy: workloadRole === 'deployment' ? pool.deploymentStrategy : pool.strategy,
           explicitVmLocation: placement.explicitVmLocation === true,
           exhaustionPolicy: pool.exhaustionPolicy,
           effectiveState,

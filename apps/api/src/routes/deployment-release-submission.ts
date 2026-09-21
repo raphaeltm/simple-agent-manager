@@ -1,4 +1,8 @@
-import type { DeploymentManifest } from '@simple-agent-manager/shared';
+import {
+  type DeploymentManifest,
+  type ResolvedResourceReservation,
+  resolveDeploymentManifestReservation,
+} from '@simple-agent-manager/shared';
 import { desc, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 import type { ExecutionContext } from 'hono';
@@ -11,6 +15,8 @@ import { errors } from '../middleware/error';
 import { collectSecretNames } from '../services/compose-renderer';
 import {
   type DeploymentNodeResult,
+  findDeploymentNodeWithCapacity,
+  linkEnvironmentToNode,
   provisionDeploymentNode,
   resolveDeploymentPlacement,
 } from '../services/deployment-provisioning';
@@ -90,12 +96,11 @@ async function prepareManifestVolumes(params: {
   userId: string;
   env: Env;
   requiresVolumes: boolean;
+  reservation: ResolvedResourceReservation;
 }): Promise<VolumePreparationOutcome> {
-  if (!params.requiresVolumes) {
-    return { success: true, placement: null };
-  }
-
-  const placement = await resolveDeploymentPlacement(params.userId, params.env, params.projectId);
+  const placement = await resolveDeploymentPlacement(params.userId, params.env, params.projectId, {
+    reservation: params.reservation,
+  });
   if (!placement) {
     return {
       success: false,
@@ -108,6 +113,10 @@ async function prepareManifestVolumes(params: {
         },
       },
     };
+  }
+
+  if (!params.requiresVolumes) {
+    return { success: true, placement };
   }
 
   await createMissingManifestVolumes(params.db, params.env, params.userId, {
@@ -283,9 +292,10 @@ async function clearSharedNodeForVolumeRelease(
 
 function buildProvisionOptions(
   placement: ReleasePlacement | null,
-  requiresVolumes: boolean
+  requiresVolumes: boolean,
+  reservation: ResolvedResourceReservation
 ): ProvisionDeploymentNodeOptions {
-  const options: ProvisionDeploymentNodeOptions = { requiresVolumes };
+  const options: ProvisionDeploymentNodeOptions = { requiresVolumes, reservation };
   if (placement) {
     options.providerOverride = placement.provider;
     options.vmLocationOverride = placement.location;
@@ -350,6 +360,7 @@ async function provisionNodeForRelease(params: {
   releaseId: string;
   requiresVolumes: boolean;
   placement: ReleasePlacement | null;
+  reservation: ResolvedResourceReservation;
   executionCtx?: ExecutionContext;
 }): Promise<string | null> {
   try {
@@ -358,7 +369,7 @@ async function provisionNodeForRelease(params: {
       params.projectId,
       params.userId,
       params.env,
-      buildProvisionOptions(params.placement, params.requiresVolumes)
+      buildProvisionOptions(params.placement, params.requiresVolumes, params.reservation)
     );
     if (!result) {
       await markDeploymentReleasePlacementFailed(
@@ -410,6 +421,7 @@ async function placeReleaseOnDeploymentNode(params: {
   releaseId: string;
   requiresVolumes: boolean;
   placement: ReleasePlacement | null;
+  reservation: ResolvedResourceReservation;
   executionCtx?: ExecutionContext;
 }): Promise<string | null> {
   const runtime = await readEnvironmentRuntimeState(params.db, params.envId);
@@ -430,6 +442,15 @@ async function placeReleaseOnDeploymentNode(params: {
 
   const shouldProvision = runtime.status !== 'stopped' && runtime.status !== 'stopping';
   if (!shouldProvision) {
+    if (!nodeId) {
+      await params.db
+        .update(schema.deploymentEnvironments)
+        .set({
+          resolvedReservationJson: JSON.stringify(params.reservation),
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.deploymentEnvironments.id, params.envId));
+    }
     log.info('deployment_release.provisioning_skipped_environment_stopped', {
       envId: params.envId,
       releaseId: params.releaseId,
@@ -440,6 +461,37 @@ async function placeReleaseOnDeploymentNode(params: {
 
   if (!nodeId) {
     return provisionNodeForRelease(params);
+  }
+
+  if (!params.requiresVolumes && params.placement) {
+    const currentNode = await findDeploymentNodeWithCapacity(
+      params.env,
+      params.userId,
+      params.placement,
+      false,
+      { nodeId, excludeEnvironmentId: params.envId }
+    );
+    const reserved =
+      currentNode?.nodeId === nodeId &&
+      (await linkEnvironmentToNode({
+        env: params.env,
+        db: params.db,
+        envId: params.envId,
+        nodeId,
+        placement: currentNode.placement,
+        userId: params.userId,
+        expectedNodeStatus: 'running',
+        nodeMode: 'shared',
+      }));
+    if (!reserved) {
+      await markDeploymentReleasePlacementFailed(
+        params.db,
+        params.envId,
+        params.releaseId,
+        'Existing deployment node cannot admit the declared resource reservation'
+      );
+      return null;
+    }
   }
 
   if (params.requiresVolumes) {
@@ -460,6 +512,7 @@ export async function createDeploymentReleaseFromManifest(
   }
 ): Promise<CreateDeploymentReleaseOutcome> {
   const requiresVolumes = Object.keys(manifest.volumes).length > 0;
+  const reservation = resolveDeploymentManifestReservation(manifest, params.envId);
   const secretError = await validateManifestSecrets(db, manifest, params.envId);
   if (secretError) {
     return { success: false, response: secretError };
@@ -477,6 +530,7 @@ export async function createDeploymentReleaseFromManifest(
     userId: params.userId,
     env: params.env,
     requiresVolumes,
+    reservation,
   });
   if (!volumePreparation.success) {
     return { success: false, response: volumePreparation.response };
@@ -517,6 +571,7 @@ export async function createDeploymentReleaseFromManifest(
     releaseId: id,
     requiresVolumes,
     placement: volumePreparation.placement,
+    reservation,
     executionCtx: params.executionCtx,
   });
 

@@ -5,6 +5,7 @@ import type {
   CredentialProvider,
   CredentialSource,
   ResourceResolutionInput,
+  ResolvedResourceReservation,
   VMLocation,
   VMSize,
 } from '@simple-agent-manager/shared';
@@ -61,6 +62,7 @@ export interface CanonicalVmAllocationInput {
   credentialProjectPolicy?: PlacementCredentialProjectPolicy;
   taskModeDefault?: PlacementTaskModeDefault;
   resourceRequirements?: ResourceResolutionInput;
+  resolvedReservationOverride?: ResolvedResourceReservation;
   workloadRole?: CapacityWorkloadRole;
   requiredCredentialSource?: CredentialSource;
   credentialsRequiredMessage?: string;
@@ -82,12 +84,13 @@ export interface CanonicalVmAllocationPlan {
   providerInstanceImage: string | null;
   providerInstanceArchitecture: VMArchitecture | null;
   capacityPoolSelection: TaskStartCapacityPoolSelection | null;
+  /** Full eligible set before an explicit native-offering request narrows provisioning. */
+  eligibleCapacityPoolSelection: TaskStartCapacityPoolSelection | null;
   capacityPlacementSnapshot: CapacityPlacementSnapshot | null;
 }
 
 export type CanonicalVmAllocationResult =
-  | CanonicalVmAllocationPlan
-  | { error: string; errorKind: 'placement' | 'credentials' };
+  CanonicalVmAllocationPlan | { error: string; errorKind: 'placement' | 'credentials' };
 
 export function placementProjectDefaultsFromRow(project: {
   id: string;
@@ -133,6 +136,7 @@ export async function resolveCanonicalVmAllocationPlan(
       credentialProjectPolicy: input.credentialProjectPolicy ?? 'current-project',
       taskModeDefault: input.taskModeDefault ?? 'task',
       resourceRequirements: input.resourceRequirements,
+      resolvedReservationOverride: input.resolvedReservationOverride,
       workloadRole: input.workloadRole ?? 'workspace',
     });
   } catch (err) {
@@ -233,6 +237,7 @@ export async function resolveCanonicalVmAllocationPlan(
       ),
       attribution,
       capacityPoolSelection: effectiveSelection,
+      eligibleCapacityPoolSelection: capacityPoolSelection,
       capacityPlacementSnapshot: snapshot,
       vmSize: selectedCandidate.machineSize ?? placement.vmSize,
       vmLocation: selectedCandidate.location,
@@ -247,6 +252,7 @@ export async function resolveCanonicalVmAllocationPlan(
     quotaCredentialSource: resolveCapacityAwareQuotaCredentialSource(credential, null),
     attribution,
     capacityPoolSelection: null,
+    eligibleCapacityPoolSelection: null,
     capacityPlacementSnapshot: directPlacementAuditSnapshot(placement),
     vmSize: placement.vmSize,
     vmLocation: placement.vmLocation,
@@ -293,6 +299,7 @@ function planFromAttribution(input: {
     credentialAttributionSource: CredentialSource;
   };
   capacityPoolSelection: TaskStartCapacityPoolSelection | null;
+  eligibleCapacityPoolSelection: TaskStartCapacityPoolSelection | null;
   capacityPlacementSnapshot: CapacityPlacementSnapshot | null;
   vmSize: VMSize;
   vmLocation: VMLocation;
@@ -314,6 +321,7 @@ function planFromAttribution(input: {
     providerInstanceArchitecture: input.native
       .providerInstanceArchitecture as VMArchitecture | null,
     capacityPoolSelection: input.capacityPoolSelection,
+    eligibleCapacityPoolSelection: input.eligibleCapacityPoolSelection,
     capacityPlacementSnapshot: input.capacityPlacementSnapshot,
   };
 }

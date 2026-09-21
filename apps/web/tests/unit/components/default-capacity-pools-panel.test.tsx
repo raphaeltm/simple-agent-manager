@@ -255,6 +255,7 @@ function summary(scope: CapacityPoolScope): DefaultCapacityPoolSummary {
       revision: 3,
       status: 'active',
       strategy: 'balanced',
+      deploymentStrategy: 'smallest-fit',
       exhaustionPolicy: 'queue',
       createdAt: '2026-08-28T00:00:00.000Z',
       updatedAt: '2026-08-28T00:00:00.000Z',
@@ -506,7 +507,11 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(await screen.findByText('No visible active default pool')).toBeInTheDocument();
     expect(
       screen.getAllByText((_, element) =>
-        Boolean(element?.textContent?.includes('0 allowed instances · Balanced'))
+        Boolean(
+          element?.textContent?.includes(
+            '0 allowed instances · workspaces Balanced · deployments Smallest Fit'
+          )
+        )
       ).length
     ).toBeGreaterThan(0);
     expect(
@@ -558,7 +563,12 @@ describe('DefaultCapacityPoolsPanel', () => {
     mocks.updateProjectDefaultCapacityPools.mockResolvedValue(
       response('project', {
         ...current,
-        pool: { ...current.pool, strategy: 'pack', revision: 4 },
+        pool: {
+          ...current.pool,
+          strategy: 'pack',
+          deploymentStrategy: 'balanced',
+          revision: 4,
+        },
         candidates: current.candidates.map((candidateItem) =>
           candidateItem.id === 'candidate-project-ash-cpx31'
             ? { ...candidateItem, status: 'deleted' }
@@ -573,7 +583,10 @@ describe('DefaultCapacityPoolsPanel', () => {
     renderPanel();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getByLabelText('Strategy'), { target: { value: 'pack' } });
+    fireEvent.change(screen.getByLabelText('Workspace strategy'), { target: { value: 'pack' } });
+    fireEvent.change(screen.getByLabelText('Deployment strategy'), {
+      target: { value: 'balanced' },
+    });
     fireEvent.change(screen.getByRole('spinbutton', { name: /Maximum nodes/ }), {
       target: { value: '5' },
     });
@@ -583,7 +596,7 @@ describe('DefaultCapacityPoolsPanel', () => {
 
     await waitFor(() =>
       expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
-        policy: { strategy: 'pack', maxNodes: 5 },
+        policy: { strategy: 'pack', deploymentStrategy: 'balanced', maxNodes: 5 },
         candidates: [
           { id: 'candidate-project-ash-cpx31', status: 'deleted' },
           { id: 'candidate-project-hil-ccx33', status: 'active' },

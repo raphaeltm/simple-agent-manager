@@ -414,7 +414,7 @@ function normalizePersistedTaskResourcePlan(value: unknown): PersistedTaskResour
   return plan;
 }
 
-function parseStoredResolvedReservationJson(
+export function parseStoredResolvedReservationJson(
   value: string | null | undefined
 ): ResolvedResourceReservation | null {
   if (!value) return null;
@@ -434,6 +434,10 @@ function normalizeResolvedReservation(
   if (!source) {
     throw new ResourceRequirementsValidationError(`${fieldName}.source is invalid`);
   }
+  const maxCoTenants =
+    value.maxCoTenants === undefined
+      ? undefined
+      : numberField(value.maxCoTenants, `${fieldName}.maxCoTenants`);
 
   const reservation: ResolvedResourceReservation = {
     version: numberField(value.version, `${fieldName}.version`),
@@ -441,7 +445,7 @@ function normalizeResolvedReservation(
     memoryMb: numberField(value.memoryMb, `${fieldName}.memoryMb`),
     diskMb: numberField(value.diskMb, `${fieldName}.diskMb`),
     exclusiveNode: booleanField(value.exclusiveNode, `${fieldName}.exclusiveNode`),
-    maxCoTenants: numberField(value.maxCoTenants, `${fieldName}.maxCoTenants`),
+    ...(maxCoTenants === undefined ? {} : { maxCoTenants }),
     source,
     sourceId: stringOrUndefined(value.sourceId) ?? '',
     fieldProvenance: normalizeReservationFieldProvenance(value.fieldProvenance, fieldName),

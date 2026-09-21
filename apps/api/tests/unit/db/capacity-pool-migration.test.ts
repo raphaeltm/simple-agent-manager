@@ -11,6 +11,7 @@ import {
   capacitySourceAuthoritySnapshotsMigrationSql,
   capacitySourceExternalCredentialsMigrationSql,
   concreteOfferingMigrationSql,
+  deploymentPoolStrategyMigrationSql,
   migrationSql,
   runtimeNativeObservedMetadataMigrationSql,
 } from '../../helpers/capacity-pool-migrations';
@@ -140,6 +141,13 @@ function db(): Database.Database {
 
     CREATE TABLE compute_usage (
       id TEXT PRIMARY KEY
+    );
+
+    CREATE TABLE deployment_environments (
+      id TEXT PRIMARY KEY,
+      project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      node_id TEXT REFERENCES nodes(id) ON DELETE SET NULL,
+      requires_volumes INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE tasks (
@@ -1383,5 +1391,36 @@ describe('0167_capacity_pool_max_nodes migration', () => {
       { user_id: 'user-1', count: 2 },
       { user_id: 'user-2', count: 1 },
     ]);
+  });
+});
+
+describe('0170_deployment_pool_strategy_reservations migration', () => {
+  it('adds smallest-fit deployment policy and nullable reservation snapshots additively', () => {
+    const database = db();
+    database.exec(`
+      INSERT INTO deployment_environments (id, project_id)
+      VALUES ('environment-existing', 'project-1');
+    `);
+    applyCapacityPoolSchemaMigrations(database);
+    insertPool({ id: 'pool-existing', scope: 'user', ownerUserId: 'user-1', isDefault: 1 });
+
+    expect(
+      database
+        .prepare('SELECT deployment_strategy FROM capacity_pools WHERE id = ?')
+        .get('pool-existing')
+    ).toEqual({ deployment_strategy: 'smallest-fit' });
+    expect(
+      database
+        .prepare('SELECT resolved_reservation_json FROM deployment_environments WHERE id = ?')
+        .get('environment-existing')
+    ).toEqual({ resolved_reservation_json: null });
+    expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
+  it('contains no destructive statements', () => {
+    const sql = deploymentPoolStrategyMigrationSql.toUpperCase();
+    expect(sql).not.toContain('DROP TABLE');
+    expect(sql).not.toContain('DELETE FROM');
+    expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
   });
 });

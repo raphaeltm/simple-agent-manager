@@ -48,23 +48,23 @@ Durable product source: SAM idea `01M30N3SR9APZ2E19Y87VHNSVA`.
 
 ## Implementation Checklist
 
-- [ ] Add shared deployment strategy and manifest-reservation types/defaults with deterministic aggregation
+- [x] Add shared deployment strategy and manifest-reservation types/defaults with deterministic aggregation
       of declared CPU, memory, disk, and explicit conservative defaults for missing service declarations.
-- [ ] Add safe additive migrations and Drizzle fields for capacity-pool deployment strategy and persisted
+- [x] Add safe additive migrations and Drizzle fields for capacity-pool deployment strategy and persisted
       deployment-environment reservation snapshots; update migration-chain coverage.
-- [ ] Thread deployment strategy through capacity-pool summaries, API validation, atomic policy updates,
+- [x] Thread deployment strategy through capacity-pool summaries, API validation, atomic policy updates,
       revision/digest authority, and the existing pool editor without duplicating supply constraints.
-- [ ] Make capacity selection use the workspace strategy for workspace workloads and the deployment strategy
+- [x] Make capacity selection use the workspace strategy for workspace workloads and the deployment strategy
       for deployment workloads; preserve workspace `pack` largest-allowed ordering.
-- [ ] Pass the manifest-derived environment reservation into canonical deployment placement so new deployment
+- [x] Pass the manifest-derived environment reservation into canonical deployment placement so new deployment
       nodes use smallest-sufficient candidate ranking and subtract host memory reserve.
-- [ ] Replace count/load-only shared deployment-node selection with reservation-aware admission using trusted
+- [x] Replace count/load-only shared deployment-node selection with reservation-aware admission using trusted
       node capacity, live telemetry/disk-pressure safety, exact compatibility and placement authority.
-- [ ] Repeat aggregate CPU, memory, disk, reservation-validity, and exclusivity checks in the final atomic
+- [x] Repeat aggregate CPU, memory, disk, reservation-validity, and exclusivity checks in the final atomic
       environment-to-node write, persisting the exact request reservation in the same mutation.
-- [ ] Preserve persistent-volume exclusive placement and ensure release submission carries one reservation
+- [x] Preserve persistent-volume exclusive placement and ensure release submission carries one reservation
       snapshot consistently through placement, reuse, provisioning, and later audit surfaces.
-- [ ] Add focused tests for divergent workspace/deployment strategy ranking, declared-resource candidate sizing,
+- [x] Add focused tests for divergent workspace/deployment strategy ranking, declared-resource candidate sizing,
       existing-node reuse, dimension overflow, malformed legacy reservations, atomic final admission races,
       exact host-memory reserve boundaries, and persistent-volume exclusivity.
 - [ ] Update public compute-pool documentation and API/UI tests; run required desktop/mobile Playwright evidence

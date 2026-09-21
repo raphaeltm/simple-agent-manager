@@ -37,7 +37,7 @@ user-invocable: false
 - `GET /api/projects/:projectId/comments` — List project-wide comment inbox across chat and library threads (supports `status=open|sent|resolved`, `limit`)
 - `GET /api/projects/:id/capacity-pools/defaults` — Read default capacity pool context for the current project/user context. Requires project `project:read`; every active member receives the redacted `effectiveSummary` plus safe `placementSettings` resource defaults/settings. Raw project/user summaries require project `secret:read`, raw installation summaries are superadmin-only, and encrypted credential material is never returned. `?ensure=true` reconciles only for callers that also have project `secret:read`; non-superadmins never reconcile installation credentials through this route.
 - `POST /api/projects/:id/capacity-pools/defaults/reconcile` — Explicitly reconcile visible default capacity pool metadata from existing credentials and return the same safe summary payload. Non-superadmins reconcile project/user scopes only.
-- `PATCH /api/projects/:id/capacity-pools/defaults` — Update only the project-owned default pool policy, candidate statuses, or provider-native `catalogAdditions`; requires project `secret:write` and never mutates user or installation fallback pools.
+- `PATCH /api/projects/:id/capacity-pools/defaults` — Update only the project-owned default pool policy (workspace strategy, deployment strategy, exhaustion policy, or maximum nodes), candidate statuses, or provider-native `catalogAdditions`; requires project `secret:write` and never mutates user or installation fallback pools.
 - `PATCH /api/projects/:id` — Update project metadata (`name`, `description`, `defaultBranch`)
 - `DELETE /api/projects/:id` — Delete project (cascades project tasks/dependencies/events)
 
@@ -45,10 +45,10 @@ user-invocable: false
 
 - `GET /api/capacity-pools/defaults` — Read the authenticated user's default compute pool summaries. Hidden project/installation scopes are represented structurally and are not rendered as user-facing placeholder rows. Pass `?ensure=true` for idempotent user-scope reconciliation before returning. Existing installation metadata may appear only through redacted `effectiveSummary`; this route never reconciles installation credentials.
 - `POST /api/capacity-pools/defaults/reconcile` — Explicitly reconcile the authenticated user's default compute pool metadata from their cloud credentials.
-- `PATCH /api/capacity-pools/defaults` — Update only the authenticated user's owned default pool policy, candidate statuses, or provider-native `catalogAdditions`.
+- `PATCH /api/capacity-pools/defaults` — Update only the authenticated user's owned default pool policy (including separate workspace and deployment strategies), candidate statuses, or provider-native `catalogAdditions`.
 - `GET /api/admin/capacity-pools/defaults` — Superadmin-only read for the SAM installation default compute pool summaries; reveals non-secret metadata about platform cloud credentials.
 - `POST /api/admin/capacity-pools/defaults/reconcile` — Superadmin-only explicit reconciliation for installation default pool metadata from platform cloud credentials.
-- `PATCH /api/admin/capacity-pools/defaults` — Superadmin-only update for the installation-owned default pool policy, candidate statuses, or provider-native `catalogAdditions`.
+- `PATCH /api/admin/capacity-pools/defaults` — Superadmin-only update for the installation-owned default pool policy (including separate workspace and deployment strategies), candidate statuses, or provider-native `catalogAdditions`.
 - `GET /api/providers/catalog` — Return concrete provider-native offering catalogs available to the authenticated context. Omitted `scope` is personal/user-only; project catalogs require `scope=project&projectId=...` plus project `secret:read`; installation catalogs require superadmin. The response is `Cache-Control: private, no-store` and includes non-secret metadata only.
 
 ## Chat Sessions (Project Scoped)

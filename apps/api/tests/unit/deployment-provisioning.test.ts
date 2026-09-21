@@ -89,7 +89,18 @@ function canonicalAllocation(
   }> = {}
 ) {
   return {
-    placement: { workloadRole: 'deployment' },
+    placement: {
+      workloadRole: 'deployment',
+      resolvedReservation: {
+        cpuMillis: 250,
+        memoryMb: 256,
+        diskMb: 1_024,
+        exclusiveNode: false,
+        source: 'task',
+        sourceId: 'environment',
+        version: 3,
+      },
+    },
     credential: {
       credentialSource: overrides.credentialAttributionSource ?? 'user',
       providerName: overrides.effectiveProvider ?? 'hetzner',
@@ -106,6 +117,7 @@ function canonicalAllocation(
     providerInstanceImage: null,
     providerInstanceArchitecture: null,
     capacityPoolSelection: null,
+    eligibleCapacityPoolSelection: null,
     capacityPlacementSnapshot: null,
   };
 }
@@ -349,7 +361,33 @@ describe('provisionDeploymentNode', () => {
       if (method === 'all' && sql.includes('FROM nodes n')) {
         return {
           results: [
-            { id: 'node-existing', vm_size: 'small', vm_location: 'fsn1', last_metrics: null },
+            {
+              id: 'node-existing',
+              vmSize: 'small',
+              vmLocation: 'fsn1',
+              cloudProvider: 'hetzner',
+              capacityPoolId: null,
+              capacityPoolScope: null,
+              capacitySourceId: null,
+              capacityPoolProjectId: null,
+              workloadRole: 'deployment',
+              nodeClass: 'managed',
+              providerInstanceId: 'provider-existing',
+              providerInstanceType: 'cx22',
+              providerInstanceVcpuCount: 2,
+              providerInstanceMemoryMb: 4096,
+              providerInstanceDiskGb: 40,
+              providerInstanceBootDiskSizeGb: null,
+              providerInstanceImage: null,
+              providerInstanceArchitecture: null,
+              observedProviderInstanceType: 'cx22',
+              observedProviderInstanceVcpuCount: 2,
+              observedProviderInstanceMemoryMb: 4096,
+              observedProviderInstanceDiskGb: 40,
+              observedHardwareSource: 'observed',
+              lastMetrics: null,
+              lastHeartbeatAt: null,
+            },
           ],
         };
       }

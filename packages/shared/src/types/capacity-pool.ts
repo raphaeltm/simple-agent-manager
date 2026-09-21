@@ -41,6 +41,7 @@ export type DefaultCapacityPoolEffectiveState =
 
 export const CAPACITY_POOL_STRATEGIES = ['balanced', 'pack', 'spread', 'smallest-fit'] as const;
 export type CapacityPoolStrategy = (typeof CAPACITY_POOL_STRATEGIES)[number];
+export const DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY: CapacityPoolStrategy = 'smallest-fit';
 
 /** Default maximum number of managed workspace nodes per user in one capacity pool. */
 export const DEFAULT_CAPACITY_POOL_MAX_NODES = 3;
@@ -91,6 +92,8 @@ export interface CapacityPool {
   status: CapacityPoolStatus;
   configurationState?: CapacityPoolConfigurationState;
   strategy: CapacityPoolStrategy;
+  /** Candidate ordering used when provisioning deployment-role nodes. */
+  deploymentStrategy: CapacityPoolStrategy;
   exhaustionPolicy: CapacityExhaustionPolicy;
   /** Per-user managed workspace-node ceiling. Spread provisions until this limit, then packs. */
   maxNodes?: number;
@@ -246,6 +249,7 @@ export interface SafeEffectiveCapacityPoolSummary {
   scope: CapacityPoolScope | null;
   state: DefaultCapacityPoolEffectiveState;
   strategy: CapacityPoolStrategy | null;
+  deploymentStrategy?: CapacityPoolStrategy | null;
   exhaustionPolicy: CapacityExhaustionPolicy | null;
   availableCandidateCount: number;
   /** Eligible VM choices without pool, source, credential or owner identifiers. */
@@ -283,6 +287,7 @@ export interface DefaultCapacityPoolScopeSummary {
 
 export interface DefaultCapacityPoolPolicyUpdate {
   strategy?: CapacityPoolStrategy;
+  deploymentStrategy?: CapacityPoolStrategy;
   exhaustionPolicy?: CapacityExhaustionPolicy;
   maxNodes?: number;
 }

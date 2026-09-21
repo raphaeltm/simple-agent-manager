@@ -115,15 +115,22 @@ function parsePolicyUpdate(
     isCapacityExhaustionPolicy,
     'Invalid default capacity pool exhaustion policy'
   );
+  const deploymentStrategy = optionalEnum(
+    record,
+    'deploymentStrategy',
+    isCapacityPoolStrategy,
+    'Invalid default capacity pool deployment strategy'
+  );
   const maxNodes = optionalPositiveInteger(
     record,
     'maxNodes',
     'Default capacity pool maxNodes must be a positive integer'
   );
 
-  if (!strategy && !exhaustionPolicy && maxNodes === undefined) return null;
+  if (!strategy && !deploymentStrategy && !exhaustionPolicy && maxNodes === undefined) return null;
   return {
     ...(strategy ? { strategy } : {}),
+    ...(deploymentStrategy ? { deploymentStrategy } : {}),
     ...(exhaustionPolicy ? { exhaustionPolicy } : {}),
     ...(maxNodes !== undefined ? { maxNodes } : {}),
   };

@@ -332,6 +332,15 @@ user-isolated, so **Spread** provisions separate nodes for that user until their
 the limit, then packs further sessions onto those nodes. **Pack** chooses the largest allowed
 offering and fills it densely; **Smallest fit** chooses the smallest or cheapest sufficient offering.
 
+The same pool has a separate **Deployment strategy**. Its provider, regions, credentials, allowed
+offerings, and quota boundaries remain shared with the workspace policy, while deployment
+placement can use different ordering. The default **Smallest fit** behavior first reuses a healthy,
+compatible deployment node when the sum of its declared CPU, memory, and disk reservations still
+fits. If none fits, SAM provisions the smallest allowed machine that can hold the deployment.
+Service resource limits in the deployment manifest determine this reservation; environment names
+such as preview, staging, and production do not select a machine size. Deployments with persistent
+volumes continue to use an exclusive node.
+
 ### Warm reuse
 
 When the last workspace leaves a machine SAM provisioned automatically, the machine stays **warm**
@@ -373,7 +382,8 @@ remove it so a lower scope applies.
 | Work fails immediately with a capacity error                   | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                                                                           |
 | No offering satisfies the request                              | Requirements exceed every allowed machine — remember the host memory reserve, so a 4 GiB offering tops out at a 3584 MiB reservation. Lower the requirements or allow a bigger instance type. |
 | A new machine is provisioned for every task                    | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's maximum-node limit.                                                            |
-| Machines are bigger or pricier than expected                   | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor.                                                           |
+| Workspace machines are bigger or pricier than expected         | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor.                                                           |
+| A deployment machine is bigger than expected                   | Check the service CPU and memory limits in its deployment manifest, the pool's deployment strategy, and which smaller offerings the pool allows.                                              |
 | Editing is disabled                                            | Project pools need owner or admin (`secret:write`); maintainers can view and reconcile but not edit.                                                                                          |
 | The project ignores your personal pool                         | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                               |
 | Everything lands on one cloud although the pool allows several | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                 |

@@ -178,6 +178,7 @@ function capacitySummary(scope: PoolScope) {
       revision: 7,
       status: 'active',
       strategy: scope === 'user' ? 'smallest-fit' : 'pack',
+      deploymentStrategy: 'smallest-fit',
       exhaustionPolicy: 'queue',
       maxNodes: 3,
       createdAt: TIMESTAMP,

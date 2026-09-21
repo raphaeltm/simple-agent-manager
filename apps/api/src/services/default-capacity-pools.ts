@@ -2,6 +2,7 @@ import type {
   CapacityPoolScope,
   SafeEffectiveCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
+import { DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
@@ -222,7 +223,8 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
             candidate.status === ACTIVE_STATUS &&
             candidate.providerInstanceType === null &&
             summary.sources.some(
-              (source) => source.id === candidate.capacitySourceId && source.status === ACTIVE_STATUS
+              (source) =>
+                source.id === candidate.capacitySourceId && source.status === ACTIVE_STATUS
             )
         ) &&
         !summary.candidates.some(
@@ -558,6 +560,7 @@ async function createDefaultPoolIfAbsent(
       status: ACTIVE_STATUS,
       configurationState: 'migration-pending',
       strategy: DEFAULT_POOL_STRATEGY,
+      deploymentStrategy: DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY,
       exhaustionPolicy: DEFAULT_EXHAUSTION_POLICY,
       createdBy: input.createdBy,
       createdAt: now,

@@ -3023,6 +3023,8 @@ export const capacityPools = sqliteTable(
     status: text('status').notNull().default('active'),
     configurationState: text('configuration_state').notNull().default('configured-ready'),
     strategy: text('strategy').notNull().default('balanced'),
+    /** Candidate ordering used when provisioning deployment-role nodes. */
+    deploymentStrategy: text('deployment_strategy').notNull().default('smallest-fit'),
     exhaustionPolicy: text('exhaustion_policy').notNull().default('queue'),
     maxNodes: integer('max_nodes').notNull().default(3),
     lastReconciledAt: text('last_reconciled_at'),
@@ -4099,6 +4101,8 @@ export const deploymentEnvironments = sqliteTable(
     nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
     /** True when the latest submitted manifest declares persistent volumes. */
     requiresVolumes: integer('requires_volumes', { mode: 'boolean' }).notNull().default(false),
+    /** Exact aggregate manifest reservation consumed by deployment-node admission. */
+    resolvedReservationJson: text('resolved_reservation_json'),
     /** Cloud provider used for placement (e.g. 'hetzner', 'scaleway'). */
     provider: text('provider'),
     /** Provider location/region for placement constraint. */

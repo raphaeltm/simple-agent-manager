@@ -312,17 +312,36 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
     expect(manifest.routes).toEqual([{ service: 'web', port: 3000, mode: 'public' }]);
 
     expect(mockResolver).toHaveBeenCalledWith('registry.sam.example', 'proj-1/web', 'v1.2.3');
+    expect(mockResolveDeploymentPlacement).toHaveBeenCalledWith(
+      'test-user-id',
+      expect.anything(),
+      'proj-1',
+      expect.objectContaining({
+        reservation: expect.objectContaining({
+          cpuMillis: 250,
+          memoryMb: 256,
+          diskMb: 1024,
+          exclusiveNode: true,
+        }),
+      })
+    );
     expect(mockProvisionDeploymentNode).toHaveBeenCalledWith(
       'env-1',
       'proj-1',
       'test-user-id',
       expect.anything(),
-      {
+      expect.objectContaining({
         providerOverride: 'hetzner',
         requiresVolumes: true,
+        reservation: expect.objectContaining({
+          cpuMillis: 250,
+          memoryMb: 256,
+          diskMb: 1024,
+          exclusiveNode: true,
+        }),
         vmLocationOverride: 'fsn1',
         vmSizeOverride: 'small',
-      }
+      })
     );
     expect(mockCreateMissingManifestVolumes).toHaveBeenCalledWith(
       expect.anything(),

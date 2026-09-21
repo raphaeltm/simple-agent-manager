@@ -13,6 +13,7 @@ import type {
 import {
   CAPACITY_EXHAUSTION_POLICIES,
   CAPACITY_POOL_STRATEGIES,
+  DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY,
   DEFAULT_CAPACITY_POOL_MAX_NODES,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
@@ -132,7 +133,7 @@ function EffectivePoolCard({
           revision {summary.pool.revision} · {formatLabel(summary.pool.status)}
         </div>
       </div>
-      <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-4">
+      <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5">
         <div>
           <div className="text-fg-muted">Node limit per user</div>
           <div className="font-medium text-fg-primary">
@@ -140,8 +141,16 @@ function EffectivePoolCard({
           </div>
         </div>
         <div>
-          <div className="text-fg-muted">Strategy</div>
+          <div className="text-fg-muted">Workspace strategy</div>
           <div className="font-medium text-fg-primary">{formatLabel(summary.pool.strategy)}</div>
+        </div>
+        <div>
+          <div className="text-fg-muted">Deployment strategy</div>
+          <div className="font-medium text-fg-primary">
+            {formatLabel(
+              summary.pool.deploymentStrategy ?? DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY
+            )}
+          </div>
         </div>
         <div>
           <div className="text-fg-muted">Exhaustion</div>
@@ -174,8 +183,11 @@ function ScopeRow({ item }: { item: DefaultCapacityPoolScopeSummary }) {
       {item.summary ? (
         <div className="mt-1 text-xs text-fg-muted">
           {item.summary.sources.length} source{item.summary.sources.length === 1 ? '' : 's'} ·{' '}
-          {item.summary.activeCandidateCount} allowed instances ·{' '}
-          {formatLabel(item.summary.pool.strategy)}
+          {item.summary.activeCandidateCount} allowed instances · workspaces{' '}
+          {formatLabel(item.summary.pool.strategy)} · deployments{' '}
+          {formatLabel(
+            item.summary.pool.deploymentStrategy ?? DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY
+          )}
         </div>
       ) : (
         <div className="mt-1 text-xs text-fg-muted">
@@ -315,6 +327,7 @@ function PolicySelect<T extends string>({
 function buildUpdateRequest(
   summary: DefaultCapacityPoolSummary,
   draftStrategy: CapacityPoolStrategy,
+  draftDeploymentStrategy: CapacityPoolStrategy,
   draftExhaustionPolicy: CapacityExhaustionPolicy,
   draftMaxNodes: number,
   draftStatuses: CandidateStatusDraft,
@@ -322,6 +335,12 @@ function buildUpdateRequest(
 ): DefaultCapacityPoolUpdateRequest | null {
   const policy: DefaultCapacityPoolUpdateRequest['policy'] = {};
   if (draftStrategy !== summary.pool.strategy) policy.strategy = draftStrategy;
+  if (
+    draftDeploymentStrategy !==
+    (summary.pool.deploymentStrategy ?? DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY)
+  ) {
+    policy.deploymentStrategy = draftDeploymentStrategy;
+  }
   if (draftExhaustionPolicy !== summary.pool.exhaustionPolicy) {
     policy.exhaustionPolicy = draftExhaustionPolicy;
   }
@@ -336,7 +355,7 @@ function buildUpdateRequest(
   });
 
   const request: DefaultCapacityPoolUpdateRequest = {};
-  if (policy.strategy || policy.exhaustionPolicy || policy.maxNodes) request.policy = policy;
+  if (Object.keys(policy).length > 0) request.policy = policy;
   if (candidates.length > 0) request.candidates = candidates;
   const catalogAdditions = Object.values(draftCatalogAdditions);
   if (catalogAdditions.length > 0) request.catalogAdditions = catalogAdditions;
@@ -382,6 +401,9 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
   const [draftStrategy, setDraftStrategy] = useState<CapacityPoolStrategy>(
     CAPACITY_POOL_STRATEGIES[0]
   );
+  const [draftDeploymentStrategy, setDraftDeploymentStrategy] = useState<CapacityPoolStrategy>(
+    DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY
+  );
   const [draftExhaustionPolicy, setDraftExhaustionPolicy] = useState<CapacityExhaustionPolicy>(
     CAPACITY_EXHAUSTION_POLICIES[0]
   );
@@ -426,6 +448,9 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
   const startEditing = () => {
     if (!ownedDefault) return;
     setDraftStrategy(ownedDefault.pool.strategy);
+    setDraftDeploymentStrategy(
+      ownedDefault.pool.deploymentStrategy ?? DEFAULT_CAPACITY_POOL_DEPLOYMENT_STRATEGY
+    );
     setDraftExhaustionPolicy(ownedDefault.pool.exhaustionPolicy);
     setDraftMaxNodes(ownedDefault.pool.maxNodes ?? DEFAULT_CAPACITY_POOL_MAX_NODES);
     setDraftCandidateStatuses(
@@ -442,6 +467,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
     const request = buildUpdateRequest(
       ownedDefault,
       draftStrategy,
+      draftDeploymentStrategy,
       draftExhaustionPolicy,
       draftMaxNodes,
       draftCandidateStatuses,
@@ -538,14 +564,25 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
                   Add or remove concrete provider offerings. Reconcile refreshes provider catalog
                   rows without re-enabling offerings you removed here.
                 </p>
+                <p className="m-0 mt-1 text-xs text-fg-muted">
+                  Workspace strategy controls agent nodes. Deployment strategy orders new app nodes
+                  after SAM first checks existing compatible deployment capacity against the
+                  environment&apos;s declared resources.
+                </p>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <PolicySelect
-                  label="Strategy"
+                  label="Workspace strategy"
                   value={draftStrategy}
                   options={CAPACITY_POOL_STRATEGIES}
                   onChange={setDraftStrategy}
+                />
+                <PolicySelect
+                  label="Deployment strategy"
+                  value={draftDeploymentStrategy}
+                  options={CAPACITY_POOL_STRATEGIES}
+                  onChange={setDraftDeploymentStrategy}
                 />
                 <PolicySelect
                   label="Exhaustion policy"
