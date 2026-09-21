@@ -1161,6 +1161,73 @@ type ArchiveSearchCursor = {
   executionErrors: Array<{ ownerName: string; error: string }>;
 };
 
+function isArchiveSearchCursor(value: unknown): value is ArchiveSearchCursor {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const cursor = value as Record<string, unknown>;
+  const integers = [
+    'expiresAt',
+    'limit',
+    'nextOwner',
+    'ownersSucceeded',
+    'ownersFailed',
+    'sessionsAvailable',
+    'sessionsIndexed',
+    'sessionsIncomplete',
+  ];
+  if (
+    cursor.version !== 1 ||
+    typeof cursor.projectId !== 'string' ||
+    typeof cursor.query !== 'string' ||
+    typeof cursor.rootQueried !== 'boolean' ||
+    (cursor.rootError !== null && typeof cursor.rootError !== 'string') ||
+    !integers.every((key) => Number.isSafeInteger(cursor[key])) ||
+    !(
+      cursor.roles === null ||
+      (Array.isArray(cursor.roles) && cursor.roles.every((role) => typeof role === 'string'))
+    ) ||
+    !Array.isArray(cursor.owners) ||
+    !Array.isArray(cursor.results) ||
+    !Array.isArray(cursor.indexErrors) ||
+    !Array.isArray(cursor.executionErrors)
+  ) {
+    return false;
+  }
+  const recordsHave = (items: unknown[], fields: string[]) =>
+    items.every(
+      (item) =>
+        item !== null &&
+        typeof item === 'object' &&
+        !Array.isArray(item) &&
+        fields.every((field) => typeof (item as Record<string, unknown>)[field] === 'string')
+    );
+  return (
+    cursor.owners.every(
+      (owner) =>
+        owner !== null &&
+        typeof owner === 'object' &&
+        !Array.isArray(owner) &&
+        typeof (owner as Record<string, unknown>).owner_name === 'string' &&
+        Number.isSafeInteger((owner as Record<string, unknown>).generation)
+    ) &&
+    cursor.results.every(
+      (result) =>
+        result !== null &&
+        typeof result === 'object' &&
+        !Array.isArray(result) &&
+        ['id', 'sessionId', 'role', 'snippet'].every(
+          (field) => typeof (result as Record<string, unknown>)[field] === 'string'
+        ) &&
+        Number.isSafeInteger((result as Record<string, unknown>).createdAt) &&
+        ['sessionTopic', 'sessionTaskId'].every((field) => {
+          const fieldValue = (result as Record<string, unknown>)[field];
+          return fieldValue === null || typeof fieldValue === 'string';
+        })
+    ) &&
+    recordsHave(cursor.indexErrors, ['ownerName', 'sessionId', 'error']) &&
+    recordsHave(cursor.executionErrors, ['ownerName', 'error'])
+  );
+}
+
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -1210,7 +1277,9 @@ async function decodeArchiveSearchCursor(
     new TextEncoder().encode(body)
   );
   if (!valid) throw new Error('Invalid archive search continuation signature');
-  const cursor = JSON.parse(new TextDecoder().decode(base64UrlDecode(body))) as ArchiveSearchCursor;
+  const parsed: unknown = JSON.parse(new TextDecoder().decode(base64UrlDecode(body)));
+  if (!isArchiveSearchCursor(parsed)) throw new Error('Invalid archive search continuation body');
+  const cursor = parsed;
   if (
     cursor.version !== 1 ||
     cursor.expiresAt < Date.now() ||
