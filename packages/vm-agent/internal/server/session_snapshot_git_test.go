@@ -464,7 +464,7 @@ func TestValidateCapturedSnapshotGitStateRejectsCheckoutDuringCapture(t *testing
 	}
 }
 
-func TestValidateCapturedSnapshotGitStateRejectsNonCanonicalUpstream(t *testing.T) {
+func TestCaptureSnapshotGitStateOmitsNonCanonicalUpstream(t *testing.T) {
 	repo := initSnapshotTestRepo(t)
 	runGit(t, repo, "remote", "add", "backup", filepath.Join(t.TempDir(), "backup.git"))
 	branch := gitOutput(t, repo, "branch", "--show-current")
@@ -475,43 +475,28 @@ func TestValidateCapturedSnapshotGitStateRejectsNonCanonicalUpstream(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = validateCapturedSnapshotGitState(context.Background(), standaloneSnapshotGit(repo), state)
-	if err == nil || !strings.Contains(err.Error(), "canonical remote") {
-		t.Fatalf("capture metadata error = %v, want canonical remote diagnostics", err)
+	if state.Git == nil || state.Git.Branch != branch || state.Git.Upstream != "" || state.Git.Remote != "" {
+		t.Fatalf("captured Git metadata = %#v, want branch-only metadata", state.Git)
+	}
+	if err := validateCapturedSnapshotGitState(context.Background(), standaloneSnapshotGit(repo), state); err != nil {
+		t.Fatalf("validate branch-only metadata: %v", err)
 	}
 }
 
-func TestCaptureWIPOmitsInvalidGitMetadataAfterValidationFailure(t *testing.T) {
-	repo := initSnapshotTestRepo(t)
-	runGit(t, repo, "remote", "add", "backup", filepath.Join(t.TempDir(), "backup.git"))
-	branch := gitOutput(t, repo, "branch", "--show-current")
-	runGit(t, repo, "update-ref", "refs/remotes/backup/"+branch, "HEAD")
-	runGit(t, repo, "config", "branch."+branch+".remote", "backup")
-	runGit(t, repo, "config", "branch."+branch+".merge", "refs/heads/"+branch)
-
-	manifest := &snapshotManifest{Artifacts: map[string]snapshotArtifact{}}
-	capture := snapshotArtifactCapture{
-		server:    &Server{config: &config.Config{}},
-		workDir:   repo,
-		threshold: defaultSnapshotEntryThresholdBytes,
-		budget:    defaultSnapshotTotalBudgetBytes,
-		progress:  &snapshotProgressReporter{},
-		manifest:  manifest,
+func TestEnsureSnapshotUpstreamAvailableFetchesExactRemoteTrackingRef(t *testing.T) {
+	repo, _ := initSnapshotRemoteRepo(t)
+	runGit(t, repo, "update-ref", "-d", "refs/remotes/origin/main")
+	runGit(t, repo, "branch", "origin/main", "HEAD")
+	state := snapshotGitState{Git: &snapshotGitMetadata{
+		Branch:   "main",
+		Upstream: "origin/main",
+		Remote:   "origin",
+	}}
+	if err := ensureSnapshotUpstreamAvailable(context.Background(), standaloneSnapshotGit(repo), state); err != nil {
+		t.Fatal(err)
 	}
-	if failed := capture.captureWIP(context.Background()); !failed {
-		t.Fatal("captureWIP succeeded with noncanonical Git metadata")
-	}
-	if manifest.BaseCommit == "" {
-		t.Fatal("captureWIP discarded the validated base commit")
-	}
-	if manifest.Git != nil {
-		t.Fatalf("captureWIP retained invalid Git metadata: %#v", manifest.Git)
-	}
-	if _, ok := manifest.Artifacts["wip"]; ok {
-		t.Fatal("captureWIP uploaded a bundle after Git metadata validation failed")
-	}
-	if len(manifest.Skipped) != 1 || !strings.Contains(manifest.Skipped[0].Reason, "canonical remote") {
-		t.Fatalf("captureWIP skipped diagnostics = %#v, want canonical remote failure", manifest.Skipped)
+	if got := gitOutput(t, repo, "show-ref", "--verify", "refs/remotes/origin/main"); got == "" {
+		t.Fatal("exact remote-tracking ref was not fetched")
 	}
 }
 

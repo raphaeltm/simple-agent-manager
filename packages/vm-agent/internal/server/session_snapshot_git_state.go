@@ -52,6 +52,10 @@ func captureSnapshotGitState(ctx context.Context, git snapshotGitCommand) (snaps
 			if remote, remoteErr := git(ctx, nil, "for-each-ref", "--count=1", "--format=%(upstream:remotename)", "refs/heads/"+metadata.Branch); remoteErr == nil {
 				metadata.Remote = strings.TrimSpace(remote)
 			}
+			if metadata.Remote != "origin" || metadata.Upstream != "origin/"+metadata.Branch {
+				metadata.Upstream = ""
+				metadata.Remote = ""
+			}
 		}
 	}
 	state.Git = metadata
@@ -226,13 +230,14 @@ func ensureSnapshotUpstreamAvailable(ctx context.Context, git snapshotGitCommand
 		return fmt.Errorf("restore snapshot upstream %q: saved remote metadata is unavailable", upstream)
 	}
 	branch := strings.TrimPrefix(upstream, remote+"/")
-	refspec := "+refs/heads/" + branch + ":refs/remotes/" + upstream
-	if _, err := git(ctx, nil, "rev-parse", "--verify", upstream); err != nil {
+	remoteTrackingRef := "refs/remotes/" + remote + "/" + branch
+	refspec := "+refs/heads/" + branch + ":" + remoteTrackingRef
+	if _, err := git(ctx, nil, "rev-parse", "--verify", remoteTrackingRef); err != nil {
 		if _, err := git(ctx, nil, "fetch", "--no-tags", "--", remote, refspec); err != nil {
 			return fmt.Errorf("restore snapshot upstream %q from remote %q: %w", upstream, remote, err)
 		}
 	}
-	if _, err := git(ctx, nil, "rev-parse", "--verify", upstream); err != nil {
+	if _, err := git(ctx, nil, "rev-parse", "--verify", remoteTrackingRef); err != nil {
 		return fmt.Errorf("restore snapshot upstream %q: fetched ref is unavailable", upstream)
 	}
 	fetchRefspecs, _ := git(ctx, nil, "config", "--local", "--get-all", "remote."+remote+".fetch")
