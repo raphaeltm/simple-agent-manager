@@ -5,21 +5,26 @@
  * length 4 characters), so no raw row holds a whole word and a multi-word query
  * cannot match one. The grouped/FTS index that fixes that only ran when a session
  * terminalized, so sleeping sessions — most recent work — were unsearchable.
- * Reproduced on staging before this change against session
- * `95001592-0000-4236-80e0-d1bb8521e12d` (1,508 messages, never materialized):
- * `search_messages("pgvector Django")` and `search_messages("agentic frameworks")`
- * both returned 0.
+ *
+ * Reproduced on live staging before this change, in Test Project 1, with every
+ * phrase taken from the session's ACTUAL assistant content (read back through
+ * `get_session_messages`):
+ *
+ *   stopped + materialized  3a1a7624… "dispatch a subtask" -> 1, "fresh node"    -> 1
+ *   active  + never indexed 95001592… "Simeon Emanuilov"   -> 0, "Better Stack"  -> 0
+ *
+ * The stopped-session control proves search works; the only variable is whether
+ * the session was ever materialized.
  *
  * This spec drives a real Instant session with a real agent's streaming output.
  * `ProjectData.searchMessages` is reachable only through the MCP `search_messages`
- * tool — the surface the bug was reported on — and MCP tokens are workspace-scoped
- * and live only in KV, so the operator resolves the token out of band and supplies
- * it as `SAM_STAGING_MCP_TOKEN` before the assertion phase.
+ * tool — the surface the bug was reported on — and that tool is scoped by the
+ * token's PROJECT, not by workspace. The staging smoke user owns the project the
+ * existing tokens belong to, so one pre-existing token (resolved out of band from
+ * the staging KV `mcp:` prefix) can search a session this spec creates.
  *
- * Phase 1 (no MCP token): create the session, drive sleep → wake → sleep, print IDs.
- * Phase 2 (with SAM_STAGING_MCP_TOKEN): assert both halves are searchable.
- *
- * Run: pnpm exec playwright test staging-incremental-materialization --project=chromium
+ * Required env: SAM_STAGING_PROJECT_ID, SAM_STAGING_MCP_TOKEN.
+ * Run: pnpm exec playwright test staging-incremental-materialization --project="Desktop (1280x800)"
  */
 import { expect, type Page, test } from '@playwright/test';
 
@@ -158,16 +163,9 @@ test.describe('incremental materialization on staging', () => {
     console.log('[staging] first sleep committed');
 
     const mcpToken = process.env.SAM_STAGING_MCP_TOKEN;
-    if (!mcpToken) {
-      // eslint-disable-next-line no-console
-      console.log(
-        `[staging] PHASE 1 DONE. Resolve the MCP token for workspace ${workspaceId} from KV, ` +
-          `then re-run with SAM_STAGING_MCP_TOKEN set to assert. Sentinels: ${FIRST_SENTINEL} / ${SECOND_SENTINEL}`
-      );
-      return;
-    }
+    expect(mcpToken, 'set SAM_STAGING_MCP_TOKEN').toBeTruthy();
 
-    const afterFirstSleep = await searchMessages(page, mcpToken, FIRST_SENTINEL, sessionId!);
+    const afterFirstSleep = await searchMessages(page, mcpToken!, FIRST_SENTINEL, sessionId!);
     expect(
       afterFirstSleep.length,
       'assistant text from a SLEEPING session must be searchable'
@@ -188,14 +186,14 @@ test.describe('incremental materialization on staging', () => {
 
     // THE load-bearing assertion: the old boolean gate would have stamped the
     // session on the first sleep and dropped everything after it, permanently.
-    const secondBatch = await searchMessages(page, mcpToken, SECOND_SENTINEL, sessionId!);
+    const secondBatch = await searchMessages(page, mcpToken!, SECOND_SENTINEL, sessionId!);
     expect(
       secondBatch.length,
       'text written after the first sleep must also be searchable'
     ).toBeGreaterThanOrEqual(1);
 
     // Liveness control: a pass cannot have become a silent no-op.
-    const firstAgain = await searchMessages(page, mcpToken, FIRST_SENTINEL, sessionId!);
+    const firstAgain = await searchMessages(page, mcpToken!, FIRST_SENTINEL, sessionId!);
     expect(firstAgain.length, 'first batch must remain searchable').toBeGreaterThanOrEqual(1);
   });
 });
