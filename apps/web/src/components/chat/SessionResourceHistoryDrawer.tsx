@@ -1,5 +1,5 @@
 import { Spinner } from '@simple-agent-manager/ui';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
   Activity,
   AlertTriangle,
@@ -392,6 +392,7 @@ export function ChunkButton({
     <button
       type="button"
       onClick={onSelect}
+      aria-pressed={selected}
       className={`w-full rounded-lg border p-3 text-left transition-colors ${selected ? 'border-accent bg-accent/10' : 'border-border-default bg-surface hover:bg-surface-hover'}`}
     >
       <div className="flex items-center justify-between gap-2 text-sm text-fg-primary">
@@ -423,6 +424,7 @@ function ChunksDisclosure({
       <button
         type="button"
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
         className="flex w-full items-center gap-2 py-2 text-xs font-semibold uppercase tracking-wide text-fg-muted"
       >
         <ChevronRight
@@ -460,6 +462,7 @@ export function SessionResourceHistoryDrawer({
     queryKey: ['session-resource-history', projectId, sessionId, selectedChunkId],
     queryFn: () => getSessionResourceHistory(projectId, sessionId, { chunkId: selectedChunkId }),
     staleTime: 15_000,
+    placeholderData: keepPreviousData,
   });
 
   const history = query.data;
