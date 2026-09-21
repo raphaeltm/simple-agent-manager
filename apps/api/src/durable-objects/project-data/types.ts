@@ -96,6 +96,10 @@ export type Env = {
   PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS?: string;
+  /** Sessions indexed per `materializePendingSessions` backfill call (default: 50). */
+  PROJECT_DATA_MATERIALIZATION_SWEEP_LIMIT?: string;
+  /** Sessions examined per `materializePendingSessions` backfill call (default: 500). */
+  PROJECT_DATA_MATERIALIZATION_SWEEP_SCAN_LIMIT?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS?: string;
