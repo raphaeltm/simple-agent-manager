@@ -20,16 +20,10 @@ import (
 
 func TestCreateWIPBundlePreservesBranchAndIndex(t *testing.T) {
 	repo := initSnapshotTestRepo(t)
-	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("staged"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustWriteSnapshotFile(t, repo, "README.md", "staged")
 	runGit(t, repo, "add", "README.md")
-	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("staged and unstaged"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "untracked.txt"), []byte("untracked"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustWriteSnapshotFile(t, repo, "README.md", "staged and unstaged")
+	mustWriteSnapshotFile(t, repo, "untracked.txt", "untracked")
 	beforeStatus := gitOutput(t, repo, "status", "--porcelain=v1")
 	beforeHead := gitOutput(t, repo, "rev-parse", "HEAD")
 	beforeBranch := gitOutput(t, repo, "branch", "--show-current")
@@ -367,15 +361,7 @@ func TestRestoreDetachedSnapshotGitState(t *testing.T) {
 }
 
 func TestRestoreDirtySnapshotMovesToSavedCommitBeforeApplyingWIP(t *testing.T) {
-	seed, remote := initSnapshotRemoteRepo(t)
-	runGit(t, seed, "checkout", "-b", "sam/saved-task")
-	if err := os.WriteFile(filepath.Join(seed, "saved.txt"), []byte("saved"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, seed, "add", "saved.txt")
-	runGit(t, seed, "commit", "-m", "saved task")
-	runGit(t, seed, "push", "-u", "origin", "sam/saved-task")
-	wantHead := gitOutput(t, seed, "rev-parse", "HEAD")
+	seed, remote, wantHead := createRemoteTaskCommit(t, "sam/saved-task", "saved.txt")
 	if err := os.WriteFile(filepath.Join(seed, "saved.txt"), []byte("dirty snapshot"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -416,16 +402,7 @@ func TestContainerCleanLocalOnlyCommitBundlesAndRestoresExactGitState(t *testing
 
 	s := &Server{config: &config.Config{Role: config.RoleStandalone}}
 	target := &containerSnapshotTarget{workDir: repo}
-	state, err := captureSnapshotGitState(context.Background(), func(ctx context.Context, env []string, args ...string) (string, error) {
-		return s.containerGit(ctx, target, env, args...)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, bundlePath, _, err := s.createContainerWIPBundle(context.Background(), target, 1024, 1<<30, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	state, bundlePath := captureContainerSnapshotBundle(t, s, target)
 	if bundlePath == "" {
 		t.Fatal("clean local-only container snapshot did not produce a Git bundle")
 	}
@@ -433,13 +410,7 @@ func TestContainerCleanLocalOnlyCommitBundlesAndRestoresExactGitState(t *testing
 
 	restored := filepath.Join(t.TempDir(), "restored")
 	runGit(t, filepath.Dir(restored), "clone", "--single-branch", "--branch", "main", remote, restored)
-	bundleServer := serveSnapshotBundle(t, bundlePath)
-	defer bundleServer.Close()
-	s.config.ControlPlaneURL = bundleServer.URL
-	restoredTarget := &containerSnapshotTarget{workDir: restored}
-	if err := s.downloadAndRestoreContainerWIPWithGitState(context.Background(), restoredTarget, bundleServer.URL, "token", time.Second, 1<<30, state); err != nil {
-		t.Fatal(err)
-	}
+	restoreContainerSnapshotBundle(t, s, restored, bundlePath, state)
 	if got := gitOutput(t, restored, "rev-parse", "HEAD"); got != wantHead {
 		t.Fatalf("restored container HEAD = %q, want local-only commit %q", got, wantHead)
 	}
@@ -449,42 +420,19 @@ func TestContainerCleanLocalOnlyCommitBundlesAndRestoresExactGitState(t *testing
 }
 
 func TestContainerDirtySnapshotRestoresSavedCommitBeforeWIP(t *testing.T) {
-	seed, remote := initSnapshotRemoteRepo(t)
-	runGit(t, seed, "checkout", "-b", "sam/container-task")
-	if err := os.WriteFile(filepath.Join(seed, "container-task.txt"), []byte("saved"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, seed, "add", "container-task.txt")
-	runGit(t, seed, "commit", "-m", "container saved task")
-	runGit(t, seed, "push", "-u", "origin", "sam/container-task")
-	wantHead := gitOutput(t, seed, "rev-parse", "HEAD")
+	seed, remote, wantHead := createRemoteTaskCommit(t, "sam/container-task", "container-task.txt")
 	if err := os.WriteFile(filepath.Join(seed, "container-task.txt"), []byte("dirty container snapshot"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	s := &Server{config: &config.Config{Role: config.RoleStandalone}}
 	target := &containerSnapshotTarget{workDir: seed}
-	state, err := captureSnapshotGitState(context.Background(), func(ctx context.Context, env []string, args ...string) (string, error) {
-		return s.containerGit(ctx, target, env, args...)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, bundlePath, _, err := s.createContainerWIPBundle(context.Background(), target, 1024, 1<<30, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	state, bundlePath := captureContainerSnapshotBundle(t, s, target)
 	defer os.Remove(bundlePath)
 
 	restored := filepath.Join(t.TempDir(), "restored")
 	runGit(t, filepath.Dir(restored), "clone", "--branch", "main", remote, restored)
-	bundleServer := serveSnapshotBundle(t, bundlePath)
-	defer bundleServer.Close()
-	s.config.ControlPlaneURL = bundleServer.URL
-	restoredTarget := &containerSnapshotTarget{workDir: restored}
-	if err := s.downloadAndRestoreContainerWIPWithGitState(context.Background(), restoredTarget, bundleServer.URL, "token", time.Second, 1<<30, state); err != nil {
-		t.Fatal(err)
-	}
+	restoreContainerSnapshotBundle(t, s, restored, bundlePath, state)
 	if got := gitOutput(t, restored, "rev-parse", "HEAD"); got != wantHead {
 		t.Fatalf("restored container HEAD = %q, want saved commit %q", got, wantHead)
 	}
@@ -628,6 +576,50 @@ func initSnapshotTestRepo(t *testing.T) string {
 	runGit(t, repo, "add", "README.md")
 	runGit(t, repo, "commit", "-m", "base")
 	return repo
+}
+
+func mustWriteSnapshotFile(t *testing.T, repo, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func createRemoteTaskCommit(t *testing.T, branch, file string) (string, string, string) {
+	t.Helper()
+	seed, remote := initSnapshotRemoteRepo(t)
+	runGit(t, seed, "checkout", "-b", branch)
+	mustWriteSnapshotFile(t, seed, file, "saved")
+	runGit(t, seed, "add", file)
+	runGit(t, seed, "commit", "-m", "saved task")
+	runGit(t, seed, "push", "-u", "origin", branch)
+	return seed, remote, gitOutput(t, seed, "rev-parse", "HEAD")
+}
+
+func captureContainerSnapshotBundle(t *testing.T, s *Server, target *containerSnapshotTarget) (snapshotGitState, string) {
+	t.Helper()
+	state, err := captureSnapshotGitState(context.Background(), func(ctx context.Context, env []string, args ...string) (string, error) {
+		return s.containerGit(ctx, target, env, args...)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, bundlePath, _, err := s.createContainerWIPBundle(context.Background(), target, 1024, 1<<30, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state, bundlePath
+}
+
+func restoreContainerSnapshotBundle(t *testing.T, s *Server, restored, bundlePath string, state snapshotGitState) {
+	t.Helper()
+	bundleServer := serveSnapshotBundle(t, bundlePath)
+	t.Cleanup(bundleServer.Close)
+	s.config.ControlPlaneURL = bundleServer.URL
+	target := &containerSnapshotTarget{workDir: restored}
+	if err := s.downloadAndRestoreContainerWIPWithGitState(context.Background(), target, bundleServer.URL, "token", time.Second, 1<<30, state); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func initSnapshotRemoteRepo(t *testing.T) (string, string) {

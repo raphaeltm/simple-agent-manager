@@ -67,18 +67,7 @@ func TestCreateHomeTarExcludesCachesAndRecordsOversizedFiles(t *testing.T) {
 }
 
 func TestCreateWIPBundleDegradesDuringMerge(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-	repo := t.TempDir()
-	runGit(t, repo, "init")
-	runGit(t, repo, "config", "user.email", "sam@example.test")
-	runGit(t, repo, "config", "user.name", "SAM")
-	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("base"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, repo, "add", "README.md")
-	runGit(t, repo, "commit", "-m", "base")
+	repo := initSnapshotTestRepo(t)
 	if err := os.WriteFile(filepath.Join(repo, ".git", "MERGE_HEAD"), []byte("deadbeef"), 0o600); err != nil {
 		t.Fatal(err)
 	}
