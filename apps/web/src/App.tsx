@@ -144,6 +144,10 @@ const ProjectTriggerDetail = lazyNamed(
 );
 const ProjectTriggers = lazyNamed(() => import('./pages/ProjectTriggers'), 'ProjectTriggers');
 const ProjectEvents = lazyNamed(() => import('./pages/ProjectEvents'), 'ProjectEvents');
+const NodeResourcesPrototype = lazyNamed(
+  () => import('./pages/node-resources-prototype'),
+  'NodeResourcesPrototype'
+);
 const SamPrototype = lazyNamed(() => import('./pages/SamPrototype'), 'SamPrototype');
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
@@ -268,6 +272,11 @@ export default function App() {
                       <>
                         {/* SAM prototype — local/test only, no auth */}
                         <Route path="/sam" element={page(<SamPrototype />)} />
+                        {/* Node resource-visualisation concepts — prototype, remove before merge */}
+                        <Route
+                          path="/prototype/node-resources"
+                          element={page(<NodeResourcesPrototype />)}
+                        />
                         {/* Harness for Playwright audits — mounts trial components with mock data */}
                         <Route
                           path="/__test/trial-chat-gate"

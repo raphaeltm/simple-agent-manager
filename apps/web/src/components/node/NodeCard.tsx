@@ -12,7 +12,7 @@ import {
   StatusBadge,
 } from '@simple-agent-manager/ui';
 import { Plus, Rocket, Server } from 'lucide-react';
-import type { FC } from 'react';
+import type { FC, ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
 import { HardwareDetails } from '../hardware/HardwareDetails';
@@ -29,6 +29,12 @@ interface NodeCardProps {
   onCreateWorkspace: (nodeId: string) => void;
   /** @deprecated Existing nodes display persisted hardware, never current catalog guesses. */
   catalogs?: ProviderCatalog[];
+  /**
+   * Prototype-only slot. When provided it replaces the MiniMetricBadge row so a
+   * resource-visualisation concept can be evaluated inside the real card.
+   * Remove together with `apps/web/src/pages/node-resources-prototype/`.
+   */
+  resourceSlot?: ReactNode;
 }
 
 function getNodeActions(
@@ -64,6 +70,7 @@ export const NodeCard: FC<NodeCardProps> = ({
   onStop,
   onDelete,
   onCreateWorkspace,
+  resourceSlot,
 }) => {
   const navigate = useNavigate();
   const overflowItems = getNodeActions(node, { onStop, onDelete });
@@ -173,7 +180,11 @@ export const NodeCard: FC<NodeCardProps> = ({
         )}
 
         {/* Resource metrics */}
-        {hasMetrics ? (
+        {resourceSlot ? (
+          <div role="presentation" onClick={(e) => e.stopPropagation()}>
+            {resourceSlot}
+          </div>
+        ) : hasMetrics ? (
           <div className="flex flex-wrap gap-2">
             {metrics.cpuLoadAvg1 != null && (
               <MiniMetricBadge label="CPU" value={metrics.cpuLoadAvg1} />
