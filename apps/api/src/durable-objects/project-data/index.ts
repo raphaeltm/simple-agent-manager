@@ -1665,11 +1665,13 @@ export class ProjectData extends DurableObject<Env> {
   materializeSession(sessionId: string): void {
     materialization.materializeSession(this.sql, sessionId);
   }
-  materializePendingSessions(
-    limit: number = materialization.DEFAULT_MATERIALIZATION_SWEEP_LIMIT,
-    scanLimit: number = materialization.DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT
-  ) {
-    return materialization.materializePendingSessions(this.sql, limit, scanLimit);
+  materializePendingSessions(limit?: number, scanLimit?: number) {
+    const config = materialization.resolveMaterializationSweepConfig(this.env);
+    return materialization.materializePendingSessions(
+      this.sql,
+      limit ?? config.limit,
+      scanLimit ?? config.scanLimit
+    );
   }
 
   async linkSessionIdea(sessionId: string, taskId: string, context: string | null): Promise<void> {

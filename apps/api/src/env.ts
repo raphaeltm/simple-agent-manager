@@ -664,6 +664,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES?: string; // Absolute bounded metadata read cap for legacy oversized archives (default: 1900000)
   PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS?: string; // Default row budget for admin-only ProjectData relief measurement slices
   PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS?: string; // Max physical row window for admin/preflight measurement and ordinary cleanup selection
+  PROJECT_DATA_MATERIALIZATION_SWEEP_LIMIT?: string; // Sessions indexed per materializePendingSessions backfill call (default: 50)
+  PROJECT_DATA_MATERIALIZATION_SWEEP_SCAN_LIMIT?: string; // Sessions examined per materializePendingSessions backfill call (default: 500)
   PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED?: string; // Disabled-by-default cleanup of old terminal-session grouped/FTS derived rows
   PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO?: string;

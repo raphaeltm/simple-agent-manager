@@ -13,6 +13,7 @@
  * sleep would be quadratic in the session's lifetime message count.
  */
 import { log } from '../../lib/logger';
+import { parsePositiveInt } from '../../lib/route-helpers';
 import {
   type MaterializationState,
   parseCount,
@@ -51,6 +52,27 @@ export const DEFAULT_MATERIALIZATION_SWEEP_LIMIT = 50;
  * indexed would scan every session on every call (rule 47).
  */
 export const DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT = 500;
+
+export interface MaterializationSweepConfig {
+  limit: number;
+  scanLimit: number;
+}
+
+export function resolveMaterializationSweepConfig(env: {
+  PROJECT_DATA_MATERIALIZATION_SWEEP_LIMIT?: string;
+  PROJECT_DATA_MATERIALIZATION_SWEEP_SCAN_LIMIT?: string;
+}): MaterializationSweepConfig {
+  return {
+    limit: parsePositiveInt(
+      env.PROJECT_DATA_MATERIALIZATION_SWEEP_LIMIT,
+      DEFAULT_MATERIALIZATION_SWEEP_LIMIT
+    ),
+    scanLimit: parsePositiveInt(
+      env.PROJECT_DATA_MATERIALIZATION_SWEEP_SCAN_LIMIT,
+      DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT
+    ),
+  };
+}
 
 /**
  * SQLite has no infinity for an integer column, and `Number.MAX_SAFE_INTEGER`

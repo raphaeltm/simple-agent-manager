@@ -255,6 +255,8 @@ read-only measurement, cursor and byte/deadline bounds; and
 (`apps/api/src/scheduled/project-data-storage-relief-preflight.ts`) owns the lease, the
 per-slice and per-run admission budgets, and the verified R2 manifest writes.
 
+- `PROJECT_DATA_MATERIALIZATION_SWEEP_LIMIT` — Sessions indexed by one chat-search materialization backfill call (default: `50`)
+- `PROJECT_DATA_MATERIALIZATION_SWEEP_SCAN_LIMIT` — Sessions examined by one chat-search materialization backfill call (default: `500`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED` — Production-disabled switch for cleanup of old terminal-session grouped message rows and their external-content FTS entries (default: disabled)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO` — ProjectData usage ratio that starts grouped/FTS derived-data cleanup when explicitly enabled (default: `0.9`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO` — ProjectData usage ratio below which grouped/FTS cleanup stops (default: `0.85`)
