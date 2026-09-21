@@ -1140,15 +1140,24 @@ async function readProjectWideArchiveSearchOwners(
   projectId: string
 ): Promise<ProjectDataArchiveSearchOwnerRow[]> {
   const rows = await env.DATABASE.prepare(
-    `SELECT owner_name, generation
-     FROM project_data_session_locations
-     WHERE project_id = ?
-       AND location_state = 'archive_shard'
-       AND owner_kind = 'archive_shard'
+    `SELECT owner_name, generation FROM (
+       SELECT owner_name, generation
+       FROM project_data_session_locations
+       WHERE project_id = ?
+         AND location_state = 'archive_shard'
+         AND owner_kind = 'archive_shard'
+       UNION
+       SELECT target_owner_name AS owner_name, target_generation AS generation
+       FROM project_data_archive_migrations
+       WHERE project_id = ?
+         AND state IN ('target_sealed', 'recovery_manifest_persisted', 'source_deleted')
+         AND target_aggregate_sha256 IS NOT NULL
+         AND target_aggregate_sha256 != ''
+     )
      GROUP BY owner_name, generation
      ORDER BY generation DESC, owner_name ASC`
   )
-    .bind(projectId)
+    .bind(projectId, projectId)
     .all<ProjectDataArchiveSearchOwnerRow>();
   return rows.results ?? [];
 }

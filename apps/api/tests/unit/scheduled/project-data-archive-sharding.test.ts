@@ -1505,6 +1505,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
           r2.put = vi.fn(async (key: string, value: string) => {
             if (key.includes('chat_messages/1.json') && !injected) {
               injected = true;
+              await originalPut(key, value);
               throw new Error('injected put failure');
             }
             return originalPut(key, value);
@@ -1536,6 +1537,13 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
           .mocked(r2.put)
           .mock.calls.filter(([key]) => String(key).includes('chat_messages/0.json'));
         expect(prefixPuts).toHaveLength(1);
+        if (failureBoundary === 'put') {
+          expect(
+            vi
+              .mocked(r2.put)
+              .mock.calls.filter(([key]) => String(key).includes('chat_messages/1.json'))
+          ).toHaveLength(1);
+        }
         const prefixReceipts = target.archiveTargetCommitChunk.mock.calls.filter(
           ([chunk]) => chunk.tableName === 'chat_messages' && chunk.ordinal === 0
         );

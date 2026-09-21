@@ -70,7 +70,10 @@ function envForSearch(sqlite: Database.Database, stubs: Record<string, SearchStu
 }
 
 function createLocationTable(sqlite: Database.Database): void {
-  createSchemaTables(sqlite, [schema.projectDataSessionLocations]);
+  createSchemaTables(sqlite, [
+    schema.projectDataArchiveMigrations,
+    schema.projectDataSessionLocations,
+  ]);
 }
 
 describe('ProjectData project-wide archive search metadata', () => {
@@ -97,6 +100,54 @@ describe('ProjectData project-wide archive search metadata', () => {
         archiveOwnersOmitted: 0,
       });
       expect(root.searchMessages).toHaveBeenCalledWith('needle', null, null, 10);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('searches a verified target during the source-deleted publication gap', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createLocationTable(sqlite);
+      sqlite
+        .prepare(
+          `INSERT INTO project_data_archive_migrations
+             (migration_id, project_id, session_id, state, source_owner_name,
+              target_owner_name, target_generation, target_aggregate_sha256,
+              created_at, updated_at)
+           VALUES ('migration-gap', 'project-search', 'session-gap', 'source_deleted',
+                   'project-search', 'project-search:archive:g2:s0', 2,
+                   'verified-target-sha', 1000, 1000)`
+        )
+        .run();
+      sqlite
+        .prepare(
+          `INSERT INTO project_data_session_locations
+             (project_id, session_id, location_state, owner_kind, owner_name,
+              generation, migration_id, routing_schema_version, updated_at)
+           VALUES ('project-search', 'session-gap', 'migrating', 'archive_shard',
+                   'project-search:archive:g2:s0', 2, 'migration-gap', 1, 1000)`
+        )
+        .run();
+      const target = stub({ archive: [row('gap-message', 'session-gap', 500)] });
+      const result = await searchMessagesWithArchiveMetadata(
+        envForSearch(sqlite, {
+          'project-search': stub({}),
+          'project-search:archive:g2:s0': target,
+        }),
+        'project-search',
+        'needle',
+        null,
+        null,
+        10
+      );
+
+      expect(result.archiveSearch).toMatchObject({
+        complete: true,
+        archiveOwnersAvailable: 1,
+        archiveOwnersQueried: 1,
+      });
+      expect(result.results.map((item) => item.id)).toEqual(['gap-message']);
     } finally {
       sqlite.close();
     }
