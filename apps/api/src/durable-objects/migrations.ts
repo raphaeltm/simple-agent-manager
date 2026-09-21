@@ -2316,6 +2316,18 @@ export const MIGRATIONS: Migration[] = [
           'search_indexed_at',
           'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_indexed_at INTEGER',
         ],
+        [
+          'search_repair_next_ordinal',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_next_ordinal INTEGER',
+        ],
+        [
+          'search_repair_pending_json',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_pending_json TEXT',
+        ],
+        [
+          'search_repair_message_count',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_message_count INTEGER',
+        ],
       ] as const) {
         try {
           sql.exec(statement);
@@ -2331,7 +2343,8 @@ export const MIGRATIONS: Migration[] = [
         FROM project_data_archive_target_chunks LIMIT 0`);
       sql.exec(`SELECT search_index_version, search_index_state,
           search_index_message_count, search_index_document_count,
-          search_index_sha256, search_indexed_at
+          search_index_sha256, search_indexed_at, search_repair_next_ordinal,
+          search_repair_pending_json, search_repair_message_count
         FROM project_data_archive_target_sessions LIMIT 0`);
       sql.exec(`CREATE TABLE IF NOT EXISTS project_data_archive_search_documents (
         rowid INTEGER PRIMARY KEY AUTOINCREMENT,

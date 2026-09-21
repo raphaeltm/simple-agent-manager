@@ -113,6 +113,7 @@ type CompactRawFilter = {
   order?: 'asc' | 'desc';
   deadline?: number;
   perChunkTimeoutMs?: number;
+  startAfterOrdinal?: number;
 };
 
 function compactChunkQuery(sessionId: string, cursor: number | null, filter: CompactRawFilter) {
@@ -155,14 +156,15 @@ export async function* compactRawChunks(
     .toArray()[0];
   if (!target) throw new Error('Compact archive target missing');
   const perChunkMs = filter.perChunkTimeoutMs;
-  const sharedDeadline = filter.deadline ?? Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
-  let cursor: number | null = null;
+  const sharedDeadline =
+    filter.deadline ?? Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
+  let cursor: number | null = filter.startAfterOrdinal ?? null;
   for (;;) {
     const { query, params } = compactChunkQuery(sessionId, cursor, filter);
     const row = sql.exec(query, ...params).toArray()[0];
     if (!row) return;
     cursor = Number(row.ordinal);
-    const chunkTimeout = perChunkMs ?? (sharedDeadline - Date.now());
+    const chunkTimeout = perChunkMs ?? sharedDeadline - Date.now();
     if (chunkTimeout <= 0) throw new Error('Compact archive operation deadline exceeded');
     const chunk = await readCompactChunk(
       bucket(env),

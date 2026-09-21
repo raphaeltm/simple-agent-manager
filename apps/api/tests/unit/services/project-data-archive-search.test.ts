@@ -258,6 +258,39 @@ describe('ProjectData project-wide archive search metadata', () => {
           `${continuation}x`
         )
       ).rejects.toThrow('continuation');
+      await expect(
+        searchMessagesWithArchiveMetadata(
+          env,
+          'project-search',
+          'different-query',
+          null,
+          null,
+          10,
+          continuation
+        )
+      ).rejects.toThrow('does not match');
+      await expect(
+        searchMessagesWithArchiveMetadata(
+          env,
+          'project-search',
+          'needle',
+          null,
+          ['assistant'],
+          10,
+          continuation
+        )
+      ).rejects.toThrow('does not match');
+      await expect(
+        searchMessagesWithArchiveMetadata(
+          env,
+          'project-search',
+          'needle',
+          null,
+          null,
+          9,
+          continuation
+        )
+      ).rejects.toThrow('does not match');
 
       const completed = await searchMessagesWithArchiveMetadata(
         env,
@@ -279,6 +312,172 @@ describe('ProjectData project-wide archive search metadata', () => {
         sessionsIndexed: 65,
         complete: true,
       });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps a failed root search retryable and never reports false completion', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createLocationTable(sqlite);
+      const root = stub({ root: [row('root-message', 'root-session', 100)] });
+      root.searchMessages
+        .mockRejectedValueOnce(new Error('temporary root failure'))
+        .mockRejectedValueOnce(new Error('temporary root retry failure'))
+        .mockResolvedValueOnce([row('root-message', 'root-session', 100)]);
+      const env = envForSearch(sqlite, { 'project-search': root });
+
+      const first = await searchMessagesWithArchiveMetadata(
+        env,
+        'project-search',
+        'needle',
+        null,
+        null,
+        10
+      );
+      expect(first.archiveSearch).toMatchObject({
+        complete: false,
+        partial: true,
+        rootError: 'root_search_failed',
+      });
+      expect(first.archiveSearch.continuation).toEqual(expect.any(String));
+
+      const completed = await searchMessagesWithArchiveMetadata(
+        env,
+        'project-search',
+        'needle',
+        null,
+        null,
+        10,
+        first.archiveSearch.continuation
+      );
+      expect(completed.archiveSearch).toMatchObject({
+        complete: true,
+        partial: false,
+        rootError: null,
+        continuation: null,
+      });
+      expect(completed.results.map((item) => item.id)).toEqual(['root-message']);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps failed and incomplete owners retryable until their coverage is final', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createLocationTable(sqlite);
+      sqlite
+        .prepare(
+          `INSERT INTO project_data_session_locations
+             (project_id, session_id, location_state, owner_kind, owner_name,
+              generation, migration_id, routing_schema_version, updated_at)
+           VALUES ('project-search', 'session-archive', 'archive_shard', 'archive_shard',
+                   'project-search:archive:g1:s0', 1, 'migration-a', 1, 1000)`
+        )
+        .run();
+      const root = stub({});
+      const archive = stub({ archive: [row('archive-message', 'session-archive', 200)] });
+      archive.archiveTargetSearchProjectMessages
+        .mockRejectedValueOnce(new Error('private backend detail'))
+        .mockResolvedValueOnce({
+          results: [row('archive-message', 'session-archive', 200)],
+          coverage: {
+            sessionsAvailable: 2,
+            sessionsIndexed: 1,
+            sessionsIncomplete: 1,
+            errors: [],
+          },
+        })
+        .mockResolvedValueOnce({
+          results: [row('archive-message', 'session-archive', 200)],
+          coverage: {
+            sessionsAvailable: 2,
+            sessionsIndexed: 2,
+            sessionsIncomplete: 0,
+            errors: [],
+          },
+        });
+      const env = envForSearch(sqlite, {
+        'project-search': root,
+        'project-search:archive:g1:s0': archive,
+      });
+
+      let result = await searchMessagesWithArchiveMetadata(
+        env,
+        'project-search',
+        'needle',
+        null,
+        null,
+        10
+      );
+      expect(result.archiveSearch).toMatchObject({
+        complete: false,
+        resultsProvisional: true,
+        executionErrors: [
+          { ownerName: 'project-search:archive:g1:s0', error: 'archive_owner_search_failed' },
+        ],
+      });
+      expect(result.archiveSearch.continuation).toEqual(expect.any(String));
+
+      result = await searchMessagesWithArchiveMetadata(
+        env,
+        'project-search',
+        'needle',
+        null,
+        null,
+        10,
+        result.archiveSearch.continuation
+      );
+      expect(result.archiveSearch).toMatchObject({
+        complete: false,
+        resultsProvisional: true,
+        executionErrors: [],
+        indexCoverage: { sessionsIncomplete: 1, complete: false },
+      });
+
+      result = await searchMessagesWithArchiveMetadata(
+        env,
+        'project-search',
+        'needle',
+        null,
+        null,
+        10,
+        result.archiveSearch.continuation
+      );
+      expect(result.archiveSearch).toMatchObject({
+        complete: true,
+        resultsProvisional: false,
+        continuation: null,
+        executionErrors: [],
+        indexCoverage: { sessionsIncomplete: 0, complete: true },
+      });
+      expect(result.results.map((item) => item.id)).toEqual(['archive-message']);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('rejects an oversized continuation before decoding it', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createLocationTable(sqlite);
+      const env = {
+        ...envForSearch(sqlite, { 'project-search': stub({}) }),
+        PROJECT_DATA_ARCHIVE_SEARCH_CURSOR_MAX_BYTES: '128',
+      } as Env;
+      await expect(
+        searchMessagesWithArchiveMetadata(
+          env,
+          'project-search',
+          'needle',
+          null,
+          null,
+          10,
+          'x'.repeat(129)
+        )
+      ).rejects.toThrow('byte limit');
     } finally {
       sqlite.close();
     }

@@ -21,6 +21,7 @@ CREATE TABLE project_data_archive_copy_checkpoints (
   last_chunk_sha256 TEXT,
   lease_epoch INTEGER NOT NULL DEFAULT 0 CHECK (lease_epoch >= 0),
   last_operation TEXT,
+  last_operation_id TEXT,
   last_operation_started_at INTEGER,
   last_operation_completed_at INTEGER,
   last_operation_duration_ms INTEGER CHECK (

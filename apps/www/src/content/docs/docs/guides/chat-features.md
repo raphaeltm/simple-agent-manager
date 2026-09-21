@@ -184,6 +184,12 @@ Indexing is incremental: it runs every time a session sleeps and again when it s
 
 Agents can search messages using the `search_messages` MCP tool.
 
+Project-wide search also traverses immutable archive owners. A bounded call can return provisional
+results plus `archiveSearch.continuation`; pass that continuation with the same query, roles, and
+limit until `archiveSearch.complete` is true. `ownerCoverage`, `indexCoverage`, `rootError`, and
+`executionErrors` distinguish pending traversal, one-time index repair, and execution failures.
+Session-scoped search resolves the exact owner directly.
+
 ## Session Lifecycle
 
 Agent conversations and task sessions stay active until they complete, fail, or are explicitly stopped.

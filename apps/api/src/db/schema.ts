@@ -3650,6 +3650,7 @@ export const projectDataArchiveCopyCheckpoints = sqliteTable(
     lastChunkSha256: text('last_chunk_sha256'),
     leaseEpoch: integer('lease_epoch').notNull().default(0),
     lastOperation: text('last_operation'),
+    lastOperationId: text('last_operation_id'),
     lastOperationStartedAt: integer('last_operation_started_at'),
     lastOperationCompletedAt: integer('last_operation_completed_at'),
     lastOperationDurationMs: integer('last_operation_duration_ms'),

@@ -760,12 +760,12 @@ describe('ProjectData terminal archive sharding bridge', () => {
     }
   });
 
-  it('indexes raw messages beyond the old 5,000-row materialization cap before sealing', async () => {
+  it('indexes more than 10,000 raw messages beyond the old materialization cap before sealing', async () => {
     const source = makeSql();
     const target = makeSql();
     try {
       const sessionId = 'session-over-materialization-cap';
-      seedWideTerminalSession(source.sql, sessionId, 5_001);
+      seedWideTerminalSession(source.sql, sessionId, 10_001);
       const base = {
         projectId: 'project-archive',
         sessionId,
@@ -822,11 +822,11 @@ describe('ProjectData terminal archive sharding bridge', () => {
           ownerName: base.targetOwnerName,
           generation: base.targetGeneration,
         },
-        'wide payload 5000',
+        'wide payload 10000',
         null,
         10
       );
-      expect(search.results.map((result) => result.id)).toContain(`${sessionId}-message-5000`);
+      expect(search.results.map((result) => result.id)).toContain(`${sessionId}-message-10000`);
       expect(search.coverage).toMatchObject({
         sessionsAvailable: 1,
         sessionsIndexed: 1,
@@ -839,12 +839,12 @@ describe('ProjectData terminal archive sharding bridge', () => {
             sessionId
           )
           .toArray()[0]
-      ).toEqual({ search_index_message_count: 5_001 });
+      ).toEqual({ search_index_message_count: 10_001 });
     } finally {
       source.db.close();
       target.db.close();
     }
-  });
+  }, 15_000);
 
   it('returns a typed pre-copy refusal before any write, and throws once an intent exists', async () => {
     const source = makeSql();
@@ -1022,24 +1022,13 @@ describe('ProjectData terminal archive sharding bridge', () => {
     }
   });
 
-  it('fails closed when a single source row cannot fit inside the configured chunk byte budget', async () => {
-    const source = makeSql();
-    try {
-      seedTerminalSession(source.sql);
-      const prepared = await prepareArchiveSourceIntent(source.sql, {
-        projectId: 'project-archive',
-        sessionId: 'session-archive',
-        migrationId: 'migration-small-budget',
-        sourceOwnerName: 'project-archive',
-        targetOwnerName: 'project-archive:archive:g1:s1',
-        targetGeneration: 1,
-        sourceIntentToken: 'intent-small-budget',
-        now: NOW,
-        minTerminalAgeMs: 0,
-      });
-      expect(prepared.messageCount).toBe(2);
-      await expect(
-        exportArchiveChunk(source.sql, {
+  it.each(PROJECT_DATA_ARCHIVE_TABLES)(
+    'exports a valid oversized %s row alone when it exceeds the configured chunk byte budget',
+    async (tableName) => {
+      const source = makeSql();
+      try {
+        seedTerminalSession(source.sql);
+        const prepared = await prepareArchiveSourceIntent(source.sql, {
           projectId: 'project-archive',
           sessionId: 'session-archive',
           migrationId: 'migration-small-budget',
@@ -1047,16 +1036,31 @@ describe('ProjectData terminal archive sharding bridge', () => {
           targetOwnerName: 'project-archive:archive:g1:s1',
           targetGeneration: 1,
           sourceIntentToken: 'intent-small-budget',
-          tableName: 'chat_messages',
+          now: NOW,
+          minTerminalAgeMs: 0,
+        });
+        expect(prepared.messageCount).toBe(2);
+        const chunk = await exportArchiveChunk(source.sql, {
+          projectId: 'project-archive',
+          sessionId: 'session-archive',
+          migrationId: 'migration-small-budget',
+          sourceOwnerName: 'project-archive',
+          targetOwnerName: 'project-archive:archive:g1:s1',
+          targetGeneration: 1,
+          sourceIntentToken: 'intent-small-budget',
+          tableName,
           ordinal: 0,
           maxRows: 10,
           maxBytes: 1,
-        })
-      ).rejects.toMatchObject({ reason: 'archive_row_exceeds_chunk_budget' });
-    } finally {
-      source.db.close();
+        });
+        expect(chunk.rows).toHaveLength(1);
+        expect(chunk.byteCount).toBeGreaterThan(1);
+        expect(chunk.hasMore).toBe(true);
+      } finally {
+        source.db.close();
+      }
     }
-  });
+  );
 });
 
 /**

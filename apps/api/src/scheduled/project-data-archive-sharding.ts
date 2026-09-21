@@ -234,6 +234,7 @@ type ArchiveCopyCheckpoint = {
   copied_bytes: number;
   last_chunk_sha256: string | null;
   lease_epoch: number;
+  last_operation_id: string | null;
 };
 
 type ProjectDataArchiveGlobalSweepCadenceStatus =
@@ -2367,7 +2368,7 @@ async function ensureCopyCheckpoints(
   const rows = await env.DATABASE.prepare(
     `SELECT migration_id, table_name, storage_format, chunk_rows, chunk_bytes,
             next_ordinal, source_cursor, complete, copied_rows, copied_bytes,
-            last_chunk_sha256, lease_epoch
+            last_chunk_sha256, lease_epoch, last_operation_id
      FROM project_data_archive_copy_checkpoints
      WHERE migration_id = ?
      ORDER BY table_name ASC`
@@ -2411,10 +2412,11 @@ async function markCopyOperationStarted(
   checkpoint: ArchiveCopyCheckpoint,
   operation: string,
   now: number
-): Promise<void> {
+): Promise<string> {
+  const operationId = crypto.randomUUID();
   const result = await env.DATABASE.prepare(
     `UPDATE project_data_archive_copy_checkpoints
-     SET lease_epoch = ?, last_operation = ?, last_operation_started_at = ?,
+     SET lease_epoch = ?, last_operation = ?, last_operation_id = ?, last_operation_started_at = ?,
          last_operation_completed_at = NULL, last_operation_duration_ms = NULL, updated_at = ?
      WHERE migration_id = ? AND table_name = ?
        AND next_ordinal = ?
@@ -2428,6 +2430,7 @@ async function markCopyOperationStarted(
     .bind(
       migration.lease_epoch,
       operation,
+      operationId,
       now,
       now,
       migration.migration_id,
@@ -2446,6 +2449,7 @@ async function markCopyOperationStarted(
       `ProjectData archive migration ${migration.migration_id} could not start ${operation}`
     );
   }
+  return operationId;
 }
 
 async function advanceCopyCheckpoint(
@@ -2453,6 +2457,7 @@ async function advanceCopyCheckpoint(
   migration: ClaimedMigrationRow,
   checkpoint: ArchiveCopyCheckpoint,
   chunk: Pick<ProjectDataArchiveChunk, 'cursor' | 'hasMore' | 'rowCount' | 'byteCount' | 'sha256'>,
+  operationId: string,
   startedAt: number,
   now: number
 ): Promise<ArchiveCopyCheckpoint> {
@@ -2466,6 +2471,7 @@ async function advanceCopyCheckpoint(
      WHERE migration_id = ? AND table_name = ?
        AND next_ordinal = ?
        AND (source_cursor = ? OR (source_cursor IS NULL AND ? IS NULL))
+       AND last_operation_id = ?
        AND EXISTS (
          SELECT 1 FROM project_data_archive_migrations m
          WHERE m.migration_id = project_data_archive_copy_checkpoints.migration_id
@@ -2473,7 +2479,7 @@ async function advanceCopyCheckpoint(
        )
      RETURNING migration_id, table_name, storage_format, chunk_rows, chunk_bytes,
        next_ordinal, source_cursor, complete, copied_rows, copied_bytes,
-       last_chunk_sha256, lease_epoch`
+       last_chunk_sha256, lease_epoch, last_operation_id`
   )
     .bind(
       chunk.hasMore ? chunk.cursor : null,
@@ -2490,6 +2496,7 @@ async function advanceCopyCheckpoint(
       checkpoint.next_ordinal,
       checkpoint.source_cursor,
       checkpoint.source_cursor,
+      operationId,
       migration.lease_owner,
       migration.lease_epoch,
       now
@@ -2564,7 +2571,13 @@ async function copySourceChunks(
         );
       }
       const startedAt = Date.now();
-      await markCopyOperationStarted(env, migration, checkpoint, 'reconcile_receipt', startedAt);
+      const operationId = await markCopyOperationStarted(
+        env,
+        migration,
+        checkpoint,
+        'reconcile_receipt',
+        startedAt
+      );
       let continuation = {
         cursor: receipt.sourceCursor,
         hasMore: receipt.sourceHasMore,
@@ -2584,8 +2597,11 @@ async function copySourceChunks(
           tableName,
           ordinal: checkpoint.next_ordinal,
           cursor: checkpoint.source_cursor,
-          maxRows: checkpoint.chunk_rows,
-          maxBytes: checkpoint.chunk_bytes,
+          // Pre-checkpoint receipts do not carry their original source cursor or
+          // frozen layout. Their durable row/byte inventory is sufficient to
+          // replay the exact prefix even when deployment defaults changed.
+          maxRows: Math.max(1, receipt.rowCount),
+          maxBytes: Math.max(checkpoint.chunk_bytes, receipt.byteCount, 1),
         });
         if (
           replay.sha256 !== receipt.sha256 ||
@@ -2610,6 +2626,7 @@ async function copySourceChunks(
           cursor: continuation.cursor,
           hasMore: continuation.hasMore ?? false,
         },
+        operationId,
         startedAt,
         Date.now()
       );
@@ -2618,7 +2635,13 @@ async function copySourceChunks(
 
     for (;;) {
       const startedAt = Date.now();
-      await markCopyOperationStarted(env, migration, checkpoint, 'export_commit', startedAt);
+      const operationId = await markCopyOperationStarted(
+        env,
+        migration,
+        checkpoint,
+        'export_commit',
+        startedAt
+      );
       const chunk = await source.archiveSourceExportChunk({
         projectId: migration.project_id,
         sessionId: migration.session_id,
@@ -2646,6 +2669,7 @@ async function copySourceChunks(
         migration,
         checkpoint,
         chunk,
+        operationId,
         startedAt,
         Date.now()
       );

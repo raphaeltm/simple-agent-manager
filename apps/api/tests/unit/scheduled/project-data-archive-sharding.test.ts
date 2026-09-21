@@ -1386,12 +1386,102 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       expect(
         sqlite
           .prepare(
-            `SELECT next_ordinal, complete, last_chunk_sha256
+            `SELECT next_ordinal, complete, last_chunk_sha256, last_operation_id,
+                    last_operation_completed_at
              FROM project_data_archive_copy_checkpoints
              WHERE migration_id = ? AND table_name = 'chat_messages'`
           )
           .get(MIGRATION_ID)
-      ).toEqual({ next_ordinal: 1, complete: 1, last_chunk_sha256: 'chat_messages:0:sha' });
+      ).toEqual({
+        next_ordinal: 1,
+        complete: 1,
+        last_chunk_sha256: 'chat_messages:0:sha',
+        last_operation_id: expect.any(String),
+        last_operation_completed_at: expect.any(Number),
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('adopts a legacy receipt by its durable row and byte inventory after defaults change', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'copying', { sourceIntentToken: 'old-token' });
+      const source = createFakeSource({ state: 'intent_prepared', token: 'old-token' });
+      const legacyChunk = {
+        ...makeChunk('chat_messages', 0),
+        rowCount: 7,
+        byteCount: 700,
+        sha256: 'legacy-layout-sha',
+        cursor: 'legacy-cursor',
+        hasMore: false,
+      };
+      source.archiveSourceExportChunk.mockImplementation(
+        async (input: {
+          tableName: ProjectDataArchiveTableName;
+          ordinal: number;
+          maxRows?: number;
+          maxBytes?: number;
+        }) => {
+          if (input.tableName === 'chat_messages') {
+            expect(input.maxRows).toBe(7);
+            expect(input.maxBytes).toBeGreaterThanOrEqual(700);
+            return legacyChunk;
+          }
+          return makeChunk(input.tableName, input.ordinal);
+        }
+      );
+      const target = createFakeTarget();
+      await target.archiveTargetCommitChunk(legacyChunk);
+      // Model a pre-upgrade receipt: hashes/counts exist, source continuation does not.
+      target.archiveTargetInspectSession.mockResolvedValue({
+        state: 'copying',
+        terminalVersionSha256: TERMINAL_SHA,
+        aggregateSha256: TARGET_SHA,
+        messageCount: 2,
+        groupedCount: 1,
+        toolArchiveCount: 0,
+        chunks: [
+          {
+            tableName: 'chat_messages',
+            ordinal: 0,
+            sha256: legacyChunk.sha256,
+            rowCount: legacyChunk.rowCount,
+            byteCount: legacyChunk.byteCount,
+            sourceCursor: null,
+            sourceHasMore: null,
+          },
+        ],
+        sessionRow: { id: SESSION_ID, status: 'stopped' },
+        databaseSizeBytes: 750,
+        storageFormat: 'sqlite-v1',
+      });
+
+      const stats = await runProjectDataArchiveSharding(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '99',
+          PROJECT_DATA_ARCHIVE_CHUNK_BYTES: '9999',
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          PROJECT_DATA: createProjectDataNamespace({
+            [SOURCE_OWNER]: source,
+            [TARGET_OWNER]: target,
+          }),
+        }),
+        new Date(NOW)
+      );
+
+      expect(stats.migrated).toBe(1);
+      expect(source.archiveSourceExportChunk).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tableName: 'chat_messages',
+          maxRows: 7,
+          maxBytes: 9999,
+        })
+      );
     } finally {
       sqlite.close();
     }

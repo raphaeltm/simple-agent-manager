@@ -55,7 +55,7 @@ session ownership remain separate follow-ups.
 
 ### Archive attribution, bounded memory, and repeated work
 
-- [ ] Add bounded, content-free migration progress evidence for phase, table, ordinal, source and
+- [x] Add bounded, content-free migration progress evidence for phase, table, ordinal, source and
   stored byte counts, operation outcome/duration, lease epoch, and request correlation. Record the
   last-started operation so resets/timeouts remain attributable when completion logs never happen.
 - [x] Freeze copy layout fields needed by retries in the migration journal. Existing in-flight and
@@ -68,7 +68,7 @@ session ownership remain separate follow-ups.
 - [x] Replace remaining chunk-level one-shot canonical hashes with byte-identical incremental hashes
   and eliminate safe attempt-local duplicate read/decompress/hash passes. Keep retry-time corruption
   checks and the final pre-delete target verification.
-- [ ] Bound grouped/tool export pages by actual serialized/canonical bytes with an explicit single
+- [x] Bound grouped/tool export pages by actual serialized/canonical bytes with an explicit single
   oversized-row policy; do not truncate or livelock valid rows.
 - [x] Reduce simultaneous compact-read representations where the v1 JSON/gzip format permits, and
   expose measured peak working-set proxies/read counts in production-shaped tests.

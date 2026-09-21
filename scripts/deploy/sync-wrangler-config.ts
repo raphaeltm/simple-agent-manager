@@ -407,8 +407,7 @@ function extractStaticBindings(topLevel: WranglerToml): {
     durable_objects: topLevel.durable_objects as DurableObjectsConfig | undefined,
     ai: topLevel.ai as AIBinding | undefined,
     analytics_engine_datasets: topLevel.analytics_engine_datasets as
-      | AnalyticsEngineDatasetBinding[]
-      | undefined,
+      AnalyticsEngineDatasetBinding[] | undefined,
     containers: topLevel.containers as ContainerBinding[] | undefined,
     migrations: topLevel.migrations as MigrationEntry[] | undefined,
     artifacts: topLevel.artifacts as unknown[] | undefined,
@@ -645,11 +644,7 @@ function append(path: string | undefined, content: string): void {
   }
 }
 
-function overrideSummaryTable(
-  heading: string,
-  note: string,
-  rows: readonly string[]
-): string {
+function overrideSummaryTable(heading: string, note: string, rows: readonly string[]): string {
   return [
     `### ${heading}`,
     '',
@@ -982,6 +977,11 @@ function getApiWorkerVars(
       'PROJECT_DATA_ARCHIVE_R2_PREFIX',
       'PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS',
       'PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY',
+      'PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS',
+      'PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS',
+      'PROJECT_DATA_ARCHIVE_SEARCH_CONTINUATION_TTL_MS',
+      'PROJECT_DATA_ARCHIVE_SEARCH_CURSOR_MAX_BYTES',
+      'PROJECT_DATA_ARCHIVE_SEARCH_ERROR_LIMIT',
       'PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED',
       'PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS',
       'PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS',

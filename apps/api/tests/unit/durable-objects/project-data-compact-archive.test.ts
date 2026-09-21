@@ -300,9 +300,21 @@ describe('compact archive migration compatibility', () => {
             date.mockRestore();
           }
         }
+        const rawChunkCount = Number(
+          target
+            .exec(
+              `SELECT COUNT(*) AS count FROM project_data_archive_raw_chunks
+               WHERE session_id = 'session'`
+            )
+            .toArray()[0]?.count ?? 0
+        );
+        vi.mocked(bucket.get).mockClear();
         const sealed = await archive.sealArchiveTarget(target, sealInput, env);
+        expect(bucket.get).toHaveBeenCalledTimes(rawChunkCount);
         expect(sealed.messageCount).toBe(count);
+        vi.mocked(bucket.get).mockClear();
         expect(await archive.sealArchiveTarget(target, sealInput, env)).toEqual(sealed);
+        expect(bucket.get).toHaveBeenCalledTimes(rawChunkCount);
         expect(target.exec('SELECT COUNT(*) AS count FROM chat_messages').toArray()[0]?.count).toBe(
           0
         );
@@ -344,6 +356,73 @@ describe('compact archive migration compatibility', () => {
         expect(
           await archive.archiveTargetSearchMessages(target, env, owner, 'consolidated', null, 10)
         ).toHaveLength(1);
+        if (!metadataBytes) {
+          target.exec('DELETE FROM project_data_archive_search_documents_fts');
+          target.exec('DELETE FROM project_data_archive_search_documents');
+          target.exec(
+            `UPDATE project_data_archive_target_sessions
+             SET search_index_version = NULL, search_index_state = NULL,
+                 search_index_message_count = NULL, search_index_document_count = NULL,
+                 search_index_sha256 = NULL, search_indexed_at = NULL,
+                 search_repair_next_ordinal = NULL, search_repair_pending_json = NULL,
+                 search_repair_message_count = NULL
+             WHERE session_id = 'session'`
+          );
+          vi.mocked(bucket.get).mockClear();
+          let projectSearch;
+          let replayedInterruptedChunk = false;
+          for (let step = 0; step <= rawChunkCount; step++) {
+            const beforeGets = vi.mocked(bucket.get).mock.calls.length;
+            projectSearch = await archive.archiveTargetSearchProjectMessages(
+              target,
+              {
+                ...env,
+                PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS: '1',
+                PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS: '1',
+              },
+              {
+                kind: 'archive_shard',
+                projectId: 'project',
+                ownerName: owner.ownerName,
+                generation: 1,
+              },
+              'Unicode',
+              null,
+              10
+            );
+            expect(vi.mocked(bucket.get).mock.calls.length - beforeGets).toBeLessThanOrEqual(1);
+            if (step === 0 && rawChunkCount > 1) {
+              const indexed = target
+                .exec(
+                  `SELECT rowid FROM project_data_archive_search_documents
+                   WHERE session_id = 'session' ORDER BY rowid ASC LIMIT 1`
+                )
+                .toArray()[0];
+              expect(indexed).toBeDefined();
+              target.exec(
+                'DELETE FROM project_data_archive_search_documents_fts WHERE rowid = ?',
+                indexed?.rowid
+              );
+              target.exec(
+                `UPDATE project_data_archive_target_sessions
+                 SET search_repair_next_ordinal = 0, search_repair_pending_json = NULL,
+                     search_repair_message_count = 0
+                 WHERE session_id = 'session'`
+              );
+              replayedInterruptedChunk = true;
+            }
+            if (projectSearch.coverage.sessionsIncomplete === 0) break;
+          }
+          expect(projectSearch?.coverage).toMatchObject({
+            sessionsAvailable: 1,
+            sessionsIndexed: 1,
+            sessionsIncomplete: 0,
+          });
+          expect(projectSearch?.results.length).toBeGreaterThan(0);
+          expect(bucket.get).toHaveBeenCalledTimes(
+            rawChunkCount + (replayedInterruptedChunk ? 1 : 0)
+          );
+        }
         const recovered: unknown[] = [];
         let cursor: string | null = null;
         let ordinal = 0;
