@@ -1,9 +1,19 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 
 import { describe, expect, it, vi } from 'vitest';
+import { parse } from 'yaml';
 
 import {
   normalizeSha,
@@ -53,6 +63,27 @@ function workflow(path: string): string {
 
 function repoFile(path: string): string {
   return readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
+}
+
+interface WorkflowShape {
+  jobs?: Record<string, { steps?: { name?: string; run?: string }[] }>;
+}
+
+function workflowStepRun(contents: string, stepName: string): string {
+  for (const job of Object.values((parse(contents) as WorkflowShape).jobs ?? {})) {
+    for (const step of job.steps ?? []) {
+      if (step.name !== stepName) continue;
+      if (!step.run) throw new Error(`Workflow step has no run block: ${stepName}`);
+      return step.run;
+    }
+  }
+  throw new Error(`Workflow step not found: ${stepName}`);
+}
+
+function workflowFileNames(): string[] {
+  return readdirSync(new URL('../../.github/workflows/', import.meta.url))
+    .filter((name) => name.endsWith('.yml'))
+    .sort();
 }
 
 function workflowJobIfExpression(contents: string, jobKey: string): string {
@@ -546,6 +577,123 @@ describe('deployment workflow safety wiring', () => {
     expect(release).toContain('--verify-tag');
     expect(release).toContain('--generate-notes');
     expect(release).toContain('--latest');
+  });
+
+  // Regression: release.yml shipped with every string assertion above green and
+  // still failed on every scheduled run, because a runner has no git identity
+  // and `git tag -a` needs a tagger. Grepping the workflow could not see that.
+  // This runs the real step scripts against a real repository instead.
+  it('release.yml creates and pushes the tag when the runner has no git identity', () => {
+    const release = workflow('release.yml');
+    const configureGit = workflowStepRun(release, 'Configure git');
+    const createTagAndRelease = workflowStepRun(release, 'Create tag and release');
+
+    const root = mkdtempSync(join(tmpdir(), 'sam-release-tag-'));
+    try {
+      const repo = join(root, 'repo');
+      const origin = join(root, 'origin.git');
+      const home = join(root, 'home');
+      const bin = join(root, 'bin');
+      const ghLog = join(root, 'gh-invocations.log');
+      for (const dir of [repo, home, bin]) mkdirSync(dir);
+
+      const identity = {
+        GIT_AUTHOR_NAME: 'Fixture',
+        GIT_AUTHOR_EMAIL: 'fixture@example.test',
+        GIT_COMMITTER_NAME: 'Fixture',
+        GIT_COMMITTER_EMAIL: 'fixture@example.test',
+      };
+      const setupEnv = { ...process.env, ...identity, HOME: home, GIT_CONFIG_NOSYSTEM: '1' };
+      const git = (args: string[], cwd: string) =>
+        execFileSync('git', args, { cwd, env: setupEnv, encoding: 'utf8' }).trim();
+
+      git(['init', '--bare', '--initial-branch=main', origin], root);
+      git(['init', '--initial-branch=main', repo], root);
+      writeFileSync(join(repo, 'README.md'), 'sam\n');
+      git(['add', '.'], repo);
+      git(['commit', '-m', 'initial'], repo);
+      git(['remote', 'add', 'origin', origin], repo);
+      const deploySha = git(['rev-parse', 'HEAD'], repo);
+
+      // A GitHub runner has no configured identity. Auto-detection must not
+      // rescue the script either, so disable it — otherwise this test would
+      // pass on any host whose passwd entry happens to carry a gecos name,
+      // and could not observe the defect it exists to catch.
+      git(['config', 'user.useConfigOnly', 'true'], repo);
+
+      writeFileSync(
+        join(bin, 'gh'),
+        `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${ghLog}'\nexit 0\n`
+      );
+      chmodSync(join(bin, 'gh'), 0o755);
+
+      const runEnv: NodeJS.ProcessEnv = {
+        ...process.env,
+        HOME: home,
+        PATH: `${bin}:${process.env.PATH ?? ''}`,
+        GIT_CONFIG_NOSYSTEM: '1',
+        TAG_NAME: 'v2026.09.21',
+        TAG_EXISTS: 'false',
+        DEPLOY_SHA: deploySha,
+        GH_TOKEN: 'fixture-token',
+      };
+      for (const key of [
+        ...Object.keys(identity),
+        'EMAIL',
+        'GIT_CONFIG_GLOBAL',
+        'GIT_CONFIG_SYSTEM',
+      ]) {
+        delete runEnv[key];
+      }
+
+      const result = spawnSync(
+        'bash',
+        ['-euo', 'pipefail', '-c', `${configureGit}\n${createTagAndRelease}`],
+        { cwd: repo, env: runEnv, encoding: 'utf8' }
+      );
+      expect(`${result.stdout ?? ''}${result.stderr ?? ''}`).not.toContain('empty ident name');
+      expect(result.status, result.stderr ?? '').toBe(0);
+
+      // The tag must be annotated, point at the deployed commit, and reach
+      // origin. Production never got past the first of those.
+      expect(git(['cat-file', '-t', 'v2026.09.21'], repo)).toBe('tag');
+      expect(git(['rev-list', '-n', '1', 'v2026.09.21'], repo)).toBe(deploySha);
+      expect(git(['rev-list', '-n', '1', 'v2026.09.21'], origin)).toBe(deploySha);
+
+      // Liveness: the release call really ran, against the tag just pushed.
+      const ghInvocations = readFileSync(ghLog, 'utf8');
+      expect(ghInvocations).toContain('release create v2026.09.21');
+      expect(ghInvocations).toContain('--verify-tag');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // The same omission in any other workflow would be just as invisible.
+  it('every workflow job that writes a git object configures a committer identity', () => {
+    const needsIdentity = /git\s+(?:tag\s+-[as]|commit|merge)\b/;
+    const offenders: string[] = [];
+
+    for (const file of workflowFileNames()) {
+      const parsed = parse(workflow(file)) as WorkflowShape;
+      for (const [jobKey, job] of Object.entries(parsed.jobs ?? {})) {
+        const runs = (job.steps ?? []).map((step) => step.run ?? '');
+        // `::error::` lines quote a recovery command for the operator to run by
+        // hand; they are echoed, never executed.
+        const executed = runs.map((run) =>
+          run
+            .split('\n')
+            .filter((line) => !line.includes('::error::'))
+            .join('\n')
+        );
+        if (!executed.some((run) => needsIdentity.test(run))) continue;
+        if (!runs.some((run) => run.includes('git config user.email'))) {
+          offenders.push(`${file}:${jobKey}`);
+        }
+      }
+    }
+
+    expect(offenders).toEqual([]);
   });
 
   it('update-self-hosted.yml fast-forwards fork main to upstream release and triggers deploy', () => {
