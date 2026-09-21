@@ -47,8 +47,8 @@ Constitution alignment: the change adds no URLs, timeouts, limits, or environmen
 - [x] Extend the API manifest contract for additive Git metadata.
 - [x] Update public sleep/snapshot documentation for the exact Git-state durability contract and bundle budget behavior.
 - [x] Add discriminating regression coverage for remote clean commit restore, clean local-only commit bundling/restore, dirty restore ordering/effect, mismatch failure, and existing remote branch checkout.
-- [ ] Run focused Go/API tests, full local quality gates, specialist reviews, and task completion validation.
-- [ ] Deploy to staging, provision a fresh VM, verify heartbeat/access and a real sleep/wake exact-HEAD flow, then clean up.
+- [x] Run focused Go/API tests, full local quality gates, specialist reviews, and task completion validation.
+- [x] Deploy to staging, provision a fresh VM, verify heartbeat/access and a real sleep/wake exact-HEAD flow, then clean up.
 - [ ] Open the PR with the referenced failure, before/after behavior, tests, staging evidence, and reviewer evidence; complete CI and CodeRabbit gates.
 
 ## Acceptance criteria
@@ -58,7 +58,7 @@ Constitution alignment: the change adds no URLs, timeouts, limits, or environmen
 - [x] A dirty worktree first restores saved `HEAD`, then restores its index/worktree state.
 - [x] Restore cannot return or report `restored` when actual `HEAD` differs from saved `BaseCommit`.
 - [x] A recovery checkout uses an existing remote task branch rather than recreating it from main.
-- [ ] The referenced session would restore to `f967ae394bed2c21f100f6cad23e3a2897caf65a` or report explicit degradation, never silent success on `be80ba3fe6842cdb298cef7b0d0c67a88b27c814`.
+- [x] The referenced session would restore to `f967ae394bed2c21f100f6cad23e3a2897caf65a` or report explicit degradation, never silent success on `be80ba3fe6842cdb298cef7b0d0c67a88b27c814`.
 
 ## References
 
@@ -78,3 +78,6 @@ Constitution alignment: the change adds no URLs, timeouts, limits, or environmen
 - Bootstrap checks `refs/remotes/origin/<checkout>` and tracks it when present; only genuinely new output branches are created from the requested clone base.
 - Focused validation: VM-agent server/bootstrap tests pass with Go 1.26.6; API snapshot route has 19 passing tests; real Worker D1/R2 wiring has 2 passing tests; API typecheck and lint pass.
 - Full validation: repository lint, typecheck, test, and build pass; all VM-agent Go tests and vet pass; focused race tests pass. Security, Go, Cloudflare, constitution, test, and documentation reviewers report no remaining findings.
+- Staging deployment run `35552023220` passed at exact commit `870c1401ed0d8b90118acc7121af3845bc4a52d7`. A fresh full VM workspace created clean, unpushed commit `f8ddfb44e71390edf7d0b4c012c4bf104a6c9273` on `sam/staging-snapshot-verification-repository-adj6sy`; capture persisted matching branch/upstream metadata and a 23,255-byte Git bundle. Recovery provisioned replacement workspace `01M30YVZKEC2WCPZH2YCMZ9W9J`, reported both snapshot restore and recovery status `restored`, and the resumed agent verified the exact saved SHA, branch, and clean status. Authenticated dashboard, project, and settings pages returned 200 with no browser console errors. Staging cleanup finished with zero nodes.
+- The staging run also exposed a separate pre-existing delivery timing defect: `workspace_deletion_unconfirmed` was classified terminal before deletion proof arrived. It is tracked as SAM Idea `01M30Z8PB7R3YXTX90BRG1KW0N`; a fresh delivery after proof existed created exactly one recovery task and completed the restore above.
+- The mandatory task-completion validator passed checks A-F with no blocking or advisory gaps.
