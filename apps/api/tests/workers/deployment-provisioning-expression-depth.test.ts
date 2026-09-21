@@ -37,7 +37,10 @@ interface DeploymentPlacementFixture {
   snapshot: CapacityPlacementSnapshot;
 }
 
-async function seedDeploymentPlacementFixture(label: string): Promise<DeploymentPlacementFixture> {
+async function seedDeploymentPlacementFixture(
+  label: string,
+  options: { occupied?: boolean } = {}
+): Promise<DeploymentPlacementFixture> {
   const suffix = nextId(label);
   const installationId = `installation-${suffix}`;
   const projectId = `project-${suffix}`;
@@ -47,7 +50,9 @@ async function seedDeploymentPlacementFixture(label: string): Promise<Deployment
   const candidateId = `capacity-candidate-${suffix}`;
   const nodeId = `node-${suffix}`;
   const environmentId = `environment-${suffix}`;
+  const occupiedEnvironmentId = `occupied-environment-${suffix}`;
   const updatedAt = '2026-09-19 12:00:00.123';
+  const heartbeatAt = new Date().toISOString();
   const version = await sqliteTimestampVersion(updatedAt);
   const credentialReference = `platform_credentials:${platformCredentialId}`;
 
@@ -71,10 +76,18 @@ async function seedDeploymentPlacementFixture(label: string): Promise<Deployment
        (id, scope, owner_user_id, owner_project_id, source_kind, provider, credential_source,
         credential_id, platform_credential_id, credential_reference, credential_version,
         external_source_ref, status, created_by, created_at, updated_at)
-     VALUES (?, 'project', NULL, ?, 'cloud-provider-credential', 'hetzner', 'platform',
+     VALUES (?, 'installation', NULL, NULL, 'cloud-provider-credential', 'hetzner', 'platform',
         NULL, ?, ?, ?, NULL, 'active', ?, ?, ?)`
   )
-    .bind(sourceId, projectId, platformCredentialId, credentialReference, version, USER_ID, updatedAt, updatedAt)
+    .bind(
+      sourceId,
+      platformCredentialId,
+      credentialReference,
+      version,
+      USER_ID,
+      updatedAt,
+      updatedAt
+    )
     .run();
 
   await env.DATABASE.prepare(
@@ -82,10 +95,10 @@ async function seedDeploymentPlacementFixture(label: string): Promise<Deployment
        (id, scope, owner_user_id, owner_project_id, name, is_default, revision, status,
         configuration_state, strategy, exhaustion_policy, migration_state, created_by,
         created_at, updated_at)
-     VALUES (?, 'project', NULL, ?, ?, 1, 7, 'active', 'configured-ready', 'balanced',
+     VALUES (?, 'installation', NULL, NULL, ?, 1, 7, 'active', 'configured-ready', 'balanced',
         'queue', 'complete', ?, ?, ?)`
   )
-    .bind(poolId, projectId, `Pool ${suffix}`, USER_ID, updatedAt, updatedAt)
+    .bind(poolId, `Pool ${suffix}`, USER_ID, updatedAt, updatedAt)
     .run();
 
   await env.DATABASE.prepare(
@@ -107,14 +120,18 @@ async function seedDeploymentPlacementFixture(label: string): Promise<Deployment
        (id, user_id, name, status, health_status, runtime, node_class, node_role, workload_role,
         node_mode, cloud_provider, vm_location, vm_size, provider_instance_id,
         provider_instance_type, provider_instance_vcpu_count, provider_instance_memory_mb,
-        provider_instance_disk_gb, capacity_pool_id, capacity_pool_scope, capacity_pool_revision,
-        capacity_source_id, capacity_source_generation, capacity_source_external_ref,
-        capacity_pool_candidate_id, capacity_pool_project_id, placement_credential_source,
-        placement_credential_reference, placement_credential_version, agent_ready_at,
+       provider_instance_disk_gb, capacity_pool_id, capacity_pool_scope, capacity_pool_revision,
+       capacity_source_id, capacity_source_generation, capacity_source_external_ref,
+       capacity_pool_candidate_id, capacity_pool_project_id, placement_credential_source,
+        placement_credential_reference, placement_credential_version,
+        observed_provider_instance_type, observed_provider_instance_vcpu_count,
+        observed_provider_instance_memory_mb, observed_provider_instance_disk_gb,
+        observed_hardware_source, last_metrics, last_heartbeat_at, agent_ready_at,
         agent_version, created_at, updated_at)
      VALUES (?, ?, ?, 'running', 'healthy', 'vm', 'managed', 'deployment', 'deployment',
-        'shared', 'hetzner', 'fsn1', 'small', ?, 'cx23', 2, 4096, 40, ?, 'project', 7,
-        ?, ?, NULL, ?, ?, 'platform', ?, ?, ?, 'current-sha', ?, ?)`
+        'shared', 'hetzner', 'fsn1', 'small', ?, 'cx23', 2, 4096, 40, ?, 'installation', 7,
+        ?, ?, NULL, ?, NULL, 'platform', ?, ?, 'cx23', 2, 4096, 40, 'observed', ?, ?, ?,
+        'current-sha', ?, ?)`
   )
     .bind(
       nodeId,
@@ -125,9 +142,16 @@ async function seedDeploymentPlacementFixture(label: string): Promise<Deployment
       sourceId,
       version,
       candidateId,
-      projectId,
       credentialReference,
       version,
+      JSON.stringify({
+        version: 1,
+        cpuLoadAvg1: 0.1,
+        memoryPercent: 10,
+        diskPercent: 10,
+        creatingWorkspaces: 0,
+      }),
+      heartbeatAt,
       updatedAt,
       updatedAt,
       updatedAt
@@ -143,6 +167,33 @@ async function seedDeploymentPlacementFixture(label: string): Promise<Deployment
     .bind(environmentId, projectId, USER_ID, updatedAt, updatedAt)
     .run();
 
+  if (options.occupied) {
+    await env.DATABASE.prepare(
+      `INSERT INTO deployment_environments
+         (id, project_id, name, status, node_id, provider, location, requires_volumes,
+          resolved_reservation_json, created_by_user_id, created_at, updated_at)
+       VALUES (?, ?, 'preview', 'active', ?, 'hetzner', 'fsn1', 0, ?, ?, ?, ?)`
+    )
+      .bind(
+        occupiedEnvironmentId,
+        projectId,
+        nodeId,
+        JSON.stringify({
+          cpuMillis: 250,
+          memoryMb: 128,
+          diskMb: 1024,
+          exclusiveNode: false,
+          source: 'task',
+          sourceId: `release-${suffix}`,
+          version: 3,
+        }),
+        USER_ID,
+        updatedAt,
+        updatedAt
+      )
+      .run();
+  }
+
   return {
     environmentId,
     nodeId,
@@ -150,7 +201,7 @@ async function seedDeploymentPlacementFixture(label: string): Promise<Deployment
     snapshot: {
       placementPlanVersion: 1,
       capacityPoolId: poolId,
-      capacityPoolScope: 'project',
+      capacityPoolScope: 'installation',
       capacityPoolRevision: 7,
       capacitySourceId: sourceId,
       capacitySourceGeneration: version,
@@ -159,7 +210,7 @@ async function seedDeploymentPlacementFixture(label: string): Promise<Deployment
       placementCredentialSource: 'platform',
       placementCredentialReference: credentialReference,
       placementCredentialVersion: version,
-      capacityPoolProjectId: projectId,
+      capacityPoolProjectId: null,
       workloadRole: 'deployment',
       providerInstanceType: 'cx23',
       providerInstanceVcpuCount: 2,
@@ -174,8 +225,8 @@ async function seedDeploymentPlacementFixture(label: string): Promise<Deployment
 }
 
 describe('deployment provisioning placement on real Workers D1', () => {
-  it('links a deployment node with the full placement-authority predicate under D1 limits', async () => {
-    const fixture = await seedDeploymentPlacementFixture('link');
+  it('links a second environment through installation authority within SQLite limits', async () => {
+    const fixture = await seedDeploymentPlacementFixture('reuse', { occupied: true });
     const linked = await linkEnvironmentToNode({
       env,
       db: drizzle(env.DATABASE, { schema }),
@@ -197,6 +248,16 @@ describe('deployment provisioning placement on real Workers D1', () => {
         providerInstanceImage: fixture.snapshot.providerInstanceImage,
         providerInstanceArchitecture: fixture.snapshot.providerInstanceArchitecture,
         capacityPlacementSnapshot: fixture.snapshot,
+        capacityPoolSelection: null,
+        reservation: {
+          cpuMillis: 250,
+          memoryMb: 128,
+          diskMb: 1024,
+          exclusiveNode: false,
+          source: 'task',
+          sourceId: `release-${fixture.environmentId}`,
+          version: 3,
+        },
       },
       userId: USER_ID,
       expectedNodeStatus: 'running',

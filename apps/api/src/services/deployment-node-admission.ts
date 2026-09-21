@@ -415,9 +415,16 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
           reservation.diskMb,
         ];
   const result = await env.DATABASE.prepare(
-    `UPDATE deployment_environments AS de
+    `WITH authorized_node AS MATERIALIZED (
+       SELECT n.id
+       FROM nodes n
+       WHERE n.id = ?
+       ${authority.sql}
+     )
+     UPDATE deployment_environments AS de
      SET node_id = ?, provider = ?, location = ?, resolved_reservation_json = ?, updated_at = ?
      FROM nodes n
+     JOIN authorized_node authorized ON authorized.id = n.id
      WHERE de.id = ?
        ${
          hasReleaseFence
@@ -437,7 +444,6 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
        END = 0
        AND (de.node_id IS NULL OR de.node_id = n.id)
        AND n.id = ?
-       AND n.user_id = ?
        AND n.status = ?
        AND n.node_role = 'deployment'
        AND n.cloud_provider = ?
@@ -449,10 +455,11 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
          COALESCE(n.node_mode, 'shared') = 'shared'
          OR NOT EXISTS (SELECT 1 FROM (${otherReservationsSql}) existing)
        )
-       ${capacitySql}
-       ${authority.sql}`
+       ${capacitySql}`
   )
     .bind(
+      nodeId,
+      ...authority.binds,
       nodeId,
       placement.provider,
       placement.location,
@@ -462,15 +469,13 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
       ...(hasReleaseFence ? [opts.releaseId] : []),
       ...(hasExpectedReservation ? [opts.expectedReservationJson ?? null] : []),
       nodeId,
-      userId,
       expectedNodeStatus,
       placement.provider,
       placement.location,
       ...nativeIdentity.binds,
       nodeMode,
       maxEnvironments,
-      ...capacityBinds,
-      ...authority.binds
+      ...capacityBinds
     )
     .run();
   return (result.meta?.changes ?? 0) > 0;
