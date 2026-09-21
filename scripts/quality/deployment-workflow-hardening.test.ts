@@ -4,7 +4,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -14,30 +13,21 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
-import { parse } from 'yaml';
 
-interface WorkflowStep {
-  name?: string;
-  if?: string;
-  run?: string;
-  env?: Record<string, unknown>;
-}
-
-interface ParsedWorkflow {
-  on?: { workflow_dispatch?: { inputs?: Record<string, unknown> } };
-  concurrency?: { group?: string; 'cancel-in-progress'?: boolean };
-  jobs?: Record<string, { environment?: string; steps?: WorkflowStep[] }>;
-}
+import {
+  allWorkflowRunBlocks,
+  namedStep,
+  type ParsedWorkflow,
+  parsedWorkflow,
+  workflowFileNames,
+  workflowSource as workflow,
+} from './workflow-test-helpers.js';
 
 interface ResourceNamesModule {
   resolveResourceNames(
     env: Record<string, string | undefined>,
     mode: 'deploy' | 'teardown' | 'marketing' | 'pulumi'
   ): Record<string, string>;
-}
-
-function workflow(path: string): string {
-  return readFileSync(new URL(`../../.github/workflows/${path}`, import.meta.url), 'utf8');
 }
 
 function repoFile(path: string): string {
@@ -49,39 +39,10 @@ const configureSecretsScript = fileURLToPath(
   new URL('../../scripts/deploy/configure-secrets.sh', import.meta.url)
 );
 
-function parsedWorkflow(path: string): ParsedWorkflow {
-  return parse(workflow(path)) as ParsedWorkflow;
-}
-
 async function resourceNamesModule(): Promise<ResourceNamesModule> {
   return (await import(
     new URL('../../scripts/deploy/workflow-resource-names.mjs', import.meta.url).href
   )) as ResourceNamesModule;
-}
-
-function allWorkflowRunBlocks(): Array<{ path: string; stepName: string; run: string }> {
-  const workflowPaths = readdirSync(new URL('../../.github/workflows/', import.meta.url))
-    .filter((path) => /\.ya?ml$/u.test(path))
-    .sort();
-
-  return workflowPaths.flatMap((path) => {
-    const parsed = parsedWorkflow(path);
-    return Object.values(parsed.jobs ?? {}).flatMap((job) =>
-      (job.steps ?? []).flatMap((step) =>
-        typeof step.run === 'string'
-          ? [{ path, stepName: step.name ?? '<unnamed step>', run: step.run }]
-          : []
-      )
-    );
-  });
-}
-
-function namedStep(parsed: ParsedWorkflow, name: string): WorkflowStep {
-  const step = Object.values(parsed.jobs ?? {})
-    .flatMap((job) => job.steps ?? [])
-    .find((candidate) => candidate.name === name);
-  expect(step).toBeDefined();
-  return step!;
 }
 
 function stepBlock(contents: string, stepName: string): string {
@@ -210,6 +171,55 @@ function runConfigureSecrets(overrides: Record<string, string | undefined> = {})
 }
 
 describe('deployment workflow hardening', () => {
+  // release.yml shipped a `git tag -a` with no identity step and failed 100% of
+  // its scheduled runs (exit 128, "empty ident name"), producing zero tags and
+  // zero releases until 2026-09-21. A scheduled workflow failing raises no PR
+  // check and no deploy failure, so the same omission anywhere else would be
+  // just as invisible.
+  //
+  // This deliberately over-matches. Only some of these forms need a committer
+  // (`git tag -a`, not `git tag -l`; a real merge, not `--ff-only`), but
+  // discriminating on flags is what creates false negatives — an earlier draft
+  // keyed on `-[as]` and silently missed the combined `git tag -am`. A false
+  // positive costs a workflow two config lines it can harmlessly carry; a
+  // false negative costs another fortnight of silent 06:00 failures.
+  it('configures a committer identity in every job that writes a git object', () => {
+    const needsIdentity =
+      /git\s+(?:-c\s+\S+\s+)*(?:tag|commit-tree|commit|merge(?!-)|cherry-pick|revert|rebase|am|stash)\b/u;
+    const offenders: string[] = [];
+
+    for (const file of workflowFileNames()) {
+      for (const [jobKey, job] of Object.entries(parsedWorkflow(file).jobs ?? {})) {
+        // `::error::` lines quote a recovery command for the operator to run
+        // by hand (see update-self-hosted.yml); they are echoed, never run.
+        // BOTH checks below must read the filtered text: reading the raw text
+        // for the identity check would let a job that merely *prints*
+        // `git config user.email` in an error hint pass as compliant.
+        const steps = (job.steps ?? []).map((step) => {
+          const run = step.run ?? '';
+          return run
+            .split('\n')
+            .filter((line) => !line.includes('::error::'))
+            .join('\n');
+        });
+
+        const writesIndex = steps.findIndex((run) => needsIdentity.test(run));
+        if (writesIndex === -1) continue;
+
+        // The identity has to be set by the time the write happens, so only
+        // steps up to and including the writing step count.
+        const configured = steps
+          .slice(0, writesIndex + 1)
+          // Any configuration form counts: `git config user.email`, the same
+          // with `--global`, or an inline `git -c user.email=`.
+          .some((run) => run.includes('user.email'));
+        if (!configured) offenders.push(`${file}:${jobKey}`);
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
   it('keeps GitHub expressions out of every workflow shell source block', () => {
     const runBlocks = allWorkflowRunBlocks();
 

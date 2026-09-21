@@ -95,19 +95,60 @@ jobs:
         if: steps.deploy.outputs.skip != 'true' && steps.tag.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_SERVER_URL: ${{ github.server_url }}
           TAG_NAME: ${{ steps.tag.outputs.tag_name }}
           TAG_EXISTS: ${{ steps.tag.outputs.tag_exists }}
           DEPLOY_SHA: ${{ steps.deploy.outputs.sha }}
+          # GitHub rejects a release body over 125,000 characters with HTTP 422.
+          # Stay under it with headroom for the fallback text below.
+          RELEASE_NOTES_MAX_BYTES: ${{ vars.RELEASE_NOTES_MAX_BYTES || '120000' }}
         run: |
           if [ "$TAG_EXISTS" != "true" ]; then
             git tag -a "$TAG_NAME" "$DEPLOY_SHA" -m "Release $TAG_NAME"
             git push origin "$TAG_NAME"
           fi
 
+          NOTES_FILE="${RUNNER_TEMP:-/tmp}/release-notes.md"
+          PREVIOUS_TAG=$(
+            gh release list --repo "$GH_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName // empty'
+          )
+
+          # Bound the generated notes to the previous release when there is one.
+          # Without previous_tag_name GitHub summarises the ENTIRE history, which
+          # is what broke the first release (run 35626181536: HTTP 422).
+          generate_notes_args=(
+            --method POST
+            "repos/${GH_REPOSITORY}/releases/generate-notes"
+            -f "tag_name=${TAG_NAME}"
+            -f "target_commitish=${DEPLOY_SHA}"
+          )
+          if [ -n "$PREVIOUS_TAG" ]; then
+            generate_notes_args+=(-f "previous_tag_name=${PREVIOUS_TAG}")
+            CHANGELOG_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/compare/${PREVIOUS_TAG}...${TAG_NAME}"
+          else
+            CHANGELOG_URL="${GH_SERVER_URL}/${GH_REPOSITORY}/commits/${TAG_NAME}"
+          fi
+
+          gh api "${generate_notes_args[@]}" --jq '.body' > "$NOTES_FILE"
+
+          # One rule covers both the first release and any long gap between
+          # releases: if the notes do not fit, link to them instead of failing.
+          if [ "$(wc -c < "$NOTES_FILE")" -gt "$RELEASE_NOTES_MAX_BYTES" ]; then
+            echo "Generated notes exceed ${RELEASE_NOTES_MAX_BYTES} bytes; substituting a changelog link."
+            {
+              echo "Production deploy \`${DEPLOY_SHA}\`."
+              echo
+              echo "Generated release notes exceeded GitHub's release body limit and were omitted."
+              echo
+              echo "Full changelog: ${CHANGELOG_URL}"
+            } > "$NOTES_FILE"
+          fi
+
           gh release create "$TAG_NAME" \
             --target "$DEPLOY_SHA" \
             --verify-tag \
-            --generate-notes \
+            --notes-file "$NOTES_FILE" \
             --latest \
             --title "$TAG_NAME"
 
