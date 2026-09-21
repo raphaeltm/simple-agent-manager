@@ -104,6 +104,21 @@ jobs:
           # Stay under it with headroom for the fallback text below.
           RELEASE_NOTES_MAX_BYTES: ${{ vars.RELEASE_NOTES_MAX_BYTES || '120000' }}
         run: |
+          # A `[ x -gt y ]` usage error exits 2, and errexit exempts an `if`
+          # condition, so a malformed override would silently skip truncation
+          # and send the oversized body — reintroducing the 422 this guards.
+          # Validate up front and fail closed instead.
+          case "$RELEASE_NOTES_MAX_BYTES" in
+            '' | *[!0-9]*)
+              echo "::error::RELEASE_NOTES_MAX_BYTES must be a positive integer (got: '$RELEASE_NOTES_MAX_BYTES')"
+              exit 1
+              ;;
+          esac
+          if [ "$RELEASE_NOTES_MAX_BYTES" -le 0 ]; then
+            echo "::error::RELEASE_NOTES_MAX_BYTES must be greater than zero (got: '$RELEASE_NOTES_MAX_BYTES')"
+            exit 1
+          fi
+
           if [ "$TAG_EXISTS" != "true" ]; then
             git tag -a "$TAG_NAME" "$DEPLOY_SHA" -m "Release $TAG_NAME"
             git push origin "$TAG_NAME"

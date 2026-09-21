@@ -568,7 +568,11 @@ describe('deployment workflow safety wiring', () => {
   // `--generate-notes` with no previous release summarises the entire history
   // and exceeds GitHub's 125,000-character body limit. Grepping the workflow
   // could see neither. This runs the real step scripts instead.
-  function runReleaseSteps(options: { previousTag: string; generatedNotes: string }) {
+  function runReleaseSteps(options: {
+    previousTag: string;
+    generatedNotes: string;
+    maxBytes?: string;
+  }) {
     const release = parsedWorkflow('release.yml');
     const script = [
       namedStepRun(release, 'Configure git'),
@@ -664,7 +668,7 @@ describe('deployment workflow safety wiring', () => {
       GH_TOKEN: 'fixture-token',
       GH_REPOSITORY: 'raphaeltm/simple-agent-manager',
       GH_SERVER_URL: 'https://github.com',
-      RELEASE_NOTES_MAX_BYTES: '120000',
+      RELEASE_NOTES_MAX_BYTES: options.maxBytes ?? '120000',
       STUB_GH_LOG: ghLog,
       STUB_PREVIOUS_TAG: options.previousTag,
       STUB_NOTES_FROM_API: notesFromApi,
@@ -692,7 +696,7 @@ describe('deployment workflow safety wiring', () => {
       root,
       repo,
       origin,
-      ghInvocations: () => readFileSync(ghLog, 'utf8'),
+      ghInvocations: () => (existsSync(ghLog) ? readFileSync(ghLog, 'utf8') : ''),
       releaseBody: () => readFileSync(capturedNotes, 'utf8'),
     };
   }
@@ -728,6 +732,34 @@ describe('deployment workflow safety wiring', () => {
       expect(body).toContain(
         'https://github.com/raphaeltm/simple-agent-manager/commits/v2026.09.21'
       );
+    } finally {
+      rmSync(run.root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { label: 'non-numeric', maxBytes: 'not-a-number' },
+    { label: 'empty', maxBytes: '' },
+    { label: 'zero', maxBytes: '0' },
+  ])('release.yml fails closed on a $label RELEASE_NOTES_MAX_BYTES', ({ maxBytes }) => {
+    // `[ x -gt y ]` exits 2 on a usage error, and errexit exempts an `if`
+    // condition — so an unvalidated bad value skips truncation silently and
+    // ships the oversized body that produced HTTP 422 in production. The step
+    // must refuse to publish instead.
+    const run = runReleaseSteps({
+      previousTag: '',
+      generatedNotes: 'x'.repeat(200_000),
+      maxBytes,
+    });
+    try {
+      expect(run.result.status, run.result.stdout ?? '').not.toBe(0);
+      expect(`${run.result.stdout ?? ''}${run.result.stderr ?? ''}`).toContain(
+        'RELEASE_NOTES_MAX_BYTES'
+      );
+      // Nothing may happen at all: no release, and no tag left behind that a
+      // later run would treat as already-published.
+      expect(run.ghInvocations()).not.toContain('release create');
+      expect(() => run.git(['rev-parse', 'v2026.09.21'], run.repo)).toThrow();
     } finally {
       rmSync(run.root, { recursive: true, force: true });
     }
