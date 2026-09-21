@@ -219,6 +219,11 @@ export const PROJECT_AWARENESS_TOOLS = [
           type: 'number',
           description: 'Max results to return (default: 10, max: 20)',
         },
+        continuation: {
+          type: 'string',
+          description:
+            'Signed continuation returned by archiveSearch.continuation. Repeat the same query, roles, and limit until archiveSearch.complete is true.',
+        },
       },
       required: ['query'],
       additionalProperties: false,

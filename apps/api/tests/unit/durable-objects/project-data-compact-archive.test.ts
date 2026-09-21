@@ -342,7 +342,7 @@ describe('compact archive migration compatibility', () => {
           })
         ).toEqual({ content: [{ type: 'text', text: 'complete tool payload' }], source: 'inline' });
         expect(
-          archive.archiveTargetSearchMessages(target, owner, 'consolidated', null, 10)
+          await archive.archiveTargetSearchMessages(target, env, owner, 'consolidated', null, 10)
         ).toHaveLength(1);
         const recovered: unknown[] = [];
         let cursor: string | null = null;
@@ -405,7 +405,10 @@ describe('compact archive bounded failures', () => {
     ).rejects.toThrow('size');
     expect(bucket.get).not.toHaveBeenCalled();
     vi.mocked(bucket.get).mockImplementation(() => new Promise(() => undefined));
-    await expect(readCompactChunk(bucket, ref, chunk, 5)).rejects.toThrow('deadline');
+    await expect(readCompactChunk(bucket, ref, chunk, 5)).rejects.toMatchObject({
+      name: 'CompactArchiveTimeoutError',
+      stage: 'get',
+    });
   });
 
   it('round-trips bulky inline tool metadata without truncating Unicode or JSON', async () => {
@@ -447,7 +450,10 @@ describe('compact object corruption after transport validation', () => {
       size: ref.bytes,
       body: new ReadableStream({ cancel }),
     } as R2ObjectBody);
-    await expect(readCompactChunk(bucket, ref, chunk, 5)).rejects.toThrow('deadline');
+    await expect(readCompactChunk(bucket, ref, chunk, 5)).rejects.toMatchObject({
+      name: 'CompactArchiveTimeoutError',
+      stage: 'decompress_read',
+    });
     expect(cancel).toHaveBeenCalledTimes(1);
   });
 });

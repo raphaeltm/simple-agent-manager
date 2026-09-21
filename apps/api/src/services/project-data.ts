@@ -138,7 +138,9 @@ import type { RegisterTaskWaitInput } from '../durable-objects/project-data/task
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import {
+  PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_CONCURRENCY,
   PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_MAX_OWNERS,
+  PROJECT_DATA_ARCHIVE_MAX_SEARCH_CONCURRENCY,
   PROJECT_DATA_ARCHIVE_MAX_SEARCH_OWNERS,
   PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
   type ProjectDataArchiveLocation,
@@ -1042,14 +1044,32 @@ export type ProjectDataArchiveSearchMetadata = {
     | null
     | 'session_scoped_exact_read'
     | 'archive_owner_inventory_unavailable'
-    | 'archive_owner_limit_exceeded'
-    | 'archive_owner_query_failed';
+    | 'continuation_required'
+    | 'archive_search_errors';
+  complete: boolean;
+  continuation: string | null;
+  resultsProvisional: boolean;
   rootQueried: boolean;
+  rootError: string | null;
   archiveOwnersAvailable: number;
   archiveOwnersQueried: number;
   archiveOwnersFailed: number;
   archiveOwnersOmitted: number;
   archiveOwnerLimit: number;
+  ownerCoverage: {
+    attempted: number;
+    succeeded: number;
+    remaining: number;
+    complete: boolean;
+  };
+  indexCoverage: {
+    sessionsAvailable: number;
+    sessionsIndexed: number;
+    sessionsIncomplete: number;
+    complete: boolean;
+    errors: Array<{ ownerName: string; sessionId: string; error: string }>;
+  };
+  executionErrors: Array<{ ownerName: string; error: string }>;
 };
 
 export type ProjectDataSearchMessagesWithArchiveMetadataResult = {
@@ -1066,7 +1086,7 @@ function resolveProjectWideArchiveSearchMaxOwners(env: Env): number {
   const parsed = Number.parseInt(env.PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS ?? '', 10);
   if (
     Number.isSafeInteger(parsed) &&
-    parsed >= 0 &&
+    parsed > 0 &&
     parsed <= PROJECT_DATA_ARCHIVE_MAX_SEARCH_OWNERS
   ) {
     return parsed;
@@ -1074,26 +1094,22 @@ function resolveProjectWideArchiveSearchMaxOwners(env: Env): number {
   return PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_MAX_OWNERS;
 }
 
+function resolveProjectWideArchiveSearchConcurrency(env: Env): number {
+  const parsed = Number.parseInt(env.PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY ?? '', 10);
+  if (
+    Number.isSafeInteger(parsed) &&
+    parsed > 0 &&
+    parsed <= PROJECT_DATA_ARCHIVE_MAX_SEARCH_CONCURRENCY
+  ) {
+    return parsed;
+  }
+  return PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_CONCURRENCY;
+}
+
 async function readProjectWideArchiveSearchOwners(
   env: Env,
-  projectId: string,
-  limit: number
-): Promise<{ owners: ProjectDataArchiveSearchOwnerRow[]; total: number }> {
-  const totalRow = await env.DATABASE.prepare(
-    `SELECT COUNT(*) AS count
-     FROM (
-       SELECT owner_name, generation
-       FROM project_data_session_locations
-       WHERE project_id = ?
-         AND location_state = 'archive_shard'
-         AND owner_kind = 'archive_shard'
-       GROUP BY owner_name, generation
-     )`
-  )
-    .bind(projectId)
-    .first<{ count: number }>();
-  const total = typeof totalRow?.count === 'number' ? totalRow.count : 0;
-  if (limit === 0) return { owners: [], total };
+  projectId: string
+): Promise<ProjectDataArchiveSearchOwnerRow[]> {
   const rows = await env.DATABASE.prepare(
     `SELECT owner_name, generation
      FROM project_data_session_locations
@@ -1101,19 +1117,139 @@ async function readProjectWideArchiveSearchOwners(
        AND location_state = 'archive_shard'
        AND owner_kind = 'archive_shard'
      GROUP BY owner_name, generation
-     ORDER BY generation DESC, owner_name ASC
-     LIMIT ?`
+     ORDER BY generation DESC, owner_name ASC`
   )
-    .bind(projectId, limit)
+    .bind(projectId)
     .all<ProjectDataArchiveSearchOwnerRow>();
-  return { owners: rows.results ?? [], total };
+  return rows.results ?? [];
 }
 
 function sortAndLimitSearchResults(
   results: ProjectDataMessageSearchResult[],
   limit: number
 ): ProjectDataMessageSearchResult[] {
-  return [...results].sort((a, b) => b.createdAt - a.createdAt).slice(0, limit);
+  const deduped = new Map<string, ProjectDataMessageSearchResult>();
+  for (const result of results) deduped.set(`${result.sessionId}\u0000${result.id}`, result);
+  return [...deduped.values()]
+    .sort(
+      (a, b) =>
+        b.createdAt - a.createdAt ||
+        a.sessionId.localeCompare(b.sessionId) ||
+        a.id.localeCompare(b.id)
+    )
+    .slice(0, limit);
+}
+
+type ArchiveSearchCursor = {
+  version: 1;
+  expiresAt: number;
+  projectId: string;
+  query: string;
+  roles: string[] | null;
+  limit: number;
+  owners: ProjectDataArchiveSearchOwnerRow[];
+  nextOwner: number;
+  results: ProjectDataMessageSearchResult[];
+  rootQueried: boolean;
+  rootError: string | null;
+  ownersSucceeded: number;
+  ownersFailed: number;
+  sessionsAvailable: number;
+  sessionsIndexed: number;
+  sessionsIncomplete: number;
+  indexErrors: Array<{ ownerName: string; sessionId: string; error: string }>;
+  executionErrors: Array<{ ownerName: string; error: string }>;
+};
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64UrlDecode(value: string): Uint8Array {
+  const padded = value
+    .replace(/-/g, '+')
+    .replace(/_/g, '/')
+    .padEnd(Math.ceil(value.length / 4) * 4, '=');
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+async function archiveSearchCursorKey(secret: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
+}
+
+async function encodeArchiveSearchCursor(env: Env, cursor: ArchiveSearchCursor): Promise<string> {
+  const body = base64UrlEncode(new TextEncoder().encode(JSON.stringify(cursor)));
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    await archiveSearchCursorKey(env.ENCRYPTION_KEY),
+    new TextEncoder().encode(body)
+  );
+  return `${body}.${base64UrlEncode(new Uint8Array(signature))}`;
+}
+
+async function decodeArchiveSearchCursor(
+  env: Env,
+  value: string,
+  binding: Pick<ArchiveSearchCursor, 'projectId' | 'query' | 'roles' | 'limit'>
+): Promise<ArchiveSearchCursor> {
+  const [body, suppliedSignature, extra] = value.split('.');
+  if (!body || !suppliedSignature || extra) throw new Error('Invalid archive search continuation');
+  const valid = await crypto.subtle.verify(
+    'HMAC',
+    await archiveSearchCursorKey(env.ENCRYPTION_KEY),
+    base64UrlDecode(suppliedSignature),
+    new TextEncoder().encode(body)
+  );
+  if (!valid) throw new Error('Invalid archive search continuation signature');
+  const cursor = JSON.parse(new TextDecoder().decode(base64UrlDecode(body))) as ArchiveSearchCursor;
+  if (
+    cursor.version !== 1 ||
+    cursor.expiresAt < Date.now() ||
+    cursor.projectId !== binding.projectId ||
+    cursor.query !== binding.query ||
+    cursor.limit !== binding.limit ||
+    JSON.stringify(cursor.roles) !== JSON.stringify(binding.roles) ||
+    !Array.isArray(cursor.owners) ||
+    !Number.isSafeInteger(cursor.nextOwner) ||
+    cursor.nextOwner < 0 ||
+    cursor.nextOwner > cursor.owners.length
+  ) {
+    throw new Error('Archive search continuation does not match this query');
+  }
+  return cursor;
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  fn: (value: T) => Promise<R>
+): Promise<Array<PromiseSettledResult<R>>> {
+  const results: Array<PromiseSettledResult<R>> = new Array(values.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+      for (;;) {
+        const index = next++;
+        const value = values[index];
+        if (value === undefined) return;
+        try {
+          results[index] = { status: 'fulfilled', value: await fn(value) };
+        } catch (reason) {
+          results[index] = { status: 'rejected', reason };
+        }
+      }
+    })
+  );
+  return results;
 }
 
 export async function searchMessagesWithArchiveMetadata(
@@ -1122,7 +1258,8 @@ export async function searchMessagesWithArchiveMetadata(
   query: string,
   sessionId: string | null = null,
   roles: string[] | null = null,
-  limit: number = 10
+  limit: number = 10,
+  continuation: string | null = null
 ): Promise<ProjectDataSearchMessagesWithArchiveMetadataResult> {
   if (sessionId) {
     const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
@@ -1138,76 +1275,194 @@ export async function searchMessagesWithArchiveMetadata(
       archiveSearch: {
         partial: false,
         reason: 'session_scoped_exact_read',
+        complete: true,
+        continuation: null,
+        resultsProvisional: false,
         rootQueried: owner.kind === 'root',
+        rootError: null,
         archiveOwnersAvailable: owner.kind === 'archive_shard' ? 1 : 0,
         archiveOwnersQueried: owner.kind === 'archive_shard' ? 1 : 0,
         archiveOwnersFailed: 0,
         archiveOwnersOmitted: 0,
         archiveOwnerLimit: 1,
+        ownerCoverage: {
+          attempted: owner.kind === 'archive_shard' ? 1 : 0,
+          succeeded: owner.kind === 'archive_shard' ? 1 : 0,
+          remaining: 0,
+          complete: true,
+        },
+        indexCoverage: {
+          sessionsAvailable: owner.kind === 'archive_shard' ? 1 : 0,
+          sessionsIndexed: owner.kind === 'archive_shard' ? 1 : 0,
+          sessionsIncomplete: 0,
+          complete: true,
+          errors: [],
+        },
+        executionErrors: [],
       },
     };
   }
-  const stub = await getStub(env, projectId);
-  const rootResults = (await stub.searchMessages(
-    query,
-    sessionId,
-    roles,
-    limit
-  )) as ProjectDataMessageSearchResult[];
   const archiveOwnerLimit = resolveProjectWideArchiveSearchMaxOwners(env);
-  let archiveOwners: ProjectDataArchiveSearchOwnerRow[] = [];
-  let archiveOwnersAvailable = 0;
-  let reason: ProjectDataArchiveSearchMetadata['reason'] = null;
-  try {
-    const inventory = await readProjectWideArchiveSearchOwners(env, projectId, archiveOwnerLimit);
-    archiveOwners = inventory.owners;
-    archiveOwnersAvailable = inventory.total;
-    if (inventory.total > inventory.owners.length) reason = 'archive_owner_limit_exceeded';
-  } catch (error) {
-    log.warn('project_data.archive_search_inventory_failed', {
-      projectId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    reason = 'archive_owner_inventory_unavailable';
-  }
-
-  const archiveResults: ProjectDataMessageSearchResult[] = [];
-  let archiveOwnersFailed = 0;
-  for (const archiveOwner of archiveOwners) {
-    const owner: ProjectDataArchiveOwnerRef = {
-      kind: 'archive_shard',
-      projectId,
-      ownerName: archiveOwner.owner_name,
-      generation: archiveOwner.generation,
-    };
+  let cursor: ArchiveSearchCursor;
+  if (continuation) {
+    cursor = await decodeArchiveSearchCursor(env, continuation, { projectId, query, roles, limit });
+  } else {
+    let rootResults: ProjectDataMessageSearchResult[] = [];
+    let rootError: string | null = null;
     try {
-      const ownerStub = await getStubForOwner(env, projectId, owner.ownerName);
-      archiveResults.push(
-        ...(await ownerStub.archiveTargetSearchProjectMessages(owner, query, roles, limit))
-      );
+      const stub = await getStub(env, projectId);
+      rootResults = (await stub.searchMessages(
+        query,
+        null,
+        roles,
+        limit
+      )) as ProjectDataMessageSearchResult[];
     } catch (error) {
-      archiveOwnersFailed++;
-      reason = 'archive_owner_query_failed';
-      log.warn('project_data.archive_search_owner_failed', {
+      rootError = error instanceof Error ? error.message : String(error);
+      log.warn('project_data.root_search_failed', { projectId, error: rootError });
+    }
+    let owners: ProjectDataArchiveSearchOwnerRow[];
+    try {
+      owners = await readProjectWideArchiveSearchOwners(env, projectId);
+    } catch (error) {
+      log.warn('project_data.archive_search_inventory_failed', {
         projectId,
-        ownerName: owner.ownerName,
-        generation: owner.generation,
         error: error instanceof Error ? error.message : String(error),
       });
+      return {
+        results: rootResults,
+        archiveSearch: {
+          partial: true,
+          reason: 'archive_owner_inventory_unavailable',
+          complete: false,
+          continuation: null,
+          resultsProvisional: true,
+          rootQueried: true,
+          rootError,
+          archiveOwnersAvailable: 0,
+          archiveOwnersQueried: 0,
+          archiveOwnersFailed: 0,
+          archiveOwnersOmitted: 0,
+          archiveOwnerLimit,
+          ownerCoverage: { attempted: 0, succeeded: 0, remaining: 0, complete: false },
+          indexCoverage: {
+            sessionsAvailable: 0,
+            sessionsIndexed: 0,
+            sessionsIncomplete: 0,
+            complete: false,
+            errors: [],
+          },
+          executionErrors: [],
+        },
+      };
     }
+    cursor = {
+      version: 1,
+      expiresAt: Date.now() + 15 * 60 * 1000,
+      projectId,
+      query,
+      roles,
+      limit,
+      owners,
+      nextOwner: 0,
+      results: rootResults,
+      rootQueried: true,
+      rootError,
+      ownersSucceeded: 0,
+      ownersFailed: 0,
+      sessionsAvailable: 0,
+      sessionsIndexed: 0,
+      sessionsIncomplete: 0,
+      indexErrors: [],
+      executionErrors: [],
+    };
   }
 
+  const ownerBatch = cursor.owners.slice(cursor.nextOwner, cursor.nextOwner + archiveOwnerLimit);
+  const ownerResults = await mapWithConcurrency(
+    ownerBatch,
+    resolveProjectWideArchiveSearchConcurrency(env),
+    async (archiveOwner) => {
+      const owner: ProjectDataArchiveOwnerRef = {
+        kind: 'archive_shard',
+        projectId,
+        ownerName: archiveOwner.owner_name,
+        generation: archiveOwner.generation,
+      };
+      const ownerStub = await getStubForOwner(env, projectId, owner.ownerName);
+      return {
+        owner,
+        result: await ownerStub.archiveTargetSearchProjectMessages(owner, query, roles, limit),
+      };
+    }
+  );
+  ownerResults.forEach((settled, index) => {
+    const archiveOwner = ownerBatch[index];
+    if (!archiveOwner) return;
+    if (settled.status === 'rejected') {
+      cursor.ownersFailed++;
+      const error =
+        settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+      cursor.executionErrors.push({ ownerName: archiveOwner.owner_name, error });
+      log.warn('project_data.archive_search_owner_failed', {
+        projectId,
+        ownerName: archiveOwner.owner_name,
+        generation: archiveOwner.generation,
+        error,
+      });
+      return;
+    }
+    cursor.ownersSucceeded++;
+    cursor.results.push(...settled.value.result.results);
+    const coverage = settled.value.result.coverage;
+    cursor.sessionsAvailable += coverage.sessionsAvailable;
+    cursor.sessionsIndexed += coverage.sessionsIndexed;
+    cursor.sessionsIncomplete += coverage.sessionsIncomplete;
+    cursor.indexErrors.push(
+      ...coverage.errors.map((error: { sessionId: string; error: string }) => ({
+        ownerName: archiveOwner.owner_name,
+        ...error,
+      }))
+    );
+  });
+  cursor.nextOwner += ownerBatch.length;
+
+  const remaining = cursor.owners.length - cursor.nextOwner;
+  const complete = remaining === 0;
+  const nextContinuation = complete ? null : await encodeArchiveSearchCursor(env, cursor);
+  const hasErrors = cursor.rootError !== null || cursor.executionErrors.length > 0;
+  const indexComplete = complete && cursor.sessionsIncomplete === 0 && cursor.ownersFailed === 0;
+  const partial = !complete || !indexComplete || hasErrors;
+
   return {
-    results: sortAndLimitSearchResults([...rootResults, ...archiveResults], limit),
+    results: sortAndLimitSearchResults(cursor.results, limit),
     archiveSearch: {
-      partial: reason !== null,
-      reason,
-      rootQueried: true,
-      archiveOwnersAvailable,
-      archiveOwnersQueried: archiveOwners.length - archiveOwnersFailed,
-      archiveOwnersFailed,
-      archiveOwnersOmitted: Math.max(0, archiveOwnersAvailable - archiveOwners.length),
+      partial,
+      reason: !complete ? 'continuation_required' : partial ? 'archive_search_errors' : null,
+      complete,
+      continuation: nextContinuation,
+      resultsProvisional: !complete,
+      rootQueried: cursor.rootQueried,
+      rootError: cursor.rootError,
+      archiveOwnersAvailable: cursor.owners.length,
+      archiveOwnersQueried: cursor.ownersSucceeded,
+      archiveOwnersFailed: cursor.ownersFailed,
+      archiveOwnersOmitted: remaining,
       archiveOwnerLimit,
+      ownerCoverage: {
+        attempted: cursor.nextOwner,
+        succeeded: cursor.ownersSucceeded,
+        remaining,
+        complete,
+      },
+      indexCoverage: {
+        sessionsAvailable: cursor.sessionsAvailable,
+        sessionsIndexed: cursor.sessionsIndexed,
+        sessionsIncomplete: cursor.sessionsIncomplete,
+        complete: indexComplete,
+        errors: cursor.indexErrors,
+      },
+      executionErrors: cursor.executionErrors,
     },
   };
 }

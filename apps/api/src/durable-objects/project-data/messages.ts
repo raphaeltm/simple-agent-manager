@@ -379,7 +379,10 @@ export function getMessages(
 }
 
 function parseListedMessage(
-  row: Record<string, unknown>, sessionId: string, compact: boolean, compactOptions?: CompactMessageOptions
+  row: Record<string, unknown>,
+  sessionId: string,
+  compact: boolean,
+  compactOptions?: CompactMessageOptions
 ): Record<string, unknown> | null {
   try {
     return compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row);
@@ -396,8 +399,12 @@ function parseListedMessage(
 }
 
 export function formatMessageRows(
-  rows: Record<string, unknown>[], sessionId: string, limit: number,
-  compact: boolean, order: 'asc' | 'desc', compactOptions?: CompactMessageOptions
+  rows: Record<string, unknown>[],
+  sessionId: string,
+  limit: number,
+  compact: boolean,
+  order: 'asc' | 'desc',
+  compactOptions?: CompactMessageOptions
 ): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let hasMore = rows.length > limit;
   const candidateRows = hasMore ? rows.slice(0, limit) : rows;
@@ -550,7 +557,7 @@ function searchMessagesFts(
     JOIN chat_messages_grouped m ON m.rowid = f.rowid
     JOIN chat_sessions s ON s.id = m.session_id
     WHERE ${whereClause}
-    ORDER BY rank
+    ORDER BY m.created_at DESC, m.session_id ASC, m.id ASC
     LIMIT ?
   `;
   params.push(limit);
@@ -558,9 +565,9 @@ function searchMessagesFts(
   try {
     const rows = sql.exec(sqlQuery, ...params).toArray();
     return rows.map((row) => mapSearchResultToSearchResult(parseSearchResultRow(row), query));
-  } catch (e) {
-    log.error('messages.fts5_search_failed', { error: String(e) });
-    return [];
+  } catch (error) {
+    log.error('messages.fts5_search_failed', { error: String(error) });
+    throw error;
   }
 }
 

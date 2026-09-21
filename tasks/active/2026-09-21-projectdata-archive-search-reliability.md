@@ -58,52 +58,52 @@ session ownership remain separate follow-ups.
 - [ ] Add bounded, content-free migration progress evidence for phase, table, ordinal, source and
   stored byte counts, operation outcome/duration, lease epoch, and request correlation. Record the
   last-started operation so resets/timeouts remain attributable when completion logs never happen.
-- [ ] Freeze copy layout fields needed by retries in the migration journal. Existing in-flight and
+- [x] Freeze copy layout fields needed by retries in the migration journal. Existing in-flight and
   legacy migrations must retain their current layout and reader/recovery semantics.
-- [ ] Add durable per-table copy checkpoints, advanced only after target receipt is verified under
+- [x] Add durable per-table copy checkpoints, advanced only after target receipt is verified under
   the current migration and lease epoch. Reconcile target receipts ahead of a checkpoint and refuse
   incompatible/missing receipts rather than blindly overwriting or skipping.
-- [ ] Resume source export at the verified cursor/ordinal and preserve immutable R2 keys and chunk
+- [x] Resume source export at the verified cursor/ordinal and preserve immutable R2 keys and chunk
   hashes across retries, including PUT-before-receipt and receipt-before-checkpoint resets.
-- [ ] Replace remaining chunk-level one-shot canonical hashes with byte-identical incremental hashes
+- [x] Replace remaining chunk-level one-shot canonical hashes with byte-identical incremental hashes
   and eliminate safe attempt-local duplicate read/decompress/hash passes. Keep retry-time corruption
   checks and the final pre-delete target verification.
 - [ ] Bound grouped/tool export pages by actual serialized/canonical bytes with an explicit single
   oversized-row policy; do not truncate or livelock valid rows.
-- [ ] Reduce simultaneous compact-read representations where the v1 JSON/gzip format permits, and
+- [x] Reduce simultaneous compact-read representations where the v1 JSON/gzip format permits, and
   expose measured peak working-set proxies/read counts in production-shaped tests.
-- [ ] Classify timeout stage and cancellation behavior. An expired wrapper must not leave unbounded
+- [x] Classify timeout stage and cancellation behavior. An expired wrapper must not leave unbounded
   duplicate provider I/O racing a retry.
-- [ ] Measure source finalization row/byte/duration work. If one RPC remains unsafe, implement a
+- [x] Measure source finalization row/byte/duration work. If one RPC remains unsafe, implement a
   durable, read-safe deleting continuation; otherwise record benchmark evidence that it is bounded.
 
 ### Complete destination index and migration-safe publication
 
-- [ ] Copy the full materialization watermark/index-state anchor contract and version it compatibly.
-- [ ] Before sealing/deletion, derive every missing grouped search document in the destination from
+- [x] Copy the full materialization watermark/index-state anchor contract and version it compatibly.
+- [x] Before sealing/deletion, derive every missing grouped search document in the destination from
   ordered raw source/R2 data, including terminal partial sessions beyond 5,000 rows and pruned
   grouped indexes. Preserve stable message/group IDs, roles, timestamps, raw/tool references, and v1
   transcript hashes.
-- [ ] Store and verify explicit destination index coverage (source version/watermark, document and
+- [x] Store and verify explicit destination index coverage (source version/watermark, document and
   searchable-row counts/hash) separately from immutable transcript inventory. Refuse source deletion
   when transcript or index proof is missing, inconsistent, corrupt, or unavailable.
-- [ ] Add a bounded backfill/repair path for already published incomplete compact archives that reads
+- [x] Add a bounded backfill/repair path for already published incomplete compact archives that reads
   R2 directly, is idempotent, reports progress/failure, and does not refill the pressured root.
-- [ ] Keep source-or-verified-target visibility throughout concurrent migration, publication, repair,
+- [x] Keep source-or-verified-target visibility throughout concurrent migration, publication, repair,
   and search; dedupe by stable logical identity and routing generation.
 
 ### Exhaustive project-wide history search
 
-- [ ] Replace the fixed total-owner cap with a query-bound owner inventory snapshot and continuation.
+- [x] Replace the fixed total-owner cap with a query-bound owner inventory snapshot and continuation.
   Bounds limit concurrency/time/output per step; they must not permanently omit searchable owners.
-- [ ] Recheck project membership/authorization on every continuation and bind the cursor to project,
+- [x] Recheck project membership/authorization on every continuation and bind the cursor to project,
   normalized query, roles/session/time scope, inventory generation, and stable ordering state.
-- [ ] Query owners with configurable bounded concurrency, retry-safe owner progress, and deterministic
+- [x] Query owners with configurable bounded concurrency, retry-safe owner progress, and deterministic
   global newest-first order `(createdAt, sessionId, id)` with stable deduplication.
-- [ ] Expose owner coverage, index coverage, provisional/final state, omitted/pending owners, and
+- [x] Expose owner coverage, index coverage, provisional/final state, omitted/pending owners, and
   execution failures independently through the service and real MCP/session-search consumer. Never
   turn FTS failure into an empty successful result.
-- [ ] Preserve session-scoped exact routing, legacy readers, tool-call expansion links, and visibility
+- [x] Preserve session-scoped exact routing, legacy readers, tool-call expansion links, and visibility
   while locations transition between root, migrating, sealed, and published states.
 
 ### Tests and measurement

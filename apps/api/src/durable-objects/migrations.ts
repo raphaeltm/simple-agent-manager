@@ -2082,7 +2082,9 @@ export const MIGRATIONS: Migration[] = [
             throw error;
         }
       }
-      sql.exec('SELECT audience_scope, audience_project_id, audience_user_id FROM project_events LIMIT 0');
+      sql.exec(
+        'SELECT audience_scope, audience_project_id, audience_user_id FROM project_events LIMIT 0'
+      );
       sql.exec(`
         CREATE INDEX IF NOT EXISTS idx_project_events_audience
         ON project_events(project_id, audience_scope, audience_user_id, received_at DESC, id)
@@ -2206,10 +2208,14 @@ export const MIGRATIONS: Migration[] = [
     name: '056-project-event-orphan-retention-cursor',
     run: (sql) => {
       for (const [column, statement] of [
-        ['orphan_scan_lifecycle_at',
-          'ALTER TABLE project_event_wake_scheduler_state ADD COLUMN orphan_scan_lifecycle_at INTEGER'],
-        ['orphan_scan_match_id',
-          'ALTER TABLE project_event_wake_scheduler_state ADD COLUMN orphan_scan_match_id TEXT'],
+        [
+          'orphan_scan_lifecycle_at',
+          'ALTER TABLE project_event_wake_scheduler_state ADD COLUMN orphan_scan_lifecycle_at INTEGER',
+        ],
+        [
+          'orphan_scan_match_id',
+          'ALTER TABLE project_event_wake_scheduler_state ADD COLUMN orphan_scan_match_id TEXT',
+        ],
       ] as const) {
         try {
           sql.exec(statement);
@@ -2235,10 +2241,14 @@ export const MIGRATIONS: Migration[] = [
     name: '057-chat-search-incremental-watermark',
     run: (sql) => {
       for (const [column, statement] of [
-        ['materialized_through_created_at',
-          'ALTER TABLE chat_sessions ADD COLUMN materialized_through_created_at INTEGER'],
-        ['materialized_through_sequence',
-          'ALTER TABLE chat_sessions ADD COLUMN materialized_through_sequence INTEGER'],
+        [
+          'materialized_through_created_at',
+          'ALTER TABLE chat_sessions ADD COLUMN materialized_through_created_at INTEGER',
+        ],
+        [
+          'materialized_through_sequence',
+          'ALTER TABLE chat_sessions ADD COLUMN materialized_through_sequence INTEGER',
+        ],
       ] as const) {
         try {
           sql.exec(statement);
@@ -2252,6 +2262,90 @@ export const MIGRATIONS: Migration[] = [
       }
       sql.exec(`SELECT materialized_through_created_at, materialized_through_sequence
         FROM chat_sessions LIMIT 0`);
+    },
+  },
+  {
+    // Archive copy receipts carry the exact source continuation that produced an
+    // immutable ordinal. Search coverage is separate derived evidence: transcript
+    // hashes stay byte-compatible with r2-gzip-v1 while incomplete/pruned indexes
+    // can be repaired and verified independently before source deletion.
+    name: '058-archive-copy-receipts-and-search-coverage',
+    run: (sql) => {
+      for (const [column, statement] of [
+        [
+          'source_cursor',
+          'ALTER TABLE project_data_archive_target_chunks ADD COLUMN source_cursor TEXT',
+        ],
+        [
+          'source_has_more',
+          'ALTER TABLE project_data_archive_target_chunks ADD COLUMN source_has_more INTEGER CHECK (source_has_more IS NULL OR source_has_more IN (0, 1))',
+        ],
+      ] as const) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.toLowerCase().includes(`duplicate column name: ${column}`)
+          )
+            throw error;
+        }
+      }
+      for (const [column, statement] of [
+        [
+          'search_index_version',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_version INTEGER',
+        ],
+        [
+          'search_index_state',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_state TEXT',
+        ],
+        [
+          'search_index_message_count',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_message_count INTEGER',
+        ],
+        [
+          'search_index_document_count',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_document_count INTEGER',
+        ],
+        [
+          'search_index_sha256',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_sha256 TEXT',
+        ],
+        [
+          'search_indexed_at',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_indexed_at INTEGER',
+        ],
+      ] as const) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.toLowerCase().includes(`duplicate column name: ${column}`)
+          )
+            throw error;
+        }
+      }
+      sql.exec(`SELECT source_cursor, source_has_more
+        FROM project_data_archive_target_chunks LIMIT 0`);
+      sql.exec(`SELECT search_index_version, search_index_state,
+          search_index_message_count, search_index_document_count,
+          search_index_sha256, search_indexed_at
+        FROM project_data_archive_target_sessions LIMIT 0`);
+      sql.exec(`CREATE TABLE IF NOT EXISTS project_data_archive_search_documents (
+        rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+        projection_id TEXT NOT NULL UNIQUE,
+        document_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_data_archive_search_documents_session
+        ON project_data_archive_search_documents(session_id, created_at DESC, projection_id DESC)`);
+      sql.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS project_data_archive_search_documents_fts
+        USING fts5(content, content='project_data_archive_search_documents', content_rowid='rowid')`);
     },
   },
 ];

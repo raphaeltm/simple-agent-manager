@@ -1,4 +1,5 @@
-import { withTimeout } from '../durable-objects/project-data/tool-payload-archive-primitives';
+import { createHash } from 'node:crypto';
+
 import type { ProjectDataArchiveChunk } from './contract';
 import { sha256Hex } from './hashing';
 
@@ -12,13 +13,31 @@ export function compactArchiveTimeout(value?: string): number {
   const n = Number(value);
   return Number.isSafeInteger(n) && n > 0 ? n : COMPACT_ARCHIVE_DEFAULT_TIMEOUT_MS;
 }
-function timed<T>(promise: Promise<T>, deadline: number): Promise<T> {
+export class CompactArchiveTimeoutError extends Error {
+  constructor(readonly stage: string) {
+    super(`Compact archive R2 deadline exceeded (${stage})`);
+    this.name = 'CompactArchiveTimeoutError';
+  }
+}
+
+async function timed<T>(promise: Promise<T>, deadline: number, stage: string): Promise<T> {
   const remaining = deadline - Date.now();
   if (remaining <= 0) {
     void promise.catch(() => undefined);
-    return Promise.reject(new Error('Compact archive R2 deadline exceeded'));
+    throw new CompactArchiveTimeoutError(stage);
   }
-  return withTimeout(promise, remaining, 'Compact archive R2 deadline exceeded');
+  void promise.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new CompactArchiveTimeoutError(stage)), remaining);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 export type CompactChunkRef = { key: string; bytes: number; bodyBytes: number; bodySha256: string };
 export type CompactChunkIdentity = Pick<
@@ -36,14 +55,14 @@ async function readBounded(
   let size = 0;
   try {
     for (;;) {
-      const { done, value } = await timed(reader.read(), deadline);
+      const { done, value } = await timed(reader.read(), deadline, 'stream_read');
       if (done) break;
       size += value.byteLength;
       if (size > maxBytes) throw new Error('Compact archive exceeds object byte limit');
       parts.push(value);
     }
   } catch (error) {
-    void reader.cancel().catch(() => undefined);
+    await reader.cancel().catch(() => undefined);
     throw error;
   } finally {
     reader.releaseLock();
@@ -55,6 +74,88 @@ async function readBounded(
     offset += part.byteLength;
   }
   return result;
+}
+
+/**
+ * Decode a compact object without first collecting a second full compressed or
+ * decompressed byte buffer. JSON.parse still needs one bounded UTF-8 string, but
+ * compressed bytes are released as the decompressor consumes them and the body
+ * hash is updated incrementally.
+ */
+async function readCompressedText(
+  stream: ReadableStream<Uint8Array>,
+  expectedCompressedBytes: number,
+  expectedBodyBytes: number,
+  expectedBodySha256: string,
+  deadline: number
+): Promise<string> {
+  let compressedBytes = 0;
+  const sourceReader = stream.getReader();
+  let sourceReleased = false;
+  const releaseSource = () => {
+    if (sourceReleased) return;
+    sourceReleased = true;
+    sourceReader.releaseLock();
+  };
+  const counted = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await sourceReader.read();
+        if (done) {
+          if (compressedBytes !== expectedCompressedBytes) {
+            throw new Error('Compact archive compressed size mismatch');
+          }
+          controller.close();
+          releaseSource();
+          return;
+        }
+        compressedBytes += value.byteLength;
+        if (compressedBytes > expectedCompressedBytes) {
+          throw new Error('Compact archive compressed size mismatch');
+        }
+        controller.enqueue(value);
+      } catch (error) {
+        controller.error(error);
+        await sourceReader.cancel(error).catch(() => undefined);
+        releaseSource();
+      }
+    },
+    async cancel(reason) {
+      await sourceReader.cancel(reason).catch(() => undefined);
+      releaseSource();
+    },
+  });
+  const reader = counted.pipeThrough(new DecompressionStream('gzip')).getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
+  const hash = createHash('sha256');
+  const parts: string[] = [];
+  let bodyBytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await timed(reader.read(), deadline, 'decompress_read');
+      if (done) break;
+      bodyBytes += value.byteLength;
+      if (bodyBytes > expectedBodyBytes) {
+        throw new Error('Compact archive exceeds object byte limit');
+      }
+      hash.update(value);
+      const decoded = decoder.decode(value, { stream: true });
+      if (decoded) parts.push(decoded);
+    }
+    const final = decoder.decode();
+    if (final) parts.push(final);
+  } catch (error) {
+    await sourceReader.cancel(error).catch(() => undefined);
+    releaseSource();
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  if (bodyBytes !== expectedBodyBytes || hash.digest('hex') !== expectedBodySha256) {
+    throw new Error('Compact archive body hash mismatch');
+  }
+  return parts.join('');
 }
 
 function assertChunk(value: unknown): asserts value is ProjectDataArchiveChunk {
@@ -149,18 +250,15 @@ export async function readCompactChunk(
   ) {
     throw new Error('Invalid compact archive object size');
   }
-  const object = await timed(r2.get(ref.key), deadline);
+  const object = await timed(r2.get(ref.key), deadline, 'get');
   if (object?.size !== ref.bytes) throw new Error('Compact archive missing or size mismatch');
-  const compressed = await readBounded(object.body, ref.bytes, deadline);
-  const body = await readBounded(
-    responseBody(compressed).pipeThrough(new DecompressionStream('gzip')),
+  const text = await readCompressedText(
+    object.body,
+    ref.bytes,
     ref.bodyBytes,
+    ref.bodySha256,
     deadline
   );
-  const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(body);
-  if (body.byteLength !== ref.bodyBytes || (await sha256Hex(text)) !== ref.bodySha256) {
-    throw new Error('Compact archive body hash mismatch');
-  }
   const chunk: unknown = JSON.parse(text);
   assertChunk(chunk);
   assertIdentity(chunk, expected);
@@ -186,7 +284,7 @@ export async function writeCompactChunk(
     deadline
   );
   const ref = { key, bytes: compressed.byteLength, bodyBytes, bodySha256: await sha256Hex(text) };
-  const existing = await timed(r2.head(key), deadline);
+  const existing = await timed(r2.head(key), deadline, 'head');
   if (!existing) {
     // Immutable publication: concurrent retries may only win creation, never overwrite.
     await timed(
@@ -194,7 +292,8 @@ export async function writeCompactChunk(
         onlyIf: { etagDoesNotMatch: '*' },
         httpMetadata: { contentType: 'application/gzip' },
       }),
-      deadline
+      deadline,
+      'put'
     );
   } else {
     // Compression implementations may emit different gzip headers for the same input.

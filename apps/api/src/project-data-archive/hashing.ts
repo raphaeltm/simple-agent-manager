@@ -72,7 +72,9 @@ export async function canonicalRowsSha256(
   columns: readonly string[],
   rows: readonly Record<string, unknown>[]
 ): Promise<string> {
-  return sha256Hex(canonicalizeArchiveRows(columns, rows));
+  const hasher = createCanonicalRowsHasher(columns);
+  for (const row of rows) hasher.update(row);
+  return hasher.digestHex();
 }
 
 export type CanonicalRowsHasher = {

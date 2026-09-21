@@ -80,6 +80,7 @@ function createCoordinatorTables(sqlite: Database.Database): void {
     schema.projectDataArchiveCircuitBreakers,
     schema.projectDataArchiveGlobalSweepCadence,
     schema.projectDataArchiveMigrations,
+    schema.projectDataArchiveCopyCheckpoints,
     schema.projectDataSessionLocations,
   ]);
 }
@@ -99,11 +100,7 @@ function createMemoryR2(): R2Bucket {
 }
 
 type SourceState =
-  | null
-  | 'intent_prepared'
-  | 'target_sealed'
-  | 'recovery_manifest_persisted'
-  | 'source_deleted';
+  null | 'intent_prepared' | 'target_sealed' | 'recovery_manifest_persisted' | 'source_deleted';
 
 type FakeSourceOptions = {
   state?: SourceState;
@@ -274,6 +271,8 @@ function createFakeTarget() {
         sha256: chunk.sha256,
         rowCount: chunk.rowCount,
         byteCount: chunk.byteCount,
+        sourceCursor: chunk.cursor,
+        sourceHasMore: chunk.hasMore,
       })),
       sessionRow: {
         id: SESSION_ID,
@@ -1357,6 +1356,88 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
     }
   );
 
+  it('reconciles a committed target receipt after reset without re-exporting that source chunk', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'copying', { sourceIntentToken: 'old-token' });
+      const source = createFakeSource({ state: 'intent_prepared', token: 'old-token' });
+      const target = createFakeTarget();
+      await target.archiveTargetCommitChunk(makeChunk('chat_messages', 0));
+
+      const stats = await runProjectDataArchiveSharding(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          PROJECT_DATA: createProjectDataNamespace({
+            [SOURCE_OWNER]: source,
+            [TARGET_OWNER]: target,
+          }),
+        }),
+        new Date(NOW)
+      );
+
+      expect(stats.migrated).toBe(1);
+      expect(source.archiveSourceExportChunk.mock.calls.map(([input]) => input.tableName)).toEqual([
+        'chat_messages_grouped',
+        'tool_payload_archives',
+      ]);
+      expect(
+        sqlite
+          .prepare(
+            `SELECT next_ordinal, complete, last_chunk_sha256
+             FROM project_data_archive_copy_checkpoints
+             WHERE migration_id = ? AND table_name = 'chat_messages'`
+          )
+          .get(MIGRATION_ID)
+      ).toEqual({ next_ordinal: 1, complete: 1, last_chunk_sha256: 'chat_messages:0:sha' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps the first persisted byte and row layout when retry configuration changes', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'copying', { sourceIntentToken: 'old-token' });
+      for (const tableName of ['chat_messages', 'chat_messages_grouped', 'tool_payload_archives']) {
+        sqlite
+          .prepare(
+            `INSERT INTO project_data_archive_copy_checkpoints (
+               migration_id, table_name, storage_format, chunk_rows, chunk_bytes,
+               next_ordinal, complete, copied_rows, copied_bytes, lease_epoch, updated_at
+             ) VALUES (?, ?, 'sqlite-v1', 7, 700, 0, 0, 0, 0, 0, ?)`
+          )
+          .run(MIGRATION_ID, tableName, NOW - 1000);
+      }
+      const source = createFakeSource({ state: 'intent_prepared', token: 'old-token' });
+      const target = createFakeTarget();
+      const stats = await runProjectDataArchiveSharding(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '99',
+          PROJECT_DATA_ARCHIVE_CHUNK_BYTES: '9999',
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          PROJECT_DATA: createProjectDataNamespace({
+            [SOURCE_OWNER]: source,
+            [TARGET_OWNER]: target,
+          }),
+        }),
+        new Date(NOW)
+      );
+
+      expect(stats.migrated).toBe(1);
+      for (const [input] of source.archiveSourceExportChunk.mock.calls) {
+        expect(input).toMatchObject({ maxRows: 7, maxBytes: 700 });
+      }
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('implements freeze, poison, frozen-intent inspection, and copy-back controls', async () => {
     const sqlite = new Database(':memory:');
     try {
@@ -1641,14 +1722,24 @@ describe('archive-sharding candidate selection is size-ordered and budgeted', ()
     try {
       createCoordinatorTables(sqlite);
       seedSized(sqlite);
-      const result = await runScopedProjectDataArchiveCanary(makeEnv(sqlite, {
-        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true', PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '100',
-      }), { projectId: PROJECT_ID, dryRun: true, limit: 1, nowDate: new Date(NOW) });
-      expect(result.selected.map(candidate => candidate.sessionId)).toEqual(['session-small']);
+      const result = await runScopedProjectDataArchiveCanary(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '100',
+        }),
+        { projectId: PROJECT_ID, dryRun: true, limit: 1, nowDate: new Date(NOW) }
+      );
+      expect(result.selected.map((candidate) => candidate.sessionId)).toEqual(['session-small']);
       expect(countMigrations(sqlite)).toBe(0);
-      expect(await dryRunSelection(sqlite, { PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
-        PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '1' })).toEqual([]);
-    } finally { sqlite.close(); }
+      expect(
+        await dryRunSelection(sqlite, {
+          PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '1',
+        })
+      ).toEqual([]);
+    } finally {
+      sqlite.close();
+    }
   });
 
   it('still selects a single session larger than the whole budget so it cannot starve', async () => {

@@ -44,7 +44,15 @@ function stub(input: {
     searchMessages: vi.fn(async () => input.root ?? []),
     archiveTargetSearchProjectMessages: vi.fn(async () => {
       if (input.failArchive) throw new Error('archive owner unavailable');
-      return input.archive ?? [];
+      return {
+        results: input.archive ?? [],
+        coverage: {
+          sessionsAvailable: 1,
+          sessionsIndexed: 1,
+          sessionsIncomplete: 0,
+          errors: [],
+        },
+      };
     }),
   };
 }
@@ -57,6 +65,7 @@ function envForSearch(sqlite: Database.Database, stubs: Record<string, SearchStu
   return {
     DATABASE: createSqliteD1(sqlite),
     PROJECT_DATA: namespace,
+    ENCRYPTION_KEY: 'archive-search-test-key',
   } as unknown as Env;
 }
 
@@ -93,7 +102,7 @@ describe('ProjectData project-wide archive search metadata', () => {
     }
   });
 
-  it('bounds archive-owner fanout and reports explicit partial metadata', async () => {
+  it('bounds each owner batch and completes every owner through a query-bound continuation', async () => {
     const sqlite = new Database(':memory:');
     try {
       createLocationTable(sqlite);
@@ -111,14 +120,17 @@ describe('ProjectData project-wide archive search metadata', () => {
         .run();
       const root = stub({ root: [row('root-message', 'root-session', 100)] });
       const archive = stub({ archive: [row('archive-message', 'session-archive-a', 200)] });
+      const archiveB = stub({ archive: [row('archive-message-b', 'session-archive-b', 300)] });
+      const env = {
+        ...envForSearch(sqlite, {
+          'project-search': root,
+          'project-search:archive:g1:s0': archive,
+          'project-search:archive:g1:s1': archiveB,
+        }),
+        PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: '1',
+      } as Env;
       const result = await searchMessagesWithArchiveMetadata(
-        {
-          ...envForSearch(sqlite, {
-            'project-search': root,
-            'project-search:archive:g1:s0': archive,
-          }),
-          PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: '1',
-        } as Env,
+        env,
         'project-search',
         'needle',
         null,
@@ -129,12 +141,14 @@ describe('ProjectData project-wide archive search metadata', () => {
       expect(result.results.map((item) => item.id)).toEqual(['archive-message', 'root-message']);
       expect(result.archiveSearch).toMatchObject({
         partial: true,
-        reason: 'archive_owner_limit_exceeded',
+        reason: 'continuation_required',
+        complete: false,
         archiveOwnersAvailable: 2,
         archiveOwnersQueried: 1,
         archiveOwnersOmitted: 1,
         archiveOwnerLimit: 1,
       });
+      expect(result.archiveSearch.continuation).toEqual(expect.any(String));
       expect(archive.archiveTargetSearchProjectMessages).toHaveBeenCalledWith(
         {
           kind: 'archive_shard',
@@ -146,6 +160,28 @@ describe('ProjectData project-wide archive search metadata', () => {
         null,
         10
       );
+      const completed = await searchMessagesWithArchiveMetadata(
+        env,
+        'project-search',
+        'needle',
+        null,
+        null,
+        10,
+        result.archiveSearch.continuation
+      );
+      expect(completed.results.map((item) => item.id)).toEqual([
+        'archive-message-b',
+        'archive-message',
+        'root-message',
+      ]);
+      expect(completed.archiveSearch).toMatchObject({
+        partial: false,
+        complete: true,
+        continuation: null,
+        archiveOwnersQueried: 2,
+        archiveOwnersOmitted: 0,
+      });
+      expect(root.searchMessages).toHaveBeenCalledTimes(1);
     } finally {
       sqlite.close();
     }
@@ -169,6 +205,79 @@ describe('ProjectData project-wide archive search metadata', () => {
         partial: true,
         reason: 'archive_owner_inventory_unavailable',
         archiveOwnersQueried: 0,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('continues beyond 64 occupied owners and rejects a modified continuation', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createLocationTable(sqlite);
+      const stubs: Record<string, SearchStub> = { 'project-search': stub({}) };
+      const insert = sqlite.prepare(
+        `INSERT INTO project_data_session_locations
+           (project_id, session_id, location_state, owner_kind, owner_name,
+            generation, migration_id, routing_schema_version, updated_at)
+         VALUES ('project-search', ?, 'archive_shard', 'archive_shard', ?, 1, ?, 1, 1000)`
+      );
+      for (let index = 0; index < 65; index++) {
+        const owner = `project-search:archive:g1:s${String(index).padStart(2, '0')}`;
+        insert.run(`session-${index}`, owner, `migration-${index}`);
+        stubs[owner] = stub({ archive: [row(`message-${index}`, `session-${index}`, index)] });
+      }
+      const env = {
+        ...envForSearch(sqlite, stubs),
+        PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: '64',
+      } as Env;
+      const first = await searchMessagesWithArchiveMetadata(
+        env,
+        'project-search',
+        'needle',
+        null,
+        null,
+        10
+      );
+      expect(first.archiveSearch.ownerCoverage).toEqual({
+        attempted: 64,
+        succeeded: 64,
+        remaining: 1,
+        complete: false,
+      });
+      const continuation = first.archiveSearch.continuation;
+      expect(continuation).toEqual(expect.any(String));
+      await expect(
+        searchMessagesWithArchiveMetadata(
+          env,
+          'project-search',
+          'needle',
+          null,
+          null,
+          10,
+          `${continuation}x`
+        )
+      ).rejects.toThrow('continuation');
+
+      const completed = await searchMessagesWithArchiveMetadata(
+        env,
+        'project-search',
+        'needle',
+        null,
+        null,
+        10,
+        continuation
+      );
+      expect(completed.archiveSearch.ownerCoverage).toEqual({
+        attempted: 65,
+        succeeded: 65,
+        remaining: 0,
+        complete: true,
+      });
+      expect(completed.archiveSearch.indexCoverage).toMatchObject({
+        sessionsAvailable: 65,
+        sessionsIndexed: 65,
+        complete: true,
       });
     } finally {
       sqlite.close();
