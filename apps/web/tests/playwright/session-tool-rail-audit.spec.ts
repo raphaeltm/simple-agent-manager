@@ -418,6 +418,24 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       await route.fulfill({ json: [] });
       return;
     }
+    if (pathname === '/api/credentials/agent') {
+      await route.fulfill({ json: { credentials: [] } });
+      return;
+    }
+    if (pathname === '/api/notifications') {
+      await route.fulfill({ json: [] });
+      return;
+    }
+    if (pathname === '/api/notifications/preferences') {
+      await route.fulfill({ json: { email: false, push: false } });
+      return;
+    }
+    if (
+      pathname === `/api/projects/${PROJECT_ID}/credential-attribution-health`
+    ) {
+      await route.fulfill({ json: { healthy: true } });
+      return;
+    }
     if (pathname === '/api/chats') {
       await route.fulfill({ json: { sessions: [], total: 0 } });
       return;
@@ -1019,20 +1037,25 @@ test.describe('Session Details — desktop', () => {
 });
 
 test.describe('Session resource history drawer', () => {
-  test('opens contextual summary and lazy detail from the real rail action', async ({ page }) => {
+  test('opens contextual summary and auto-loads detail from the real rail action', async ({
+    page,
+  }) => {
     await openChat(page, { state: 'active', messagesLong: true });
     await page.getByTestId('session-tool-resources').click();
 
-    await expect(page.getByRole('dialog', { name: 'Session resources' })).toBeVisible();
+    const dialog = page.getByRole('dialog', { name: 'Session resources' });
+    await expect(dialog).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Resources' })).toBeVisible();
-    await expect(page.getByText('CPU peak')).toBeVisible();
-    await expect(page.getByText('RAM peak')).toBeVisible();
-    await expect(page.getByText('1 OOM event observed in retained samples.')).toBeVisible();
-    await expect(page.getByText('Correlation is based on concurrent tool windows')).toBeVisible();
-    await capture(page, `resource-history-summary-${page.viewportSize()?.width ?? 'viewport'}`);
 
-    await page.getByRole('button', { name: 'Load detail timeline' }).click();
-    await expect(page.getByRole('img', { name: 'CPU and memory resource timeline' })).toBeVisible();
+    // Stat cards — use exact match to avoid ambiguity with chart legend text
+    await expect(page.getByText('CPU peak', { exact: true })).toBeVisible();
+    await expect(page.getByText('RAM peak', { exact: true })).toBeVisible();
+    await expect(page.getByText('1 OOM event observed in retained samples.')).toBeVisible();
+
+    // Chart auto-loads via useEffect selecting newest chunk — wait for it
+    await expect(
+      page.getByRole('img', { name: 'CPU and memory resource timeline' })
+    ).toBeVisible({ timeout: 10_000 });
     await expect(
       page.getByText('CPU: green solid line, normalized to the CPU peak for this chunk.')
     ).toBeVisible();
@@ -1041,12 +1064,30 @@ test.describe('Session resource history drawer', () => {
     ).toBeVisible();
     await expect(page.getByText(/Blue bands: concurrent tool windows/)).toBeVisible();
     await expect(page.getByText('Tool windows', { exact: true })).toBeVisible();
-    await page
-      .getByRole('dialog', { name: 'Session resources' })
-      .locator('.overflow-y-auto')
-      .evaluate((el) => {
-        el.scrollTop = el.scrollHeight;
-      });
+
+    // Correlation disclaimer is contextual — only visible after chart loads
+    await expect(page.getByText('Correlation is based on concurrent tool windows')).toBeVisible();
+
+    await capture(page, `resource-history-summary-${page.viewportSize()?.width ?? 'viewport'}`);
+
+    // Scroll to bottom for detail screenshot
+    await dialog.locator('.overflow-y-auto').evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
     await capture(page, `resource-history-detail-${page.viewportSize()?.width ?? 'viewport'}`);
+
+    // Chunks disclosure — collapsed by default, toggle to expand
+    const chunksToggle = page.getByRole('button', { name: /chunk/ });
+    await expect(chunksToggle).toBeVisible();
+    await expect(chunksToggle).toHaveAttribute('aria-expanded', 'false');
+    await chunksToggle.click();
+    await expect(chunksToggle).toHaveAttribute('aria-expanded', 'true');
+    // Verify chunk buttons are visible after expanding
+    await expect(page.getByRole('button', { name: /samples/ }).first()).toBeVisible();
+
+    await dialog.locator('.overflow-y-auto').evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await capture(page, `resource-history-chunks-${page.viewportSize()?.width ?? 'viewport'}`);
   });
 });
