@@ -66,6 +66,34 @@ Scanner jobs install the frozen lockfile without lifecycle scripts, and CI passe
 binary paths to the wrappers. Do not publish scanner reports, hashes, advisories, or candidate
 secret material in logs, PR text, or public issues.
 
+## Cloudflare usage estimates
+
+`pnpm quality:cloudflare-cost` is an on-demand production cost audit. It reads Cloudflare Analytics
+with `CF_PRODUCTION_DEBUGGING_TOKEN` and `CF_PRODUCTION_ACCOUNT_ID`, prints daily usage plus a
+recent-rate monthly projection, and labels the result as a usage-derived estimate rather than an
+invoice line. By default the window ends at the last complete UTC day so a partial current-day bucket
+does not dilute the recent-rate projection; pass `--end-date=YYYY-MM-DD` for an explicit same-day
+read. The script fails closed when credentials are absent, when Cloudflare GraphQL returns errors,
+or when a dataset reaches the query limit and might be partial.
+
+Metric choices are deliberate:
+
+- Durable Objects duration uses `durableObjectsPeriodicGroups.sum.duration` ("Sum of Duration -
+  GB*s"). It never uses `durableObjectsInvocationsAdaptiveGroups.sum.wallTime`, which is a latency
+  metric and diverges sharply for hibernating WebSocket objects.
+- Durable Object request counts use `durableObjectsInvocationsAdaptiveGroups.sum.requests`; tail
+  worker invocations are not counted as request billing.
+- Durable Object row/storage metrics use `durableObjectsPeriodicGroups.sum.rowsRead`,
+  `rowsWritten`, `storageReadUnits`, and `storageWriteUnits`.
+- Workers AI uses `aiInferenceAdaptiveGroups.sum.totalNeurons` and applies the daily Neuron
+  allowance before estimating dollars.
+- R2 storage uses `r2StorageAdaptiveGroups.max.payloadSize` plus metadata bytes, D1 uses
+  `d1AnalyticsAdaptiveGroups.sum.rowsRead` / `rowsWritten` and
+  `d1StorageAdaptiveGroups.max.databaseSizeBytes`, and Containers memory uses
+  `containersUsageAdaptiveGroups.sum.allocatedMemory`.
+
+Use `--max-usd=<n>` when the audit should fail a local guard. The default is report-only.
+
 ## Rollback switches
 
 Each layer is independently reversible:

@@ -50,6 +50,7 @@
     "quality:scripts:test": "vitest run --config scripts/quality/vitest.config.ts",
     "quality:no-tracked-stale-binaries": "tsx scripts/quality/check-no-tracked-stale-binaries.ts",
     "quality:do-wall-time": "tsx scripts/quality/check-do-wall-time.ts",
+    "quality:cloudflare-cost": "tsx scripts/quality/check-cloudflare-cost.ts",
     "quality:observability-noise": "tsx scripts/quality/check-observability-noise.ts",
     "quality:dependency-governance": "npx vitest run --config scripts/quality/vitest.config.ts scripts/quality/dependency-governance.test.ts",
     "quality:workspace-test-surfaces": "tsx scripts/quality/check-workspace-test-surfaces.ts",
