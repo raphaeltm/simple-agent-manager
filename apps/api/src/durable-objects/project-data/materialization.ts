@@ -99,6 +99,13 @@ export const DEFAULT_MATERIALIZATION_MAX_ROWS_PER_PASS = 5000;
  */
 export const DEFAULT_MATERIALIZATION_MAX_GROUP_CHARS = 65536;
 
+/** Shared so it is not rebuilt per call and not an object literal in a signature. */
+const DEFAULT_PASS_CONFIG: MaterializationPassConfig = {
+  pageRows: DEFAULT_MATERIALIZATION_PAGE_ROWS,
+  maxRowsPerPass: DEFAULT_MATERIALIZATION_MAX_ROWS_PER_PASS,
+  maxGroupChars: DEFAULT_MATERIALIZATION_MAX_GROUP_CHARS,
+};
+
 export interface MaterializationSweepConfig {
   limit: number;
   scanLimit: number;
@@ -260,7 +267,7 @@ function groupTokens(
   const grouped: GroupedMessage[] = [];
   for (const token of tokens) {
     const last = grouped[grouped.length - 1];
-    if (last && last.role === token.role && GROUPABLE_ROLES.has(token.role)) {
+    if (last?.role === token.role && GROUPABLE_ROLES.has(token.role)) {
       last.content += token.content;
       last.lastCreatedAt = Math.max(last.lastCreatedAt, token.createdAt);
       last.lastSequence = Math.max(last.lastSequence, token.sequence);
@@ -432,6 +439,68 @@ function stampIndexState(
 }
 
 /**
+ * The upper bound of a page, by MAX rather than "last in scan order".
+ *
+ * `chat_messages.created_at` comes from the VM agent's own clock
+ * (`persistMessageBatch`) while `sequence` is assigned here at insert. They agree
+ * unless a retried batch lands out of order, and taking the max of each keeps the
+ * watermark a true upper bound of what was indexed.
+ */
+function pageWatermark(tokens: Array<ReturnType<typeof parseMaterializationToken>>): Watermark {
+  return tokens.reduce<Watermark>(
+    (acc, token) => ({
+      createdAt: Math.max(acc.createdAt, token.createdAt),
+      sequence: Math.max(acc.sequence, token.sequence),
+    }),
+    { createdAt: 0, sequence: 0 }
+  );
+}
+
+/**
+ * Group and write one page, returning the trailing group for the next page.
+ *
+ * `trailing` is `undefined` when it has not been read yet, `null` when the session
+ * has none. Carrying it across pages matters: a same-role run spanning several
+ * pages would otherwise re-read and rewrite its whole growing content per page.
+ */
+function writePage(
+  sql: SqlStorage,
+  sessionId: string,
+  input: {
+    tokens: Array<ReturnType<typeof parseMaterializationToken>>;
+    trailing: TrailingGroup | null | undefined;
+    config: MaterializationPassConfig;
+  }
+): TrailingGroup | null {
+  const groups = groupTokens(input.tokens);
+  let trailing = input.trailing;
+  let index = 0;
+  const head = groups[0];
+
+  if (head && GROUPABLE_ROLES.has(head.role)) {
+    if (trailing === undefined) trailing = readTrailingGroup(sql, sessionId);
+    if (
+      trailing?.role === head.role &&
+      trailing.content.length < input.config.maxGroupChars
+    ) {
+      trailing = extendTrailingGroup(sql, trailing, head);
+      index = 1;
+      // Checkpoint immediately. Unlike `insertGroup`, extension is a plain
+      // in-place UPDATE with no conflict guard, so if anything below throws — and
+      // every caller catches and logs rather than failing the transition — a retry
+      // re-reading these tokens would append the same text a second time. Moving
+      // the watermark past the extended run first makes the retry skip it.
+      stampIndexState(sql, sessionId, SEARCH_INDEX_STATE_PARTIAL, headWatermark(head));
+    }
+  }
+
+  for (const group of groups.slice(index)) {
+    trailing = insertGroup(sql, sessionId, group) ?? trailing;
+  }
+  return trailing ?? null;
+}
+
+/**
  * Materialize grouped messages for a session, from its watermark forward.
  *
  * Safe to call on every sleep and again on stop. Idempotent: a call with no new
@@ -445,11 +514,7 @@ function stampIndexState(
 export function materializeSession(
   sql: SqlStorage,
   sessionId: string,
-  config: MaterializationPassConfig = {
-    pageRows: DEFAULT_MATERIALIZATION_PAGE_ROWS,
-    maxRowsPerPass: DEFAULT_MATERIALIZATION_MAX_ROWS_PER_PASS,
-    maxGroupChars: DEFAULT_MATERIALIZATION_MAX_GROUP_CHARS,
-  }
+  config: MaterializationPassConfig = DEFAULT_PASS_CONFIG
 ): void {
   const state = readMaterializationState(sql, sessionId);
   if (!state) return;
@@ -473,43 +538,8 @@ export function materializeSession(
       break;
     }
 
-    const groups = groupTokens(tokens);
-    let index = 0;
-    const head = groups[0];
-    if (head && GROUPABLE_ROLES.has(head.role)) {
-      if (trailing === undefined) trailing = readTrailingGroup(sql, sessionId);
-      if (
-        trailing &&
-        trailing.role === head.role &&
-        trailing.content.length < config.maxGroupChars
-      ) {
-        trailing = extendTrailingGroup(sql, trailing, head);
-        index = 1;
-        // Checkpoint immediately. Unlike `insertGroup`, extension is a plain
-        // in-place UPDATE with no conflict guard, so if anything below throws —
-        // and every caller catches and logs rather than failing the transition —
-        // a retry re-reading these tokens would append the same text a second
-        // time. Moving the watermark past the extended run first makes the retry
-        // skip it instead.
-        watermark = headWatermark(head);
-        stampIndexState(sql, sessionId, SEARCH_INDEX_STATE_PARTIAL, watermark);
-      }
-    }
-    for (const group of groups.slice(index)) {
-      trailing = insertGroup(sql, sessionId, group) ?? trailing;
-    }
-
-    // MAX, not "last in scan order": `chat_messages.created_at` comes from the VM
-    // agent's own clock (`persistMessageBatch`), while `sequence` is assigned here
-    // at insert. They agree unless a retried batch lands out of order, and taking
-    // the max of each keeps the watermark a true upper bound of what was indexed.
-    watermark = tokens.reduce<Watermark>(
-      (acc, token) => ({
-        createdAt: Math.max(acc.createdAt, token.createdAt),
-        sequence: Math.max(acc.sequence, token.sequence),
-      }),
-      { createdAt: 0, sequence: 0 }
-    );
+    trailing = writePage(sql, sessionId, { tokens, trailing, config });
+    watermark = pageWatermark(tokens);
     processed += tokens.length;
     if (tokens.length < pageRows) {
       drained = true;

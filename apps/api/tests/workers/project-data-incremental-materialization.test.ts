@@ -261,7 +261,7 @@ describe('incremental materialization on sleep', () => {
     // The word only exists once the two halves are joined, so an FTS hit is
     // proof the boundary run was merged rather than split into two rows.
     const results = await stub.searchMessages('analyze the code', sessionId, ['assistant']);
-    expect(results.length).toBe(1);
+    expect(results).toHaveLength(1);
 
     // The extension replaced its FTS entry rather than adding a second one.
     expect(await countFtsHits(stub, sessionId, 'analyze')).toBe(1);
