@@ -469,14 +469,17 @@ export function SessionResourceHistoryDrawer({
   const summary = history?.summary;
   const latestChunk = history?.chunks[0] ?? null;
   const effectiveChunkId = selectedChunkId ?? latestChunk?.id ?? null;
-  const detail = history?.detail;
+  const detail = query.isPlaceholderData ? undefined : history?.detail;
 
-  // Auto-select the newest chunk once available so the detail chart loads immediately
   useEffect(() => {
-    if (selectedChunkId === null && latestChunk?.id) {
+    setSelectedChunkId(null);
+  }, [projectId, sessionId]);
+
+  useEffect(() => {
+    if (selectedChunkId === null && latestChunk?.id && !query.isPlaceholderData) {
       setSelectedChunkId(latestChunk.id);
     }
-  }, [selectedChunkId, latestChunk?.id]);
+  }, [selectedChunkId, latestChunk?.id, query.isPlaceholderData]);
 
   return createPortal(
     <>

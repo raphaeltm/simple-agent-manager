@@ -30,14 +30,14 @@ The session resource history drawer (`SessionResourceHistoryDrawer.tsx`) has thr
 
 ## Acceptance Criteria
 
-- [ ] Resource panel scrolls on mobile (375px viewport)
-- [ ] Chart appears immediately on panel open (no manual chunk selection required)
-- [ ] Stats (CPU peak, RAM peak, I/O, Samples) are visible at top
-- [ ] Chunks are behind a collapsed disclosure toggle
-- [ ] All tool windows shown (no truncation)
-- [ ] Dialog shell matches Comments drawer geometry
-- [ ] No prototype files or routes remain in the codebase
-- [ ] Typecheck and lint pass
+- [x] Resource panel scrolls on mobile (375px viewport)
+- [x] Chart appears immediately on panel open (no manual chunk selection required)
+- [x] Stats (CPU peak, RAM peak, I/O, Samples) are visible at top
+- [x] Chunks are behind a collapsed disclosure toggle
+- [x] All tool windows shown (no truncation)
+- [x] Dialog shell matches Comments drawer geometry
+- [x] No prototype files or routes remain in the codebase
+- [x] Typecheck and lint pass
 
 ## References
 
