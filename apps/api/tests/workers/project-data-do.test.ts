@@ -2330,7 +2330,7 @@ describe('ProjectData Durable Object', () => {
       expect(results.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('materializeAllStopped backfills existing sessions', async () => {
+    it('materializePendingSessions backfills existing sessions', async () => {
       const stub = getStub('project-fts5-backfill');
 
       // Create and stop multiple sessions
@@ -2346,8 +2346,9 @@ describe('ProjectData Durable Object', () => {
       const s3 = await stub.createSession(null, 'Active session');
       await stub.persistMessage(s3, 'user', 'Active session content', null);
 
-      // materializeAllStopped should report already-materialized sessions as no-ops
-      const result = await stub.materializeAllStopped();
+      // Already-materialized sessions have nothing past their watermark, so the
+      // sweep must not re-select them.
+      const result = await stub.materializePendingSessions();
       expect(result.errors).toBe(0);
 
       // Both stopped sessions should be searchable

@@ -2225,6 +2225,35 @@ export const MIGRATIONS: Migration[] = [
         FROM project_event_wake_scheduler_state LIMIT 0`);
     },
   },
+  {
+    // Incremental search materialization. `materialized_at` is a wall-clock stamp
+    // of when the last pass ran, which cannot say WHICH tokens that pass covered —
+    // so re-materializing a woken session had to rebuild from token zero, and the
+    // boolean `materialized_at IS NOT NULL` gate suppressed the rebuild entirely.
+    // These columns record the exact last token folded into chat_messages_grouped,
+    // so each pass reads only what arrived since. Additive only (rule 31).
+    name: '057-chat-search-incremental-watermark',
+    run: (sql) => {
+      for (const [column, statement] of [
+        ['materialized_through_created_at',
+          'ALTER TABLE chat_sessions ADD COLUMN materialized_through_created_at INTEGER'],
+        ['materialized_through_sequence',
+          'ALTER TABLE chat_sessions ADD COLUMN materialized_through_sequence INTEGER'],
+      ] as const) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.toLowerCase().includes(`duplicate column name: ${column}`)
+          )
+            throw error;
+        }
+      }
+      sql.exec(`SELECT materialized_through_created_at, materialized_through_sequence
+        FROM chat_sessions LIMIT 0`);
+    },
+  },
 ];
 
 /**

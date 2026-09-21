@@ -44,10 +44,12 @@ export {
 } from './row-schemas/knowledge';
 export { parseInboxMessageRow, parseMailboxMessageRow } from './row-schemas/mailbox';
 export {
-  parseMaterializationCheck,
+  type MaterializationState,
+  parseMaterializationState,
   parseMaterializationToken,
   parseRowid,
   parseSessionId,
+  parseTrailingGroup,
 } from './row-schemas/materialization';
 export {
   type CompactMessageOptions,

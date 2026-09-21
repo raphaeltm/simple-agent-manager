@@ -141,23 +141,24 @@ content plus the tail, so materializing on wake would double the passes for zero
 
 ## Implementation checklist
 
-- [ ] Migration `057-chat-search-incremental-watermark` — two additive columns + probe SELECT
-- [ ] `row-schemas/materialization.ts` — extend the session-state schema, add a token schema with `sequence`, add a trailing-grouped-row schema
-- [ ] `materialization.ts` — watermark resolution, bounded token scan, trailing-group extension, `partial`/`complete` stamping, `grouped_fts_pruned` refusal
-- [ ] `materialization.ts` — sweep predicate + remaining count rewritten around the watermark; rename `materializeAllStopped` -> `materializePendingSessions` (it no longer covers only stopped sessions)
-- [ ] `index.ts` — materialize inside `sleepSession()`; rename the RPC wrapper
-- [ ] `services/project-data.ts` — rename the service wrapper to match
-- [ ] `grouped-fts-cleanup.ts` — clear the watermark columns when pruning
-- [ ] `messages.ts` — LIKE fallback gated on the watermark instead of `materialized_at IS NULL`
-- [ ] Tests: sleep -> wake -> write -> sleep, both batches searchable (load-bearing, real trigger)
-- [ ] Tests: final-stop captures the post-last-sleep tail
-- [ ] Tests: boundary run is one grouped row, searchable across the boundary
-- [ ] Tests: idempotent second sleep with no new messages
-- [ ] Tests: rows-read assertion proving pass 2 does not re-scan batch 1 (drives the real `sleepSession`)
-- [ ] Tests: legacy row (`materialized_at` set, watermark NULL) does not duplicate content
-- [ ] Tests: pruned session is refused and stays LIKE-searchable
-- [ ] Tests: live tail still LIKE-searchable after the session was materialized once
-- [ ] Prove discriminating: revert the watermark to the old boolean gate, confirm exactly the sleep-wake-sleep test reddens, restore
+- [x] Migration `057-chat-search-incremental-watermark` — two additive columns + probe SELECT
+- [x] `row-schemas/materialization.ts` — extend the session-state schema, add a token schema with `sequence`, add a trailing-grouped-row schema
+- [x] `materialization.ts` — watermark resolution, bounded token scan, trailing-group extension, `partial`/`complete` stamping, `grouped_fts_pruned` refusal
+- [x] `materialization.ts` — sweep predicate + remaining count rewritten around the watermark; rename `materializeAllStopped` -> `materializePendingSessions` (it no longer covers only stopped sessions)
+- [x] `index.ts` — materialize inside `sleepSession()`; rename the RPC wrapper
+- [x] `services/project-data.ts` — rename the service wrapper to match
+- [x] `grouped-fts-cleanup.ts` — clear the watermark columns when pruning
+- [x] `messages.ts` — LIKE fallback gated on the watermark instead of `materialized_at IS NULL`
+- [x] Tests: sleep -> wake -> write -> sleep, both batches searchable (load-bearing, real trigger)
+- [x] Tests: final-stop captures the post-last-sleep tail
+- [x] Tests: boundary run is one grouped row, searchable across the boundary
+- [x] Tests: idempotent second sleep with no new messages
+- [x] Tests: rows-read assertion proving pass 2 does not re-scan batch 1 (drives the real `sleepSession`)
+- [x] Tests: legacy row (`materialized_at` set, watermark NULL) does not duplicate content
+- [x] Tests: pruned session is refused and stays LIKE-searchable
+- [x] Tests: live tail still LIKE-searchable after the session was materialized once
+- [x] Prove discriminating: revert the watermark to the old boolean gate, confirm exactly the sleep-wake-sleep test reddens, restore
+- [x] Tests: a replayed pass over groups that already exist does not corrupt the index
 - [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build`
 - [ ] Specialist review (task-completion-validator, cloudflare-specialist, performance-reviewer, architecture-reviewer, test-engineer)
 - [ ] Staging deploy + live verification (sleep, wake, write, search both halves)
@@ -187,3 +188,57 @@ content plus the tail, so materializing on wake would double the passes for zero
 - `apps/api/.claude/rules/47-control-loop-io-budget.md`
 - Out of scope: idea `01M2Z46ZFZZYB72EDHWNREEESE` (project-wide archive search owner cap),
   idea `01M27M6BDJCRVE1FFQA5BXAQ5D` (server-side delta grouping on the chat READ path)
+
+
+## Implementation notes
+
+### Discrimination results (rule 62)
+
+Each guard was reverted in isolation and the suite re-run. Every revert was surgical
+(the code still compiled), and the code was restored immediately after.
+
+| Reverted guard | Tests that went red |
+|---|---|
+| `materializeSession` early-returns on `materialized_at IS NOT NULL` (the old boolean gate) | 6 — sleep/wake/sleep (**the load-bearing one**), final-stop tail, boundary run, role-change boundary, rows-read, legacy watermark |
+| Boundary extension disabled (`extendTrailingGroup` never called) | 3 — boundary run, rows-read, legacy watermark |
+| `grouped-fts-cleanup` stops clearing the watermark columns | 1 — pruned session (both the column assertions and, verified separately with those relaxed, the rebuild assertions) |
+| LIKE fallback reverted to `s.materialized_at IS NULL` | 1 — woken-session live tail (`expected 0 to be greater than or equal to 1`) |
+| Token scan ignores the watermark (full rebuild every pass) | 5 — boundary run, role-change boundary, idempotency, rows-read (`expected 64 to be less than or equal to 5`), legacy watermark |
+
+One check did NOT discriminate, and the code comment was corrected rather than the
+claim kept: replacing `ON CONFLICT(id) DO NOTHING RETURNING rowid` with the older
+`INSERT OR IGNORE` + `SELECT rowid` left all 11 tests green. A direct workerd probe
+confirmed why — inserting a duplicate rowid into this external-content FTS5 table
+neither errors nor produces a duplicate `MATCH` hit. The `RETURNING` form is kept for
+the read it saves per group, and its comment now says exactly that.
+
+### Read amplification
+
+Per pass, rows read is `1 (session state) + N (new tokens) + 1 (trailing grouped row)
++ 0`, where N is the number of non-system messages written since the last pass. The
+grouped-row insert no longer costs a read per group. Measured in
+`project-data-incremental-materialization.test.ts`: with a 60-token first batch and a
+4-token second batch, the second `sleepSession()` reads **at most 5** rows from
+`chat_messages` and fewer than 60 rows in total across the whole sleep path. A full
+rebuild reads 64.
+
+### Decisions taken
+
+- **Not materializing on wake.** A wake is latency-sensitive and adds no new text; the
+  next sleep indexes the same content plus its tail, so a wake-time pass would double
+  the passes for zero search benefit.
+- **`CHAT_SESSION_ANCHOR_COLUMNS` left unchanged.** That list feeds a SHA-256 archive
+  proof (`archive-sharding.ts:883`), so adding columns to it is a rolling-deploy hazard
+  for an in-flight archive. It already carries `materialized_at`, and archived sessions
+  are terminal, so the legacy fallback in `resolveWatermark()` reconstructs an exact
+  watermark for them. Covered by the legacy-watermark test.
+- **A pruned session is never re-indexed.** Previously, `grouped-fts-cleanup` set
+  `materialized_at = NULL`, so a pruned session that was later re-stopped would be fully
+  re-materialized — silently undoing the storage relief. `search_index_state =
+  'grouped_fts_pruned'` is now a hard refusal. The session stays LIKE-searchable, which
+  is exactly what its stored `search_index_degradation_reason` already promises.
+- **The sweep has no automatic caller.** `materializePendingSessions` is reachable only
+  by RPC; nothing schedules it. Sessions already asleep before this ships become
+  searchable when they next sleep or stop. Wiring a periodic backfill is deliberately
+  left out of this change — it needs its own I/O budget, config, and tests under
+  rule 47 — and is filed as a follow-up idea.

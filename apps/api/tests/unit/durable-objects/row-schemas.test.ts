@@ -28,7 +28,7 @@ import {
   parseIdeaSessionDetail,
   parseIdleCleanupSchedule,
   parseInboxMessageRow,
-  parseMaterializationCheck,
+  parseMaterializationState,
   parseMaterializationToken,
   parseMaxLatest,
   parseMaxSeq,
@@ -43,6 +43,7 @@ import {
   parseSessionIdeaLink,
   parseSessionStatus,
   parseSessionStop,
+  parseTrailingGroup,
   parseWorkspaceActivity,
   parseWorkspaceId,
 } from '../../../src/durable-objects/project-data/row-schemas';
@@ -411,14 +412,46 @@ describe('parseSessionStatus', () => {
 // Materialization parsers
 // =============================================================================
 
-describe('parseMaterializationCheck', () => {
-  it('parses with materialized_at value', () => {
-    const result = parseMaterializationCheck({ materialized_at: 5000, status: 'stopped' });
-    expect(result).toEqual({ materializedAt: 5000, status: 'stopped' });
+describe('parseMaterializationState', () => {
+  it('parses a watermarked session', () => {
+    const result = parseMaterializationState({
+      status: 'sleeping',
+      materialized_at: 5000,
+      search_index_state: 'partial',
+      materialized_through_created_at: 4800,
+      materialized_through_sequence: 12,
+    });
+    expect(result).toEqual({
+      status: 'sleeping',
+      materializedAt: 5000,
+      searchIndexState: 'partial',
+      throughCreatedAt: 4800,
+      throughSequence: 12,
+    });
   });
 
-  it('handles null materialized_at', () => {
-    expect(parseMaterializationCheck({ materialized_at: null, status: 'active' }).materializedAt).toBeNull();
+  it('accepts a pre-watermark row with every optional column null', () => {
+    const result = parseMaterializationState({
+      status: 'stopped',
+      materialized_at: 5000,
+      search_index_state: null,
+      materialized_through_created_at: null,
+      materialized_through_sequence: null,
+    });
+    expect(result.throughCreatedAt).toBeNull();
+    expect(result.throughSequence).toBeNull();
+    expect(result.searchIndexState).toBeNull();
+  });
+
+  it('accepts a never-materialized row', () => {
+    const result = parseMaterializationState({
+      status: 'active',
+      materialized_at: null,
+      search_index_state: null,
+      materialized_through_created_at: null,
+      materialized_through_sequence: null,
+    });
+    expect(result.materializedAt).toBeNull();
   });
 });
 
@@ -429,8 +462,36 @@ describe('parseMaterializationToken', () => {
       role: 'assistant',
       content: 'chunk',
       created_at: 3000,
+      sequence: 7,
     });
-    expect(result).toEqual({ id: 'tok1', role: 'assistant', content: 'chunk', createdAt: 3000 });
+    expect(result).toEqual({
+      id: 'tok1',
+      role: 'assistant',
+      content: 'chunk',
+      createdAt: 3000,
+      sequence: 7,
+    });
+  });
+
+  it('defaults a legacy null sequence to 0 rather than failing the pass', () => {
+    const result = parseMaterializationToken({
+      id: 'tok2',
+      role: 'user',
+      content: 'hello',
+      created_at: 3000,
+      sequence: null,
+    });
+    expect(result.sequence).toBe(0);
+  });
+});
+
+describe('parseTrailingGroup', () => {
+  it('maps the trailing grouped row', () => {
+    expect(parseTrailingGroup({ rowid: 9, role: 'assistant', content: 'so far' })).toEqual({
+      rowid: 9,
+      role: 'assistant',
+      content: 'so far',
+    });
   });
 });
 

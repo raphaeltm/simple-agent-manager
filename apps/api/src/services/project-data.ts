@@ -1526,14 +1526,21 @@ export async function updateFileCommentThreadStatus(
   );
 }
 
-/** Materialize all stopped sessions that haven't been indexed yet. */
-export async function materializeAllStopped(
+/**
+ * Materialize sessions whose transcript has outrun their search index.
+ *
+ * Backfill entry point for sessions that were already sleeping when incremental
+ * materialization shipped; ordinary sessions are indexed by their own sleep and
+ * stop transitions.
+ */
+export async function materializePendingSessions(
   env: Env,
   projectId: string,
-  limit: number = 50
+  limit?: number,
+  scanLimit?: number
 ): Promise<{ materialized: number; errors: number; remaining: number }> {
   const stub = await getStub(env, projectId);
-  return stub.materializeAllStopped(limit);
+  return stub.materializePendingSessions(limit, scanLimit);
 }
 
 export async function getCleanupAt(

@@ -227,9 +227,18 @@ function deleteGroupedFtsForSession(
     groupedRowsDeleted++;
   }
 
+  // The watermark must die with the rows it described (rule 44: every writer that
+  // invalidates a column has to clear it). `resolveWatermark()` prefers the
+  // watermark over `materialized_at`, so a leftover value would claim the deleted
+  // head rows are still indexed: only the tail would ever be re-grouped, and
+  // `searchMessagesLike` would skip the head's raw rows as already covered. Today
+  // the `grouped_fts_pruned` refusal is what prevents that, and this clearing is
+  // what makes the refusal a second line of defence rather than the only one.
   sql.exec(
     `UPDATE chat_sessions
      SET materialized_at = NULL,
+         materialized_through_created_at = NULL,
+         materialized_through_sequence = NULL,
          search_index_state = 'grouped_fts_pruned',
          search_index_updated_at = ?,
          search_index_degradation_reason = ?
