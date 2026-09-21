@@ -332,7 +332,8 @@ describe('search_task_messages', () => {
       'test',
       'resolved-session',
       null,
-      expect.any(Number)
+      expect.any(Number),
+      null
     );
   });
 
