@@ -365,6 +365,7 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "fresh_injection_failed", provisionErr.Error(), callbackToken)
 		return nil, provisionErr
 	}
+	var validateRestoredGitState func() error
 	if s.config.IsStandaloneMode() && restore.Download.Home != "" {
 		if err := s.downloadAndExtractSessionStateTar(ctx, restore.Download.Home, callbackToken, idleTimeout, entryThreshold, totalBudget); err != nil {
 			_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "home_failed", err.Error(), callbackToken)
@@ -387,6 +388,9 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 	}
 	if s.config.IsStandaloneMode() {
 		workDir := standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
+		validateRestoredGitState = func() error {
+			return validateStandaloneSnapshotGitState(ctx, workDir, gitState)
+		}
 		if err := validateStandaloneSnapshotGitState(ctx, workDir, gitState); err != nil {
 			_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "git_mismatch", err.Error(), callbackToken)
 			return nil, err
@@ -405,6 +409,9 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		}
 		gitCommand := func(ctx context.Context, env []string, args ...string) (string, error) {
 			return s.containerGit(ctx, target, env, args...)
+		}
+		validateRestoredGitState = func() error {
+			return validateSnapshotGitState(ctx, gitCommand, gitState)
 		}
 		if restore.Download.WIP == "" {
 			if err := restoreSnapshotGitState(ctx, gitCommand, gitState); err != nil {
@@ -448,6 +455,12 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 	}
 	if host.Status() != acp.HostReady {
 		return nil, fmt.Errorf("restored agent failed to become ready: %s", host.Status())
+	}
+	if validateRestoredGitState != nil {
+		if err := validateRestoredGitState(); err != nil {
+			_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "git_mismatch", err.Error(), callbackToken)
+			return nil, err
+		}
 	}
 	_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "restored", "", callbackToken)
 	return map[string]interface{}{"status": "restored", "degradation": restore.Degradation}, nil
