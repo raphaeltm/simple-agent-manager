@@ -339,6 +339,30 @@ describe('default capacity pool routes', () => {
     });
   });
 
+  it('rejects an invalid deployment strategy without changing the pool', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1' });
+    await createApp().request('/api/capacity-pools/defaults/reconcile', { method: 'POST' }, env);
+
+    const res = await createApp().request(
+      '/api/capacity-pools/defaults',
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ policy: { deploymentStrategy: 'largest-label-wins' } }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      message: 'Invalid default capacity pool deployment strategy',
+    });
+    expect(
+      sqlite.prepare("SELECT deployment_strategy FROM capacity_pools WHERE scope = 'user'").get()
+    ).toEqual({ deployment_strategy: 'smallest-fit' });
+  });
+
   it('keeps a zero-active user default visible and effective as configured-empty', async () => {
     const { sqlite, env } = createEnv();
     seedUser(sqlite, 'user-1');

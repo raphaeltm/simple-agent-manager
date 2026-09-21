@@ -280,7 +280,8 @@ export async function markDeploymentReleaseVolumeAttachFailed(
   db: ReturnType<typeof drizzle>,
   environmentId: string,
   releaseId: string,
-  error: unknown
+  error: unknown,
+  env?: Env
 ): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
   const now = new Date().toISOString();
@@ -289,15 +290,32 @@ export async function markDeploymentReleaseVolumeAttachFailed(
     .update(schema.deploymentReleases)
     .set({ status: 'failed', statusUpdatedAt: now })
     .where(eq(schema.deploymentReleases.id, releaseId));
-  await db
-    .update(schema.deploymentEnvironments)
-    .set({
-      status: 'error',
-      observedStatus: 'failed',
-      observedErrorMessage: `Volume attach failed: ${message}`,
-      updatedAt: now,
-    })
-    .where(eq(schema.deploymentEnvironments.id, environmentId));
+  if (env && typeof env.DATABASE.prepare === 'function') {
+    await env.DATABASE.prepare(
+      `UPDATE deployment_environments
+          SET status = 'error', observed_status = 'failed',
+              observed_error_message = ?, updated_at = ?
+        WHERE id = ?
+          AND ? = (
+            SELECT latest.id FROM deployment_releases latest
+            WHERE latest.environment_id = deployment_environments.id
+            ORDER BY latest.version DESC
+            LIMIT 1
+          )`
+    )
+      .bind(`Volume attach failed: ${message}`, now, environmentId, releaseId)
+      .run();
+  } else {
+    await db
+      .update(schema.deploymentEnvironments)
+      .set({
+        status: 'error',
+        observedStatus: 'failed',
+        observedErrorMessage: `Volume attach failed: ${message}`,
+        updatedAt: now,
+      })
+      .where(eq(schema.deploymentEnvironments.id, environmentId));
+  }
 }
 
 export async function createMissingManifestVolumes(
@@ -522,7 +540,8 @@ export async function attachEnvironmentVolumes(
   userId: string,
   environmentId: string,
   serverId: string,
-  serverLocation: string
+  serverLocation: string,
+  options: { assertExternalMutationAuthority?: () => Promise<void> } = {}
 ): Promise<DeploymentVolumeRow[]> {
   const volumes = await listEnvironmentVolumes(db, environmentId);
 
@@ -571,6 +590,7 @@ export async function attachEnvironmentVolumes(
       );
     }
 
+    await options.assertExternalMutationAuthority?.();
     const attached: VolumeInstance = await provider.attachVolume({
       volumeId: vol.providerVolumeId,
       serverId,
@@ -615,11 +635,21 @@ export async function attachEnvironmentVolumesToLinkedNode(
   db: ReturnType<typeof drizzle>,
   env: Env,
   userId: string,
-  environmentId: string
+  environmentId: string,
+  options: { assertExternalMutationAuthority?: () => Promise<void> } = {}
 ): Promise<DeploymentVolumeRow[]> {
+  await options.assertExternalMutationAuthority?.();
   const target = await resolveLinkedDeploymentNodeVolumeTarget(db, environmentId);
 
-  return attachEnvironmentVolumes(db, env, userId, environmentId, target.serverId, target.location);
+  return attachEnvironmentVolumes(
+    db,
+    env,
+    userId,
+    environmentId,
+    target.serverId,
+    target.location,
+    options
+  );
 }
 
 export async function detachEnvironmentVolumesFromLinkedNode(

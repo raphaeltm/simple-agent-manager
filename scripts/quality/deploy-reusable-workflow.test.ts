@@ -919,6 +919,13 @@ describe('deploy reusable workflow', () => {
       'CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: ${{ vars.CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS }}'
     );
     expect(sync).toContain('CF_CONTAINER_CLONE_FILTER: ${{ vars.CF_CONTAINER_CLONE_FILTER }}');
+    for (const name of [
+      'DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS',
+      'DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB',
+      'DEPLOYMENT_DEFAULT_ROOT_DISK_MB',
+    ]) {
+      expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
+    }
     expect(sync).toContain(
       'PLATFORM_FEEDBACK_PROJECT_ID: ${{ vars.PLATFORM_FEEDBACK_PROJECT_ID }}'
     );

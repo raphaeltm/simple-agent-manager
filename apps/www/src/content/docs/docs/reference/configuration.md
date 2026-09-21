@@ -908,7 +908,9 @@ An out-of-range weight makes the unit fail to load, which would take the slice h
 | `MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE`         | `5`                                    | Maximum deployment environments to place on one deployment node           |
 | `DEPLOYMENT_DEFAULT_VM_SIZE`                   | `small`                                | Default VM size for deployment nodes                                      |
 | `DEPLOYMENT_MODEL_RUNNER_VM_SIZE`              | `medium`                               | VM size for deployment nodes that need Docker Model Runner                |
-| `DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB`           | `256`                                  | Default per-service memory limit for compose-publish releases             |
+| `DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS`          | `250`                                  | Per-service CPU reservation when the whole resource block is omitted      |
+| `DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB`           | `256`                                  | Per-service memory limit/reservation when the whole resource block is omitted |
+| `DEPLOYMENT_DEFAULT_ROOT_DISK_MB`              | `1024`                                 | Per-service root-disk reservation used for deployment placement           |
 | `DEPLOYMENT_LOG_MAX_SIZE`                      | `10m`                                  | Default json-file log max-size for compose-publish releases               |
 | `DEPLOYMENT_LOG_MAX_FILE`                      | `3`                                    | Default json-file log max-file for compose-publish releases               |
 | `MCP_DEPLOYMENT_COMPOSE_PREVIEW_MAX_BYTES`     | `128000`                               | Max Compose YAML size accepted by deployment route preview MCP tool       |

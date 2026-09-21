@@ -1,3 +1,12 @@
+import {
+  DEFAULT_DEPLOYMENT_SERVICE_CPU_MILLIS,
+  DEFAULT_DEPLOYMENT_SERVICE_DISK_MB,
+  DEFAULT_DEPLOYMENT_SERVICE_MEMORY_MB,
+  type DeploymentReservationDefaults,
+  parseResources,
+  resolveDeploymentManifestReservation,
+  type ResolvedResourceReservation,
+} from '@simple-agent-manager/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { InferOutput } from 'valibot';
@@ -7,6 +16,7 @@ import { parse as parseYaml } from 'yaml';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
+import { parsePositiveInt } from '../../lib/route-helpers';
 import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
 import { AppError, errors } from '../../middleware/error';
@@ -19,18 +29,19 @@ import { extractComposePublishVolumeDeclarations } from '../../services/compose-
 import { assertAgentDeploymentAllowedForProfile } from '../../services/deployment-control';
 import {
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE,
-  provisionDeploymentNode,
   resolveDeploymentPlacement,
 } from '../../services/deployment-provisioning';
 import {
-  attachEnvironmentVolumesToLinkedNode,
   createMissingDeclaredVolumes,
-  detachEnvironmentVolumes,
-  listEnvironmentVolumes,
   markDeploymentReleaseVolumeAttachFailed,
 } from '../../services/deployment-volumes';
-import { teardownDeploymentEnvironmentOnNode } from '../../services/node-agent';
 import { recordDeploymentReleaseLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
+import {
+  DeploymentPlacementCancelledError,
+  insertDeploymentReleaseWhilePlacementUnlocked,
+  placeReleaseOnDeploymentNode,
+  updateDeploymentEnvironmentForLatestRelease,
+} from '../deployment-release-submission';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
 
 /**
@@ -148,6 +159,52 @@ function composeHasModelProvider(composeYaml: string): boolean {
   return false;
 }
 
+function resolveComposePublishReservation(
+  composeYaml: string,
+  environmentId: string,
+  volumes: Record<string, { sizeHintMb?: number }>,
+  defaults: DeploymentReservationDefaults
+): ResolvedResourceReservation {
+  let doc: unknown;
+  try {
+    doc = parseYaml(composeYaml);
+  } catch (error) {
+    throw errors.badRequest(error instanceof Error ? error.message : String(error));
+  }
+  if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) {
+    throw errors.badRequest('Captured composeYaml must be a mapping');
+  }
+  const rawServices = (doc as Record<string, unknown>).services;
+  if (typeof rawServices !== 'object' || rawServices === null || Array.isArray(rawServices)) {
+    throw errors.badRequest('Captured composeYaml must include a services mapping');
+  }
+
+  const services: Record<string, { resources?: { memoryLimitMb: number; cpuLimit: number } }> = {};
+  const resourceErrors: Array<{ path: string; message: string }> = [];
+  for (const [serviceName, rawService] of Object.entries(rawServices)) {
+    if (typeof rawService !== 'object' || rawService === null || Array.isArray(rawService)) {
+      services[serviceName] = {};
+      continue;
+    }
+    const deploy = (rawService as Record<string, unknown>).deploy;
+    const resources =
+      typeof deploy === 'object' && deploy !== null && !Array.isArray(deploy)
+        ? parseResources(
+            { resources: (deploy as Record<string, unknown>).resources },
+            `services.${serviceName}`,
+            resourceErrors
+          )
+        : undefined;
+    services[serviceName] = resources ? { resources } : {};
+  }
+  if (resourceErrors.length > 0) {
+    throw errors.badRequest(
+      resourceErrors.map(({ path, message }) => `${path}: ${message}`).join('; ')
+    );
+  }
+  return resolveDeploymentManifestReservation({ services, volumes }, environmentId, defaults);
+}
+
 composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c) => {
   const { projectId, workspaceId, userId, db, assertCurrent } =
     await verifyWorkspacePublishCallback(
@@ -214,6 +271,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     .select({
       nodeId: schema.deploymentEnvironments.nodeId,
       status: schema.deploymentEnvironments.status,
+      resolvedReservationJson: schema.deploymentEnvironments.resolvedReservationJson,
     })
     .from(schema.deploymentEnvironments)
     .where(
@@ -242,6 +300,25 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     throw errors.badRequest(err instanceof Error ? err.message : String(err));
   }
   const requiresVolumes = Object.keys(volumeDeclarations).length > 0;
+  const reservation = resolveComposePublishReservation(
+    composeYaml,
+    environmentId,
+    volumeDeclarations,
+    {
+      cpuMillis: parsePositiveInt(
+        c.env.DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS,
+        DEFAULT_DEPLOYMENT_SERVICE_CPU_MILLIS
+      ),
+      memoryMb: parsePositiveInt(
+        c.env.DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB,
+        DEFAULT_DEPLOYMENT_SERVICE_MEMORY_MB
+      ),
+      diskMb: parsePositiveInt(
+        c.env.DEPLOYMENT_DEFAULT_ROOT_DISK_MB,
+        DEFAULT_DEPLOYMENT_SERVICE_DISK_MB
+      ),
+    }
+  );
 
   const services: ComposePublishServiceInput[] = submission.services ?? [];
   if (services.length === 0) {
@@ -267,12 +344,16 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     }
   }
 
-  const placement = requiresVolumes
-    ? await resolveDeploymentPlacement(userId, c.env, projectId)
-    : null;
-  if (requiresVolumes && !placement) {
+  const vmSizeOverride = composeHasModelProvider(composeYaml)
+    ? c.env.DEPLOYMENT_MODEL_RUNNER_VM_SIZE?.trim() || DEPLOYMENT_MODEL_RUNNER_VM_SIZE
+    : undefined;
+  const placement = await resolveDeploymentPlacement(userId, c.env, projectId, {
+    reservation,
+    vmSizeOverride,
+  });
+  if (!placement) {
     throw errors.badRequest(
-      'No cloud provider credential found. Connect a cloud provider before deploying volumes.'
+      'No cloud provider credential found. Connect a cloud provider before deploying applications.'
     );
   }
   if (requiresVolumes && placement) {
@@ -333,27 +414,37 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
 
   await assertCurrent();
   try {
-    await db.insert(schema.deploymentReleases).values({
-      id: releaseId,
-      environmentId,
-      // The captured submission IS the manifest for compose-publish releases;
-      // the `source` discriminator tells consumers how to interpret it.
-      manifest: JSON.stringify(manifestSubmission),
-      version: nextVersion,
-      status: 'created',
-      statusUpdatedAt: releaseCreatedAt,
-      source: 'compose-publish',
-      createdBy: userId,
-      createdAt: releaseCreatedAt,
+    const insertedRelease = await insertDeploymentReleaseWhilePlacementUnlocked({
+      db,
+      env: c.env,
+      values: {
+        id: releaseId,
+        environmentId,
+        // The captured submission IS the manifest for compose-publish releases;
+        // the `source` discriminator tells consumers how to interpret it.
+        manifest: JSON.stringify(manifestSubmission),
+        version: nextVersion,
+        status: 'created',
+        statusUpdatedAt: releaseCreatedAt,
+        source: 'compose-publish',
+        createdBy: userId,
+        createdAt: releaseCreatedAt,
+      },
     });
+    if (!insertedRelease) {
+      throw errors.conflict(
+        'Another deployment placement operation is in progress. Please retry this release.'
+      );
+    }
     await assertCurrent();
-    await db
-      .update(schema.deploymentEnvironments)
-      .set({
-        requiresVolumes,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.deploymentEnvironments.id, environmentId));
+    await updateDeploymentEnvironmentForLatestRelease({
+      db,
+      env: c.env,
+      environmentId,
+      releaseId,
+      requiresVolumes,
+      updatedAt: new Date().toISOString(),
+    });
   } catch (err) {
     if (err instanceof AppError) throw err;
     const internalMessage = err instanceof Error ? err.message : String(err);
@@ -391,155 +482,43 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     })
   );
 
-  // Provision a deployment node for this environment if one is not already
-  // linked, so the captured release rolls out. Failures here must NOT fail the
-  // release recording (the release is already durable); the node can be
-  // provisioned on the next release or via the deploy verb.
+  // Admit this release through the same reservation-aware placement path used
+  // by normalized manifests. Failures here must not fail the release recording
+  // (the release is already durable); placement can be retried later.
   let nodeId: string | null = environmentRow.nodeId ?? null;
-  const shouldProvision =
-    environmentRow.status !== 'stopped' && environmentRow.status !== 'stopping';
-  let currentNodeMode: string | null = null;
-  let currentNodeStatus: string | null = null;
-  let currentNodeProviderInstanceId: string | null = null;
-  if (requiresVolumes && nodeId) {
-    const nodeRows = await db
-      .select({
-        nodeMode: schema.nodes.nodeMode,
-        status: schema.nodes.status,
-        providerInstanceId: schema.nodes.providerInstanceId,
-      })
-      .from(schema.nodes)
-      .where(eq(schema.nodes.id, nodeId))
-      .limit(1);
-    currentNodeMode = nodeRows[0]?.nodeMode ?? null;
-    currentNodeStatus = nodeRows[0]?.status ?? null;
-    currentNodeProviderInstanceId = nodeRows[0]?.providerInstanceId ?? null;
-  }
-  if (requiresVolumes && nodeId && currentNodeMode !== 'exclusive') {
-    try {
-      if (currentNodeStatus === 'running') {
-        await assertCurrent();
-        await teardownDeploymentEnvironmentOnNode(nodeId, environmentId, c.env, userId);
-      }
-      const volumes = await listEnvironmentVolumes(db, environmentId);
-      const attachedServerIds = new Set<string>();
-      for (const volume of volumes) {
-        if (volume.attachedServerId) {
-          attachedServerIds.add(volume.attachedServerId);
-        }
-      }
-      if (currentNodeProviderInstanceId) {
-        attachedServerIds.add(currentNodeProviderInstanceId);
-      }
-      for (const serverId of attachedServerIds) {
-        await assertCurrent();
-        await detachEnvironmentVolumes(db, c.env, userId, environmentId, serverId);
-      }
-    } catch (err) {
-      if (err instanceof AppError) throw err;
-      // Shared→exclusive migration (teardown + volume detach) failed. The
-      // release was already recorded durably above, so we MUST NOT return a
-      // 500 here: the VM agent treats a 5xx as a transient publish failure and
-      // retries the whole submission, which inserts a SECOND release with the
-      // next version number (duplicate version records). Record the
-      // volume-attach failure for diagnosis and return the durable release.
-      // The migration is retried via the deploy verb or the next release.
-      await assertCurrent();
-      await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
-      log.error('compose_publish_release.shared_to_exclusive_migration_failed', {
-        projectId,
-        environmentId,
-        releaseId,
-        nodeId,
-        action: 'release_recorded_migration_deferred',
-        ...serializeError(err),
-      });
-      await assertCurrent();
-      return c.json({
-        releaseId,
-        version: nextVersion,
-        status: 'created',
-        nodeId,
-      });
-    }
-    await assertCurrent();
-    await db
-      .update(schema.deploymentEnvironments)
-      .set({ nodeId: null, updatedAt: new Date().toISOString() })
-      .where(eq(schema.deploymentEnvironments.id, environmentId));
-    nodeId = null;
-  }
   try {
-    if (!shouldProvision) {
-      log.info('compose_publish_release.provisioning_skipped_environment_stopped', {
-        projectId,
-        environmentId,
-        releaseId,
-        environmentStatus: environmentRow.status,
-      });
-    } else if (!nodeId) {
-      const vmSizeOverride = composeHasModelProvider(composeYaml)
-        ? c.env.DEPLOYMENT_MODEL_RUNNER_VM_SIZE?.trim() || DEPLOYMENT_MODEL_RUNNER_VM_SIZE
-        : undefined;
-
-      await assertCurrent();
-      const result = await provisionDeploymentNode(environmentId, projectId, userId, c.env, {
-        vmSizeOverride: placement?.vmSize ?? vmSizeOverride,
-        ...(placement
-          ? { providerOverride: placement.provider, vmLocationOverride: placement.location }
-          : {}),
-        requiresVolumes,
-      });
-      if (result) {
-        nodeId = result.nodeId;
-        const provisioningPromise = result.provisioningPromise.catch(async (err) => {
-          await assertCurrent();
-          await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
-          throw err;
-        });
-        const finishPromise = requiresVolumes
-          ? provisioningPromise.then(async () => {
-              try {
-                await assertCurrent();
-                await attachEnvironmentVolumesToLinkedNode(db, c.env, userId, environmentId);
-              } catch (err) {
-                if (err instanceof AppError) throw err;
-                await assertCurrent();
-                await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
-                throw err;
-              }
-            })
-          : provisioningPromise;
-        c.executionCtx?.waitUntil(finishPromise.catch(() => undefined));
-        log.info('compose_publish_release.provisioning_triggered', {
-          projectId,
-          environmentId,
-          releaseId,
-          nodeId,
-          vmSizeOverride: vmSizeOverride ?? null,
-        });
-      }
-    } else if (requiresVolumes) {
-      await assertCurrent();
-      const attachPromise = attachEnvironmentVolumesToLinkedNode(db, c.env, userId, environmentId);
-      c.executionCtx?.waitUntil(attachPromise.catch(() => undefined));
-      try {
-        await attachPromise;
-      } catch (err) {
-        if (err instanceof AppError) throw err;
-        await assertCurrent();
-        await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
-        throw err;
-      }
-    }
+    nodeId = await placeReleaseOnDeploymentNode({
+      db,
+      env: c.env,
+      envId: environmentId,
+      projectId,
+      userId,
+      releaseId,
+      requiresVolumes,
+      placement,
+      reservation,
+      executionCtx: c.executionCtx,
+      beforeExternalMutation: assertCurrent,
+    });
   } catch (err) {
     if (err instanceof AppError) throw err;
-    log.error('compose_publish_release.provisioning_trigger_failed', {
-      projectId,
-      environmentId,
-      releaseId,
-      ...serializeError(err),
-    });
+    if (err instanceof DeploymentPlacementCancelledError) {
+      log.info('compose_publish_release.placement_superseded', {
+        projectId,
+        environmentId,
+        releaseId,
+      });
+      nodeId = environmentRow.nodeId ?? null;
+    } else {
+      await assertCurrent();
+      await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err, c.env);
+      log.error('compose_publish_release.provisioning_trigger_failed', {
+        projectId,
+        environmentId,
+        releaseId,
+        ...serializeError(err),
+      });
+    }
   }
 
   // Response shape matches the agent's Go ReleaseResult struct

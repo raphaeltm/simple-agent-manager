@@ -18,7 +18,9 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { log, serializeError } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
 import {
   placementProjectDefaultsFromRow,
@@ -40,6 +42,7 @@ import {
   evaluateWorkspaceReservationCapacity,
   resolveTrustedWorkspaceNodeCapacity,
   resolveWorkspaceAdmissionPolicy,
+  RESOURCE_REQUIREMENTS_SOURCE_SQL,
   trustedWorkspaceNodeCapacityColumnsSql,
   type WorkspaceResourceNode,
 } from './workspace-resource-capacity';
@@ -59,6 +62,7 @@ export const DEPLOYMENT_MODEL_RUNNER_VM_SIZE = 'medium';
 
 /** Default maximum number of deployment environments placed on one deployment node. */
 export const DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE = 5;
+const DEPLOYMENT_RELOCATION_CLAIM_FIELD = 'samRelocationClaim';
 
 export interface DeploymentNodeResult {
   nodeId: string;
@@ -68,7 +72,7 @@ export interface DeploymentNodeResult {
   provisioningPromise: Promise<void>;
 }
 
-interface DeploymentPlacement {
+export interface DeploymentPlacement {
   projectId: string;
   provider: CredentialProvider;
   location: string;
@@ -109,6 +113,10 @@ interface LinkEnvironmentToNodeOptions {
   userId: string;
   expectedNodeStatus: 'creating' | 'running';
   nodeMode: 'shared' | 'exclusive';
+  /** CAS guard used when replacing an existing environment reservation. */
+  expectedReservationJson?: string | null;
+  /** When set, admission succeeds only while this remains the newest release. */
+  releaseId?: string;
 }
 
 /** Native identity is independent of the historical vm_size label. The shared
@@ -133,11 +141,17 @@ export async function findDeploymentNodeWithCapacity(
   userId: string,
   placement: DeploymentPlacement,
   requiresVolumes: boolean,
-  options: { nodeId?: string; excludeEnvironmentId?: string } = {}
+  options: {
+    nodeId?: string;
+    excludeEnvironmentId?: string;
+    nodeMode?: 'shared' | 'exclusive';
+  } = {}
 ): Promise<DeploymentNodeMatch | null> {
-  if (requiresVolumes || placement.reservation.exclusiveNode) {
+  const nodeMode = options.nodeMode ?? 'shared';
+  if ((requiresVolumes || placement.reservation.exclusiveNode) && nodeMode !== 'exclusive') {
     return null;
   }
+  if (nodeMode === 'exclusive' && !options.nodeId) return null;
   if (typeof env.DATABASE.prepare !== 'function') {
     return null;
   }
@@ -177,28 +191,37 @@ export async function findDeploymentNodeWithCapacity(
        AND n.status = 'running'
        AND n.health_status != 'unhealthy'
        AND n.node_role = 'deployment'
-       AND COALESCE(n.node_mode, 'shared') = 'shared'
+       AND COALESCE(n.node_mode, 'shared') = ?
        AND n.cloud_provider = ?
        ${options.nodeId ? 'AND n.id = ?' : ''}
      ORDER BY n.id`
   )
-    .bind(userId, placement.provider, ...(options.nodeId ? [options.nodeId] : []))
+    .bind(userId, nodeMode, placement.provider, ...(options.nodeId ? [options.nodeId] : []))
     .all<DeploymentNodeCandidate>();
 
   const candidates = nodes.results ?? [];
   if (candidates.length === 0) return null;
 
   const nodeIds = candidates.map((node) => node.id);
-  const placeholders = nodeIds.map(() => '?').join(',');
-  const counts = await env.DATABASE.prepare(
-    `SELECT id, node_id AS nodeId, resolved_reservation_json AS resolvedReservationJson
-     FROM deployment_environments
-     WHERE node_id IN (${placeholders})`
-  )
-    .bind(...nodeIds)
-    .all<{ id: string; nodeId: string; resolvedReservationJson: string | null }>();
+  const reservationRows: Array<{
+    id: string;
+    nodeId: string;
+    resolvedReservationJson: string | null;
+  }> = [];
+  for (let offset = 0; offset < nodeIds.length; offset += D1_MAX_BOUND_PARAMETERS) {
+    const chunk = nodeIds.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = await env.DATABASE.prepare(
+      `SELECT id, node_id AS nodeId, resolved_reservation_json AS resolvedReservationJson
+       FROM deployment_environments
+       WHERE node_id IN (${placeholders})`
+    )
+      .bind(...chunk)
+      .all<{ id: string; nodeId: string; resolvedReservationJson: string | null }>();
+    reservationRows.push(...(rows.results ?? []));
+  }
   const rowsByNode = new Map<string, Array<{ resolvedReservationJson: string | null }>>();
-  for (const row of counts.results ?? []) {
+  for (const row of reservationRows) {
     if (row.id === options.excludeEnvironmentId) continue;
     const rows = rowsByNode.get(row.nodeId) ?? [];
     rows.push({ resolvedReservationJson: row.resolvedReservationJson });
@@ -222,6 +245,14 @@ export async function findDeploymentNodeWithCapacity(
     }
 
     const usage = aggregateWorkspaceReservationRows(rowsByNode.get(node.id) ?? []);
+    const maxEnvironments =
+      nodeMode === 'exclusive'
+        ? 1
+        : parsePositiveInt(
+            env.MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
+            DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE
+          );
+    if (usage.activeCount >= maxEnvironments) return [];
     const decision = evaluateWorkspaceReservationCapacity(
       node,
       usage,
@@ -326,6 +357,8 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
   const policy = resolveWorkspaceAdmissionPolicy(env);
   const reservation = placement.reservation;
   const reservationJson = JSON.stringify(reservation);
+  const hasExpectedReservation = Object.hasOwn(opts, 'expectedReservationJson');
+  const hasReleaseFence = typeof opts.releaseId === 'string';
   const otherReservationsSql = `
     SELECT occupied.resolved_reservation_json
     FROM deployment_environments occupied
@@ -339,7 +372,33 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
     AND json_extract(resolved_reservation_json, '$.memoryMb') > 0
     AND json_type(resolved_reservation_json, '$.diskMb') = 'integer'
     AND json_extract(resolved_reservation_json, '$.diskMb') >= 0
-    AND json_type(resolved_reservation_json, '$.exclusiveNode') IN ('true', 'false'))`;
+    AND json_type(resolved_reservation_json, '$.exclusiveNode') IN ('true', 'false')
+    AND json_type(resolved_reservation_json, '$.source') = 'text'
+    AND json_extract(resolved_reservation_json, '$.source') IN (${RESOURCE_REQUIREMENTS_SOURCE_SQL})
+    AND (
+      (
+        json_extract(resolved_reservation_json, '$.version') IN (1, 2)
+        AND json_type(resolved_reservation_json, '$.maxCoTenants') = 'integer'
+        AND json_extract(resolved_reservation_json, '$.maxCoTenants') > 0
+      )
+      OR (
+        json_extract(resolved_reservation_json, '$.version') = 3
+        AND (
+          json_type(resolved_reservation_json, '$.maxCoTenants') IS NULL
+          OR (
+            json_type(resolved_reservation_json, '$.maxCoTenants') = 'integer'
+            AND json_extract(resolved_reservation_json, '$.maxCoTenants') > 0
+          )
+        )
+      )
+    ))`;
+  const maxEnvironments =
+    nodeMode === 'exclusive'
+      ? 1
+      : parsePositiveInt(
+          env.MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
+          DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE
+        );
   const runningCapacitySql = `
        AND n.provider_instance_id IS NOT NULL
        AND n.observed_hardware_source = 'observed'
@@ -423,6 +482,22 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
      SET node_id = ?, provider = ?, location = ?, resolved_reservation_json = ?, updated_at = ?
      FROM nodes n
      WHERE de.id = ?
+       ${
+         hasReleaseFence
+           ? `AND ? = (
+         SELECT latest.id FROM deployment_releases latest
+         WHERE latest.environment_id = de.id
+         ORDER BY latest.version DESC
+         LIMIT 1
+       )`
+           : ''
+       }
+       ${hasExpectedReservation ? 'AND de.resolved_reservation_json IS ?' : ''}
+       AND CASE
+         WHEN json_valid(de.resolved_reservation_json)
+         THEN COALESCE(json_extract(de.resolved_reservation_json, '$.${DEPLOYMENT_RELOCATION_CLAIM_FIELD}'), 0)
+         ELSE 0
+       END = 0
        AND (de.node_id IS NULL OR de.node_id = n.id)
        AND n.id = ?
        AND n.user_id = ?
@@ -432,12 +507,10 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
        AND n.vm_location = ?
        ${nativeIdentity.sql}
        AND COALESCE(n.node_mode, 'shared') = ?
+       AND (SELECT COUNT(*) FROM (${otherReservationsSql}) existing) < ?
        AND (
          COALESCE(n.node_mode, 'shared') = 'shared'
-         OR NOT EXISTS (
-           SELECT 1 FROM deployment_environments existing
-           WHERE existing.node_id = n.id
-         )
+         OR NOT EXISTS (SELECT 1 FROM (${otherReservationsSql}) existing)
        )
        ${capacitySql}
        ${authority.sql}`
@@ -449,6 +522,8 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
       reservationJson,
       new Date().toISOString(),
       envId,
+      ...(hasReleaseFence ? [opts.releaseId] : []),
+      ...(hasExpectedReservation ? [opts.expectedReservationJson ?? null] : []),
       nodeId,
       userId,
       expectedNodeStatus,
@@ -456,6 +531,7 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
       placement.location,
       ...nativeIdentity.binds,
       nodeMode,
+      maxEnvironments,
       ...capacityBinds,
       ...authority.binds
     )
@@ -463,11 +539,157 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
   return (result.meta?.changes ?? 0) > 0;
 }
 
+/**
+ * Fence a shared environment before external teardown. The exclusive marker
+ * keeps the old node unavailable to co-tenants while teardown is in flight,
+ * and the old reservation comparison prevents a stale release from claiming a
+ * placement already updated by a concurrent release.
+ */
+export async function claimDeploymentEnvironmentRelocation(params: {
+  env: Env;
+  envId: string;
+  nodeId: string;
+  userId: string;
+  placement: DeploymentPlacement;
+  expectedReservationJson: string | null;
+  reservation: ResolvedResourceReservation;
+  releaseId?: string;
+}): Promise<string | null> {
+  const authority = buildPlacementAuthoritySqlPredicate({
+    nodeAlias: 'n',
+    userId: params.userId,
+    projectId: params.placement.projectId,
+    nodeRole: 'deployment',
+    workloadRole: 'deployment',
+    capacityPlacementSnapshot: params.placement.capacityPlacementSnapshot,
+    requireProjectMembership: true,
+  });
+  const claimJson = JSON.stringify({
+    ...params.reservation,
+    [DEPLOYMENT_RELOCATION_CLAIM_FIELD]: true,
+    exclusiveNode: true,
+    diagnostics: [
+      ...(params.reservation.diagnostics ?? []),
+      'deployment-environment-relocation-claim',
+    ],
+  });
+  const claimed = await params.env.DATABASE.prepare(
+    `UPDATE deployment_environments AS de
+        SET resolved_reservation_json = ?, updated_at = ?
+       FROM nodes n
+      WHERE de.id = ?
+        ${
+          params.releaseId
+            ? `AND ? = (
+          SELECT latest.id FROM deployment_releases latest
+          WHERE latest.environment_id = de.id
+          ORDER BY latest.version DESC
+          LIMIT 1
+        )`
+            : ''
+        }
+        AND de.node_id = ? AND de.resolved_reservation_json IS ?
+        AND n.id = de.node_id
+        AND CASE
+          WHEN json_valid(de.resolved_reservation_json)
+          THEN COALESCE(json_extract(de.resolved_reservation_json, '$.${DEPLOYMENT_RELOCATION_CLAIM_FIELD}'), 0)
+          ELSE 0
+        END = 0
+        ${authority.sql}
+      RETURNING id`
+  )
+    .bind(
+      claimJson,
+      new Date().toISOString(),
+      params.envId,
+      ...(params.releaseId ? [params.releaseId] : []),
+      params.nodeId,
+      params.expectedReservationJson,
+      ...authority.binds
+    )
+    .first<{ id: string }>();
+  return claimed ? claimJson : null;
+}
+
+export async function completeDeploymentEnvironmentRelocation(params: {
+  env: Env;
+  envId: string;
+  nodeId: string;
+  claimJson: string;
+  releaseId?: string;
+}): Promise<boolean> {
+  const result = await params.env.DATABASE.prepare(
+    `UPDATE deployment_environments
+        SET node_id = NULL, resolved_reservation_json = NULL, updated_at = ?
+      WHERE id = ?
+        ${
+          params.releaseId
+            ? `AND ? = (
+          SELECT latest.id FROM deployment_releases latest
+          WHERE latest.environment_id = deployment_environments.id
+          ORDER BY latest.version DESC
+          LIMIT 1
+        )`
+            : ''
+        }
+        AND node_id = ? AND resolved_reservation_json = ?`
+  )
+    .bind(
+      new Date().toISOString(),
+      params.envId,
+      ...(params.releaseId ? [params.releaseId] : []),
+      params.nodeId,
+      params.claimJson
+    )
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
+export async function restoreDeploymentEnvironmentRelocation(params: {
+  env: Env;
+  envId: string;
+  nodeId: string;
+  claimJson: string;
+  reservationJson: string | null;
+}): Promise<void> {
+  await params.env.DATABASE.prepare(
+    `UPDATE deployment_environments
+        SET resolved_reservation_json = ?, updated_at = ?
+      WHERE id = ? AND node_id = ? AND resolved_reservation_json = ?`
+  )
+    .bind(
+      params.reservationJson,
+      new Date().toISOString(),
+      params.envId,
+      params.nodeId,
+      params.claimJson
+    )
+    .run();
+}
+
 async function rollbackEnvironmentNodeLink(
   db: ReturnType<typeof drizzle<typeof schema>>,
+  env: Env,
   envId: string,
-  nodeId: string
-): Promise<void> {
+  nodeId: string,
+  releaseId?: string
+): Promise<boolean> {
+  if (releaseId && typeof env.DATABASE.prepare === 'function') {
+    const result = await env.DATABASE.prepare(
+      `UPDATE deployment_environments
+          SET node_id = NULL, updated_at = ?
+        WHERE id = ? AND node_id = ?
+          AND ? = (
+            SELECT latest.id FROM deployment_releases latest
+            WHERE latest.environment_id = deployment_environments.id
+            ORDER BY latest.version DESC
+            LIMIT 1
+          )`
+    )
+      .bind(new Date().toISOString(), envId, nodeId, releaseId)
+      .run();
+    return (result.meta?.changes ?? 0) > 0;
+  }
   await db
     .update(schema.deploymentEnvironments)
     .set({ nodeId: null, updatedAt: new Date().toISOString() })
@@ -477,6 +699,7 @@ async function rollbackEnvironmentNodeLink(
         eq(schema.deploymentEnvironments.nodeId, nodeId)
       )
     );
+  return true;
 }
 
 async function assertFreshDeploymentProvisioningAuthority(input: {
@@ -488,6 +711,7 @@ async function assertFreshDeploymentProvisioningAuthority(input: {
   placement: DeploymentPlacement;
   nodeMode: 'shared' | 'exclusive';
   requiresVolumes: boolean;
+  releaseId?: string;
 }): Promise<void> {
   await assertDeploymentProvisioningAuthority(input.env, {
     environmentId: input.envId,
@@ -502,6 +726,7 @@ async function assertFreshDeploymentProvisioningAuthority(input: {
     providerInstanceArchitecture: input.placement.providerInstanceArchitecture,
     nodeMode: input.nodeMode,
     requiresVolumes: input.requiresVolumes,
+    releaseId: input.releaseId,
   });
 }
 
@@ -626,6 +851,7 @@ export async function provisionDeploymentNode(
     providerOverride?: CredentialProvider;
     requiresVolumes?: boolean;
     reservation?: ResolvedResourceReservation;
+    releaseId?: string;
   }
 ): Promise<DeploymentNodeResult | null> {
   const db = drizzle(env.DATABASE, { schema });
@@ -660,7 +886,8 @@ export async function provisionDeploymentNode(
       placement: existingNode.placement,
       userId,
       expectedNodeStatus: 'running',
-      nodeMode: 'shared',
+      nodeMode,
+      releaseId: options?.releaseId,
     });
     if (linked) {
       log.info('deployment_provisioning.placed_existing_node', {
@@ -720,6 +947,7 @@ export async function provisionDeploymentNode(
     userId,
     expectedNodeStatus: 'creating',
     nodeMode,
+    releaseId: options?.releaseId,
   });
   if (!linkedFreshNode) {
     await db
@@ -768,6 +996,7 @@ export async function provisionDeploymentNode(
       placement,
       nodeMode,
       requiresVolumes,
+      releaseId: options?.releaseId,
     });
   };
 
@@ -799,8 +1028,24 @@ export async function provisionDeploymentNode(
     // re-trigger provisioning instead of being orphaned against a dead node.
     // Guard on nodeId = our node to avoid stomping a concurrent successful
     // re-provisioning that already wrote a different nodeId.
+    let mayCleanupNode = false;
     try {
-      await rollbackEnvironmentNodeLink(db, envId, node.id);
+      const rolledBack = await rollbackEnvironmentNodeLink(
+        db,
+        env,
+        envId,
+        node.id,
+        options?.releaseId
+      );
+      if (!rolledBack) {
+        log.info('deployment_provisioning.cleanup_skipped_superseded_release', {
+          envId,
+          nodeId: node.id,
+          releaseId: options?.releaseId ?? null,
+        });
+        throw err;
+      }
+      mayCleanupNode = true;
       log.info('deployment_provisioning.nodeId_rolled_back', { envId, nodeId: node.id });
     } catch (rollbackErr) {
       log.error('deployment_provisioning.nodeId_rollback_failed', {
@@ -809,6 +1054,7 @@ export async function provisionDeploymentNode(
         ...serializeError(rollbackErr),
       });
     }
+    if (!mayCleanupNode) throw err;
     await cleanupFreshProvisioningNode(env, {
       nodeId: node.id,
       userId,

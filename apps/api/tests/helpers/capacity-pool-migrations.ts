@@ -46,7 +46,10 @@ export const deploymentPoolStrategyMigrationSql = readDbMigration(
   '0170_deployment_pool_strategy_reservations.sql'
 );
 
-export function applyCapacityPoolSchemaMigrations(database: SqliteMigrationTarget): void {
+export function applyCapacityPoolSchemaMigrations(
+  database: SqliteMigrationTarget,
+  options: { includeDeploymentStrategy?: boolean } = {}
+): void {
   database.exec(migrationSql);
   database.exec(candidateSnapshotMigrationSql);
   database.exec(concreteOfferingMigrationSql);
@@ -59,6 +62,9 @@ export function applyCapacityPoolSchemaMigrations(database: SqliteMigrationTarge
   database.exec(capacityPoolAuthorityGenerationMigrationSql);
   database.exec(capacityPoolSelectionDigestMigrationSql);
   database.exec(capacityPoolMaxNodesMigrationSql);
+  if (options.includeDeploymentStrategy === false) {
+    return;
+  }
   const [poolStrategyStatement, environmentReservationStatement] =
     deploymentPoolStrategyMigrationSql.split(/;\s*(?=ALTER TABLE deployment_environments)/);
   database.exec(`${poolStrategyStatement};`);

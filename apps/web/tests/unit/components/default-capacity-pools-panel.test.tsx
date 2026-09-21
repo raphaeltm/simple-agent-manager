@@ -606,6 +606,30 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(mocks.toast.success).toHaveBeenCalledWith('Project default compute pool updated');
   });
 
+  it('updates the deployment strategy independently from workspace placement', async () => {
+    const current = summary('project');
+    mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(response('project', current));
+    mocks.updateProjectDefaultCapacityPools.mockResolvedValue(
+      response('project', {
+        ...current,
+        pool: { ...current.pool, deploymentStrategy: 'balanced', revision: 4 },
+      })
+    );
+
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Deployment strategy'), {
+      target: { value: 'balanced' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.updateProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1', {
+        policy: { deploymentStrategy: 'balanced' },
+      })
+    );
+  });
+
   it('filters catalog offerings and applies bulk add/remove through candidate statuses', async () => {
     const current = summary('project');
     current.candidates = [

@@ -131,6 +131,12 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `DEPLOYMENT_RELEASE_RECONCILIATION_ACTIVITY_GRACE_HOURS` — Recent release-event protection window for active fetch/apply work (default: `6`)
 - `COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE` — Maximum abandoned compose archives deleted per daily run (default: `250`)
 
+### Deployment Placement Defaults
+
+- `DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS` — Per-service CPU reservation when a normalized deployment manifest omits the whole resource block (default: `250`)
+- `DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB` — Per-service memory limit and placement reservation when a deployment omits the whole resource block (default: `256`)
+- `DEPLOYMENT_DEFAULT_ROOT_DISK_MB` — Per-service root-filesystem reservation for image layers, logs, and temporary files (default: `1024`)
+
 ### Guided Agent Credential Setup
 
 - `MAX_CONCURRENT_SETUP_SESSIONS` — Concurrent Cloudflare Sandbox setup-session cap (default: `2`)

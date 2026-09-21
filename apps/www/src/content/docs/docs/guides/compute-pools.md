@@ -288,10 +288,11 @@ Putting it together, when you start work SAM:
 
 1. **Resolves the requirements** by walking the precedence chain above.
 2. **Resolves the pool** by walking project → user → installation.
-3. **Looks for a machine you already have.** A node can be reused only if it belongs to you, is
-   in the same pool at the same revision, was provisioned from the same credential and the same
-   instance type, and — for a project pool — belongs to that project. Anything else means the node
-   is not interchangeable with what the current request resolved to.
+3. **Looks for a machine you already have.** A node can be reused only if it belongs to you, keeps
+   the current pool and credential authority, and — for a project pool — belongs to that project.
+   Deployment placement may reuse a larger compatible node from any currently allowed pool
+   offering when the declared reservation fits; workspace placement retains its existing
+   compatibility rules.
 4. **Checks that the machine can actually take the work** (see below). Candidates are ordered by
    the pool's strategy; the capacity check is re-run atomically when the workspace slot is
    claimed, so two simultaneous requests can never both take the last slot.

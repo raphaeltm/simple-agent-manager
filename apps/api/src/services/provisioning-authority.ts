@@ -35,6 +35,7 @@ interface DeploymentProvisioningAuthorityInput {
   providerInstanceArchitecture: string | null;
   nodeMode: 'shared' | 'exclusive';
   requiresVolumes: boolean;
+  releaseId?: string;
 }
 
 interface TrialProvisioningAuthorityInput {
@@ -69,10 +70,7 @@ export interface FreshProvisioningNodeCleanupInput {
 }
 
 export type FreshProvisioningNodeCleanupResult =
-  | 'strict-deleted'
-  | 'placeholder-deleted'
-  | 'skipped'
-  | 'failed';
+  'strict-deleted' | 'placeholder-deleted' | 'skipped' | 'failed';
 
 function projectMemberCapabilitySql(capability: ProjectCapability): string {
   const roles = projectMemberRolesWithCapability(capability);
@@ -161,6 +159,16 @@ export async function assertDeploymentProvisioningAuthority(
          ON n.id = de.node_id
         AND n.user_id = ?
       WHERE de.id = ?
+        ${
+          input.releaseId
+            ? `AND ? = (
+          SELECT latest.id FROM deployment_releases latest
+          WHERE latest.environment_id = de.id
+          ORDER BY latest.version DESC
+          LIMIT 1
+        )`
+            : ''
+        }
         AND de.project_id = ?
         AND de.status = 'active'
         AND de.node_id = ?
@@ -183,6 +191,7 @@ export async function assertDeploymentProvisioningAuthority(
       input.userId,
       input.userId,
       input.environmentId,
+      ...(input.releaseId ? [input.releaseId] : []),
       input.projectId,
       input.nodeId,
       input.provider,

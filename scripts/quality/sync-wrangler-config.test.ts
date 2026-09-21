@@ -67,6 +67,19 @@ afterEach(() => {
 });
 
 describe('sync wrangler config', () => {
+  it('forwards configurable deployment reservation defaults to the Worker', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS', '400');
+    vi.stubEnv('DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB', '640');
+    vi.stubEnv('DEPLOYMENT_DEFAULT_ROOT_DISK_MB', '2048');
+
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
+      DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS: '400',
+      DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB: '640',
+      DEPLOYMENT_DEFAULT_ROOT_DISK_MB: '2048',
+    });
+  });
+
   it.each([
     { migrationTag: null, tailExists: false, bootstrap: true, tailSync: true },
     { migrationTag: null, tailExists: true, bootstrap: true, tailSync: false },

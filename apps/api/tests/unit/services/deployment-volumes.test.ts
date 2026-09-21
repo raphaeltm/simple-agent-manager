@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import {
   attachEnvironmentVolumes,
+  attachEnvironmentVolumesToLinkedNode,
   buildVolumeMountDescriptors,
   createEnvironmentVolume,
   createMissingDeclaredVolumes,
@@ -846,6 +847,25 @@ describe('attachEnvironmentVolumes', () => {
     expect(results[0].linuxDevice).toBe('/dev/sdb');
   });
 
+  it('rechecks placement authority before each provider attachment', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider);
+    const db = createMockDb([makeDetachedVolumeRow()]);
+    const assertExternalMutationAuthority = vi
+      .fn()
+      .mockRejectedValue(new Error('newer release changed the placement'));
+
+    await expect(
+      attachEnvironmentVolumes(db as any, mockEnv, 'user-1', 'env-001', 'srv-target', 'nbg1', {
+        assertExternalMutationAuthority,
+      })
+    ).rejects.toThrow('newer release changed the placement');
+
+    expect(assertExternalMutationAuthority).toHaveBeenCalledTimes(1);
+    expect(provider.attachVolume).not.toHaveBeenCalled();
+    expect(db.update).not.toHaveBeenCalled();
+  });
+
   // Regression: Hetzner's attach is an async action, so the volume it reports back at
   // the instant attach returns is commonly still `creating` or `available`, and nothing
   // ever re-polls this row — the only other writer is the detach path. Persisting the
@@ -1194,6 +1214,27 @@ function createPlacementDb(placement: PlacementRow | undefined) {
 }
 
 describe('resolveLinkedDeploymentNodeVolumeTarget', () => {
+  it('checks placement authority before resolving the current linked target', async () => {
+    const db = createPlacementDb({
+      nodeId: 'node-newer',
+      location: 'nbg1',
+      providerInstanceId: 'srv-newer',
+      vmLocation: 'nbg1',
+      nodeRole: 'deployment',
+    });
+    const assertExternalMutationAuthority = vi
+      .fn()
+      .mockRejectedValue(new Error('volume attachment claim is stale'));
+
+    await expect(
+      attachEnvironmentVolumesToLinkedNode(db as any, mockEnv, 'user-1', 'env-1', {
+        assertExternalMutationAuthority,
+      })
+    ).rejects.toThrow('volume attachment claim is stale');
+
+    expect(db.select).not.toHaveBeenCalled();
+  });
+
   it('throws when the environment is not linked to a node', async () => {
     const db = createPlacementDb({
       nodeId: null,

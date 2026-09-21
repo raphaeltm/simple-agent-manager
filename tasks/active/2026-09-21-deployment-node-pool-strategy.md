@@ -71,8 +71,8 @@ Durable product source: SAM idea `01M30N3SR9APZ2E19Y87VHNSVA`.
       if the existing pool editor changes.
 - [x] Run focused scheduler/deployment tests and broader API checks plus repository lint, typecheck, formatting,
       migration-safety, node-pool-boundary, and full test-suite gates.
-- [ ] Run completion
-      validation, and all required specialist reviews.
+- [x] Run all required specialist reviews and address their findings; completion validation remains
+      scheduled after staging and PR evidence are available.
 - [ ] Coordinate staging use, deploy the final candidate, validate real declared-resource placement/reuse,
       clean up owned staging resources, then open the PR and complete CI, CodeRabbit, merge, and production
       deployment monitoring.

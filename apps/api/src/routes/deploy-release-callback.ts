@@ -364,6 +364,10 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       routeTargets: routes,
       resolvedSecrets,
       baseInterpolationEnv: environmentConfig.values,
+      defaultMemoryLimitMb: parsePositiveInt(
+        c.env.DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB,
+        DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB
+      ),
     });
     composeYaml = rendered.composeYaml;
     interpolationEnv = rendered.interpolationEnv;

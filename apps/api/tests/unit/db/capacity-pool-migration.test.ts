@@ -1397,18 +1397,22 @@ describe('0167_capacity_pool_max_nodes migration', () => {
 describe('0170_deployment_pool_strategy_reservations migration', () => {
   it('adds smallest-fit deployment policy and nullable reservation snapshots additively', () => {
     const database = db();
+    applyCapacityPoolSchemaMigrations(database, { includeDeploymentStrategy: false });
     database.exec(`
+      INSERT INTO capacity_pools
+        (id, scope, owner_user_id, name, is_default, status, strategy, exhaustion_policy)
+      VALUES ('pool-existing', 'user', 'user-1', 'Existing', 1, 'active', 'pack', 'queue');
+
       INSERT INTO deployment_environments (id, project_id)
       VALUES ('environment-existing', 'project-1');
     `);
-    applyCapacityPoolSchemaMigrations(database);
-    insertPool({ id: 'pool-existing', scope: 'user', ownerUserId: 'user-1', isDefault: 1 });
+    database.exec(deploymentPoolStrategyMigrationSql);
 
     expect(
       database
-        .prepare('SELECT deployment_strategy FROM capacity_pools WHERE id = ?')
+        .prepare('SELECT strategy, deployment_strategy FROM capacity_pools WHERE id = ?')
         .get('pool-existing')
-    ).toEqual({ deployment_strategy: 'smallest-fit' });
+    ).toEqual({ strategy: 'pack', deployment_strategy: 'smallest-fit' });
     expect(
       database
         .prepare('SELECT resolved_reservation_json FROM deployment_environments WHERE id = ?')

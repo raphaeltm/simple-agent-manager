@@ -66,6 +66,20 @@ describe('resolveDeploymentManifestReservation', () => {
     expect(reservation.diagnostics).toContain('deployment-service-resource-defaults-applied');
   });
 
+  it('uses caller-configured fallback reservations when declarations are omitted', () => {
+    const reservation = resolveDeploymentManifestReservation(
+      manifest({ api: { image, env: {}, volumes: [] } }),
+      'preview',
+      { cpuMillis: 400, memoryMb: 640, diskMb: 2_048 }
+    );
+
+    expect(reservation).toMatchObject({
+      cpuMillis: 400,
+      memoryMb: 640,
+      diskMb: 2_048,
+    });
+  });
+
   it('adds declared volume capacity and preserves exclusive-node behavior', () => {
     const reservation = resolveDeploymentManifestReservation(
       manifest(

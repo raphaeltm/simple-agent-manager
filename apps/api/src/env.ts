@@ -230,7 +230,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE?: string;
   DEPLOYMENT_DEFAULT_VM_SIZE?: string; // Default VM size for deployment nodes (default: small)
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE?: string; // VM size for deployment nodes running Docker Model Runner (default: medium)
-  DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB?: string; // Default per-service memory limit for compose-publish applies (default: 256)
+  DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS?: string; // Default per-service CPU reservation when a manifest omits resources (default: 250)
+  DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB?: string; // Default per-service memory limit/reservation (default: 256)
+  DEPLOYMENT_DEFAULT_ROOT_DISK_MB?: string; // Default per-service root-disk reservation (default: 1024)
   DEPLOYMENT_LOG_MAX_SIZE?: string; // Default json-file log max-size for compose-publish applies (default: 10m)
   DEPLOYMENT_LOG_MAX_FILE?: string; // Default json-file log max-file for compose-publish applies (default: 3)
   MCP_DEPLOYMENT_COMPOSE_PREVIEW_MAX_BYTES?: string; // Max composeYaml bytes accepted by deployment route preview MCP tool

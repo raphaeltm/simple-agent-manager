@@ -33,12 +33,24 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
 
 x-sam-routes:
   - service: web
     port: 3000
     mode: public
 ```
+
+CPU and memory limits drive deployment placement. SAM sums the limits across services, reuses an
+allowed deployment node when the aggregate reservation fits, and otherwise provisions the smallest
+sufficient allowed offering. When a service omits the whole `deploy.resources` block, configurable
+per-service CPU and memory defaults apply. If the block declares only one limit, Compose parsing uses
+its compatibility fallback for the other limit (1 CPU or 512 MB). Placement also reserves a
+configurable root-disk allowance per service and adds `x-sam-size-hint-mb` from named volumes.
 
 Submit the file to the release endpoint with a YAML content type:
 

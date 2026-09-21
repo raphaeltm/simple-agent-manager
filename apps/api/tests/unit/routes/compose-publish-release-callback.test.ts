@@ -27,6 +27,7 @@ const DEPLOYMENT_ENVIRONMENTS = {
   agentDeployDisabledAt: 'deployment_environments.agentDeployDisabledAt',
   allowedDeployProfileIdsJson: 'deployment_environments.allowedDeployProfileIdsJson',
   requiresVolumes: 'deployment_environments.requiresVolumes',
+  resolvedReservationJson: 'deployment_environments.resolvedReservationJson',
   updatedAt: 'deployment_environments.updatedAt',
 };
 const NODES = {
@@ -55,6 +56,7 @@ let environmentRows: Array<{
   agentDeployEnabledAt?: string | null;
   agentDeployDisabledAt?: string | null;
   allowedDeployProfileIdsJson?: string | null;
+  resolvedReservationJson?: string | null;
 }> = [];
 let nodeRows: Array<{
   nodeMode: string | null;
@@ -64,6 +66,10 @@ let nodeRows: Array<{
 const inserted: Array<Record<string, unknown>> = [];
 const updated: Array<Record<string, unknown>> = [];
 const mockProvisionDeploymentNode = vi.hoisted(() => vi.fn(async () => null));
+const mockResolveDeploymentPlacement = vi.hoisted(() => vi.fn());
+const mockClaimDeploymentEnvironmentRelocation = vi.hoisted(() => vi.fn());
+const mockCompleteDeploymentEnvironmentRelocation = vi.hoisted(() => vi.fn());
+const mockRestoreDeploymentEnvironmentRelocation = vi.hoisted(() => vi.fn());
 const mockCreateMissingDeclaredVolumes = vi.hoisted(() => vi.fn(async () => []));
 const mockAttachEnvironmentVolumesToLinkedNode = vi.hoisted(() => vi.fn(async () => []));
 const mockMarkDeploymentReleaseVolumeAttachFailed = vi.hoisted(() => vi.fn(async () => undefined));
@@ -102,11 +108,13 @@ vi.mock('../../../src/db/schema', () => ({
 vi.mock('../../../src/services/deployment-provisioning', () => ({
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE: 'medium',
   provisionDeploymentNode: (...args: unknown[]) => mockProvisionDeploymentNode(...args),
-  resolveDeploymentPlacement: vi.fn(async () => ({
-    provider: 'hetzner',
-    location: 'fsn1',
-    vmSize: 'small',
-  })),
+  resolveDeploymentPlacement: (...args: unknown[]) => mockResolveDeploymentPlacement(...args),
+  claimDeploymentEnvironmentRelocation: (...args: unknown[]) =>
+    mockClaimDeploymentEnvironmentRelocation(...args),
+  completeDeploymentEnvironmentRelocation: (...args: unknown[]) =>
+    mockCompleteDeploymentEnvironmentRelocation(...args),
+  restoreDeploymentEnvironmentRelocation: (...args: unknown[]) =>
+    mockRestoreDeploymentEnvironmentRelocation(...args),
 }));
 
 vi.mock('../../../src/services/deployment-volumes', () => ({
@@ -248,6 +256,14 @@ const validSubmission = {
 describe('compose-publish-release callback (vertical slice)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockResolveDeploymentPlacement.mockResolvedValue({
+      provider: 'hetzner',
+      location: 'fsn1',
+      vmSize: 'small',
+    });
+    mockClaimDeploymentEnvironmentRelocation.mockResolvedValue('relocation-claim');
+    mockCompleteDeploymentEnvironmentRelocation.mockResolvedValue(true);
+    mockRestoreDeploymentEnvironmentRelocation.mockResolvedValue(undefined);
     inserted.length = 0;
     updated.length = 0;
     nodeRows = [];
@@ -329,6 +345,89 @@ describe('compose-publish-release callback (vertical slice)', () => {
       })
     );
     expect(waitUntilMock).toHaveBeenCalled();
+  });
+
+  it('uses explicit Compose limits and configured root disk for placement and provisioning', async () => {
+    const app = await buildApp();
+    const response = await request(
+      app,
+      'proj-1',
+      {
+        ...validSubmission,
+        composeYaml: `services:
+  web:
+    image: nginx:latest
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 768M
+`,
+      },
+      {
+        DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS: '400',
+        DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB: '640',
+        DEPLOYMENT_DEFAULT_ROOT_DISK_MB: '2048',
+      }
+    );
+
+    expect(response.status).toBe(200);
+    const expectedReservation = expect.objectContaining({
+      cpuMillis: 1500,
+      memoryMb: 768,
+      diskMb: 2048,
+      exclusiveNode: false,
+      sourceId: 'env-1',
+    });
+    expect(mockResolveDeploymentPlacement).toHaveBeenCalledWith(
+      'user-1',
+      expect.anything(),
+      'proj-1',
+      expect.objectContaining({ reservation: expectedReservation })
+    );
+    expect(mockProvisionDeploymentNode).toHaveBeenCalledWith(
+      'env-1',
+      'proj-1',
+      'user-1',
+      expect.anything(),
+      expect.objectContaining({ reservation: expectedReservation })
+    );
+  });
+
+  it('rejects a volume-free release when placement cannot be resolved for its existing node', async () => {
+    environmentRows = [
+      {
+        id: 'env-1',
+        nodeId: 'node-shared-1',
+        status: 'active',
+        agentDeployEnabled: true,
+        agentDeployEnabledBy: 'user-1',
+        agentDeployEnabledAt: '2026-06-21T00:00:00.000Z',
+        agentDeployDisabledAt: null,
+        allowedDeployProfileIdsJson: null,
+        resolvedReservationJson: JSON.stringify({
+          version: 3,
+          source: 'deployment-manifest',
+          sourceId: 'env-1',
+          cpuMillis: 250,
+          memoryMb: 256,
+          diskMb: 1024,
+          exclusiveNode: false,
+        }),
+      },
+    ];
+    mockResolveDeploymentPlacement.mockResolvedValueOnce(null);
+
+    const app = await buildApp();
+    const response = await request(app, 'proj-1', validSubmission);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      message:
+        'No cloud provider credential found. Connect a cloud provider before deploying applications.',
+    });
+    expect(inserted).toHaveLength(0);
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -416,6 +515,13 @@ volumes:
         vmLocationOverride: 'fsn1',
         vmSizeOverride: 'small',
         requiresVolumes: true,
+        releaseId: 'release-ulid-1',
+        reservation: expect.objectContaining({
+          cpuMillis: 250,
+          memoryMb: 256,
+          diskMb: 2048,
+          exclusiveNode: true,
+        }),
       }
     );
   });
@@ -477,7 +583,8 @@ volumes:
       expect.anything(),
       'env-1',
       'release-ulid-1',
-      expect.any(Error)
+      expect.any(Error),
+      expect.anything()
     );
     // The migration returns early — provisioning is NOT triggered on the failed tick.
     expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();

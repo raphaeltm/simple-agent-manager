@@ -487,6 +487,20 @@ describe('deployment environment stop/start lifecycle', () => {
     );
   });
 
+  it('rejects a malformed stored reservation before starting or provisioning', async () => {
+    envRows[0]!.status = 'stopped';
+    envRows[0]!.nodeId = null;
+    envRows[0]!.resolvedReservationJson = '{"cpuMillis":"invalid"}';
+    volumeRows[0]!.attachedServerId = null;
+
+    const response = await start(createApp());
+    const body = (await response.json()) as { message: string };
+
+    expect(response.status).toBe(409);
+    expect(body.message).toContain('stored deployment resource reservation is invalid');
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+  });
+
   it('returns 409 when stopping an environment that is already stopping', async () => {
     envRows[0].status = 'stopping';
     const app = createApp();

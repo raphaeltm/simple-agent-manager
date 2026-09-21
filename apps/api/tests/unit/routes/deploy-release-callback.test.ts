@@ -240,11 +240,11 @@ function stubDnsFetch(): ReturnType<typeof vi.fn> {
 }
 
 /** Issue the standard deploy-release callback request. */
-function requestDeployRelease() {
+function requestDeployRelease(envOverrides: Partial<Env> = {}) {
   return createTestApp().request(
     '/api/nodes/node-deploy-1/deploy-release?seq=7&environmentId=env-1',
     { headers: { Authorization: 'Bearer callback-token' } },
-    env(),
+    { ...env(), ...envOverrides },
     { waitUntil: waitUntilMock, passThroughOnException: vi.fn() }
   );
 }
@@ -355,17 +355,39 @@ describe('deploy release callback route', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
       // route 1 create succeeds
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ result: { id: 'dns-r1' } }), { status: 200 })
+      )
       // route 2 create loses the race
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        errors: [{ code: 81058, message: 'An identical record already exists.' }],
-      }), { status: 400 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            errors: [{ code: 81058, message: 'An identical record already exists.' }],
+          }),
+          { status: 400 }
+        )
+      )
       // route 2 re-resolve now sees the winner's record
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        result: [{ id: 'dns-r2-winner', name: 'r2-api-8080-env-1.apps.sammy.party', type: 'A', content: '203.0.113.10', proxied: false }],
-      }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: [
+              {
+                id: 'dns-r2-winner',
+                name: 'r2-api-8080-env-1.apps.sammy.party',
+                type: 'A',
+                content: '203.0.113.10',
+                proxied: false,
+              },
+            ],
+          }),
+          { status: 200 }
+        )
+      )
       // route 2 updates it in place
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-r2-winner' } }), { status: 200 }));
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ result: { id: 'dns-r2-winner' } }), { status: 200 })
+      );
     vi.stubGlobal('fetch', fetchMock);
 
     const response = await requestDeployRelease();
@@ -470,6 +492,19 @@ describe('deploy release callback route', () => {
       content: '203.0.113.10',
       proxied: false,
     });
+  });
+
+  it('uses the configured default memory limit when the manifest omits service resources', async () => {
+    stubHappyPathDb();
+    stubDnsFetch();
+
+    const response = await requestDeployRelease({
+      DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB: '640',
+    });
+
+    const body = await response.json<{ composeYaml: string }>();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(body.composeYaml.match(/memory: 640M/g)).toHaveLength(2);
   });
 
   it('returns conflict when the release was terminalized before the node claimed apply', async () => {
