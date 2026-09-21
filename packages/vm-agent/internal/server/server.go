@@ -64,6 +64,8 @@ const fatalErrorStopReason = acp.FatalErrorStopReason
 var taskCallbackDiagnosticRedactionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}`),
 	regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)("[^"]+"|'[^']+'|[^\s,;]+)`),
+	regexp.MustCompile(`(?i)(https?://)([^/\s@]+)@`),
+	regexp.MustCompile(`(?i)([?&](?:access[_-]?token|api[_-]?key|token|secret|password)=)([^&\s]+)`),
 	regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{12,})\b`),
 	regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9_]{12,})\b`),
 	regexp.MustCompile(`\b(github_pat_[A-Za-z0-9_]{12,})\b`),

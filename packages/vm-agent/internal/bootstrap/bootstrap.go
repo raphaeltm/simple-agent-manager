@@ -3155,6 +3155,11 @@ func createCheckoutBranch(ctx context.Context, workspaceDir, cloneBranch, checko
 			return fmt.Errorf("failed to check out existing remote branch %q: %w: %s", checkoutBranch, checkoutErr, strings.TrimSpace(string(output)))
 		}
 		return nil
+	} else {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+			return fmt.Errorf("failed to inspect remote checkout branch %q: %w", checkoutBranch, err)
+		}
 	}
 	cmd = exec.CommandContext(ctx, gitBinaryPath, "-C", workspaceDir, "checkout", "-b", checkoutBranch)
 	output, err := cmd.CombinedOutput()

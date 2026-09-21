@@ -3,6 +3,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { redactSecretPatterns } from './secret-redaction';
 import {
   buildSessionSnapshotR2Key,
   type CompleteSessionSnapshotInput,
@@ -298,19 +299,33 @@ export async function getRestorableSessionSnapshot(
 
 export async function recordSessionSnapshotRestoreResult(
   db: Db,
+  env: Env,
   input: {
     chatSessionId: string;
     status: string;
     message: string | null;
   }
 ): Promise<void> {
+  const restoreMessage = sanitizeSessionSnapshotRestoreMessage(env, input.message);
   await db
     .update(schema.sessionSnapshots)
     .set({
       restoreStatus: input.status,
-      restoreMessage: input.message,
+      restoreMessage,
       restoredAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId));
+}
+
+export function sanitizeSessionSnapshotRestoreMessage(
+  env: Env,
+  message: string | null
+): string | null {
+  if (message === null) return null;
+  const withoutControls = Array.from(message, (character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code < 0x20 || code === 0x7f ? ' ' : character;
+  }).join('');
+  return sessionLifecycleError(env, redactSecretPatterns(withoutControls));
 }

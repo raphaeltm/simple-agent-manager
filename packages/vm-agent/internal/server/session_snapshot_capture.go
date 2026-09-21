@@ -21,29 +21,31 @@ func (c *snapshotArtifactCapture) captureWIP(ctx context.Context) bool {
 	var err error
 	var baseCommit, wipPath string
 	var wipSkipped []snapshotSkippedEntry
+	var gitState snapshotGitState
 	if c.target == nil {
-		baseCommit, wipPath, wipSkipped, err = createWIPBundle(ctx, c.workDir, c.threshold)
+		baseCommit, wipPath, wipSkipped, err = createWIPBundleWithGitState(ctx, c.workDir, c.threshold, &gitState)
 	} else {
-		baseCommit, wipPath, wipSkipped, err = c.server.createContainerWIPBundle(ctx, c.target, c.threshold, c.budget, c.progress.Report)
+		baseCommit, wipPath, wipSkipped, err = c.server.createContainerWIPBundleWithGitState(ctx, c.target, c.threshold, c.budget, c.progress.Report, &gitState)
 	}
 	c.manifest.BaseCommit = baseCommit
 	if baseCommit != "" && err == nil {
-		var gitState snapshotGitState
+		c.manifest.Git = gitState.Git
 		if c.target == nil {
-			gitState, err = captureStandaloneSnapshotGitState(ctx, c.workDir)
+			err = validateCapturedSnapshotGitState(ctx, standaloneSnapshotGit(c.workDir), gitState)
 		} else {
-			gitState, err = captureSnapshotGitState(ctx, func(ctx context.Context, env []string, args ...string) (string, error) {
+			err = validateCapturedSnapshotGitState(ctx, func(ctx context.Context, env []string, args ...string) (string, error) {
 				return c.server.containerGit(ctx, c.target, env, args...)
-			})
-		}
-		if err == nil {
-			c.manifest.Git = gitState.Git
+			}, gitState)
 		}
 	}
 	c.manifest.Skipped = append(c.manifest.Skipped, wipSkipped...)
 	wipCaptureFailed := err != nil
 	if err != nil {
 		c.manifest.Skipped = append(c.manifest.Skipped, snapshotSkippedEntry{Path: c.workDir, Reason: err.Error()})
+		if wipPath != "" {
+			_ = os.Remove(wipPath)
+			wipPath = ""
+		}
 	}
 
 	if wipPath != "" {

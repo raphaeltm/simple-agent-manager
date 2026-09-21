@@ -19,7 +19,7 @@ The affected data flow is:
 Assumptions and compatibility decisions:
 
 - Git branch, upstream, remote, and detached-HEAD metadata can be added as optional manifest v1 fields, preserving old snapshots.
-- A commit is local-only when saved `HEAD` is not contained by any known remote-tracking ref. That state requires a Git bundle even when the index and worktree are clean.
+- Clean status does not prove recoverability. Snapshot capture preserves the saved commit graph in a Git bundle even for clean remotely reachable commits, avoiding capture-time network access and stale-remote assumptions.
 - Existing snapshots with only `BaseCommit` remain restorable; missing new metadata falls back to exact detached/base validation without rejecting the old manifest.
 - The existing restore error path already records a visible `degraded` result, so a Git-state mismatch must return an error through that path rather than introduce a second terminal-state system.
 - No public API or user documentation contract changes; the manifest extension and restore diagnostics are internal and covered by task/test documentation.
@@ -33,14 +33,14 @@ Constitution alignment: the change adds no URLs, timeouts, limits, or environmen
 - Existing two-ref WIP bundles contain synthetic worktree/index commits parented by saved `HEAD`; forcing this compact bundle for local-only clean commits preserves the commit graph without a filesystem snapshot.
 - `restoreSessionSnapshot` reports `restored` after harness resume without a final repository HEAD check.
 - `createCheckoutBranch` always uses `git checkout -b`, so a clone from `main` recreates an existing remote task branch from the wrong base.
-- The API manifest validator mirrors the Go manifest field-for-field and must accept any additive Git metadata.
+- The API manifest validator mirrors the Go manifest field-for-field and accepts reproducible additive Git metadata while rejecting ref state a fresh canonical clone cannot recreate.
 - Existing Git snapshot tests exercise real repositories and are the correct regression seam; workspace branch dispatch already has a focused bootstrap helper test seam.
 - Relevant prior incident lessons require exact terminal verdicts, real trigger coverage, and fresh-node staging for VM-agent changes.
 
 ## Implementation checklist
 
 - [x] Capture optional branch, upstream, remote, and detached-HEAD metadata in standalone and container snapshots.
-- [x] Detect a saved `HEAD` not reachable from remote-tracking refs and create/upload a compact Git bundle even when the worktree is clean.
+- [x] Create/upload a Git bundle for clean worktrees so local-only commits and stale or unavailable remote state cannot make the saved `HEAD` unrecoverable.
 - [x] Restore the exact saved commit and branch/detached state before applying WIP for standalone and container runtimes.
 - [x] Validate actual `HEAD` against saved `BaseCommit` before reporting `restored`; route any mismatch through the existing degraded recovery result.
 - [x] Prefer an existing remote checkout branch during bootstrap instead of recreating it from the clone base.
@@ -72,7 +72,7 @@ Constitution alignment: the change adds no URLs, timeouts, limits, or environmen
 ## Implementation notes
 
 - New snapshots retain `baseCommit` plus optional `git` metadata (`branch`, `upstream`, `remote`, `detached`) without changing the manifest version; old manifests remain accepted.
-- Clean capture creates a bundle only when no remote-tracking ref contains saved `HEAD`. Dirty capture keeps the existing worktree/index bundle and now treats exact-HEAD restoration as a prerequisite.
+- Clean capture now preserves the commit graph without consulting repository-controlled remotes. Dirty capture keeps the existing worktree/index bundle and treats exact-HEAD restoration as a prerequisite.
 - Bundle restore imports objects first, checks out the saved commit/ref, materializes worktree/index state, and validates `HEAD` again before harness resume can report `restored`.
 - Bootstrap checks `refs/remotes/origin/<checkout>` and tracks it when present; only genuinely new output branches are created from the requested clone base.
-- Focused validation: VM-agent server/bootstrap tests pass with Go 1.26.6; API snapshot route has 18 passing tests; API typecheck and lint pass.
+- Focused validation: VM-agent server/bootstrap tests pass with Go 1.26.6; API snapshot route has 19 passing tests; real Worker D1/R2 wiring has 2 passing tests; API typecheck and lint pass.

@@ -456,14 +456,21 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 	if host.Status() != acp.HostReady {
 		return nil, fmt.Errorf("restored agent failed to become ready: %s", host.Status())
 	}
-	if validateRestoredGitState != nil {
-		if err := validateRestoredGitState(); err != nil {
-			_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "git_mismatch", err.Error(), callbackToken)
-			return nil, err
+	if err := s.reportRestoredSnapshotIfGitStateMatches(ctx, runtime.ID, chatSessionID, callbackToken, validateRestoredGitState); err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"status": "restored", "degradation": restore.Degradation}, nil
+}
+
+func (s *Server) reportRestoredSnapshotIfGitStateMatches(ctx context.Context, workspaceID, chatSessionID, callbackToken string, validateGitState func() error) error {
+	if validateGitState != nil {
+		if err := validateGitState(); err != nil {
+			_ = s.reportSnapshotRestoreResult(ctx, workspaceID, chatSessionID, "git_mismatch", err.Error(), callbackToken)
+			return err
 		}
 	}
-	_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "restored", "", callbackToken)
-	return map[string]interface{}{"status": "restored", "degradation": restore.Degradation}, nil
+	_ = s.reportSnapshotRestoreResult(ctx, workspaceID, chatSessionID, "restored", "", callbackToken)
+	return nil
 }
 
 func snapshotRestoreGitState(restore *snapshotRestoreResponse) (snapshotGitState, error) {

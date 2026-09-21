@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -151,7 +152,7 @@ func TestDownloadAndRestoreWIPPreservesIndexAndWorktree(t *testing.T) {
 	}
 }
 
-func TestCreateWIPBundleSkipsCleanRemoteCommit(t *testing.T) {
+func TestCreateWIPBundlePreservesCleanRemoteCommit(t *testing.T) {
 	repo, _ := initSnapshotRemoteRepo(t)
 	state, err := captureStandaloneSnapshotGitState(context.Background(), repo)
 	if err != nil {
@@ -161,16 +162,40 @@ func TestCreateWIPBundleSkipsCleanRemoteCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bundlePath != "" {
-		defer os.Remove(bundlePath)
-		t.Fatalf("bundlePath = %q, want no bundle for a clean remotely reachable HEAD", bundlePath)
+	if bundlePath == "" {
+		t.Fatal("clean remotely reachable HEAD did not produce a Git bundle")
 	}
+	defer os.Remove(bundlePath)
 	if base != state.BaseCommit || state.BaseCommit != gitOutput(t, repo, "rev-parse", "HEAD") {
 		t.Fatalf("captured base = %q, want current HEAD", state.BaseCommit)
 	}
 	if state.Git == nil || state.Git.Branch != "main" || state.Git.Upstream != "origin/main" {
 		t.Fatalf("captured git metadata = %#v", state.Git)
 	}
+}
+
+func TestCreateWIPBundlePreservesHeadWhenRemoteTrackingRefIsStale(t *testing.T) {
+	repo, remote := initSnapshotRemoteRepo(t)
+	runGit(t, repo, "checkout", "-b", "sam/stale-task")
+	if err := os.WriteFile(filepath.Join(repo, "stale.txt"), []byte("must survive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "stale.txt")
+	runGit(t, repo, "commit", "-m", "stale remote task")
+	runGit(t, repo, "push", "-u", "origin", "sam/stale-task")
+	runGit(t, remote, "update-ref", "-d", "refs/heads/sam/stale-task")
+
+	if got := gitOutput(t, repo, "rev-parse", "refs/remotes/origin/sam/stale-task"); got == "" {
+		t.Fatal("expected stale remote-tracking ref to remain locally")
+	}
+	_, bundlePath, _, err := createWIPBundle(context.Background(), repo, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundlePath == "" {
+		t.Fatal("stale remote-tracking ref suppressed the required Git bundle")
+	}
+	defer os.Remove(bundlePath)
 }
 
 func TestCleanLocalOnlyCommitBundlesAndRestoresExactGitState(t *testing.T) {
@@ -306,6 +331,94 @@ func TestRestoreDirtySnapshotMovesToSavedCommitBeforeApplyingWIP(t *testing.T) {
 	}
 }
 
+func TestContainerCleanLocalOnlyCommitBundlesAndRestoresExactGitState(t *testing.T) {
+	repo, remote := initSnapshotRemoteRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, "container-local.txt"), []byte("container local commit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "container-local.txt")
+	runGit(t, repo, "commit", "-m", "container local only")
+	wantHead := gitOutput(t, repo, "rev-parse", "HEAD")
+
+	s := &Server{config: &config.Config{Role: config.RoleStandalone}}
+	target := &containerSnapshotTarget{workDir: repo}
+	state, err := captureSnapshotGitState(context.Background(), func(ctx context.Context, env []string, args ...string) (string, error) {
+		return s.containerGit(ctx, target, env, args...)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, bundlePath, _, err := s.createContainerWIPBundle(context.Background(), target, 1024, 1<<30, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundlePath == "" {
+		t.Fatal("clean local-only container snapshot did not produce a Git bundle")
+	}
+	defer os.Remove(bundlePath)
+
+	restored := filepath.Join(t.TempDir(), "restored")
+	runGit(t, filepath.Dir(restored), "clone", "--single-branch", "--branch", "main", remote, restored)
+	bundleServer := serveSnapshotBundle(t, bundlePath)
+	defer bundleServer.Close()
+	s.config.ControlPlaneURL = bundleServer.URL
+	restoredTarget := &containerSnapshotTarget{workDir: restored}
+	if err := s.downloadAndRestoreContainerWIPWithGitState(context.Background(), restoredTarget, bundleServer.URL, "token", time.Second, 1<<30, state); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitOutput(t, restored, "rev-parse", "HEAD"); got != wantHead {
+		t.Fatalf("restored container HEAD = %q, want local-only commit %q", got, wantHead)
+	}
+	if got := gitOutput(t, restored, "status", "--porcelain=v1"); got != "" {
+		t.Fatalf("restored container snapshot status = %q, want clean", got)
+	}
+}
+
+func TestContainerDirtySnapshotRestoresSavedCommitBeforeWIP(t *testing.T) {
+	seed, remote := initSnapshotRemoteRepo(t)
+	runGit(t, seed, "checkout", "-b", "sam/container-task")
+	if err := os.WriteFile(filepath.Join(seed, "container-task.txt"), []byte("saved"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, seed, "add", "container-task.txt")
+	runGit(t, seed, "commit", "-m", "container saved task")
+	runGit(t, seed, "push", "-u", "origin", "sam/container-task")
+	wantHead := gitOutput(t, seed, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(seed, "container-task.txt"), []byte("dirty container snapshot"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{config: &config.Config{Role: config.RoleStandalone}}
+	target := &containerSnapshotTarget{workDir: seed}
+	state, err := captureSnapshotGitState(context.Background(), func(ctx context.Context, env []string, args ...string) (string, error) {
+		return s.containerGit(ctx, target, env, args...)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, bundlePath, _, err := s.createContainerWIPBundle(context.Background(), target, 1024, 1<<30, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(bundlePath)
+
+	restored := filepath.Join(t.TempDir(), "restored")
+	runGit(t, filepath.Dir(restored), "clone", "--branch", "main", remote, restored)
+	bundleServer := serveSnapshotBundle(t, bundlePath)
+	defer bundleServer.Close()
+	s.config.ControlPlaneURL = bundleServer.URL
+	restoredTarget := &containerSnapshotTarget{workDir: restored}
+	if err := s.downloadAndRestoreContainerWIPWithGitState(context.Background(), restoredTarget, bundleServer.URL, "token", time.Second, 1<<30, state); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitOutput(t, restored, "rev-parse", "HEAD"); got != wantHead {
+		t.Fatalf("restored container HEAD = %q, want saved commit %q", got, wantHead)
+	}
+	if got := gitOutput(t, restored, "diff", "--", "container-task.txt"); !strings.Contains(got, "dirty container snapshot") {
+		t.Fatalf("restored container WIP diff = %q, want dirty snapshot", got)
+	}
+}
+
 func TestValidateSnapshotGitStateRejectsWrongHead(t *testing.T) {
 	repo := initSnapshotTestRepo(t)
 	actual := gitOutput(t, repo, "rev-parse", "HEAD")
@@ -313,6 +426,105 @@ func TestValidateSnapshotGitStateRejectsWrongHead(t *testing.T) {
 	err := validateStandaloneSnapshotGitState(context.Background(), repo, state)
 	if err == nil || !strings.Contains(err.Error(), state.BaseCommit) || !strings.Contains(err.Error(), actual) {
 		t.Fatalf("validation error = %v, want expected and actual commit diagnostics", err)
+	}
+}
+
+func TestValidateCapturedSnapshotGitStateRejectsCheckoutDuringCapture(t *testing.T) {
+	repo := initSnapshotTestRepo(t)
+	state, err := captureStandaloneSnapshotGitState(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "checkout", "-b", "changed-during-capture")
+	err = validateCapturedSnapshotGitState(context.Background(), standaloneSnapshotGit(repo), state)
+	if err == nil || !strings.Contains(err.Error(), "changed during capture") {
+		t.Fatalf("capture coherence error = %v, want changed-during-capture diagnostics", err)
+	}
+}
+
+func TestValidateCapturedSnapshotGitStateRejectsNonCanonicalUpstream(t *testing.T) {
+	repo := initSnapshotTestRepo(t)
+	runGit(t, repo, "remote", "add", "backup", filepath.Join(t.TempDir(), "backup.git"))
+	branch := gitOutput(t, repo, "branch", "--show-current")
+	runGit(t, repo, "update-ref", "refs/remotes/backup/"+branch, "HEAD")
+	runGit(t, repo, "config", "branch."+branch+".remote", "backup")
+	runGit(t, repo, "config", "branch."+branch+".merge", "refs/heads/"+branch)
+	state, err := captureStandaloneSnapshotGitState(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = validateCapturedSnapshotGitState(context.Background(), standaloneSnapshotGit(repo), state)
+	if err == nil || !strings.Contains(err.Error(), "canonical remote") {
+		t.Fatalf("capture metadata error = %v, want canonical remote diagnostics", err)
+	}
+}
+
+func TestTerminalRestoreReportRejectsHeadChangedDuringHarnessResume(t *testing.T) {
+	repo := initSnapshotTestRepo(t)
+	savedState, err := captureStandaloneSnapshotGitState(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "later.txt"), []byte("later"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "later.txt")
+	runGit(t, repo, "commit", "-m", "simulate harness changing HEAD")
+	actualHead := gitOutput(t, repo, "rev-parse", "HEAD")
+
+	var reports []map[string]string
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/session-snapshot/restore-result") {
+			http.NotFound(w, r)
+			return
+		}
+		var payload map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		reports = append(reports, payload)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer controlPlane.Close()
+
+	s := &Server{config: &config.Config{ControlPlaneURL: controlPlane.URL}}
+	err = s.reportRestoredSnapshotIfGitStateMatches(
+		context.Background(),
+		"workspace-1",
+		"chat-1",
+		"callback-token",
+		func() error { return validateStandaloneSnapshotGitState(context.Background(), repo, savedState) },
+	)
+	if err == nil || !strings.Contains(err.Error(), savedState.BaseCommit) || !strings.Contains(err.Error(), actualHead) {
+		t.Fatalf("terminal validation error = %v, want expected and actual HEAD diagnostics", err)
+	}
+	if len(reports) != 1 || reports[0]["status"] != "git_mismatch" {
+		t.Fatalf("restore reports = %#v, want one git_mismatch report", reports)
+	}
+	for _, report := range reports {
+		if report["status"] == "restored" {
+			t.Fatalf("terminal mismatch emitted restored report: %#v", reports)
+		}
+	}
+}
+
+func TestSnapshotRestoreDiagnosticRedactsCredentialURLsAndCapsOutput(t *testing.T) {
+	s := &Server{config: &config.Config{ErrorReportStringBytes: 96}}
+	diagnostic := s.snapshotRestoreDiagnostic(
+		"fatal:\nhttps://git-user:user-password@example.invalid/repo.git?access_token=query-secret " + strings.Repeat("x", 200),
+	)
+	for _, secret := range []string{"git-user", "user-password", "query-secret"} {
+		if strings.Contains(diagnostic, secret) {
+			t.Fatalf("diagnostic leaked %q: %q", secret, diagnostic)
+		}
+	}
+	if len(diagnostic) > 96 {
+		t.Fatalf("diagnostic length = %d, want at most 96 bytes", len(diagnostic))
+	}
+	if strings.ContainsAny(diagnostic, "\r\n\x00") {
+		t.Fatalf("diagnostic retained control characters: %q", diagnostic)
 	}
 }
 

@@ -25,6 +25,10 @@ type snapshotArchiveRoot struct {
 }
 
 func createWIPBundle(ctx context.Context, workDir string, entryThreshold int64) (string, string, []snapshotSkippedEntry, error) {
+	return createWIPBundleWithGitState(ctx, workDir, entryThreshold, nil)
+}
+
+func createWIPBundleWithGitState(ctx context.Context, workDir string, entryThreshold int64, capturedState *snapshotGitState) (string, string, []snapshotSkippedEntry, error) {
 	if ok, err := standaloneRepositoryPresent(workDir); err != nil || !ok {
 		if err != nil {
 			return "", "", nil, err
@@ -38,19 +42,12 @@ func createWIPBundle(ctx context.Context, workDir string, entryThreshold int64) 
 	if err != nil {
 		return "", "", nil, fmt.Errorf("resolve base commit: %w", err)
 	}
-	base := gitState.BaseCommit
-	status, err := runStandaloneGitCommand(ctx, workDir, nil, "status", "--porcelain")
-	if err != nil {
-		return base, "", nil, fmt.Errorf("git status: %w", err)
+	if capturedState != nil {
+		*capturedState = gitState
 	}
-	if strings.TrimSpace(status) == "" {
-		localOnly, reachabilityErr := snapshotHeadRequiresBundle(ctx, standaloneSnapshotGit(workDir), base)
-		if reachabilityErr != nil {
-			return base, "", nil, reachabilityErr
-		}
-		if !localOnly {
-			return base, "", nil, nil
-		}
+	base := gitState.BaseCommit
+	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "status", "--porcelain"); err != nil {
+		return base, "", nil, fmt.Errorf("git status: %w", err)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

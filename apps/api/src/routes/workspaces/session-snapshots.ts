@@ -9,6 +9,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord, parseWithSchema } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
+import { isValidGitRefName } from '../../services/branch-name';
 import {
   generateSessionSnapshotDirectUploadUrl,
   sessionSnapshotDirectUploadAvailable,
@@ -105,6 +106,8 @@ const SessionSnapshotManifestSchema = v.object({
   }),
   createdAt: v.string(),
 });
+
+const FULL_GIT_OBJECT_ID = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
 
 async function readJsonBody(c: SnapshotRouteContext) {
   const raw = await c.req.raw.text();
@@ -436,11 +439,35 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
   const baseCommit = requestedBaseCommit ?? manifest.baseCommit ?? null;
   if (manifest.git) {
     if (!baseCommit) throw errors.badRequest('Snapshot Git metadata requires a base commit');
+    if (!FULL_GIT_OBJECT_ID.test(baseCommit)) {
+      throw errors.badRequest('Snapshot Git metadata requires a full Git object ID');
+    }
     if (manifest.git.detached === Boolean(manifest.git.branch)) {
       throw errors.badRequest('Snapshot Git branch and detached state are inconsistent');
     }
+    if (manifest.git.branch && !isValidGitRefName(manifest.git.branch)) {
+      throw errors.badRequest('Snapshot Git branch is invalid');
+    }
+    if (manifest.git.detached && (manifest.git.upstream || manifest.git.remote)) {
+      throw errors.badRequest('Detached snapshot Git state cannot include upstream metadata');
+    }
     if (manifest.git.upstream && !manifest.git.remote) {
       throw errors.badRequest('Snapshot Git upstream requires remote metadata');
+    }
+    if (manifest.git.remote && !manifest.git.upstream) {
+      throw errors.badRequest('Snapshot Git remote requires upstream metadata');
+    }
+    if (
+      manifest.git.upstream &&
+      (manifest.git.remote !== 'origin' || !manifest.git.upstream.startsWith('origin/'))
+    ) {
+      throw errors.badRequest('Snapshot Git upstream must use the canonical origin remote');
+    }
+    if (
+      manifest.git.upstream &&
+      !isValidGitRefName(manifest.git.upstream.slice('origin/'.length))
+    ) {
+      throw errors.badRequest('Snapshot Git upstream branch is invalid');
     }
   }
   if (
@@ -662,7 +689,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/restore-result', async (c) => 
   if (workspace.chatSessionId !== chatSessionId) {
     throw errors.forbidden('Snapshot chat session does not match workspace');
   }
-  await recordSessionSnapshotRestoreResult(db, {
+  await recordSessionSnapshotRestoreResult(db, c.env, {
     chatSessionId,
     status: requiredStringField(body, 'status'),
     message: stringField(body, 'message', false),

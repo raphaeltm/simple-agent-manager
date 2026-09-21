@@ -154,6 +154,13 @@ describe('session snapshot D1/R2 worker wiring', () => {
       new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('wip'))),
       (byte) => byte.toString(16).padStart(2, '0')
     ).join('');
+    const savedCommit = 'f967ae394bed2c21f100f6cad23e3a2897caf65a';
+    const savedGitState = {
+      branch: 'sam/new-ui-resources-being-qd7mnj',
+      upstream: 'origin/sam/new-ui-resources-being-qd7mnj',
+      remote: 'origin',
+      detached: false,
+    };
     const manifest: SessionSnapshotManifest = {
       version: 1,
       chatSessionId,
@@ -161,7 +168,8 @@ describe('session snapshot D1/R2 worker wiring', () => {
       agentSessionId,
       acpSessionId: 'acp-session-1',
       agentType: 'openai-codex',
-      baseCommit: 'base-commit',
+      baseCommit: savedCommit,
+      git: savedGitState,
       status: 'available',
       degradation: 'none',
       skipped: [],
@@ -179,7 +187,7 @@ describe('session snapshot D1/R2 worker wiring', () => {
       chatSessionId,
       agentSessionId,
       runtime: 'cf-container',
-      baseCommit: 'base-commit',
+      baseCommit: savedCommit,
       status: 'available',
       degradation: 'none',
       captureGeneration: prepared.generation,
@@ -200,13 +208,17 @@ describe('session snapshot D1/R2 worker wiring', () => {
       homeR2Key: prepared.keys.home,
       wipR2Key: prepared.keys.wip,
       manifestR2Key: prepared.keys.manifest,
-      baseCommit: 'base-commit',
+      baseCommit: savedCommit,
       snapshotGeneration: prepared.generation,
       captureGeneration: null,
       homeSha256,
       wipSha256,
     });
     if (!restorable) throw new Error('snapshot was not restorable');
+    expect(JSON.parse(restorable.manifestJson ?? '{}')).toMatchObject({
+      baseCommit: savedCommit,
+      git: savedGitState,
+    });
     await expect(verifyRestorableSessionSnapshotArtifacts(bindings, restorable)).resolves.toBe(
       true
     );
@@ -219,6 +231,8 @@ describe('session snapshot D1/R2 worker wiring', () => {
       workspaceId,
       acpSessionId: 'acp-session-1',
       agentType: 'openai-codex',
+      baseCommit: savedCommit,
+      git: savedGitState,
       artifacts: {
         home: { sizeBytes: 4 },
         wip: { sizeBytes: 3 },

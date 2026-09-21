@@ -87,6 +87,7 @@ function makeDb(
 
 const HOME_SHA256 = '4ea140588150773ce3aace786aeef7f4049ce100fa649c94fbbddb960f1da942';
 const WIP_SHA256 = '32e4caaf6344aea2380a7f150312f351897e2dc23de446b4e9c418298d1cbc97';
+const BASE_COMMIT = 'f967ae394bed2c21f100f6cad23e3a2897caf65a';
 
 function checksumBytes(hex: string): ArrayBuffer {
   return Uint8Array.from(hex.match(/.{2}/g) ?? [], (byte) => Number.parseInt(byte, 16)).buffer;
@@ -613,7 +614,7 @@ describe('workspaces session snapshot callback routes', () => {
       runtime: 'cf-container',
       status: 'available',
       degradation: 'none',
-      baseCommit: 'abc123',
+      baseCommit: BASE_COMMIT,
       artifactSizes: { homeBytes: 999, wipBytes: 999 },
       manifest: {
         version: 1,
@@ -622,7 +623,7 @@ describe('workspaces session snapshot callback routes', () => {
         agentSessionId: 'agent-session-1',
         acpSessionId: 'acp-session-1',
         agentType: 'openai-codex',
-        baseCommit: 'abc123',
+        baseCommit: BASE_COMMIT,
         git: {
           branch: 'sam/saved-task',
           upstream: 'origin/sam/saved-task',
@@ -653,7 +654,7 @@ describe('workspaces session snapshot callback routes', () => {
       expect.anything(),
       runtimeBindings,
       expect.objectContaining({
-        baseCommit: 'abc123',
+        baseCommit: BASE_COMMIT,
         artifactSizes: { homeBytes: 4, wipBytes: 3 },
         manifest: expect.objectContaining({
           git: {
@@ -681,6 +682,118 @@ describe('workspaces session snapshot callback routes', () => {
     expect(baseCommitMismatch.status).toBe(400);
     await expect(baseCommitMismatch.json()).resolves.toMatchObject({
       message: 'Snapshot base commit does not match manifest',
+    });
+
+    const shortBaseCommit = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...body,
+          baseCommit: 'abc123',
+          manifest: { ...body.manifest, baseCommit: 'abc123' },
+        }),
+      },
+      runtimeBindings
+    );
+    expect(shortBaseCommit.status).toBe(400);
+    await expect(shortBaseCommit.json()).resolves.toMatchObject({
+      message: 'Snapshot Git metadata requires a full Git object ID',
+    });
+
+    const customRemote = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...body,
+          manifest: {
+            ...body.manifest,
+            git: {
+              branch: 'sam/saved-task',
+              upstream: 'backup/sam/saved-task',
+              remote: 'backup',
+              detached: false,
+            },
+          },
+        }),
+      },
+      runtimeBindings
+    );
+    expect(customRemote.status).toBe(400);
+    await expect(customRemote.json()).resolves.toMatchObject({
+      message: 'Snapshot Git upstream must use the canonical origin remote',
+    });
+
+    const detachedWithUpstream = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...body,
+          manifest: {
+            ...body.manifest,
+            git: {
+              upstream: 'origin/sam/saved-task',
+              remote: 'origin',
+              detached: true,
+            },
+          },
+        }),
+      },
+      runtimeBindings
+    );
+    expect(detachedWithUpstream.status).toBe(400);
+    await expect(detachedWithUpstream.json()).resolves.toMatchObject({
+      message: 'Detached snapshot Git state cannot include upstream metadata',
+    });
+
+    const invalidBranch = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...body,
+          manifest: {
+            ...body.manifest,
+            git: { branch: '../invalid', detached: false },
+          },
+        }),
+      },
+      runtimeBindings
+    );
+    expect(invalidBranch.status).toBe(400);
+    await expect(invalidBranch.json()).resolves.toMatchObject({
+      message: 'Snapshot Git branch is invalid',
+    });
+
+    const invalidUpstream = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...body,
+          manifest: {
+            ...body.manifest,
+            git: {
+              branch: 'sam/saved-task',
+              upstream: 'origin/../invalid',
+              remote: 'origin',
+              detached: false,
+            },
+          },
+        }),
+      },
+      runtimeBindings
+    );
+    expect(invalidUpstream.status).toBe(400);
+    await expect(invalidUpstream.json()).resolves.toMatchObject({
+      message: 'Snapshot Git upstream branch is invalid',
     });
 
     for (const degradation of [
@@ -778,6 +891,56 @@ describe('workspaces session snapshot callback routes', () => {
       runtimeBindings
     );
     expect(lifecycleMismatch.status).toBe(400);
+  });
+
+  it('returns the exact persisted Git state in the restore response', async () => {
+    mocks.getRestorableSessionSnapshot.mockResolvedValue({
+      status: 'available',
+      degradation: 'none',
+      baseCommit: BASE_COMMIT,
+      homeR2Key: null,
+      wipR2Key: null,
+      manifestR2Key: 'test-snapshots/chat-1/generation-1/manifest.json',
+      manifestJson: JSON.stringify({
+        version: 1,
+        chatSessionId: 'chat-1',
+        workspaceId: 'WS_1',
+        agentSessionId: 'agent-session-1',
+        baseCommit: BASE_COMMIT,
+        git: {
+          branch: 'sam/saved-task',
+          upstream: 'origin/sam/saved-task',
+          remote: 'origin',
+          detached: false,
+        },
+        status: 'available',
+        degradation: 'none',
+        skipped: [],
+        artifacts: {},
+        createdAt: '2026-09-21T00:00:00.000Z',
+      }),
+    });
+
+    const res = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/restore?chatSessionId=chat-1',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      runtimeBindings
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      available: true,
+      baseCommit: BASE_COMMIT,
+      manifest: {
+        baseCommit: BASE_COMMIT,
+        git: {
+          branch: 'sam/saved-task',
+          upstream: 'origin/sam/saved-task',
+          remote: 'origin',
+          detached: false,
+        },
+      },
+    });
   });
 
   it('accepts direct-upload artifacts with absent R2 checksum when authorization matches', async () => {

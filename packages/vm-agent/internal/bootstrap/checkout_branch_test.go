@@ -84,6 +84,14 @@ func TestCreateCheckoutBranchTracksExistingRemoteBranch(t *testing.T) {
 	}
 }
 
+func TestCreateCheckoutBranchDoesNotTreatInspectionFailureAsMissingBranch(t *testing.T) {
+	workspace := t.TempDir()
+	err := createCheckoutBranch(context.Background(), workspace, "main", "sam/saved-task")
+	if err == nil || !strings.Contains(err.Error(), "failed to inspect remote checkout branch") {
+		t.Fatalf("createCheckoutBranch() error = %v, want remote inspection failure", err)
+	}
+}
+
 func runCheckoutBranchGit(t *testing.T, repo string, args ...string) string {
 	t.Helper()
 	cmdArgs := append([]string{"-C", filepath.Clean(repo)}, args...)

@@ -58,12 +58,44 @@ func captureSnapshotGitState(ctx context.Context, git snapshotGitCommand) (snaps
 	return state, nil
 }
 
-func snapshotHeadRequiresBundle(ctx context.Context, git snapshotGitCommand, baseCommit string) (bool, error) {
-	containedBy, err := git(ctx, nil, "for-each-ref", "--format=%(refname)", "--contains="+strings.TrimSpace(baseCommit), "refs/remotes")
+func validateCapturedSnapshotGitState(ctx context.Context, git snapshotGitCommand, expected snapshotGitState) error {
+	actual, err := captureSnapshotGitState(ctx, git)
 	if err != nil {
-		return false, fmt.Errorf("inspect remote reachability for snapshot HEAD: %w", err)
+		return fmt.Errorf("validate snapshot Git state after capture: %w", err)
 	}
-	return strings.TrimSpace(containedBy) == "", nil
+	if actual.BaseCommit != expected.BaseCommit || !sameSnapshotGitMetadata(actual.Git, expected.Git) {
+		return fmt.Errorf(
+			"snapshot Git state changed during capture: expected HEAD %s (%s), actual HEAD %s (%s)",
+			expected.BaseCommit,
+			describeSnapshotGitMetadata(expected.Git),
+			actual.BaseCommit,
+			describeSnapshotGitMetadata(actual.Git),
+		)
+	}
+	return validateSnapshotGitMetadata(ctx, git, actual.Git)
+}
+
+func sameSnapshotGitMetadata(left, right *snapshotGitMetadata) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Branch == right.Branch &&
+		left.Upstream == right.Upstream &&
+		left.Remote == right.Remote &&
+		left.Detached == right.Detached
+}
+
+func describeSnapshotGitMetadata(metadata *snapshotGitMetadata) string {
+	if metadata == nil {
+		return "legacy ref metadata"
+	}
+	if metadata.Detached {
+		return "detached HEAD"
+	}
+	if metadata.Upstream != "" {
+		return fmt.Sprintf("branch %q tracking %q", metadata.Branch, metadata.Upstream)
+	}
+	return fmt.Sprintf("branch %q", metadata.Branch)
 }
 
 func restoreStandaloneSnapshotGitState(ctx context.Context, workDir string, state snapshotGitState) error {
@@ -82,6 +114,9 @@ func restoreSnapshotGitState(ctx context.Context, git snapshotGitCommand, state 
 	if !isSnapshotObjectID(state.BaseCommit) {
 		return fmt.Errorf("restore snapshot Git state: saved BaseCommit %q is not a full Git object ID", state.BaseCommit)
 	}
+	if err := validateSnapshotGitMetadata(ctx, git, state.Git); err != nil {
+		return err
+	}
 	if err := ensureSnapshotCommitAvailable(ctx, git, state); err != nil {
 		return err
 	}
@@ -97,13 +132,11 @@ func restoreSnapshotGitState(ctx context.Context, git snapshotGitCommand, state 
 		}
 		return validateSnapshotGitState(ctx, git, state)
 	}
+	return restoreSnapshotBranchState(ctx, git, state)
+}
+
+func restoreSnapshotBranchState(ctx context.Context, git snapshotGitCommand, state snapshotGitState) error {
 	branch := strings.TrimSpace(state.Git.Branch)
-	if branch == "" {
-		return fmt.Errorf("restore snapshot Git state: saved checkout is neither a branch nor detached")
-	}
-	if output, err := git(ctx, nil, "check-ref-format", "--branch", branch); err != nil {
-		return fmt.Errorf("restore snapshot branch %q: invalid saved branch: %w: %s", branch, err, output)
-	}
 	if output, err := git(ctx, nil, "checkout", "--force", "-B", branch, state.BaseCommit); err != nil {
 		return fmt.Errorf("restore snapshot branch %q at %s: %w: %s", branch, state.BaseCommit, err, output)
 	}
@@ -116,9 +149,6 @@ func restoreSnapshotGitState(ctx context.Context, git snapshotGitCommand, state 
 		}
 		remote := strings.TrimSpace(state.Git.Remote)
 		upstreamBranch := strings.TrimPrefix(upstream, remote+"/")
-		if remote == "." {
-			upstreamBranch = upstream
-		}
 		if output, err := git(ctx, nil, "config", "--local", "branch."+branch+".remote", remote); err != nil {
 			return fmt.Errorf("restore snapshot remote %q for branch %q: %w: %s", remote, branch, err, output)
 		}
@@ -127,6 +157,40 @@ func restoreSnapshotGitState(ctx context.Context, git snapshotGitCommand, state 
 		}
 	}
 	return validateSnapshotGitState(ctx, git, state)
+}
+
+func validateSnapshotGitMetadata(ctx context.Context, git snapshotGitCommand, metadata *snapshotGitMetadata) error {
+	if metadata == nil {
+		return nil
+	}
+	branch := strings.TrimSpace(metadata.Branch)
+	upstream := strings.TrimSpace(metadata.Upstream)
+	remote := strings.TrimSpace(metadata.Remote)
+	if metadata.Detached {
+		if branch != "" || upstream != "" || remote != "" {
+			return fmt.Errorf("restore snapshot Git state: detached metadata includes branch or upstream state")
+		}
+		return nil
+	}
+	if branch == "" {
+		return fmt.Errorf("restore snapshot Git state: saved checkout is neither a branch nor detached")
+	}
+	if output, err := git(ctx, nil, "check-ref-format", "--branch", branch); err != nil {
+		return fmt.Errorf("restore snapshot Git state: invalid saved branch: %w: %s", err, output)
+	}
+	if upstream == "" {
+		if remote != "" {
+			return fmt.Errorf("restore snapshot Git state: saved remote has no upstream")
+		}
+		return nil
+	}
+	if remote != "origin" || !strings.HasPrefix(upstream, "origin/") {
+		return fmt.Errorf("restore snapshot Git state: saved upstream is not available from the canonical remote")
+	}
+	if output, err := git(ctx, nil, "check-ref-format", "--branch", strings.TrimPrefix(upstream, "origin/")); err != nil {
+		return fmt.Errorf("restore snapshot Git state: invalid saved upstream: %w: %s", err, output)
+	}
+	return nil
 }
 
 func ensureSnapshotCommitAvailable(ctx context.Context, git snapshotGitCommand, state snapshotGitState) error {
@@ -158,13 +222,7 @@ func ensureSnapshotCommitAvailable(ctx context.Context, git snapshotGitCommand, 
 func ensureSnapshotUpstreamAvailable(ctx context.Context, git snapshotGitCommand, state snapshotGitState) error {
 	upstream := strings.TrimSpace(state.Git.Upstream)
 	remote := strings.TrimSpace(state.Git.Remote)
-	if remote == "." {
-		if _, err := git(ctx, nil, "rev-parse", "--verify", upstream); err != nil {
-			return fmt.Errorf("restore local snapshot upstream %q: saved branch is unavailable", upstream)
-		}
-		return nil
-	}
-	if remote == "" || remote == "." || !strings.HasPrefix(upstream, remote+"/") {
+	if remote == "" || !strings.HasPrefix(upstream, remote+"/") {
 		return fmt.Errorf("restore snapshot upstream %q: saved remote metadata is unavailable", upstream)
 	}
 	branch := strings.TrimPrefix(upstream, remote+"/")
@@ -193,34 +251,17 @@ func ensureSnapshotUpstreamAvailable(ctx context.Context, git snapshotGitCommand
 	return nil
 }
 
-func snapshotFetchRemotes(ctx context.Context, git snapshotGitCommand, metadata *snapshotGitMetadata) []string {
+func snapshotFetchRemotes(ctx context.Context, git snapshotGitCommand, _ *snapshotGitMetadata) []string {
 	available, err := git(ctx, nil, "remote")
 	if err != nil {
 		return nil
 	}
-	seen := make(map[string]bool)
-	var remotes []string
-	appendRemote := func(remote string) {
-		remote = strings.TrimSpace(remote)
-		if remote == "" || remote == "." || seen[remote] {
-			return
-		}
-		for _, candidate := range strings.Fields(available) {
-			if candidate == remote {
-				seen[remote] = true
-				remotes = append(remotes, remote)
-				return
-			}
-		}
-	}
-	if metadata != nil {
-		appendRemote(metadata.Remote)
-	}
-	appendRemote("origin")
 	for _, remote := range strings.Fields(available) {
-		appendRemote(remote)
+		if remote == "origin" {
+			return []string{"origin"}
+		}
 	}
-	return remotes
+	return nil
 }
 
 func snapshotCommitAvailable(ctx context.Context, git snapshotGitCommand, commit string) bool {

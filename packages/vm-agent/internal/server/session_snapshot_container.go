@@ -246,6 +246,10 @@ func (s *Server) resetContainerSnapshotIndexPaths(ctx context.Context, target *c
 }
 
 func (s *Server) createContainerWIPBundle(ctx context.Context, target *containerSnapshotTarget, entryThreshold, maxBytes int64, reportProgress func(context.Context, string)) (string, string, []snapshotSkippedEntry, error) {
+	return s.createContainerWIPBundleWithGitState(ctx, target, entryThreshold, maxBytes, reportProgress, nil)
+}
+
+func (s *Server) createContainerWIPBundleWithGitState(ctx context.Context, target *containerSnapshotTarget, entryThreshold, maxBytes int64, reportProgress func(context.Context, string), capturedState *snapshotGitState) (string, string, []snapshotSkippedEntry, error) {
 	present, err := s.containerGit(ctx, target, nil, "rev-parse", "--is-inside-work-tree")
 	if err != nil || present != "true" {
 		return "", "", nil, nil
@@ -260,19 +264,12 @@ func (s *Server) createContainerWIPBundle(ctx context.Context, target *container
 	if err != nil {
 		return "", "", nil, fmt.Errorf("resolve container snapshot base commit: %w", err)
 	}
-	base := gitState.BaseCommit
-	status, err := s.containerGit(ctx, target, nil, "status", "--porcelain")
-	if err != nil {
-		return base, "", nil, fmt.Errorf("container git status: %w", err)
+	if capturedState != nil {
+		*capturedState = gitState
 	}
-	if status == "" {
-		localOnly, reachabilityErr := snapshotHeadRequiresBundle(ctx, gitCommand, base)
-		if reachabilityErr != nil {
-			return base, "", nil, reachabilityErr
-		}
-		if !localOnly {
-			return base, "", nil, nil
-		}
+	base := gitState.BaseCommit
+	if _, err := s.containerGit(ctx, target, nil, "status", "--porcelain"); err != nil {
+		return base, "", nil, fmt.Errorf("container git status: %w", err)
 	}
 	if reportProgress != nil {
 		reportProgress(ctx, "wip-capture")
