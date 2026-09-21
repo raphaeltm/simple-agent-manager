@@ -27,6 +27,21 @@ import { teardownDeploymentEnvironmentOnNode } from '../services/node-agent';
 type DeploymentReleaseDb = ReturnType<typeof drizzle>;
 type ReleasePlacement = DeploymentPlacement;
 type ProvisionDeploymentNodeOptions = NonNullable<Parameters<typeof provisionDeploymentNode>[4]>;
+type BeforeExternalMutation = () => Promise<void>;
+
+interface PlaceReleaseOnDeploymentNodeParams {
+  db: DeploymentReleaseDb;
+  env: Env;
+  envId: string;
+  projectId: string;
+  userId: string;
+  releaseId: string;
+  requiresVolumes: boolean;
+  placement: ReleasePlacement | null;
+  reservation: ResolvedResourceReservation;
+  executionCtx?: ExecutionContext;
+  beforeExternalMutation?: BeforeExternalMutation;
+}
 class RelocationClaimLostError extends Error {}
 
 export class DeploymentPlacementCancelledError extends Error {}
@@ -227,47 +242,47 @@ async function stopRuntimeBeforeNodeMove(params: {
   }
 }
 
-async function clearSharedNodeForVolumeRelease(
-  db: DeploymentReleaseDb,
-  env: Env,
-  userId: string,
-  envId: string,
-  nodeId: string | null,
-  requiresVolumes: boolean,
-  placement: ReleasePlacement | null,
-  reservation: ResolvedResourceReservation,
-  expectedReservationJson: string | null,
-  releaseId: string,
-  beforeExternalMutation?: () => Promise<void>
-): Promise<string | null> {
-  if (!requiresVolumes || !nodeId) {
-    return nodeId;
+async function clearSharedNodeForVolumeRelease(params: {
+  db: DeploymentReleaseDb;
+  env: Env;
+  userId: string;
+  envId: string;
+  nodeId: string | null;
+  requiresVolumes: boolean;
+  placement: ReleasePlacement | null;
+  reservation: ResolvedResourceReservation;
+  expectedReservationJson: string | null;
+  releaseId: string;
+  beforeExternalMutation?: BeforeExternalMutation;
+}): Promise<string | null> {
+  if (!params.requiresVolumes || !params.nodeId) {
+    return params.nodeId;
   }
 
-  const nodeRows = await db
+  const nodeRows = await params.db
     .select({ nodeMode: schema.nodes.nodeMode })
     .from(schema.nodes)
-    .where(eq(schema.nodes.id, nodeId))
+    .where(eq(schema.nodes.id, params.nodeId))
     .limit(1);
 
   if (nodeRows[0]?.nodeMode === 'exclusive') {
-    return nodeId;
+    return params.nodeId;
   }
 
-  if (!placement) {
+  if (!params.placement) {
     throw new RelocationClaimLostError('Deployment placement is unavailable for volume migration');
   }
-  await beforeExternalMutation?.();
-  await assertLatestDeploymentRelease(env, envId, releaseId);
+  await params.beforeExternalMutation?.();
+  await assertLatestDeploymentRelease(params.env, params.envId, params.releaseId);
   const relocationClaim = await claimDeploymentEnvironmentRelocation({
-    env,
-    envId,
-    nodeId,
-    userId,
-    placement,
-    expectedReservationJson,
-    reservation,
-    releaseId,
+    env: params.env,
+    envId: params.envId,
+    nodeId: params.nodeId,
+    userId: params.userId,
+    placement: params.placement,
+    expectedReservationJson: params.expectedReservationJson,
+    reservation: params.reservation,
+    releaseId: params.releaseId,
   });
   if (!relocationClaim) {
     throw new RelocationClaimLostError(
@@ -276,32 +291,32 @@ async function clearSharedNodeForVolumeRelease(
   }
   try {
     await stopRuntimeBeforeNodeMove({
-      db,
-      env,
-      userId,
-      envId,
-      nodeId,
-      beforeExternalMutation,
+      db: params.db,
+      env: params.env,
+      userId: params.userId,
+      envId: params.envId,
+      nodeId: params.nodeId,
+      beforeExternalMutation: params.beforeExternalMutation,
     });
-    await beforeExternalMutation?.();
+    await params.beforeExternalMutation?.();
     const cleared = await completeDeploymentEnvironmentRelocation({
-      env,
-      envId,
-      nodeId,
+      env: params.env,
+      envId: params.envId,
+      nodeId: params.nodeId,
       claimJson: relocationClaim,
-      releaseId,
+      releaseId: params.releaseId,
     });
     if (!cleared) {
-      await beforeExternalMutation?.();
+      await params.beforeExternalMutation?.();
       throw new Error('Deployment relocation claim was lost before volume migration completed');
     }
   } catch (error) {
     await restoreDeploymentEnvironmentRelocation({
-      env,
-      envId,
-      nodeId,
+      env: params.env,
+      envId: params.envId,
+      nodeId: params.nodeId,
       claimJson: relocationClaim,
-      reservationJson: expectedReservationJson,
+      reservationJson: params.expectedReservationJson,
     });
     throw error;
   }
@@ -534,19 +549,142 @@ async function attachVolumesToExistingNode(params: {
   });
 }
 
-export async function placeReleaseOnDeploymentNode(params: {
-  db: DeploymentReleaseDb;
-  env: Env;
-  envId: string;
-  projectId: string;
-  userId: string;
-  releaseId: string;
-  requiresVolumes: boolean;
-  placement: ReleasePlacement | null;
-  reservation: ResolvedResourceReservation;
-  executionCtx?: ExecutionContext;
-  beforeExternalMutation?: () => Promise<void>;
+async function reserveExistingNodeForRelease(params: {
+  release: PlaceReleaseOnDeploymentNodeParams;
+  nodeId: string;
+  expectedReservationJson: string | null;
+  beforeExternalMutation: BeforeExternalMutation;
+}): Promise<boolean> {
+  if (!params.release.placement) return true;
+  await params.beforeExternalMutation();
+  const nodeMode = params.release.requiresVolumes ? 'exclusive' : 'shared';
+  const currentNode = await findDeploymentNodeWithCapacity(
+    params.release.env,
+    params.release.userId,
+    params.release.placement,
+    params.release.requiresVolumes,
+    {
+      nodeId: params.nodeId,
+      excludeEnvironmentId: params.release.envId,
+      nodeMode,
+    }
+  );
+  if (currentNode?.nodeId !== params.nodeId) return false;
+  return linkEnvironmentToNode({
+    env: params.release.env,
+    db: params.release.db,
+    envId: params.release.envId,
+    nodeId: params.nodeId,
+    placement: currentNode.placement,
+    userId: params.release.userId,
+    expectedNodeStatus: 'running',
+    nodeMode,
+    expectedReservationJson: params.expectedReservationJson,
+    releaseId: params.release.releaseId,
+  });
+}
+
+async function relocateSharedNodeForRelease(params: {
+  release: PlaceReleaseOnDeploymentNodeParams & { placement: ReleasePlacement };
+  nodeId: string;
+  expectedReservationJson: string | null;
+  beforeExternalMutation: BeforeExternalMutation;
 }): Promise<string | null> {
+  const { release } = params;
+  const relocationClaim = await claimDeploymentEnvironmentRelocation({
+    env: release.env,
+    envId: release.envId,
+    nodeId: params.nodeId,
+    userId: release.userId,
+    placement: release.placement,
+    expectedReservationJson: params.expectedReservationJson,
+    reservation: release.reservation,
+    releaseId: release.releaseId,
+  });
+  if (!relocationClaim) {
+    await params.beforeExternalMutation();
+    await markDeploymentReleasePlacementFailed(
+      release.db,
+      release.env,
+      release.envId,
+      release.releaseId,
+      'Deployment placement changed during release admission; retry the release',
+      false
+    );
+    return null;
+  }
+  try {
+    await stopRuntimeBeforeNodeMove({
+      db: release.db,
+      env: release.env,
+      userId: release.userId,
+      envId: release.envId,
+      nodeId: params.nodeId,
+      beforeExternalMutation: params.beforeExternalMutation,
+    });
+    await params.beforeExternalMutation();
+    const cleared = await completeDeploymentEnvironmentRelocation({
+      env: release.env,
+      envId: release.envId,
+      nodeId: params.nodeId,
+      claimJson: relocationClaim,
+      releaseId: release.releaseId,
+    });
+    if (!cleared) {
+      await params.beforeExternalMutation();
+      throw new Error('Deployment relocation claim was lost before placement completed');
+    }
+  } catch (err) {
+    await restoreDeploymentEnvironmentRelocation({
+      env: release.env,
+      envId: release.envId,
+      nodeId: params.nodeId,
+      claimJson: relocationClaim,
+      reservationJson: params.expectedReservationJson,
+    });
+    if (!isPlacementCancellation(err)) {
+      await markDeploymentReleasePlacementFailed(
+        release.db,
+        release.env,
+        release.envId,
+        release.releaseId,
+        err
+      );
+    }
+    throw err;
+  }
+  return provisionNodeForRelease({
+    ...release,
+    beforeExternalMutation: params.beforeExternalMutation,
+  });
+}
+
+async function handleExistingNodeReservationFailure(params: {
+  release: PlaceReleaseOnDeploymentNodeParams;
+  nodeId: string;
+  expectedReservationJson: string | null;
+  beforeExternalMutation: BeforeExternalMutation;
+}): Promise<string | null> {
+  await params.beforeExternalMutation();
+  if (!params.release.requiresVolumes && params.release.placement) {
+    return relocateSharedNodeForRelease({
+      ...params,
+      release: { ...params.release, placement: params.release.placement },
+    });
+  }
+  await markDeploymentReleasePlacementFailed(
+    params.release.db,
+    params.release.env,
+    params.release.envId,
+    params.release.releaseId,
+    'Existing exclusive deployment node cannot admit the declared resource reservation'
+  );
+  return null;
+}
+
+export async function placeReleaseOnDeploymentNode(
+  params: PlaceReleaseOnDeploymentNodeParams
+): Promise<string | null> {
   const runtime = await readEnvironmentRuntimeState(params.db, params.envId);
   const assertPlacementCurrent = async () => {
     await params.beforeExternalMutation?.();
@@ -560,19 +698,19 @@ export async function placeReleaseOnDeploymentNode(params: {
   }
   let nodeId: string | null;
   try {
-    nodeId = await clearSharedNodeForVolumeRelease(
-      params.db,
-      params.env,
-      params.userId,
-      params.envId,
-      runtime.nodeId,
-      params.requiresVolumes,
-      params.placement,
-      params.reservation,
-      runtime.resolvedReservationJson,
-      params.releaseId,
-      assertPlacementCurrent
-    );
+    nodeId = await clearSharedNodeForVolumeRelease({
+      db: params.db,
+      env: params.env,
+      userId: params.userId,
+      envId: params.envId,
+      nodeId: runtime.nodeId,
+      requiresVolumes: params.requiresVolumes,
+      placement: params.placement,
+      reservation: params.reservation,
+      expectedReservationJson: runtime.resolvedReservationJson,
+      releaseId: params.releaseId,
+      beforeExternalMutation: assertPlacementCurrent,
+    });
   } catch (err) {
     if (!isPlacementCancellation(err)) {
       await markDeploymentReleasePlacementFailed(
@@ -611,110 +749,19 @@ export async function placeReleaseOnDeploymentNode(params: {
     return provisionNodeForRelease({ ...params, beforeExternalMutation: assertPlacementCurrent });
   }
 
-  if (params.placement) {
-    await assertPlacementCurrent();
-    const nodeMode = params.requiresVolumes ? 'exclusive' : 'shared';
-    const currentNode = await findDeploymentNodeWithCapacity(
-      params.env,
-      params.userId,
-      params.placement,
-      params.requiresVolumes,
-      { nodeId, excludeEnvironmentId: params.envId, nodeMode }
-    );
-    const reserved =
-      currentNode?.nodeId === nodeId &&
-      (await linkEnvironmentToNode({
-        env: params.env,
-        db: params.db,
-        envId: params.envId,
-        nodeId,
-        placement: currentNode.placement,
-        userId: params.userId,
-        expectedNodeStatus: 'running',
-        nodeMode,
-        expectedReservationJson: runtime.resolvedReservationJson,
-        releaseId: params.releaseId,
-      }));
-    if (!reserved) {
-      await assertPlacementCurrent();
-      if (!params.requiresVolumes) {
-        const relocationClaim = await claimDeploymentEnvironmentRelocation({
-          env: params.env,
-          envId: params.envId,
-          nodeId,
-          userId: params.userId,
-          placement: params.placement,
-          expectedReservationJson: runtime.resolvedReservationJson,
-          reservation: params.reservation,
-          releaseId: params.releaseId,
-        });
-        if (!relocationClaim) {
-          await assertPlacementCurrent();
-          await markDeploymentReleasePlacementFailed(
-            params.db,
-            params.env,
-            params.envId,
-            params.releaseId,
-            'Deployment placement changed during release admission; retry the release',
-            false
-          );
-          return null;
-        }
-        try {
-          await stopRuntimeBeforeNodeMove({
-            db: params.db,
-            env: params.env,
-            userId: params.userId,
-            envId: params.envId,
-            nodeId,
-            beforeExternalMutation: assertPlacementCurrent,
-          });
-          await assertPlacementCurrent();
-          const cleared = await completeDeploymentEnvironmentRelocation({
-            env: params.env,
-            envId: params.envId,
-            nodeId,
-            claimJson: relocationClaim,
-            releaseId: params.releaseId,
-          });
-          if (!cleared) {
-            await assertPlacementCurrent();
-            throw new Error('Deployment relocation claim was lost before placement completed');
-          }
-        } catch (err) {
-          await restoreDeploymentEnvironmentRelocation({
-            env: params.env,
-            envId: params.envId,
-            nodeId,
-            claimJson: relocationClaim,
-            reservationJson: runtime.resolvedReservationJson,
-          });
-          if (!isPlacementCancellation(err)) {
-            await markDeploymentReleasePlacementFailed(
-              params.db,
-              params.env,
-              params.envId,
-              params.releaseId,
-              err
-            );
-          }
-          throw err;
-        }
-        return provisionNodeForRelease({
-          ...params,
-          beforeExternalMutation: assertPlacementCurrent,
-        });
-      }
-      await assertPlacementCurrent();
-      await markDeploymentReleasePlacementFailed(
-        params.db,
-        params.env,
-        params.envId,
-        params.releaseId,
-        'Existing exclusive deployment node cannot admit the declared resource reservation'
-      );
-      return null;
-    }
+  const reserved = await reserveExistingNodeForRelease({
+    release: params,
+    nodeId,
+    expectedReservationJson: runtime.resolvedReservationJson,
+    beforeExternalMutation: assertPlacementCurrent,
+  });
+  if (!reserved) {
+    return handleExistingNodeReservationFailure({
+      release: params,
+      nodeId,
+      expectedReservationJson: runtime.resolvedReservationJson,
+      beforeExternalMutation: assertPlacementCurrent,
+    });
   }
 
   if (params.requiresVolumes) {

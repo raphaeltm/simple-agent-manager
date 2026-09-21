@@ -17,6 +17,12 @@ export interface DeploymentReservationDefaults {
   diskMb: number;
 }
 
+const DEFAULT_DEPLOYMENT_RESERVATION_DEFAULTS: DeploymentReservationDefaults = {
+  cpuMillis: DEFAULT_DEPLOYMENT_SERVICE_CPU_MILLIS,
+  memoryMb: DEFAULT_DEPLOYMENT_SERVICE_MEMORY_MB,
+  diskMb: DEFAULT_DEPLOYMENT_SERVICE_DISK_MB,
+};
+
 /**
  * Convert one normalized manifest into the exact scheduler reservation used for
  * deployment-node selection and admission.
@@ -29,11 +35,7 @@ export interface DeploymentReservationDefaults {
 export function resolveDeploymentManifestReservation(
   manifest: DeploymentReservationManifest,
   environmentId: string,
-  defaults: DeploymentReservationDefaults = {
-    cpuMillis: DEFAULT_DEPLOYMENT_SERVICE_CPU_MILLIS,
-    memoryMb: DEFAULT_DEPLOYMENT_SERVICE_MEMORY_MB,
-    diskMb: DEFAULT_DEPLOYMENT_SERVICE_DISK_MB,
-  }
+  defaults: DeploymentReservationDefaults = DEFAULT_DEPLOYMENT_RESERVATION_DEFAULTS
 ): ResolvedResourceReservation {
   let cpuMillis = 0;
   let memoryMb = 0;
