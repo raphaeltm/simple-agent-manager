@@ -198,7 +198,7 @@ export const PROJECT_AWARENESS_TOOLS = [
   {
     name: 'search_messages',
     description:
-      'Search messages across all chat sessions in your project by keyword using full-text search. Returns matching message snippets with session context. Useful for finding past discussions about specific topics, decisions, or code. Completed sessions use FTS5 indexing (matches messages containing all search words); active sessions fall back to keyword matching.',
+      'Search messages across all chat sessions in your project by keyword using full-text search. Returns matching message snippets with session context. Useful for finding past discussions about specific topics, decisions, or code. Sessions are indexed incrementally each time they sleep or stop, so sleeping and stopped sessions are covered by FTS5 (matches messages containing all search words); only messages written since a session was last indexed fall back to keyword matching.',
     inputSchema: {
       type: 'object' as const,
       properties: {

@@ -601,12 +601,23 @@ function searchMessagesLike(
     // sleep — text that is findable today. Mirrors `resolveWatermark()` in
     // `materialization.ts`: no watermark columns means the legacy pass covered
     // everything up to `materialized_at`.
+    //
+    // The trailing `sequence` arm covers rows the indexer's own seek cannot reach.
+    // `created_at` is the VM agent's clock and `sequence` is assigned here at
+    // insert, so a batch that retried across a sleep can land with a created_at
+    // BELOW the watermark and a sequence above it. The indexed scan seeks on
+    // created_at and skips those; this fallback does not seek, so it can and must
+    // still return them. Streaming assistant tokens are too short for a LIKE hit,
+    // so this rescues whole-row content (user turns) rather than a split word;
+    // closing the streaming case properly is idea 01M315GZ5P6QGSHM6CB730PMR9.
     conditions.push(
       `(s.materialized_at IS NULL
         OR m.created_at > COALESCE(s.materialized_through_created_at, s.materialized_at)
         OR (s.materialized_through_created_at IS NOT NULL
             AND m.created_at = s.materialized_through_created_at
-            AND COALESCE(m.sequence, 0) > COALESCE(s.materialized_through_sequence, 0)))`
+            AND COALESCE(m.sequence, 0) > COALESCE(s.materialized_through_sequence, 0))
+        OR (s.materialized_through_sequence IS NOT NULL
+            AND COALESCE(m.sequence, 0) > s.materialized_through_sequence))`
     );
   }
 

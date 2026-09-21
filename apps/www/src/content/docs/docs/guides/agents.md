@@ -185,7 +185,7 @@ Running agents have access to project-aware MCP tools:
 | `list_linked_ideas`                 | List ideas linked to a session                                                                                                                     |
 | `list_sessions`                     | View chat sessions                                                                                                                                 |
 | `get_session_messages`              | Read conversation history (consecutive streaming tokens are concatenated into logical messages)                                                    |
-| `search_messages`                   | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions                               |
+| `search_messages`                   | Search messages by keyword — sessions are indexed incrementally as they sleep or stop, so FTS5 covers everything indexed so far; only messages written since the last index pass fall back to keyword matching                               |
 | `list_triggers`                     | List this project's automation triggers, optionally filtered by status or source type                                                              |
 | `create_project_event_subscription` | Subscribe the current task agent to durable project events using bounded v1 exact/set filters for source, event type, subject, and severity        |
 | `list_project_event_subscriptions`  | Recover active event subscription IDs owned by the current task agent                                                                              |

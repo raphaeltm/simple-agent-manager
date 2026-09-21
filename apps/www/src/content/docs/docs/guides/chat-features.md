@@ -175,10 +175,12 @@ For short conversations (5 or fewer messages), the messages are passed directly 
 
 ## Full-Text Search
 
-SAM indexes chat messages for full-text search. When a session ends, streaming tokens are grouped into logical messages and indexed using FTS5.
+Each `chat_messages` row is a single streaming token, so no row holds a whole word. SAM therefore concatenates consecutive same-role tokens into logical messages and indexes those with FTS5 (`materializeSession()` in `apps/api/src/durable-objects/project-data/materialization.ts`).
 
-- **Completed sessions**: Full-text search with stemming and phrase matching
-- **Active sessions**: Keyword-based fallback search
+Indexing is incremental: it runs every time a session sleeps and again when it stops, fails, or is cleaned up after going idle, and each pass covers only the messages written since the last one.
+
+- **Everything indexed so far**: full-text search with stemming and phrase matching
+- **Messages written since a session was last indexed**: keyword-based fallback search
 
 Agents can search messages using the `search_messages` MCP tool.
 

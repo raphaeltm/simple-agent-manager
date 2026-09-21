@@ -391,7 +391,11 @@ export class ProjectData extends DurableObject<Env> {
         JSON.stringify({ message_count: result.messageCount })
       );
       try {
-        materialization.materializeSession(this.sql, sessionId);
+        materialization.materializeSession(
+      this.sql,
+      sessionId,
+      materialization.resolveMaterializationPassConfig(this.env)
+    );
       } catch (e) {
         log.error('materialize_session_on_stop_failed', { sessionId, error: String(e) });
       }
@@ -423,7 +427,11 @@ export class ProjectData extends DurableObject<Env> {
       // (watermark-based), so a session that sleeps and wakes repeatedly pays
       // for its new tail each time, not for its whole history.
       try {
-        materialization.materializeSession(this.sql, sessionId);
+        materialization.materializeSession(
+      this.sql,
+      sessionId,
+      materialization.resolveMaterializationPassConfig(this.env)
+    );
       } catch (e) {
         log.error('materialize_session_on_sleep_failed', { sessionId, error: String(e) });
       }
@@ -505,7 +513,11 @@ export class ProjectData extends DurableObject<Env> {
         JSON.stringify({ message_count: result.messageCount, error: errorMessage })
       );
       try {
-        materialization.materializeSession(this.sql, sessionId);
+        materialization.materializeSession(
+      this.sql,
+      sessionId,
+      materialization.resolveMaterializationPassConfig(this.env)
+    );
       } catch (e) {
         log.error('materialize_session_on_fail_failed', { sessionId, error: String(e) });
       }
@@ -1663,14 +1675,19 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   materializeSession(sessionId: string): void {
-    materialization.materializeSession(this.sql, sessionId);
+    materialization.materializeSession(
+      this.sql,
+      sessionId,
+      materialization.resolveMaterializationPassConfig(this.env)
+    );
   }
   materializePendingSessions(limit?: number, scanLimit?: number) {
     const config = materialization.resolveMaterializationSweepConfig(this.env);
     return materialization.materializePendingSessions(
       this.sql,
       limit ?? config.limit,
-      scanLimit ?? config.scanLimit
+      scanLimit ?? config.scanLimit,
+      materialization.resolveMaterializationPassConfig(this.env)
     );
   }
 

@@ -255,6 +255,9 @@ read-only measurement, cursor and byte/deadline bounds; and
 (`apps/api/src/scheduled/project-data-storage-relief-preflight.ts`) owns the lease, the
 per-slice and per-run admission budgets, and the verified R2 manifest writes.
 
+- `PROJECT_DATA_MATERIALIZATION_PAGE_ROWS` — Tokens read into memory by one chat-search materialization `SELECT`, bounding Durable Object isolate memory (default: `500`)
+- `PROJECT_DATA_MATERIALIZATION_MAX_ROWS_PER_PASS` — Tokens one chat-search materialization pass indexes before leaving the rest to the next pass (default: `5000`)
+- `PROJECT_DATA_MATERIALIZATION_MAX_GROUP_CHARS` — Grouped-row size past which a continuing run starts a new row instead of rewriting the accumulated content (default: `65536`)
 - `PROJECT_DATA_MATERIALIZATION_SWEEP_LIMIT` — Sessions indexed by one chat-search materialization backfill call (default: `50`)
 - `PROJECT_DATA_MATERIALIZATION_SWEEP_SCAN_LIMIT` — Sessions examined by one chat-search materialization backfill call (default: `500`)
 - `PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED` — Production-disabled switch for cleanup of old terminal-session grouped message rows and their external-content FTS entries (default: disabled)

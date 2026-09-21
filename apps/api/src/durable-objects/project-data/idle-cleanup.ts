@@ -19,7 +19,7 @@ import {
   listReporterScopedTaskCandidates,
   terminalizeIdleTaskInD1,
 } from './idle-cleanup-terminalization';
-import { materializeSession } from './materialization';
+import { materializeSession, resolveMaterializationPassConfig } from './materialization';
 import { persistSystemMessage } from './messages';
 import {
   parseCleanupAt,
@@ -370,7 +370,7 @@ export async function processExpiredCleanups(
 
       // Materialize grouped messages (best-effort)
       try {
-        materializeSession(sql, entry.sessionId);
+        materializeSession(sql, entry.sessionId, resolveMaterializationPassConfig(env));
       } catch (e) {
         log.error('materialize_session_failed', {
           sessionId: entry.sessionId,
@@ -571,7 +571,7 @@ export async function checkWorkspaceIdleTimeouts(
         stopSessionInternal(sql, reporterSessionId);
         upsertActivityState(sql, reporterSessionId, { activity: 'idle' });
         try {
-          materializeSession(sql, reporterSessionId);
+          materializeSession(sql, reporterSessionId, resolveMaterializationPassConfig(env));
         } catch (e) {
           log.error('materialize_session_on_idle_timeout_failed', {
             sessionId: reporterSessionId,

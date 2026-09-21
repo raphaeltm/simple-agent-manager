@@ -159,23 +159,28 @@ content plus the tail, so materializing on wake would double the passes for zero
 - [x] Tests: live tail still LIKE-searchable after the session was materialized once
 - [x] Prove discriminating: revert the watermark to the old boolean gate, confirm exactly the sleep-wake-sleep test reddens, restore
 - [x] Tests: a replayed pass over groups that already exist does not corrupt the index
+- [x] Page the token scan and bound the per-pass row budget (DO isolate memory ceiling, rule 69)
+- [x] Row-value tuple seek so a same-millisecond cluster is not re-walked per pass
+- [x] Checkpoint the watermark immediately after a boundary extension (extension is not idempotent)
+- [x] Cap grouped-row growth so a repeatedly-extended run is not O(k^2) in bytes rewritten
+- [x] Fix the four stale doc locations describing the old stop-only indexing
 - [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build`
-- [ ] Specialist review (task-completion-validator, cloudflare-specialist, performance-reviewer, architecture-reviewer, test-engineer)
+- [x] Specialist review (7 reviewers: task-completion-validator, cloudflare-specialist, performance-reviewer, architecture-reviewer, test-engineer, constitution-validator, doc-sync-validator)
 - [ ] Staging deploy + live verification (sleep, wake, write, search both halves)
 - [ ] PR, CI, CodeRabbit, merge, production deploy monitoring
 
 ## Acceptance criteria
 
-- [ ] A session that sleeps has its assistant text findable by `search_messages` before it ever stops
-- [ ] After sleep -> wake -> more messages -> sleep, **both** batches are findable
-- [ ] Final stop still indexes anything written after the last sleep
-- [ ] Running materialization twice with no new messages performs no writes
-- [ ] A same-role run spanning a sleep boundary yields one grouped row, and a phrase spanning the
+- [x] A session that sleeps has its assistant text findable by `search_messages` before it ever stops
+- [x] After sleep -> wake -> more messages -> sleep, **both** batches are findable
+- [x] Final stop still indexes anything written after the last sleep
+- [x] Running materialization twice with no new messages performs no writes
+- [x] A same-role run spanning a sleep boundary yields one grouped row, and a phrase spanning the
       boundary is findable
-- [ ] Rows read by the second pass is proportional to new messages, not total session size, proven
+- [x] Rows read by the second pass is proportional to new messages, not total session size, proven
       by an assertion driving the real `sleepSession()` path
-- [ ] The `COALESCE(origin,'user') != 'system'` search filter does not leak into any message read path
-- [ ] Storage-relief pruning still wins: a pruned session is never re-materialized and stays
+- [x] The `COALESCE(origin,'user') != 'system'` search filter does not leak into any message read path
+- [x] Storage-relief pruning still wins: a pruned session is never re-materialized and stays
       LIKE-searchable
 
 ## References
@@ -243,3 +248,32 @@ rebuild reads 64.
   left out of this change — it needs its own I/O budget, config, and tests under
   rule 47 — and is filed as idea `01M313TT05Q5R09D9E0ZZGW0E3`, referenced from a comment
   on `materializePendingSessions`.
+
+
+## What specialist review changed
+
+Seven local reviewers ran. None of the findings below were in the original design; all were
+implemented before staging.
+
+| Finding | Severity | Fix |
+|---|---|---|
+| Unbounded `SELECT ... WHERE session_id = ?` + `toArray()` on a never-indexed session, now reachable from the frequent `sleepSession` trigger rather than only from `stop`. Same shape that reset this DO's isolate twice on 2026-09-05 (rule 69). | CRITICAL (found independently by 3 reviewers) | Paged the scan (`PROJECT_DATA_MATERIALIZATION_PAGE_ROWS`, default 500) with a per-pass row budget (`..._MAX_ROWS_PER_PASS`, default 5000). A truncated pass stays `partial` with an advanced watermark and resumes next time. |
+| The scan re-walked every row tied at the watermark's `created_at`: measured **201 rows re-read** for a 200-token burst sharing one timestamp. My comment claimed it "only re-filters the boundary millisecond". | HIGH | Replaced `created_at >= ? AND (created_at > ? OR sequence > ?)` with the SQLite row-value form `(created_at, sequence) > (?, ?)`, which seeks INSIDE the millisecond. Now ≤2 rows, with a test that forces the collision. |
+| `extendTrailingGroup` is a plain in-place `UPDATE` with no conflict guard, and every caller catches-and-logs. A throw between the extension and the end-of-pass watermark stamp would make the retry append the same text twice. | HIGH | Checkpoint the watermark immediately after an extension, before the rest of the page. |
+| The sweep's `EXISTS` probe was O(session history) per candidate, not the "one indexed lookup" the comment claimed (measured 5,000 rows visited per already-indexed 5,000-message candidate). | HIGH | Same row-value seek; comment corrected to state the real cost, including that `scanLimit` bounds probes and materialization but NOT `chat_sessions` rows read. |
+| `chat_messages.created_at` is the VM agent's own clock and it retries delivery for up to 5 minutes, while `sleepSession()` runs before the workspace stops. A retried batch can land below the watermark and never be indexed. | HIGH | Watermark now advances by `MAX(created_at)`/`MAX(sequence)`; the LIKE fallback gained a `sequence` arm so late arrivals stay findable; regression test drives the real `persistMessageBatch` path. The residual streaming-assistant case (4-char tokens can't satisfy a keyword LIKE) is idea `01M315GZ5P6QGSHM6CB730PMR9`. |
+| Extending a run rewrites the whole accumulated content plus both FTS postings, so k extensions of a growing turn cost O(k²) bytes. | MEDIUM | `PROJECT_DATA_MATERIALIZATION_MAX_GROUP_CHARS` (default 65536): past that a continuation starts a new grouped row. |
+| `replaceFtsRow`'s delete+insert pair can fail halfway, leaving a grouped row with zero postings — silent and permanent. | MEDIUM | Logged rather than swallowed with the missing-table case. |
+| Four docs still described indexing as happening only "when a session ends", including the MCP `search_messages` tool description that agents read. | MEDIUM ×4 | All four rewritten to describe the incremental model, with code citations. |
+| The new `SEARCH_INDEX_STATE_*` constants weren't used by the two existing files that write/read the same literals. | LOW/MEDIUM | Consolidated in `grouped-fts-cleanup.ts` and `storage-relief-measurement.ts`. |
+| Idempotency test asserted value-equality rather than zero writes; no coverage for `failSession`, `tool`/`thinking` roles, an empty session, or a system-origin message mid-run. | LOW/MEDIUM | All added; the idempotency test now counts writes through the SQL probe. |
+
+### Known gaps, deliberately not closed here
+
+- **The sweep has no automatic caller** (idea `01M313TT05Q5R09D9E0ZZGW0E3`). Sessions already asleep
+  when this ships become searchable when they next sleep or stop. Wiring a periodic caller needs a
+  partial index on the non-pruned rows first, because `scanLimit` does not bound the `chat_sessions`
+  scan when pruned rows dominate.
+- **Out-of-order batch arrival for streaming assistant tokens** (idea `01M315GZ5P6QGSHM6CB730PMR9`).
+- **Idle-cleanup's two `materializeSession` call sites have no test.** Pre-existing; the wiring is
+  unchanged by this PR and both now pass the resolved pass config like every other call site.

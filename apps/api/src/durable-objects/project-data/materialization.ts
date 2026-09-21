@@ -47,15 +47,88 @@ export const SEARCH_INDEX_STATE_PARTIAL = 'partial';
 /** Sessions materialized per sweep call. */
 export const DEFAULT_MATERIALIZATION_SWEEP_LIMIT = 50;
 /**
- * Sessions the sweep is allowed to examine per call. The `EXISTS` probe below is
- * one indexed lookup per candidate, but without a cap a DO whose sessions are all
- * indexed would scan every session on every call (rule 47).
+ * Candidates the sweep ranks per call. This caps the `EXISTS` probes and the
+ * materialization work, NOT the `chat_sessions` rows read.
+ *
+ * Each probe is cheap only because `PENDING_SESSIONS_PREDICATE` uses the same
+ * row-value seek as `readTokensAfter`: expressed as a correlated `OR` instead, it
+ * degrades to a row-by-row filter from the session's FIRST message — measured at
+ * 5,000 rows visited per already-indexed 5,000-message candidate.
+ *
+ * Measured with `EXPLAIN QUERY PLAN` and row-touch counting: the CTE's
+ * `ORDER BY updated_at DESC, id DESC LIMIT ?` pushes the limit down only while
+ * most rows pass the filter. Once pruned sessions outnumber the eligible tail and
+ * that tail is smaller than this limit, SQLite walks the whole table looking for
+ * `scanLimit` qualifying rows it will never find — 1,000,000 rows touched for 50
+ * eligible sessions in the benchmark. Nothing calls this sweep today; wiring a
+ * periodic caller needs a partial index on the non-pruned rows first, which is a
+ * prerequisite recorded on idea `01M313TT05Q5R09D9E0ZZGW0E3`.
  */
 export const DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT = 500;
+
+/**
+ * Tokens materialized into memory by one `SELECT`.
+ *
+ * A Durable Object isolate is reset when it exceeds its memory limit, and that has
+ * already happened on this object: on 2026-09-05 `tableAggregateSha256` reset the
+ * SAM root ProjectData twice with an unbounded `SELECT ... WHERE session_id = ?`
+ * plus `toArray()` on a 100,000-message session. This read has the same shape over
+ * the same table, so it pages (`apps/api/.claude/rules/69`, "Memory Is A Ceiling
+ * Too"). No harness enforces the isolate limit, so the guard is proven by a
+ * page-shape assertion rather than by reproducing the reset.
+ */
+export const DEFAULT_MATERIALIZATION_PAGE_ROWS = 500;
+/**
+ * Tokens one pass may materialize before stopping and leaving the rest to the next
+ * pass. Paging bounds memory; this bounds the wall time and `rowsRead` a single
+ * `sleepSession()` RPC can spend on a session whose whole history is unindexed —
+ * every session alive when this shipped is in exactly that state.
+ */
+export const DEFAULT_MATERIALIZATION_MAX_ROWS_PER_PASS = 5000;
+/**
+ * Characters past which a grouped row stops absorbing continuations.
+ *
+ * Extending a run rewrites the row's WHOLE accumulated content plus both FTS
+ * postings, so cost per extension is O(current size). A turn that is slept and
+ * woken repeatedly while still streaming would pay O(k^2) across k extensions with
+ * nothing to stop it — sleep is gated on the session being idle, but a stale
+ * activity mirror has kept a session in `prompting` for four hours in production
+ * before (`apps/api/.claude/rules/57`). Past this size a continuation starts a new
+ * grouped row instead: one word boundary in the index, rather than unbounded
+ * rewrite cost.
+ */
+export const DEFAULT_MATERIALIZATION_MAX_GROUP_CHARS = 65536;
 
 export interface MaterializationSweepConfig {
   limit: number;
   scanLimit: number;
+}
+
+export interface MaterializationPassConfig {
+  pageRows: number;
+  maxRowsPerPass: number;
+  maxGroupChars: number;
+}
+
+export function resolveMaterializationPassConfig(env: {
+  PROJECT_DATA_MATERIALIZATION_PAGE_ROWS?: string;
+  PROJECT_DATA_MATERIALIZATION_MAX_ROWS_PER_PASS?: string;
+  PROJECT_DATA_MATERIALIZATION_MAX_GROUP_CHARS?: string;
+}): MaterializationPassConfig {
+  return {
+    pageRows: parsePositiveInt(
+      env.PROJECT_DATA_MATERIALIZATION_PAGE_ROWS,
+      DEFAULT_MATERIALIZATION_PAGE_ROWS
+    ),
+    maxRowsPerPass: parsePositiveInt(
+      env.PROJECT_DATA_MATERIALIZATION_MAX_ROWS_PER_PASS,
+      DEFAULT_MATERIALIZATION_MAX_ROWS_PER_PASS
+    ),
+    maxGroupChars: parsePositiveInt(
+      env.PROJECT_DATA_MATERIALIZATION_MAX_GROUP_CHARS,
+      DEFAULT_MATERIALIZATION_MAX_GROUP_CHARS
+    ),
+  };
 }
 
 export function resolveMaterializationSweepConfig(env: {
@@ -90,7 +163,13 @@ interface GroupedMessage {
   role: string;
   content: string;
   createdAt: number;
+  /** The last token folded into this group, for mid-page watermark checkpoints. */
+  lastCreatedAt: number;
+  lastSequence: number;
 }
+
+/** The grouped row a pass would continue if the next token shares its role. */
+type TrailingGroup = ReturnType<typeof parseTrailingGroup>;
 
 /**
  * The last token already folded into the index, or `null` when nothing is.
@@ -129,14 +208,25 @@ function readMaterializationState(sql: SqlStorage, sessionId: string): Materiali
 /**
  * Tokens written after the watermark, oldest first.
  *
- * `created_at >= ?` is the range scan that keeps reads proportional to new rows —
- * it uses `idx_chat_messages_session_seq(session_id, created_at, sequence)`. The
- * disjunction that follows only re-filters the boundary millisecond.
+ * `(created_at, sequence) > (?, ?)` is a SQLite row-value comparison, and it is
+ * what keeps reads proportional to NEW rows: the tuple is a prefix of
+ * `idx_chat_messages_session_seq(session_id, created_at, sequence)`, so the engine
+ * seeks straight to the watermark's position INSIDE its millisecond. Writing this
+ * as `created_at >= ? AND (created_at > ? OR sequence > ?)` instead makes the
+ * sequence term a residual filter, and the scan re-walks every row tied at the
+ * watermark's `created_at` on every pass — measured at 201 rows re-read for a
+ * 200-token burst that shared one timestamp.
+ *
+ * Depends on `chat_messages.sequence` being non-NULL: a row value compares
+ * left-to-right and yields NULL (excluded) on a tie into a NULL. DO migration 007
+ * backfilled every existing row from `rowid`, and `insertNewMessage` /
+ * `persistMessageBatch` / `persistSystemMessage` all assign one.
  */
 function readTokensAfter(
   sql: SqlStorage,
   sessionId: string,
-  watermark: Watermark | null
+  watermark: Watermark | null,
+  pageRows: number
 ): Array<ReturnType<typeof parseMaterializationToken>> {
   const cursor = watermark
     ? sql.exec(
@@ -144,20 +234,22 @@ function readTokensAfter(
          FROM chat_messages
          WHERE session_id = ?
            AND COALESCE(origin, 'user') != 'system'
-           AND created_at >= ?
-           AND (created_at > ? OR COALESCE(sequence, 0) > ?)
-         ORDER BY created_at ASC, sequence ASC`,
+           AND (created_at, sequence) > (?, ?)
+         ORDER BY created_at ASC, sequence ASC
+         LIMIT ?`,
         sessionId,
         watermark.createdAt,
-        watermark.createdAt,
-        watermark.sequence
+        watermark.sequence,
+        pageRows
       )
     : sql.exec(
         `SELECT id, role, content, created_at, sequence
          FROM chat_messages
          WHERE session_id = ? AND COALESCE(origin, 'user') != 'system'
-         ORDER BY created_at ASC, sequence ASC`,
-        sessionId
+         ORDER BY created_at ASC, sequence ASC
+         LIMIT ?`,
+        sessionId,
+        pageRows
       );
   return cursor.toArray().map((row) => parseMaterializationToken(row));
 }
@@ -170,12 +262,16 @@ function groupTokens(
     const last = grouped[grouped.length - 1];
     if (last && last.role === token.role && GROUPABLE_ROLES.has(token.role)) {
       last.content += token.content;
+      last.lastCreatedAt = Math.max(last.lastCreatedAt, token.createdAt);
+      last.lastSequence = Math.max(last.lastSequence, token.sequence);
     } else {
       grouped.push({
         id: token.id,
         role: token.role,
         content: token.content,
         createdAt: token.createdAt,
+        lastCreatedAt: token.createdAt,
+        lastSequence: token.sequence,
       });
     }
   }
@@ -217,8 +313,12 @@ function replaceFtsRow(
       rowid,
       content
     );
-  } catch {
-    // FTS5 table may not exist — grouped table still has value for LIKE search
+  } catch (error) {
+    // Unlike a plain insert, this pair can fail HALFWAY: a delete that lands
+    // without its re-insert leaves the grouped row with no postings at all, and
+    // the watermark then hides it from the LIKE fallback too. Rare, but silent
+    // and permanent, so it must not be swallowed the way a missing FTS5 table is.
+    log.warn('materialization.fts_replace_failed', { rowid, error: String(error) });
   }
 }
 
@@ -233,7 +333,11 @@ function replaceFtsRow(
  * them. (Measured in workerd: redundant postings on this external-content table do
  * not produce duplicate MATCH hits, so this is index hygiene, not a search fix.)
  */
-function insertGroup(sql: SqlStorage, sessionId: string, group: GroupedMessage): void {
+function insertGroup(
+  sql: SqlStorage,
+  sessionId: string,
+  group: GroupedMessage
+): TrailingGroup | null {
   const inserted = sql
     .exec(
       `INSERT INTO chat_messages_grouped (id, session_id, role, content, created_at)
@@ -247,8 +351,10 @@ function insertGroup(sql: SqlStorage, sessionId: string, group: GroupedMessage):
       group.createdAt
     )
     .toArray()[0];
-  if (!inserted) return;
-  insertFtsRow(sql, parseRowid(inserted, 'materialization.grouped_rowid'), group.content);
+  if (!inserted) return null;
+  const rowid = parseRowid(inserted, 'materialization.grouped_rowid');
+  insertFtsRow(sql, rowid, group.content);
+  return { rowid, role: group.role, content: group.content };
 }
 
 /**
@@ -284,19 +390,20 @@ function readTrailingGroup(
  *
  * Returns true when the caller must drop the first group from its insert list.
  */
-function extendTrailingGroup(sql: SqlStorage, sessionId: string, head: GroupedMessage): boolean {
-  if (!GROUPABLE_ROLES.has(head.role)) return false;
-  const trailing = readTrailingGroup(sql, sessionId);
-  if (!trailing || trailing.role !== head.role) return false;
-
+function extendTrailingGroup(
+  sql: SqlStorage,
+  trailing: TrailingGroup,
+  head: GroupedMessage
+): TrailingGroup {
   const merged = trailing.content + head.content;
-  sql.exec(
-    'UPDATE chat_messages_grouped SET content = ? WHERE rowid = ?',
-    merged,
-    trailing.rowid
-  );
+  sql.exec('UPDATE chat_messages_grouped SET content = ? WHERE rowid = ?', merged, trailing.rowid);
   replaceFtsRow(sql, trailing.rowid, trailing.content, merged);
-  return true;
+  return { rowid: trailing.rowid, role: trailing.role, content: merged };
+}
+
+/** Upper bound of the tokens folded into a group, used as a mid-page checkpoint. */
+function headWatermark(head: GroupedMessage): Watermark {
+  return { createdAt: head.lastCreatedAt, sequence: head.lastSequence };
 }
 
 function stampIndexState(
@@ -329,17 +436,88 @@ function stampIndexState(
  *
  * Safe to call on every sleep and again on stop. Idempotent: a call with no new
  * messages and no state promotion to make writes nothing.
+ *
+ * The scan is paged, so peak memory is bounded by `pageRows` rather than by the
+ * session's size, and the pass stops after `maxRowsPerPass` tokens — leaving
+ * `search_index_state = 'partial'` and an advanced watermark, so the next sleep or
+ * stop resumes exactly where this one stopped.
  */
-export function materializeSession(sql: SqlStorage, sessionId: string): void {
+export function materializeSession(
+  sql: SqlStorage,
+  sessionId: string,
+  config: MaterializationPassConfig = {
+    pageRows: DEFAULT_MATERIALIZATION_PAGE_ROWS,
+    maxRowsPerPass: DEFAULT_MATERIALIZATION_MAX_ROWS_PER_PASS,
+    maxGroupChars: DEFAULT_MATERIALIZATION_MAX_GROUP_CHARS,
+  }
+): void {
   const state = readMaterializationState(sql, sessionId);
   if (!state) return;
   if (state.searchIndexState === SEARCH_INDEX_STATE_PRUNED) return;
 
   const terminal = TERMINAL_STATUSES.has(state.status);
-  const watermark = resolveWatermark(state);
-  const tokens = readTokensAfter(sql, sessionId, watermark);
+  const initialWatermark = resolveWatermark(state);
+  let watermark = initialWatermark;
+  // Read once per pass, then carried forward: a same-role run spanning several
+  // pages would otherwise re-read and rewrite its whole (growing) content per page.
+  let trailing: TrailingGroup | null | undefined =
+    initialWatermark === null ? null : undefined;
+  let processed = 0;
+  let drained = false;
 
-  if (tokens.length === 0) {
+  while (processed < config.maxRowsPerPass) {
+    const pageRows = Math.min(config.pageRows, config.maxRowsPerPass - processed);
+    const tokens = readTokensAfter(sql, sessionId, watermark, pageRows);
+    if (tokens.length === 0) {
+      drained = true;
+      break;
+    }
+
+    const groups = groupTokens(tokens);
+    let index = 0;
+    const head = groups[0];
+    if (head && GROUPABLE_ROLES.has(head.role)) {
+      if (trailing === undefined) trailing = readTrailingGroup(sql, sessionId);
+      if (
+        trailing &&
+        trailing.role === head.role &&
+        trailing.content.length < config.maxGroupChars
+      ) {
+        trailing = extendTrailingGroup(sql, trailing, head);
+        index = 1;
+        // Checkpoint immediately. Unlike `insertGroup`, extension is a plain
+        // in-place UPDATE with no conflict guard, so if anything below throws —
+        // and every caller catches and logs rather than failing the transition —
+        // a retry re-reading these tokens would append the same text a second
+        // time. Moving the watermark past the extended run first makes the retry
+        // skip it instead.
+        watermark = headWatermark(head);
+        stampIndexState(sql, sessionId, SEARCH_INDEX_STATE_PARTIAL, watermark);
+      }
+    }
+    for (const group of groups.slice(index)) {
+      trailing = insertGroup(sql, sessionId, group) ?? trailing;
+    }
+
+    // MAX, not "last in scan order": `chat_messages.created_at` comes from the VM
+    // agent's own clock (`persistMessageBatch`), while `sequence` is assigned here
+    // at insert. They agree unless a retried batch lands out of order, and taking
+    // the max of each keeps the watermark a true upper bound of what was indexed.
+    watermark = tokens.reduce<Watermark>(
+      (acc, token) => ({
+        createdAt: Math.max(acc.createdAt, token.createdAt),
+        sequence: Math.max(acc.sequence, token.sequence),
+      }),
+      { createdAt: 0, sequence: 0 }
+    );
+    processed += tokens.length;
+    if (tokens.length < pageRows) {
+      drained = true;
+      break;
+    }
+  }
+
+  if (processed === 0) {
     // Nothing new. Only write if terminalization has something left to record:
     // an empty or fully-indexed session that has since stopped is now complete.
     if (terminal && state.searchIndexState !== SEARCH_INDEX_STATE_COMPLETE) {
@@ -348,30 +526,38 @@ export function materializeSession(sql: SqlStorage, sessionId: string): void {
     return;
   }
 
-  const groups = groupTokens(tokens);
-  const head = groups[0];
-  const extended =
-    watermark !== null && head !== undefined && extendTrailingGroup(sql, sessionId, head);
-  for (const group of extended ? groups.slice(1) : groups) {
-    insertGroup(sql, sessionId, group);
+  if (!drained) {
+    log.info('materialization.pass_truncated', {
+      sessionId,
+      processed,
+      maxRowsPerPass: config.maxRowsPerPass,
+    });
   }
 
-  const last = tokens[tokens.length - 1];
-  if (!last) return;
   stampIndexState(
     sql,
     sessionId,
-    terminal ? SEARCH_INDEX_STATE_COMPLETE : SEARCH_INDEX_STATE_PARTIAL,
-    { createdAt: last.createdAt, sequence: last.sequence }
+    // A truncated pass has NOT indexed everything, so a stopped session stays
+    // partial until a later pass drains it — otherwise 'complete' would lie and
+    // the sweep would stop selecting a session that still has unindexed messages.
+    terminal && drained ? SEARCH_INDEX_STATE_COMPLETE : SEARCH_INDEX_STATE_PARTIAL,
+    watermark
   );
 }
 
 /**
  * Selects sessions with non-system messages past their watermark.
  *
+ * The three-branch disjunction below MIRRORS `resolveWatermark()` above, arm for
+ * arm: no watermark at all, a legacy `materialized_at`-only watermark, and a full
+ * `(created_at, sequence)` watermark. `searchMessagesLike` in `messages.ts` carries
+ * a third copy of the same rule. If you change one, change all three — a sweep that
+ * disagrees with the indexer either re-selects sessions forever or never selects
+ * them at all, and neither shows up as an error.
+ *
  * Ranked newest-updated first: the point of the index is that recent work is
  * searchable, so a truncated scan must drop the oldest sessions, not arbitrary
- * ones (rule 65). `remaining` discloses what the cap left behind.
+ * ones (rule 65).
  */
 const PENDING_SESSIONS_CTE = `
   WITH candidates AS (
@@ -379,7 +565,8 @@ const PENDING_SESSIONS_CTE = `
            COALESCE(s.materialized_through_created_at, s.materialized_at) AS wm_created_at,
            CASE WHEN s.materialized_through_created_at IS NOT NULL
                 THEN COALESCE(s.materialized_through_sequence, 0)
-                ELSE ${SEQUENCE_ABOVE_ANY_ROW} END AS wm_sequence
+                WHEN s.materialized_at IS NOT NULL THEN ${SEQUENCE_ABOVE_ANY_ROW}
+                ELSE -1 END AS wm_sequence
     FROM chat_sessions s
     WHERE COALESCE(s.search_index_state, '') != '${SEARCH_INDEX_STATE_PRUNED}'
     ORDER BY s.updated_at DESC, s.id DESC
@@ -391,11 +578,17 @@ const PENDING_SESSIONS_PREDICATE = `
     SELECT 1 FROM chat_messages m
     WHERE m.session_id = c.id
       AND COALESCE(m.origin, 'user') != 'system'
-      AND (c.wm_created_at IS NULL
-           OR m.created_at > c.wm_created_at
-           OR (m.created_at = c.wm_created_at AND COALESCE(m.sequence, 0) > c.wm_sequence))
+      AND (m.created_at, m.sequence) > (COALESCE(c.wm_created_at, 0), c.wm_sequence)
   )`;
 
+/**
+ * Pending sessions WITHIN the scan window, not the true backlog.
+ *
+ * `remaining` counts only the `scanLimit` newest-updated candidates, so it can read
+ * zero while older unscanned sessions are still unindexed. Any future caller that
+ * drains to zero must re-run until it stops making progress rather than trusting a
+ * single zero (rule 65: disclose what the cap dropped).
+ */
 function countPendingSessions(sql: SqlStorage, scanLimit: number): number {
   const row = sql
     .exec(
@@ -423,7 +616,8 @@ function countPendingSessions(sql: SqlStorage, scanLimit: number): number {
 export function materializePendingSessions(
   sql: SqlStorage,
   limit: number = DEFAULT_MATERIALIZATION_SWEEP_LIMIT,
-  scanLimit: number = DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT
+  scanLimit: number = DEFAULT_MATERIALIZATION_SWEEP_SCAN_LIMIT,
+  passConfig?: MaterializationPassConfig
 ): { materialized: number; errors: number; remaining: number } {
   const sessions = sql
     .exec(
@@ -438,7 +632,7 @@ export function materializePendingSessions(
   let errors = 0;
   for (const row of sessions) {
     try {
-      materializeSession(sql, parseSessionId(row, 'materialization.batch_session'));
+      materializeSession(sql, parseSessionId(row, 'materialization.batch_session'), passConfig);
       materialized++;
     } catch (e) {
       log.error('materialization.session_failed', {

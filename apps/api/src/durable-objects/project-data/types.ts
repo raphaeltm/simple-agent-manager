@@ -96,6 +96,12 @@ export type Env = {
   PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS?: string;
+  /** Tokens read into memory by one materialization SELECT (default: 500). */
+  PROJECT_DATA_MATERIALIZATION_PAGE_ROWS?: string;
+  /** Tokens one materialization pass may index before deferring the rest (default: 5000). */
+  PROJECT_DATA_MATERIALIZATION_MAX_ROWS_PER_PASS?: string;
+  /** Grouped-row size past which a continuation starts a new row (default: 65536). */
+  PROJECT_DATA_MATERIALIZATION_MAX_GROUP_CHARS?: string;
   /** Sessions indexed per `materializePendingSessions` backfill call (default: 50). */
   PROJECT_DATA_MATERIALIZATION_SWEEP_LIMIT?: string;
   /** Sessions examined per `materializePendingSessions` backfill call (default: 500). */

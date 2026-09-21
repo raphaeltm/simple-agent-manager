@@ -1,4 +1,8 @@
 import { createModuleLogger, serializeError } from '../../lib/logger';
+import {
+  SEARCH_INDEX_STATE_COMPLETE,
+  SEARCH_INDEX_STATE_PRUNED,
+} from './materialization';
 import type { ProjectDataStorageStatus, StorageSafetyConfig } from './storage-safety';
 import {
   META_LAST_MEASURED_AT,
@@ -155,7 +159,7 @@ function readCandidates(
        WHERE s.status IN ('stopped', 'failed')
          AND s.updated_at <= ?
          AND s.materialized_at IS NOT NULL
-         AND COALESCE(s.search_index_state, 'complete') != 'grouped_fts_pruned'
+         AND COALESCE(s.search_index_state, '${SEARCH_INDEX_STATE_COMPLETE}') != '${SEARCH_INDEX_STATE_PRUNED}'
          AND (? IS NULL OR s.id > ?)
        GROUP BY s.id
        ORDER BY s.id ASC
@@ -239,7 +243,7 @@ function deleteGroupedFtsForSession(
      SET materialized_at = NULL,
          materialized_through_created_at = NULL,
          materialized_through_sequence = NULL,
-         search_index_state = 'grouped_fts_pruned',
+         search_index_state = '${SEARCH_INDEX_STATE_PRUNED}',
          search_index_updated_at = ?,
          search_index_degradation_reason = ?
      WHERE id = ?`,
