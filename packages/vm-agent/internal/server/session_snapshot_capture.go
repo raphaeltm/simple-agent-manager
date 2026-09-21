@@ -29,13 +29,15 @@ func (c *snapshotArtifactCapture) captureWIP(ctx context.Context) bool {
 	}
 	c.manifest.BaseCommit = baseCommit
 	if baseCommit != "" && err == nil {
-		c.manifest.Git = gitState.Git
 		if c.target == nil {
 			err = validateCapturedSnapshotGitState(ctx, standaloneSnapshotGit(c.workDir), gitState)
 		} else {
 			err = validateCapturedSnapshotGitState(ctx, func(ctx context.Context, env []string, args ...string) (string, error) {
 				return c.server.containerGit(ctx, c.target, env, args...)
 			}, gitState)
+		}
+		if err == nil {
+			c.manifest.Git = gitState.Git
 		}
 	}
 	c.manifest.Skipped = append(c.manifest.Skipped, wipSkipped...)

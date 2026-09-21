@@ -481,6 +481,40 @@ func TestValidateCapturedSnapshotGitStateRejectsNonCanonicalUpstream(t *testing.
 	}
 }
 
+func TestCaptureWIPOmitsInvalidGitMetadataAfterValidationFailure(t *testing.T) {
+	repo := initSnapshotTestRepo(t)
+	runGit(t, repo, "remote", "add", "backup", filepath.Join(t.TempDir(), "backup.git"))
+	branch := gitOutput(t, repo, "branch", "--show-current")
+	runGit(t, repo, "update-ref", "refs/remotes/backup/"+branch, "HEAD")
+	runGit(t, repo, "config", "branch."+branch+".remote", "backup")
+	runGit(t, repo, "config", "branch."+branch+".merge", "refs/heads/"+branch)
+
+	manifest := &snapshotManifest{Artifacts: map[string]snapshotArtifact{}}
+	capture := snapshotArtifactCapture{
+		server:    &Server{config: &config.Config{}},
+		workDir:   repo,
+		threshold: defaultSnapshotEntryThresholdBytes,
+		budget:    defaultSnapshotTotalBudgetBytes,
+		progress:  &snapshotProgressReporter{},
+		manifest:  manifest,
+	}
+	if failed := capture.captureWIP(context.Background()); !failed {
+		t.Fatal("captureWIP succeeded with noncanonical Git metadata")
+	}
+	if manifest.BaseCommit == "" {
+		t.Fatal("captureWIP discarded the validated base commit")
+	}
+	if manifest.Git != nil {
+		t.Fatalf("captureWIP retained invalid Git metadata: %#v", manifest.Git)
+	}
+	if _, ok := manifest.Artifacts["wip"]; ok {
+		t.Fatal("captureWIP uploaded a bundle after Git metadata validation failed")
+	}
+	if len(manifest.Skipped) != 1 || !strings.Contains(manifest.Skipped[0].Reason, "canonical remote") {
+		t.Fatalf("captureWIP skipped diagnostics = %#v, want canonical remote failure", manifest.Skipped)
+	}
+}
+
 func TestTerminalRestoreReportRejectsHeadChangedDuringHarnessResume(t *testing.T) {
 	repo := initSnapshotTestRepo(t)
 	savedState, err := captureStandaloneSnapshotGitState(context.Background(), repo)
