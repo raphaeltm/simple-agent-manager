@@ -174,6 +174,96 @@ func TestCreateWIPBundlePreservesCleanRemoteCommit(t *testing.T) {
 	}
 }
 
+func TestCaptureWIPUploadsAndRestoresCleanLocalOnlyCommit(t *testing.T) {
+	repo, remote := initSnapshotRemoteRepo(t)
+	runGit(t, repo, "checkout", "-b", "sam/local-only-capture")
+	if err := os.WriteFile(filepath.Join(repo, "local-only.txt"), []byte("preserved"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "local-only.txt")
+	runGit(t, repo, "commit", "-m", "local only capture")
+	wantHead := gitOutput(t, repo, "rev-parse", "HEAD")
+
+	var uploaded []byte
+	artifactServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPut:
+			var err error
+			uploaded, err = io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodGet:
+			_, _ = w.Write(uploaded)
+		default:
+			http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+		}
+	}))
+	defer artifactServer.Close()
+
+	server := &Server{config: &config.Config{ControlPlaneURL: artifactServer.URL}}
+	prepare := &snapshotPrepareResponse{}
+	prepare.Upload.WIP = "/wip"
+	manifest := &snapshotManifest{Artifacts: map[string]snapshotArtifact{}}
+	capture := snapshotArtifactCapture{
+		server:      server,
+		workDir:     repo,
+		token:       "callback-token",
+		prepare:     prepare,
+		threshold:   defaultSnapshotEntryThresholdBytes,
+		budget:      defaultSnapshotTotalBudgetBytes,
+		idleTimeout: time.Second,
+		progress:    &snapshotProgressReporter{},
+		manifest:    manifest,
+	}
+	if failed := capture.captureWIP(context.Background()); failed {
+		t.Fatalf("captureWIP failed: skipped=%#v", manifest.Skipped)
+	}
+	if len(uploaded) == 0 {
+		t.Fatal("captureWIP uploaded no Git bundle")
+	}
+	if manifest.BaseCommit != wantHead {
+		t.Fatalf("manifest baseCommit = %q, want %q", manifest.BaseCommit, wantHead)
+	}
+	if manifest.Git == nil || manifest.Git.Branch != "sam/local-only-capture" || manifest.Git.Detached {
+		t.Fatalf("manifest Git metadata = %#v", manifest.Git)
+	}
+
+	bundlePath := filepath.Join(t.TempDir(), "captured.bundle")
+	if err := os.WriteFile(bundlePath, uploaded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if heads := gitOutput(t, repo, "bundle", "list-heads", bundlePath); !strings.Contains(heads, "/worktree") || !strings.Contains(heads, "/index") {
+		t.Fatalf("uploaded bundle heads = %q", heads)
+	}
+	size, checksum, err := snapshotFileIdentity(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, ok := manifest.Artifacts["wip"]
+	if !ok || artifact.SizeBytes != size || artifact.SHA256 != checksum {
+		t.Fatalf("manifest WIP artifact = %#v, want size=%d sha=%s", artifact, size, checksum)
+	}
+
+	restored := filepath.Join(t.TempDir(), "restored")
+	runGit(t, filepath.Dir(restored), "clone", "--single-branch", "--branch", "main", remote, restored)
+	state := snapshotGitState{BaseCommit: manifest.BaseCommit, Git: manifest.Git}
+	if err := server.downloadAndRestoreWIPWithGitState(context.Background(), artifactServer.URL+"/wip", "", time.Second, restored, state); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitOutput(t, restored, "rev-parse", "HEAD"); got != wantHead {
+		t.Fatalf("restored HEAD = %q, want %q", got, wantHead)
+	}
+	if got := gitOutput(t, restored, "branch", "--show-current"); got != "sam/local-only-capture" {
+		t.Fatalf("restored branch = %q", got)
+	}
+	if got := gitOutput(t, restored, "status", "--porcelain=v1"); got != "" {
+		t.Fatalf("restored worktree is dirty: %q", got)
+	}
+}
+
 func TestCreateWIPBundlePreservesHeadWhenRemoteTrackingRefIsStale(t *testing.T) {
 	repo, remote := initSnapshotRemoteRepo(t)
 	runGit(t, repo, "checkout", "-b", "sam/stale-task")

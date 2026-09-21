@@ -70,7 +70,7 @@ Two independent things decide this, and it's worth knowing which is which:
 - **The branch depends on how the work was started.** Only a composer chat on an Instant profile skips branch creation — a composer chat on any other profile is submitted as a task, and gets one. Anything submitted as a task — or dispatched with `dispatch_task`, on either runtime — gets an output branch, whichever mode it runs in.
 - **The push depends on task mode.** Conversation mode has no git lifecycle at all. Selecting the Instant runtime on a profile sets conversation mode, and so does choosing the **Lightweight** workspace profile — so a Lightweight submitted task gets a branch with nothing pushed to it.
 
-Persistent-session snapshots retain uncommitted work for the seven-day sleep window. If you need a durable record beyond that window, **ask the agent to commit and push it to a branch**, or run the work as a task in task mode. Don't assume a PR is coming.
+Persistent-session snapshots retain the exact saved Git checkout, including uncommitted work and clean local-only commits, for the seven-day sleep window. If you need a durable record beyond that window, **ask the agent to commit and push it to a branch**, or run the work as a task in task mode. Don't assume a PR is coming.
 
 See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands) for the task-mode behavior.
 
@@ -80,7 +80,7 @@ After an agent turn becomes idle, you can put a conversation-mode chat session w
 
 SAM can also sleep sessions automatically. VM sessions write and verify a final checkpoint after 15 minutes of inactivity by default; Instant uses its separately configured one-hour `CF_CONTAINER_SLEEP_AFTER` window. Completed tasks queue sleep immediately and release compute on the first scheduled sweep after their final prompt reaches idle. The idle clock only counts genuine ProjectData work activity—not runtime heartbeats—so an active turn is not intentionally cut off.
 
-Sending a message in the same chat wakes it. The composer stays visible while the session is sleeping so the chat remains the wake affordance. Waking is not instant: SAM has to start runtime compute, restore the saved home directory, repository work in progress, and exact harness session, and only then deliver the queued message. Instant starts a fresh container; a VM session provisions a replacement workspace because the original workspace may already have been deleted.
+Sending a message in the same chat wakes it. The composer stays visible while the session is sleeping so the chat remains the wake affordance. Waking is not instant: SAM has to start runtime compute, restore the saved home directory, exact Git checkout, repository work in progress, and harness session, and only then deliver the queued message. Instant starts a fresh container; a VM session provisions a replacement workspace because the original workspace may already have been deleted.
 
 SAM tears VM compute down only after it has re-read and re-verified durable snapshot metadata. A complete snapshot restores the full HOME and work-in-progress state. A degraded snapshot, such as `home-skipped` or `transcript-only`, can also release compute once its manifest and any claimed artifacts are verified; the degradation remains visible so the wake path can report the reduced restore state. A stalled final checkpoint is converted into an explicit degraded snapshot instead of leaving the workspace awake indefinitely.
 
@@ -97,7 +97,7 @@ Runtime compute is not the durable session. Cloudflare can reclaim an Instant co
 A snapshot captures:
 
 - **Your home directory**, including the agent harness's own transcript/session state — this is what lets Claude Code or Codex resume the conversation rather than forget it.
-- **Work in progress in the repository** — the working tree and the git index, so uncommitted and staged changes survive.
+- **The exact Git checkout** — the saved `HEAD` commit, branch or detached state, canonical upstream metadata, working tree, and index. Clean local-only commits are bundled too. Restore verifies the final `HEAD`; if it cannot recreate the saved commit and ref state, wake reports degraded recovery instead of silently continuing on a different commit.
 
 A snapshot deliberately **excludes**:
 
@@ -109,7 +109,7 @@ A snapshot deliberately **excludes**:
 Three limits are worth planning around, because SAM does not currently surface any of them in the UI:
 
 - **Snapshots expire after 7 days of sleep** (`SESSION_SNAPSHOT_TTL_DAYS`). Expiry deletes the R2 artifacts and makes the chat terminal rather than silently starting a blank agent.
-- **Size is capped** at 256 MiB, including a 256 MiB per-entry ceiling (`SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`). Snapshot artifacts use short-lived direct R2 uploads when configured (with exact checksum binding on current agents); busy legacy VM agents use a same-user current-agent relay, so this budget is not reduced by the Worker's request-body limit. The repository bundle is captured first and takes what it needs; your home directory gets whatever budget is left, so a large working tree can crowd out the agent's own state. Skipped content is recorded server-side but you are not told about it.
+- **Size is capped** at 256 MiB, including a 256 MiB per-entry ceiling (`SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`). Snapshot artifacts use short-lived direct R2 uploads when configured (with exact checksum binding on current agents); busy legacy VM agents use a same-user current-agent relay, so this budget is not reduced by the Worker's request-body limit. The repository bundle is captured first and includes the commit graph needed for the saved `HEAD` plus worktree and index state. Repository history, clean local commits, or large changes can therefore crowd out the agent's HOME state. Skipped content is recorded server-side but you are not told about it.
 - **Final checkpoint waiting is progress-based** (`SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS`). Large snapshots may run longer than the request-acceptance budget as long as the vm-agent continues reporting durable progress; no-progress captures degrade and sleep rather than keeping a VM awake forever.
 - **A repository mid-merge is skipped entirely.** If a merge, rebase, cherry-pick, or revert is in progress when the runtime goes away, none of the repository work in progress is captured.
 

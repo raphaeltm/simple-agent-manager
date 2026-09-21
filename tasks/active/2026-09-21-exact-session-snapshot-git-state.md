@@ -20,9 +20,9 @@ Assumptions and compatibility decisions:
 
 - Git branch, upstream, remote, and detached-HEAD metadata can be added as optional manifest v1 fields, preserving old snapshots.
 - Clean status does not prove recoverability. Snapshot capture preserves the saved commit graph in a Git bundle even for clean remotely reachable commits, avoiding capture-time network access and stale-remote assumptions.
-- Existing snapshots with only `BaseCommit` remain restorable; missing new metadata falls back to exact detached/base validation without rejecting the old manifest.
+- Existing snapshots with only `BaseCommit` remain restorable; missing new metadata falls back to exact base-commit restoration and validation without branch/ref reconstruction.
 - The existing restore error path already records a visible `degraded` result, so a Git-state mismatch must return an error through that path rather than introduce a second terminal-state system.
-- No public API or user documentation contract changes; the manifest extension and restore diagnostics are internal and covered by task/test documentation.
+- Public sleep/snapshot documentation must describe exact Git checkout preservation, clean local-only commits, explicit mismatch degradation, and repository bundle budget use.
 
 Constitution alignment: the change adds no URLs, timeouts, limits, or environment-specific identifiers. Git operations use the existing request context and configured repository remote.
 
@@ -45,6 +45,7 @@ Constitution alignment: the change adds no URLs, timeouts, limits, or environmen
 - [x] Validate actual `HEAD` against saved `BaseCommit` before reporting `restored`; route any mismatch through the existing degraded recovery result.
 - [x] Prefer an existing remote checkout branch during bootstrap instead of recreating it from the clone base.
 - [x] Extend the API manifest contract for additive Git metadata.
+- [x] Update public sleep/snapshot documentation for the exact Git-state durability contract and bundle budget behavior.
 - [x] Add discriminating regression coverage for remote clean commit restore, clean local-only commit bundling/restore, dirty restore ordering/effect, mismatch failure, and existing remote branch checkout.
 - [ ] Run focused Go/API tests, full local quality gates, specialist reviews, and task completion validation.
 - [ ] Deploy to staging, provision a fresh VM, verify heartbeat/access and a real sleep/wake exact-HEAD flow, then clean up.
@@ -76,3 +77,4 @@ Constitution alignment: the change adds no URLs, timeouts, limits, or environmen
 - Bundle restore imports objects first, checks out the saved commit/ref, materializes worktree/index state, and validates `HEAD` again before harness resume can report `restored`.
 - Bootstrap checks `refs/remotes/origin/<checkout>` and tracks it when present; only genuinely new output branches are created from the requested clone base.
 - Focused validation: VM-agent server/bootstrap tests pass with Go 1.26.6; API snapshot route has 19 passing tests; real Worker D1/R2 wiring has 2 passing tests; API typecheck and lint pass.
+- Full validation: repository lint, typecheck, test, and build pass; all VM-agent Go tests and vet pass; focused race tests pass. Security, Go, Cloudflare, constitution, test, and documentation reviewers report no remaining findings.

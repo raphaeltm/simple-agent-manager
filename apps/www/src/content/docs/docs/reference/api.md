@@ -116,7 +116,7 @@ Permanently stop a running workspace and delete any retained persistent-session 
 
 ### `POST /api/workspaces/:id/sleep`
 
-Checkpoint the workspace's agent HOME, harness identity, and repository work in progress, verify the snapshot, and put the session to sleep. VM compute is stopped only after SAM re-verifies the durable manifest and every artifact the manifest still claims. A complete snapshot restores the full state; a degraded-but-verified snapshot can still sleep and will surface reduced restore state on wake. If an accepted final checkpoint stops reporting progress, SAM records an explicit degraded snapshot instead of leaving idle compute awake indefinitely. Sending a follow-up in the same chat wakes the session during the seven-day retention window.
+Checkpoint the workspace's agent HOME, harness identity, exact Git checkout, and repository work in progress, verify the snapshot, and put the session to sleep. Git state includes the saved `HEAD`, branch or detached state, canonical upstream metadata, clean local-only commits, working tree, and index. VM compute is stopped only after SAM re-verifies the durable manifest and every artifact the manifest still claims. A complete snapshot restores and validates that state; if the saved Git state cannot be recreated, wake reports explicit degraded recovery instead of success on a different commit. A degraded-but-verified snapshot can still sleep and will surface reduced restore state on wake. If an accepted final checkpoint stops reporting progress, SAM records an explicit degraded snapshot instead of leaving idle compute awake indefinitely. Sending a follow-up in the same chat wakes the session during the seven-day retention window.
 
 ### `POST /api/workspaces/:id/restart`
 
