@@ -65,15 +65,7 @@ func TestDownloadAndRestoreWIPKeepsOriginalBranch(t *testing.T) {
 	defer os.Remove(bundlePath)
 	runGit(t, repo, "reset", "--hard", base)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		f, openErr := os.Open(bundlePath)
-		if openErr != nil {
-			http.Error(w, openErr.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer f.Close()
-		_, _ = io.Copy(w, f)
-	}))
+	server := serveSnapshotBundle(t, bundlePath)
 	defer server.Close()
 	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
 	if err := s.downloadAndRestoreWIP(context.Background(), server.URL, "token", time.Second, repo, base); err != nil {
@@ -122,15 +114,7 @@ func TestDownloadAndRestoreWIPPreservesIndexAndWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		f, openErr := os.Open(bundlePath)
-		if openErr != nil {
-			http.Error(w, openErr.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer f.Close()
-		_, _ = io.Copy(w, f)
-	}))
+	server := serveSnapshotBundle(t, bundlePath)
 	defer server.Close()
 
 	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
