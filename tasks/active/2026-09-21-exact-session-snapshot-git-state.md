@@ -1,0 +1,78 @@
+# Restore sleeping sessions to the exact saved Git state
+
+## Problem
+
+A sleeping session can restore its HOME and harness state while silently resuming in the wrong repository checkout. The observed session saved clean commit `f967ae394bed2c21f100f6cad23e3a2897caf65a` on `sam/new-ui-resources-being-qd7mnj`, but recovery provisioned a checkout from `main` at `be80ba3fe6842cdb298cef7b0d0c67a88b27c814`. Capture skipped a WIP bundle because `git status` was clean, and restore never enforced the saved `BaseCommit` without that bundle.
+
+## Preflight
+
+Change classes: `cross-component-change`, `business-logic-change`, and `infra-change`.
+
+The affected data flow is:
+
+1. `packages/vm-agent/internal/server/session_snapshot_{archive,container,capture}.go` inspects the repository, creates any compact Git artifact, and writes Git metadata into the manifest.
+2. `apps/api/src/routes/workspaces/session-snapshots.ts` validates the manifest; `session-snapshot-persistence.ts` stores the manifest in R2 and the base commit in D1.
+3. `apps/api/src/services/session-recovery.ts` starts a recovery TaskRunner; `workspace-steps.ts` selects checkout/base branches for workspace provisioning.
+4. `packages/vm-agent/internal/bootstrap/bootstrap.go` clones the base branch and selects the checkout branch.
+5. `packages/vm-agent/internal/server/session_snapshot.go` downloads the saved artifacts, restores Git and HOME state, resumes the harness, and only then reports `restored`.
+
+Assumptions and compatibility decisions:
+
+- Git branch, upstream, remote, and detached-HEAD metadata can be added as optional manifest v1 fields, preserving old snapshots.
+- A commit is local-only when saved `HEAD` is not contained by any known remote-tracking ref. That state requires a Git bundle even when the index and worktree are clean.
+- Existing snapshots with only `BaseCommit` remain restorable; missing new metadata falls back to exact detached/base validation without rejecting the old manifest.
+- The existing restore error path already records a visible `degraded` result, so a Git-state mismatch must return an error through that path rather than introduce a second terminal-state system.
+- No public API or user documentation contract changes; the manifest extension and restore diagnostics are internal and covered by task/test documentation.
+
+Constitution alignment: the change adds no URLs, timeouts, limits, or environment-specific identifiers. Git operations use the existing request context and configured repository remote.
+
+## Research findings
+
+- Both standalone and container capture return early on an empty porcelain status, although `BaseCommit` is still recorded.
+- Both restore paths use `BaseCommit` only while applying a downloaded WIP bundle. A clean snapshot never checks out or validates the commit.
+- Existing two-ref WIP bundles contain synthetic worktree/index commits parented by saved `HEAD`; forcing this compact bundle for local-only clean commits preserves the commit graph without a filesystem snapshot.
+- `restoreSessionSnapshot` reports `restored` after harness resume without a final repository HEAD check.
+- `createCheckoutBranch` always uses `git checkout -b`, so a clone from `main` recreates an existing remote task branch from the wrong base.
+- The API manifest validator mirrors the Go manifest field-for-field and must accept any additive Git metadata.
+- Existing Git snapshot tests exercise real repositories and are the correct regression seam; workspace branch dispatch already has a focused bootstrap helper test seam.
+- Relevant prior incident lessons require exact terminal verdicts, real trigger coverage, and fresh-node staging for VM-agent changes.
+
+## Implementation checklist
+
+- [x] Capture optional branch, upstream, remote, and detached-HEAD metadata in standalone and container snapshots.
+- [x] Detect a saved `HEAD` not reachable from remote-tracking refs and create/upload a compact Git bundle even when the worktree is clean.
+- [x] Restore the exact saved commit and branch/detached state before applying WIP for standalone and container runtimes.
+- [x] Validate actual `HEAD` against saved `BaseCommit` before reporting `restored`; route any mismatch through the existing degraded recovery result.
+- [x] Prefer an existing remote checkout branch during bootstrap instead of recreating it from the clone base.
+- [x] Extend the API manifest contract for additive Git metadata.
+- [x] Add discriminating regression coverage for remote clean commit restore, clean local-only commit bundling/restore, dirty restore ordering/effect, mismatch failure, and existing remote branch checkout.
+- [ ] Run focused Go/API tests, full local quality gates, specialist reviews, and task completion validation.
+- [ ] Deploy to staging, provision a fresh VM, verify heartbeat/access and a real sleep/wake exact-HEAD flow, then clean up.
+- [ ] Open the PR with the referenced failure, before/after behavior, tests, staging evidence, and reviewer evidence; complete CI and CodeRabbit gates.
+
+## Acceptance criteria
+
+- [x] A clean worktree on a remote task commit wakes at the saved commit when the recovery workspace was provisioned from main.
+- [x] A clean worktree with local-only commits captures a bundle and wakes with those commits intact.
+- [x] A dirty worktree first restores saved `HEAD`, then restores its index/worktree state.
+- [x] Restore cannot return or report `restored` when actual `HEAD` differs from saved `BaseCommit`.
+- [x] A recovery checkout uses an existing remote task branch rather than recreating it from main.
+- [ ] The referenced session would restore to `f967ae394bed2c21f100f6cad23e3a2897caf65a` or report explicit degradation, never silent success on `be80ba3fe6842cdb298cef7b0d0c67a88b27c814`.
+
+## References
+
+- SAM Idea `01M30PPM0B96G2RM1HC4Q7EHG6`
+- Session `b4eae631-4a46-4b1e-b89d-3d85224eccb7`
+- Task `01M304HV194SGTNM44B25TMDVP`
+- Original prototype commit `f967ae394bed2c21f100f6cad23e3a2897caf65a`
+- `tasks/archive/2026-07-11-runtime-neutral-session-hibernate-wake.md`
+- `tasks/active/2026-07-21-instant-runtime-recovery-state-machine.md`
+- `tasks/active/2026-08-19-ensure-branch-exists-before-instant-workspace.md`
+
+## Implementation notes
+
+- New snapshots retain `baseCommit` plus optional `git` metadata (`branch`, `upstream`, `remote`, `detached`) without changing the manifest version; old manifests remain accepted.
+- Clean capture creates a bundle only when no remote-tracking ref contains saved `HEAD`. Dirty capture keeps the existing worktree/index bundle and now treats exact-HEAD restoration as a prerequisite.
+- Bundle restore imports objects first, checks out the saved commit/ref, materializes worktree/index state, and validates `HEAD` again before harness resume can report `restored`.
+- Bootstrap checks `refs/remotes/origin/<checkout>` and tracks it when present; only genuinely new output branches are created from the requested clone base.
+- Focused validation: VM-agent server/bootstrap tests pass with Go 1.26.6; API snapshot route has 18 passing tests; API typecheck and lint pass.

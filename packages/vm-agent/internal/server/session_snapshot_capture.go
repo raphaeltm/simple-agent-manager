@@ -27,6 +27,19 @@ func (c *snapshotArtifactCapture) captureWIP(ctx context.Context) bool {
 		baseCommit, wipPath, wipSkipped, err = c.server.createContainerWIPBundle(ctx, c.target, c.threshold, c.budget, c.progress.Report)
 	}
 	c.manifest.BaseCommit = baseCommit
+	if baseCommit != "" && err == nil {
+		var gitState snapshotGitState
+		if c.target == nil {
+			gitState, err = captureStandaloneSnapshotGitState(ctx, c.workDir)
+		} else {
+			gitState, err = captureSnapshotGitState(ctx, func(ctx context.Context, env []string, args ...string) (string, error) {
+				return c.server.containerGit(ctx, c.target, env, args...)
+			})
+		}
+		if err == nil {
+			c.manifest.Git = gitState.Git
+		}
+	}
 	c.manifest.Skipped = append(c.manifest.Skipped, wipSkipped...)
 	wipCaptureFailed := err != nil
 	if err != nil {

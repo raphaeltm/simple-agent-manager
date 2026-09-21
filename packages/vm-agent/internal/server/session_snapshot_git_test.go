@@ -151,6 +151,182 @@ func TestDownloadAndRestoreWIPPreservesIndexAndWorktree(t *testing.T) {
 	}
 }
 
+func TestCreateWIPBundleSkipsCleanRemoteCommit(t *testing.T) {
+	repo, _ := initSnapshotRemoteRepo(t)
+	state, err := captureStandaloneSnapshotGitState(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, bundlePath, _, err := createWIPBundle(context.Background(), repo, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundlePath != "" {
+		defer os.Remove(bundlePath)
+		t.Fatalf("bundlePath = %q, want no bundle for a clean remotely reachable HEAD", bundlePath)
+	}
+	if base != state.BaseCommit || state.BaseCommit != gitOutput(t, repo, "rev-parse", "HEAD") {
+		t.Fatalf("captured base = %q, want current HEAD", state.BaseCommit)
+	}
+	if state.Git == nil || state.Git.Branch != "main" || state.Git.Upstream != "origin/main" {
+		t.Fatalf("captured git metadata = %#v", state.Git)
+	}
+}
+
+func TestCleanLocalOnlyCommitBundlesAndRestoresExactGitState(t *testing.T) {
+	repo, remote := initSnapshotRemoteRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, "local-only.txt"), []byte("local commit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "local-only.txt")
+	runGit(t, repo, "commit", "-m", "local only")
+	wantHead := gitOutput(t, repo, "rev-parse", "HEAD")
+
+	state, err := captureStandaloneSnapshotGitState(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, bundlePath, _, err := createWIPBundle(context.Background(), repo, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundlePath == "" {
+		t.Fatal("clean local-only commit did not produce a Git bundle")
+	}
+	defer os.Remove(bundlePath)
+
+	restored := filepath.Join(t.TempDir(), "restored")
+	runGit(t, filepath.Dir(restored), "clone", "--single-branch", "--branch", "main", remote, restored)
+	server := serveSnapshotBundle(t, bundlePath)
+	defer server.Close()
+	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
+	if err := s.downloadAndRestoreWIPWithGitState(context.Background(), server.URL, "token", time.Second, restored, state); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateStandaloneSnapshotGitState(context.Background(), restored, state); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitOutput(t, restored, "rev-parse", "HEAD"); got != wantHead {
+		t.Fatalf("restored HEAD = %q, want local-only commit %q", got, wantHead)
+	}
+	if got := gitOutput(t, restored, "status", "--porcelain=v1"); got != "" {
+		t.Fatalf("restored clean snapshot status = %q, want clean", got)
+	}
+}
+
+func TestRestoreCleanRemoteCommitFromMain(t *testing.T) {
+	seed, remote := initSnapshotRemoteRepo(t)
+	runGit(t, seed, "checkout", "-b", "sam/saved-task")
+	if err := os.WriteFile(filepath.Join(seed, "saved.txt"), []byte("saved"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, seed, "add", "saved.txt")
+	runGit(t, seed, "commit", "-m", "saved task")
+	wantHead := gitOutput(t, seed, "rev-parse", "HEAD")
+	runGit(t, seed, "push", "-u", "origin", "sam/saved-task")
+	state, err := captureStandaloneSnapshotGitState(context.Background(), seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	restored := filepath.Join(t.TempDir(), "restored")
+	runGit(t, filepath.Dir(restored), "clone", "--single-branch", "--branch", "main", remote, restored)
+	if err := restoreStandaloneSnapshotGitState(context.Background(), restored, state); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitOutput(t, restored, "rev-parse", "HEAD"); got != wantHead {
+		t.Fatalf("restored HEAD = %q, want saved commit %q", got, wantHead)
+	}
+	if got := gitOutput(t, restored, "branch", "--show-current"); got != "sam/saved-task" {
+		t.Fatalf("restored branch = %q, want sam/saved-task", got)
+	}
+}
+
+func TestRestoreDetachedSnapshotGitState(t *testing.T) {
+	seed, remote := initSnapshotRemoteRepo(t)
+	wantHead := gitOutput(t, seed, "rev-parse", "HEAD")
+	runGit(t, seed, "checkout", "--detach", wantHead)
+	state, err := captureStandaloneSnapshotGitState(context.Background(), seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Git == nil || !state.Git.Detached || state.Git.Branch != "" {
+		t.Fatalf("captured detached metadata = %#v", state.Git)
+	}
+
+	restored := filepath.Join(t.TempDir(), "restored")
+	runGit(t, filepath.Dir(restored), "clone", "--branch", "main", remote, restored)
+	if err := restoreStandaloneSnapshotGitState(context.Background(), restored, state); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitOutput(t, restored, "rev-parse", "HEAD"); got != wantHead {
+		t.Fatalf("restored detached HEAD = %q, want %q", got, wantHead)
+	}
+	if got := gitOutput(t, restored, "branch", "--show-current"); got != "" {
+		t.Fatalf("restored branch = %q, want detached HEAD", got)
+	}
+}
+
+func TestRestoreDirtySnapshotMovesToSavedCommitBeforeApplyingWIP(t *testing.T) {
+	seed, remote := initSnapshotRemoteRepo(t)
+	runGit(t, seed, "checkout", "-b", "sam/saved-task")
+	if err := os.WriteFile(filepath.Join(seed, "saved.txt"), []byte("saved"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, seed, "add", "saved.txt")
+	runGit(t, seed, "commit", "-m", "saved task")
+	runGit(t, seed, "push", "-u", "origin", "sam/saved-task")
+	wantHead := gitOutput(t, seed, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(seed, "saved.txt"), []byte("dirty snapshot"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state, err := captureStandaloneSnapshotGitState(context.Background(), seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, bundlePath, _, err := createWIPBundle(context.Background(), seed, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(bundlePath)
+
+	restored := filepath.Join(t.TempDir(), "restored")
+	runGit(t, filepath.Dir(restored), "clone", "--branch", "main", remote, restored)
+	server := serveSnapshotBundle(t, bundlePath)
+	defer server.Close()
+	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
+	if err := s.downloadAndRestoreWIPWithGitState(context.Background(), server.URL, "token", time.Second, restored, state); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitOutput(t, restored, "rev-parse", "HEAD"); got != wantHead {
+		t.Fatalf("restored HEAD = %q, want saved commit %q", got, wantHead)
+	}
+	if got := gitOutput(t, restored, "diff", "--", "saved.txt"); !strings.Contains(got, "dirty snapshot") {
+		t.Fatalf("restored WIP diff = %q, want dirty snapshot", got)
+	}
+}
+
+func TestValidateSnapshotGitStateRejectsWrongHead(t *testing.T) {
+	repo := initSnapshotTestRepo(t)
+	actual := gitOutput(t, repo, "rev-parse", "HEAD")
+	state := snapshotGitState{BaseCommit: strings.Repeat("a", 40)}
+	err := validateStandaloneSnapshotGitState(context.Background(), repo, state)
+	if err == nil || !strings.Contains(err.Error(), state.BaseCommit) || !strings.Contains(err.Error(), actual) {
+		t.Fatalf("validation error = %v, want expected and actual commit diagnostics", err)
+	}
+}
+
+func TestSnapshotRestoreGitStateRejectsContradictoryBaseCommit(t *testing.T) {
+	restore := &snapshotRestoreResponse{
+		BaseCommit: strings.Repeat("a", 40),
+		Manifest:   &snapshotManifest{BaseCommit: strings.Repeat("b", 40)},
+	}
+	_, err := snapshotRestoreGitState(restore)
+	if err == nil || !strings.Contains(err.Error(), "metadata mismatch") {
+		t.Fatalf("snapshotRestoreGitState error = %v, want metadata mismatch", err)
+	}
+}
+
 func initSnapshotTestRepo(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -166,6 +342,30 @@ func initSnapshotTestRepo(t *testing.T) string {
 	runGit(t, repo, "add", "README.md")
 	runGit(t, repo, "commit", "-m", "base")
 	return repo
+}
+
+func initSnapshotRemoteRepo(t *testing.T) (string, string) {
+	t.Helper()
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runGit(t, filepath.Dir(remote), "init", "--bare", remote)
+	repo := initSnapshotTestRepo(t)
+	runGit(t, repo, "branch", "-M", "main")
+	runGit(t, repo, "remote", "add", "origin", remote)
+	runGit(t, repo, "push", "-u", "origin", "main")
+	return repo, remote
+}
+
+func serveSnapshotBundle(t *testing.T, bundlePath string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		f, err := os.Open(bundlePath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+		_, _ = io.Copy(w, f)
+	}))
 }
 
 func gitOutput(t *testing.T, dir string, args ...string) string {

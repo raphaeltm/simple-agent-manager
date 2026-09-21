@@ -34,16 +34,23 @@ func createWIPBundle(ctx context.Context, workDir string, entryThreshold int64) 
 	if gitOperationInProgress(workDir) {
 		return "", "", []snapshotSkippedEntry{{Path: workDir, Reason: "git operation in progress"}}, nil
 	}
-	base, err := runStandaloneGitCommand(ctx, workDir, nil, "rev-parse", "HEAD")
+	gitState, err := captureStandaloneSnapshotGitState(ctx, workDir)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("resolve base commit: %w", err)
 	}
+	base := gitState.BaseCommit
 	status, err := runStandaloneGitCommand(ctx, workDir, nil, "status", "--porcelain")
 	if err != nil {
 		return base, "", nil, fmt.Errorf("git status: %w", err)
 	}
 	if strings.TrimSpace(status) == "" {
-		return base, "", nil, nil
+		localOnly, reachabilityErr := snapshotHeadRequiresBundle(ctx, standaloneSnapshotGit(workDir), base)
+		if reachabilityErr != nil {
+			return base, "", nil, reachabilityErr
+		}
+		if !localOnly {
+			return base, "", nil, nil
+		}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

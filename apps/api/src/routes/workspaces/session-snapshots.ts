@@ -74,6 +74,14 @@ const SessionSnapshotManifestSchema = v.object({
   acpSessionId: v.optional(v.string()),
   agentType: v.optional(v.string()),
   baseCommit: v.optional(v.string()),
+  git: v.optional(
+    v.object({
+      branch: v.optional(v.string()),
+      upstream: v.optional(v.string()),
+      remote: v.optional(v.string()),
+      detached: v.boolean(),
+    })
+  ),
   status: v.picklist(['pending', 'available', 'degraded', 'failed', 'expired']),
   degradation: v.picklist([
     'none',
@@ -417,6 +425,24 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
   if (manifest.status !== status || manifest.degradation !== degradation) {
     throw errors.badRequest('Snapshot manifest lifecycle does not match request');
   }
+  const requestedBaseCommit = stringField(body, 'baseCommit', false);
+  if (
+    requestedBaseCommit !== null &&
+    manifest.baseCommit &&
+    requestedBaseCommit !== manifest.baseCommit
+  ) {
+    throw errors.badRequest('Snapshot base commit does not match manifest');
+  }
+  const baseCommit = requestedBaseCommit ?? manifest.baseCommit ?? null;
+  if (manifest.git) {
+    if (!baseCommit) throw errors.badRequest('Snapshot Git metadata requires a base commit');
+    if (manifest.git.detached === Boolean(manifest.git.branch)) {
+      throw errors.badRequest('Snapshot Git branch and detached state are inconsistent');
+    }
+    if (manifest.git.upstream && !manifest.git.remote) {
+      throw errors.badRequest('Snapshot Git upstream requires remote metadata');
+    }
+  }
   if (
     (status === 'available' && degradation !== 'none') ||
     (status !== 'available' && degradation === 'none')
@@ -541,7 +567,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
     chatSessionId,
     agentSessionId,
     runtime: stringField(body, 'runtime', false) || 'runtime-neutral',
-    baseCommit: stringField(body, 'baseCommit', false),
+    baseCommit,
     captureGeneration: generation,
     status,
     degradation,

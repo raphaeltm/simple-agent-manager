@@ -3146,7 +3146,17 @@ func createCheckoutBranch(ctx context.Context, workspaceDir, cloneBranch, checko
 	if cloneBranch == checkoutBranch {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, gitBinaryPath, "-C", workspaceDir, "checkout", "-b", checkoutBranch)
+	remoteRef := "refs/remotes/origin/" + checkoutBranch
+	cmd := exec.CommandContext(ctx, gitBinaryPath, "-C", workspaceDir, "show-ref", "--verify", "--quiet", remoteRef)
+	if err := cmd.Run(); err == nil {
+		cmd = exec.CommandContext(ctx, gitBinaryPath, "-C", workspaceDir, "checkout", "--track", "-b", checkoutBranch, "origin/"+checkoutBranch)
+		output, checkoutErr := cmd.CombinedOutput()
+		if checkoutErr != nil {
+			return fmt.Errorf("failed to check out existing remote branch %q: %w: %s", checkoutBranch, checkoutErr, strings.TrimSpace(string(output)))
+		}
+		return nil
+	}
+	cmd = exec.CommandContext(ctx, gitBinaryPath, "-C", workspaceDir, "checkout", "-b", checkoutBranch)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to create checkout branch %q from %q: %w: %s", checkoutBranch, cloneBranch, err, strings.TrimSpace(string(output)))

@@ -622,6 +622,13 @@ describe('workspaces session snapshot callback routes', () => {
         agentSessionId: 'agent-session-1',
         acpSessionId: 'acp-session-1',
         agentType: 'openai-codex',
+        baseCommit: 'abc123',
+        git: {
+          branch: 'sam/saved-task',
+          upstream: 'origin/sam/saved-task',
+          remote: 'origin',
+          detached: false,
+        },
         status: 'available',
         degradation: 'none',
         skipped: [],
@@ -645,8 +652,36 @@ describe('workspaces session snapshot callback routes', () => {
     expect(mocks.completeSessionSnapshot).toHaveBeenCalledWith(
       expect.anything(),
       runtimeBindings,
-      expect.objectContaining({ artifactSizes: { homeBytes: 4, wipBytes: 3 } })
+      expect.objectContaining({
+        baseCommit: 'abc123',
+        artifactSizes: { homeBytes: 4, wipBytes: 3 },
+        manifest: expect.objectContaining({
+          git: {
+            branch: 'sam/saved-task',
+            upstream: 'origin/sam/saved-task',
+            remote: 'origin',
+            detached: false,
+          },
+        }),
+      })
     );
+
+    const baseCommitMismatch = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...body,
+          baseCommit: 'different-commit',
+        }),
+      },
+      runtimeBindings
+    );
+    expect(baseCommitMismatch.status).toBe(400);
+    await expect(baseCommitMismatch.json()).resolves.toMatchObject({
+      message: 'Snapshot base commit does not match manifest',
+    });
 
     for (const degradation of [
       'wip-skipped',

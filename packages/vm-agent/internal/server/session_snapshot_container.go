@@ -253,16 +253,26 @@ func (s *Server) createContainerWIPBundle(ctx context.Context, target *container
 	if s.containerGitOperationInProgress(ctx, target) {
 		return "", "", []snapshotSkippedEntry{{Path: target.workDir, Reason: "git operation in progress"}}, nil
 	}
-	base, err := s.containerGit(ctx, target, nil, "rev-parse", "HEAD")
+	gitCommand := func(ctx context.Context, env []string, args ...string) (string, error) {
+		return s.containerGit(ctx, target, env, args...)
+	}
+	gitState, err := captureSnapshotGitState(ctx, gitCommand)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("resolve container snapshot base commit: %w", err)
 	}
+	base := gitState.BaseCommit
 	status, err := s.containerGit(ctx, target, nil, "status", "--porcelain")
 	if err != nil {
 		return base, "", nil, fmt.Errorf("container git status: %w", err)
 	}
 	if status == "" {
-		return base, "", nil, nil
+		localOnly, reachabilityErr := snapshotHeadRequiresBundle(ctx, gitCommand, base)
+		if reachabilityErr != nil {
+			return base, "", nil, reachabilityErr
+		}
+		if !localOnly {
+			return base, "", nil, nil
+		}
 	}
 	if reportProgress != nil {
 		reportProgress(ctx, "wip-capture")
@@ -705,6 +715,10 @@ func parseSnapshotBundleRefs(path string) (map[string]string, error) {
 }
 
 func (s *Server) downloadAndRestoreContainerWIP(ctx context.Context, target *containerSnapshotTarget, downloadPath, token string, idleTimeout time.Duration, maxBytes int64, baseCommit string) error {
+	return s.downloadAndRestoreContainerWIPWithGitState(ctx, target, downloadPath, token, idleTimeout, maxBytes, snapshotGitState{BaseCommit: baseCommit})
+}
+
+func (s *Server) downloadAndRestoreContainerWIPWithGitState(ctx context.Context, target *containerSnapshotTarget, downloadPath, token string, idleTimeout time.Duration, maxBytes int64, gitState snapshotGitState) error {
 	hostPath, err := s.downloadSnapshotArtifactToTemp(ctx, downloadPath, token, idleTimeout, "sam-session-restore-wip-*.bundle", maxBytes)
 	if err != nil {
 		return err
@@ -725,11 +739,17 @@ func (s *Server) downloadAndRestoreContainerWIP(ctx context.Context, target *con
 		if output, err := s.containerGit(ctx, target, nil, "fetch", containerPath, worktreeRef, indexRef); err != nil {
 			return fmt.Errorf("fetch container snapshot bundle: %w: %s", err, output)
 		}
+		gitCommand := func(ctx context.Context, env []string, args ...string) (string, error) {
+			return s.containerGit(ctx, target, env, args...)
+		}
+		if err := restoreSnapshotGitState(ctx, gitCommand, gitState); err != nil {
+			return err
+		}
 		if output, err := s.containerGit(ctx, target, nil, "read-tree", "--reset", "-u", worktreeCommit); err != nil {
 			return fmt.Errorf("materialize container snapshot worktree: %w: %s", err, output)
 		}
-		if strings.TrimSpace(baseCommit) != "" {
-			if output, err := s.containerGit(ctx, target, nil, "reset", "--soft", baseCommit); err != nil {
+		if strings.TrimSpace(gitState.BaseCommit) != "" {
+			if output, err := s.containerGit(ctx, target, nil, "reset", "--soft", gitState.BaseCommit); err != nil {
 				return fmt.Errorf("restore container snapshot base commit: %w: %s", err, output)
 			}
 		}
@@ -746,11 +766,17 @@ func (s *Server) downloadAndRestoreContainerWIP(ctx context.Context, target *con
 	if output, err := s.containerGit(ctx, target, nil, "fetch", containerPath, legacyRef); err != nil {
 		return fmt.Errorf("fetch legacy container snapshot bundle: %w: %s", err, output)
 	}
+	gitCommand := func(ctx context.Context, env []string, args ...string) (string, error) {
+		return s.containerGit(ctx, target, env, args...)
+	}
+	if err := restoreSnapshotGitState(ctx, gitCommand, gitState); err != nil {
+		return err
+	}
 	if output, err := s.containerGit(ctx, target, nil, "read-tree", "--reset", "-u", "FETCH_HEAD"); err != nil {
 		return fmt.Errorf("materialize legacy container snapshot tree: %w: %s", err, output)
 	}
-	if strings.TrimSpace(baseCommit) != "" {
-		if output, err := s.containerGit(ctx, target, nil, "reset", "--mixed", baseCommit); err != nil {
+	if strings.TrimSpace(gitState.BaseCommit) != "" {
+		if output, err := s.containerGit(ctx, target, nil, "reset", "--mixed", gitState.BaseCommit); err != nil {
 			return fmt.Errorf("restore legacy container snapshot base: %w: %s", err, output)
 		}
 	}

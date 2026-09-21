@@ -77,6 +77,12 @@ export interface SessionSnapshotManifest {
   acpSessionId?: string;
   agentType?: string;
   baseCommit?: string;
+  git?: {
+    branch?: string;
+    upstream?: string;
+    remote?: string;
+    detached: boolean;
+  };
   status: SessionSnapshotStatus;
   degradation: SessionSnapshotDegradation;
   skipped: Array<{
