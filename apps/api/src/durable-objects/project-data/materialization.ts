@@ -328,12 +328,14 @@ export function materializeSession(sql: SqlStorage, sessionId: string): void {
 
   const groups = groupTokens(tokens);
   const head = groups[0];
-  const extended = watermark !== null && head !== undefined && extendTrailingGroup(sql, sessionId, head);
+  const extended =
+    watermark !== null && head !== undefined && extendTrailingGroup(sql, sessionId, head);
   for (const group of extended ? groups.slice(1) : groups) {
     insertGroup(sql, sessionId, group);
   }
 
-  const last = tokens[tokens.length - 1]!;
+  const last = tokens[tokens.length - 1];
+  if (!last) return;
   stampIndexState(
     sql,
     sessionId,
@@ -389,6 +391,12 @@ function countPendingSessions(sql: SqlStorage, scanLimit: number): number {
  * Replaces the old `status = 'stopped' AND materialized_at IS NULL` sweep: once a
  * sleeping session can be indexed mid-life, "never indexed" is no longer the same
  * question as "has unindexed messages".
+ *
+ * Nothing schedules this today — ordinary sessions are indexed by their own sleep
+ * and stop transitions, and this exists to drain sessions that were already asleep
+ * when incremental materialization shipped. Wiring a periodic caller needs its own
+ * I/O budget and candidate-escape design under `.claude/rules/47`; tracked in idea
+ * `01M313TT05Q5R09D9E0ZZGW0E3`.
  */
 export function materializePendingSessions(
   sql: SqlStorage,

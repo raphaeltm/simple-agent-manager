@@ -601,12 +601,6 @@ function searchMessagesLike(
     // sleep — text that is findable today. Mirrors `resolveWatermark()` in
     // `materialization.ts`: no watermark columns means the legacy pass covered
     // everything up to `materialized_at`.
-    // Materialization is incremental, so "this session has been indexed" is no
-    // longer the same question as "this message has been indexed". Excluding the
-    // whole session would drop everything a woken session wrote since its last
-    // sleep — text that is findable today. Mirrors `resolveWatermark()` in
-    // `materialization.ts`: no watermark columns means the legacy pass covered
-    // everything up to `materialized_at`.
     conditions.push(
       `(s.materialized_at IS NULL
         OR m.created_at > COALESCE(s.materialized_through_created_at, s.materialized_at)

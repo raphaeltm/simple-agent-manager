@@ -241,4 +241,5 @@ rebuild reads 64.
   by RPC; nothing schedules it. Sessions already asleep before this ships become
   searchable when they next sleep or stop. Wiring a periodic backfill is deliberately
   left out of this change — it needs its own I/O budget, config, and tests under
-  rule 47 — and is filed as a follow-up idea.
+  rule 47 — and is filed as idea `01M313TT05Q5R09D9E0ZZGW0E3`, referenced from a comment
+  on `materializePendingSessions`.
