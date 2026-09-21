@@ -151,7 +151,7 @@ export function ResourceSparkline({
               width={Math.max(1, Math.min(100, width))}
               height="92"
               rx="1"
-              fill="var(--sam-color-accent-primary)"
+              fill="var(--sam-color-info)"
               opacity={span.approximate ? 0.14 : 0.22}
             />
           );
