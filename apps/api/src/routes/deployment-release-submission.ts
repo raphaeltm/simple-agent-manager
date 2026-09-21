@@ -1,7 +1,7 @@
 import {
   type DeploymentManifest,
-  type ResolvedResourceReservation,
   resolveDeploymentManifestReservation,
+  type ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
 import { desc, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';

@@ -44,6 +44,7 @@ function makePool(overrides: Partial<schema.CapacityPool> = {}): schema.Capacity
     status: 'active',
     configurationState: 'configured-ready',
     strategy: 'pack',
+    deploymentStrategy: 'smallest-fit',
     exhaustionPolicy: 'queue',
     lastReconciledAt: null,
     migrationVersion: null,
@@ -130,6 +131,7 @@ describe('capacity pool mappers', () => {
       status: 'active',
       configurationState: 'configured-ready',
       strategy: 'pack',
+      deploymentStrategy: 'smallest-fit',
       exhaustionPolicy: 'queue',
     });
   });

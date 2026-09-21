@@ -67,9 +67,11 @@ Durable product source: SAM idea `01M30N3SR9APZ2E19Y87VHNSVA`.
 - [x] Add focused tests for divergent workspace/deployment strategy ranking, declared-resource candidate sizing,
       existing-node reuse, dimension overflow, malformed legacy reservations, atomic final admission races,
       exact host-memory reserve boundaries, and persistent-volume exclusivity.
-- [ ] Update public compute-pool documentation and API/UI tests; run required desktop/mobile Playwright evidence
+- [x] Update public compute-pool documentation and API/UI tests; run required desktop/mobile Playwright evidence
       if the existing pool editor changes.
-- [ ] Run focused scheduler/deployment tests, broader API checks, full repository quality gates, completion
+- [x] Run focused scheduler/deployment tests and broader API checks plus repository lint, typecheck, formatting,
+      migration-safety, node-pool-boundary, and full test-suite gates.
+- [ ] Run completion
       validation, and all required specialist reviews.
 - [ ] Coordinate staging use, deploy the final candidate, validate real declared-resource placement/reuse,
       clean up owned staging resources, then open the PR and complete CI, CodeRabbit, merge, and production

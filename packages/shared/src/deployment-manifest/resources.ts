@@ -1,6 +1,5 @@
 import { RESOURCE_RESERVATION_VERSION } from '../constants/resource-defaults';
 import type { ResolvedResourceReservation } from '../types/resource';
-
 import type { DeploymentManifest } from './schema';
 
 /** Conservative reservation used when a service omits explicit limits. */

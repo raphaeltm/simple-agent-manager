@@ -4,8 +4,8 @@ import type {
   CapacityWorkloadRole,
   CredentialProvider,
   CredentialSource,
-  ResourceResolutionInput,
   ResolvedResourceReservation,
+  ResourceResolutionInput,
   VMLocation,
   VMSize,
 } from '@simple-agent-manager/shared';

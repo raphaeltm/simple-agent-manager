@@ -39,7 +39,16 @@ const recordDeploymentReleaseLifecycleEventBestEffort = vi.hoisted(() =>
 );
 vi.mock('../../../src/services/deployment-provisioning', () => ({
   provisionDeploymentNode: (...args: unknown[]) => mockProvisionDeploymentNode(...args),
-  resolveDeploymentPlacement: vi.fn(async () => null),
+  resolveDeploymentPlacement: vi.fn(async () => ({
+    provider: 'hetzner',
+    location: 'fsn1',
+    vmSize: 'small',
+  })),
+  findDeploymentNodeWithCapacity: vi.fn(async (_env, _userId, placement) => ({
+    nodeId: 'node-existing',
+    placement,
+  })),
+  linkEnvironmentToNode: vi.fn(async () => true),
 }));
 vi.mock('../../../src/services/project-lifecycle-events', () => ({
   recordDeploymentReleaseLifecycleEventBestEffort,
@@ -117,6 +126,16 @@ vi.mock('@simple-agent-manager/shared', () => ({
     manifest: body,
   }),
   isDigestReference: (s: string) => s.startsWith('sha256:'),
+  resolveDeploymentManifestReservation: () => ({
+    version: 3,
+    cpuMillis: 250,
+    memoryMb: 256,
+    diskMb: 1024,
+    exclusiveNode: false,
+    source: 'task',
+    sourceId: 'env-1',
+    diagnostics: ['deployment-manifest-reservation:v1'],
+  }),
 }));
 
 // Mock drizzle with realistic state tracking
@@ -285,7 +304,22 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
       'proj-1',
       'test-user-id',
       expect.anything(),
-      { requiresVolumes: false }
+      {
+        requiresVolumes: false,
+        reservation: {
+          version: 3,
+          cpuMillis: 250,
+          memoryMb: 256,
+          diskMb: 1024,
+          exclusiveNode: false,
+          source: 'task',
+          sourceId: 'env-1',
+          diagnostics: ['deployment-manifest-reservation:v1'],
+        },
+        providerOverride: 'hetzner',
+        vmLocationOverride: 'fsn1',
+        vmSizeOverride: 'small',
+      }
     );
     expect(recordDeploymentReleaseLifecycleEventBestEffort).toHaveBeenCalledWith(
       mockEnv,

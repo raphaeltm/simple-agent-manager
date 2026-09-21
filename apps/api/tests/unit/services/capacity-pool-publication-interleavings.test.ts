@@ -51,8 +51,8 @@ function fixture() {
     )
   );
   sqlite.pragma('foreign_keys = ON');
-  sqlite.exec(`INSERT INTO capacity_pools (id, scope, owner_user_id, is_default, status, revision, strategy, exhaustion_policy, updated_at, configuration_state, migration_state)
-    VALUES ('pool', 'user', 'user', 1, 'active', 1, 'balanced', 'queue', 'start', 'configured-ready', 'complete');
+  sqlite.exec(`INSERT INTO capacity_pools (id, scope, owner_user_id, is_default, status, revision, strategy, deployment_strategy, exhaustion_policy, updated_at, configuration_state, migration_state)
+    VALUES ('pool', 'user', 'user', 1, 'active', 1, 'balanced', 'smallest-fit', 'queue', 'start', 'configured-ready', 'complete');
     INSERT INTO capacity_sources (id, scope, owner_user_id, source_kind, provider, status, source_generation, authority_generation)
     VALUES ('source', 'user', 'user', 'cloud-provider-credential', 'hetzner', 'active', 1, 1);`);
   const database = createSqliteD1WithBindLimit(sqlite, 100);

@@ -600,6 +600,7 @@ describe('project capacity pool routes', () => {
       scope: 'project',
       state: 'configured-empty',
       strategy: 'balanced',
+      deploymentStrategy: 'smallest-fit',
       exhaustionPolicy: 'queue',
       availableCandidateCount: 0,
       nativeOfferings: [],

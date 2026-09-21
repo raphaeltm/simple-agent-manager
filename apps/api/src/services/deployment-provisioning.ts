@@ -27,8 +27,8 @@ import {
 import { createNodeRecord, provisionNode } from './nodes';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
-  resolveReusableNodeCapacitySnapshot,
   type CapacityAwareNodePlacementRow,
+  resolveReusableNodeCapacitySnapshot,
   type TaskStartCapacityPoolSelection,
 } from './placement-resolver';
 import {
