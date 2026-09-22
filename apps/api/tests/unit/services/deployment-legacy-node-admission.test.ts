@@ -26,6 +26,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { placeReleaseOnDeploymentNode } from '../../../src/routes/deployment-release-placement';
+import { assertAgentDeploymentAllowedForProfile } from '../../../src/services/deployment-control';
 import { linkEnvironmentToLegacyNode } from '../../../src/services/deployment-legacy-node-admission';
 import type { DeploymentPlacement } from '../../../src/services/deployment-provisioning';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -49,6 +50,7 @@ const PROJECT_ID = 'project-apex';
 const ENV_ID = '01M100A361P49T716X6QBV2NV5';
 const NODE_ID = '01M1015FQ9D772EF6HHB5AGZ0Z';
 const OTHER_NODE_ID = '01KXAR1T3XCQKKPBEJEERQ2PSZ';
+const AGENT_PROFILE_ID = 'profile-apex-deployer';
 const RELEASE_V14 = '01M2PKNZXH32QM324BD7KTR0KS';
 const RELEASE_V15 = '01M32DYXWVG1Y5W57X5EB9Z2SM';
 const PLACEMENT_FAILURE_MESSAGE =
@@ -270,6 +272,43 @@ describe('linkEnvironmentToLegacyNode — owner path', () => {
     // The volumes are already attached to the node's provider instance; the
     // attach step is skipped rather than attempted with an unobtainable claim.
     expect(loggedEvents()).toContain('deployment_release.legacy_node_volume_attach_skipped');
+  });
+
+  /**
+   * The catch-22 that kept APEX down for ~22h: the recovery above only runs when
+   * a NEW release is submitted, but the agent that submits it first has to see
+   * the environment. `assertAgentDeploymentAllowedForProfile` is exactly what
+   * `compose-publish-release-callback.ts` calls before recording an
+   * agent-submitted release, so this drives both halves against the same fixture.
+   */
+  it('agent gate admits an errored environment so the recovery release can reach legacy adoption', async () => {
+    sqlite
+      .prepare(
+        `UPDATE deployment_environments
+            SET agent_deploy_enabled = 1, allowed_deploy_profile_ids_json = ?
+          WHERE id = ?`
+      )
+      .run(JSON.stringify([AGENT_PROFILE_ID]), ENV_ID);
+    // Liveness: the fixture really is in the state the incident left it in.
+    expect(readEnvironment().status).toBe('error');
+
+    const gate = await assertAgentDeploymentAllowedForProfile(
+      db(),
+      PROJECT_ID,
+      'production',
+      AGENT_PROFILE_ID
+    );
+
+    expect(gate).toMatchObject({ environmentId: ENV_ID, taskAgentProfileId: AGENT_PROFILE_ID });
+
+    // The release the agent is now able to submit reaches legacy adoption.
+    const nodeId = await placeRelease();
+
+    expect(nodeId).toBe(NODE_ID);
+    const row = readEnvironment();
+    expect(row.status).toBe('starting');
+    expect(row.observedErrorMessage).toBeNull();
+    expect(readRelease(RELEASE_V15).status).toBe('created');
   });
 
   it('leaves an active environment active (only error flips)', async () => {

@@ -91,6 +91,7 @@ vi.mock('drizzle-orm', () => ({
   and: (...conds: unknown[]) => ({ op: 'and', conds }),
   desc: (col: unknown) => col,
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
+  inArray: (col: unknown, vals: unknown[]) => ({ op: 'inArray', col, vals }),
   // The provisioning import chain (deployment-provisioning -> observability)
   // pulls observability-schema.ts, which uses sql`...` at module load time.
   sql: (strings: TemplateStringsArray, ...exprs: unknown[]) => ({ strings, exprs }),

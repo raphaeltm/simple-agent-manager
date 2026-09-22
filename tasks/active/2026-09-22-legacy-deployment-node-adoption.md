@@ -162,3 +162,22 @@ advertising the release.
 | the `status = CASE WHEN <live deployment> THEN status ELSE 'error' END` fix   | `leaves status untouched while a release is still applied on the node` (plus the pre-existing SQL-shape assertion in `deployment-release-provisioning.test.ts`) |
 | the `linkEnvironmentToLegacyNode` call site in `placeReleaseOnDeploymentNode` | all 4 adoption tests across both files                                                                                                                          |
 | the `requiresVolumes && adoptedLegacyNode` volume-attach skip                 | `adopts the legacy node … ('exclusive (requiresVolumes)')` and `adopts through the real release placement entry point` (2 failed / 40 passed)                   |
+
+## Follow-up 2026-09-22: the agent gate hid the errored environment
+
+After PR #2120 shipped, the APEX deployment agent (Conversation profile
+`01M0DBE0DRG8NWC9V0NY06EVF3`, allow-listed on the env) reported "no accessible
+deployment environments". Verified in production D1: the env was still
+`status='error'`, `agent_deploy_enabled=1`, profile allow-listed, node running
+and healthy. `assertAgentDeploymentAllowedForProfile` and
+`handleListDeploymentEnvironments` both filtered `status='active'`, so the
+recovery release that `linkEnvironmentToLegacyNode` waits for could never be
+submitted by an agent (the human release route has no status gate). Both
+APEX hostnames refused connections for ~22h.
+
+Fix: `AGENT_DEPLOYABLE_ENVIRONMENT_STATUSES = ['active', 'error']` in
+`deployment-control.ts`, applied by both gates; tool/guide/docs wording
+updated; real-SQL status-gate tests with policy controls; one cross-boundary
+test drives the gate then `placeReleaseOnDeploymentNode` on the APEX fixture.
+Dead `getProjectAgentDeployEnvironmentId` / `isProjectAgentDeployEnabled`
+removed.

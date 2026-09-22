@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -6,6 +6,7 @@ import type { Env } from '../../env';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import {
+  AGENT_DEPLOYABLE_ENVIRONMENT_STATUSES,
   assertAgentDeploymentAllowed,
   createAgentDeploymentEnvironment,
   getTaskAgentProfileId,
@@ -323,7 +324,7 @@ export async function handleListDeploymentEnvironments(
     .where(
       and(
         eq(schema.deploymentEnvironments.projectId, tokenData.projectId),
-        eq(schema.deploymentEnvironments.status, 'active')
+        inArray(schema.deploymentEnvironments.status, [...AGENT_DEPLOYABLE_ENVIRONMENT_STATUSES])
       )
     )
     .orderBy(schema.deploymentEnvironments.createdAt);

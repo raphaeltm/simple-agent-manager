@@ -14,7 +14,7 @@ Publishing is a two-step, asynchronous flow:
 
 After a successful publish, agents can verify runtime health with `read_deployment_logs(environment, ...)`.
 
-`build_and_publish` requires the named deployment environment to be active, agent deployment to be enabled by a user, and the agent profile to satisfy that environment's policy.
+`build_and_publish` requires the named deployment environment to be active — or in `error`, awaiting a recovery release — agent deployment to be enabled by a user, and the agent profile to satisfy that environment's policy. An environment that a previous release left in `error` stays available to agents precisely so the next release can recover it; environments that are starting, stopping, stopped, or being deleted are not agent-deployable.
 
 Agents can preview route behavior before publishing with `preview_deployment_routes(environment, composeYaml)` and inspect the latest release's generated routes and custom domains with `list_deployment_routes(environment)`.
 

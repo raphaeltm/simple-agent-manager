@@ -19,7 +19,7 @@ export const DEPLOYMENT_TOOLS = [
   {
     name: 'list_deployment_environments',
     description:
-      'List active deployment environments this agent is allowed to access in the current project. Only environments with agent deployment enabled and compatible with this agent profile are returned.',
+      'List the deployment environments this agent profile is allowed to target in the current project: environments that are active, plus environments in `error` that are waiting for a new release to recover. Only environments with agent deployment enabled and compatible with this agent profile are returned.',
     inputSchema: {
       type: 'object' as const,
       properties: {},

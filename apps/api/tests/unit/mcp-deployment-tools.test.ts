@@ -521,7 +521,7 @@ describe('deployment MCP tools', () => {
     expect(liveResponse.error?.message).toContain('reserved deployment environment names');
   });
 
-  it('lists active deployment environments allowed for the current agent profile', async () => {
+  it('lists active or errored deployment environments allowed for the current agent profile', async () => {
     installDb(
       createDbState({
         deploymentEnvironments: [
@@ -532,20 +532,48 @@ describe('deployment MCP tools', () => {
           }),
           deploymentEnvironment({
             agentDeployEnabled: false,
+            createdAt: '2026-06-22T00:00:01Z',
             id: 'env-disabled',
             name: 'disabled',
           }),
           deploymentEnvironment({
             allowedDeployProfileIdsJson: '["profile-other"]',
+            createdAt: '2026-06-22T00:00:02Z',
             id: 'env-profile-denied',
             name: 'profile-denied',
           }),
           deploymentEnvironment({
             allowedDeployProfileIdsJson: '["profile-allowed"]',
+            createdAt: '2026-06-22T00:00:03Z',
             id: 'env-profile-allowed',
             name: 'profile-allowed',
           }),
-          deploymentEnvironment({ id: 'env-inactive', name: 'inactive', status: 'deleted' }),
+          // The APEX incident shape: a release placement failure parked the
+          // environment in 'error'. The agent must still see it, because a new
+          // release is the recovery path.
+          deploymentEnvironment({
+            createdAt: '2026-06-22T00:00:04Z',
+            id: 'env-errored',
+            name: 'errored',
+            nodeId: 'node-legacy',
+            observedErrorMessage:
+              'Deployment node placement failed: Existing exclusive deployment node cannot admit the declared resource reservation',
+            observedStatus: 'failed',
+            status: 'error',
+          }),
+          // A user-stopped environment stays invisible: agents must not restart it.
+          deploymentEnvironment({
+            createdAt: '2026-06-22T00:00:05Z',
+            id: 'env-stopped',
+            name: 'stopped',
+            status: 'stopped',
+          }),
+          deploymentEnvironment({
+            createdAt: '2026-06-22T00:00:06Z',
+            id: 'env-inactive',
+            name: 'inactive',
+            status: 'deleted',
+          }),
         ],
         tasks: [{ id: 'task-1', agentProfileHint: 'profile-allowed' }],
       })
@@ -565,7 +593,21 @@ describe('deployment MCP tools', () => {
         id: 'env-profile-allowed',
         name: 'profile-allowed',
       }),
+      expect.objectContaining({
+        id: 'env-errored',
+        name: 'errored',
+        nodeId: 'node-legacy',
+        observedDeployment: expect.objectContaining({
+          errorMessage:
+            'Deployment node placement failed: Existing exclusive deployment node cannot admit the declared resource reservation',
+          status: 'failed',
+        }),
+        status: 'error',
+      }),
     ]);
+    const listedIds = (payload.environments as Array<{ id: string }>).map((row) => row.id);
+    expect(listedIds).not.toContain('env-stopped');
+    expect(listedIds).not.toContain('env-inactive');
   });
 
   it('reads logs from an accessible deployment node with supported filters', async () => {

@@ -58,6 +58,27 @@ export interface DeploymentAgentPolicy {
   allowedDeployProfileIds: string[];
 }
 
+/**
+ * Environment statuses an agent may inspect and submit deployment releases to.
+ *
+ * Condition: "an agent may inspect this environment and submit releases to it".
+ * Signal: `deployment_environments.status`. The two diverge for `'error'`
+ * (`.claude/rules/74`): `markDeploymentReleasePlacementFailed`
+ * (deployment-release-failure.ts) and `markEnvironmentStartFailed`
+ * (deployment-environment-lifecycle.ts) park an environment in `error` when a
+ * release placement or node start fails, and the ONLY recovery paths — legacy
+ * node adoption in `linkEnvironmentToLegacyNode`
+ * (deployment-legacy-node-admission.ts, added by PR #2120) and fresh placement —
+ * run when a NEW release is submitted. Excluding `error` therefore locks agents
+ * out of the exact recovery they are expected to drive, while the human-facing
+ * release route (deployment-release-submission.ts) has no status gate at all.
+ *
+ * `starting`, `stopping`, `stopped`, `deleting` and `deleted` stay excluded:
+ * agents must not restart an environment the user stopped, nor race an in-flight
+ * lifecycle operation.
+ */
+export const AGENT_DEPLOYABLE_ENVIRONMENT_STATUSES = ['active', 'error'] as const;
+
 export function parseJsonField(value: string | null | undefined): unknown | null {
   if (!value) return null;
   try {
@@ -391,7 +412,7 @@ export async function assertAgentDeploymentAllowedForProfile(
       and(
         eq(schema.deploymentEnvironments.projectId, projectId),
         eq(schema.deploymentEnvironments.name, environmentName),
-        eq(schema.deploymentEnvironments.status, 'active')
+        inArray(schema.deploymentEnvironments.status, [...AGENT_DEPLOYABLE_ENVIRONMENT_STATUSES])
       )
     )
     .limit(1);
@@ -399,7 +420,7 @@ export async function assertAgentDeploymentAllowedForProfile(
   const row = rows[0];
   if (!row) {
     return {
-      error: `Deployment environment '${environmentName}' not found or inactive for this project.`,
+      error: `Deployment environment '${environmentName}' not found for this project, or its status does not allow agent deployment (must be active or error).`,
     };
   }
 
@@ -425,39 +446,6 @@ export async function assertAgentDeploymentAllowedForProfile(
   }
 
   return { environmentId: row.id, policy, taskAgentProfileId: normalizedProfileId };
-}
-
-/**
- * Project-level agent-deploy gate for workspace callback flows that cannot
- * carry task/profile context, such as the VM-agent's internal registry
- * credential mint during a server-side build-and-publish. Agent-facing MCP
- * tools must use environment-scoped {@link assertAgentDeploymentAllowed}
- * before reaching those callback flows.
- */
-export async function getProjectAgentDeployEnvironmentId(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  projectId: string
-): Promise<string | null> {
-  const rows = await db
-    .select({ id: schema.deploymentEnvironments.id })
-    .from(schema.deploymentEnvironments)
-    .where(
-      and(
-        eq(schema.deploymentEnvironments.projectId, projectId),
-        eq(schema.deploymentEnvironments.status, 'active'),
-        eq(schema.deploymentEnvironments.agentDeployEnabled, true)
-      )
-    )
-    .orderBy(schema.deploymentEnvironments.createdAt)
-    .limit(1);
-  return rows[0]?.id ?? null;
-}
-
-export async function isProjectAgentDeployEnabled(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  projectId: string
-): Promise<boolean> {
-  return (await getProjectAgentDeployEnvironmentId(db, projectId)) !== null;
 }
 
 export function encodeAllowedDeployProfileIds(
