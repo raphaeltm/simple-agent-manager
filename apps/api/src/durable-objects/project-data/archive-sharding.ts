@@ -1474,6 +1474,7 @@ export async function commitArchiveTargetChunk(
     targetOwnerName: input.targetOwnerName,
     targetGeneration: input.targetGeneration,
   });
+  const spec = validateTableName(input.tableName);
   const existingChunk = sql
     .exec(
       `SELECT sha256, row_count, source_cursor, source_has_more
@@ -1488,15 +1489,32 @@ export async function commitArchiveTargetChunk(
         'ProjectData archive target chunk conflicts with committed data'
       );
     }
-    if (existingChunk.source_cursor === null && existingChunk.source_has_more === null) {
-      sql.exec(
-        `UPDATE project_data_archive_target_chunks
-         SET source_cursor = ?, source_has_more = ?
-         WHERE chunk_id = ? AND source_cursor IS NULL AND source_has_more IS NULL`,
-        input.cursor,
-        input.hasMore ? 1 : 0,
-        chunkId(input)
-      );
+    const legacyReceipt =
+      existingChunk.source_cursor === null && existingChunk.source_has_more === null;
+    if (legacyReceipt) {
+      const replayHash = await canonicalRowsSha256(spec.columns, input.rows);
+      if (replayHash !== input.sha256) {
+        throw new ProjectDataArchiveInvariantError(
+          'source_chunk_hash_mismatch',
+          'ProjectData archive source replay did not match the legacy target receipt'
+        );
+      }
+      transactionSync(() => {
+        sql.exec(
+          `UPDATE project_data_archive_target_chunks
+           SET source_cursor = ?, source_has_more = ?
+           WHERE chunk_id = ? AND source_cursor IS NULL AND source_has_more IS NULL`,
+          input.cursor,
+          input.hasMore ? 1 : 0,
+          chunkId(input)
+        );
+        // Receipts created before durable projection checkpoints are replayed
+        // by the coordinator. Reuse those authenticated source rows to adopt
+        // the receipt and projection progress atomically without re-reading R2.
+        if (compactArchive.isCompactArchive(sql, input.sessionId) && env) {
+          commitCompactSearchProjectionChunk(sql, env, input, input.rows);
+        }
+      });
     } else if (
       existingChunk.source_cursor !== input.cursor ||
       Boolean(existingChunk.source_has_more) !== input.hasMore
@@ -1519,7 +1537,6 @@ export async function commitArchiveTargetChunk(
       'ProjectData archive target is not in a copyable state'
     );
   }
-  const spec = validateTableName(input.tableName);
   const suppliedHash = await canonicalRowsSha256(spec.columns, input.rows);
   if (suppliedHash !== input.sha256) {
     throw new ProjectDataArchiveInvariantError(

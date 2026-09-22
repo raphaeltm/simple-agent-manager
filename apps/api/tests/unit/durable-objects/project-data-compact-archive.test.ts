@@ -252,6 +252,43 @@ describe('compact archive migration compatibility', () => {
               { ...chunk, rawChunkRef, now: base.now },
               env
             );
+            if (!metadataBytes && tableName === 'chat_messages' && ordinal === 0) {
+              // Simulate a compact receipt written before durable projection
+              // checkpoints and continuation fields shipped. Coordinator replay
+              // must adopt both without restarting the immutable R2 copy.
+              for (const row of target
+                .exec(
+                  `SELECT rowid, content FROM project_data_archive_search_documents
+                   WHERE session_id = 'session'`
+                )
+                .toArray()) {
+                target.exec(
+                  `INSERT INTO project_data_archive_search_documents_fts(
+                     project_data_archive_search_documents_fts, rowid, content
+                   ) VALUES('delete', ?, ?)`,
+                  row.rowid,
+                  row.content
+                );
+              }
+              target.exec(
+                "DELETE FROM project_data_archive_search_documents WHERE session_id = 'session'"
+              );
+              target.exec(
+                `UPDATE project_data_archive_target_sessions
+                 SET search_index_version = NULL, search_index_state = NULL,
+                     search_repair_phase = NULL, search_repair_next_ordinal = NULL,
+                     search_repair_pending_json = NULL,
+                     search_repair_message_count = NULL,
+                     search_repair_projection_sha256 = NULL,
+                     search_repair_document_count = NULL
+                 WHERE session_id = 'session'`
+              );
+              target.exec(
+                `UPDATE project_data_archive_target_chunks
+                 SET source_cursor = NULL, source_has_more = NULL
+                 WHERE session_id = 'session' AND table_name = 'chat_messages' AND ordinal = 0`
+              );
+            }
             expect(
               (
                 await archive.commitArchiveTargetChunk(
@@ -261,6 +298,21 @@ describe('compact archive migration compatibility', () => {
                 )
               ).idempotent
             ).toBe(true);
+            if (!metadataBytes && tableName === 'chat_messages' && ordinal === 0) {
+              expect(
+                target
+                  .exec(
+                    `SELECT search_index_state, search_repair_phase,
+                            search_repair_next_ordinal
+                     FROM project_data_archive_target_sessions WHERE session_id = 'session'`
+                  )
+                  .toArray()[0]
+              ).toMatchObject({
+                search_index_state: 'repairing',
+                search_repair_phase: 'raw',
+                search_repair_next_ordinal: 1,
+              });
+            }
             await expect(
               archive.commitArchiveTargetChunk(
                 target,

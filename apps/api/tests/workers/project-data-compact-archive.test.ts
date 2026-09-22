@@ -720,11 +720,66 @@ describe('compact archive concurrent mutation fencing', () => {
       maxRows: 500,
     });
     const rawChunkRef = await writeCompactChunk(env.PROJECT_DATA_ARCHIVE_R2, 'concurrency', chunk);
+    expect(
+      await target.archiveTargetCommitChunkRollbackForTest({
+        ...chunk,
+        rawChunkRef,
+        now: base.now,
+      })
+    ).toMatchObject({ threw: true, message: 'injected target commit rollback' });
+    expect(
+      await runInDurableObject(target, async (_instance, state) => {
+        const sql = state.storage.sql;
+        return {
+          rawChunks: sql
+            .exec(
+              'SELECT COUNT(*) AS n FROM project_data_archive_raw_chunks WHERE session_id = ?',
+              sessionId
+            )
+            .toArray()[0]?.n,
+          receipts: sql
+            .exec(
+              'SELECT COUNT(*) AS n FROM project_data_archive_target_chunks WHERE session_id = ?',
+              sessionId
+            )
+            .toArray()[0]?.n,
+          documents: sql
+            .exec(
+              'SELECT COUNT(*) AS n FROM project_data_archive_search_documents WHERE session_id = ?',
+              sessionId
+            )
+            .toArray()[0]?.n,
+          searchState: sql
+            .exec(
+              'SELECT search_index_state FROM project_data_archive_target_sessions WHERE session_id = ?',
+              sessionId
+            )
+            .toArray()[0]?.search_index_state,
+        };
+      })
+    ).toEqual({ rawChunks: 0, receipts: 0, documents: 0, searchState: null });
     const results = await Promise.all([
       target.archiveTargetCommitChunk({ ...chunk, rawChunkRef, now: base.now }),
       target.archiveTargetCommitChunk({ ...chunk, rawChunkRef, now: base.now }),
     ]);
     expect(results.map((result) => result.idempotent).sort()).toEqual([false, true]);
+    expect(
+      await runInDurableObject(
+        target,
+        async (_instance, state) =>
+          state.storage.sql
+            .exec(
+              `SELECT
+                 (SELECT COUNT(*) FROM project_data_archive_raw_chunks WHERE session_id = ?) AS raw_chunks,
+                 (SELECT COUNT(*) FROM project_data_archive_target_chunks WHERE session_id = ?) AS receipts,
+                 (SELECT COUNT(*) FROM project_data_archive_search_documents WHERE session_id = ?) AS documents`,
+              sessionId,
+              sessionId,
+              sessionId
+            )
+            .toArray()[0]
+      )
+    ).toMatchObject({ raw_chunks: 1, receipts: 1, documents: 2 });
     await target.archiveTargetAbandonSession({ ...base, sourceIntactVerified: true });
     expect(
       await runInDurableObject(
@@ -739,6 +794,129 @@ describe('compact archive concurrent mutation fencing', () => {
       )
     ).toBe(0);
     expect(await source.getMessageCount(sessionId)).toBe(10);
+  });
+
+  it('rolls back source rows and routing anchors together before exact retry', async () => {
+    const { writeCompactChunk } = await import('../../src/project-data-archive/compact-r2');
+    const { PROJECT_DATA_ARCHIVE_TABLES } = await import('../../src/project-data-archive/contract');
+    const projectId = `compact-finalize-rollback-${crypto.randomUUID()}`;
+    const { source, sessionId } = await seedTerminalSessionWithMessages(projectId, 3, true);
+    const base = {
+      projectId,
+      sessionId,
+      migrationId: crypto.randomUUID(),
+      sourceOwnerName: projectId,
+      targetOwnerName: `${projectId}:archive:g1:s0`,
+      targetGeneration: 1,
+      sourceIntentToken: crypto.randomUUID(),
+      now: Date.now() + 60_000,
+      minTerminalAgeMs: 0,
+    };
+    const prepared = await source.archiveSourcePrepareIntent(base);
+    if ('refused' in prepared) throw new Error('Source rollback fixture refused');
+    const target = projectDataStub(base.targetOwnerName);
+    await target.ensureProjectId(projectId);
+    await target.archiveTargetPrepare({
+      ...base,
+      storageFormat: 'r2-gzip-v1',
+      terminalVersionSha256: prepared.terminalVersionSha256,
+      expectedMessageCount: prepared.messageCount,
+      sessionRow: prepared.sessionRow,
+    });
+    const hashes: string[] = [];
+    for (const tableName of PROJECT_DATA_ARCHIVE_TABLES) {
+      let cursor: string | null = null;
+      let ordinal = 0;
+      do {
+        const chunk = await source.archiveSourceExportChunk({
+          ...base,
+          tableName,
+          ordinal,
+          cursor,
+          maxRows: 2,
+          maxBytes: 128 * 1024,
+        });
+        const rawChunkRef =
+          tableName === 'chat_messages'
+            ? await writeCompactChunk(env.PROJECT_DATA_ARCHIVE_R2, 'rollback', chunk)
+            : undefined;
+        await target.archiveTargetCommitChunk({ ...chunk, rawChunkRef, now: base.now });
+        hashes.push(chunk.sha256);
+        cursor = chunk.hasMore ? chunk.cursor : null;
+        ordinal++;
+      } while (cursor);
+    }
+    const sealed = await target.archiveTargetSeal({
+      ...base,
+      terminalVersionSha256: prepared.terminalVersionSha256,
+      expectedChunkHashes: hashes,
+    });
+    await source.archiveSourceMarkTargetSealed({
+      sessionId,
+      migrationId: base.migrationId,
+      sourceIntentToken: base.sourceIntentToken,
+      targetAggregateSha256: sealed.aggregateSha256,
+      now: base.now,
+    });
+    const manifestKey = `rollback/${base.migrationId}/manifest.json`;
+    await source.archiveSourceMarkRecoveryManifestPersisted({
+      sessionId,
+      migrationId: base.migrationId,
+      sourceIntentToken: base.sourceIntentToken,
+      targetAggregateSha256: sealed.aggregateSha256,
+      r2ManifestKey: manifestKey,
+      now: base.now,
+    });
+    const finalizeInput = {
+      ...base,
+      expectedTerminalVersionSha256: prepared.terminalVersionSha256,
+      targetAggregateSha256: sealed.aggregateSha256,
+      r2ManifestKey: manifestKey,
+    };
+    expect(await source.archiveSourceFinalizeDeleteRollbackForTest(finalizeInput)).toMatchObject({
+      threw: true,
+      message: 'injected source finalize rollback',
+    });
+    expect(
+      await runInDurableObject(source, async (_instance, state) => {
+        const sql = state.storage.sql;
+        return {
+          messages: sql
+            .exec('SELECT COUNT(*) AS n FROM chat_messages WHERE session_id = ?', sessionId)
+            .toArray()[0]?.n,
+          intentState: sql
+            .exec(
+              'SELECT state FROM project_data_archive_source_intents WHERE session_id = ?',
+              sessionId
+            )
+            .toArray()[0]?.state,
+          archiveState: sql
+            .exec('SELECT archive_state FROM chat_sessions WHERE id = ?', sessionId)
+            .toArray()[0]?.archive_state,
+        };
+      })
+    ).toEqual({ messages: 3, intentState: 'recovery_manifest_persisted', archiveState: null });
+
+    expect(await source.archiveSourceFinalizeDelete(finalizeInput)).toMatchObject({
+      idempotent: false,
+      messagesDeleted: 3,
+    });
+    expect(
+      await runInDurableObject(source, async (_instance, state) => ({
+        messages: state.storage.sql
+          .exec('SELECT COUNT(*) AS n FROM chat_messages WHERE session_id = ?', sessionId)
+          .toArray()[0]?.n,
+        intentState: state.storage.sql
+          .exec(
+            'SELECT state FROM project_data_archive_source_intents WHERE session_id = ?',
+            sessionId
+          )
+          .toArray()[0]?.state,
+        archiveState: state.storage.sql
+          .exec('SELECT archive_state FROM chat_sessions WHERE id = ?', sessionId)
+          .toArray()[0]?.archive_state,
+      }))
+    ).toEqual({ messages: 0, intentState: 'source_deleted', archiveState: 'source_deleted' });
   });
 });
 
