@@ -1464,7 +1464,8 @@ function readCommittedRowsForChunk(
 export async function commitArchiveTargetChunk(
   sql: SqlStorage,
   input: ArchiveTargetCommitChunkInput,
-  env?: Env
+  env?: Env,
+  transactionSync: <T>(callback: () => T) => T = (callback) => callback()
 ): Promise<ArchiveTargetCommitChunkResult> {
   const state = validateTargetOwner(readTargetSession(sql, input.sessionId), {
     projectId: input.projectId,
@@ -1526,13 +1527,15 @@ export async function commitArchiveTargetChunk(
       'ProjectData archive source chunk hash did not match the supplied rows'
     );
   }
-  const rawCompact =
-    input.tableName === 'chat_messages' && compactArchive.isCompactArchive(sql, input.sessionId);
+  const compact = compactArchive.isCompactArchive(sql, input.sessionId);
+  const rawCompact = input.tableName === 'chat_messages' && compact;
   let committedHash: string;
+  let verifiedCompact: Awaited<ReturnType<typeof compactArchive.verifyCompactRawChunk>> | null =
+    null;
   if (rawCompact) {
     if (!env || !input.rawChunkRef)
       throw new Error('Compact archive requires a verified R2 reference');
-    await compactArchive.commitCompactRawChunk(sql, env, input, input.rawChunkRef);
+    verifiedCompact = await compactArchive.verifyCompactRawChunk(env, input, input.rawChunkRef);
     committedHash = input.sha256;
   } else {
     for (const row of input.rows) insertArchiveRow(sql, input.tableName, row);
@@ -1547,44 +1550,60 @@ export async function commitArchiveTargetChunk(
       'ProjectData archive target recompute did not match source chunk hash'
     );
   }
-  sql.exec(
-    `INSERT INTO project_data_archive_target_chunks (
+  transactionSync(() => {
+    if (rawCompact) {
+      if (!input.rawChunkRef || !verifiedCompact || !env) {
+        throw new Error('Compact archive verified chunk state is missing');
+      }
+      compactArchive.commitVerifiedCompactRawChunk(sql, input, input.rawChunkRef, verifiedCompact);
+    }
+    if (compact && env) {
+      commitCompactSearchProjectionChunk(
+        sql,
+        env,
+        input,
+        rawCompact && verifiedCompact ? verifiedCompact.rows : input.rows
+      );
+    }
+    sql.exec(
+      `INSERT INTO project_data_archive_target_chunks (
        chunk_id, session_id, project_id, migration_id, owner_name, generation,
        table_name, ordinal, row_count, byte_count, sha256, committed_at
        , source_cursor, source_has_more
      )
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    chunkId(input),
-    input.sessionId,
-    input.projectId,
-    input.migrationId,
-    input.targetOwnerName,
-    input.targetGeneration,
-    input.tableName,
-    input.ordinal,
-    input.rowCount,
-    input.byteCount,
-    input.sha256,
-    input.now,
-    input.cursor,
-    input.hasMore ? 1 : 0
-  );
-  sql.exec(
-    `UPDATE project_data_archive_target_sessions
+      chunkId(input),
+      input.sessionId,
+      input.projectId,
+      input.migrationId,
+      input.targetOwnerName,
+      input.targetGeneration,
+      input.tableName,
+      input.ordinal,
+      input.rowCount,
+      input.byteCount,
+      input.sha256,
+      input.now,
+      input.cursor,
+      input.hasMore ? 1 : 0
+    );
+    sql.exec(
+      `UPDATE project_data_archive_target_sessions
      SET state = 'copying',
          received_message_count = ?,
          updated_at = ?
      WHERE session_id = ?`,
-    compactArchive.isCompactArchive(sql, input.sessionId)
-      ? compactArchive.compactMessageCount(sql, input.sessionId)
-      : countRows(
-          sql,
-          'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
-          input.sessionId
-        ),
-    input.now,
-    input.sessionId
-  );
+      compactArchive.isCompactArchive(sql, input.sessionId)
+        ? compactArchive.compactMessageCount(sql, input.sessionId)
+        : countRows(
+            sql,
+            'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
+            input.sessionId
+          ),
+      input.now,
+      input.sessionId
+    );
+  });
   return {
     idempotent: false,
     tableName: input.tableName,
@@ -1674,22 +1693,16 @@ export async function sealArchiveTarget(
   const hashPageRows = resolveHashPageRows(input.hashPageRows);
   const compact = compactArchive.isCompactArchive(sql, input.sessionId);
   const rebuiltCoverage = compact
-    ? await rebuildArchiveSearchProjection(sql, env, input.sessionId, input.now)
-    : null;
-  const compactRawEvidence = rebuiltCoverage?.compactRawEvidence;
-  if (compact && !compactRawEvidence) {
+    ? readArchiveSearchCoverage(sql, input.sessionId)
+    : await rebuildArchiveSearchProjection(sql, env, input.sessionId, input.now);
+  if (compact && !rebuiltCoverage) {
     throw new ProjectDataArchiveInvariantError(
-      'archive_search_compact_evidence_missing',
-      'Compact archive projection did not produce raw verification evidence'
+      'archive_search_index_incomplete',
+      'Compact archive projection was not completed by the verified copy'
     );
   }
-  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, {
-    hashPageRows,
-    compactEnv: env,
-    compactPerChunkTimeoutMs,
-    compactRawEvidence,
-  });
-  if (terminalVersion.sha256 !== input.terminalVersionSha256) {
+  const target = readTargetSession(sql, input.sessionId);
+  if (target?.terminal_version_sha256 !== input.terminalVersionSha256) {
     throw new ProjectDataArchiveInvariantError(
       'target_terminal_version_mismatch',
       'ProjectData archive target terminal version changed before seal'
@@ -1697,7 +1710,8 @@ export async function sealArchiveTarget(
   }
   const chunkRows = sql
     .exec(
-      `SELECT sha256 FROM project_data_archive_target_chunks
+      `SELECT table_name, ordinal, sha256, row_count
+       FROM project_data_archive_target_chunks
        WHERE session_id = ? AND migration_id = ?
        ORDER BY table_name ASC, ordinal ASC`,
       input.sessionId,
@@ -1716,27 +1730,56 @@ export async function sealArchiveTarget(
       'ProjectData archive target chunk inventory does not match the coordinator expectation'
     );
   }
-  rebuildTargetFts(sql, input.sessionId, hashPageRows);
-  if (rebuiltCoverage) {
+  if (!compact) rebuildTargetFts(sql, input.sessionId, hashPageRows);
+  if (!compact && rebuiltCoverage) {
     verifyArchiveSearchProjection(sql, input.sessionId, rebuiltCoverage, hashPageRows);
-  } else {
-    await ensureArchiveSearchCoverage(sql, env, input.sessionId, input.now);
   }
+  const compactMessageCount = compact
+    ? compactArchive.compactMessageCount(sql, input.sessionId)
+    : 0;
+  if (
+    compact &&
+    compactMessageCount !==
+      strictInteger(target?.expected_message_count, 'target.expected_message_count')
+  ) {
+    throw new ProjectDataArchiveInvariantError(
+      'target_message_count_mismatch',
+      'Compact archive target message count does not match the prepared source count'
+    );
+  }
+  const compactTableDigest = async (tableName: ProjectDataArchiveTableName) =>
+    sha256Hex(
+      chunkRows
+        .filter((row) => row.table_name === tableName)
+        .map(
+          (row) =>
+            `${strictInteger(row.ordinal, 'target_chunk.ordinal')}:${strictString(row.sha256, 'target_chunk.sha256')}:${strictInteger(row.row_count, 'target_chunk.row_count')}`
+        )
+        .join('\n')
+    );
   const aggregateSha256 = await sha256Hex(
     [
       `terminal:${input.terminalVersionSha256}`,
       `chunks:${committedChunkHashes.join(',')}`,
       `messages:${
-        compactRawEvidence
-          ? compactRawEvidence.sha256
+        compact
+          ? await compactTableDigest('chat_messages')
           : await tableAggregateSha256(sql, 'chat_messages', input.sessionId, hashPageRows)
       }`,
-      `grouped:${await tableAggregateSha256(sql, 'chat_messages_grouped', input.sessionId, hashPageRows)}`,
-      `tool_payload_archives:${await tableAggregateSha256(sql, 'tool_payload_archives', input.sessionId, hashPageRows)}`,
+      `grouped:${
+        compact
+          ? await compactTableDigest('chat_messages_grouped')
+          : await tableAggregateSha256(sql, 'chat_messages_grouped', input.sessionId, hashPageRows)
+      }`,
+      `tool_payload_archives:${
+        compact
+          ? await compactTableDigest('tool_payload_archives')
+          : await tableAggregateSha256(sql, 'tool_payload_archives', input.sessionId, hashPageRows)
+      }`,
     ].join('\n')
   );
-  const messageCount = compactRawEvidence
-    ? compactRawEvidence.messageCount
+  const messageCount = compact
+    ? compactMessageCount
     : countRows(
         sql,
         'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
@@ -2161,6 +2204,254 @@ function insertArchiveSearchDocument(
     }
   }
   hasher?.update(row);
+}
+
+/**
+ * Build the compact archive search projection from the chunk that was already
+ * fetched and authenticated for target commit. The caller commits this state,
+ * the compact chunk reference, and the copy receipt in one SQLite transaction,
+ * so a reset never leaves projection progress ahead of the durable receipt.
+ */
+function commitCompactSearchProjectionChunk(
+  sql: SqlStorage,
+  env: Env,
+  input: ArchiveTargetCommitChunkInput,
+  rows: ProjectDataArchiveRow[]
+): void {
+  if (input.tableName !== 'chat_messages' && input.tableName !== 'chat_messages_grouped') return;
+  const pageRows = resolveHashPageRows(
+    Number.parseInt(env.PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS ?? '', 10)
+  );
+  const target = sql
+    .exec(
+      `SELECT search_index_state, search_repair_phase, search_repair_next_ordinal,
+              search_repair_pending_json, search_repair_message_count,
+              search_repair_projection_sha256, search_repair_document_count
+       FROM project_data_archive_target_sessions WHERE session_id = ?`,
+      input.sessionId
+    )
+    .toArray()[0];
+  if (!target) throw new Error('Compact archive target session is missing');
+
+  let phase: 'raw' | 'grouped';
+  let nextOrdinal: number;
+  let pending: PendingArchiveSearchDocument | null;
+  let messageCount: number;
+  let chain: ReturnType<typeof createCanonicalRowsChainHasher>;
+  if (target.search_index_state !== 'repairing') {
+    if (input.tableName !== 'chat_messages' || input.ordinal !== 0) {
+      throw new ProjectDataArchiveInvariantError(
+        'archive_search_copy_order_invalid',
+        'Compact archive projection must start with raw chunk zero'
+      );
+    }
+    clearArchiveSearchProjection(sql, input.sessionId, pageRows);
+    phase = 'raw';
+    nextOrdinal = 0;
+    pending = null;
+    messageCount = 0;
+    chain = createCanonicalRowsChainHasher(ARCHIVE_SEARCH_DOCUMENT_COLUMNS);
+    sql.exec(
+      `UPDATE project_data_archive_target_sessions
+       SET search_index_version = ?, search_index_state = 'repairing',
+           search_index_message_count = NULL, search_index_document_count = NULL,
+           search_index_sha256 = NULL, search_indexed_at = NULL,
+           search_repair_phase = 'raw', search_repair_next_ordinal = 0,
+           search_repair_raw_cursor = NULL, search_repair_grouped_cursor = NULL,
+           search_repair_pending_json = NULL, search_repair_message_count = 0,
+           search_repair_projection_sha256 = ?, search_repair_document_count = 0,
+           updated_at = ?
+       WHERE session_id = ?`,
+      ARCHIVE_SEARCH_INDEX_VERSION,
+      chain.digestHex,
+      input.now,
+      input.sessionId
+    );
+  } else {
+    const storedPhase = strictString(target.search_repair_phase, 'archive_search.repair_phase');
+    if (storedPhase !== 'raw' && storedPhase !== 'grouped') {
+      throw new ProjectDataArchiveInvariantError(
+        'archive_search_repair_phase_invalid',
+        'Compact archive search projection phase is invalid'
+      );
+    }
+    phase = storedPhase;
+    nextOrdinal = strictInteger(
+      target.search_repair_next_ordinal,
+      'archive_search.repair_next_ordinal'
+    );
+    pending = parsePendingArchiveSearchDocument(target.search_repair_pending_json);
+    messageCount = strictInteger(
+      target.search_repair_message_count,
+      'archive_search.repair_message_count'
+    );
+    chain = createCanonicalRowsChainHasher(ARCHIVE_SEARCH_DOCUMENT_COLUMNS, {
+      digestHex: strictString(
+        target.search_repair_projection_sha256,
+        'archive_search.repair_projection_sha256'
+      ),
+      rowCount: strictInteger(
+        target.search_repair_document_count,
+        'archive_search.repair_document_count'
+      ),
+    });
+  }
+
+  const expectedPhase = input.tableName === 'chat_messages' ? 'raw' : 'grouped';
+  if (phase !== expectedPhase || nextOrdinal !== input.ordinal) {
+    throw new ProjectDataArchiveInvariantError(
+      'archive_search_copy_order_invalid',
+      'Compact archive projection chunk order does not match copy order'
+    );
+  }
+  const commitDocument = (document: PendingArchiveSearchDocument) => {
+    insertArchiveSearchDocument(sql, input.sessionId, document);
+    chain.update({
+      projection_id: document.projectionId,
+      document_id: document.documentId,
+      session_id: input.sessionId,
+      role: document.role,
+      content: document.content,
+      created_at: document.createdAt,
+    });
+  };
+  const flush = () => {
+    if (!pending) return;
+    commitDocument(pending);
+    pending = null;
+  };
+
+  if (phase === 'raw') {
+    const maxGroupChars = resolveMaterializationPassConfig(env).maxGroupChars;
+    for (const row of rows) {
+      if ((row.origin ?? 'user') === 'system') continue;
+      const role = strictString(row.role, 'archive_search.role');
+      const content = strictString(row.content, 'archive_search.content');
+      const id = strictString(row.id, 'archive_search.message_id');
+      const createdAt = strictInteger(row.created_at, 'archive_search.created_at');
+      strictInteger(row.sequence, 'archive_search.sequence');
+      messageCount++;
+      if (
+        pending?.role === role &&
+        ARCHIVE_SEARCH_GROUPABLE_ROLES.has(role) &&
+        pending.content.length < maxGroupChars
+      ) {
+        pending.content += content;
+      } else {
+        flush();
+        pending = {
+          projectionId: `raw:${input.sessionId}:${id}`,
+          documentId: id,
+          role,
+          content,
+          createdAt,
+        };
+      }
+    }
+    nextOrdinal++;
+    if (!input.hasMore) {
+      flush();
+      phase = 'grouped';
+      nextOrdinal = 0;
+    }
+  } else {
+    for (const row of rows) {
+      const documentId = strictString(row.id, 'archive_search.grouped_id');
+      const content = strictString(row.content, 'archive_search.grouped_content');
+      const groupedRow = sql
+        .exec('SELECT rowid FROM chat_messages_grouped WHERE id = ?', documentId)
+        .toArray()[0];
+      if (!groupedRow) {
+        throw new ProjectDataArchiveInvariantError(
+          'target_chunk_missing_rows',
+          'Compact archive grouped row is missing during projection commit'
+        );
+      }
+      sql.exec(
+        'INSERT OR IGNORE INTO chat_messages_grouped_fts(rowid, content) VALUES (?, ?)',
+        strictInteger(groupedRow.rowid, 'archive_search.grouped_rowid'),
+        content
+      );
+      const equivalent = sql
+        .exec(
+          `SELECT 1 AS present FROM project_data_archive_search_documents
+           WHERE session_id = ? AND document_id = ? AND content = ? LIMIT 1`,
+          input.sessionId,
+          documentId,
+          content
+        )
+        .toArray()[0];
+      if (!equivalent) {
+        commitDocument({
+          projectionId: `grouped:${input.sessionId}:${documentId}`,
+          documentId,
+          role: strictString(row.role, 'archive_search.grouped_role'),
+          content,
+          createdAt: strictInteger(row.created_at, 'archive_search.grouped_created_at'),
+        });
+      }
+    }
+    nextOrdinal++;
+  }
+
+  if (phase === 'grouped' && input.tableName === 'chat_messages_grouped' && !input.hasMore) {
+    const documentCount = countRows(
+      sql,
+      'SELECT COUNT(*) AS count FROM project_data_archive_search_documents WHERE session_id = ?',
+      input.sessionId
+    );
+    const indexed = countRows(
+      sql,
+      `SELECT COUNT(*) AS count
+       FROM project_data_archive_search_documents_fts f
+       JOIN project_data_archive_search_documents d ON d.rowid = f.rowid
+       WHERE d.session_id = ?`,
+      input.sessionId
+    );
+    if (documentCount !== chain.rowCount || indexed !== documentCount) {
+      throw new ProjectDataArchiveInvariantError(
+        'archive_search_index_verification_failed',
+        'Compact archive search projection failed count and FTS verification'
+      );
+    }
+    sql.exec(
+      `UPDATE project_data_archive_target_sessions
+       SET search_index_version = ?, search_index_state = 'complete',
+           search_index_message_count = ?, search_index_document_count = ?,
+           search_index_sha256 = ?, search_indexed_at = ?,
+           search_repair_phase = NULL, search_repair_next_ordinal = NULL,
+           search_repair_raw_cursor = NULL, search_repair_grouped_cursor = NULL,
+           search_repair_pending_json = NULL, search_repair_message_count = NULL,
+           search_repair_projection_sha256 = NULL, search_repair_document_count = NULL,
+           updated_at = ?
+       WHERE session_id = ?`,
+      ARCHIVE_SEARCH_INDEX_VERSION,
+      messageCount,
+      documentCount,
+      chain.digestHex,
+      input.now,
+      input.now,
+      input.sessionId
+    );
+    return;
+  }
+
+  sql.exec(
+    `UPDATE project_data_archive_target_sessions
+     SET search_repair_phase = ?, search_repair_next_ordinal = ?,
+         search_repair_pending_json = ?, search_repair_message_count = ?,
+         search_repair_projection_sha256 = ?, search_repair_document_count = ?,
+         updated_at = ?
+     WHERE session_id = ?`,
+    phase,
+    nextOrdinal,
+    pending ? JSON.stringify(pending) : null,
+    messageCount,
+    chain.digestHex,
+    chain.rowCount,
+    input.now,
+    input.sessionId
+  );
 }
 
 async function rebuildArchiveSearchProjection(
@@ -3095,7 +3386,8 @@ export function abandonArchiveTargetSession(
 
 export async function finalizeSourceDelete(
   sql: SqlStorage,
-  input: ArchiveSourceFinalizeDeleteInput
+  input: ArchiveSourceFinalizeDeleteInput,
+  transactionSync: <T>(callback: () => T) => T = (callback) => callback()
 ): Promise<ArchiveSourceFinalizeDeleteResult> {
   validateRootSourceOwner(input);
   const state = assertMatchingSourceIntent(readSourceIntent(sql, input.sessionId), input);
@@ -3142,79 +3434,87 @@ export async function finalizeSourceDelete(
     );
   }
 
-  const databaseSizeBeforeBytes = databaseSize(sql);
-  let ftsRowsDeleted = 0;
-  let groupedRowsDeleted = 0;
-  forEachGroupedRowPaged(sql, input.sessionId, hashPageRows, (row) => {
-    try {
-      sql.exec(
-        `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
-         VALUES('delete', ?, ?)`,
-        row.rowid,
-        row.content
+  // All destructive rows and the source-deleted routing anchor commit in one
+  // SQLite transaction. A reset can occur before or after this callback, never
+  // between a partial transcript delete and its durable state transition.
+  return transactionSync(() => {
+    const databaseSizeBeforeBytes = databaseSize(sql);
+    let ftsRowsDeleted = 0;
+    let groupedRowsDeleted = 0;
+    forEachGroupedRowPaged(sql, input.sessionId, hashPageRows, (row) => {
+      try {
+        sql.exec(
+          `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
+           VALUES('delete', ?, ?)`,
+          row.rowid,
+          row.content
+        );
+        ftsRowsDeleted++;
+      } catch (error) {
+        log.warn('archive_source_fts_delete_marker_failed', {
+          sessionId: input.sessionId,
+          rowid: row.rowid,
+          ...serializeError(error),
+        });
+      }
+      const deleteGrouped = sql.exec(
+        'DELETE FROM chat_messages_grouped WHERE rowid = ?',
+        row.rowid
       );
-      ftsRowsDeleted++;
-    } catch (error) {
-      log.warn('archive_source_fts_delete_marker_failed', {
-        sessionId: input.sessionId,
-        rowid: row.rowid,
-        ...serializeError(error),
-      });
-    }
-    const deleteGrouped = sql.exec('DELETE FROM chat_messages_grouped WHERE rowid = ?', row.rowid);
-    groupedRowsDeleted += deleteGrouped.rowsWritten ?? 0;
+      groupedRowsDeleted += deleteGrouped.rowsWritten ?? 0;
+    });
+    const toolArchiveRowsDeleted =
+      sql.exec('DELETE FROM tool_payload_archives WHERE session_id = ?', input.sessionId)
+        .rowsWritten ?? 0;
+    const messagesDeleted =
+      sql.exec('DELETE FROM chat_messages WHERE session_id = ?', input.sessionId).rowsWritten ?? 0;
+    sql.exec(
+      `UPDATE chat_sessions
+       SET archive_last_message_at = ?,
+           archive_owner_name = ?,
+           archive_generation = ?,
+           archive_migration_id = ?,
+           archive_state = 'source_deleted',
+           updated_at = updated_at
+       WHERE id = ?`,
+      terminalVersion.lastMessageAt,
+      input.targetOwnerName,
+      input.targetGeneration,
+      input.migrationId,
+      input.sessionId
+    );
+    const databaseSizeAfterBytes = databaseSize(sql);
+    sql.exec(
+      `UPDATE project_data_archive_source_intents
+       SET state = 'source_deleted',
+           target_aggregate_sha256 = ?,
+           recovery_manifest_key = ?,
+           source_deleted_at = ?,
+           source_database_size_before = ?,
+           source_database_size_after = ?,
+           updated_at = ?
+       WHERE session_id = ? AND migration_id = ? AND source_intent_token = ?`,
+      input.targetAggregateSha256,
+      input.r2ManifestKey,
+      input.now,
+      databaseSizeBeforeBytes,
+      databaseSizeAfterBytes,
+      input.now,
+      input.sessionId,
+      input.migrationId,
+      input.sourceIntentToken
+    );
+    return {
+      idempotent: false,
+      lastMessageAt: terminalVersion.lastMessageAt,
+      messagesDeleted,
+      groupedRowsDeleted,
+      ftsRowsDeleted,
+      toolArchiveRowsDeleted,
+      databaseSizeBeforeBytes,
+      databaseSizeAfterBytes,
+    };
   });
-  const toolArchiveRowsDeleted =
-    sql.exec('DELETE FROM tool_payload_archives WHERE session_id = ?', input.sessionId)
-      .rowsWritten ?? 0;
-  const messagesDeleted =
-    sql.exec('DELETE FROM chat_messages WHERE session_id = ?', input.sessionId).rowsWritten ?? 0;
-  sql.exec(
-    `UPDATE chat_sessions
-     SET archive_last_message_at = ?,
-         archive_owner_name = ?,
-         archive_generation = ?,
-         archive_migration_id = ?,
-         archive_state = 'source_deleted',
-         updated_at = updated_at
-     WHERE id = ?`,
-    terminalVersion.lastMessageAt,
-    input.targetOwnerName,
-    input.targetGeneration,
-    input.migrationId,
-    input.sessionId
-  );
-  const databaseSizeAfterBytes = databaseSize(sql);
-  sql.exec(
-    `UPDATE project_data_archive_source_intents
-     SET state = 'source_deleted',
-         target_aggregate_sha256 = ?,
-         recovery_manifest_key = ?,
-         source_deleted_at = ?,
-         source_database_size_before = ?,
-         source_database_size_after = ?,
-         updated_at = ?
-     WHERE session_id = ? AND migration_id = ? AND source_intent_token = ?`,
-    input.targetAggregateSha256,
-    input.r2ManifestKey,
-    input.now,
-    databaseSizeBeforeBytes,
-    databaseSizeAfterBytes,
-    input.now,
-    input.sessionId,
-    input.migrationId,
-    input.sourceIntentToken
-  );
-  return {
-    idempotent: false,
-    lastMessageAt: terminalVersion.lastMessageAt,
-    messagesDeleted,
-    groupedRowsDeleted,
-    ftsRowsDeleted,
-    toolArchiveRowsDeleted,
-    databaseSizeBeforeBytes,
-    databaseSizeAfterBytes,
-  };
 }
 
 export function markSourceRecoveryManifestPersisted(

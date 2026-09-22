@@ -278,6 +278,23 @@ describe('compact archive migration compatibility', () => {
           terminalVersionSha256: prepared.terminalVersionSha256,
           expectedChunkHashes: hashes,
         };
+        const rawChunkCount = Number(
+          target
+            .exec(
+              `SELECT COUNT(*) AS count FROM project_data_archive_raw_chunks
+               WHERE session_id = 'session'`
+            )
+            .toArray()[0]?.count ?? 0
+        );
+        // Fresh seal consumes the per-chunk verification receipts and the
+        // projection built during copy; it does not traverse R2 again.
+        vi.mocked(bucket.get).mockClear();
+        const sealed = await archive.sealArchiveTarget(target, sealInput, env);
+        expect(bucket.get).not.toHaveBeenCalled();
+        expect(sealed.messageCount).toBe(count);
+
+        // A resumed/final pre-delete seal always revalidates every immutable
+        // R2 object, so loss after the first seal still fails closed.
         const saved = new Map(objects);
         objects.clear();
         await expect(archive.sealArchiveTarget(target, sealInput, env)).rejects.toThrow();
@@ -303,18 +320,9 @@ describe('compact archive migration compatibility', () => {
             date.mockRestore();
           }
         }
-        const rawChunkCount = Number(
-          target
-            .exec(
-              `SELECT COUNT(*) AS count FROM project_data_archive_raw_chunks
-               WHERE session_id = 'session'`
-            )
-            .toArray()[0]?.count ?? 0
-        );
         vi.mocked(bucket.get).mockClear();
-        const sealed = await archive.sealArchiveTarget(target, sealInput, env);
+        expect(await archive.sealArchiveTarget(target, sealInput, env)).toEqual(sealed);
         expect(bucket.get).toHaveBeenCalledTimes(rawChunkCount);
-        expect(sealed.messageCount).toBe(count);
         vi.mocked(bucket.get).mockClear();
         expect(await archive.sealArchiveTarget(target, sealInput, env)).toEqual(sealed);
         expect(bucket.get).toHaveBeenCalledTimes(rawChunkCount);

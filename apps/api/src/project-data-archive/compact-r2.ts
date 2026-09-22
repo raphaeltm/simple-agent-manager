@@ -291,6 +291,7 @@ export async function writeCompactChunk(
       r2.put(key, compressed, {
         onlyIf: { etagDoesNotMatch: '*' },
         httpMetadata: { contentType: 'application/gzip' },
+        customMetadata: { archiveBodySha256: ref.bodySha256 },
       }),
       deadline,
       'put'
@@ -298,7 +299,18 @@ export async function writeCompactChunk(
   } else {
     // Compression implementations may emit different gzip headers for the same input.
     ref.bytes = existing.size;
+    const storedBodySha256 = existing.customMetadata?.archiveBodySha256;
+    if (storedBodySha256 && storedBodySha256 !== ref.bodySha256) {
+      throw new Error('Compact archive immutable object conflicts with retry payload');
+    }
+    // Objects written before body hashes were added to HEAD metadata still need
+    // one compatibility read on retry. New objects never repeat decompression.
+    if (!storedBodySha256) {
+      await readCompactChunk(r2, ref, chunk, Math.max(1, deadline - Date.now()));
+    }
   }
-  await readCompactChunk(r2, ref, chunk, Math.max(1, deadline - Date.now()));
+  // The target commit immediately performs the authoritative GET/decompress/hash
+  // verification before it records a durable receipt. Re-reading here doubled
+  // every fresh copy without adding a durable boundary.
   return ref;
 }

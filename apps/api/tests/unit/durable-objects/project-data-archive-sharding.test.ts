@@ -674,7 +674,7 @@ describe('ProjectData terminal archive sharding bridge', () => {
         })
       ).toBe(true);
 
-      const finalized = await finalizeSourceDelete(source.sql, {
+      const finalizeInput = {
         projectId: 'project-archive',
         sessionId: 'session-archive',
         migrationId: 'migration-1',
@@ -687,7 +687,40 @@ describe('ProjectData terminal archive sharding bridge', () => {
         r2ManifestKey: 'project-data/session-archives/project/session/migration/manifest.json',
         now: NOW,
         minTerminalAgeMs: 0,
+      };
+      const faultSql = {
+        exec(query: string, ...params: unknown[]) {
+          if (/^DELETE FROM chat_messages WHERE/i.test(query.trim())) {
+            throw new Error('injected source-delete reset');
+          }
+          return source.sql.exec(query, ...params);
+        },
+        get databaseSize() {
+          return source.sql.databaseSize;
+        },
+      } as unknown as SqlStorage;
+      await expect(
+        finalizeSourceDelete(faultSql, finalizeInput, (callback) =>
+          source.db.transaction(callback)()
+        )
+      ).rejects.toThrow('injected source-delete reset');
+      expect(
+        source.db
+          .prepare(
+            `SELECT
+               (SELECT COUNT(*) FROM chat_messages WHERE session_id = ?) AS messages,
+               (SELECT COUNT(*) FROM chat_messages_grouped WHERE session_id = ?) AS grouped_rows,
+               (SELECT COUNT(*) FROM tool_payload_archives WHERE session_id = ?) AS tools`
+          )
+          .get('session-archive', 'session-archive', 'session-archive')
+      ).toEqual({ messages: 2, grouped_rows: 1, tools: 1 });
+      expect(inspectArchiveSourceIntent(source.sql, finalizeInput)).toMatchObject({
+        state: 'recovery_manifest_persisted',
       });
+
+      const finalized = await finalizeSourceDelete(source.sql, finalizeInput, (callback) =>
+        source.db.transaction(callback)()
+      );
       expect(finalized).toMatchObject({
         idempotent: false,
         lastMessageAt: 1200,

@@ -860,10 +860,14 @@ export class ProjectData extends DurableObject<Env> {
   ): Promise<archiveSharding.ArchiveSourceFinalizeDeleteResult> {
     return this.withArchiveTranscriptLock(() =>
       measureArchiveSql(this.sql, input.sessionId, 'source_delete', (sql) =>
-        archiveSharding.finalizeSourceDelete(sql, {
-          ...input,
-          hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
-        })
+        archiveSharding.finalizeSourceDelete(
+          sql,
+          {
+            ...input,
+            hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+          },
+          this.ctx.storage.transactionSync.bind(this.ctx.storage)
+        )
       )
     );
   }
@@ -971,7 +975,12 @@ export class ProjectData extends DurableObject<Env> {
   ): Promise<archiveSharding.ArchiveTargetCommitChunkResult> {
     return this.withArchiveTranscriptLock(() =>
       measureArchiveSql(this.sql, input.sessionId, 'target_commit', (sql) =>
-        archiveSharding.commitArchiveTargetChunk(sql, input, this.env)
+        archiveSharding.commitArchiveTargetChunk(
+          sql,
+          input,
+          this.env,
+          this.ctx.storage.transactionSync.bind(this.ctx.storage)
+        )
       )
     );
   }
