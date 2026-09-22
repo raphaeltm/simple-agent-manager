@@ -31,6 +31,7 @@ import {
 } from './deployment-node-admission';
 import { createNodeRecord, provisionNode } from './nodes';
 
+export { linkEnvironmentToLegacyNode } from './deployment-legacy-node-admission';
 export {
   claimDeploymentEnvironmentRelocation,
   completeDeploymentEnvironmentRelocation,

@@ -27,7 +27,8 @@ import {
 
 /** Default maximum number of deployment environments placed on one deployment node. */
 export const DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE = 5;
-const DEPLOYMENT_RELOCATION_CLAIM_FIELD = 'samRelocationClaim';
+/** Reservation JSON field that fences an environment during relocation. */
+export const DEPLOYMENT_RELOCATION_CLAIM_FIELD = 'samRelocationClaim';
 
 interface DeploymentNodeCandidate extends CapacityAwareNodePlacementRow, WorkspaceResourceNode {
   id: string;

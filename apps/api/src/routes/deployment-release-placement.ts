@@ -12,10 +12,12 @@ import {
   type DeploymentNodeResult,
   type DeploymentPlacement,
   findDeploymentNodeWithCapacity,
+  linkEnvironmentToLegacyNode,
   linkEnvironmentToNode,
   provisionDeploymentNode,
   restoreDeploymentEnvironmentRelocation,
 } from '../services/deployment-provisioning';
+import { markDeploymentReleasePlacementFailed } from '../services/deployment-release-failure';
 import {
   attachEnvironmentVolumesToLinkedNode,
   detachEnvironmentVolumes,
@@ -138,50 +140,6 @@ async function readEnvironmentRuntimeState(
     status: envRow[0]?.status ?? null,
     resolvedReservationJson: envRow[0]?.resolvedReservationJson ?? null,
   };
-}
-
-async function markDeploymentReleasePlacementFailed(
-  db: DeploymentReleaseDb,
-  env: Env,
-  environmentId: string,
-  releaseId: string,
-  error: unknown,
-  updateEnvironment = true
-): Promise<void> {
-  const message = error instanceof Error ? error.message : String(error);
-  const now = new Date().toISOString();
-  await db
-    .update(schema.deploymentReleases)
-    .set({ status: 'failed', statusUpdatedAt: now })
-    .where(eq(schema.deploymentReleases.id, releaseId));
-  if (updateEnvironment) {
-    if (typeof env.DATABASE.prepare === 'function') {
-      await env.DATABASE.prepare(
-        `UPDATE deployment_environments
-            SET status = 'error', observed_status = 'failed',
-                observed_error_message = ?, updated_at = ?
-          WHERE id = ?
-            AND ? = (
-              SELECT latest.id FROM deployment_releases latest
-              WHERE latest.environment_id = deployment_environments.id
-              ORDER BY latest.version DESC
-              LIMIT 1
-            )`
-      )
-        .bind(`Deployment node placement failed: ${message}`, now, environmentId, releaseId)
-        .run();
-    } else {
-      await db
-        .update(schema.deploymentEnvironments)
-        .set({
-          status: 'error',
-          observedStatus: 'failed',
-          observedErrorMessage: `Deployment node placement failed: ${message}`,
-          updatedAt: now,
-        })
-        .where(eq(schema.deploymentEnvironments.id, environmentId));
-    }
-  }
 }
 
 function hasDeploymentPlacementClaim(reservationJson: string | null): boolean {
@@ -755,16 +713,44 @@ export async function placeReleaseOnDeploymentNode(
     expectedReservationJson: runtime.resolvedReservationJson,
     beforeExternalMutation: assertPlacementCurrent,
   });
+  let adoptedLegacyNode = false;
   if (!reserved) {
-    return handleExistingNodeReservationFailure({
-      release: params,
+    // Pre-node-pool deployment nodes carry no pooled placement identity and no
+    // trusted observed hardware, so capacity-aware admission can never readmit
+    // them. An environment already running on one keeps deploying there.
+    await assertPlacementCurrent();
+    adoptedLegacyNode = await linkEnvironmentToLegacyNode({
+      env: params.env,
+      envId: params.envId,
       nodeId,
+      userId: params.userId,
+      releaseId: params.releaseId,
+      requiresVolumes: params.requiresVolumes,
+      reservation: params.reservation,
       expectedReservationJson: runtime.resolvedReservationJson,
-      beforeExternalMutation: assertPlacementCurrent,
     });
+    if (!adoptedLegacyNode) {
+      return handleExistingNodeReservationFailure({
+        release: params,
+        nodeId,
+        expectedReservationJson: runtime.resolvedReservationJson,
+        beforeExternalMutation: assertPlacementCurrent,
+      });
+    }
   }
 
-  if (params.requiresVolumes) {
+  if (params.requiresVolumes && adoptedLegacyNode) {
+    // A legacy node has `workload_role` NULL, which `buildPlacementAuthoritySqlPredicate`
+    // can never match, so `claimDeploymentEnvironmentRelocation` cannot issue the claim
+    // `attachVolumesForRelease` needs. Legacy adoption instead relies on the volumes that
+    // are already attached to the node's provider instance — exactly what the heartbeat's
+    // `deploymentVolumesReadyForNode` gate checks before advertising the release.
+    log.info('deployment_release.legacy_node_volume_attach_skipped', {
+      envId: params.envId,
+      nodeId,
+      releaseId: params.releaseId,
+    });
+  } else if (params.requiresVolumes) {
     await attachVolumesToExistingNode({
       ...params,
       beforeExternalMutation: assertPlacementCurrent,

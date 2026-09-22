@@ -38,12 +38,15 @@ let envRows: Array<{
   resolvedReservationJson?: string | null;
 }> = [];
 let releaseRows: Array<{ version: number }> = [];
+/** node_mode reported for the node the environment is already linked to. */
+let existingNodeMode: 'shared' | 'exclusive' = 'shared';
 
 // Mock provisionDeploymentNode
 const mockProvisionDeploymentNode = vi.fn();
 const mockResolveDeploymentPlacement = vi.hoisted(() => vi.fn());
 const mockFindDeploymentNodeWithCapacity = vi.hoisted(() => vi.fn());
 const mockLinkEnvironmentToNode = vi.hoisted(() => vi.fn());
+const mockLinkEnvironmentToLegacyNode = vi.hoisted(() => vi.fn());
 const mockClaimDeploymentEnvironmentRelocation = vi.hoisted(() => vi.fn());
 const mockCompleteDeploymentEnvironmentRelocation = vi.hoisted(() => vi.fn());
 const mockRestoreDeploymentEnvironmentRelocation = vi.hoisted(() => vi.fn());
@@ -58,6 +61,7 @@ vi.mock('../../../src/services/deployment-provisioning', () => ({
   findDeploymentNodeWithCapacity: (...args: unknown[]) =>
     mockFindDeploymentNodeWithCapacity(...args),
   linkEnvironmentToNode: (...args: unknown[]) => mockLinkEnvironmentToNode(...args),
+  linkEnvironmentToLegacyNode: (...args: unknown[]) => mockLinkEnvironmentToLegacyNode(...args),
   claimDeploymentEnvironmentRelocation: (...args: unknown[]) =>
     mockClaimDeploymentEnvironmentRelocation(...args),
   completeDeploymentEnvironmentRelocation: (...args: unknown[]) =>
@@ -173,6 +177,7 @@ vi.mock('../../../src/db/schema', () => ({
   deploymentReleases: {
     id: 'dr.id',
     environmentId: 'dr.environmentId',
+    statusUpdatedAt: 'dr.statusUpdatedAt',
     version: 'dr.version',
     status: 'dr.status',
     manifest: 'dr.manifest',
@@ -221,7 +226,7 @@ function createMockDb() {
                     );
                   }
                   if (fields && 'nodeMode' in fields) {
-                    return Promise.resolve([{ nodeMode: 'shared' }]);
+                    return Promise.resolve([{ nodeMode: existingNodeMode }]);
                   }
                   if (fields && 'providerInstanceId' in fields) {
                     return Promise.resolve([
@@ -309,6 +314,7 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
     dbCalls.length = 0;
     envRows = [{ id: 'env-1', projectId: 'proj-1', nodeId: null, status: 'active' }];
     releaseRows = [];
+    existingNodeMode = 'shared';
     mockResolveDeploymentPlacement.mockResolvedValue({
       provider: 'hetzner',
       location: 'fsn1',
@@ -319,6 +325,7 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
       placement,
     }));
     mockLinkEnvironmentToNode.mockResolvedValue(true);
+    mockLinkEnvironmentToLegacyNode.mockResolvedValue(false);
     mockClaimDeploymentEnvironmentRelocation.mockResolvedValue('relocation-claim');
     mockCompleteDeploymentEnvironmentRelocation.mockResolvedValue(true);
     mockRestoreDeploymentEnvironmentRelocation.mockResolvedValue(undefined);
@@ -524,6 +531,121 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
       )
     ).toBe(false);
     expect(dbCalls.some(({ values }) => values?.status === 'failed')).toBe(true);
+  });
+
+  it.each([
+    {
+      name: 'exclusive (requiresVolumes)',
+      requiresVolumes: true,
+      exclusiveNode: true,
+    },
+    { name: 'shared', requiresVolumes: false, exclusiveNode: false },
+  ])(
+    'adopts the legacy node an environment already runs on when capacity admission refuses it ($name)',
+    async ({ requiresVolumes, exclusiveNode }) => {
+      // Production 2026-09-21: pre-node-pool deployment nodes have no
+      // capacity_pool_id and no observed hardware, so findDeploymentNodeWithCapacity
+      // returns null and linkEnvironmentToNode can never succeed for them.
+      envRows = [{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-legacy', status: 'error' }];
+      existingNodeMode = requiresVolumes ? 'exclusive' : 'shared';
+      mockProvisionDeploymentNode.mockResolvedValue(null);
+      mockFindDeploymentNodeWithCapacity.mockResolvedValue(null);
+      mockLinkEnvironmentToNode.mockResolvedValue(false);
+      mockLinkEnvironmentToLegacyNode.mockResolvedValue(true);
+      mockResolveDeploymentManifestReservation.mockReturnValue({
+        version: 3,
+        cpuMillis: 250,
+        memoryMb: 256,
+        diskMb: 1024,
+        exclusiveNode,
+        source: 'task',
+        sourceId: 'env-1',
+        diagnostics: ['deployment-manifest-reservation:v1'],
+      });
+      const manifest = validManifest();
+      if (requiresVolumes) {
+        manifest.services.web.volumes = [{ name: 'data', mountPath: '/data' }];
+        manifest.volumes = { data: { sizeGb: 10 } };
+      }
+
+      const app = await createTestApp();
+      const response = await app.request(
+        '/api/projects/proj-1/environments/env-1/releases',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(manifest),
+        },
+        mockEnv
+      );
+
+      expect(response.status).toBe(201);
+      expect(await response.json()).toMatchObject({ nodeId: 'node-legacy' });
+      expect(mockLinkEnvironmentToLegacyNode).toHaveBeenCalledWith(
+        expect.objectContaining({
+          envId: 'env-1',
+          nodeId: 'node-legacy',
+          userId: 'test-user-id',
+          releaseId: 'release-test-id',
+          requiresVolumes,
+          expectedReservationJson: null,
+        })
+      );
+      // The environment is never failed and never retired, and no replacement
+      // node is provisioned.
+      expect(dbCalls.some(({ values }) => values?.status === 'failed')).toBe(false);
+      expect(dbCalls.some(({ values }) => values?.status === 'error')).toBe(false);
+      expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+      expect(mockTeardownDeploymentEnvironmentOnNode).not.toHaveBeenCalled();
+      // A legacy node can never satisfy the placement-authority predicate the
+      // relocation claim requires, so the volume-attach step is skipped outright
+      // rather than attempted and swallowed.
+      expect(mockClaimDeploymentEnvironmentRelocation).not.toHaveBeenCalled();
+    }
+  );
+
+  it('falls through to the existing failure path when legacy adoption refuses', async () => {
+    envRows = [{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-existing', status: 'active' }];
+    existingNodeMode = 'exclusive';
+    mockProvisionDeploymentNode.mockResolvedValue(null);
+    mockFindDeploymentNodeWithCapacity.mockResolvedValue(null);
+    mockLinkEnvironmentToNode.mockResolvedValue(false);
+    mockLinkEnvironmentToLegacyNode.mockResolvedValue(false);
+    mockResolveDeploymentManifestReservation.mockReturnValue({
+      version: 3,
+      cpuMillis: 250,
+      memoryMb: 256,
+      diskMb: 1024,
+      exclusiveNode: true,
+      source: 'task',
+      sourceId: 'env-1',
+      diagnostics: ['deployment-manifest-reservation:v1'],
+    });
+    const manifest = validManifest();
+    manifest.services.web.volumes = [{ name: 'data', mountPath: '/data' }];
+    manifest.volumes = { data: { sizeGb: 10 } };
+
+    const app = await createTestApp();
+    const response = await app.request(
+      '/api/projects/proj-1/environments/env-1/releases',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(manifest),
+      },
+      mockEnv
+    );
+
+    expect(response.status).toBe(201);
+    expect(mockLinkEnvironmentToLegacyNode).toHaveBeenCalledOnce();
+    expect(dbCalls.some(({ values }) => values?.status === 'failed')).toBe(true);
+    expect(
+      dbCalls.some(
+        ({ values }) =>
+          values?.observedErrorMessage ===
+          'Deployment node placement failed: Existing exclusive deployment node cannot admit the declared resource reservation'
+      )
+    ).toBe(true);
   });
 
   it('fences shared-to-exclusive volume migration before teardown and guarded completion', async () => {
@@ -807,8 +929,8 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
     ).resolves.toBe('node-release-a');
     await observed;
 
-    const environmentFailure = statements.find(({ sql }) =>
-      sql.includes("SET status = 'error', observed_status = 'failed'")
+    const environmentFailure = statements.find(
+      ({ sql }) => sql.includes('UPDATE deployment_environments') && sql.includes("ELSE 'error'")
     );
     expect(environmentFailure?.binds.at(-1)).toBe('release-test-id');
     expect(dbCalls.filter((call) => call.op === 'update')).toHaveLength(1);
