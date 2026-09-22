@@ -1082,7 +1082,7 @@ describe('ProjectData storage safety firebreak', () => {
         sessionId: seeded.sessionId,
         messageId: seeded.userMessageId,
       });
-      const searchResults = instance.searchMessages('search-preserved', null, null, 5);
+      const searchResults = instance.searchMessages('search-preserved', seeded.sessionId, null, 5);
       return {
         rawRows,
         groupedRows: groupedRows.count,

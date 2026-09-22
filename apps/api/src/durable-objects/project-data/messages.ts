@@ -7,6 +7,7 @@ import {
   PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES,
   type ProjectDataArchiveSourceIntentState,
 } from '../../project-data-archive/contract';
+import { SEARCH_INDEX_STATE_PRUNED, SEARCH_INDEX_STATE_REBUILD_REQUIRED } from './materialization';
 import {
   insertNewMessage,
   nextSequence,
@@ -87,6 +88,56 @@ function assertTranscriptWriteAllowed(sql: SqlStorage, sessionId: string, operat
   if (state) throw new ProjectDataTranscriptWriteFencedError(sessionId, operation, state);
 }
 
+function markSearchProjectionDirty(
+  sql: SqlStorage,
+  sessionId: string,
+  rows: Array<{ createdAt: number; sequence: number; origin?: string | null }>
+): void {
+  const visibleRows = rows.filter((row) => (row.origin ?? null) !== 'system');
+  const state = sql
+    .exec(
+      `SELECT materialized_through_created_at, materialized_through_sequence,
+              materialized_at, search_index_state
+       FROM chat_sessions WHERE id = ?`,
+      sessionId
+    )
+    .toArray()[0];
+  const watermarkCreatedAt = state?.materialized_through_created_at ?? state?.materialized_at;
+  const watermarkSequence =
+    state?.materialized_through_created_at === null ||
+    state?.materialized_through_created_at === undefined
+      ? Number.MAX_SAFE_INTEGER
+      : typeof state.materialized_through_sequence === 'number'
+        ? state.materialized_through_sequence
+        : 0;
+  const requiresRebuild =
+    typeof watermarkCreatedAt === 'number' &&
+    visibleRows.some(
+      (row) =>
+        row.createdAt < watermarkCreatedAt ||
+        (row.createdAt === watermarkCreatedAt && row.sequence <= watermarkSequence)
+    );
+  if (state?.search_index_state === SEARCH_INDEX_STATE_PRUNED) return;
+
+  // Every write clears the projection version so even a system-only session can
+  // be checked off through the partial dirty index. A visible row at or below the
+  // incremental reader's (created_at, sequence) seek point cannot be appended
+  // safely because it may join a grouped streaming message already in FTS, so it
+  // requests a bounded delete-and-rebuild instead.
+  sql.exec(
+    `UPDATE chat_sessions
+     SET search_index_state = ?, search_projection_version = 0, search_index_updated_at = ?,
+         search_index_degradation_reason = ?
+     WHERE id = ?`,
+    requiresRebuild ? SEARCH_INDEX_STATE_REBUILD_REQUIRED : (state?.search_index_state ?? null),
+    Date.now(),
+    requiresRebuild
+      ? 'A transcript row arrived below the materialization watermark.'
+      : 'Visible transcript rows are pending grouped search materialization.',
+    sessionId
+  );
+}
+
 export function persistMessage(
   sql: SqlStorage,
   env: Env,
@@ -117,7 +168,11 @@ export function persistMessage(
   if (existing) {
     return resolveDuplicateMessage(sql, existing, id, sessionId, role, content);
   }
-  return insertNewMessage(sql, env, sessionId, role, content, toolMetadata, id);
+  const inserted = insertNewMessage(sql, env, sessionId, role, content, toolMetadata, id);
+  markSearchProjectionDirty(sql, sessionId, [
+    { createdAt: inserted.now, sequence: inserted.sequence },
+  ]);
+  return inserted;
 }
 
 export function persistMessageBatch(
@@ -267,6 +322,8 @@ export function persistMessageBatch(
       origin,
     });
   }
+
+  markSearchProjectionDirty(sql, sessionId, persistedMessages);
 
   let workspaceId: string | null = null;
   let firstUserContent: string | null = null;
@@ -494,23 +551,84 @@ export function searchMessages(
   limit: number = 10
 ): SearchResult[] {
   const results: SearchResult[] = [];
+  const rebuildActive = sessionId ? isSessionSearchRebuildActive(sql, sessionId) : false;
 
   results.push(...searchMessagesFts(sql, query, sessionId, roles, limit));
+  if (sessionId) {
+    results.push(...searchMessagesRebuildBackup(sql, query, sessionId, roles, limit));
+  }
 
-  if (results.length < limit) {
-    const fallbackResults = searchMessagesLike(
-      sql,
-      query,
-      sessionId,
-      roles,
-      limit - results.length,
-      true
-    );
+  if (results.length < limit || rebuildActive) {
+    const fallbackLimit = rebuildActive ? limit : limit - results.length;
+    const fallbackResults = searchMessagesLike(sql, query, sessionId, roles, fallbackLimit, true);
     results.push(...fallbackResults);
   }
 
-  results.sort((a, b) => b.createdAt - a.createdAt);
-  return results.slice(0, limit);
+  const deduplicated = [...new Map(results.map((result) => [result.id, result])).values()];
+  deduplicated.sort(
+    (a, b) =>
+      b.createdAt - a.createdAt ||
+      a.sessionId.localeCompare(b.sessionId) ||
+      a.id.localeCompare(b.id)
+  );
+  return deduplicated.slice(0, limit);
+}
+
+function isSessionSearchRebuildActive(sql: SqlStorage, sessionId: string): boolean {
+  const row = sql
+    .exec(
+      `SELECT (
+         search_index_state IN ('rebuild_required', 'backup_cleanup')
+         OR EXISTS (
+           SELECT 1 FROM chat_messages_grouped_rebuild_backup b
+           WHERE b.session_id = chat_sessions.id
+         )
+       ) AS active
+       FROM chat_sessions WHERE id = ?`,
+      sessionId
+    )
+    .toArray()[0];
+  return row?.active === 1;
+}
+
+function searchMessagesRebuildBackup(
+  sql: SqlStorage,
+  query: string,
+  sessionId: string,
+  roles: string[] | null,
+  limit: number
+): SearchResult[] {
+  const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
+  const conditions = ["b.content LIKE ? ESCAPE '\\'", 'b.session_id = ?'];
+  const params: (string | number)[] = [`%${escapedQuery}%`, sessionId];
+  if (roles && roles.length > 0) {
+    conditions.push(`b.role IN (${roles.map(() => '?').join(', ')})`);
+    params.push(...roles);
+  }
+  params.push(limit);
+  const rows = sql
+    .exec(
+      `SELECT b.id, b.session_id, b.role, b.content, b.created_at,
+              s.topic AS session_topic, s.task_id AS session_task_id
+       FROM chat_messages_grouped_rebuild_backup b
+       JOIN chat_sessions s ON s.id = b.session_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY b.created_at DESC, b.id ASC
+       LIMIT ?`,
+      ...params
+    )
+    .toArray();
+  return rows.map((row) => mapSearchResultToSearchResult(parseSearchResultRow(row), query));
+}
+
+/** Search a project after `prepareProjectSearchIndex` proved every raw row indexed. */
+export function searchMaterializedProjectMessages(
+  sql: SqlStorage,
+  query: string,
+  roles: string[] | null = null,
+  limit: number = 10
+): SearchResult[] {
+  return searchMessagesFts(sql, query, null, roles, limit);
 }
 
 function mapSearchResultToSearchResult(parsed: SearchResultParsed, query: string): SearchResult {

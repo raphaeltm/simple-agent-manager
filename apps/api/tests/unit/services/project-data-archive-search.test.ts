@@ -375,7 +375,6 @@ describe('ProjectData project-wide archive search metadata', () => {
       const root = stub({ root: [row('root-message', 'root-session', 100)] });
       root.searchMessages
         .mockRejectedValueOnce(new Error('temporary root failure'))
-        .mockRejectedValueOnce(new Error('temporary root retry failure'))
         .mockResolvedValueOnce([row('root-message', 'root-session', 100)]);
       const env = envForSearch(sqlite, { 'project-search': root });
 
@@ -393,6 +392,7 @@ describe('ProjectData project-wide archive search metadata', () => {
         rootError: 'root_search_failed',
       });
       expect(first.archiveSearch.continuation).toEqual(expect.any(String));
+      expect(root.searchMessages).toHaveBeenCalledTimes(1);
 
       const completed = await searchMessagesWithArchiveMetadata(
         env,
@@ -410,6 +410,51 @@ describe('ProjectData project-wide archive search metadata', () => {
         continuation: null,
       });
       expect(completed.results.map((item) => item.id)).toEqual(['root-message']);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('reports bounded root index advancement separately from execution failure', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createLocationTable(sqlite);
+      const root = stub({ root: [row('root-message', 'root-session', 100)] });
+      root.searchMessages
+        .mockRejectedValueOnce(new Error('PROJECT_DATA_SEARCH_INDEX_INCOMPLETE'))
+        .mockResolvedValueOnce([row('root-message', 'root-session', 100)]);
+      const env = envForSearch(sqlite, { 'project-search': root });
+
+      const first = await searchMessagesWithArchiveMetadata(
+        env,
+        'project-search',
+        'needle',
+        null,
+        null,
+        10
+      );
+      expect(first.archiveSearch).toMatchObject({
+        complete: false,
+        partial: true,
+        rootError: 'root_index_incomplete',
+        executionErrors: [],
+      });
+      expect(root.searchMessages).toHaveBeenCalledTimes(1);
+
+      const completed = await searchMessagesWithArchiveMetadata(
+        env,
+        'project-search',
+        'needle',
+        null,
+        null,
+        10,
+        first.archiveSearch.continuation
+      );
+      expect(completed.archiveSearch).toMatchObject({
+        complete: true,
+        rootError: null,
+        continuation: null,
+      });
     } finally {
       sqlite.close();
     }

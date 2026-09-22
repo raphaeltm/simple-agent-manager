@@ -563,7 +563,8 @@ describe('DO Migrations', () => {
       // Additive audience/channel/schedule/wake-seek indexes (049–054): 18.
       // Active mailbox capacity index (055): 1.
       // Complete archive-search projection: 1 session seek index (058).
-      expect(indexes).toHaveLength(126);
+      // Root complete-search pending projection: queue + rebuild-backup indexes (059).
+      expect(indexes).toHaveLength(128);
       expect(indexes.some((query) => query.includes('idx_archive_raw_chunk_time'))).toBe(true);
     });
   });

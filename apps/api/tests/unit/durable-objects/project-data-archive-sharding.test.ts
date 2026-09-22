@@ -581,6 +581,15 @@ describe('ProjectData terminal archive sharding bridge', () => {
     const target = makeSql();
     try {
       seedTerminalSession(source.sql);
+      source.sql.exec(
+        `INSERT INTO chat_messages_grouped_rebuild_backup(id, session_id, role, content, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        'session-archive-rebuild-backup',
+        'session-archive',
+        'assistant',
+        'temporary search rebuild backup',
+        1200
+      );
       const prepared = await prepareArchiveSourceIntent(source.sql, {
         projectId: 'project-archive',
         sessionId: 'session-archive',
@@ -710,10 +719,11 @@ describe('ProjectData terminal archive sharding bridge', () => {
             `SELECT
                (SELECT COUNT(*) FROM chat_messages WHERE session_id = ?) AS messages,
                (SELECT COUNT(*) FROM chat_messages_grouped WHERE session_id = ?) AS grouped_rows,
-               (SELECT COUNT(*) FROM tool_payload_archives WHERE session_id = ?) AS tools`
+               (SELECT COUNT(*) FROM tool_payload_archives WHERE session_id = ?) AS tools,
+               (SELECT COUNT(*) FROM chat_messages_grouped_rebuild_backup WHERE session_id = ?) AS rebuild_backup`
           )
-          .get('session-archive', 'session-archive', 'session-archive')
-      ).toEqual({ messages: 2, grouped_rows: 1, tools: 1 });
+          .get('session-archive', 'session-archive', 'session-archive', 'session-archive')
+      ).toEqual({ messages: 2, grouped_rows: 1, tools: 1, rebuild_backup: 1 });
       expect(inspectArchiveSourceIntent(source.sql, finalizeInput)).toMatchObject({
         state: 'recovery_manifest_persisted',
       });
@@ -730,9 +740,39 @@ describe('ProjectData terminal archive sharding bridge', () => {
       });
       expect(
         source.db
-          .prepare('SELECT archive_last_message_at, archive_state FROM chat_sessions WHERE id = ?')
+          .prepare(
+            `SELECT archive_last_message_at,
+                    archive_state,
+                    (SELECT COUNT(*) FROM chat_messages_grouped_rebuild_backup WHERE session_id = chat_sessions.id) AS rebuild_backup
+             FROM chat_sessions WHERE id = ?`
+          )
           .get('session-archive')
-      ).toEqual({ archive_last_message_at: 1200, archive_state: 'source_deleted' });
+      ).toEqual({
+        archive_last_message_at: 1200,
+        archive_state: 'source_deleted',
+        rebuild_backup: 0,
+      });
+      source.sql.exec(
+        `INSERT INTO chat_messages_grouped_rebuild_backup(id, session_id, role, content, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        'session-archive-stale-rebuild-backup',
+        'session-archive',
+        'assistant',
+        'stale backup from an older finalizer',
+        1200
+      );
+      await expect(
+        finalizeSourceDelete(source.sql, finalizeInput, (callback) =>
+          source.db.transaction(callback)()
+        )
+      ).resolves.toMatchObject({ idempotent: true });
+      expect(
+        source.db
+          .prepare(
+            'SELECT COUNT(*) AS count FROM chat_messages_grouped_rebuild_backup WHERE session_id = ?'
+          )
+          .get('session-archive')
+      ).toEqual({ count: 0 });
       expect(
         target.db
           .prepare('SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?')

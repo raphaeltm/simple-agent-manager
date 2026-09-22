@@ -20,6 +20,8 @@ const MaterializationStateSchema = v.object({
   search_index_state: v.nullable(v.string()),
   materialized_through_created_at: v.nullable(v.number()),
   materialized_through_sequence: v.nullable(v.number()),
+  search_projection_version: v.nullable(v.number()),
+  message_count: v.number(),
 });
 
 export interface MaterializationState {
@@ -28,6 +30,8 @@ export interface MaterializationState {
   searchIndexState: string | null;
   throughCreatedAt: number | null;
   throughSequence: number | null;
+  projectionVersion: number | null;
+  messageCount: number;
 }
 
 export function parseMaterializationState(row: unknown): MaterializationState {
@@ -38,6 +42,8 @@ export function parseMaterializationState(row: unknown): MaterializationState {
     searchIndexState: r.search_index_state,
     throughCreatedAt: r.materialized_through_created_at,
     throughSequence: r.materialized_through_sequence,
+    projectionVersion: r.search_projection_version,
+    messageCount: r.message_count,
   };
 }
 

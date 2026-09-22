@@ -1398,6 +1398,12 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+function classifyRootSearchError(error: unknown): string {
+  return error instanceof Error && error.message.includes('PROJECT_DATA_SEARCH_INDEX_INCOMPLETE')
+    ? 'root_index_incomplete'
+    : 'root_search_failed';
+}
+
 export async function searchMessagesWithArchiveMetadata(
   env: Env,
   projectId: string,
@@ -1466,8 +1472,12 @@ export async function searchMessagesWithArchiveMetadata(
       )) as ProjectDataMessageSearchResult[];
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      rootError = 'root_search_failed';
-      log.warn('project_data.root_search_failed', { projectId, error: errorMessage });
+      rootError = classifyRootSearchError(error);
+      if (rootError === 'root_index_incomplete') {
+        log.info('project_data.root_search_index_advancing', { projectId });
+      } else {
+        log.warn('project_data.root_search_failed', { projectId, error: errorMessage });
+      }
     }
     let owners: ProjectDataArchiveSearchOwnerRow[];
     try {
@@ -1530,7 +1540,10 @@ export async function searchMessagesWithArchiveMetadata(
     };
   }
 
-  if (cursor.rootError !== null) {
+  // A fresh request already spent its one bounded root-search pass above. Only a
+  // signed continuation may advance/retry the root again; otherwise an index
+  // miss silently doubles the configured materialization budget in one request.
+  if (continuation && cursor.rootError !== null) {
     try {
       const stub = await getStub(env, projectId);
       cursor.results.push(
@@ -1543,11 +1556,15 @@ export async function searchMessagesWithArchiveMetadata(
       );
       cursor.rootError = null;
     } catch (error) {
-      log.warn('project_data.root_search_retry_failed', {
-        projectId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      cursor.rootError = 'root_search_failed';
+      cursor.rootError = classifyRootSearchError(error);
+      if (cursor.rootError === 'root_index_incomplete') {
+        log.info('project_data.root_search_index_advancing', { projectId });
+      } else {
+        log.warn('project_data.root_search_retry_failed', {
+          projectId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
   if (cursor.nextOwner >= cursor.owners.length && cursor.retryOwners.length > 0) {

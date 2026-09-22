@@ -391,10 +391,12 @@ export class ProjectData extends DurableObject<Env> {
         JSON.stringify({ message_count: result.messageCount })
       );
       try {
-        materialization.materializeSession(
-          this.sql,
-          sessionId,
-          materialization.resolveMaterializationPassConfig(this.env)
+        this.ctx.storage.transactionSync(() =>
+          materialization.materializeSession(
+            this.sql,
+            sessionId,
+            materialization.resolveMaterializationPassConfig(this.env)
+          )
         );
       } catch (e) {
         log.error('materialize_session_on_stop_failed', { sessionId, error: String(e) });
@@ -427,10 +429,12 @@ export class ProjectData extends DurableObject<Env> {
       // (watermark-based), so a session that sleeps and wakes repeatedly pays
       // for its new tail each time, not for its whole history.
       try {
-        materialization.materializeSession(
-          this.sql,
-          sessionId,
-          materialization.resolveMaterializationPassConfig(this.env)
+        this.ctx.storage.transactionSync(() =>
+          materialization.materializeSession(
+            this.sql,
+            sessionId,
+            materialization.resolveMaterializationPassConfig(this.env)
+          )
         );
       } catch (e) {
         log.error('materialize_session_on_sleep_failed', { sessionId, error: String(e) });
@@ -513,10 +517,12 @@ export class ProjectData extends DurableObject<Env> {
         JSON.stringify({ message_count: result.messageCount, error: errorMessage })
       );
       try {
-        materialization.materializeSession(
-          this.sql,
-          sessionId,
-          materialization.resolveMaterializationPassConfig(this.env)
+        this.ctx.storage.transactionSync(() =>
+          materialization.materializeSession(
+            this.sql,
+            sessionId,
+            materialization.resolveMaterializationPassConfig(this.env)
+          )
         );
       } catch (e) {
         log.error('materialize_session_on_fail_failed', { sessionId, error: String(e) });
@@ -1163,6 +1169,19 @@ export class ProjectData extends DurableObject<Env> {
     roles: string[] | null = null,
     limit: number = 10
   ) {
+    if (sessionId === null) {
+      const preparation = this.ctx.storage.transactionSync(() =>
+        materialization.prepareProjectSearchIndex(
+          this.sql,
+          materialization.resolveMaterializationPassConfig(this.env)
+        )
+      );
+      if (!preparation.complete) {
+        log.info('project_search_index_advancing', preparation);
+        throw new Error('PROJECT_DATA_SEARCH_INDEX_INCOMPLETE');
+      }
+      return messages.searchMaterializedProjectMessages(this.sql, query, roles, limit);
+    }
     return messages.searchMessages(this.sql, query, sessionId, roles, limit);
   }
 
@@ -1717,10 +1736,12 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   materializeSession(sessionId: string): void {
-    materialization.materializeSession(
-      this.sql,
-      sessionId,
-      materialization.resolveMaterializationPassConfig(this.env)
+    this.ctx.storage.transactionSync(() =>
+      materialization.materializeSession(
+        this.sql,
+        sessionId,
+        materialization.resolveMaterializationPassConfig(this.env)
+      )
     );
   }
   materializePendingSessions(limit?: number, scanLimit?: number) {

@@ -3409,6 +3409,15 @@ export async function finalizeSourceDelete(
   validateRootSourceOwner(input);
   const state = assertMatchingSourceIntent(readSourceIntent(sql, input.sessionId), input);
   if (state === 'source_deleted') {
+    // The routing anchor intentionally survives source finalization, so the
+    // chat_sessions DELETE trigger cannot clear a rebuild backup. Clean up any
+    // row left by an interrupted/older finalizer on the idempotent path too.
+    transactionSync(() => {
+      sql.exec(
+        'DELETE FROM chat_messages_grouped_rebuild_backup WHERE session_id = ?',
+        input.sessionId
+      );
+    });
     const intent = readSourceIntent(sql, input.sessionId);
     return {
       idempotent: true,
@@ -3483,6 +3492,10 @@ export async function finalizeSourceDelete(
     const toolArchiveRowsDeleted =
       sql.exec('DELETE FROM tool_payload_archives WHERE session_id = ?', input.sessionId)
         .rowsWritten ?? 0;
+    sql.exec(
+      'DELETE FROM chat_messages_grouped_rebuild_backup WHERE session_id = ?',
+      input.sessionId
+    );
     const messagesDeleted =
       sql.exec('DELETE FROM chat_messages WHERE session_id = ?', input.sessionId).rowsWritten ?? 0;
     sql.exec(

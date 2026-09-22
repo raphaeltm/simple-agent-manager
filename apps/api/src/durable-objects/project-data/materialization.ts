@@ -43,6 +43,10 @@ export const SEARCH_INDEX_STATE_PRUNED = 'grouped_fts_pruned';
 export const SEARCH_INDEX_STATE_COMPLETE = 'complete';
 /** Live or sleeping session: indexed through the watermark, more may arrive. */
 export const SEARCH_INDEX_STATE_PARTIAL = 'partial';
+/** Derived rows are being removed before a full rebuild after a backdated write. */
+export const SEARCH_INDEX_STATE_REBUILD_REQUIRED = 'rebuild_required';
+const SEARCH_INDEX_STATE_BACKUP_CLEANUP = 'backup_cleanup';
+const PROJECT_SEARCH_PROJECTION_VERSION = 1;
 
 /** Sessions materialized per sweep call. */
 export const DEFAULT_MATERIALIZATION_SWEEP_LIMIT = 50;
@@ -178,6 +182,256 @@ interface GroupedMessage {
 /** The grouped row a pass would continue if the next token shares its role. */
 type TrailingGroup = ReturnType<typeof parseTrailingGroup>;
 
+type ProjectSearchIndexCandidate = {
+  id: string;
+  state: string | null;
+  materializedAt: number | null;
+  projectionVersion: number | null;
+};
+
+const PROJECT_SEARCH_INDEX_CANDIDATE_SQL = `
+  SELECT s.id, s.search_index_state, s.materialized_at, s.search_projection_version
+  FROM chat_sessions s INDEXED BY idx_chat_sessions_project_search_pending
+  WHERE s.search_index_state IN ('${SEARCH_INDEX_STATE_PRUNED}', '${SEARCH_INDEX_STATE_REBUILD_REQUIRED}', '${SEARCH_INDEX_STATE_BACKUP_CLEANUP}')
+     OR (s.search_index_state = '${SEARCH_INDEX_STATE_PARTIAL}'
+         AND s.status IN ('stopped', 'failed'))
+     OR ((s.search_projection_version IS NULL
+          OR s.search_projection_version != ${PROJECT_SEARCH_PROJECTION_VERSION})
+         AND s.message_count > 0)
+  ORDER BY s.updated_at DESC, s.id DESC
+  LIMIT 1`;
+
+function readProjectSearchIndexCandidate(sql: SqlStorage): ProjectSearchIndexCandidate | null {
+  const row = sql.exec(PROJECT_SEARCH_INDEX_CANDIDATE_SQL).toArray()[0];
+  if (!row) return null;
+  if (typeof row.id !== 'string') throw new Error('Invalid project search index candidate id');
+  return {
+    id: row.id,
+    state: typeof row.search_index_state === 'string' ? row.search_index_state : null,
+    materializedAt: typeof row.materialized_at === 'number' ? row.materialized_at : null,
+    projectionVersion:
+      typeof row.search_projection_version === 'number' ? row.search_projection_version : null,
+  };
+}
+
+function beginSearchProjectionRebuild(sql: SqlStorage, sessionId: string): void {
+  sql.exec(
+    `UPDATE chat_sessions
+     SET materialized_at = NULL,
+         materialized_through_created_at = NULL,
+         materialized_through_sequence = NULL,
+         search_projection_version = 0,
+         search_index_state = ?,
+         search_index_updated_at = ?,
+         search_index_degradation_reason = ?
+     WHERE id = ?`,
+    SEARCH_INDEX_STATE_REBUILD_REQUIRED,
+    Date.now(),
+    'Grouped search projection is rebuilding; exact search uses the retained backup.',
+    sessionId
+  );
+}
+
+function deleteSearchProjectionPage(
+  sql: SqlStorage,
+  sessionId: string,
+  rowLimit: number,
+  byteLimit: number
+): { deleted: number; hasMore: boolean } {
+  const candidates = sql
+    .exec(
+      `SELECT rowid, length(CAST(content AS BLOB)) AS content_bytes
+       FROM chat_messages_grouped
+       WHERE session_id = ?
+       ORDER BY created_at ASC, rowid ASC
+       LIMIT ?`,
+      sessionId,
+      rowLimit + 1
+    )
+    .toArray();
+  const selected: number[] = [];
+  let selectedBytes = 0;
+  for (const candidate of candidates.slice(0, rowLimit)) {
+    const rowid = parseRowid(candidate, 'materialization.rebuild_candidate_rowid');
+    if (typeof candidate.content_bytes !== 'number') {
+      throw new Error('Invalid grouped message byte size during search projection rebuild');
+    }
+    if (selected.length > 0 && selectedBytes + candidate.content_bytes > byteLimit) break;
+    selected.push(rowid);
+    selectedBytes += candidate.content_bytes;
+  }
+  let deleted = 0;
+  for (const candidateRowid of selected) {
+    const row = sql
+      .exec(
+        `SELECT rowid, id, role, content, created_at
+         FROM chat_messages_grouped WHERE rowid = ?`,
+        candidateRowid
+      )
+      .toArray()[0];
+    if (!row) throw new Error('Grouped message disappeared during search projection rebuild');
+    const rowid = parseRowid(row, 'materialization.rebuild_rowid');
+    if (typeof row.content !== 'string') {
+      throw new Error('Invalid grouped message content during search projection rebuild');
+    }
+    if (
+      typeof row.id !== 'string' ||
+      typeof row.role !== 'string' ||
+      typeof row.created_at !== 'number'
+    ) {
+      throw new Error('Invalid grouped message identity during search projection rebuild');
+    }
+    sql.exec(
+      `INSERT OR IGNORE INTO chat_messages_grouped_rebuild_backup
+         (id, session_id, role, content, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      row.id,
+      sessionId,
+      row.role,
+      row.content,
+      row.created_at
+    );
+    sql.exec(
+      `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
+       VALUES('delete', ?, ?)`,
+      rowid,
+      row.content
+    );
+    sql.exec('DELETE FROM chat_messages_grouped WHERE rowid = ?', rowid);
+    deleted++;
+  }
+  return { deleted, hasMore: selected.length < candidates.length };
+}
+
+function deleteSearchProjectionBackupPage(
+  sql: SqlStorage,
+  sessionId: string,
+  limit: number
+): number {
+  const rows = sql
+    .exec(
+      `SELECT id FROM chat_messages_grouped_rebuild_backup
+       WHERE session_id = ? ORDER BY created_at ASC, id ASC LIMIT ?`,
+      sessionId,
+      limit
+    )
+    .toArray();
+  for (const row of rows) {
+    if (typeof row.id !== 'string') throw new Error('Invalid rebuild backup message id');
+    sql.exec('DELETE FROM chat_messages_grouped_rebuild_backup WHERE id = ?', row.id);
+  }
+  return rows.length;
+}
+
+function scheduleBackupCleanupIfComplete(sql: SqlStorage, sessionId: string): void {
+  const row = sql
+    .exec(
+      `SELECT EXISTS(
+         SELECT 1 FROM chat_messages_grouped_rebuild_backup WHERE session_id = ?
+       ) AS has_backup,
+       search_projection_version
+       FROM chat_sessions WHERE id = ?`,
+      sessionId,
+      sessionId
+    )
+    .toArray()[0];
+  if (row?.has_backup !== 1 || row.search_projection_version !== PROJECT_SEARCH_PROJECTION_VERSION)
+    return;
+  sql.exec(
+    `UPDATE chat_sessions SET search_index_state = ?, search_index_updated_at = ? WHERE id = ?`,
+    SEARCH_INDEX_STATE_BACKUP_CLEANUP,
+    Date.now(),
+    sessionId
+  );
+}
+
+function finishBackupCleanup(sql: SqlStorage, sessionId: string): void {
+  sql.exec(
+    `UPDATE chat_sessions
+     SET search_index_state = CASE
+           WHEN status IN ('stopped', 'failed') THEN ? ELSE ? END,
+         search_index_updated_at = ?,
+         search_index_degradation_reason = NULL
+     WHERE id = ?`,
+    SEARCH_INDEX_STATE_COMPLETE,
+    SEARCH_INDEX_STATE_PARTIAL,
+    Date.now(),
+    sessionId
+  );
+}
+
+function resetSearchProjectionWatermark(sql: SqlStorage, sessionId: string): void {
+  sql.exec(
+    `UPDATE chat_sessions
+     SET materialized_at = NULL,
+         materialized_through_created_at = NULL,
+         materialized_through_sequence = NULL,
+         search_projection_version = NULL,
+         search_index_state = NULL,
+         search_index_updated_at = ?,
+         search_index_degradation_reason = NULL
+     WHERE id = ?`,
+    Date.now(),
+    sessionId
+  );
+}
+
+/**
+ * Advance at most one session's derived search projection by one bounded pass.
+ *
+ * Project-wide search calls this before FTS and retries through its signed outer
+ * continuation while `complete` is false. That makes a no-hit query proportional
+ * to the configured materialization/delete pass instead of every retained raw
+ * message, and never reports a complete result while raw rows remain unindexed.
+ */
+export function prepareProjectSearchIndex(
+  sql: SqlStorage,
+  config: MaterializationPassConfig = DEFAULT_PASS_CONFIG
+): { complete: boolean; sessionId: string | null; action: string } {
+  const candidate = readProjectSearchIndexCandidate(sql);
+  if (!candidate) return { complete: true, sessionId: null, action: 'ready' };
+
+  if (candidate.state === SEARCH_INDEX_STATE_BACKUP_CLEANUP) {
+    const deleted = deleteSearchProjectionBackupPage(sql, candidate.id, config.pageRows);
+    if (deleted >= config.pageRows) {
+      return { complete: false, sessionId: candidate.id, action: 'delete_rebuild_backup' };
+    }
+    finishBackupCleanup(sql, candidate.id);
+    return {
+      complete: readProjectSearchIndexCandidate(sql) === null,
+      sessionId: candidate.id,
+      action: 'finish_rebuild_backup',
+    };
+  }
+
+  const needsProjectionReset =
+    candidate.state === SEARCH_INDEX_STATE_REBUILD_REQUIRED ||
+    (candidate.projectionVersion === null && candidate.materializedAt !== null);
+  if (needsProjectionReset) {
+    if (candidate.materializedAt !== null) beginSearchProjectionRebuild(sql, candidate.id);
+    const moved = deleteSearchProjectionPage(
+      sql,
+      candidate.id,
+      config.pageRows,
+      config.maxGroupChars
+    );
+    if (moved.hasMore) {
+      return { complete: false, sessionId: candidate.id, action: 'delete_rebuild_projection' };
+    }
+    resetSearchProjectionWatermark(sql, candidate.id);
+  } else if (candidate.state === SEARCH_INDEX_STATE_PRUNED) {
+    resetSearchProjectionWatermark(sql, candidate.id);
+  }
+
+  materializeSession(sql, candidate.id, config);
+  scheduleBackupCleanupIfComplete(sql, candidate.id);
+  return {
+    complete: readProjectSearchIndexCandidate(sql) === null,
+    sessionId: candidate.id,
+    action: 'materialize',
+  };
+}
+
 /**
  * The last token already folded into the index, or `null` when nothing is.
  *
@@ -204,7 +458,8 @@ function readMaterializationState(sql: SqlStorage, sessionId: string): Materiali
   const row = sql
     .exec(
       `SELECT status, materialized_at, search_index_state,
-              materialized_through_created_at, materialized_through_sequence
+              materialized_through_created_at, materialized_through_sequence,
+              search_projection_version, message_count
        FROM chat_sessions WHERE id = ?`,
       sessionId
     )
@@ -285,21 +540,13 @@ function groupTokens(
   return grouped;
 }
 
-/**
- * FTS5 external-content tables are not kept in sync by SQLite — the index rows
- * are written by hand. A missing virtual table is tolerated: the grouped table
- * alone still serves LIKE search.
- */
+/** FTS5 external-content tables are not kept in sync by SQLite; write every row. */
 function insertFtsRow(sql: SqlStorage, rowid: number, content: string): void {
-  try {
-    sql.exec(
-      'INSERT OR IGNORE INTO chat_messages_grouped_fts (rowid, content) VALUES (?, ?)',
-      rowid,
-      content
-    );
-  } catch {
-    // FTS5 table may not exist — grouped table still has value for LIKE search
-  }
+  sql.exec(
+    'INSERT OR IGNORE INTO chat_messages_grouped_fts (rowid, content) VALUES (?, ?)',
+    rowid,
+    content
+  );
 }
 
 function replaceFtsRow(
@@ -308,25 +555,13 @@ function replaceFtsRow(
   previousContent: string,
   content: string
 ): void {
-  try {
-    sql.exec(
-      `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
-       VALUES('delete', ?, ?)`,
-      rowid,
-      previousContent
-    );
-    sql.exec(
-      'INSERT INTO chat_messages_grouped_fts (rowid, content) VALUES (?, ?)',
-      rowid,
-      content
-    );
-  } catch (error) {
-    // Unlike a plain insert, this pair can fail HALFWAY: a delete that lands
-    // without its re-insert leaves the grouped row with no postings at all, and
-    // the watermark then hides it from the LIKE fallback too. Rare, but silent
-    // and permanent, so it must not be swallowed the way a missing FTS5 table is.
-    log.warn('materialization.fts_replace_failed', { rowid, error: String(error) });
-  }
+  sql.exec(
+    `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
+     VALUES('delete', ?, ?)`,
+    rowid,
+    previousContent
+  );
+  sql.exec('INSERT INTO chat_messages_grouped_fts (rowid, content) VALUES (?, ?)', rowid, content);
 }
 
 /**
@@ -360,7 +595,15 @@ function insertGroup(
     .toArray()[0];
   if (!inserted) return null;
   const rowid = parseRowid(inserted, 'materialization.grouped_rowid');
-  insertFtsRow(sql, rowid, group.content);
+  try {
+    insertFtsRow(sql, rowid, group.content);
+  } catch (error) {
+    // Some legacy/best-effort callers are not wrapped in a storage transaction.
+    // Remove the content row so a retry cannot mistake a grouped-only orphan for
+    // a fully indexed conflict and then stamp the projection complete.
+    sql.exec('DELETE FROM chat_messages_grouped WHERE rowid = ?', rowid);
+    throw error;
+  }
   return { rowid, role: group.role, content: group.content };
 }
 
@@ -417,7 +660,8 @@ function stampIndexState(
   sql: SqlStorage,
   sessionId: string,
   indexState: string,
-  watermark: Watermark | null
+  watermark: Watermark | null,
+  projectionComplete: boolean
 ): void {
   const now = Date.now();
   sql.exec(
@@ -426,6 +670,7 @@ function stampIndexState(
          materialized_through_created_at = ?,
          materialized_through_sequence = ?,
          search_index_state = ?,
+         search_projection_version = ?,
          search_index_updated_at = ?,
          search_index_degradation_reason = NULL
      WHERE id = ?`,
@@ -433,6 +678,7 @@ function stampIndexState(
     watermark?.createdAt ?? null,
     watermark?.sequence ?? null,
     indexState,
+    projectionComplete ? PROJECT_SEARCH_PROJECTION_VERSION : 0,
     now,
     sessionId
   );
@@ -479,10 +725,7 @@ function writePage(
 
   if (head && GROUPABLE_ROLES.has(head.role)) {
     if (trailing === undefined) trailing = readTrailingGroup(sql, sessionId);
-    if (
-      trailing?.role === head.role &&
-      trailing.content.length < input.config.maxGroupChars
-    ) {
+    if (trailing?.role === head.role && trailing.content.length < input.config.maxGroupChars) {
       trailing = extendTrailingGroup(sql, trailing, head);
       index = 1;
       // Checkpoint immediately. Unlike `insertGroup`, extension is a plain
@@ -490,7 +733,7 @@ function writePage(
       // every caller catches and logs rather than failing the transition — a retry
       // re-reading these tokens would append the same text a second time. Moving
       // the watermark past the extended run first makes the retry skip it.
-      stampIndexState(sql, sessionId, SEARCH_INDEX_STATE_PARTIAL, headWatermark(head));
+      stampIndexState(sql, sessionId, SEARCH_INDEX_STATE_PARTIAL, headWatermark(head), false);
     }
   }
 
@@ -525,8 +768,7 @@ export function materializeSession(
   let watermark = initialWatermark;
   // Read once per pass, then carried forward: a same-role run spanning several
   // pages would otherwise re-read and rewrite its whole (growing) content per page.
-  let trailing: TrailingGroup | null | undefined =
-    initialWatermark === null ? null : undefined;
+  let trailing: TrailingGroup | null | undefined = initialWatermark === null ? null : undefined;
   let processed = 0;
   let drained = false;
 
@@ -550,8 +792,12 @@ export function materializeSession(
   if (processed === 0) {
     // Nothing new. Only write if terminalization has something left to record:
     // an empty or fully-indexed session that has since stopped is now complete.
-    if (terminal && state.searchIndexState !== SEARCH_INDEX_STATE_COMPLETE) {
-      stampIndexState(sql, sessionId, SEARCH_INDEX_STATE_COMPLETE, watermark);
+    const settledState = terminal ? SEARCH_INDEX_STATE_COMPLETE : SEARCH_INDEX_STATE_PARTIAL;
+    if (
+      (terminal && state.searchIndexState !== SEARCH_INDEX_STATE_COMPLETE) ||
+      (state.messageCount > 0 && state.projectionVersion !== PROJECT_SEARCH_PROJECTION_VERSION)
+    ) {
+      stampIndexState(sql, sessionId, settledState, watermark, true);
     }
     return;
   }
@@ -571,7 +817,8 @@ export function materializeSession(
     // partial until a later pass drains it — otherwise 'complete' would lie and
     // the sweep would stop selecting a session that still has unindexed messages.
     terminal && drained ? SEARCH_INDEX_STATE_COMPLETE : SEARCH_INDEX_STATE_PARTIAL,
-    watermark
+    watermark,
+    drained
   );
 }
 

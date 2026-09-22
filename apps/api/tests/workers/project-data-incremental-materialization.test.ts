@@ -107,6 +107,22 @@ async function countFtsHits(
   });
 }
 
+async function expectProjectSearchIncomplete(
+  stub: DurableObjectStub<ProjectDataTestDouble>,
+  query: string,
+  roles: string[]
+): Promise<void> {
+  const error = await runInDurableObject(stub, async (instance) => {
+    try {
+      instance.searchMessages(query, null, roles, 20);
+      return null;
+    } catch (caught) {
+      return String(caught);
+    }
+  });
+  expect(error).toContain('PROJECT_DATA_SEARCH_INDEX_INCOMPLETE');
+}
+
 /**
  * Wrap the Durable Object's own `SqlStorage` so a real transition can be
  * measured. Cursors are returned untouched and their `rowsRead` is summed after
@@ -173,6 +189,370 @@ function createSqlProbe(real: SqlStorage): {
 const TOKEN_SCAN = /SELECT id, role, content, created_at, sequence FROM chat_messages/;
 
 describe('incremental materialization on sleep', () => {
+  it('advances a large active projection in bounded passes before a project-wide no-hit', async () => {
+    const stub = getStub('project-no-hit-bounded-materialization');
+    const sessionId = await stub.createSession('ws-live-history', 'Live history');
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `WITH RECURSIVE rows(n) AS (
+           SELECT 1 UNION ALL SELECT n + 1 FROM rows WHERE n < 6001
+         )
+         INSERT INTO chat_messages (id, session_id, role, content, created_at, sequence)
+         SELECT 'live-' || n, ?, 'user', 'active historical row ' || n, n, n FROM rows`,
+        sessionId
+      );
+      state.storage.sql.exec(
+        'UPDATE chat_sessions SET message_count = 6001 WHERE id = ?',
+        sessionId
+      );
+    });
+
+    const firstPass = await runInDurableObject(stub, async (instance) => {
+      const holder = instance as unknown as { sql: SqlStorage };
+      const originalSql = holder.sql;
+      const probe = createSqlProbe(originalSql);
+      holder.sql = probe.sql;
+      let error: string | null = null;
+      try {
+        instance.searchMessages('runtime-generated-no-hit-control', null, ['user'], 20);
+      } catch (caught) {
+        error = String(caught);
+      } finally {
+        holder.sql = originalSql;
+      }
+      return {
+        error,
+        maxTokensInMemory: probe.maxRowsMaterializedByOneStatement(TOKEN_SCAN),
+        tokenRowsRead: probe.rowsReadMatching(TOKEN_SCAN),
+        rawLikeRowsRead: probe.rowsReadMatching(/m\.content LIKE/),
+      };
+    });
+    expect(firstPass.error).toContain('PROJECT_DATA_SEARCH_INDEX_INCOMPLETE');
+    expect(firstPass.maxTokensInMemory).toBe(500);
+    expect(firstPass.tokenRowsRead).toBeGreaterThanOrEqual(5000);
+    expect(firstPass.tokenRowsRead).toBeLessThanOrEqual(5020);
+    expect(firstPass.rawLikeRowsRead).toBe(0);
+
+    const afterFirstPass = await readIndexState(stub, sessionId);
+    expect(afterFirstPass.materialized_through_sequence).toBe(5000);
+    expect(afterFirstPass.search_index_state).toBe('partial');
+
+    await expect(
+      stub.searchMessages('runtime-generated-no-hit-control', null, ['user'], 20)
+    ).resolves.toEqual([]);
+    const afterSecondPass = await readIndexState(stub, sessionId);
+    expect(afterSecondPass.materialized_through_sequence).toBe(6001);
+
+    const steady = await runInDurableObject(stub, async (instance) => {
+      const holder = instance as unknown as { sql: SqlStorage };
+      const originalSql = holder.sql;
+      const probe = createSqlProbe(originalSql);
+      holder.sql = probe.sql;
+      try {
+        return {
+          results: instance.searchMessages('runtime-generated-no-hit-control', null, ['user'], 20),
+          candidateRowsRead: probe.rowsReadMatching(
+            /INDEXED BY idx_chat_sessions_project_search_pending/
+          ),
+        };
+      } finally {
+        holder.sql = originalSql;
+      }
+    });
+    expect(steady.results).toEqual([]);
+    expect(steady.candidateRowsRead).toBeLessThanOrEqual(1);
+  });
+
+  it('keeps system-origin user-role rows out of project-wide search', async () => {
+    const stub = getStub('project-wide-system-origin');
+    const sessionId = await stub.createSession('ws-system-origin', 'System origin');
+    await stub.persistMessageBatch(sessionId, [
+      {
+        messageId: crypto.randomUUID(),
+        role: 'user',
+        content: 'hidden project wide injected sentinel',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+        origin: 'system',
+      },
+    ]);
+
+    await expect(
+      stub.searchMessages('hidden project wide injected sentinel', null, ['user'], 20)
+    ).resolves.toEqual([]);
+  });
+
+  it('rebuilds a failed session when a delayed batch lands below its watermark', async () => {
+    const stub = getStub('project-backdated-rebuild');
+    const sessionId = await stub.createSession('ws-backdated', 'Backdated rebuild');
+    await streamAssistant(stub, sessionId, ['Current indexed response.']);
+    expect(await stub.failSession(sessionId, 'late flush')).toBe(true);
+
+    await stub.persistMessageBatch(sessionId, [
+      {
+        messageId: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'delayed trans',
+        toolMetadata: null,
+        timestamp: '2000-01-01T00:00:00.000Z',
+      },
+      {
+        messageId: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'cript sentinel ',
+        toolMetadata: null,
+        timestamp: '2000-01-01T00:00:00.001Z',
+      },
+    ]);
+    expect((await readIndexState(stub, sessionId)).search_index_state).toBe('rebuild_required');
+
+    await expectProjectSearchIncomplete(stub, 'transcript sentinel', ['assistant']);
+
+    const results = await stub.searchMessages('transcript sentinel', null, ['assistant'], 20);
+    expect(await readGroupedRows(stub, sessionId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          content: expect.stringContaining('delayed transcript sentinel'),
+        }),
+      ])
+    );
+    expect(await countFtsHits(stub, sessionId, 'transcript')).toBe(1);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.snippet).toContain('delayed transcript sentinel');
+    expect((await readIndexState(stub, sessionId)).search_index_state).toBe('complete');
+  });
+
+  it('invalidates the projection for a same-timestamp row behind the sequence watermark', async () => {
+    const stub = getStub('project-same-time-backdated-sequence');
+    const sessionId = await stub.createSession('ws-same-time-backdated', 'Same timestamp');
+    const timestamp = '2026-09-22T00:00:00.000Z';
+    await stub.persistMessageBatch(sessionId, [
+      {
+        messageId: crypto.randomUUID(),
+        role: 'user',
+        content: 'first same-time row',
+        toolMetadata: null,
+        timestamp,
+        sequence: 10,
+      },
+    ]);
+    expect(await stub.sleepSession(sessionId)).toBe(true);
+    expect(await stub.wakeSession(sessionId, 'ws-same-time-backdated', 'task-same-time')).toBe(
+      true
+    );
+
+    await stub.persistMessageBatch(sessionId, [
+      {
+        messageId: crypto.randomUUID(),
+        role: 'user',
+        content: 'behind sequence sentinel',
+        toolMetadata: null,
+        timestamp,
+        sequence: 5,
+      },
+    ]);
+    expect((await readIndexState(stub, sessionId)).search_index_state).toBe('rebuild_required');
+    await expectProjectSearchIncomplete(stub, 'behind sequence sentinel', ['user']);
+    expect(await stub.searchMessages('behind sequence sentinel', null, ['user'], 20)).toHaveLength(
+      1
+    );
+  });
+
+  it('audits and rebuilds an existing complete projection with a hidden retrograde row', async () => {
+    const stub = getStub('project-upgrade-retrograde-audit');
+    const sessionId = await stub.createSession('ws-upgrade-retrograde', 'Upgrade audit');
+    await stub.persistMessage(sessionId, 'user', 'already indexed head', null);
+    expect(await stub.failSession(sessionId, 'complete before upgrade')).toBe(true);
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      const indexed = state.storage.sql
+        .exec(
+          `SELECT materialized_through_created_at AS created_at,
+                  materialized_through_sequence AS sequence
+           FROM chat_sessions WHERE id = ?`,
+          sessionId
+        )
+        .toArray()[0] as { created_at: number; sequence: number };
+      state.storage.sql.exec(
+        `INSERT INTO chat_messages
+           (id, session_id, role, content, created_at, sequence, origin)
+         VALUES ('legacy-retrograde', ?, 'user', 'legacy hidden sentinel', ?, ?, NULL)`,
+        sessionId,
+        indexed.created_at - 60_000,
+        indexed.sequence + 1
+      );
+      state.storage.sql.exec(
+        `UPDATE chat_sessions
+         SET message_count = message_count + 1,
+             search_projection_version = NULL
+         WHERE id = ?`,
+        sessionId
+      );
+    });
+
+    await expectProjectSearchIncomplete(stub, 'legacy hidden sentinel', ['user']);
+    expect(await stub.searchMessages('legacy hidden sentinel', null, ['user'], 20)).toHaveLength(1);
+  });
+
+  it('keeps exact-session search visible between pages of a legacy projection rebuild', async () => {
+    const stub = getStub('project-upgrade-rebuild-visibility');
+    const sessionId = await stub.createSession('ws-upgrade-visibility', 'Upgrade visibility');
+    await stub.persistMessageBatch(
+      sessionId,
+      Array.from({ length: 501 }, (_, index) => ({
+        messageId: crypto.randomUUID(),
+        role: 'user',
+        content: index === 0 ? 'legacy head remains visible' : `legacy row ${index}`,
+        toolMetadata: null,
+        timestamp: new Date(1_700_000_000_000 + index).toISOString(),
+      }))
+    );
+    expect(await stub.failSession(sessionId, 'complete before upgrade')).toBe(true);
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        'UPDATE chat_sessions SET search_projection_version = NULL WHERE id = ?',
+        sessionId
+      );
+    });
+
+    // The first pass moves exactly one configured 500-row page to the retained
+    // backup and then yields. Exact reads during that durable pause must still
+    // see content whose main grouped/FTS row was removed.
+    await expectProjectSearchIncomplete(stub, 'no project hit', ['user']);
+    expect(
+      await stub.searchMessages('legacy head remains visible', sessionId, ['user'])
+    ).toHaveLength(1);
+    const paused = await runInDurableObject(stub, async (_instance, state) => {
+      const backup = state.storage.sql
+        .exec(
+          'SELECT COUNT(*) AS count FROM chat_messages_grouped_rebuild_backup WHERE session_id = ?',
+          sessionId
+        )
+        .toArray()[0] as { count: number };
+      return backup.count;
+    });
+    expect(paused).toBe(500);
+
+    // Finish moving the final row and materialize the replacement, but pause
+    // before backup cleanup. FTS and backup now overlap on stable IDs. A fresh
+    // raw row must still be queried before dedupe even though those duplicates
+    // already fill the requested limit.
+    await expectProjectSearchIncomplete(stub, 'no project hit', ['user']);
+    const rawOnlyId = crypto.randomUUID();
+    await stub.persistMessageBatch(sessionId, [
+      {
+        messageId: rawOnlyId,
+        role: 'user',
+        content: 'legacy newest raw sentinel',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+    const saturated = await runInDurableObject(stub, async (instance) => {
+      const holder = instance as unknown as { sql: SqlStorage };
+      const originalSql = holder.sql;
+      const probe = createSqlProbe(originalSql);
+      holder.sql = probe.sql;
+      try {
+        return {
+          results: instance.searchMessages('legacy', sessionId, ['user'], 20),
+          maxRawRows: probe.maxRowsMaterializedByOneStatement(
+            /FROM chat_messages m JOIN chat_sessions/
+          ),
+        };
+      } finally {
+        holder.sql = originalSql;
+      }
+    });
+    expect(saturated.results.map((result) => result.id)).toContain(rawOnlyId);
+    expect(saturated.maxRawRows).toBeLessThanOrEqual(20);
+
+    const backupAfterSessionDelete = await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec('DELETE FROM chat_sessions WHERE id = ?', sessionId);
+      const row = state.storage.sql
+        .exec(
+          'SELECT COUNT(*) AS count FROM chat_messages_grouped_rebuild_backup WHERE session_id = ?',
+          sessionId
+        )
+        .toArray()[0] as { count: number };
+      return row.count;
+    });
+    expect(backupAfterSessionDelete).toBe(0);
+  });
+
+  it('moves one oversized grouped row without materializing a row-count page', async () => {
+    const stub = getStub('project-upgrade-rebuild-byte-bound');
+    const sessionId = await stub.createSession('ws-upgrade-byte-bound', 'Upgrade byte bound');
+    await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO chat_messages (id, session_id, role, content, created_at, sequence)
+         VALUES ('oversized-a', ?, 'user', ?, 1, 1),
+                ('oversized-b', ?, 'user', ?, 2, 2)`,
+        sessionId,
+        `oversized backup sentinel ${'x'.repeat(100_000)}`,
+        sessionId,
+        `second oversized row ${'y'.repeat(100_000)}`
+      );
+      state.storage.sql.exec(
+        `UPDATE chat_sessions
+         SET message_count = 2, status = 'failed'
+         WHERE id = ?`,
+        sessionId
+      );
+      instance.materializeSession(sessionId);
+      state.storage.sql.exec(
+        'UPDATE chat_sessions SET search_projection_version = NULL WHERE id = ?',
+        sessionId
+      );
+    });
+
+    await expectProjectSearchIncomplete(stub, 'no oversized hit', ['user']);
+    const counts = await runInDurableObject(stub, async (_instance, state) => {
+      const backup = state.storage.sql
+        .exec(
+          'SELECT COUNT(*) AS count FROM chat_messages_grouped_rebuild_backup WHERE session_id = ?',
+          sessionId
+        )
+        .toArray()[0] as { count: number };
+      const grouped = state.storage.sql
+        .exec('SELECT COUNT(*) AS count FROM chat_messages_grouped WHERE session_id = ?', sessionId)
+        .toArray()[0] as { count: number };
+      return { backup: backup.count, grouped: grouped.count };
+    });
+    expect(counts).toEqual({ backup: 1, grouped: 1 });
+  });
+
+  it('fails closed when an FTS projection write fails', async () => {
+    const stub = getStub('project-fts-write-failure');
+    const sessionId = await stub.createSession('ws-fts-failure', 'FTS failure');
+    await stub.persistMessage(sessionId, 'user', 'must never become a false empty', null);
+
+    const outcome = await runInDurableObject(stub, async (instance, state) => {
+      state.storage.sql.exec('DROP TABLE chat_messages_grouped_fts');
+      let error: string | null = null;
+      try {
+        instance.searchMessages('must never become a false empty', null, ['user'], 20);
+      } catch (caught) {
+        error = String(caught);
+      }
+      const session = state.storage.sql
+        .exec('SELECT search_projection_version FROM chat_sessions WHERE id = ?', sessionId)
+        .toArray()[0] as { search_projection_version: number | null };
+      const grouped = state.storage.sql
+        .exec('SELECT COUNT(*) AS count FROM chat_messages_grouped WHERE session_id = ?', sessionId)
+        .toArray()[0] as { count: number };
+      return {
+        error,
+        projectionVersion: session.search_projection_version,
+        grouped: grouped.count,
+      };
+    });
+
+    expect(outcome.error).toContain('chat_messages_grouped_fts');
+    expect(outcome.projectionVersion).not.toBe(1);
+    expect(outcome.grouped).toBe(0);
+  });
+
   it('indexes a sleeping session, and indexes the tail written after it wakes', async () => {
     const stub = getStub('project-incremental-sleep-wake-sleep');
     const sessionId = await stub.createSession('ws-incremental-1', 'Sleep wake sleep');
@@ -234,8 +614,9 @@ describe('incremental materialization on sleep', () => {
     const tail = await stub.searchMessages('zephyrous', sessionId, ['assistant']);
     expect(tail.length).toBeGreaterThanOrEqual(1);
     // Control: the pre-sleep half is still there.
-    expect((await stub.searchMessages('quixotic', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('quixotic', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
 
     const state = await readIndexState(stub, sessionId);
     expect(state.status).toBe('stopped');
@@ -301,8 +682,9 @@ describe('incremental materialization on sleep', () => {
     expect(await stub.searchMessages('quarantined injected sentinel', sessionId)).toEqual([]);
     // Liveness control: the surrounding run IS searchable, so the empty result
     // above cannot mean the session was never indexed at all.
-    expect((await stub.searchMessages('system message', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('system message', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('does not start a new grouped row when the role changes across the boundary', async () => {
@@ -341,10 +723,12 @@ describe('incremental materialization on sleep', () => {
     expect(grouped.map((row) => row.role)).toEqual(['thinking', 'tool']);
     expect(grouped[0]!.content).toBe('Considering the recondite option.');
     expect(grouped[1]!.content).toBe('Read(subterranean.md)');
-    expect((await stub.searchMessages('recondite', sessionId, ['thinking'])).length)
-      .toBeGreaterThanOrEqual(1);
-    expect((await stub.searchMessages('subterranean', sessionId, ['tool'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('recondite', sessionId, ['thinking'])).length
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('subterranean', sessionId, ['tool'])).length
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('indexes the tail when a session fails rather than stops', async () => {
@@ -358,10 +742,12 @@ describe('incremental materialization on sleep', () => {
 
     expect(await stub.failSession(sessionId, 'agent crashed')).toBe(true);
 
-    expect((await stub.searchMessages('catastrophe', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
-    expect((await stub.searchMessages('debacle', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('catastrophe', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('debacle', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
     const state = await readIndexState(stub, sessionId);
     expect(state.status).toBe('failed');
     expect(state.search_index_state).toBe('complete');
@@ -416,8 +802,9 @@ describe('incremental materialization on sleep', () => {
     // lands inside the shared millisecond rather than at the start of it. One new
     // message, so at most a couple of rows.
     expect(secondPass.tokenScanRows).toBeLessThanOrEqual(2);
-    expect((await stub.searchMessages('a later question', sessionId, ['user'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('a later question', sessionId, ['user'])).length
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('is a no-op when a sleeping session is re-materialized with nothing new', async () => {
@@ -561,8 +948,9 @@ describe('incremental materialization on sleep', () => {
     expect(grouped[0]!.content).toBe(
       Array.from({ length: TOKEN_COUNT }, (_, i) => `p${i} `).join('')
     );
-    expect((await stub.searchMessages(`p${TOKEN_COUNT - 1}`, sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages(`p${TOKEN_COUNT - 1}`, sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
 
     const state = await readIndexState(stub, sessionId);
     expect(state.search_index_state).toBe('partial');
@@ -590,10 +978,12 @@ describe('incremental materialization on sleep', () => {
     expect(grouped.every((row) => row.role === 'assistant')).toBe(true);
 
     // Both rows are still indexed — capping must not drop content from search.
-    expect((await stub.searchMessages('oversize', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
-    expect((await stub.searchMessages('continuation after', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('oversize', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('continuation after', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('defers the remainder when a pass hits its row budget, and resumes on the next pass', async () => {
@@ -632,8 +1022,9 @@ describe('incremental materialization on sleep', () => {
     await stub.materializeSession(sessionId);
     expect(await readGroupedRows(stub, sessionId)).toHaveLength(3);
     expect((await readIndexState(stub, sessionId)).search_index_state).toBe('complete');
-    expect((await stub.searchMessages('third budgeted', sessionId, ['user'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('third budgeted', sessionId, ['user'])).length
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('treats a pre-watermark session as indexed through materialized_at', async () => {
@@ -666,8 +1057,9 @@ describe('incremental materialization on sleep', () => {
     expect(grouped).toHaveLength(1);
     expect(grouped[0]!.content).toBe('Legacy obligato content. Plus fungible tail.');
     expect(await countFtsHits(stub, sessionId, 'obligato')).toBe(1);
-    expect((await stub.searchMessages('fungible', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('fungible', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('keeps a batch that landed below the watermark findable through the fallback', async () => {
@@ -797,20 +1189,16 @@ describe('incremental materialization and storage relief', () => {
     expect(swept.errors).toBe(0);
     expect(await readGroupedRows(stub, sessionId)).toHaveLength(0);
 
-    // Defence in depth: with the refusal marker gone, a leftover watermark would
-    // claim the deleted head rows were still indexed and re-group only the tail.
-    // Because the pruner cleared it, a re-index rebuilds the whole session.
-    await runInDurableObject(stub, async (_instance, state) => {
-      state.storage.sql.exec(
-        "UPDATE chat_sessions SET search_index_state = NULL WHERE id = ?",
-        sessionId
-      );
-    });
-    await stub.materializeSession(sessionId);
+    // Project-wide search has a stronger contract than the ordinary background
+    // materializer: it must cover every retained row before reporting a final
+    // answer. It therefore owns the explicit bounded repair of a pruned session.
+    const complete = await stub.searchMessages('prunable assistant text', null, ['assistant'], 20);
+    expect(complete).toHaveLength(1);
     const rebuilt = await readGroupedRows(stub, sessionId);
     expect(rebuilt.map((row) => row.role)).toEqual(['user', 'assistant']);
     expect(rebuilt[0]!.content).toBe('prunable sentinel phrase');
     expect(rebuilt[1]!.content).toBe('Also prunable assistant text.');
+    expect((await readIndexState(stub, sessionId)).search_index_state).toBe('complete');
   });
 });
 
@@ -823,10 +1211,7 @@ describe('materializePendingSessions sweep', () => {
     // Put it to sleep WITHOUT indexing, reproducing a session that was already
     // asleep when incremental materialization shipped.
     await runInDurableObject(stub, async (_instance, state) => {
-      state.storage.sql.exec(
-        "UPDATE chat_sessions SET status = 'sleeping' WHERE id = ?",
-        sleeping
-      );
+      state.storage.sql.exec("UPDATE chat_sessions SET status = 'sleeping' WHERE id = ?", sleeping);
     });
 
     expect(await stub.searchMessages('peripatetic', sleeping, ['assistant'])).toEqual([]);
@@ -834,8 +1219,9 @@ describe('materializePendingSessions sweep', () => {
     const first = await stub.materializePendingSessions();
     expect(first.errors).toBe(0);
     expect(first.materialized).toBeGreaterThanOrEqual(1);
-    expect((await stub.searchMessages('peripatetic', sleeping, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('peripatetic', sleeping, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
 
     // Second sweep: nothing is pending any more, so it must not re-select.
     const second = await stub.materializePendingSessions();
@@ -868,8 +1254,9 @@ describe('materializePendingSessions sweep', () => {
     expect(swept.errors).toBe(0);
     expect(swept.materialized).toBeGreaterThanOrEqual(1);
 
-    expect((await stub.searchMessages('pusillanimous', sessionId, ['assistant'])).length)
-      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await stub.searchMessages('pusillanimous', sessionId, ['assistant'])).length
+    ).toBeGreaterThanOrEqual(1);
     // Liveness control: the first half is still indexed exactly once.
     expect(await countFtsHits(stub, sessionId, 'antediluvian')).toBe(1);
   });

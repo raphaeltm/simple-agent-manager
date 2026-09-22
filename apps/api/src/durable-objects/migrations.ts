@@ -2375,12 +2375,46 @@ export const MIGRATIONS: Migration[] = [
         session_id TEXT NOT NULL,
         role TEXT NOT NULL,
         content TEXT NOT NULL,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
       )`);
       sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_data_archive_search_documents_session
         ON project_data_archive_search_documents(session_id, created_at DESC, projection_id DESC)`);
       sql.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS project_data_archive_search_documents_fts
         USING fts5(content, content='project_data_archive_search_documents', content_rowid='rowid')`);
+    },
+  },
+  {
+    // Project-wide search must prove that every visible root transcript row is
+    // represented in grouped FTS without scanning chat_sessions or raw messages
+    // on every query. The partial index is a durable dirty queue maintained by
+    // transcript writes. A version column makes every existing non-empty session
+    // enter the queue without a bulk data UPDATE; its first project-wide search
+    // performs a bounded rebuild so rows below the old timestamp watermark are
+    // reconciled too. Only derived search data is replaced.
+    name: '059-root-search-pending-projection',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE chat_sessions ADD COLUMN search_projection_version INTEGER`);
+      sql.exec(`CREATE TABLE IF NOT EXISTS chat_messages_grouped_rebuild_backup (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_chat_messages_grouped_rebuild_backup_session
+        ON chat_messages_grouped_rebuild_backup(session_id, created_at DESC, id DESC)`);
+      sql.exec(`CREATE TRIGGER IF NOT EXISTS trg_chat_session_rebuild_backup_delete
+        AFTER DELETE ON chat_sessions
+        BEGIN
+          DELETE FROM chat_messages_grouped_rebuild_backup WHERE session_id = OLD.id;
+        END`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_project_search_pending
+        ON chat_sessions(updated_at DESC, id DESC)
+        WHERE search_index_state IN ('grouped_fts_pruned', 'rebuild_required', 'backup_cleanup')
+           OR (search_index_state = 'partial' AND status IN ('stopped', 'failed'))
+           OR ((search_projection_version IS NULL OR search_projection_version != 1)
+               AND message_count > 0)`);
     },
   },
 ];
