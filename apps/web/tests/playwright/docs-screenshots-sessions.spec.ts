@@ -158,7 +158,6 @@ const CHUNK_SAMPLE_COUNT = 180;
 const OOM_INDEX = Math.round(CHUNK_SAMPLE_COUNT * 0.55);
 const GAP_INDEX = Math.round(CHUNK_SAMPLE_COUNT * 0.7);
 
-
 const RESOURCE_SUMMARY = {
   id: `workspace:${PROJECT_ID}:${WORKSPACE_ID}:session:${SESSION_ID}`,
   projectId: PROJECT_ID,
@@ -271,8 +270,12 @@ const RESOURCE_DETAIL = {
     cpuMillis: sampleCpu(i),
     memoryBytes: sampleMemory(i),
     memoryPeakBytes: sampleMemory(i),
-    ioReadBytes: i % 6 === 0 ? 12_582_912 : 262_144,
-    ioWriteBytes: i % 5 === 0 ? 41_943_040 : 524_288,
+    // Scaled so one chunk's I/O stays well inside RESOURCE_SUMMARY's session totals:
+    // 30 x 5 MiB + 150 x 64 KiB read, 36 x 12 MiB + 144 x 64 KiB write. The guide
+    // teaches the reader to compare the chunk line against the session stat card, so a
+    // slice that out-reads the session containing it would read as a contradiction.
+    ioReadBytes: i % 6 === 0 ? 5_242_880 : 65_536,
+    ioWriteBytes: i % 5 === 0 ? 12_582_912 : 65_536,
     oom: i === OOM_INDEX ? 1 : 0,
     oomKill: i === OOM_INDEX ? 1 : 0,
     gap: i === GAP_INDEX,

@@ -121,9 +121,10 @@ Only the chunk you select is fetched, so moving between slices costs one small r
 than downloading the whole session.
 
 At the shipped defaults a chunk holds about 180 samples — 15 minutes at one sample every 5 seconds —
-so the header reads a plain point count and the chart draws every sample. If a deployment raises the
-chunk interval or lowers `WORKSPACE_RESOURCE_DETAIL_MAX_POINTS` far enough that a chunk exceeds the
-720-point cap, the chart is thinned to fit and the header switches to `<shown>/<total> points`. The
+so the header reads a plain point count and the chart draws every sample. A chunk only exceeds the
+720-point cap if a deployment samples faster than about every 1.25 seconds, lengthens the chunk
+interval, or lowers `WORKSPACE_RESOURCE_DETAIL_MAX_POINTS`. When it does, the chart is thinned to
+fit and the header switches to `<shown>/<total> points`. The
 thinning keeps gaps and the highest CPU/memory sample from each slice of the chunk, so the busiest
 moments survive; it does not specifically keep OOM samples, so an OOM marker can drop off a thinned
 chart. The OOM banner and its count come from the stored summary and are never affected.

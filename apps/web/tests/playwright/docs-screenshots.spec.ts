@@ -73,6 +73,10 @@ async function setupGuidedMocks(page: Page) {
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
     if (path === '/api/agents') return respond(200, { agents: [CLAUDE_AGENT] });
     if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
+    // The app shell calls an array method on /api/credentials, so the catch-all `{}` at the
+    // bottom of this handler crashes the whole page before the settings surface renders
+    // (tasks/backlog/2026-09-23-playwright-audit-shell-mocks-crash.md).
+    if (path === '/api/credentials') return respond(200, []);
     if (path === '/api/agent-credential-setup-sessions/config') {
       return respond(200, {
         enabled: true,
