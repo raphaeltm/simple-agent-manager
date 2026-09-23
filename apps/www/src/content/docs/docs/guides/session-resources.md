@@ -24,7 +24,7 @@ The button is always there, including on sessions that already ended — which i
 want it, because the workspace is gone and this is the only record left. It is also there on
 sessions that never collected anything, where it shows an empty state rather than hiding itself.
 
-![The Resources drawer for a chat session: stat cards reading CPU peak 4120 ms/sample, RAM peak 3.4 GB, I/O total 384 MB read and 1.1 GB write, and 684 samples with 1 gap; an amber banner reading "1 OOM event observed in retained samples"; a detail timeline chart with a green CPU line, a dashed purple RAM line, blue tool-window bands and an amber OOM marker; a Tool windows list; and a collapsed "2 chunks" disclosure.](/images/docs/session-resources-drawer.png)
+![The Resources drawer for a chat session: stat cards reading CPU peak 4120 ms/sample, RAM peak 3.4 GB, I/O total 384 MB read and 1.1 GB write, and 360 samples with 1 gap; an amber banner reading "1 OOM event observed in retained samples"; a detail timeline chart with a green CPU line, a dashed purple RAM line, blue tool-window bands and an amber OOM marker; a Tool windows list; and a collapsed "2 chunks" disclosure.](/images/docs/session-resources-drawer.png)
 
 On mobile the same panel fills the screen and scrolls, with the stat cards and the OOM banner
 first so the answer is above the fold.
@@ -53,12 +53,12 @@ The drawer stacks its content top to bottom in the order you normally need it.
 
 Four numbers for the whole session:
 
-| Card          | What it means                                                                                                                   |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| **CPU peak**  | The busiest single sample, in milliseconds of CPU time. See the conversion below.                                               |
-| **RAM peak**  | The highest total memory the container held at any sampled moment — **including page cache**, so read it with the caveat below. |
-| **I/O total** | Bytes read and written over the session.                                                                                        |
-| **Samples**   | How many observations were retained, and how many **gaps** there are (see [Gaps and resets](#gaps-and-resets)).                 |
+| Card          | What it means                                                                                                                                              |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CPU peak**  | The busiest single sample, in milliseconds of CPU time. See the conversion below.                                                                          |
+| **RAM peak**  | The highest total memory the container held at any sampled moment — **including page cache**, so read it with [this caveat](#what-this-does-not-tell-you). |
+| **I/O total** | Bytes read and written over the session.                                                                                                                   |
+| **Samples**   | How many observations were retained, and how many **gaps** there are (see [Gaps and resets](#gaps-and-resets)).                                            |
 
 **Converting CPU peak to cores.** CPU is reported as CPU-milliseconds consumed per sample, and
 SAM samples every 5 seconds by default (`RESOURCE_HISTORY_SAMPLE_INTERVAL`). One core running flat
@@ -118,11 +118,15 @@ collapsed until you open it; each row shows the start time, duration, sample cou
 tool-window count, and gaps. Click one to load its timeline.
 
 Only the chunk you select is fetched, so moving between slices costs one small request each rather
-than downloading the whole session. A chunk with more samples than the drawer can draw is
-downsampled first, and the header then reads `<shown>/<total> points`. Downsampling keeps gaps and
-the largest CPU and memory samples, so a usage spike survives it. It does **not** specifically
-preserve OOM samples, so on a downsampled chunk an OOM marker can drop off the timeline — the OOM
-banner and its count come from the stored summary and are never affected.
+than downloading the whole session.
+
+At the shipped defaults a chunk holds about 180 samples — 15 minutes at one sample every 5 seconds —
+so the header reads a plain point count and the chart draws every sample. If a deployment raises the
+chunk interval or lowers `WORKSPACE_RESOURCE_DETAIL_MAX_POINTS` far enough that a chunk exceeds the
+720-point cap, the chart is thinned to fit and the header switches to `<shown>/<total> points`. The
+thinning keeps gaps and the highest CPU/memory sample from each slice of the chunk, so the busiest
+moments survive; it does not specifically keep OOM samples, so an OOM marker can drop off a thinned
+chart. The OOM banner and its count come from the stored summary and are never affected.
 
 **The list is capped.** It shows the most recent 24 chunks
 (`WORKSPACE_RESOURCE_LIST_LIMIT`) — about six hours of a continuously running session at the

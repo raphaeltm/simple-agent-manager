@@ -191,7 +191,7 @@ Agent responses can be played back as audio. SAM uses Deepgram Aura 2 (via Worke
 
 ## Conversation Forking
 
-You can branch off from any point in a conversation to explore an alternative approach without losing the original thread.
+You can branch off from a conversation to explore an alternative approach without losing the original thread. A fork copies the session's context into a new session — it is session-scoped, not anchored to a particular message.
 
 Forking now applies to task-backed chat sessions broadly, including instant-container and conversation-style sessions. You do not need to know whether the original session started from an idea, a task, or a lightweight chat; if the session is forkable, SAM preserves the lineage and starts the new branch with the right context.
 

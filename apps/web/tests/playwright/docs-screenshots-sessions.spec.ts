@@ -146,6 +146,19 @@ function conversation() {
 
 const CHUNK_ID = 'wrchunk-docs-2';
 
+/**
+ * One chunk at the shipped defaults: 15 minutes of 5-second samples, so 180 points —
+ * comfortably under WORKSPACE_RESOURCE_DETAIL_MAX_POINTS (720). Downsampling therefore
+ * does not fire, which is what a reader's own panel will show, so the captured header
+ * must read a plain point count rather than the `<shown>/<total>` downsampled form.
+ */
+const CHUNK_SAMPLE_COUNT = 180;
+
+/** Index of the out-of-memory sample, and of the telemetry gap after it. */
+const OOM_INDEX = Math.round(CHUNK_SAMPLE_COUNT * 0.55);
+const GAP_INDEX = Math.round(CHUNK_SAMPLE_COUNT * 0.7);
+
+
 const RESOURCE_SUMMARY = {
   id: `workspace:${PROJECT_ID}:${WORKSPACE_ID}:session:${SESSION_ID}`,
   projectId: PROJECT_ID,
@@ -158,9 +171,9 @@ const RESOURCE_SUMMARY = {
   agentType: 'claude-code',
   runtime: 'vm',
   sourceVersion: 1,
-  startedAt: NOW - 3_600_000,
+  startedAt: NOW - 1_920_000,
   endedAt: NOW - 120_000,
-  sampleCount: 684,
+  sampleCount: 360,
   gapCount: 1,
   toolSpanCount: 8,
   cpuMeanMillis: 940,
@@ -192,7 +205,7 @@ const RESOURCE_CHUNKS = [
     sha256: 'a'.repeat(64),
     startedAt: NOW - 1_020_000,
     endedAt: NOW - 120_000,
-    sampleCount: 180,
+    sampleCount: CHUNK_SAMPLE_COUNT,
     gapCount: 1,
     toolSpanCount: 5,
     completeness: { status: 'complete' },
@@ -213,7 +226,7 @@ const RESOURCE_CHUNKS = [
     sha256: 'b'.repeat(64),
     startedAt: NOW - 1_920_000,
     endedAt: NOW - 1_020_000,
-    sampleCount: 180,
+    sampleCount: CHUNK_SAMPLE_COUNT,
     gapCount: 0,
     toolSpanCount: 3,
     completeness: { status: 'complete' },
@@ -222,36 +235,47 @@ const RESOURCE_CHUNKS = [
   },
 ];
 
-/** A build ramp, a test spike, the OOM, then a quieter recovery. */
+/**
+ * A build ramp, a test spike, the OOM, then a quieter recovery.
+ *
+ * The wobble is a slow sine rather than `i % n`: at 180 points a modulo jitter
+ * draws a sawtooth that fills the chart and hides the shape the docs describe.
+ */
+function wobble(i: number, amplitude: number): number {
+  return Math.round(amplitude * (0.5 + 0.5 * Math.sin(i / 9)));
+}
+
 function sampleCpu(i: number): number {
-  if (i === 22) return 4_120;
-  if (i >= 18 && i <= 24) return 2_400 + (i % 3) * 420;
-  if (i >= 6 && i <= 12) return 1_500 + (i % 4) * 260;
-  return 320 + (i % 5) * 140;
+  if (i === OOM_INDEX) return 4_120;
+  if (i >= OOM_INDEX - 6 && i <= OOM_INDEX + 3) return 2_300 + wobble(i, 700);
+  if (i >= CHUNK_SAMPLE_COUNT * 0.15 && i <= CHUNK_SAMPLE_COUNT * 0.32) {
+    return 1_450 + wobble(i, 520);
+  }
+  return 300 + wobble(i, 240);
 }
 
 function sampleMemory(i: number): number {
-  if (i === 22) return 3_650_722_201;
-  if (i >= 16) return 2_100_000_000 + i * 48_000_000;
-  return 620_000_000 + i * 62_000_000;
+  if (i === OOM_INDEX) return 3_650_722_201;
+  if (i >= CHUNK_SAMPLE_COUNT * 0.4) return 2_100_000_000 + i * 8_000_000;
+  return 620_000_000 + i * 13_000_000;
 }
 
 const RESOURCE_DETAIL = {
   chunkId: CHUNK_ID,
-  originalSampleCount: 180,
-  downsampled: true,
+  originalSampleCount: CHUNK_SAMPLE_COUNT,
+  downsampled: false,
   downsampleLimit: 720,
-  samples: Array.from({ length: 40 }, (_, i) => ({
-    t: NOW - 1_020_000 + i * 22_500,
+  samples: Array.from({ length: CHUNK_SAMPLE_COUNT }, (_, i) => ({
+    t: NOW - 1_020_000 + i * 5_000,
     intervalMillis: 5_000,
     cpuMillis: sampleCpu(i),
     memoryBytes: sampleMemory(i),
     memoryPeakBytes: sampleMemory(i),
     ioReadBytes: i % 6 === 0 ? 12_582_912 : 262_144,
     ioWriteBytes: i % 5 === 0 ? 41_943_040 : 524_288,
-    oom: i === 22 ? 1 : 0,
-    oomKill: i === 22 ? 1 : 0,
-    gap: i === 28,
+    oom: i === OOM_INDEX ? 1 : 0,
+    oomKill: i === OOM_INDEX ? 1 : 0,
+    gap: i === GAP_INDEX,
   })),
   toolSpans: [
     {

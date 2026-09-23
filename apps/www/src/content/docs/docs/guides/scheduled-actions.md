@@ -49,9 +49,6 @@ state out in text as well, so you never have to rely on the colour.
 | Red    | `failed`, `unauthorized`, `unsupported`, `critical`, `error`                                |
 | Grey   | `cancelled`, `expired`, `recorded_not_injected`, and anything else                          |
 
-Grey is also the fallback for a state the UI does not recognise, so read the badge's text rather
-than inferring "finished" from the colour.
-
 ## Schedule once
 
 In the **Schedules** section, choose **Schedule once**, enter a due time, and pick an action:

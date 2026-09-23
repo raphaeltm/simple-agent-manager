@@ -127,7 +127,7 @@ The chat itself is the reliable signal. Find what you're seeing in this table, t
 | **"delivery was interrupted … outcome is unknown"**                                     | Your prompt may or may not have executed | [Check, then decide](#your-prompt-may-or-may-not-have-run) |
 | **"could not restore its last safe checkpoint"**                                        | In-container work in progress is gone    | [Re-state the work](#the-checkpoint-could-not-be-restored) |
 | The composer is gone and the session reads **"This session has ended."**                | Terminal — nothing to recover            | [Start a new chat](#the-session-is-permanently-stopped)    |
-| No banner at all — the agent just stopped mid-sentence (VM sessions)                    | Possibly an out-of-memory kill           | [Check the Resources panel](#none-of-these-fit)            |
+| No banner, composer still there — the agent just stopped mid-sentence (VM sessions)     | Possibly an out-of-memory kill           | [Check the Resources panel](#none-of-these-fit)            |
 
 Anything else — including a message that delivery "could not be confirmed" — means SAM couldn't classify the failure. Treat it like the interrupted case: check before you resend.
 
