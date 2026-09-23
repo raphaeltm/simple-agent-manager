@@ -4,15 +4,17 @@ import { type drizzle } from 'drizzle-orm/d1';
 import { type Context } from 'hono';
 import * as v from 'valibot';
 
-import { createAuth } from '../auth';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
 import { AppError, errors } from '../middleware/error';
-import { getBetterAuthAccountIdForProvider } from './better-auth-account';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getGitLabOAuthConfig } from './platform-config';
+import {
+  getBetterAuthAccessTokenForProvider,
+  requestLockedUserAccessToken,
+} from './user-access-token';
 
 const MIN_GITLAB_WRITE_ACCESS_LEVEL = 30; // Developer
 
@@ -141,12 +143,6 @@ function availableAccessToken(
   return { accessToken: token.accessToken, accessTokenExpiresAt: expiresAtIso };
 }
 
-const lockedTokenResponseSchema = v.object({
-  accessToken: v.nullable(v.string()),
-  accessTokenExpiresAt: v.nullable(v.string()),
-  scopes: v.optional(v.array(v.string())),
-});
-
 async function getDirectGitLabUserAccessTokenResultWithHeaders(
   env: Env,
   headers: Headers | undefined,
@@ -154,8 +150,8 @@ async function getDirectGitLabUserAccessTokenResultWithHeaders(
   flow: string
 ): Promise<GitLabAccessTokenResult | null> {
   try {
-    const accountId = await getBetterAuthAccountIdForProvider(env, userId, 'gitlab');
-    if (!accountId) {
+    const token = await getBetterAuthAccessTokenForProvider(env, headers, userId, 'gitlab');
+    if (!token) {
       log.warn('gitlab.user_access_token_account_missing', {
         flow,
         userId,
@@ -163,11 +159,6 @@ async function getDirectGitLabUserAccessTokenResultWithHeaders(
       });
       return null;
     }
-    const auth = await createAuth(env);
-    const token = await auth.api.getAccessToken({
-      ...(headers ? { headers } : {}),
-      body: { accountId, userId },
-    });
     log.info('gitlab.user_access_token.lookup', {
       flow,
       userId,
@@ -213,31 +204,23 @@ export async function getGitLabUserAccessTokenResultWithHeaders(
     return getDirectGitLabUserAccessTokenResultWithHeaders(env, headers, userId, flow);
   }
   try {
-    const id = env.GITLAB_USER_ACCESS_TOKEN_LOCK.idFromName(userId);
-    const stub = env.GITLAB_USER_ACCESS_TOKEN_LOCK.get(id);
-    const response = await stub.fetch('https://gitlab-user-access-token-lock/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId,
-        flow,
-        ...(headers ? { headers: Array.from(headers.entries()) } : {}),
-      }),
-    });
-    if (!response.ok) {
+    const { token, status } = await requestLockedUserAccessToken(
+      env.GITLAB_USER_ACCESS_TOKEN_LOCK,
+      'https://gitlab-user-access-token-lock/token',
+      headers,
+      userId,
+      flow,
+      'gitlab.user_access_token.locked'
+    );
+    if (!token) {
       log.warn('gitlab.user_access_token_unavailable', {
         flow,
         userId,
         tokenPresent: false,
-        status: response.status,
+        status,
       });
       return null;
     }
-    const token = await readResponseJson(
-      response,
-      lockedTokenResponseSchema,
-      'gitlab.user_access_token.locked'
-    );
     log.info('gitlab.user_access_token.lookup', {
       flow,
       userId,

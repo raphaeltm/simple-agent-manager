@@ -1,18 +1,12 @@
 import { type Context } from 'hono';
-import * as v from 'valibot';
 
-import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { readResponseJson } from '../lib/runtime-validation';
-import { getBetterAuthAccountIdForProvider } from './better-auth-account';
 import { getTokenType } from './github-route-helpers';
-
-const lockedTokenResponseSchema = v.object({
-  accessToken: v.nullable(v.string()),
-  accessTokenExpiresAt: v.nullable(v.string()),
-  scopes: v.optional(v.array(v.string())),
-});
+import {
+  getBetterAuthAccessTokenForProvider,
+  requestLockedUserAccessToken,
+} from './user-access-token';
 
 type GitHubAccessTokenResult = {
   accessToken: string | null | undefined;
@@ -57,8 +51,8 @@ async function getDirectGitHubUserAccessTokenWithHeaders(
   flow: string
 ): Promise<string | null> {
   try {
-    const accountId = await getBetterAuthAccountIdForProvider(env, userId, 'github');
-    if (!accountId) {
+    const token = await getBetterAuthAccessTokenForProvider(env, headers, userId, 'github');
+    if (!token) {
       log.warn('github.user_access_token_account_missing', {
         flow,
         userId,
@@ -66,11 +60,6 @@ async function getDirectGitHubUserAccessTokenWithHeaders(
       });
       return null;
     }
-    const auth = await createAuth(env);
-    const token = await auth.api.getAccessToken({
-      ...(headers ? { headers } : {}),
-      body: { accountId, userId },
-    });
     log.info('github.user_access_token.lookup', {
       flow,
       userId,
@@ -101,33 +90,24 @@ export async function getGitHubUserAccessTokenWithHeaders(
   }
 
   try {
-    const id = env.GITHUB_USER_ACCESS_TOKEN_LOCK.idFromName(userId);
-    const stub = env.GITHUB_USER_ACCESS_TOKEN_LOCK.get(id);
-    const response = await stub.fetch('https://github-user-access-token-lock/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId,
-        flow,
-        ...(headers ? { headers: Array.from(headers.entries()) } : {}),
-      }),
-    });
-
-    if (!response.ok) {
+    const { token, status } = await requestLockedUserAccessToken(
+      env.GITHUB_USER_ACCESS_TOKEN_LOCK,
+      'https://github-user-access-token-lock/token',
+      headers,
+      userId,
+      flow,
+      'github.user_access_token.locked'
+    );
+    if (!token) {
       log.warn('github.user_access_token_unavailable', {
         flow,
         userId,
         tokenPresent: false,
-        status: response.status,
+        status,
       });
       return null;
     }
 
-    const token = await readResponseJson(
-      response,
-      lockedTokenResponseSchema,
-      'github.user_access_token.locked'
-    );
     log.info('github.user_access_token.lookup', {
       flow,
       userId,
