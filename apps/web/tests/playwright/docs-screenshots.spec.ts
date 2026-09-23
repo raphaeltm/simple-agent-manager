@@ -13,13 +13,15 @@
  *   1. Guided subscription sign-in modal (Claude Code) — /settings/agents
  *   2. Cloud provider connect picker (all seven providers) — /settings/connections
  *   3. Report an Issue dialog with consent expanded — project chat session tool rail
+ *   4. Instant runtime interrupted-delivery banner — project chat
+ *
+ * Session-surface captures (tool rail, Resources, Events) live in
+ * `docs-screenshots-sessions.spec.ts`.
  */
-import { mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
-
 import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { type AuditResponder, makeMockUser, seedTheme, setupAuditRoutes } from './audit-helpers';
+import { docsShot } from './docs-shot';
 
 const MOCK_USER = makeMockUser({
   email: 'docs@example.com',
@@ -28,26 +30,6 @@ const MOCK_USER = makeMockUser({
   sessionId: 'docs-session',
   userId: 'docs-user',
 });
-
-const DOCS_IMAGE_DIR = resolve(process.cwd(), '../www/public/images/docs');
-
-/**
- * Capture a focused element (or the full page) into the docs image directory when
- * DOCS_SHOTS is set, otherwise into the gitignored tmp dir with a viewport suffix.
- */
-async function docsShot(page: Page, name: string, locator?: ReturnType<Page['locator']>) {
-  await page.waitForTimeout(500);
-  const target = locator ?? page;
-  if (process.env.DOCS_SHOTS) {
-    mkdirSync(DOCS_IMAGE_DIR, { recursive: true });
-    await target.screenshot({ path: `${DOCS_IMAGE_DIR}/${name}.png` });
-    return;
-  }
-  const suffix = page.viewportSize()?.width ?? 'x';
-  const tmp = `${process.cwd()}/.codex/tmp/playwright-screenshots`;
-  mkdirSync(tmp, { recursive: true });
-  await target.screenshot({ path: `${tmp}/${name}-${suffix}.png` });
-}
 
 async function dismissOnboarding(page: Page) {
   await page.addInitScript((userId) => {
