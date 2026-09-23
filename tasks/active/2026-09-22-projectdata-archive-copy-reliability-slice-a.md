@@ -65,9 +65,9 @@ work while preserving the existing archive format, reader behavior, and deletion
 
 - [x] Add focused unit/workerd coverage for production-shaped byte bounds, oversized rows, receipts,
       checkpoints, resume boundaries, repair, hashing, atomic rollback, and proof-gated deletion.
-- [ ] Run focused tests, `pnpm check:fast`, typecheck, full API tests,
+- [x] Run focused tests, `pnpm check:fast`, typecheck, full API tests,
       `pnpm quality:migration-safety`, and `pnpm quality:do-migration-safety`.
-- [ ] Complete Cloudflare, security, test, constitution, and task-completion specialist reviews and
+- [x] Complete Cloudflare, security, test, constitution, and task-completion specialist reviews and
       record evidence in the PR.
 - [ ] Deploy one pinned SHA to shared staging after checking active runs/agents; verify real-R2 resume,
       deletion refusal, completed sweep, and migration 058 no-op; clean up only created resources.
