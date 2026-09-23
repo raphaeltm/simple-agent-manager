@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { makeBetterAuthAccountEnv } from './access-token-lock-test-helpers';
+
 const { createAuthMock, logWarnMock } = vi.hoisted(() => ({
   createAuthMock: vi.fn(),
   logWarnMock: vi.fn(),
@@ -40,18 +42,6 @@ function makeRequest(): Request {
   });
 }
 
-function makeEnv(accountId: string | null = 'gitlab-account-row') {
-  const first = vi.fn(async () => (accountId ? { id: accountId } : null));
-  const bind = vi.fn(() => ({ first }));
-  const prepare = vi.fn(() => ({ bind }));
-  return {
-    env: { DATABASE: { prepare } },
-    prepare,
-    bind,
-    first,
-  };
-}
-
 describe('GitLabUserAccessTokenLock', () => {
   beforeEach(() => {
     createAuthMock.mockReset();
@@ -88,7 +78,7 @@ describe('GitLabUserAccessTokenLock', () => {
 
     createAuthMock.mockReturnValue({ api: { getAccessToken } });
 
-    const { env } = makeEnv();
+    const { env } = makeBetterAuthAccountEnv('gitlab-account-row');
     const lock = new GitLabUserAccessTokenLock({} as never, env as never);
 
     const [res1, res2] = await Promise.all([lock.fetch(makeRequest()), lock.fetch(makeRequest())]);
@@ -113,7 +103,7 @@ describe('GitLabUserAccessTokenLock', () => {
     });
     createAuthMock.mockReturnValue({ api: { getAccessToken } });
 
-    const { env } = makeEnv();
+    const { env } = makeBetterAuthAccountEnv('gitlab-account-row');
     const lock = new GitLabUserAccessTokenLock({} as never, env as never);
     const res = await lock.fetch(makeRequest());
 
@@ -129,7 +119,7 @@ describe('GitLabUserAccessTokenLock', () => {
     const getAccessToken = vi.fn();
     createAuthMock.mockReturnValue({ api: { getAccessToken } });
 
-    const { env } = makeEnv(null);
+    const { env } = makeBetterAuthAccountEnv(null);
     const lock = new GitLabUserAccessTokenLock({} as never, env as never);
     const res = await lock.fetch(makeRequest());
 

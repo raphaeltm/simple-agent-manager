@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { makeBetterAuthAccountEnv } from './access-token-lock-test-helpers';
+
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
     ctx: unknown;
@@ -27,9 +29,8 @@ vi.mock('../../../src/lib/logger', () => ({
   },
 }));
 
-const { GitHubUserAccessTokenLock } = await import(
-  '../../../src/durable-objects/github-user-access-token-lock'
-);
+const { GitHubUserAccessTokenLock } =
+  await import('../../../src/durable-objects/github-user-access-token-lock');
 
 function makeRequest(userId = 'user-1'): Request {
   return new Request('https://do-internal/token', {
@@ -41,18 +42,6 @@ function makeRequest(userId = 'user-1'): Request {
       headers: [['cookie', 'session=abc']],
     }),
   });
-}
-
-function makeEnv(accountId: string | null = 'github-account-row') {
-  const first = vi.fn(async () => (accountId ? { id: accountId } : null));
-  const bind = vi.fn(() => ({ first }));
-  const prepare = vi.fn(() => ({ bind }));
-  return {
-    env: { DATABASE: { prepare } },
-    prepare,
-    bind,
-    first,
-  };
 }
 
 describe('GitHubUserAccessTokenLock', () => {
@@ -96,7 +85,7 @@ describe('GitHubUserAccessTokenLock', () => {
       },
     });
 
-    const { env } = makeEnv();
+    const { env } = makeBetterAuthAccountEnv('github-account-row');
     const lock = new GitHubUserAccessTokenLock({}, env as never);
     const [first, second] = await Promise.all([
       lock.fetch(makeRequest()),
@@ -122,7 +111,7 @@ describe('GitHubUserAccessTokenLock', () => {
       },
     });
 
-    const { env } = makeEnv();
+    const { env } = makeBetterAuthAccountEnv('github-account-row');
     const lock = new GitHubUserAccessTokenLock({}, env as never);
     const res = await lock.fetch(makeRequest());
 
@@ -139,7 +128,7 @@ describe('GitHubUserAccessTokenLock', () => {
     const getAccessToken = vi.fn();
     mocks.createAuth.mockReturnValue({ api: { getAccessToken } });
 
-    const { env } = makeEnv(null);
+    const { env } = makeBetterAuthAccountEnv(null);
     const lock = new GitHubUserAccessTokenLock({}, env as never);
     const res = await lock.fetch(makeRequest());
 
