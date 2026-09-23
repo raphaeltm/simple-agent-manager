@@ -156,8 +156,6 @@ export const PROJECT_DATA_ARCHIVE_DEFAULT_WALL_TIME_MS = 5_000;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_R2_PREFIX = 'project-data/session-archives';
 export const PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_MAX_OWNERS = 4;
 export const PROJECT_DATA_ARCHIVE_MAX_SEARCH_OWNERS = 64;
-export const PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_CONCURRENCY = 4;
-export const PROJECT_DATA_ARCHIVE_MAX_SEARCH_CONCURRENCY = 16;
 
 /**
  * Returned (not thrown) by the root object's prepare RPC when a pre-copy eligibility invariant

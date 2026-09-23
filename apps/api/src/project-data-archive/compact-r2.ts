@@ -39,6 +39,45 @@ async function timed<T>(promise: Promise<T>, deadline: number, stage: string): P
     if (timer !== undefined) clearTimeout(timer);
   }
 }
+
+type PendingR2Operation = { stage: string; promise: Promise<unknown> };
+const pendingR2Operations = new WeakMap<R2Bucket, Map<string, PendingR2Operation>>();
+
+/**
+ * Keep one provider operation in flight per bucket/key. A deadline may release
+ * the request, but a retry in the same isolate waits for the original provider
+ * promise to settle before issuing another GET/HEAD/PUT for that immutable key.
+ * A Worker reset cancels the original request and clears this isolate state.
+ */
+async function timedR2<T>(
+  r2: R2Bucket,
+  key: string,
+  deadline: number,
+  stage: string,
+  start: () => Promise<T>
+): Promise<T> {
+  let operations = pendingR2Operations.get(r2);
+  if (!operations) {
+    operations = new Map();
+    pendingR2Operations.set(r2, operations);
+  }
+  const pending = operations.get(key);
+  if (pending) {
+    if (pending.stage === stage) {
+      return timed(pending.promise as Promise<T>, deadline, stage);
+    }
+    await timed(pending.promise, deadline, `${stage}_pending`);
+    return timedR2(r2, key, deadline, stage, start);
+  }
+  const promise = start();
+  operations.set(key, { stage, promise });
+  void promise
+    .finally(() => {
+      if (operations?.get(key)?.promise === promise) operations.delete(key);
+    })
+    .catch(() => undefined);
+  return timed(promise, deadline, stage);
+}
 export type CompactChunkRef = { key: string; bytes: number; bodyBytes: number; bodySha256: string };
 export type CompactChunkIdentity = Pick<
   ProjectDataArchiveChunk,
@@ -250,7 +289,7 @@ export async function readCompactChunk(
   ) {
     throw new Error('Invalid compact archive object size');
   }
-  const object = await timed(r2.get(ref.key), deadline, 'get');
+  const object = await timedR2(r2, ref.key, deadline, 'get', () => r2.get(ref.key));
   if (object?.size !== ref.bytes) throw new Error('Compact archive missing or size mismatch');
   const text = await readCompressedText(
     object.body,
@@ -284,17 +323,15 @@ export async function writeCompactChunk(
     deadline
   );
   const ref = { key, bytes: compressed.byteLength, bodyBytes, bodySha256: await sha256Hex(text) };
-  const existing = await timed(r2.head(key), deadline, 'head');
+  const existing = await timedR2(r2, key, deadline, 'head', () => r2.head(key));
   if (!existing) {
     // Immutable publication: concurrent retries may only win creation, never overwrite.
-    await timed(
+    await timedR2(r2, key, deadline, 'put', () =>
       r2.put(key, compressed, {
         onlyIf: { etagDoesNotMatch: '*' },
         httpMetadata: { contentType: 'application/gzip' },
         customMetadata: { archiveBodySha256: ref.bodySha256 },
-      }),
-      deadline,
-      'put'
+      })
     );
   } else {
     // Compression implementations may emit different gzip headers for the same input.
@@ -313,4 +350,63 @@ export async function writeCompactChunk(
   // verification before it records a durable receipt. Re-reading here doubled
   // every fresh copy without adding a durable boundary.
   return ref;
+}
+
+export async function writeImmutableJson(
+  r2: R2Bucket,
+  key: string,
+  value: unknown,
+  timeoutMs = COMPACT_ARCHIVE_DEFAULT_TIMEOUT_MS
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  const text = JSON.stringify(value);
+  const bytes = new TextEncoder().encode(text);
+  if (bytes.byteLength > COMPACT_ARCHIVE_MAX_OBJECT_BYTES) {
+    throw new Error('ProjectData archive JSON exceeds object byte limit');
+  }
+  const bodySha256 = await sha256Hex(text);
+  const verifyExisting = async (head: R2Object): Promise<void> => {
+    if (head.size !== bytes.byteLength) {
+      throw new Error(`ProjectData archive immutable R2 object conflict at ${key}`);
+    }
+    const storedSha256 = head.customMetadata?.archiveBodySha256;
+    if (storedSha256) {
+      if (storedSha256 !== bodySha256) {
+        throw new Error(`ProjectData archive immutable R2 object conflict at ${key}`);
+      }
+      return;
+    }
+    const existing = await timedR2(r2, key, deadline, 'get', () => r2.get(key));
+    if (!existing || existing.size !== bytes.byteLength) {
+      throw new Error(`ProjectData archive immutable R2 object conflict at ${key}`);
+    }
+    const existingBytes = await readBounded(
+      existing.body,
+      COMPACT_ARCHIVE_MAX_OBJECT_BYTES,
+      deadline
+    );
+    if (
+      new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(existingBytes) !== text
+    ) {
+      throw new Error(`ProjectData archive immutable R2 object conflict at ${key}`);
+    }
+  };
+
+  const existing = await timedR2(r2, key, deadline, 'head', () => r2.head(key));
+  if (existing) {
+    await verifyExisting(existing);
+    return;
+  }
+  const created = await timedR2(r2, key, deadline, 'put', () =>
+    r2.put(key, bytes, {
+      onlyIf: { etagDoesNotMatch: '*' },
+      httpMetadata: { contentType: 'application/json' },
+      customMetadata: { archiveBodySha256: bodySha256 },
+    })
+  );
+  if (!created) {
+    const raced = await timedR2(r2, key, deadline, 'head', () => r2.head(key));
+    if (!raced) throw new Error(`ProjectData archive immutable R2 object missing at ${key}`);
+    await verifyExisting(raced);
+  }
 }

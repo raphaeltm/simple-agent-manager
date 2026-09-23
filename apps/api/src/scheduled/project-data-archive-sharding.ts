@@ -13,9 +13,11 @@ import { createModuleLogger, serializeError } from '../lib/logger';
 import {
   COMPACT_ARCHIVE_CHUNK_BYTES,
   COMPACT_ARCHIVE_FORMAT,
+  CompactArchiveTimeoutError,
   compactArchiveTimeout,
   LEGACY_ARCHIVE_FORMAT,
   writeCompactChunk,
+  writeImmutableJson,
 } from '../project-data-archive/compact-r2';
 import {
   isProjectDataArchiveSourcePrepareRefusal,
@@ -1912,21 +1914,6 @@ async function alignJournalToLocalSourceProof(
   return refreshClaimed(env, migration);
 }
 
-async function putImmutableJson(r2: R2Bucket, key: string, value: unknown): Promise<void> {
-  const text = JSON.stringify(value);
-  const existing = await r2.get(key);
-  if (existing) {
-    const existingText = await existing.text();
-    if (existingText !== text) {
-      throw new Error(`ProjectData archive immutable R2 object conflict at ${key}`);
-    }
-    return;
-  }
-  await r2.put(key, text, {
-    httpMetadata: { contentType: 'application/json' },
-  });
-}
-
 async function publishArchivedLocation(
   env: Env,
   migration: MigrationRow,
@@ -2429,7 +2416,7 @@ async function markCopyOperationStarted(
   )
     .bind(
       migration.lease_epoch,
-      operation,
+      `${operation}:started`,
       operationId,
       now,
       now,
@@ -2457,6 +2444,7 @@ async function advanceCopyCheckpoint(
   migration: ClaimedMigrationRow,
   checkpoint: ArchiveCopyCheckpoint,
   chunk: Pick<ProjectDataArchiveChunk, 'cursor' | 'hasMore' | 'rowCount' | 'byteCount' | 'sha256'>,
+  operation: string,
   operationId: string,
   startedAt: number,
   now: number
@@ -2466,7 +2454,7 @@ async function advanceCopyCheckpoint(
      SET next_ordinal = next_ordinal + 1,
          source_cursor = ?, complete = ?,
          copied_rows = copied_rows + ?, copied_bytes = copied_bytes + ?,
-         last_chunk_sha256 = ?, lease_epoch = ?,
+         last_chunk_sha256 = ?, lease_epoch = ?, last_operation = ?,
          last_operation_completed_at = ?, last_operation_duration_ms = ?, updated_at = ?
      WHERE migration_id = ? AND table_name = ?
        AND next_ordinal = ?
@@ -2488,6 +2476,7 @@ async function advanceCopyCheckpoint(
       chunk.byteCount,
       chunk.sha256,
       migration.lease_epoch,
+      `${operation}:succeeded`,
       now,
       Math.max(0, now - startedAt),
       now,
@@ -2509,6 +2498,49 @@ async function advanceCopyCheckpoint(
     );
   }
   return result;
+}
+
+async function markCopyOperationFailed(
+  env: Env,
+  migration: ClaimedMigrationRow,
+  checkpoint: ArchiveCopyCheckpoint,
+  operation: string,
+  operationId: string,
+  startedAt: number,
+  error: unknown
+): Promise<void> {
+  const now = Date.now();
+  const outcome = error instanceof CompactArchiveTimeoutError ? 'timed_out' : 'failed';
+  await env.DATABASE.prepare(
+    `UPDATE project_data_archive_copy_checkpoints
+     SET last_operation = ?, last_operation_completed_at = ?,
+         last_operation_duration_ms = ?, updated_at = ?
+     WHERE migration_id = ? AND table_name = ?
+       AND next_ordinal = ?
+       AND (source_cursor = ? OR (source_cursor IS NULL AND ? IS NULL))
+       AND last_operation_id = ?
+       AND EXISTS (
+         SELECT 1 FROM project_data_archive_migrations m
+         WHERE m.migration_id = project_data_archive_copy_checkpoints.migration_id
+           AND m.lease_owner = ? AND m.lease_epoch = ? AND m.lease_expires_at > ?
+       )`
+  )
+    .bind(
+      `${operation}:${outcome}`,
+      now,
+      Math.max(0, now - startedAt),
+      now,
+      migration.migration_id,
+      checkpoint.table_name,
+      checkpoint.next_ordinal,
+      checkpoint.source_cursor,
+      checkpoint.source_cursor,
+      operationId,
+      migration.lease_owner,
+      migration.lease_epoch,
+      now
+    )
+    .run();
 }
 
 function tableReceipts(
@@ -2578,58 +2610,72 @@ async function copySourceChunks(
         'reconcile_receipt',
         startedAt
       );
-      let continuation = {
-        cursor: receipt.sourceCursor,
-        hasMore: receipt.sourceHasMore,
-        rowCount: receipt.rowCount,
-        byteCount: receipt.byteCount,
-        sha256: receipt.sha256,
-      };
-      if (receipt.sourceHasMore === null) {
-        const replay = await source.archiveSourceExportChunk({
-          projectId: migration.project_id,
-          sessionId: migration.session_id,
-          migrationId: migration.migration_id,
-          sourceOwnerName: migration.source_owner_name,
-          targetOwnerName: migration.target_owner_name,
-          targetGeneration: migration.target_generation,
-          sourceIntentToken,
-          tableName,
-          ordinal: checkpoint.next_ordinal,
-          cursor: checkpoint.source_cursor,
-          // Pre-checkpoint receipts do not carry their original source cursor or
-          // frozen layout. Their durable row/byte inventory is sufficient to
-          // replay the exact prefix even when deployment defaults changed.
-          maxRows: Math.max(1, receipt.rowCount),
-          maxBytes: Math.max(checkpoint.chunk_bytes, receipt.byteCount, 1),
-        });
-        if (
-          replay.sha256 !== receipt.sha256 ||
-          replay.rowCount !== receipt.rowCount ||
-          replay.byteCount !== receipt.byteCount
-        ) {
-          throw new ProjectDataArchiveCoordinatorStateError(
-            'copy_receipt_replay_mismatch',
-            `ProjectData archive migration ${migration.migration_id} legacy receipt no longer matches source`
-          );
+      try {
+        let continuation = {
+          cursor: receipt.sourceCursor,
+          hasMore: receipt.sourceHasMore,
+          rowCount: receipt.rowCount,
+          byteCount: receipt.byteCount,
+          sha256: receipt.sha256,
+        };
+        if (receipt.sourceHasMore === null) {
+          const replay = await source.archiveSourceExportChunk({
+            projectId: migration.project_id,
+            sessionId: migration.session_id,
+            migrationId: migration.migration_id,
+            sourceOwnerName: migration.source_owner_name,
+            targetOwnerName: migration.target_owner_name,
+            targetGeneration: migration.target_generation,
+            sourceIntentToken,
+            tableName,
+            ordinal: checkpoint.next_ordinal,
+            cursor: checkpoint.source_cursor,
+            // Pre-checkpoint receipts do not carry their original source cursor or
+            // frozen layout. Their durable row/byte inventory is sufficient to
+            // replay the exact prefix even when deployment defaults changed.
+            maxRows: Math.max(1, receipt.rowCount),
+            maxBytes: Math.max(checkpoint.chunk_bytes, receipt.byteCount, 1),
+          });
+          if (
+            replay.sha256 !== receipt.sha256 ||
+            replay.rowCount !== receipt.rowCount ||
+            replay.byteCount !== receipt.byteCount
+          ) {
+            throw new ProjectDataArchiveCoordinatorStateError(
+              'copy_receipt_replay_mismatch',
+              `ProjectData archive migration ${migration.migration_id} legacy receipt no longer matches source`
+            );
+          }
+          await target.archiveTargetCommitChunk({ ...replay, now });
+          continuation = replay;
         }
-        await target.archiveTargetCommitChunk({ ...replay, now });
-        continuation = replay;
+        await assertLeaseStillHeld(env, migration);
+        checkpoint = await advanceCopyCheckpoint(
+          env,
+          migration,
+          checkpoint,
+          {
+            ...continuation,
+            cursor: continuation.cursor,
+            hasMore: continuation.hasMore ?? false,
+          },
+          'reconcile_receipt',
+          operationId,
+          startedAt,
+          Date.now()
+        );
+      } catch (error) {
+        await markCopyOperationFailed(
+          env,
+          migration,
+          checkpoint,
+          'reconcile_receipt',
+          operationId,
+          startedAt,
+          error
+        ).catch(() => undefined);
+        throw error;
       }
-      await assertLeaseStillHeld(env, migration);
-      checkpoint = await advanceCopyCheckpoint(
-        env,
-        migration,
-        checkpoint,
-        {
-          ...continuation,
-          cursor: continuation.cursor,
-          hasMore: continuation.hasMore ?? false,
-        },
-        operationId,
-        startedAt,
-        Date.now()
-      );
     }
     if (checkpoint.complete === 1) continue;
 
@@ -2642,40 +2688,59 @@ async function copySourceChunks(
         'export_commit',
         startedAt
       );
-      const chunk = await source.archiveSourceExportChunk({
-        projectId: migration.project_id,
-        sessionId: migration.session_id,
-        migrationId: migration.migration_id,
-        sourceOwnerName: migration.source_owner_name,
-        targetOwnerName: migration.target_owner_name,
-        targetGeneration: migration.target_generation,
-        sourceIntentToken,
-        tableName,
-        ordinal: checkpoint.next_ordinal,
-        cursor: checkpoint.source_cursor,
-        maxRows: checkpoint.chunk_rows,
-        maxBytes: checkpoint.chunk_bytes,
-      });
-      if (targetInfo.storageFormat === COMPACT_ARCHIVE_FORMAT && tableName === 'chat_messages') {
-        const rawChunkRef = await writeCompactChunk(r2, config.r2Prefix, chunk, config.r2TimeoutMs);
-        await target.archiveTargetCommitChunk({ ...chunk, rawChunkRef, now });
-      } else {
-        await putImmutableJson(r2, chunkKey(config, chunk), chunk);
-        await target.archiveTargetCommitChunk({ ...chunk, now });
+      try {
+        const chunk = await source.archiveSourceExportChunk({
+          projectId: migration.project_id,
+          sessionId: migration.session_id,
+          migrationId: migration.migration_id,
+          sourceOwnerName: migration.source_owner_name,
+          targetOwnerName: migration.target_owner_name,
+          targetGeneration: migration.target_generation,
+          sourceIntentToken,
+          tableName,
+          ordinal: checkpoint.next_ordinal,
+          cursor: checkpoint.source_cursor,
+          maxRows: checkpoint.chunk_rows,
+          maxBytes: checkpoint.chunk_bytes,
+        });
+        if (targetInfo.storageFormat === COMPACT_ARCHIVE_FORMAT && tableName === 'chat_messages') {
+          const rawChunkRef = await writeCompactChunk(
+            r2,
+            config.r2Prefix,
+            chunk,
+            config.r2TimeoutMs
+          );
+          await target.archiveTargetCommitChunk({ ...chunk, rawChunkRef, now });
+        } else {
+          await writeImmutableJson(r2, chunkKey(config, chunk), chunk, config.r2TimeoutMs);
+          await target.archiveTargetCommitChunk({ ...chunk, now });
+        }
+        await assertLeaseStillHeld(env, migration);
+        checkpoint = await advanceCopyCheckpoint(
+          env,
+          migration,
+          checkpoint,
+          chunk,
+          'export_commit',
+          operationId,
+          startedAt,
+          Date.now()
+        );
+        chunksCopied++;
+        rowsCopied += chunk.rowCount;
+        if (!chunk.hasMore) break;
+      } catch (error) {
+        await markCopyOperationFailed(
+          env,
+          migration,
+          checkpoint,
+          'export_commit',
+          operationId,
+          startedAt,
+          error
+        ).catch(() => undefined);
+        throw error;
       }
-      await assertLeaseStillHeld(env, migration);
-      checkpoint = await advanceCopyCheckpoint(
-        env,
-        migration,
-        checkpoint,
-        chunk,
-        operationId,
-        startedAt,
-        Date.now()
-      );
-      chunksCopied++;
-      rowsCopied += chunk.rowCount;
-      if (!chunk.hasMore) break;
     }
   }
   targetInfo = await target.archiveTargetInspectSession(targetInspectInput(migration));
@@ -2750,7 +2815,7 @@ async function persistRecoveryManifest(
   const terminalVersionSha256 =
     migration.terminal_version_sha256 ?? targetInfo.terminalVersionSha256;
   const recoveryManifestKey = manifestKey(config, migration);
-  await putImmutableJson(
+  await writeImmutableJson(
     r2,
     recoveryManifestKey,
     manifestForTarget(
@@ -2760,7 +2825,8 @@ async function persistRecoveryManifest(
       aggregateSha256,
       targetInfo.chunks,
       now
-    )
+    ),
+    config.r2TimeoutMs
   );
   const sourceMarked = await source.archiveSourceMarkRecoveryManifestPersisted({
     sessionId: migration.session_id,

@@ -3403,9 +3403,19 @@ export async function finalizeSourceDelete(
   transactionSync: <T>(callback: () => T) => T = (callback) => callback()
 ): Promise<ArchiveSourceFinalizeDeleteResult> {
   validateRootSourceOwner(input);
-  const state = assertMatchingSourceIntent(readSourceIntent(sql, input.sessionId), input);
+  const intent = readSourceIntent(sql, input.sessionId);
+  const state = assertMatchingSourceIntent(intent, input);
+  if (
+    intent?.terminal_version_sha256 !== input.expectedTerminalVersionSha256 ||
+    intent.target_aggregate_sha256 !== input.targetAggregateSha256 ||
+    intent.recovery_manifest_key !== input.r2ManifestKey
+  ) {
+    throw new ProjectDataArchiveInvariantError(
+      'source_finalization_proof_mismatch',
+      'ProjectData archive source delete proof does not match persisted recovery evidence'
+    );
+  }
   if (state === 'source_deleted') {
-    const intent = readSourceIntent(sql, input.sessionId);
     return {
       idempotent: true,
       lastMessageAt:

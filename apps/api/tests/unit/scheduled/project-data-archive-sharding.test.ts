@@ -86,15 +86,30 @@ function createCoordinatorTables(sqlite: Database.Database): void {
 }
 
 function createMemoryR2(): R2Bucket {
-  const objects = new Map<string, string>();
+  const objects = new Map<string, { body: Uint8Array; customMetadata?: Record<string, string> }>();
   return {
-    get: vi.fn(async (key: string) => {
-      const text = objects.get(key);
-      return text === undefined ? null : ({ text: async () => text } as R2ObjectBody);
+    head: vi.fn(async (key: string) => {
+      const object = objects.get(key);
+      return object
+        ? ({ size: object.body.byteLength, customMetadata: object.customMetadata } as R2Object)
+        : null;
     }),
-    put: vi.fn(async (key: string, value: string) => {
-      objects.set(key, value);
-      return null;
+    get: vi.fn(async (key: string) => {
+      const object = objects.get(key);
+      return object
+        ? ({
+            size: object.body.byteLength,
+            customMetadata: object.customMetadata,
+            body: new Response(object.body).body,
+          } as R2ObjectBody)
+        : null;
+    }),
+    put: vi.fn(async (key: string, value: string | Uint8Array, options?: R2PutOptions) => {
+      if (options?.onlyIf && objects.has(key)) return null;
+      const body =
+        typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
+      objects.set(key, { body, customMetadata: options?.customMetadata });
+      return { size: body.byteLength, customMetadata: options?.customMetadata } as R2Object;
     }),
   } as unknown as R2Bucket;
 }
@@ -1524,6 +1539,19 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
 
         const first = await runProjectDataArchiveSharding(env, new Date(NOW));
         expect(first.failed).toBe(1);
+        expect(
+          sqlite
+            .prepare(
+              `SELECT last_operation, last_operation_completed_at, last_operation_duration_ms
+               FROM project_data_archive_copy_checkpoints
+               WHERE migration_id = ? AND table_name = 'chat_messages'`
+            )
+            .get(MIGRATION_ID)
+        ).toEqual({
+          last_operation: 'export_commit:failed',
+          last_operation_completed_at: expect.any(Number),
+          last_operation_duration_ms: expect.any(Number),
+        });
         sqlite
           .prepare('UPDATE project_data_archive_global_sweep_cadence SET next_eligible_at = 0')
           .run();
@@ -1553,6 +1581,52 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       }
     }
   );
+
+  it('records an R2 deadline as a timed-out copy operation with bounded duration evidence', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'copying', { sourceIntentToken: 'old-token' });
+      const source = createFakeSource({ state: 'intent_prepared', token: 'old-token' });
+      const target = createFakeTarget();
+      const r2 = {
+        head: vi.fn(() => new Promise<R2Object | null>(() => undefined)),
+        get: vi.fn(),
+        put: vi.fn(),
+      } as unknown as R2Bucket;
+      const stats = await runProjectDataArchiveSharding(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS: '5',
+          PROJECT_DATA_ARCHIVE_R2: r2,
+          PROJECT_DATA: createProjectDataNamespace({
+            [SOURCE_OWNER]: source,
+            [TARGET_OWNER]: target,
+          }),
+        }),
+        new Date(NOW)
+      );
+
+      expect(stats.failed).toBe(1);
+      expect(
+        sqlite
+          .prepare(
+            `SELECT last_operation, last_operation_completed_at, last_operation_duration_ms
+             FROM project_data_archive_copy_checkpoints
+             WHERE migration_id = ? AND table_name = 'chat_messages'`
+          )
+          .get(MIGRATION_ID)
+      ).toEqual({
+        last_operation: 'export_commit:timed_out',
+        last_operation_completed_at: expect.any(Number),
+        last_operation_duration_ms: expect.any(Number),
+      });
+      expect(r2.put).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
 
   it('adopts a legacy receipt by its durable row and byte inventory after defaults change', async () => {
     const sqlite = new Database(':memory:');

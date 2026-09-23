@@ -688,6 +688,33 @@ describe('ProjectData terminal archive sharding bridge', () => {
         now: NOW,
         minTerminalAgeMs: 0,
       };
+      for (const mismatch of [
+        { expectedTerminalVersionSha256: '0'.repeat(64) },
+        { targetAggregateSha256: '1'.repeat(64) },
+        { r2ManifestKey: 'project-data/session-archives/project/session/other.json' },
+      ]) {
+        await expect(
+          finalizeSourceDelete(source.sql, { ...finalizeInput, ...mismatch }, (callback) =>
+            source.db.transaction(callback)()
+          )
+        ).rejects.toMatchObject({ reason: 'source_finalization_proof_mismatch' });
+      }
+      expect(
+        source.db
+          .prepare(
+            `SELECT
+               (SELECT COUNT(*) FROM chat_messages WHERE session_id = ?) AS messages,
+               (SELECT COUNT(*) FROM chat_messages_grouped WHERE session_id = ?) AS grouped_rows,
+               (SELECT COUNT(*) FROM tool_payload_archives WHERE session_id = ?) AS tools,
+               (SELECT state FROM project_data_archive_source_intents WHERE session_id = ?) AS intent_state`
+          )
+          .get('session-archive', 'session-archive', 'session-archive', 'session-archive')
+      ).toEqual({
+        messages: 2,
+        grouped_rows: 1,
+        tools: 1,
+        intent_state: 'recovery_manifest_persisted',
+      });
       const faultSql = {
         exec(query: string, ...params: unknown[]) {
           if (/^DELETE FROM chat_messages WHERE/i.test(query.trim())) {

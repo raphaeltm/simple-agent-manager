@@ -6,6 +6,7 @@ import {
   COMPACT_ARCHIVE_MAX_OBJECT_BYTES,
   readCompactChunk,
   writeCompactChunk,
+  writeImmutableJson,
 } from '../../../src/project-data-archive/compact-r2';
 import type { ProjectDataArchiveChunk } from '../../../src/project-data-archive/contract';
 import {
@@ -452,11 +453,7 @@ describe('compact archive migration compatibility', () => {
           if (firstObject) objects.delete(firstObject[0]);
           const corruptSearch = await archive.archiveTargetSearchProjectMessages(
             target,
-            {
-              ...env,
-              PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS: '1',
-              PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS: '1',
-            },
+            env,
             {
               kind: 'archive_shard',
               projectId: 'project',
@@ -476,11 +473,7 @@ describe('compact archive migration compatibility', () => {
             const beforeGets = vi.mocked(bucket.get).mock.calls.length;
             projectSearch = await archive.archiveTargetSearchProjectMessages(
               target,
-              {
-                ...env,
-                PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS: '1',
-                PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS: '1',
-              },
+              env,
               {
                 kind: 'archive_shard',
                 projectId: 'project',
@@ -619,6 +612,72 @@ describe('compact archive migration compatibility', () => {
 });
 
 describe('compact archive bounded failures', () => {
+  it('bounds immutable JSON publication and refuses conflicting retry payloads', async () => {
+    const { bucket } = memoryR2();
+    await expect(
+      writeImmutableJson(bucket, 'too-large.json', 'x'.repeat(COMPACT_ARCHIVE_MAX_OBJECT_BYTES + 1))
+    ).rejects.toThrow('byte limit');
+    expect(bucket.head).not.toHaveBeenCalled();
+
+    await writeImmutableJson(bucket, 'manifest.json', { version: 1 });
+    await expect(writeImmutableJson(bucket, 'manifest.json', { version: 2 })).rejects.toThrow(
+      'conflict'
+    );
+    expect(bucket.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not race a retry against a timed-out immutable provider write', async () => {
+    let finishPut: ((value: R2Object) => void) | undefined;
+    const stored = new Map<string, Uint8Array>();
+    const bucket = {
+      head: vi.fn(async (key: string) => {
+        const body = stored.get(key);
+        return body
+          ? ({
+              size: body.byteLength,
+              customMetadata: {
+                archiveBodySha256: await crypto.subtle
+                  .digest('SHA-256', body)
+                  .then((digest) =>
+                    Array.from(new Uint8Array(digest), (byte) =>
+                      byte.toString(16).padStart(2, '0')
+                    ).join('')
+                  ),
+              },
+            } as R2Object)
+          : null;
+      }),
+      put: vi.fn(
+        (key: string, body: Uint8Array) =>
+          new Promise<R2Object>((resolve) => {
+            stored.set(key, new Uint8Array(body));
+            finishPut = resolve;
+          })
+      ),
+      get: vi.fn(),
+    } as unknown as R2Bucket;
+
+    await expect(writeImmutableJson(bucket, 'pending.json', { ok: true }, 5)).rejects.toMatchObject(
+      {
+        name: 'CompactArchiveTimeoutError',
+        stage: 'put',
+      }
+    );
+    await expect(writeImmutableJson(bucket, 'pending.json', { ok: true }, 5)).rejects.toMatchObject(
+      {
+        name: 'CompactArchiveTimeoutError',
+        stage: 'head_pending',
+      }
+    );
+    expect(bucket.put).toHaveBeenCalledTimes(1);
+    finishPut?.({} as R2Object);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(
+      writeImmutableJson(bucket, 'pending.json', { ok: true }, 50)
+    ).resolves.toBeUndefined();
+    expect(bucket.put).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects oversized metadata before fetching and cancels a stalled object read', async () => {
     const { bucket } = memoryR2();
     const chunk = await fixture();
