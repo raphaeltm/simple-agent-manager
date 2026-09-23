@@ -21,6 +21,7 @@ vi.mock('../../../src/lib/logger', () => ({
 import type { Env } from '../../../src/env';
 import {
   getGitLabUserAccessTokenForOwner,
+  getGitLabUserAccessTokenResultWithHeaders,
   getGitLabUserAccessTokenWithHeaders,
 } from '../../../src/services/gitlab';
 import {
@@ -95,6 +96,39 @@ describe('getGitLabUserAccessTokenWithHeaders', () => {
     expectBetterAuthTokenLookup(getAccessToken, 'gitlab-account-row');
   });
 
+  it('normalizes a direct Better Auth Date expiry in the returned result', async () => {
+    const expiresAt = new Date('2099-01-02T03:04:05.000Z');
+    mocks.createAuth.mockResolvedValue({
+      api: {
+        getAccessToken: vi.fn(async () => ({
+          accessToken: 'direct-access',
+          accessTokenExpiresAt: expiresAt,
+          scopes: ['api'],
+        })),
+      },
+    });
+    const env = { DATABASE: makeDatabaseBinding('gitlab-account-row') } as unknown as Env;
+
+    await expect(
+      getGitLabUserAccessTokenResultWithHeaders(env, new Headers(), 'user-1', 'request')
+    ).resolves.toEqual({
+      accessToken: 'direct-access',
+      accessTokenExpiresAt: expiresAt.toISOString(),
+    });
+  });
+
+  it('preserves a locked future ISO expiry in the returned result', async () => {
+    const accessTokenExpiresAt = '2099-02-03T04:05:06.000Z';
+    const { binding } = makeLockBinding(
+      Response.json({ accessToken: 'locked-access', accessTokenExpiresAt, scopes: ['api'] })
+    );
+    const env = { GITLAB_USER_ACCESS_TOKEN_LOCK: binding } as unknown as Env;
+
+    await expect(
+      getGitLabUserAccessTokenResultWithHeaders(env, new Headers(), 'user-1', 'request')
+    ).resolves.toEqual({ accessToken: 'locked-access', accessTokenExpiresAt });
+  });
+
   it('omits headers for a trusted owner lookup', async () => {
     const getAccessToken = vi.fn(async () => ({
       accessToken: 'owner-access',
@@ -151,10 +185,11 @@ describe('getGitLabUserAccessTokenWithHeaders', () => {
   });
 
   it('returns null for an expired token returned by the DO lock', async () => {
+    const accessTokenExpiresAt = '2020-01-02T03:04:05.000Z';
     const { binding } = makeLockBinding(
       Response.json({
         accessToken: 'stale-access',
-        accessTokenExpiresAt: new Date(Date.now() - 60_000).toISOString(),
+        accessTokenExpiresAt,
         scopes: ['api'],
       })
     );
@@ -168,9 +203,32 @@ describe('getGitLabUserAccessTokenWithHeaders', () => {
     );
 
     expect(token).toBeNull();
+    expect(mocks.logWarn).toHaveBeenCalledWith('gitlab.user_access_token_expired', {
+      flow: 'request',
+      userId: 'user-1',
+      tokenPresent: true,
+      accessTokenExpiresAt,
+    });
+  });
+
+  it('fails closed when GitLab returns malformed expiry metadata', async () => {
+    mocks.createAuth.mockResolvedValue({
+      api: {
+        getAccessToken: vi.fn(async () => ({
+          accessToken: 'direct-access',
+          accessTokenExpiresAt: 'not-a-date',
+          scopes: ['api'],
+        })),
+      },
+    });
+    const env = { DATABASE: makeDatabaseBinding('gitlab-account-row') } as unknown as Env;
+
+    await expect(
+      getGitLabUserAccessTokenResultWithHeaders(env, new Headers(), 'user-1', 'request')
+    ).resolves.toBeNull();
     expect(mocks.logWarn).toHaveBeenCalledWith(
-      'gitlab.user_access_token_expired',
-      expect.objectContaining({ userId: 'user-1' })
+      'gitlab.user_access_token_unavailable',
+      expect.objectContaining({ flow: 'request', userId: 'user-1' })
     );
   });
 });
