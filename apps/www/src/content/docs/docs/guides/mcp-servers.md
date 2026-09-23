@@ -20,32 +20,32 @@ How the endpoint reaches the agent depends on the agent. Claude Code receives it
 
 ## Choosing a provider
 
-| Provider                                  | Best for                                                                                                | Auth                             |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| [Zapier MCP](https://zapier.com/mcp)      | Breadth — around 9,000 apps, including LinkedIn and Google Docs                                         | Bearer token                     |
-| [executor.sh](https://executor.sh/)       | Open source (MIT). Run it yourself via CLI, Docker or a Cloudflare Worker, or use their hosted endpoint | Bearer token                     |
-| [Composio / Rube](https://composio.dev/)  | Managed OAuth with a large toolkit catalog                                                              | Pre-signed URL — choose **None** |
-| [Klavis / Strata](https://www.klavis.ai/) | Self-hosting everything (Apache-2.0)                                                                    | Bearer token                     |
-| Official service endpoints                | A single service you already pay for — GitHub, Notion, Linear, Sentry, Stripe                           | Personal access token as bearer  |
+| Provider | Best for | Auth |
+| --- | --- | --- |
+| [Zapier MCP](https://zapier.com/mcp) | Breadth — around 9,000 apps, including LinkedIn and Google Docs | Bearer token |
+| [executor.sh](https://executor.sh/) | Open source (MIT). Run it yourself via CLI, Docker or a Cloudflare Worker, or use their hosted endpoint | Bearer token |
+| [Composio / Rube](https://composio.dev/) | Managed OAuth with a large toolkit catalog | Pre-signed URL — choose **None** |
+| [Klavis / Strata](https://www.klavis.ai/) | Self-hosting everything (Apache-2.0) | Bearer token |
+| Official service endpoints | A single service you already pay for — GitHub, Notion, Linear, Sentry, Stripe | Personal access token as bearer |
 
 Prefer gateway-style providers that expose a small number of tools over servers that dump a hundred tool definitions into the agent's context. Every tool definition costs context window on every turn.
 
 ## Adding a server
 
-| Field                | Notes                                                                                                                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Name**             | How the agent sees the server; its tools are namespaced by it. 1–32 characters, lowercase letters, digits and hyphens; it may not start or end with a hyphen. `sam-mcp` is reserved. |
-| **MCP endpoint URL** | Must be HTTPS. `http://localhost:<port>` and `http://127.0.0.1:<port>` are allowed for a gateway running on the same machine — an explicit port is required.                         |
-| **Authentication**   | **Bearer token** for most providers. **None** when the credential is embedded in the URL itself, as with Composio's pre-signed URLs.                                                 |
+| Field | Notes |
+| --- | --- |
+| **Name** | How the agent sees the server; its tools are namespaced by it. 1–32 characters, lowercase letters, digits and hyphens; it may not start or end with a hyphen. `sam-mcp` is reserved. |
+| **MCP endpoint URL** | Must be HTTPS. `http://localhost:<port>` and `http://127.0.0.1:<port>` are allowed for a gateway running on the same machine — an explicit port is required. |
+| **Authentication** | **Bearer token** for most providers. **None** when the credential is embedded in the URL itself, as with Composio's pre-signed URLs. |
 
 Both the URL and the token are encrypted at rest and are never returned by the API or shown again after you save them — several providers put the credential directly in the URL, so the URL is treated as a secret too. SAM shows only the host.
 
 ## Scopes
 
-| Scope        | Where                      | Who it applies to                               |
-| ------------ | -------------------------- | ----------------------------------------------- |
-| **Personal** | Settings → MCP Servers     | Every session _you_ start, in any project       |
-| **Project**  | Project Settings → Runtime | Every session any member starts in that project |
+| Scope | Where | Who it applies to |
+| --- | --- | --- |
+| **Personal** | Settings → MCP Servers | Every session *you* start, in any project |
+| **Project** | Project Settings → Runtime | Every session any member starts in that project |
 
 If a project server and a personal server share a name, the project one wins. Adding or changing a project-scoped server requires the `secret:write` capability, so project owners and admins can manage them but maintainers and viewers cannot.
 
@@ -65,7 +65,7 @@ Tools from a connected MCP server run inside your agent's session, which already
 
 ## Notes on specific services
 
-- **LinkedIn** — the official API only supports _posting_; it cannot read your feed, DMs or arbitrary profiles. Any MCP server that reads the feed drives a member session cookie, which violates LinkedIn's user agreement. Posting works through Zapier and Composio; reading is a risk decision that belongs to you and your chosen vendor.
+- **LinkedIn** — the official API only supports *posting*; it cannot read your feed, DMs or arbitrary profiles. Any MCP server that reads the feed drives a member session cookie, which violates LinkedIn's user agreement. Posting works through Zapier and Composio; reading is a risk decision that belongs to you and your chosen vendor.
 - **Medium** — the API is closed to new integrations and no new tokens are issued. Publish to Dev.to, Hashnode, Ghost or WordPress instead, or to a company blog through the GitHub repository SAM already connects to.
 
 ## Limitations
