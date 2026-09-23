@@ -44,11 +44,12 @@ All Storybook packages must be at the same version. The fix is to also bump
 
 - [x] All Storybook packages at version 10.6.0 in `packages/ui/package.json`
 - [x] Storybook production build succeeds (`storybook build`)
-- [ ] All CI checks pass (especially "Workspace Quality Surfaces") — pending CI run on PR
+- [x] All CI checks pass (especially "Workspace Quality Surfaces") — PR #2132 CI fully green
 - [x] No regressions in existing tests (10,215 tests passed locally)
 
 ## References
 
-- PR #2129: https://github.com/raphaeltm/simple-agent-manager/pull/2129 (Dependabot, to be superseded)
+- PR #2129: https://github.com/raphaeltm/simple-agent-manager/pull/2129 (Dependabot, closed/superseded)
+- PR #2132: https://github.com/raphaeltm/simple-agent-manager/pull/2132 (replacement PR, CI green, needs-human-review for CodeRabbit non-response)
 - PR #2128: addon-a11y bump (already merged)
 - Output branch: sam/complete-pr-2129-dependabot-ag52vm
