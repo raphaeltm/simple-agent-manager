@@ -4,44 +4,25 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getTokenType } from './github-route-helpers';
 import {
+  availableUserAccessToken,
   getBetterAuthAccessTokenForProvider,
   requestLockedUserAccessToken,
+  type UserAccessTokenResult,
 } from './user-access-token';
 
-type GitHubAccessTokenResult = {
-  accessToken: string | null | undefined;
-  accessTokenExpiresAt?: Date | string | null;
-  scopes?: string[];
-};
-
-function isExpired(expiresAt: Date | string | null | undefined): boolean {
-  if (!expiresAt) {
-    return false;
-  }
-  const expiresAtMs = new Date(expiresAt).getTime();
-  return Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now();
-}
-
-function availableAccessToken(
-  token: GitHubAccessTokenResult,
+function availableGitHubAccessToken(
+  token: UserAccessTokenResult,
   flow: string,
   userId: string
 ): string | null {
-  if (!token.accessToken) {
-    return null;
-  }
-  if (isExpired(token.accessTokenExpiresAt)) {
+  return availableUserAccessToken(token, (accessTokenExpiresAt) => {
     log.warn('github.user_access_token_expired', {
       flow,
       userId,
       tokenPresent: true,
-      accessTokenExpiresAt: token.accessTokenExpiresAt
-        ? new Date(token.accessTokenExpiresAt).toISOString()
-        : null,
+      accessTokenExpiresAt,
     });
-    return null;
-  }
-  return token.accessToken;
+  });
 }
 
 async function getDirectGitHubUserAccessTokenWithHeaders(
@@ -67,7 +48,7 @@ async function getDirectGitHubUserAccessTokenWithHeaders(
       tokenType: getTokenType(token),
       scopes: token.scopes,
     });
-    return availableAccessToken(token, flow, userId);
+    return availableGitHubAccessToken(token, flow, userId);
   } catch (err) {
     log.warn('github.user_access_token_unavailable', {
       flow,
@@ -115,7 +96,7 @@ export async function getGitHubUserAccessTokenWithHeaders(
       tokenType: getTokenType(token),
       scopes: token.scopes,
     });
-    return availableAccessToken(token, flow, userId);
+    return availableGitHubAccessToken(token, flow, userId);
   } catch (err) {
     log.warn('github.user_access_token_unavailable', {
       flow,

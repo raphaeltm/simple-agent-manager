@@ -16,6 +16,36 @@ const lockedTokenResponseSchema = v.object({
   scopes: v.optional(v.array(v.string())),
 });
 
+export type UserAccessTokenResult = {
+  accessToken: string | null | undefined;
+  accessTokenExpiresAt?: Date | string | null;
+  scopes?: string[];
+};
+
+export function userAccessTokenExpiryIso(
+  expiresAt: Date | string | null | undefined
+): string | null {
+  return expiresAt ? new Date(expiresAt).toISOString() : null;
+}
+
+export function availableUserAccessToken(
+  token: UserAccessTokenResult,
+  onExpired: (expiresAtIso: string | null) => void
+): string | null {
+  if (!token.accessToken) {
+    return null;
+  }
+
+  const expiresAt = token.accessTokenExpiresAt;
+  const expiresAtMs = expiresAt ? new Date(expiresAt).getTime() : Number.POSITIVE_INFINITY;
+  if (Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now()) {
+    onExpired(userAccessTokenExpiryIso(expiresAt));
+    return null;
+  }
+
+  return token.accessToken;
+}
+
 export async function getBetterAuthAccessTokenForProvider(
   env: Env,
   headers: Headers | undefined,

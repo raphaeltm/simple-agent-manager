@@ -12,8 +12,11 @@ import { AppError, errors } from '../middleware/error';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getGitLabOAuthConfig } from './platform-config';
 import {
+  availableUserAccessToken,
   getBetterAuthAccessTokenForProvider,
   requestLockedUserAccessToken,
+  userAccessTokenExpiryIso,
+  type UserAccessTokenResult,
 } from './user-access-token';
 
 const MIN_GITLAB_WRITE_ACCESS_LEVEL = 30; // Developer
@@ -106,41 +109,22 @@ export type GitLabAccessTokenResult = {
   accessTokenExpiresAt: string | null;
 };
 
-type TokenResult = {
-  accessToken: string | null | undefined;
-  accessTokenExpiresAt?: Date | string | null;
-  scopes?: string[];
-};
-
-function isExpired(expiresAt: Date | string | null | undefined): boolean {
-  if (!expiresAt) {
-    return false;
-  }
-  const expiresAtMs = new Date(expiresAt).getTime();
-  return Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now();
-}
-
-function availableAccessToken(
-  token: TokenResult,
+function availableGitLabAccessToken(
+  token: UserAccessTokenResult,
   flow: string,
   userId: string
 ): GitLabAccessTokenResult | null {
-  if (!token.accessToken) {
-    return null;
-  }
-  const expiresAtIso = token.accessTokenExpiresAt
-    ? new Date(token.accessTokenExpiresAt).toISOString()
-    : null;
-  if (isExpired(token.accessTokenExpiresAt)) {
+  const accessToken = availableUserAccessToken(token, (accessTokenExpiresAt) => {
     log.warn('gitlab.user_access_token_expired', {
       flow,
       userId,
       tokenPresent: true,
-      accessTokenExpiresAt: expiresAtIso,
+      accessTokenExpiresAt,
     });
-    return null;
-  }
-  return { accessToken: token.accessToken, accessTokenExpiresAt: expiresAtIso };
+  });
+  return accessToken
+    ? { accessToken, accessTokenExpiresAt: userAccessTokenExpiryIso(token.accessTokenExpiresAt) }
+    : null;
 }
 
 async function getDirectGitLabUserAccessTokenResultWithHeaders(
@@ -165,7 +149,7 @@ async function getDirectGitLabUserAccessTokenResultWithHeaders(
       tokenPresent: Boolean(token.accessToken),
       scopes: token.scopes,
     });
-    return availableAccessToken(token, flow, userId);
+    return availableGitLabAccessToken(token, flow, userId);
   } catch (err) {
     log.warn('gitlab.user_access_token_unavailable', {
       flow,
@@ -227,7 +211,7 @@ export async function getGitLabUserAccessTokenResultWithHeaders(
       tokenPresent: Boolean(token.accessToken),
       scopes: token.scopes,
     });
-    return availableAccessToken(token, flow, userId);
+    return availableGitLabAccessToken(token, flow, userId);
   } catch (err) {
     log.warn('gitlab.user_access_token_unavailable', {
       flow,
