@@ -19,7 +19,10 @@ vi.mock('../../../src/lib/logger', () => ({
 }));
 
 import type { Env } from '../../../src/env';
-import { getGitLabUserAccessTokenWithHeaders } from '../../../src/services/gitlab';
+import {
+  getGitLabUserAccessTokenForOwner,
+  getGitLabUserAccessTokenWithHeaders,
+} from '../../../src/services/gitlab';
 
 function makeLockBinding(response: Response) {
   const stubFetch = vi.fn(async () => response);
@@ -99,6 +102,21 @@ describe('getGitLabUserAccessTokenWithHeaders', () => {
         body: { accountId: 'gitlab-account-row', userId: 'user-1' },
       })
     );
+  });
+
+  it('omits headers for a trusted owner lookup', async () => {
+    const getAccessToken = vi.fn(async () => ({
+      accessToken: 'owner-access',
+      accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
+      scopes: ['api'],
+    }));
+    mocks.createAuth.mockResolvedValue({ api: { getAccessToken } });
+    const env = { DATABASE: makeDatabaseBinding() } as unknown as Env;
+
+    await expect(getGitLabUserAccessTokenForOwner(env, 'user-1')).resolves.toBe('owner-access');
+    expect(getAccessToken).toHaveBeenCalledWith({
+      body: { accountId: 'gitlab-account-row', userId: 'user-1' },
+    });
   });
 
   it('returns null on the direct path when the user has no linked GitLab account row', async () => {

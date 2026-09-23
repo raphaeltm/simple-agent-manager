@@ -52,7 +52,7 @@ function availableAccessToken(
 
 async function getDirectGitHubUserAccessTokenWithHeaders(
   env: Env,
-  headers: Headers,
+  headers: Headers | undefined,
   userId: string,
   flow: string
 ): Promise<string | null> {
@@ -68,7 +68,7 @@ async function getDirectGitHubUserAccessTokenWithHeaders(
     }
     const auth = await createAuth(env);
     const token = await auth.api.getAccessToken({
-      headers,
+      ...(headers ? { headers } : {}),
       body: { accountId, userId },
     });
     log.info('github.user_access_token.lookup', {
@@ -92,7 +92,7 @@ async function getDirectGitHubUserAccessTokenWithHeaders(
 
 export async function getGitHubUserAccessTokenWithHeaders(
   env: Env,
-  headers: Headers,
+  headers: Headers | undefined,
   userId: string,
   flow: string
 ): Promise<string | null> {
@@ -109,7 +109,7 @@ export async function getGitHubUserAccessTokenWithHeaders(
       body: JSON.stringify({
         userId,
         flow,
-        headers: Array.from(headers.entries()),
+        ...(headers ? { headers: Array.from(headers.entries()) } : {}),
       }),
     });
 
@@ -123,7 +123,11 @@ export async function getGitHubUserAccessTokenWithHeaders(
       return null;
     }
 
-    const token = await readResponseJson(response, lockedTokenResponseSchema, 'github.user_access_token.locked');
+    const token = await readResponseJson(
+      response,
+      lockedTokenResponseSchema,
+      'github.user_access_token.locked'
+    );
     log.info('github.user_access_token.lookup', {
       flow,
       userId,
@@ -160,13 +164,14 @@ export async function getGitHubUserAccessToken(
  *
  * VM-agent callback routes know the owning SAM user from persisted workspace
  * state, but they authenticate with callback JWTs rather than BetterAuth
- * cookies. BetterAuth still owns OAuth token refresh/decryption; the empty
- * headers simply make this an owner-id lookup instead of a session lookup.
+ * cookies. BetterAuth still owns OAuth token refresh/decryption. Omitting the
+ * headers property marks this as a trusted server-side user-id lookup; Better
+ * Auth 1.7 treats even an empty Headers object as an unauthenticated request.
  */
 export async function getGitHubUserAccessTokenForOwner(
   env: Env,
   userId: string,
   flow = 'owner-callback'
 ): Promise<string | null> {
-  return getGitHubUserAccessTokenWithHeaders(env, new Headers(), userId, flow);
+  return getGitHubUserAccessTokenWithHeaders(env, undefined, userId, flow);
 }

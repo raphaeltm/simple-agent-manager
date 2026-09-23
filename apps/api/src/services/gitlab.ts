@@ -149,7 +149,7 @@ const lockedTokenResponseSchema = v.object({
 
 async function getDirectGitLabUserAccessTokenResultWithHeaders(
   env: Env,
-  headers: Headers,
+  headers: Headers | undefined,
   userId: string,
   flow: string
 ): Promise<GitLabAccessTokenResult | null> {
@@ -165,7 +165,7 @@ async function getDirectGitLabUserAccessTokenResultWithHeaders(
     }
     const auth = await createAuth(env);
     const token = await auth.api.getAccessToken({
-      headers,
+      ...(headers ? { headers } : {}),
       body: { accountId, userId },
     });
     log.info('gitlab.user_access_token.lookup', {
@@ -197,7 +197,7 @@ async function getDirectGitLabUserAccessTokenResultWithHeaders(
  */
 export async function getGitLabUserAccessTokenResultWithHeaders(
   env: Env,
-  headers: Headers,
+  headers: Headers | undefined,
   userId: string,
   flow: string
 ): Promise<GitLabAccessTokenResult | null> {
@@ -221,7 +221,7 @@ export async function getGitLabUserAccessTokenResultWithHeaders(
       body: JSON.stringify({
         userId,
         flow,
-        headers: Array.from(headers.entries()),
+        ...(headers ? { headers: Array.from(headers.entries()) } : {}),
       }),
     });
     if (!response.ok) {
@@ -258,7 +258,7 @@ export async function getGitLabUserAccessTokenResultWithHeaders(
 
 export async function getGitLabUserAccessTokenWithHeaders(
   env: Env,
-  headers: Headers,
+  headers: Headers | undefined,
   userId: string,
   flow: string
 ): Promise<string | null> {
@@ -278,7 +278,7 @@ export async function getGitLabUserAccessTokenForOwner(
   userId: string,
   flow = 'owner-callback'
 ): Promise<string | null> {
-  return getGitLabUserAccessTokenWithHeaders(env, new Headers(), userId, flow);
+  return getGitLabUserAccessTokenWithHeaders(env, undefined, userId, flow);
 }
 
 export async function requireGitLabUserAccessToken(
@@ -310,7 +310,7 @@ export async function requireGitLabUserAccessTokenResultForOwner(
   userId: string,
   flow = 'owner-callback'
 ): Promise<GitLabAccessTokenResult> {
-  const result = await getGitLabUserAccessTokenResultWithHeaders(env, new Headers(), userId, flow);
+  const result = await getGitLabUserAccessTokenResultWithHeaders(env, undefined, userId, flow);
   if (!result) {
     throw new AppError(
       401,

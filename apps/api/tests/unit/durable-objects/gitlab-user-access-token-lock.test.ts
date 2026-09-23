@@ -30,14 +30,14 @@ vi.mock('../../../src/lib/logger', () => ({
 
 import { GitLabUserAccessTokenLock } from '../../../src/durable-objects/gitlab-user-access-token-lock';
 
-function makeRequest(): Request {
+function makeRequest(includeHeaders = true): Request {
   return new Request('https://gitlab-user-access-token-lock/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       userId: 'user-1',
       flow: 'test',
-      headers: [['cookie', 'session=abc']],
+      ...(includeHeaders ? { headers: [['cookie', 'session=abc']] } : {}),
     }),
   });
 }
@@ -113,6 +113,20 @@ describe('GitLabUserAccessTokenLock', () => {
       'gitlab.user_access_token_lock.unavailable',
       expect.objectContaining({ flow: 'test', userId: 'user-1' })
     );
+  });
+
+  it('preserves the trusted owner context by omitting headers for Better Auth', async () => {
+    const getAccessToken = vi.fn(async () => ({ accessToken: 'owner-token' }));
+    createAuthMock.mockReturnValue({ api: { getAccessToken } });
+    const { env } = makeBetterAuthAccountEnv('gitlab-account-row');
+    const lock = new GitLabUserAccessTokenLock({} as never, env as never);
+
+    const res = await lock.fetch(makeRequest(false));
+
+    expect(res.status).toBe(200);
+    expect(getAccessToken).toHaveBeenCalledWith({
+      body: { accountId: 'gitlab-account-row', userId: 'user-1' },
+    });
   });
 
   it('returns 401 before BetterAuth when the user has no linked GitLab account row', async () => {

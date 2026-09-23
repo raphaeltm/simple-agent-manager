@@ -10,7 +10,7 @@ import { getBetterAuthAccountIdForProvider } from '../services/better-auth-accou
 const requestSchema = v.object({
   userId: v.string(),
   flow: v.string(),
-  headers: v.array(v.tuple([v.string(), v.string()])),
+  headers: v.optional(v.array(v.tuple([v.string(), v.string()]))),
 });
 
 type TokenLockPayload = v.InferOutput<typeof requestSchema>;
@@ -80,7 +80,7 @@ export abstract class UserAccessTokenLock extends DurableObject<Env> {
       }
       const auth = await createAuth(this.env);
       const token = await auth.api.getAccessToken({
-        headers: new Headers(payload.headers),
+        ...(payload.headers ? { headers: new Headers(payload.headers) } : {}),
         body: { accountId, userId: payload.userId },
       });
 

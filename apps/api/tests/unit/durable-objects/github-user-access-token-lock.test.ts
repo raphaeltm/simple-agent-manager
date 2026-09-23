@@ -32,14 +32,14 @@ vi.mock('../../../src/lib/logger', () => ({
 const { GitHubUserAccessTokenLock } =
   await import('../../../src/durable-objects/github-user-access-token-lock');
 
-function makeRequest(userId = 'user-1'): Request {
+function makeRequest(userId = 'user-1', includeHeaders = true): Request {
   return new Request('https://do-internal/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       userId,
       flow: 'test',
-      headers: [['cookie', 'session=abc']],
+      ...(includeHeaders ? { headers: [['cookie', 'session=abc']] } : {}),
     }),
   });
 }
@@ -121,6 +121,20 @@ describe('GitHubUserAccessTokenLock', () => {
       flow: 'test',
       userId: 'user-1',
       error: 'FAILED_TO_GET_ACCESS_TOKEN',
+    });
+  });
+
+  it('preserves the trusted owner context by omitting headers for Better Auth', async () => {
+    const getAccessToken = vi.fn(async () => ({ accessToken: 'owner-token' }));
+    mocks.createAuth.mockReturnValue({ api: { getAccessToken } });
+    const { env } = makeBetterAuthAccountEnv('github-account-row');
+    const lock = new GitHubUserAccessTokenLock({}, env as never);
+
+    const res = await lock.fetch(makeRequest('user-1', false));
+
+    expect(res.status).toBe(200);
+    expect(getAccessToken).toHaveBeenCalledWith({
+      body: { accountId: 'github-account-row', userId: 'user-1' },
     });
   });
 
