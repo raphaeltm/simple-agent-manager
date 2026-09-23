@@ -29,20 +29,26 @@ All Storybook packages must be at the same version. The fix is to also bump
 
 ## Implementation Checklist
 
-- [ ] Bump `storybook` from 10.5.7 to 10.6.0 in `packages/ui/package.json`
-- [ ] Bump `@storybook/addon-docs` from 10.5.7 to 10.6.0 in `packages/ui/package.json`
-- [ ] Run `pnpm install` to update lockfile
-- [ ] Verify Storybook builds locally (`pnpm --filter @simple-agent-manager/ui build-storybook`)
-- [ ] Run full quality suite (`pnpm lint && pnpm typecheck && pnpm test && pnpm build`)
+- [x] Bump `storybook` from 10.5.7 to 10.6.0 in `packages/ui/package.json`
+- [x] Bump `@storybook/addon-docs` from 10.5.7 to 10.6.0 in `packages/ui/package.json`
+- [x] Run `pnpm install` to update lockfile
+- [x] Verify Storybook builds locally (`pnpm --filter @simple-agent-manager/ui build-storybook`)
+  - Result: `Storybook build completed successfully` (storybook-static output generated)
+- [x] Run full quality suite (`pnpm lint && pnpm typecheck && pnpm test && pnpm build`)
+  - typecheck: 19 successful, 19 total
+  - lint: 13 successful, 13 total (0 errors, 3 pre-existing warnings)
+  - test: 748 test files, 10,215 tests passed
+  - build: 9 successful, 9 total
 
 ## Acceptance Criteria
 
-- [ ] All Storybook packages at version 10.6.0 in `packages/ui/package.json`
-- [ ] Storybook production build succeeds (`storybook build`)
-- [ ] All CI checks pass (especially "Workspace Quality Surfaces")
-- [ ] No regressions in existing tests
+- [x] All Storybook packages at version 10.6.0 in `packages/ui/package.json`
+- [x] Storybook production build succeeds (`storybook build`)
+- [ ] All CI checks pass (especially "Workspace Quality Surfaces") — pending CI run on PR
+- [x] No regressions in existing tests (10,215 tests passed locally)
 
 ## References
 
-- PR #2129: https://github.com/raphaeltm/simple-agent-manager/pull/2129
+- PR #2129: https://github.com/raphaeltm/simple-agent-manager/pull/2129 (Dependabot, to be superseded)
 - PR #2128: addon-a11y bump (already merged)
+- Output branch: sam/complete-pr-2129-dependabot-ag52vm
