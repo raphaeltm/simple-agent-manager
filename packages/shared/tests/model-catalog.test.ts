@@ -28,46 +28,35 @@ describe('model-catalog', () => {
       const groups = getModelGroupsForAgent('openai-codex');
       expect(groups.length).toBeGreaterThanOrEqual(2);
       const latestModels = groups[0]?.models.map((model) => model.id) ?? [];
-      expect(latestModels).toEqual(
-        expect.arrayContaining([
-          'gpt-5.6-sol',
-          'gpt-5.6-terra',
-          'gpt-5.6-luna',
-          'gpt-5.5-pro',
-          'gpt-5.5',
-        ])
-      );
-      expect(groups[1]?.models.map((model) => model.id)).toEqual(
-        expect.arrayContaining([
-          'gpt-5.4-pro',
-          'gpt-5.4',
-          'gpt-5.4-mini',
-          'gpt-5.4-nano',
-        ])
-      );
+      expect(latestModels).toEqual(['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna']);
+      expect(groups[1]?.models.map((model) => model.id)).toEqual([
+        'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
+      ]);
 
       const namesById = new Map(
         groups.flatMap((group) => group.models).map((model) => [model.id, model.name])
       );
       expect(
-        groups.find((group) => group.label === 'GPT-5.4 (Current)')?.models.map((model) => model.id)
-      ).toEqual(['gpt-5.4-pro', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano']);
+        groups
+          .find((group) => group.label === 'GPT-5.5 / 5.2 (Previous)')
+          ?.models.map((model) => model.id)
+      ).toEqual(['gpt-5.5', 'gpt-5.2']);
       expect(
-        groups.find((group) => group.label === 'Codex (Current)')?.models.map((model) => model.id)
-      ).toEqual(['gpt-5.3-codex']);
-      expect(
-        groups.find((group) => group.label === 'Deprecated')?.models.map((model) => model.id)
-      ).toEqual(['o4-mini']);
-      expect(
-        groups.find((group) => group.label === 'GPT-5 (Previous)')?.models.map((model) => model.id)
-      ).toEqual(['gpt-5-mini']);
-      expect(namesById.get('gpt-5.4')).not.toContain('retires');
-      expect(namesById.get('gpt-5.4-mini')).not.toContain('retires');
-      expect(namesById.get('gpt-5.3-codex')).not.toContain('Deprecated');
+        groups
+          .find((group) => group.label === 'GPT-5.4 (Legacy, hidden upstream)')
+          ?.models.map((model) => model.id)
+      ).toEqual(['gpt-5.4', 'gpt-5.4-mini']);
+      expect(namesById.get('gpt-5.4')).toContain('Legacy');
+      expect(namesById.get('gpt-5.4-mini')).toContain('Legacy');
+      expect(namesById.has('gpt-5.4-pro')).toBe(false);
+      expect(namesById.has('gpt-5.4-nano')).toBe(false);
+      expect(namesById.has('gpt-5.3-codex')).toBe(false);
       expect(namesById.has('gpt-5.2-codex')).toBe(false);
       expect(namesById.has('gpt-5.1-codex-max')).toBe(false);
       expect(namesById.has('gpt-5.1-codex-mini')).toBe(false);
-      expect(namesById.get('o4-mini')).toContain('Deprecated');
+      expect(namesById.has('o4-mini')).toBe(false);
     });
 
     it('returns grouped models for mistral-vibe', () => {
@@ -76,15 +65,19 @@ describe('model-catalog', () => {
       const allModels = groups.flatMap((g) => g.models);
       expect(allModels.map((model) => model.id)).toEqual(
         expect.arrayContaining([
-          'mistral-medium-3-5',
-          'mistral-small-2603',
-          'mistral-large-2512',
-          'codestral-2508',
-          'ministral-14b-2512',
-          'ministral-8b-2512',
-          'ministral-3b-2512',
+          'mistral-medium-latest',
+          'zai-glm-5-3',
+          'zai-glm-5-2',
+          'mistral-small-latest',
+          'mistral-large-latest',
+          'codestral-latest',
+          'ministral-14b-latest',
+          'ministral-8b-latest',
+          'ministral-3b-latest',
         ])
       );
+      expect(allModels.some((model) => model.id === 'mistral-medium-3-5')).toBe(false);
+      expect(allModels.some((model) => model.id === 'codestral-2508')).toBe(false);
       expect(allModels.some((model) => model.id === 'mistral-medium-3-5-2604')).toBe(false);
       expect(allModels.some((model) => model.id === 'devstral-2-2512')).toBe(false);
       expect(allModels.some((model) => model.id === 'mistral-medium-2508')).toBe(false);
@@ -96,6 +89,7 @@ describe('model-catalog', () => {
       const groups = getModelGroupsForAgent('google-gemini');
       expect(groups.length).toBeGreaterThanOrEqual(1);
       const allModels = groups.flatMap((g) => g.models);
+      expect(allModels.some((m) => m.id === 'gemini-3.8-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.7-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-2.5-pro')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.6-flash')).toBe(true);
@@ -113,8 +107,8 @@ describe('model-catalog', () => {
         'Gemini 2.5 Flash',
         'Gemini 2.5 Flash-Lite',
       ]);
-      expect(allModels.find((model) => model.id === 'gemini-3.1-flash-lite')?.name).toContain(
-        'retires May 7, 2027'
+      expect(allModels.find((model) => model.id === 'gemini-3.1-flash-lite')?.name).toBe(
+        'Gemini 3.1 Flash-Lite'
       );
     });
 
@@ -130,22 +124,27 @@ describe('model-catalog', () => {
         expect.arrayContaining(['OpenCode Zen', 'OpenCode Go'])
       );
       expect(allModels.some((m) => m.id === 'opencode/claude-sonnet-4-6')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/gpt-6-astra')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/gpt-6-sol')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/gemini-3.8-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/gemini-3.7-flash')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode/grok-4.6')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.2')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.2-contributor-free')).toBe(
+      expect(allModels.some((m) => m.id === 'opencode/grok-4.7')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.3')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.3-contributor-free')).toBe(
         true
       );
-      expect(allModels.some((m) => m.id === 'opencode/nemotron-3.5-lightning-free')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode/x-preview-f-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/ling-3.0-flash-fin-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/x-preview-f-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode/ling-3.0-tiny-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/glm-5.2')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/glm-5.3')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/gpt-6-luna')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/grok-4.7')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/deepseek-v4-flash-vision-exp')).toBe(
         true
       );
-      expect(allModels.some((m) => m.id === 'opencode-go/muse-spark-1.2-contributor')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode-go/ox-alpha-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/muse-spark-1.3-contributor')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/ox-alpha-free')).toBe(false);
     });
   });
 
@@ -155,6 +154,7 @@ describe('model-catalog', () => {
       expect(models.length).toBeGreaterThanOrEqual(14);
       expect(models.some((m) => m.id === 'claude-fable-5-1')).toBe(true);
       expect(models.some((m) => m.id === 'claude-fable-5')).toBe(true);
+      expect(models.some((m) => m.id === 'claude-opus-5-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-sonnet-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-4-8')).toBe(true);
@@ -171,6 +171,7 @@ describe('model-catalog', () => {
       const expectedOneMillionContextModels = [
         'claude-fable-5-1',
         'claude-fable-5',
+        'claude-opus-5-5',
         'claude-opus-5',
         'claude-sonnet-5',
         'claude-opus-4-8[1m]',
@@ -184,6 +185,7 @@ describe('model-catalog', () => {
       );
       // Native 1M models (Claude 5 family) are base IDs — no [1m] selector variants.
       expect(models.some((model) => model.id === 'claude-sonnet-5[1m]')).toBe(false);
+      expect(models.some((model) => model.id === 'claude-opus-5-5[1m]')).toBe(false);
       expect(models.some((model) => model.id === 'claude-opus-5[1m]')).toBe(false);
       expect(models.some((model) => model.id === 'claude-fable-5-1[1m]')).toBe(false);
 
@@ -249,6 +251,7 @@ describe('model-catalog', () => {
   describe('isKnownModel', () => {
     it('returns true for a known claude model', () => {
       expect(isKnownModel('claude-code', 'claude-fable-5-1')).toBe(true);
+      expect(isKnownModel('claude-code', 'claude-opus-5-5')).toBe(true);
       expect(isKnownModel('claude-code', 'claude-opus-5')).toBe(true);
       expect(isKnownModel('claude-code', 'claude-opus-4-7')).toBe(true);
     });
@@ -262,6 +265,9 @@ describe('model-catalog', () => {
     });
 
     it('returns true for a codex model under openai-codex', () => {
+      expect(isKnownModel('openai-codex', 'gpt-6-astra')).toBe(true);
+      expect(isKnownModel('openai-codex', 'gpt-6-sol')).toBe(true);
+      expect(isKnownModel('openai-codex', 'gpt-6-luna')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-5.6-sol')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-5.6-terra')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-5.6-luna')).toBe(true);

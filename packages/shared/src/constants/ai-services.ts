@@ -334,6 +334,12 @@ const OPENAI_GPT56_PREVIEW_PROFILE = {
   intendedRole: 'workspace-agent',
 } satisfies Pick<ModelDefinition, 'contextWindow' | 'toolCallSupport' | 'intendedRole'>;
 
+const OPENAI_GPT6_MODELS = [
+  ['gpt-6-astra', 'GPT-6 Astra', 'premium', 0.01, 0.05, 'openai-premium'],
+  ['gpt-6-sol', 'GPT-6 Sol', 'premium', 0.002, 0.01, 'openai-premium'],
+  ['gpt-6-luna', 'GPT-6 Luna', 'standard', 0.0001, 0.0005, 'openai-standard'],
+] as const satisfies readonly [string, string, PlatformAIModelTier, number, number, string][];
+
 const OPENAI_GPT56_PREVIEW_MODELS = [
   ['gpt-5.6-sol', 'GPT-5.6 Sol', 'premium', 0.005, 0.03, 'openai-premium'],
   ['gpt-5.6-terra', 'GPT-5.6 Terra', 'premium', 0.0025, 0.015, 'openai-premium'],
@@ -476,6 +482,11 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     fallbackGroup: 'anthropic-premium',
   }),
   anthropicModel({
+    id: 'claude-opus-5-5',
+    label: 'Claude Opus 5.5',
+    ...ANTHROPIC_OPUS_PREMIUM_PROFILE,
+  }),
+  anthropicModel({
     id: 'claude-opus-5',
     label: 'Claude Opus 5',
     ...ANTHROPIC_OPUS_PREMIUM_PROFILE,
@@ -502,7 +513,22 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     fallbackGroup: 'anthropic-premium',
   }),
   // --- OpenAI (via AI Gateway) ---
-  // GPT-5.6 preview series
+  // GPT-6 series
+  ...OPENAI_GPT6_MODELS.map(
+    ([id, label, tier, costPer1kInputTokens, costPer1kOutputTokens, fallbackGroup]) =>
+      openAIModel({
+        id,
+        label,
+        tier,
+        costPer1kInputTokens,
+        costPer1kOutputTokens,
+        contextWindow: 1050000,
+        toolCallSupport: 'excellent',
+        intendedRole: 'workspace-agent',
+        fallbackGroup,
+      })
+  ),
+  // GPT-5.6 previous series
   ...OPENAI_GPT56_PREVIEW_MODELS.map(
     ([id, label, tier, costPer1kInputTokens, costPer1kOutputTokens, fallbackGroup]) =>
       openAIModel({
@@ -515,7 +541,7 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
         fallbackGroup,
       })
   ),
-  // GPT-5.5 series (current flagship)
+  // GPT-5.5 / GPT-5.2 previous series
   openAIModel({
     id: 'gpt-5.5-pro',
     label: 'GPT-5.5 Pro',
@@ -538,7 +564,18 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-premium',
   }),
-  // GPT-5.4 series (current)
+  openAIModel({
+    id: 'gpt-5.2',
+    label: 'GPT-5.2',
+    tier: 'premium',
+    costPer1kInputTokens: 0.00175,
+    costPer1kOutputTokens: 0.014,
+    contextWindow: 400000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'workspace-agent',
+    fallbackGroup: 'openai-premium',
+  }),
+  // GPT-5.4 legacy series
   openAIModel({
     id: 'gpt-5.4-pro',
     label: 'GPT-5.4 Pro',
