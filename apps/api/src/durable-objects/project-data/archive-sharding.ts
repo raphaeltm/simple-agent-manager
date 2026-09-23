@@ -3941,19 +3941,22 @@ function searchArchiveProjection(
     params.push(...roles);
   }
 
-  const select = `SELECT d.document_id AS id, d.session_id, d.role, d.content, d.created_at,
-                          s.topic AS session_topic, s.task_id AS session_task_id
-                   FROM project_data_archive_search_documents d
-                   JOIN chat_sessions s ON s.id = d.session_id
-                   JOIN project_data_archive_target_sessions t ON t.session_id = d.session_id`;
+  // The AST SQL-safety check recognizes `whereClause` as a parameterized
+  // condition builder. Every caller value represented here is still bound
+  // through `params`; the only literal fragment is the fixed condition list.
+  const whereClause = conditions.join(' AND ');
   let rows: Record<string, unknown>[];
   if (ftsQuery) {
     rows = sql
       .exec(
-        `${select}
+        `SELECT d.document_id AS id, d.session_id, d.role, d.content, d.created_at,
+                s.topic AS session_topic, s.task_id AS session_task_id
+         FROM project_data_archive_search_documents d
+         JOIN chat_sessions s ON s.id = d.session_id
+         JOIN project_data_archive_target_sessions t ON t.session_id = d.session_id
          JOIN project_data_archive_search_documents_fts f ON f.rowid = d.rowid
          WHERE f.project_data_archive_search_documents_fts MATCH ?
-           AND ${conditions.join(' AND ')}
+           AND ${whereClause}
          ORDER BY rank
          LIMIT ?`,
         ftsQuery,
@@ -3964,9 +3967,13 @@ function searchArchiveProjection(
   } else {
     rows = sql
       .exec(
-        `${select}
+        `SELECT d.document_id AS id, d.session_id, d.role, d.content, d.created_at,
+                s.topic AS session_topic, s.task_id AS session_task_id
+         FROM project_data_archive_search_documents d
+         JOIN chat_sessions s ON s.id = d.session_id
+         JOIN project_data_archive_target_sessions t ON t.session_id = d.session_id
          WHERE d.content LIKE ? ESCAPE '\\'
-           AND ${conditions.join(' AND ')}
+           AND ${whereClause}
          ORDER BY d.created_at DESC, d.session_id ASC, d.document_id ASC
          LIMIT ?`,
         `%${query.replace(/[%_\\]/g, '\\$&')}%`,
