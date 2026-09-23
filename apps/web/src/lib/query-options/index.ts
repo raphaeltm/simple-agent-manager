@@ -30,6 +30,11 @@
  */
 
 export {
+  adminProjectDataArchiveBreakersQueryOptions,
+  adminProjectDataStorageQueryKeys,
+  adminProjectDataStorageTelemetryQueryOptions,
+} from './admin-project-data-storage';
+export {
   adminProjectEventInspectorQueryOptions,
   adminProjectEventQueryKeys,
 } from './admin-project-events';

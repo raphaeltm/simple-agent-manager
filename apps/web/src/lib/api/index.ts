@@ -92,6 +92,11 @@ export {
   updateSignupApprovalConfig,
 } from './admin';
 export {
+  closeAdminProjectDataArchiveCircuitBreaker,
+  fetchAdminProjectDataArchiveCircuitBreakers,
+  fetchAdminProjectDataStorageTelemetry,
+} from './admin-project-data-storage';
+export {
   createAgentProfile,
   createSkill,
   deleteAgentCredential,

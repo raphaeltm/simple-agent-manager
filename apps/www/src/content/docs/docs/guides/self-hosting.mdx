@@ -381,6 +381,10 @@ Notes:
 
 The sentinel user id defaults to `system_anonymous_trials`. If your deployment uses a different sentinel id, set `TRIAL_ANONYMOUS_USER_ID` to that value so the first-user checks exclude it correctly. This variable scopes the login-time self-heal hook and the first-user creation check; the deploy-time migration excludes the sentinel by its `status='system'` flag (not by id), so it stays correct regardless of this setting because the sentinel is always seeded with `status='system'`. Most deployments never need to set this.
 
+### Storage and archive circuit breakers
+
+**Admin → Storage** (`/admin/storage`) shows per-project ProjectData storage telemetry and the archive-sharding circuit breakers. When a project's archive drain fails repeatedly, its breaker opens and the scheduled sweep stops archiving that project until a superadmin closes the breaker. Use the **Close breaker** button on that page (it works from a phone) once the underlying failure is fixed; it calls `POST /api/admin/project-data/storage/:projectId/archive-sharding/circuit-breaker` with `state: "closed"` and the reason you enter. Closing a breaker does not thaw migrations that were already frozen.
+
 ## Teardown
 
 To remove all resources: Actions → Teardown → Run workflow → type `DELETE` to confirm.

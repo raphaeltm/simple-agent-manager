@@ -9,6 +9,7 @@ const ADMIN_TABS: Tab[] = [
   { id: 'integrations', label: 'Integrations', path: 'integrations' },
   { id: 'credentials', label: 'Credentials', path: 'credentials' },
   { id: 'infrastructure', label: 'Infrastructure', path: 'infrastructure' },
+  { id: 'storage', label: 'Storage', path: 'storage' },
   { id: 'ai-proxy', label: 'AI Proxy', path: 'ai-proxy' },
   { id: 'trials', label: 'Trials', path: 'trials' },
   { id: 'costs', label: 'Costs', path: 'costs' },

@@ -278,3 +278,62 @@ export interface LogStreamClientMessage {
   levels?: string[];
   search?: string;
 }
+
+// =============================================================================
+// Admin ProjectData storage (archive circuit breakers + storage telemetry)
+// =============================================================================
+
+export type AdminProjectDataArchiveCircuitBreakerState = 'closed' | 'open' | 'frozen';
+
+/** One row of `project_data_archive_circuit_breakers`, joined to the project name. */
+export interface AdminProjectDataArchiveCircuitBreaker {
+  projectId: string;
+  projectName: string | null;
+  repository: string | null;
+  state: AdminProjectDataArchiveCircuitBreakerState;
+  reason: string | null;
+  openedAt: number | null;
+  updatedAt: number;
+}
+
+export interface AdminProjectDataArchiveCircuitBreakersResponse {
+  breakers: AdminProjectDataArchiveCircuitBreaker[];
+  /** Rows skipped because they were malformed (rule 50: one bad row must not hide the list). */
+  skippedRows: number;
+  limit: number;
+}
+
+export interface AdminProjectDataArchiveCircuitBreakerControlResult {
+  projectId: string;
+  state: AdminProjectDataArchiveCircuitBreakerState;
+  reason: string;
+  frozenMigrations: number;
+  frozenLocations: number;
+  updatedAt: number;
+  note: string | null;
+}
+
+export interface AdminProjectDataArchiveCircuitBreakerControlResponse {
+  result: AdminProjectDataArchiveCircuitBreakerControlResult;
+}
+
+/** Raw D1 row shape returned by `GET /api/admin/project-data/storage`. */
+export interface AdminProjectDataStorageTelemetryRow {
+  project_id: string;
+  project_name: string | null;
+  repository: string | null;
+  measured_at: number;
+  database_size_bytes: number;
+  limit_bytes: number;
+  usage_ratio: number;
+  status: string;
+  growth_rate_bytes_per_day: number | null;
+  estimated_days_to_limit: number | null;
+  cleanup_health: string | null;
+  last_error: string | null;
+  updated_at: number;
+}
+
+export interface AdminProjectDataStorageTelemetryResponse {
+  telemetry: AdminProjectDataStorageTelemetryRow[];
+}
