@@ -474,7 +474,7 @@ describe('compact archive migration compatibility', () => {
             const beforeGets = vi.mocked(bucket.get).mock.calls.length;
             projectSearch = await archive.archiveTargetSearchProjectMessages(
               target,
-              env,
+              step === 0 ? { ...env, PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS: '2' } : env,
               {
                 kind: 'archive_shard',
                 projectId: 'project',
@@ -485,7 +485,9 @@ describe('compact archive migration compatibility', () => {
               null,
               10
             );
-            expect(vi.mocked(bucket.get).mock.calls.length - beforeGets).toBeLessThanOrEqual(1);
+            const chunkReads = vi.mocked(bucket.get).mock.calls.length - beforeGets;
+            if (step === 0 && rawChunkCount > 1) expect(chunkReads).toBe(2);
+            else expect(chunkReads).toBeLessThanOrEqual(1);
             if (step === 0 && rawChunkCount > 1) {
               const indexed = target
                 .exec(
@@ -559,7 +561,7 @@ describe('compact archive migration compatibility', () => {
               .toArray()[0]
           ).toEqual(expectedCoverage);
           expect(bucket.get).toHaveBeenCalledTimes(
-            rawChunkCount + (replayedInterruptedChunk ? 1 : 0) + 1
+            rawChunkCount + (replayedInterruptedChunk ? 1 : 0) + 2
           );
         }
         const recovered: unknown[] = [];

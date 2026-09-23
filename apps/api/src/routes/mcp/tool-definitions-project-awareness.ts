@@ -83,11 +83,6 @@ export const PROJECT_AWARENESS_TOOLS = [
           type: 'number',
           description: 'Max results to return (default: 10, max: 20)',
         },
-        continuation: {
-          type: 'string',
-          description:
-            'Signed continuation returned by archiveSearch.continuation. Repeat the same query, roles, and limit until archiveSearch.complete is true.',
-        },
       },
       required: ['query'],
       additionalProperties: false,
@@ -223,6 +218,11 @@ export const PROJECT_AWARENESS_TOOLS = [
         limit: {
           type: 'number',
           description: 'Max results to return (default: 10, max: 20)',
+        },
+        continuation: {
+          type: 'string',
+          description:
+            'Project-wide signed continuation returned by archiveSearch.continuation. Repeat the same query, roles, and limit until archiveSearch.complete is true. Cannot be combined with sessionId.',
         },
       },
       required: ['query'],

@@ -391,6 +391,8 @@ describe('ProjectData project-wide archive search metadata', () => {
         complete: false,
         partial: true,
         rootError: 'root_search_failed',
+        ownerCoverage: { attempted: 0, succeeded: 0, remaining: 0, complete: true },
+        indexCoverage: { complete: true },
       });
       expect(first.archiveSearch.continuation).toEqual(expect.any(String));
 
@@ -553,6 +555,7 @@ describe('ProjectData project-wide archive search metadata', () => {
         complete: false,
         resultsProvisional: true,
         executionErrors: [],
+        ownerCoverage: { attempted: 1, succeeded: 1, remaining: 0, complete: true },
         indexCoverage: { sessionsIncomplete: 1, complete: false },
       });
 
@@ -573,6 +576,43 @@ describe('ProjectData project-wide archive search metadata', () => {
         indexCoverage: { sessionsIncomplete: 0, complete: true },
       });
       expect(result.results.map((item) => item.id)).toEqual(['archive-message']);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('applies the configured public error retention limit', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createLocationTable(sqlite);
+      const stubs: Record<string, SearchStub> = { 'project-search': stub({}) };
+      const insert = sqlite.prepare(
+        `INSERT INTO project_data_session_locations
+           (project_id, session_id, location_state, owner_kind, owner_name,
+            generation, migration_id, routing_schema_version, updated_at)
+         VALUES ('project-search', ?, 'archive_shard', 'archive_shard', ?, 1, ?, 1, 1000)`
+      );
+      for (let index = 0; index < 3; index++) {
+        const owner = `project-search:archive:g1:s${index}`;
+        insert.run(`session-${index}`, owner, `migration-${index}`);
+        stubs[owner] = stub({ failArchive: true });
+      }
+      const result = await searchMessagesWithArchiveMetadata(
+        {
+          ...envForSearch(sqlite, stubs),
+          PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: '3',
+          PROJECT_DATA_ARCHIVE_SEARCH_ERROR_LIMIT: '2',
+        } as Env,
+        'project-search',
+        'needle',
+        null,
+        null,
+        10
+      );
+
+      expect(result.archiveSearch.executionErrors).toHaveLength(2);
+      expect(result.archiveSearch.archiveOwnersFailed).toBe(3);
+      expect(result.archiveSearch.complete).toBe(false);
     } finally {
       sqlite.close();
     }
@@ -602,7 +642,27 @@ describe('ProjectData project-wide archive search metadata', () => {
     }
   });
 
-  it('binds continuations to the project and original lifetime', async () => {
+  it('rejects continuations on session-scoped exact searches', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createLocationTable(sqlite);
+      await expect(
+        searchMessagesWithArchiveMetadata(
+          envForSearch(sqlite, { 'project-search': stub({}) }),
+          'project-search',
+          'needle',
+          'session-one',
+          null,
+          10,
+          'signed-project-wide-cursor'
+        )
+      ).rejects.toThrow('cannot be combined');
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('binds continuations to the project and configured fixed lifetime', async () => {
     vi.useFakeTimers({ now: 1_000_000 });
     const sqlite = new Database(':memory:');
     try {
@@ -626,6 +686,7 @@ describe('ProjectData project-wide archive search metadata', () => {
           'project-search:archive:g1:s1': stub({}),
         }),
         PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: '1',
+        PROJECT_DATA_ARCHIVE_SEARCH_CONTINUATION_TTL_MS: '1000',
       } as Env;
       const first = await searchMessagesWithArchiveMetadata(
         env,
@@ -650,7 +711,7 @@ describe('ProjectData project-wide archive search metadata', () => {
         )
       ).rejects.toThrow('does not match');
 
-      vi.setSystemTime(1_900_001);
+      vi.setSystemTime(1_001_001);
       await expect(
         searchMessagesWithArchiveMetadata(
           env,

@@ -451,6 +451,8 @@ describe('MCP Routes', () => {
     mockD1 = createMockD1();
     mockEnv.DATABASE = mockD1;
     mockEnv.CF_CONTAINER_ENABLED = 'false';
+    delete (mockEnv as Record<string, unknown>).ENCRYPTION_KEY;
+    delete (mockEnv as Record<string, unknown>).PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS;
     providerCredentialMocks.resolveCredentialSource.mockResolvedValue({
       credentialSource: 'user',
       providerName: 'hetzner',
@@ -622,6 +624,16 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('get_session_messages');
       expect(toolNames).toContain('get_archived_tool_payloads');
       expect(toolNames).toContain('search_messages');
+      const searchMessages = body.result.tools.find(
+        (tool: { name: string }) => tool.name === 'search_messages'
+      );
+      expect(searchMessages.inputSchema.properties.continuation).toMatchObject({
+        type: 'string',
+      });
+      const searchTasks = body.result.tools.find(
+        (tool: { name: string }) => tool.name === 'search_tasks'
+      );
+      expect(searchTasks.inputSchema.properties.continuation).toBeUndefined();
       expect(toolNames).toContain('update_session_topic');
       expect(toolNames).toContain('dispatch_task');
       // Message-comment tools
@@ -1948,6 +1960,109 @@ describe('MCP Routes', () => {
       expect(data.query).toBe('authentication');
     });
 
+    it('carries an authorized continuation through inventory and every archive owner', async () => {
+      mockD1._stmt.all.mockResolvedValue({
+        results: [
+          { owner_name: 'proj-456:archive:g1:s0', generation: 1 },
+          { owner_name: 'proj-456:archive:g1:s1', generation: 1 },
+        ],
+      });
+      Object.assign(mockEnv, {
+        ENCRYPTION_KEY: 'mcp-archive-search-test-key',
+        PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: '1',
+      });
+      mockDoStub.searchMessages.mockResolvedValueOnce([
+        {
+          id: 'root-message',
+          sessionId: 'root-session',
+          role: 'assistant',
+          snippet: 'root result',
+          createdAt: 100,
+          sessionTopic: 'Root',
+          sessionTaskId: null,
+        },
+      ]);
+      for (const [id, sessionId, createdAt] of [
+        ['archive-a', 'archive-session-a', 200],
+        ['archive-b', 'archive-session-b', 300],
+      ] as const) {
+        mockDoStub.archiveTargetSearchProjectMessages.mockResolvedValueOnce({
+          results: [
+            {
+              id,
+              sessionId,
+              role: 'assistant',
+              snippet: `result ${id}`,
+              createdAt,
+              sessionTopic: 'Archive',
+              sessionTaskId: null,
+            },
+          ],
+          coverage: {
+            sessionsAvailable: 1,
+            sessionsIndexed: 1,
+            sessionsIncomplete: 0,
+            repairAttempts: 0,
+            sessionsRepaired: 0,
+            errors: [],
+          },
+        });
+      }
+
+      const firstResponse = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: { query: 'archive' },
+        })
+      );
+      const firstBody = await firstResponse.json();
+      const first = JSON.parse(firstBody.result.content[0].text);
+      expect(first.archiveSearch).toMatchObject({
+        complete: false,
+        archiveOwnersAvailable: 2,
+        archiveOwnersQueried: 1,
+      });
+      expect(first.archiveSearch.continuation).toEqual(expect.any(String));
+
+      const secondResponse = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: { query: 'archive', continuation: first.archiveSearch.continuation },
+        })
+      );
+      const secondBody = await secondResponse.json();
+      const second = JSON.parse(secondBody.result.content[0].text);
+      expect(second.archiveSearch).toMatchObject({
+        complete: true,
+        continuation: null,
+        archiveOwnersAvailable: 2,
+        archiveOwnersQueried: 2,
+      });
+      expect(second.results.map((result: { messageId: string }) => result.messageId)).toEqual([
+        'archive-b',
+        'archive-a',
+        'root-message',
+      ]);
+      expect(mockDoStub.archiveTargetSearchProjectMessages).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ ownerName: 'proj-456:archive:g1:s0' }),
+        'archive',
+        ['user', 'assistant'],
+        10
+      );
+      expect(mockDoStub.archiveTargetSearchProjectMessages).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ ownerName: 'proj-456:archive:g1:s1' }),
+        'archive',
+        ['user', 'assistant'],
+        10
+      );
+      delete (mockEnv as Record<string, unknown>).ENCRYPTION_KEY;
+      delete (mockEnv as Record<string, unknown>).PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS;
+    });
+
     it('should reject empty query', async () => {
       const res = await mcpRequest(
         app,
@@ -2010,6 +2125,25 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.error).toBeDefined();
+      expect(mockDoStub.searchMessages).not.toHaveBeenCalled();
+    });
+
+    it('rejects a continuation combined with a session-scoped search', async () => {
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: {
+            query: 'test',
+            sessionId: 'session-one',
+            continuation: 'signed-project-wide-cursor',
+          },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error).toMatchObject({ code: -32602 });
+      expect(body.error.message).toContain('cannot be combined');
       expect(mockDoStub.searchMessages).not.toHaveBeenCalled();
     });
   });

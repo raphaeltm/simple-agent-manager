@@ -37,7 +37,9 @@ callers to distinguish a complete empty result from an incomplete or failed sear
 - Continuations must be tamper evident, finite-lived, byte bounded, bound to project/query/roles/limit,
   and re-authorized at every MCP continuation request. Cross-project owner rows must never be queried.
 - Search work must bound concurrency and per-step owner count without permanently truncating the owner
-  inventory. Failures remain visible and retryable; they cannot become successful empty results.
+  inventory. Archive-owner execution, index-repair, and missing/corrupt-object failures remain visible
+  and retryable; they cannot become successful empty results. Root FTS classification requires the
+  explicitly deferred Slice C `messages.ts` and bounded-root-index changes.
 - The six new runtime variables must be added to the Worker type, top-level Wrangler vars, both env
   examples, sync allowlist, centralized `wrangler_sync_env` mapping, public configuration docs, and
   the repository env-reference skill. Both Wrangler sync invocations inherit the central mapping.
@@ -100,8 +102,9 @@ callers to distinguish a complete empty result from an incomplete or failed sear
    provisional or final.
 2. Tampered, expired, mismatched, oversized, or cross-project continuations fail closed. Membership
    removal blocks the next MCP continuation before any owner search runs.
-3. Owner coverage, index coverage, pending repair, and execution errors remain distinct. Root, archive,
-   FTS, and missing/corrupt-object failures cannot appear as complete successful empty results.
+3. Owner coverage, index coverage, pending repair, and execution errors remain distinct. Archive-owner
+   execution, index-repair, and missing/corrupt-object failures cannot appear as complete successful
+   empty results. Root FTS classification remains an explicit Slice C acceptance item.
 4. The six configurable bounds are wired through every deployment path and their deployed staging
    values match the checked-in defaults.
 5. Tests, specialist reviews, one pinned staging deployment, measurements, CI, and the review gate are
@@ -112,7 +115,9 @@ callers to distinguish a complete empty result from an incomplete or failed sear
 - **Slice C:** DO migration 059, bounded root history indexing, `materialization.ts`, `messages.ts`,
   materialization row schemas, grouped rebuild backup, and incremental-materialization/storage-safety
   tests. In particular, `classifyRootSearchError()` and continuation-driven root index advancement from
-  parent commit `7868bc894` stay out of Slice B.
+  parent commit `7868bc894` stay out of Slice B. Until Slice C lands, the existing root
+  `searchMessagesFts()` path can still resolve an internal FTS error as an empty array; Slice B makes no
+  completeness claim for that deferred root-index behavior.
 - Canonical complete-message storage, transient-fragment disposal, tool-output migration, session-owned
   primary storage, and any separate partitioned search projection remain in idea
   `01M0YZNBKSKQZ47NC0K7M8N5AX`.
@@ -134,9 +139,10 @@ callers to distinguish a complete empty result from an incomplete or failed sear
   diff is inspected independently and excluded.
 - GitHub auth, Node, pnpm, staging token, production debugging token, and production account ID are
   available. No environment prerequisite is currently blocking implementation or measurement.
-- Focused service, MCP, SAM-session, and archive-sharding unit suites pass: 4 files, 333 tests. API
-  typecheck passes. Added direct coverage for project binding, fixed cursor lifetime, foreign-project
-  owner exclusion, and SAM-session continuation forwarding.
+- Focused service, MCP, SAM-session, archive-sharding, and compact-R2 suites pass: 5 files, 354 tests.
+  API typecheck passes. Added direct coverage for the real MCP-to-service continuation path, project
+  binding, fixed cursor lifetime, independent coverage dimensions, configurable error/repair bounds,
+  foreign-project owner exclusion, and exact-scope continuation rejection.
 - Full local gates pass: `pnpm check:fast`; `pnpm typecheck` (19/19 tasks); API Node suite (751
   files, 10,263 tests); full workerd suite (88 files, 1,180 tests); `pnpm build` (9/9 tasks);
   migration safety; Durable Object migration safety; and Wrangler binding validation.
@@ -149,14 +155,14 @@ cost evidence.
 
 ## Specialist review evidence
 
-| Reviewer                  | Status  | Outcome     |
-| ------------------------- | ------- | ----------- |
-| cloudflare-specialist     | PENDING | Not started |
-| security-auditor          | PENDING | Not started |
-| test-engineer             | PENDING | Not started |
-| constitution-validator    | PENDING | Not started |
-| doc-sync-validator        | PENDING | Not started |
-| task-completion-validator | PENDING | Not started |
+| Reviewer                  | Status  | Outcome |
+| ------------------------- | ------- | ------- |
+| cloudflare-specialist     | PASS    | Owner inventory/fanout, bounded DO/R2 repair, Wrangler/config sync, independent coverage, and strict Slice C exclusion pass |
+| security-auditor          | PASS    | Cursor signing/binding, authorization refresh, tenant isolation, and sanitized errors pass; unbounded query length deferred to idea `01M37Y00HSVM8VWSZCGXV8NDN3` |
+| test-engineer             | PASS    | Vertical MCP continuation plus configurable bounds and error paths pass; 5 focused files / 354 tests |
+| constitution-validator    | PASS    | Six settings remain configurable with bounded defaults; no Principle XI or scope violations |
+| doc-sync-validator        | PASS    | Runtime contracts, caps, per-collection error semantics, and Slice C root-FTS deferral are synchronized |
+| task-completion-validator | PASS    | Implementation and tests satisfy Slice B; staging/benchmark/PR remain the expected pending phases |
 
 ## References
 

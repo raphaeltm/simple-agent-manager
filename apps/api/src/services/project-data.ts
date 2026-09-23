@@ -1408,6 +1408,9 @@ export async function searchMessagesWithArchiveMetadata(
   continuation: string | null = null
 ): Promise<ProjectDataSearchMessagesWithArchiveMetadataResult> {
   const searchStartedAt = Date.now();
+  if (sessionId && continuation) {
+    throw new Error('Archive search continuation cannot be combined with a session-scoped search');
+  }
   if (sessionId) {
     const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
     const ownerStub = await getStubForOwner(env, projectId, owner.ownerName);
@@ -1636,7 +1639,18 @@ export async function searchMessagesWithArchiveMetadata(
   const errorLimit = resolveArchiveSearchErrorLimit(env);
   cursor.executionErrors = cursor.executionErrors.slice(-errorLimit);
   cursor.indexErrors = cursor.indexErrors.slice(-errorLimit);
-  cursor.ownersFailed = cursor.failedOwnerNames.length;
+  const failedOwnerNames = new Set(cursor.failedOwnerNames);
+  const successfullyQueriedOwnerNames = new Set(
+    cursor.ownerIndexCoverage
+      .map((item) => item.ownerName)
+      .filter((ownerName) => !failedOwnerNames.has(ownerName))
+  );
+  const attemptedOwnerNames = new Set([
+    ...cursor.ownerIndexCoverage.map((item) => item.ownerName),
+    ...failedOwnerNames,
+  ]);
+  cursor.ownersSucceeded = successfullyQueriedOwnerNames.size;
+  cursor.ownersFailed = failedOwnerNames.size;
   cursor.sessionsAvailable = cursor.ownerIndexCoverage.reduce(
     (total, item) => total + item.sessionsAvailable,
     0
@@ -1650,6 +1664,8 @@ export async function searchMessagesWithArchiveMetadata(
     0
   );
   const remaining = cursor.owners.length - cursor.nextOwner + cursor.retryOwners.length;
+  const ownerTraversalRemaining = Math.max(0, cursor.ownerCount - attemptedOwnerNames.size);
+  const ownerTraversalComplete = ownerTraversalRemaining === 0;
   const complete =
     remaining === 0 &&
     cursor.rootError === null &&
@@ -1657,7 +1673,11 @@ export async function searchMessagesWithArchiveMetadata(
     cursor.sessionsIncomplete === 0;
   const nextContinuation = complete ? null : await encodeArchiveSearchCursor(env, cursor);
   const hasErrors = cursor.rootError !== null || cursor.failedOwnerNames.length > 0;
-  const indexComplete = complete && cursor.sessionsIncomplete === 0 && cursor.ownersFailed === 0;
+  const indexComplete =
+    ownerTraversalComplete &&
+    cursor.sessionsIncomplete === 0 &&
+    cursor.ownersFailed === 0 &&
+    cursor.indexErrors.length === 0;
   const partial = !complete || !indexComplete || hasErrors;
 
   const response: ProjectDataSearchMessagesWithArchiveMetadataResult = {
@@ -1676,13 +1696,10 @@ export async function searchMessagesWithArchiveMetadata(
       archiveOwnersOmitted: remaining,
       archiveOwnerLimit,
       ownerCoverage: {
-        attempted: new Set([
-          ...cursor.ownerIndexCoverage.map((item) => item.ownerName),
-          ...cursor.failedOwnerNames,
-        ]).size,
+        attempted: attemptedOwnerNames.size,
         succeeded: cursor.ownersSucceeded,
-        remaining,
-        complete,
+        remaining: ownerTraversalRemaining,
+        complete: ownerTraversalComplete,
       },
       indexCoverage: {
         sessionsAvailable: cursor.sessionsAvailable,

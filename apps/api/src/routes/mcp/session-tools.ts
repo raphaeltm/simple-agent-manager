@@ -261,6 +261,13 @@ export async function handleSearchMessages(
     typeof params.continuation === 'string' && params.continuation.length > 0
       ? params.continuation
       : null;
+  if (sessionId && continuation) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'continuation cannot be combined with sessionId'
+    );
+  }
 
   await requireProjectAccess(
     drizzle(env.DATABASE, { schema }),

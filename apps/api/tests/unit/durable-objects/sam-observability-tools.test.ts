@@ -355,6 +355,27 @@ describe('search_task_messages', () => {
     );
   });
 
+  it.each([{ sessionId: 'session-one' }, { taskId: 'task-one' }])(
+    'rejects a continuation combined with exact scope $sessionId$taskId',
+    async (scope) => {
+      const callsBefore = mockSearchMessages.mock.calls.length;
+      const result = await searchTaskMessages(
+        {
+          projectId: 'proj-1',
+          query: 'test',
+          continuation: 'signed-project-wide-cursor',
+          ...scope,
+        },
+        buildCtx({ dbFirstResult: OWNED_PROJECT })
+      );
+
+      expect(result).toEqual({
+        error: 'continuation cannot be combined with sessionId or taskId.',
+      });
+      expect(mockSearchMessages).toHaveBeenCalledTimes(callsBefore);
+    }
+  );
+
   it('dispatches via executeTool', async () => {
     const ctx = buildCtx();
     const toolCall: CollectedToolCall = {
