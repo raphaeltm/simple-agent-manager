@@ -9,6 +9,7 @@
 `apps/web/src/components/AgentKeyCard.tsx` has three pre-existing accessibility issues flagged HIGH by the ui-ux-specialist during the project-credential-overrides review. These are shared-component issues that affect both user settings (`/settings/agents`) and project settings (`/projects/:id/settings`), so fixing them cross-cuts multiple surfaces and warrants a dedicated PR with focused a11y testing.
 
 The project-credential-overrides PR defers these to this task because:
+
 - Not introduced by that PR (pre-existing in the shared component)
 - Fixing requires coordinated a11y test pass across user + project contexts
 - A focused PR is cheaper to review than bundling unrelated a11y work

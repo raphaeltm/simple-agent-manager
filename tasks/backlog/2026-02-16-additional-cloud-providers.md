@@ -65,12 +65,12 @@ Most unusual auth (custom SHA1 signature + time sync) and NO instance tags. Low 
 Four of the seven providers in the original consolidated file have shipped and their sections
 were removed from this file:
 
-| Provider | Evidence in `main` |
-| --- | --- |
-| DigitalOcean | `packages/providers/src/digitalocean.ts` (+ `-volumes`, `-tags`, `-metadata`, `validation-digitalocean.ts`) |
-| Vultr | `packages/providers/src/vultr.ts` (+ `-volumes`, `-labels`, `-metadata`, `validation-vultr.ts`) |
-| UpCloud | `packages/providers/src/upcloud.ts` (+ `upcloud-utils.ts`, `validation-upcloud.ts`) |
-| GCP Compute Engine | `packages/providers/src/gcp.ts` (+ `gcp-native-instance.ts`, `gcp-metadata.ts`) |
+| Provider           | Evidence in `main`                                                                                          |
+| ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| DigitalOcean       | `packages/providers/src/digitalocean.ts` (+ `-volumes`, `-tags`, `-metadata`, `validation-digitalocean.ts`) |
+| Vultr              | `packages/providers/src/vultr.ts` (+ `-volumes`, `-labels`, `-metadata`, `validation-vultr.ts`)             |
+| UpCloud            | `packages/providers/src/upcloud.ts` (+ `upcloud-utils.ts`, `validation-upcloud.ts`)                         |
+| GCP Compute Engine | `packages/providers/src/gcp.ts` (+ `gcp-native-instance.ts`, `gcp-metadata.ts`)                             |
 
 Infomaniak also shipped (`packages/providers/src/infomaniak.ts`) and was never in this file.
 

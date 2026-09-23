@@ -588,7 +588,7 @@ Still open — this is why the file stays here:
 
 - Headline acceptance is `sql.databaseSize` **≤ 9,000,000,000 bytes**. The production root
   ProjectData DO measured **10,103,668,736 bytes** at 2026-09-23 21:48Z, status `degraded`.
-  It is *above* the configured 10^10 limit, not below the 9 GB target — the gap has widened
+  It is _above_ the configured 10^10 limit, not below the 9 GB target — the gap has widened
   since this task was written.
 - The post-operation observation window has therefore never been satisfied.
 
@@ -599,7 +599,7 @@ Current live threads that will actually move this number (do not duplicate them 
 - **Slice C** (bounded root history indexing) — queued behind B.
 - Two poisoned SAM migrations (`67927ce6`, `6d6f3099`) are excluded from the drain until
   abandoned via `POST …/archive-sharding/migrations/:id/abandon`. There is no Admin UI
-  button for abandon yet (the *close breaker* button shipped in PR #2135).
+  button for abandon yet (the _close breaker_ button shipped in PR #2135).
 - Drain rate after the breaker was closed on 2026-09-23 is roughly **1 session/hour**
   (sweep budget 8 sessions / 10k messages per hour) against 3,751 remaining terminal
   sessions. At that rate the backlog does not clear on its own.
