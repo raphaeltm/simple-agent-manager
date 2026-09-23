@@ -1916,6 +1916,7 @@ describe('MCP Routes', () => {
   describe('search_messages', () => {
     beforeEach(() => {
       mockKV.get.mockResolvedValue(validTokenData);
+      mockDispatchProjectAccess();
     });
 
     it('should search messages across sessions', async () => {
@@ -1994,6 +1995,22 @@ describe('MCP Routes', () => {
         ['user', 'assistant'],
         expect.any(Number)
       );
+    });
+
+    it('rechecks active project membership before accepting a continuation', async () => {
+      mockDispatchProjectAccess({ memberRole: null });
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: { query: 'test', continuation: 'previously-valid-signed-cursor' },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(mockDoStub.searchMessages).not.toHaveBeenCalled();
     });
   });
 

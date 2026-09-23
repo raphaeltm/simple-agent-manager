@@ -332,7 +332,26 @@ describe('search_task_messages', () => {
       'test',
       'resolved-session',
       null,
-      expect.any(Number)
+      expect.any(Number),
+      null
+    );
+  });
+
+  it('forwards the signed archive continuation', async () => {
+    mockSearchMessages.mockResolvedValueOnce([]);
+    const ctx = buildCtx({ dbFirstResult: OWNED_PROJECT });
+    await searchTaskMessages(
+      { projectId: 'proj-1', query: 'test', continuation: 'signed-continuation' },
+      ctx
+    );
+    expect(mockSearchMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'test',
+      null,
+      null,
+      expect.any(Number),
+      'signed-continuation'
     );
   });
 

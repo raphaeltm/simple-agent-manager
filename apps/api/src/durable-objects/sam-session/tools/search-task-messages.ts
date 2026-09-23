@@ -51,6 +51,11 @@ export const searchTaskMessagesDef: AnthropicToolDef = {
         type: 'number',
         description: `Max results to return. Defaults to ${DEFAULT_LIMIT}, max ${DEFAULT_MAX_LIMIT}.`,
       },
+      continuation: {
+        type: 'string',
+        description:
+          'Signed continuation returned by archiveSearch.continuation. Repeat the same query until archiveSearch.complete is true.',
+      },
     },
     required: ['projectId', 'query'],
   },
@@ -64,6 +69,7 @@ export async function searchTaskMessages(
     sessionId?: string;
     roles?: string[];
     limit?: number;
+    continuation?: string;
   },
   ctx: ToolContext
 ): Promise<unknown> {
@@ -119,7 +125,8 @@ export async function searchTaskMessages(
     input.query.trim(),
     sessionId,
     roles,
-    limit
+    limit,
+    input.continuation?.trim() || null
   );
 
   return {
