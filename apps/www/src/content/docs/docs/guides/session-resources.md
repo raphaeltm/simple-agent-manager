@@ -22,7 +22,10 @@ desktop and full-screen on mobile.
 The button is always there, including on sessions that already ended — which is usually when you
 want it, because the workspace is gone and this is the only record left.
 
-![The Resources drawer for a chat session: stat cards reading CPU peak 4,120 ms/sample, RAM peak 3.4 GB, I/O total, and a sample count; an amber banner reading "1 OOM event observed in retained samples"; and a detail timeline chart with a green CPU line, a dashed purple RAM line, and blue tool-window bands.](/images/docs/session-resources-drawer.png)
+![The Resources drawer for a chat session: stat cards reading CPU peak 4120 ms/sample, RAM peak 3.4 GB, I/O total 384 MB read and 1.1 GB write, and 684 samples with 1 gap; an amber banner reading "1 OOM event observed in retained samples"; a detail timeline chart with a green CPU line, a dashed purple RAM line, blue tool-window bands and an amber OOM marker; a Tool windows list; and a collapsed "2 chunks" disclosure.](/images/docs/session-resources-drawer.png)
+
+On mobile the same panel fills the screen and scrolls, with the stat cards and the OOM
+banner first so the answer is above the fold.
 
 ## Reading the panel
 
@@ -69,15 +72,18 @@ The chart loads automatically for the most recent slice of the session:
 - **Purple dashed line** — RAM, normalized to this slice's own RAM peak.
 - **Blue bands** — tool windows: stretches where the agent had one or more tool calls in flight.
   A fainter band means SAM inferred the end of the window rather than observing it.
-- **Dashed vertical markers** — a gap, a counter reset, or an out-of-memory sample. Markers near
-  the top are OOM events; markers near the bottom are gaps and resets.
+- **An amber marker at the top**, with a dashed line down the chart — an out-of-memory sample.
+- **A small grey dot at the bottom** — a gap or a counter reset. (These are easy to miss; see
+  [Gaps and resets](#gaps-and-resets) for why they matter.)
 
 Each line is scaled to its **own** peak within the slice, so the two lines are shaped for reading
 against the tool bands — not against each other. A tall green line does not mean CPU is higher
 than RAM.
 
-Below the chart, **Tool windows** lists each window with its time, duration, and how many tool
-calls overlapped. Under it, the I/O read and write totals for this slice.
+Below the chart, **Tool windows** lists each window with its start time, duration, and how many
+tool calls overlapped. Every entry currently reads `acp_tool_call`: SAM records that a tool ran,
+not which one, so the list tells you _when_ and _how long_, never _what_. Under it, the I/O read
+and write totals for this slice.
 
 ### 4. Chunks
 
@@ -97,8 +103,10 @@ A **gap** means SAM has no observations for a stretch — the node was rebooted,
 or telemetry could not be collected. A **counter reset** means the kernel counters the agent reads
 went backwards, usually because the container was recreated.
 
-Neither is an error. They matter because a gap is *not* a period of zero usage: do not read a flat
-line across a gap as "the agent was idle." The marker is there so you can tell the two apart.
+Neither is an error. They matter because a gap is _not_ a period of zero usage: do not read a flat
+line across a gap as "the agent was idle." The **Samples** stat card counts them, so when that card
+says there were gaps, check the timeline for the grey dots before drawing conclusions from a quiet
+stretch.
 
 ## What this does not tell you
 

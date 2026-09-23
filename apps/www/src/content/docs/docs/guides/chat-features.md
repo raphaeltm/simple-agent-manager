@@ -31,9 +31,15 @@ features on this page are opened from.
 | **Complete**  | Mark the task complete                                                                                    | When the task is not already finished  |
 | **Details**   | Session identifiers and the infrastructure it ran on                                                      | Always                                 |
 
+![The session tool rail in icons-and-labels mode, listing Files, Git, Timeline, Resources, Events and Comments, then Retry and Fork after a divider, with Report, Complete and Details pinned at the bottom.](/images/docs/session-tool-rail.png)
+
 **Files** and **Git** need a running workspace, so they disappear once a session stops or fails.
 Everything else stays — which matters, because inspecting resources, reading the timeline, or
 reporting a problem is usually something you want to do _after_ a session ended.
+
+The rail is grouped by what each tool acts on: the workspace and its history at the top, the task
+behind the session in the middle, and cross-cutting actions pinned to the bottom so they stay
+reachable however long the top group grows.
 
 ### Changing how much of the rail you see
 
@@ -100,6 +106,8 @@ A single agent turn often runs dozens of tools between two sentences of prose. T
 keep the conversation readable, SAM folds a run of consecutive tool calls into one
 compact **activity card** that simply states how many ran — for example
 `7 tool calls`.
+
+![A chat timeline: a user message, the agent's plan in prose, a single collapsed card reading "8 tool calls · 1 failed", then the agent's summary of what it found. The eight individual tool calls are hidden behind the one card.](/images/docs/chat-tool-activity-card.png)
 
 - While the run is in progress the card shows a motion indicator plus the tool
   currently executing (or `thinking…` while the agent reasons between calls). When
