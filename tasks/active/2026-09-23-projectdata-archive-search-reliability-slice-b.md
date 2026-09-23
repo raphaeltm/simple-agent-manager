@@ -75,7 +75,7 @@ callers to distinguish a complete empty result from an incomplete or failed sear
       tampering, expiry, query mismatch, cross-project isolation, repair/error disclosure, and legacy
       behavior.
 - [x] Add MCP and SAM-session contract coverage, including authorization revocation mid-continuation.
-- [ ] Run focused and full API/Workers suites plus every requested local quality gate.
+- [x] Run focused and full API/Workers suites plus every requested local quality gate.
 - [ ] Complete Cloudflare, security, test, constitution, documentation, and task-completion reviews;
       resolve all blocking findings and record each result in the PR.
 - [ ] Deploy one pinned SHA after checking shared staging occupancy. Prove complete archive-owner
@@ -137,6 +137,9 @@ callers to distinguish a complete empty result from an incomplete or failed sear
 - Focused service, MCP, SAM-session, and archive-sharding unit suites pass: 4 files, 333 tests. API
   typecheck passes. Added direct coverage for project binding, fixed cursor lifetime, foreign-project
   owner exclusion, and SAM-session continuation forwarding.
+- Full local gates pass: `pnpm check:fast`; `pnpm typecheck` (19/19 tasks); API Node suite (751
+  files, 10,263 tests); full workerd suite (88 files, 1,180 tests); `pnpm build` (9/9 tasks);
+  migration safety; Durable Object migration safety; and Wrangler binding validation.
 
 ## Benchmark and architecture decision
 
