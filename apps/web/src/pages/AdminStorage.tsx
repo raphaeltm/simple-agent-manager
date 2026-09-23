@@ -132,7 +132,7 @@ function TelemetryRow({ row }: { row: AdminProjectDataStorageTelemetryRow }) {
           <> · {formatBytes(row.growth_rate_bytes_per_day)}/day</>
         )}
         {row.estimated_days_to_limit !== null && (
-          <> · ~{row.estimated_days_to_limit} days to limit</>
+          <> · ~{Math.round(row.estimated_days_to_limit).toLocaleString()} days to limit</>
         )}
         {row.cleanup_health && <> · cleanup {row.cleanup_health}</>}
       </div>
