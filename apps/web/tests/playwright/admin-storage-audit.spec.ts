@@ -109,6 +109,17 @@ const TELEMETRY = {
   ],
 };
 
+/**
+ * The first-run cloud onboarding wizard overlays every authenticated page when the
+ * mocked user has no credentials. It would cover the surface under test (see
+ * .claude/rules/62), so mark it dismissed before the app boots.
+ */
+async function dismissOnboardingWizard(page: Page) {
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, ADMIN_USER.user.id);
+}
+
 async function respondJson(route: Route, status: number, body: unknown) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
@@ -122,6 +133,7 @@ async function setupMocks(
     telemetryStatus?: number;
   }
 ) {
+  await dismissOnboardingWizard(page);
   await setupAuditRoutes(page, (path, respond) => {
     if (path === '/api/auth/get-session') return respond(200, ADMIN_USER);
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
@@ -131,6 +143,10 @@ async function setupMocks(
     if (path === '/api/notifications') {
       return respond(200, { notifications: [], unreadCount: 0, nextCursor: null });
     }
+    if (path.startsWith('/api/credentials')) return respond(200, []);
+    if (path === '/api/github/installations') return respond(200, []);
+    if (path === '/api/workspaces') return respond(200, []);
+    if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
     if (path === '/api/admin/project-data/storage/archive-sharding/circuit-breakers') {
       return respond(options.breakerStatus ?? 200, options.breakers ?? BREAKERS);
     }
@@ -193,6 +209,7 @@ test.describe('AdminStorage', () => {
   }) => {
     let breakers = structuredClone(BREAKERS);
     const postBodies: Array<{ path: string; body: unknown }> = [];
+    await dismissOnboardingWizard(page);
     await page.route('**/api/**', async (route) => {
       const request = route.request();
       const path = new URL(request.url()).pathname;
@@ -204,6 +221,11 @@ test.describe('AdminStorage', () => {
       if (path === '/api/notifications') {
         return respondJson(route, 200, { notifications: [], unreadCount: 0, nextCursor: null });
       }
+      if (path.startsWith('/api/credentials')) return respondJson(route, 200, []);
+      if (path === '/api/github/installations') return respondJson(route, 200, []);
+      if (path === '/api/workspaces') return respondJson(route, 200, []);
+      if (path.startsWith('/api/provider-catalog'))
+        return respondJson(route, 200, { catalogs: [] });
       if (path === '/api/admin/project-data/storage') return respondJson(route, 200, TELEMETRY);
       if (path === '/api/admin/project-data/storage/archive-sharding/circuit-breakers') {
         return respondJson(route, 200, breakers);
