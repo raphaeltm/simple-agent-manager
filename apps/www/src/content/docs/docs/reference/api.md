@@ -177,9 +177,9 @@ Retained CPU, memory, I/O, and out-of-memory observations for VM-backed workspac
 
 All three return `{ summary, chunks }`, where `summary` carries the session's peaks, sample and gap counts, I/O totals, and OOM count, and `chunks` is the index of retained time slices, newest first and capped at `WORKSPACE_RESOURCE_LIST_LIMIT` (24) with no pagination. Add `?chunkId=` to include a `detail` object with that chunk's samples and tool-correlation spans, downsampled to `WORKSPACE_RESOURCE_DETAIL_MAX_POINTS` (720) with spikes preserved.
 
-Samples are workspace-cgroup observations, not per-process attribution. Stored payloads deliberately exclude prompts, commands, tool names, tool arguments, tool output, file paths, environment values, and secrets; tool-call IDs are hashed. Instant (Cloudflare Container) sessions have no resource history and return an empty summary and chunk list.
+Samples are workspace-cgroup observations, not per-process attribution. Stored payloads deliberately exclude prompts, commands, tool names, tool arguments, tool output, file paths, environment values, and secrets; tool-call IDs are hashed. Instant (Cloudflare Container) sessions have no resource history: the response is `200` with `summary: null` and an empty `chunks` array.
 
-Agents read the same data with the `get_resource_history` MCP tool, which takes no `projectId` — the project comes from the verified token — and defaults to the caller's own session, task, or workspace.
+Agents read the same data with the `get_resource_history` MCP tool, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
 
 ## Nodes
 

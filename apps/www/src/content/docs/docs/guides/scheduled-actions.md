@@ -4,7 +4,54 @@ description: Schedule a message or a new session and manage project event automa
 ---
 
 Open **Events** in a project to schedule work, watch for events, and see what automation is
-already running. [Where to find it](#where-to-find-it) is at the bottom if you need the tour first.
+already running. It has four sections — **Subscriptions**, **Schedules**, **Standing watches**, and
+**Channels** — and a session-scoped version of the first three lives in every chat.
+
+## Where to find it
+
+### Everything in the project
+
+The **project Events page** — **Events** in the project navigation — is the full view. It has four
+sections: **Subscriptions**, **Schedules**, **Standing watches**, and **Channels**. Each carries an
+icon, and a section you have loaded keeps a count beside its name as you move between them (a
+section holding nothing shows no count). Schedules refresh every 30 seconds
+while the tab is in front (and stop while it is in the background, so a page left open does not
+poll forever). Every section has its own empty state naming what would appear there, so "nothing
+here" never looks like a failed load.
+
+![The project Events page: Subscriptions, Schedules, Standing watches and Channels section buttons with icons, the open Subscriptions section carrying a count of 2, and two subscription cards showing their reason, owner, filter, requested and resolved delivery, target session link, and green "active" state badges.](/images/docs/project-events-page.png)
+
+### What is attached to this one chat?
+
+The **session Events drawer** is the same data, narrowed to one conversation. Open a chat session,
+click **Events** in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail), and
+the drawer opens over the chat with **Subscriptions**, **Schedules**, and **Watches** tabs for that
+session. It answers "what automation is attached to _this_ chat" without leaving the chat.
+**View full page** at the bottom hands you to the project page with the same session filter applied;
+it always lands on Subscriptions, whichever tab you had open.
+
+![The Events drawer open over a chat session, headed "Events", with Subscriptions, Schedules and Watches tabs; the Subscriptions tab shows two session-scoped subscriptions with their state, delivery routing, target session link, and Inspect delivery and Cancel subscription buttons; a "View full page" link sits at the bottom.](/images/docs/session-events-drawer.png)
+
+On the project page, a session filter shows a banner with the first eight characters of the
+session ID (a link back to the chat) and a **Show whole project** button to clear it. Channels are
+always project-wide — that banner says so — because a channel is shared between agents rather than
+owned by one conversation.
+
+### Reading a state badge
+
+Badges are coloured the same way here as in the admin event inspector, and every badge spells its
+state out in text as well, so you never have to rely on the colour.
+
+| Colour | States                                                                                      |
+| ------ | ------------------------------------------------------------------------------------------- |
+| Green  | `active`, `delivered`, `acked`, `accepted`, `matched`, `batch_created`, `record_only`       |
+| Blue   | `pending`, `queued_for_prompt_delivery`, `runtime_steer`, `runtime_interrupt`, `spawn_task` |
+| Amber  | `retry`, `ambiguous`                                                                        |
+| Red    | `failed`, `unauthorized`, `unsupported`, `critical`, `error`                                |
+| Grey   | `cancelled`, `expired`, `recorded_not_injected`, and anything else                          |
+
+Grey is also the fallback for a state the UI does not recognise, so read the badge's text rather
+than inferring "finished" from the colour.
 
 ## Schedule once
 
@@ -74,49 +121,6 @@ webhook pass a different trigger's filters.
 Project members can inspect automation. Project writers can change it. Access is
 checked again when an action fires; schedules store creator identity, never an
 agent's bearer token.
-
-## Where to find it
-
-### Everything in the project
-
-The **project Events page** — **Events** in the project navigation — is the full view. It has four
-sections: **Subscriptions**, **Schedules**, **Standing watches**, and **Channels**. Each carries an
-icon, and once you have opened a section its button keeps a count beside its name, so you can see
-at a glance where the activity is as you move between them. Schedules refresh every 30 seconds
-while the tab is in front (and stop while it is in the background, so a page left open does not
-poll forever). Every section has its own empty state naming what would appear there, so "nothing
-here" never looks like a failed load.
-
-![The project Events page: Subscriptions, Schedules, Standing watches and Channels section buttons with icons, the open Subscriptions section carrying a count of 2, and two subscription cards showing their reason, owner, filter, requested and resolved delivery, target session link, and green "active" state badges.](/images/docs/project-events-page.png)
-
-### What is attached to this one chat?
-
-The **session Events drawer** is the same data, narrowed to one conversation. Open a chat session,
-click **Events** in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail), and
-the drawer opens over the chat with **Subscriptions**, **Schedules**, and **Watches** tabs for that
-session. It answers "what automation is attached to _this_ chat" without leaving the chat.
-**View full page** at the bottom hands you to the project page with the same session filter applied;
-it always lands on Subscriptions, whichever tab you had open.
-
-![The Events drawer open over a chat session, headed "Events", with Subscriptions, Schedules and Watches tabs; the Subscriptions tab shows two session-scoped subscriptions with their state, delivery routing, target session link, and Inspect delivery and Cancel subscription buttons; a "View full page" link sits at the bottom.](/images/docs/session-events-drawer.png)
-
-On the project page, a session filter shows a banner with the first eight characters of the
-session ID (a link back to the chat) and a **Show whole project** button to clear it. Channels are
-always project-wide — the banner says so — because a channel is shared between agents rather than
-owned by one conversation.
-
-### Reading a state badge
-
-Badges are coloured the same way here as in the admin event inspector, and every badge spells its
-state out in text as well, so you never have to rely on the colour.
-
-| Colour | States                                      |
-| ------ | ------------------------------------------- |
-| Green  | active, delivered, acked, accepted, matched |
-| Blue   | pending and other in-flight routing states  |
-| Amber  | retry, ambiguous                            |
-| Red    | failed, unauthorized, unsupported, error    |
-| Grey   | cancelled, expired, recorded-not-injected   |
 
 ## Storage and input limits
 

@@ -44,6 +44,8 @@ sample 28): the grey dot is present, the vertical line is not.
       remains in `apps/web/src` (grep as part of the fix).
 - [ ] If the fix changes the drawer's appearance, re-run
       `DOCS_SHOTS=1 npx playwright test docs-screenshots-sessions` and commit the
-      refreshed docs image, and re-read
-      `apps/www/src/content/docs/docs/guides/session-resources.md#gaps-and-resets`,
-      which currently describes the marker as it actually renders today.
+      refreshed docs image. Three places in
+      `apps/www/src/content/docs/docs/guides/session-resources.md` describe the marker
+      as it renders *today* and must be updated together, or the guide half-reverts:
+      the chart-legend bullet under "The detail timeline", the "Gaps and resets"
+      section, and the Troubleshooting row about a long flat stretch.

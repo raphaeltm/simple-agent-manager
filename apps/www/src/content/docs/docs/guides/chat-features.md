@@ -1,6 +1,6 @@
 ---
 title: Chat Features
-description: File browsing, conversation forking, voice input, text-to-speech, and real-time streaming in SAM's chat interface.
+description: The session tool rail, file browsing, tool activity cards, conversation forking, search, voice input, and text-to-speech in SAM's chat interface.
 ---
 
 SAM's project pages are chat-first interfaces where you interact with AI coding agents in real-time.
@@ -11,12 +11,12 @@ Recent chat updates make the workspace feel more like a persistent work surface:
 
 Agent output streams directly to your browser via WebSocket. You see code being written, terminal commands executing, and the agent's thought process as it happens — no waiting for a complete response.
 
-## The session tool rail
+## The Session Tool Rail
 
 Most of what you can do _to_ a session — rather than _say_ to it — lives in the **tool rail** down
 the right edge of the chat. It is the same rail on desktop and mobile, and it is where most of the
 features on this page are opened from. (The session's lifecycle controls — Interrupt, Sleep,
-Archive — and the agent's plan sit in the dock just below the composer instead, because they act on
+Archive — and the agent's plan sit in the dock just above the composer instead, because they act on
 the conversation you are in rather than opening something beside it.)
 
 | Tool          | What it opens                                                                                                                                                      | When it appears                                          |
@@ -45,7 +45,7 @@ The rail is grouped by what each tool acts on: the workspace and its history at 
 behind the session in the middle, and cross-cutting actions pinned to the bottom so they stay
 reachable however long the top group grows.
 
-### Changing how much of the rail you see
+### Changing How Much of the Rail You See
 
 The chevron at the top of the rail cycles it through three modes:
 
@@ -114,10 +114,10 @@ compact **activity card** that simply states how many ran — for example
 ![A chat timeline: a user message, the agent's plan in prose, a single collapsed card reading "8 tool calls · 1 failed", then the agent's summary of what it found. The eight individual tool calls are hidden behind the one card.](/images/docs/chat-tool-activity-card.png)
 
 - While the run is in progress the card shows a motion indicator plus the tool
-  currently executing — or `thinking…` while the agent reasons between calls, or just
-  `working` when there is nothing more specific to name. When the run finishes the
-  indicator settles, with no layout jump: a check mark if every call succeeded, a red ✗
-  if any of them failed.
+  currently executing (`· running <tool>`) — or `· thinking…` while the agent reasons
+  between calls, or `· working` when there is nothing more specific to name. When the
+  run finishes the indicator settles, with no layout jump: a check mark if every call
+  succeeded, a red ✗ if any of them failed.
 - If any call failed, the card says so in text as well as colour — for example
   `7 tool calls · 2 failed`.
 - A single tool call is folded too, into a `1 tool call` card.
@@ -229,10 +229,18 @@ Each `chat_messages` row is a single streaming token, so no row holds a whole wo
 
 Indexing is incremental: it runs every time a session sleeps and again when it stops, fails, or is cleaned up after going idle, and each pass covers only the messages written since the last one.
 
-- **Everything indexed so far**: full-text search with stemming and phrase matching
-- **Messages written since a session was last indexed**: keyword-based fallback search
+- **Everything indexed so far**: full-text search with stemming and phrase matching.
+- **Messages written since a session was last indexed**: keyword-based fallback search. This
+  rescues whole user messages; streaming agent output is split across too many rows for a keyword
+  match, so agent text becomes searchable only once the next pass runs.
+- **Sessions whose index was pruned for storage**: keyword fallback only, permanently. Under
+  storage pressure SAM deletes the grouped rows and index entries for terminal sessions older than
+  a week to reclaim space, and deliberately never re-indexes them — re-indexing would undo the
+  reclaimed bytes. In practice those old sessions are hard to find by search.
 
-Agents can search messages using the `search_messages` MCP tool.
+Agents search messages with the `search_messages` MCP tool. The project chat's own "Search chats"
+box is a different thing: it filters the session list by topic, session ID, and creator, and does
+not look inside messages.
 
 ## Session Lifecycle
 

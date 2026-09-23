@@ -5,7 +5,8 @@ description: Read the CPU, memory, and I/O history SAM retains for a workspace s
 
 Every VM-backed workspace records what it actually used — CPU, memory, disk I/O, and
 out-of-memory events — and keeps that history after the machine is gone. Open **Resources**
-in a chat session's tool rail to read it.
+in a chat session's tool rail to read it. ([Instant](/docs/guides/instant-sessions/) sessions
+are the exception — see [below](#where-resource-history-exists--and-where-it-doesnt).)
 
 This answers questions you previously had to guess at:
 
@@ -20,18 +21,33 @@ on the right edge and click **Resources** (the activity icon). The panel opens a
 desktop and full-screen on mobile.
 
 The button is always there, including on sessions that already ended — which is usually when you
-want it, because the workspace is gone and this is the only record left.
+want it, because the workspace is gone and this is the only record left. It is also there on
+sessions that never collected anything, where it shows an empty state rather than hiding itself.
 
 ![The Resources drawer for a chat session: stat cards reading CPU peak 4120 ms/sample, RAM peak 3.4 GB, I/O total 384 MB read and 1.1 GB write, and 684 samples with 1 gap; an amber banner reading "1 OOM event observed in retained samples"; a detail timeline chart with a green CPU line, a dashed purple RAM line, blue tool-window bands and an amber OOM marker; a Tool windows list; and a collapsed "2 chunks" disclosure.](/images/docs/session-resources-drawer.png)
 
 On mobile the same panel fills the screen and scrolls, with the stat cards and the OOM banner
 first so the answer is above the fold.
 
-![The same Resources panel on a phone: it fills the whole screen, with the four stat cards, the OOM banner and the start of the timeline chart visible, and the rest reachable by scrolling.](/images/docs/session-resources-drawer-mobile.png)
+![The same Resources panel on a phone, filling the whole screen: the four stat cards stacked two by two, the amber OOM banner, the full timeline chart with its four-line legend and chunk I/O totals, and the first Tool windows row, with the rest reachable by scrolling.](/images/docs/session-resources-drawer-mobile.png)
+
+## Where resource history exists — and where it doesn't
+
+| Runtime                                                                        | Resource history |
+| ------------------------------------------------------------------------------ | ---------------- |
+| **VM-backed workspaces** (standard sessions and tasks)                         | Yes              |
+| **[Instant sessions](/docs/guides/instant-sessions/)** (Cloudflare Containers) | No               |
+| **[App deployment](/docs/guides/app-deployments/) nodes**                      | No               |
+
+The collector runs in the VM agent when it holds the workspace role, which Instant containers do
+not. Opening **Resources** on an Instant session shows _"No retained resource history is available
+for this session yet."_ — that is the expected result, not a failure. The same message appears on a
+brand-new VM session that has not yet finished its first chunk, so give a young session a few
+minutes before concluding anything.
 
 ## Reading the panel
 
-The drawer stacks four things, top to bottom, in the order you normally need them.
+The drawer stacks its content top to bottom in the order you normally need it.
 
 ### Stat cards
 
@@ -64,8 +80,12 @@ the single most useful thing on the page** — an out-of-memory kill is the usua
 agent that stopped mid-sentence, produced a truncated result, or reported a tool crash it could not
 describe.
 
-The count covers both an allocation that hit the limit and a process the kernel actually killed. If
-you see one, raise the memory the work asks for — see
+The count covers both an allocation that hit the limit and a process the kernel actually killed.
+
+SAM does not just watch this happen: when the node evicts a workspace under memory pressure it
+tries to preserve the session and bring it back through normal placement, so a single OOM does not
+necessarily mean lost work. What it does not do is change the size for you — if a session keeps
+hitting the limit, raise the memory the work asks for. See
 [Right-sizing after you've read the history](#right-sizing-after-youve-read-the-history).
 
 ### The detail timeline
@@ -100,8 +120,10 @@ tool-window count, and gaps. Click one to load its timeline.
 
 Only the chunk you select is fetched, so moving between slices costs one small request each rather
 than downloading the whole session. A chunk with more samples than the drawer can draw is
-downsampled first — the header then reads `<shown>/<total> points` — and the downsampling
-deliberately preserves spikes, so a peak never disappears because a slice was busy.
+downsampled first, and the header then reads `<shown>/<total> points`. Downsampling keeps gaps and
+the largest CPU and memory samples, so a usage spike survives it. It does **not** specifically
+preserve OOM samples, so on a downsampled chunk an OOM marker can drop off the timeline — the OOM
+banner and its count come from the stored summary and are never affected.
 
 **The list is capped.** It shows the most recent 24 chunks
 (`WORKSPACE_RESOURCE_LIST_LIMIT`) — about six hours of a continuously running session at the
@@ -140,20 +162,6 @@ The panel is easy to over-read. Four things it cannot tell you:
 The drawer states the correlation caveat inline, under the chart, so nobody reads a chart in
 isolation and reports a false cause.
 
-## Where resource history exists — and where it doesn't
-
-| Runtime                                                                        | Resource history |
-| ------------------------------------------------------------------------------ | ---------------- |
-| **VM-backed workspaces** (standard sessions and tasks)                         | Yes              |
-| **[Instant sessions](/docs/guides/instant-sessions/)** (Cloudflare Containers) | No               |
-| **[App deployment](/docs/guides/app-deployments/) nodes**                      | No               |
-
-The collector runs in the VM agent when it holds the workspace role, which Instant containers do
-not. Opening **Resources** on an Instant session shows _"No retained resource history is available
-for this session yet."_ — that is the expected result, not a failure. The same message appears on a
-brand-new VM session that has not yet finished its first chunk, so give a young session a few
-minutes before concluding anything.
-
 ## How long it is kept
 
 | Data                                     | Default retention | Setting                                     |
@@ -191,8 +199,8 @@ an agent.
 Agents connected to SAM's MCP server read the same data with the `get_resource_history` tool.
 **Called with no arguments it returns the agent's own session** — which is the useful case, because
 an agent can check whether it is heading for the same wall that killed the last attempt. Pass
-`sessionId`, `taskId`, or `workspaceId` to look at a different scope, and `chunkId` to pull one
-slice's samples. Without `chunkId` it returns only the summary and chunk index, so a casual lookup
+`sessionId`, `taskId`, or `workspaceId` to look at a different scope — any one of them replaces the
+agent's own scope rather than narrowing it — and `chunkId` to pull one slice's samples. Without `chunkId` it returns only the summary and chunk index, so a casual lookup
 stays cheap. There is no `projectId` parameter — the project comes from the agent's connection.
 
 This turns a vague complaint into a checkable one. For example:
@@ -203,6 +211,20 @@ This turns a vague complaint into a checkable one. For example:
 The same information is available over HTTP at
 `GET /api/projects/:projectId/sessions/:sessionId/resource-history` (also `…/tasks/:taskId/…` and
 `…/workspaces/:workspaceId/…`), with an optional `?chunkId=` for detail.
+
+## Was it working, or waiting?
+
+A session that took an hour is not necessarily a session that did an hour of work. The timeline
+separates the two:
+
+- **Tool bands with CPU movement under them** — the agent was running something.
+- **Tool bands with a flat CPU line under them** — the agent was blocked on something external: a
+  network call, a provider API, a slow download, a human. Elapsed time in a tool window is not work.
+- **No tool band at all** — the agent was not executing a tool. Between turns this usually means it
+  was waiting for you; mid-turn it usually means it was generating text.
+
+Only the first case is improved by a bigger machine. The other two are improved by changing what
+the agent is waiting on.
 
 ## Right-sizing after you've read the history
 
@@ -222,25 +244,11 @@ reads large files reaches it while having plenty of memory to spare. The OOM ban
 you never used. Lower the requirement, or set the pool's **Workspace strategy** to **Smallest fit**
 so SAM stops reaching for big machines.
 
-**If the timeline is mostly flat with long quiet stretches**, see
-[Was it working, or waiting?](#was-it-working-or-waiting) — a bigger machine will not help.
+**If the timeline was mostly flat with long quiet stretches**, the session was waiting rather than
+computing (see [above](#was-it-working-or-waiting)) — a bigger machine will not help.
 
 See [Compute Pools](/docs/guides/compute-pools/#resource-requirements-how-much-machine-work-asks-for) for where
 each requirement is set and how SAM picks a machine from it.
-
-## Was it working, or waiting?
-
-A session that took an hour is not necessarily a session that did an hour of work. The timeline
-separates the two:
-
-- **Tool bands with CPU movement under them** — the agent was running something.
-- **Tool bands with a flat CPU line under them** — the agent was blocked on something external: a
-  network call, a provider API, a slow download, a human. Elapsed time in a tool window is not work.
-- **No tool band at all** — the agent was not executing a tool. Between turns this usually means it
-  was waiting for you; mid-turn it usually means it was generating text.
-
-Only the first case is improved by a bigger machine. The other two are improved by changing what
-the agent is waiting on.
 
 ## Troubleshooting
 

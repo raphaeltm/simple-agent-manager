@@ -175,14 +175,14 @@ SAM keeps the two workload roles in sync behind it.
 **Strategy** decides the order SAM considers machines in — both existing nodes it could reuse and
 fresh offerings it could provision.
 
-| Strategy         | What it does                                                                                                                                                      |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Balanced**     | **Lowest projected utilization first.** Spreads work over the machines you already pay for, leaving headroom on each.                                             |
-| **Pack**         | **Highest projected utilization that still fits, first.** Fills an existing host before opening another; when provisioning, chooses the largest allowed offering. |
-| **Spread**       | **Fewest neighbouring workspaces first.** Buys isolation and predictable performance at the cost of running more machines.                                        |
-| **Smallest fit** | **Smallest sufficient capacity first.** Chooses the smallest, then cheapest, sufficient offering and keeps bigger machines free for work that needs them.         |
+| Strategy                 | What it does                                                                                                                                                      |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Balanced** _(default)_ | **Lowest projected utilization first.** Spreads work over the machines you already pay for, leaving headroom on each.                                             |
+| **Pack**                 | **Highest projected utilization that still fits, first.** Fills an existing host before opening another; when provisioning, chooses the largest allowed offering. |
+| **Spread**               | **Fewest neighbouring workspaces first.** Buys isolation and predictable performance at the cost of running more machines.                                        |
+| **Smallest fit**         | **Smallest sufficient capacity first.** Chooses the smallest, then cheapest, sufficient offering and keeps bigger machines free for work that needs them.         |
 
-### The four fields in the pool editor
+### The four policy fields
 
 Agent workspaces and [app deployments](/docs/guides/app-deployments/) want opposite things — a
 workspace is bursty and short-lived, a deployment is steady and long-lived — so the pool carries a
@@ -210,9 +210,9 @@ This is two things at once, and the second one surprises people:
   running. The other strategies do not use it this way.
 - **For every strategy, it is a hard ceiling.** Once a user is at the limit, SAM will not provision
   another node in that pool for them under any strategy. It reuses a machine that fits; if none
-  fits, the request queues or fails according to the exhaustion policy, with
-  _"Capacity pool node limit (N) reached and no node can fit the request"_. Set it to 2 under
-  Balanced and you will hit that message, not silently get a third node.
+  fits, the work **queues until the overall capacity wait expires — even under Fail** — and then
+  fails with _"Capacity pool node limit (N) reached and no node can fit the request."_ Set the
+  limit to 2 under Balanced and you will hit that wait, not silently get a third node.
 
 It counts **managed workspace nodes only** — nodes you brought yourself and deployment nodes are
 not counted and are not capped by it. A separate installation-wide ceiling (`MAX_NODES_PER_USER`,
@@ -251,16 +251,17 @@ the failure names what was tried.
 :::
 
 :::caution
-**One capacity failure ignores the policy.** These three policies govern _per-offering_ scarcity —
-a particular instance type being sold out in a particular region. When the provider instead reports
-that your whole **account** is out of capacity (a Hetzner server-limit error, for example), SAM
-always parks the work and retries after a provider cooldown, even under **Fail**, and gives up only
-when the overall capacity wait expires.
+**Two capacity failures ignore the policy.** These three policies govern _per-offering_ scarcity —
+a particular instance type being sold out in a particular region. Two other cases always park the
+work and retry until the overall capacity wait expires, even under **Fail**:
 
-That is deliberate: trying other instance types against an account that has hit its own limit
-cannot succeed, and just multiplies failed provider calls. But it does mean **Fail** is not a
-guarantee of an immediate error in every capacity situation. If you are hitting this, the fix is
-your provider account's server limit, not the pool.
+- **Your whole account is out of capacity** (a Hetzner server-limit error, for example). Trying
+  other instance types against an account that has hit its own limit cannot succeed, and just
+  multiplies failed provider calls. The fix is your provider account's server limit, not the pool.
+- **The pool's [Maximum nodes per user](#maximum-nodes-per-user) is reached** and no running node
+  can take the work. The fix is the limit, the requirements, or freeing a node.
+
+So **Fail** is not a guarantee of an immediate error in every capacity situation.
 :::
 
 While work is waiting for capacity, the chat's infrastructure section shows "Waiting for capacity"
@@ -372,17 +373,28 @@ sufficient offering.
 
 ### How deployment placement differs
 
-App deployments use the pool's [**Deployment strategy**](#the-four-fields-in-the-pool-editor) rather than the
-workspace one. Under the **Smallest fit** default, SAM first looks for a healthy, compatible
-deployment node whose declared CPU, memory, and disk reservations still leave room; only if none
-does will it provision, and then it provisions the smallest allowed machine that can hold the
-deployment.
+Whatever the strategy, SAM always looks for a healthy, compatible deployment node whose declared
+CPU, memory, and disk reservations still leave room before it provisions anything. The pool's
+[**Deployment strategy**](#the-four-policy-fields) only orders the _provisioning_ step; under its
+**Smallest fit** default that means the smallest allowed machine that can hold the deployment.
 
-What drives the size is the **service resource limits in your deployment manifest** — the
-`deploy.resources.limits` block per service, summed across services. Environment names do not:
-calling an environment `production` does not buy it a bigger machine than one called `preview`. If
-a deployment machine is larger than you expected, read the manifest first. See
+What drives the size is your **deployment manifest**:
+
+- **CPU and memory** come from each service's `deploy.resources.limits`, summed across services.
+  `deploy.resources.reservations` is ignored entirely — it is neither read nor rejected, so a
+  manifest that only sets reservations silently gets the per-service defaults.
+- **Disk** does not come from `limits` at all. Each service reserves a fixed root-disk allowance,
+  plus each named volume's `x-sam-size-hint-mb`.
+- **Environment names carry no weight.** Calling an environment `production` does not buy it a
+  bigger machine than one called `preview`.
+
+If a deployment machine is larger than you expected, read the manifest first. See
 [App Deployments](/docs/guides/app-deployments/).
+
+If no node can take the deployment and none can be provisioned, the release is marked **failed
+immediately** — deployment placement does not queue and does not retry, so setting the pool's
+exhaustion policy to **Queue** changes nothing here. Free capacity or lower the manifest's limits,
+then submit a new release.
 
 Deployments with persistent volumes still get an exclusive node — a volume is attached to one
 machine, so the environment cannot be relocated or share a host.

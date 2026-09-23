@@ -9,15 +9,15 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ### For everyone
 
-| Change                                      | What users notice                                                                                                                                                                                                                   | Where to use it                                                                                                          |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| **Sessions show what they used**            | A **Resources** panel with CPU, memory, and I/O history for a session — including whether it was killed for running out of memory — that outlives the machine.                                                                      | Session tool rail → **Resources**; [Session Resource History](/docs/guides/session-resources/)                           |
-| **Long tool runs stop burying the chat**    | A run of consecutive tool calls folds into one card reading "N tool calls". Tap to expand; failures are counted in the text.                                                                                                        | Project chat; [Tool Activity Cards](/docs/guides/chat-features/#tool-activity-cards)                                     |
-| **Events sit next to the conversation**     | The old "Events & schedules" header link became an **Events** button in the session tool rail that opens a drawer over the chat. The project Events page gained counts, state colours, empty states, and self-refreshing schedules. | Session tool rail → **Events**; Project → **Events**                                                                     |
-| **Sleeping chats are searchable**           | Search finds work in sessions that are asleep, not just ones that were stopped — which is most of your recent work.                                                                                                                 | Project chat search; `search_messages`                                                                                   |
-| **Wake puts you back on the same commit**   | A woken session restores the exact saved Git checkout — commit, branch, upstream, working tree, index, and clean local-only commits — or reports degraded recovery instead of quietly continuing somewhere else.                    | Any sleeping session                                                                                                     |
-| **One pool, two placement strategies**      | A compute pool now orders workspace machines and app-deployment machines separately, with a cap on how many nodes **Spread** may open per user.                                                                                     | Project → Settings → **Infrastructure**; [Compute Pools](/docs/guides/compute-pools/#the-four-fields-in-the-pool-editor) |
-| **Deployment size comes from the manifest** | The CPU and memory limits in your Compose services decide which machine a deployment lands on. Environment names do not.                                                                                                            | [App Deployments](/docs/guides/app-deployments/)                                                                         |
+| Change                                      | What users notice                                                                                                                                                                                                                   | Where to use it                                                                                              |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Sessions show what they used**            | A **Resources** panel with CPU, memory, and I/O history for a session — including whether it was killed for running out of memory — that outlives the machine.                                                                      | Session tool rail → **Resources**; [Session Resource History](/docs/guides/session-resources/)               |
+| **Long tool runs stop burying the chat**    | A run of consecutive tool calls folds into one card reading "N tool calls". Tap to expand; failures are counted in the text.                                                                                                        | Project chat and workspace chat; [Tool Activity Cards](/docs/guides/chat-features/#tool-activity-cards)      |
+| **Events sit next to the conversation**     | The old "Events & schedules" header link became an **Events** button in the session tool rail that opens a drawer over the chat. The project Events page gained counts, state colours, empty states, and self-refreshing schedules. | Session tool rail → **Events**; Project → **Events**                                                         |
+| **Sleeping chats are searchable**           | An agent asked to search the project now finds work in sessions that are asleep, not just ones that were stopped — which is most of your recent work.                                                                               | `search_messages` (agent tool); not the chat-list search box                                                 |
+| **Wake puts you back on the same commit**   | A woken session restores the exact saved Git checkout — commit, branch, upstream, working tree, index, and clean local-only commits — or reports degraded recovery instead of quietly continuing somewhere else.                    | Any sleeping session                                                                                         |
+| **One pool, two placement strategies**      | A compute pool now orders workspace machines and app-deployment machines separately, with a cap on how many nodes **Spread** may open per user.                                                                                     | Project → Settings → **Infrastructure**; [Compute Pools](/docs/guides/compute-pools/#the-four-policy-fields) |
+| **Deployment size comes from the manifest** | The CPU and memory limits in your Compose services decide which machine a deployment lands on. Environment names do not.                                                                                                            | [App Deployments](/docs/guides/app-deployments/)                                                             |
 
 ### For self-hosters & admins
 
@@ -77,8 +77,13 @@ which excluded **sleeping** sessions, and sleeping is where most of your recent 
 
 The pass now also runs when a session goes to sleep, and it is incremental: each pass reads only
 what was written since the last one, so indexing a long-running session stays cheap and a session
-that sleeps and wakes repeatedly does not lose the messages in between. Anything written since the
-last pass is still reachable through keyword fallback search.
+that sleeps and wakes repeatedly does not lose the messages in between. User messages written since
+the last pass stay reachable through keyword fallback; streaming agent output is only searchable
+once a pass has run.
+
+Search got narrower in the same week too, and it is worth knowing: under storage pressure SAM now
+prunes the search index for old terminal sessions to reclaim space, and a pruned session is never
+re-indexed. See [Full-Text Search](/docs/guides/chat-features/#full-text-search).
 
 See [Full-Text Search](/docs/guides/chat-features/#full-text-search).
 
@@ -92,9 +97,11 @@ Restore verifies the result. If SAM cannot recreate the saved commit and ref sta
 degraded recovery rather than silently continuing on a different commit — which is the failure mode
 that quietly loses work, because everything looks fine until you push.
 
-Plan for one trade-off: the repository bundle is captured first out of a fixed snapshot budget, so a
-large history or a big working tree can crowd out the agent's own HOME state. If a session carries
-work you cannot lose, have the agent commit and push it.
+Plan for one trade-off: the repository bundle is captured first out of a shared snapshot budget
+(256 MiB by default), so a large history or a big working tree can crowd out the agent's own HOME
+state. Only commits reachable from the saved `HEAD` are bundled, so work parked on another local
+branch is not captured. If a session carries work you cannot lose, have the agent commit and push
+it.
 
 See [Instant Sessions → What gets restored](/docs/guides/instant-sessions/#what-gets-restored).
 
@@ -119,7 +126,7 @@ Packing itself moved onto explicit resources at the same time. The legacy worksp
 memory-percentage gates no longer decide placement; declared CPU, memory, and disk reservations do,
 with disk pressure and CPU saturation as backstops.
 
-See [Compute Pools](/docs/guides/compute-pools/#the-four-fields-in-the-pool-editor) and
+See [Compute Pools](/docs/guides/compute-pools/#the-four-policy-fields) and
 [App Deployments](/docs/guides/app-deployments/).
 
 ### Updating a self-hosted instance is one workflow
@@ -143,8 +150,8 @@ project stops until someone closes it. Nothing closes it automatically, and unti
 meant a hand-rolled superadmin API call from a desktop browser — so a stopped drain could stay
 stopped long after the underlying bug was fixed.
 
-**Admin → Storage** now lists every project's storage telemetry and breaker state with a **Close
-breaker** button that works on a phone. Closing a breaker resumes the scheduled sweep for that
+**Admin → Storage** now lists storage telemetry and breaker state — the heaviest projects and any
+open breakers, not an exhaustive list — with a **Close breaker** button that works on a phone. Closing a breaker resumes the scheduled sweep for that
 project; it does not thaw migrations that were already frozen.
 
 See [Self-Hosting → Storage and archive circuit breakers](/docs/guides/self-hosting/#storage-and-archive-circuit-breakers).
