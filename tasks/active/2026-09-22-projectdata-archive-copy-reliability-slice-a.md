@@ -109,6 +109,18 @@ work while preserving the existing archive format, reader behavior, and deletion
   `PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS="604800000"`, matching the checked-in seven-day default.
   The Environment override list is empty, and staging remained at zero live VMs throughout.
 
+## Post-rebase validation (2026-09-23)
+
+Rebased cleanly onto `origin/main` at `c9deee440`, then passed:
+
+- `pnpm check:fast`
+- `pnpm typecheck` (19/19 Turbo tasks)
+- focused API archive/migration tests (5 files, 143 tests)
+- focused workerd compact-archive tests (1 file, 7 tests)
+- full API tests (748 files, 10,232 tests)
+- `pnpm quality:migration-safety`
+- `pnpm quality:do-migration-safety`
+
 ## Acceptance criteria
 
 1. A reset or timeout at any copy boundary resumes from verified durable progress with the same
