@@ -1,5 +1,15 @@
 import { expect, vi } from 'vitest';
 
+export function makeDatabaseBinding(accountId: string | null = 'account-row') {
+  return {
+    prepare: vi.fn(() => ({
+      bind: vi.fn(() => ({
+        first: vi.fn(async () => (accountId ? { id: accountId } : null)),
+      })),
+    })),
+  };
+}
+
 export function makeBetterAuthAccountEnv(accountId: string | null) {
   const first = vi.fn(async () => (accountId ? { id: accountId } : null));
   const bind = vi.fn(() => ({ first }));

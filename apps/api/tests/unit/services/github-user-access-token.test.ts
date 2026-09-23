@@ -17,7 +17,7 @@ import {
 import {
   expectTrustedOwnerTokenLookup,
   makeDatabaseBinding,
-} from './better-auth-token-test-helpers';
+} from '../durable-objects/access-token-lock-test-helpers';
 
 function makeEnv() {
   return { DATABASE: makeDatabaseBinding('github-account-row') } as unknown as Env;

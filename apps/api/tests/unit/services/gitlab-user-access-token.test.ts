@@ -28,7 +28,7 @@ import {
   expectBetterAuthTokenLookup,
   expectTrustedOwnerTokenLookup,
   makeDatabaseBinding,
-} from './better-auth-token-test-helpers';
+} from '../durable-objects/access-token-lock-test-helpers';
 
 function makeLockBinding(response: Response) {
   const stubFetch = vi.fn(async () => response);
