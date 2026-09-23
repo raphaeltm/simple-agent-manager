@@ -57,6 +57,31 @@ with Playwright screenshots taken against the real components with mock data.
 
 ## Review loop
 
-- [x] Local sub-agent review round 1
-- [x] Local sub-agent review round 2
-- [x] Local sub-agent review round 3 (no actionable feedback left)
+Five local Opus reviewers ran in sequence, each reading the diff *and* the code behind every
+claim, and each told not to re-report the previous rounds' findings. 13 factual errors were
+found and fixed; every one was independently verified against source before acting on it.
+
+| Round | Found | Fixed in |
+| ----- | ----- | -------- |
+| 1 | 7 errors: `get_resource_history` took no `projectId`; maxNodes is a hard ceiling, not Spread-only; the requirements precedence chain was reversed; RAM peak is `memory.current` (page cache); the chunk list is capped at 24; a failed run settles to a red cross; the exhaustion policy is workspace-only | `c05e9bde4` |
+| 2 | 4 errors, two of them overshoots from round 1's own fixes: node-limit hits always queue; the lifecycle dock is above the composer; the chat search box filters the session list; three stale shipped defaults in `configuration.md` | `4abe93cd5` |
+| 3 | 1 error — round 1's Files/Git fix was wrong, because `markAgentCompleted` has no production caller — plus structural residue from round 2's section moves | `8a4ad4d67` |
+| 4 | 1 error: downsampling cannot fire at shipped defaults, so the hero screenshot showed an unreachable state. Also endorsed the decision to document the gap marker as it renders | `e22ff23b0` |
+| 5 | 1 inconsistency round 4's own fixture rescale introduced (chunk I/O exceeded the session total). Cleared everything else | `d2dc0e2b1` |
+
+The loop converged: round 5 found only the defect round 4 had just introduced.
+
+### Pushed back on
+
+Round 3 argued the `--sam-color-border-strong` token should be fixed here so the docs could
+describe the intended dashed marker. Declined: it would pull an unrelated `apps/web/src` change
+under the UI visual-audit and staging merge gates for a documentation PR, and documenting a line
+the reader cannot see is worse than documenting the dot. The bug is tracked in
+`tasks/backlog/2026-09-23-resource-sparkline-gap-marker-has-no-colour.md`, whose acceptance
+criteria name the three doc passages to revise when it lands. Round 4 reviewed the reasoning
+independently and agreed.
+
+## Outcome
+
+PR #2139. Docs site builds (218 pages), 0 broken internal doc links across 30 pages, all 10
+Playwright docs captures pass.
