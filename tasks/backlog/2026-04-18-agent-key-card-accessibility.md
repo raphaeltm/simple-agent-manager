@@ -72,6 +72,28 @@ Only `apps/web/src/components/AgentKeyCard.tsx`. Do not change the API, the cred
 - [ ] Playwright visual audit at 375px and 1280px passes for both user settings and project settings contexts
 - [ ] axe-core or similar accessibility scan passes
 
+## Merged findings from `2026-04-18-agent-key-card-a11y.md` (consolidated 2026-09-23)
+
+The two 2026-04-18 AgentKeyCard files came out of the same review cycle on the same component
+and were being worked as if independent. The a11y-scoped file is folded in here; its distinct
+items are below. `AgentKeyCard` is shared by user scope (`AgentsSection`) and project scope
+(`ProjectAgentsSection` -> `ProjectAgentCard`), so one fix covers both.
+
+- [ ] `aria-pressed` + `aria-controls` on the show/hide toggle, with the label switching between
+      "Show value" and "Hide value"
+- [ ] Turn the Add-credential affordance into a real disclosure: `aria-expanded`, `aria-controls`,
+      and `role="region"` + `aria-labelledby` on the revealed form
+- [ ] Visually-hidden text on the active-credential status (currently colour + emoji only)
+- [ ] Memoize credential-kind options / stabilize handlers so the select does not rebuild every
+      render and re-announce to assistive tech
+- [ ] **Delete-scope decision (correctness, pre-existing).** `deleteAgentCredential(agentType)`
+      deletes ALL credentials for the agent, while `deleteAgentCredentialByKind(agentType, kind)`
+      exists. The UI always calls the broad delete even when one kind is shown active. Either
+      switch Remove to the kind-specific call, or keep the broad behaviour and change the confirm
+      copy to say so.
+- [ ] Update unit tests for the new ARIA attributes and the chosen delete behaviour. Existing
+      tests select via `button.text-danger`; do not break that selector without updating them.
+
 ## References
 
 - Source review: `ui-ux-specialist` on PR `sam/project-credential-overrides`
