@@ -85,8 +85,6 @@ Search got narrower in the same week too, and it is worth knowing: under storage
 prunes the search index for old terminal sessions to reclaim space, and a pruned session is never
 re-indexed. See [Full-Text Search](/docs/guides/chat-features/#full-text-search).
 
-See [Full-Text Search](/docs/guides/chat-features/#full-text-search).
-
 ### Waking puts you back on the exact same commit
 
 A snapshot used to capture the working tree and index. It now captures the **Git state**: the saved

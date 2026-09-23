@@ -175,12 +175,24 @@ SAM keeps the two workload roles in sync behind it.
 **Strategy** decides the order SAM considers machines in — both existing nodes it could reuse and
 fresh offerings it could provision.
 
-| Strategy                 | What it does                                                                                                                                                      |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Balanced** _(default)_ | **Lowest projected utilization first.** Spreads work over the machines you already pay for, leaving headroom on each.                                             |
-| **Pack**                 | **Highest projected utilization that still fits, first.** Fills an existing host before opening another; when provisioning, chooses the largest allowed offering. |
-| **Spread**               | **Fewest neighbouring workspaces first.** Buys isolation and predictable performance at the cost of running more machines.                                        |
-| **Smallest fit**         | **Smallest sufficient capacity first.** Chooses the smallest, then cheapest, sufficient offering and keeps bigger machines free for work that needs them.         |
+| Strategy                           | What it does                                                                                                                                                      |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Balanced** _(workspace default)_ | **Lowest projected utilization first.** Spreads work over the machines you already pay for, leaving headroom on each.                                             |
+| **Pack**                           | **Highest projected utilization that still fits, first.** Fills an existing host before opening another; when provisioning, chooses the largest allowed offering. |
+| **Spread**                         | **Fewest neighbouring workspaces first.** Buys isolation and predictable performance at the cost of running more machines.                                        |
+| **Smallest fit**                   | **Smallest sufficient capacity first.** Chooses the smallest, then cheapest, sufficient offering and keeps bigger machines free for work that needs them.         |
+
+A few things worth knowing:
+
+- Strategy only **orders** machines that are already known to fit. It can never let work onto a
+  host that fails the capacity checks below — changing strategy cannot overcommit a node.
+- **Pack** and **Spread** are about _distribution_, so for a brand-new machine they are applied to
+  the provider/region you already have machines in: Pack concentrates there, Spread moves away.
+- "Projected utilization" means how full a host would be _after_ placing this work, measured on
+  its fullest dimension (CPU, memory, or disk).
+
+The session's infrastructure panel spells the applied ordering out in plain language — for
+example, _"Why this node: lowest projected utilization first"_.
 
 ### The four policy fields
 
@@ -217,18 +229,6 @@ This is two things at once, and the second one surprises people:
 It counts **managed workspace nodes only** — nodes you brought yourself and deployment nodes are
 not counted and are not capped by it. A separate installation-wide ceiling (`MAX_NODES_PER_USER`,
 10 by default) applies on top, so raising the pool limit past that has no effect.
-
-A few things worth knowing:
-
-- Strategy only **orders** machines that are already known to fit. It can never let work onto a
-  host that fails the capacity checks below — changing strategy cannot overcommit a node.
-- **Pack** and **Spread** are about _distribution_, so for a brand-new machine they are applied to
-  the provider/region you already have machines in: Pack concentrates there, Spread moves away.
-- "Projected utilization" means how full a host would be _after_ placing this work, measured on
-  its fullest dimension (CPU, memory, or disk).
-
-The session's infrastructure panel spells the applied ordering out in plain language — for
-example, _"Why this node: lowest projected utilization first"_.
 
 ## Exhaustion policy: what happens when nothing is available
 
@@ -373,18 +373,27 @@ sufficient offering.
 
 ### How deployment placement differs
 
-Whatever the strategy, SAM always looks for a healthy, compatible deployment node whose declared
-CPU, memory, and disk reservations still leave room before it provisions anything. The pool's
+For a deployment **without** persistent volumes, SAM always looks for a healthy, compatible
+deployment node whose declared CPU, memory, and disk reservations still leave room before it
+provisions anything — whatever the strategy. Reuse is also capped by how many environments one
+deployment node may host (`MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE`, 5 by default), which is a second
+reason a new machine can appear while an existing one still looks roomy. The pool's
 [**Deployment strategy**](#the-four-policy-fields) only orders the _provisioning_ step; under its
 **Smallest fit** default that means the smallest allowed machine that can hold the deployment.
+
+A deployment **with** persistent volumes skips that search entirely and always gets its own
+machine — see below.
 
 What drives the size is your **deployment manifest**:
 
 - **CPU and memory** come from each service's `deploy.resources.limits`, summed across services.
-  `deploy.resources.reservations` is ignored entirely — it is neither read nor rejected, so a
-  manifest that only sets reservations silently gets the per-service defaults.
-- **Disk** does not come from `limits` at all. Each service reserves a fixed root-disk allowance,
-  plus each named volume's `x-sam-size-hint-mb`.
+  Machine sizing ignores `deploy.resources.reservations` — it is neither read for sizing nor
+  rejected, so a manifest that sets only reservations silently gets the per-service defaults
+  (`DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS` and `DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB`). The block is
+  still passed through to Docker, where it constrains the running container — it just does not
+  decide which machine you land on.
+- **Disk** does not come from `limits` at all. Each service reserves 1 GB of root disk by default
+  (`DEPLOYMENT_DEFAULT_ROOT_DISK_MB`), plus each named volume's `x-sam-size-hint-mb`.
 - **Environment names carry no weight.** Calling an environment `production` does not buy it a
   bigger machine than one called `preview`.
 
@@ -447,7 +456,7 @@ remove it so a lower scope applies.
 | The project ignores your personal pool                                 | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                                                                                                               |
 | Everything lands on one cloud although the pool allows several         | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                                                                                                 |
 | Too many, or too few, workspaces share a machine                       | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and maximum-node limit. [Session Resource History](/docs/guides/session-resources/) is the evidence for what the requirements should be.                |
-| Work waits for capacity even though the policy is **Fail**             | The provider reported account-wide exhaustion, which always retries. Check your provider account's server limit.                                                                                                                                                              |
+| Work waits for capacity even though the policy is **Fail**             | Either the provider reported account-wide exhaustion (check your provider account's server limit), or the pool's [Maximum nodes per user](#maximum-nodes-per-user) is reached and no running node has room. Both always wait.                                                 |
 
 ## Where to look when you want the details
 

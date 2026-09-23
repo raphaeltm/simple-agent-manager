@@ -21,8 +21,8 @@ the conversation you are in rather than opening something beside it.)
 
 | Tool          | What it opens                                                                                                                                                      | When it appears                                          |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
-| **Files**     | The workspace file browser — [File Browsing](#file-browsing)                                                                                                       | While the agent is working                               |
-| **Git**       | Uncommitted changes in the workspace                                                                                                                               | While the agent is working                               |
+| **Files**     | The workspace file browser — [File Browsing](#file-browsing)                                                                                                       | While the session is live and has a workspace            |
+| **Git**       | Uncommitted changes in the workspace                                                                                                                               | While the session is live and has a workspace            |
 | **Timeline**  | A jump list through the session's history                                                                                                                          | Always                                                   |
 | **Resources** | CPU, memory, I/O, and OOM history — [Session Resource History](/docs/guides/session-resources/)                                                                    | Always                                                   |
 | **Events**    | This session's subscriptions, schedules, and watches — [Scheduled actions](/docs/guides/scheduled-actions/)                                                        | Always                                                   |
@@ -35,11 +35,9 @@ the conversation you are in rather than opening something beside it.)
 
 ![The session tool rail in icons-and-labels mode, listing Files, Git, Timeline, Resources, Events and Comments, then Retry and Fork after a divider, with Report, Complete and Details pinned at the bottom.](/images/docs/session-tool-rail.png)
 
-**Files** and **Git** need a live workspace with an agent still working in it, so they disappear
-the moment the agent finishes its turn — not only when the session stops or fails. If they vanish
-while the workspace still looks up, that is why. Everything else stays, which matters: inspecting
-resources, reading the timeline, or reporting a problem is usually something you want to do _after_
-a session has ended.
+**Files** and **Git** need a linked workspace and a live session, so they disappear once the
+session sleeps or stops. Everything else stays, which matters: inspecting resources, reading the
+timeline, or reporting a problem is usually something you want to do _after_ a session has ended.
 
 The rail is grouped by what each tool acts on: the workspace and its history at the top, the task
 behind the session in the middle, and cross-cutting actions pinned to the bottom so they stay
@@ -114,7 +112,7 @@ compact **activity card** that simply states how many ran — for example
 ![A chat timeline: a user message, the agent's plan in prose, a single collapsed card reading "8 tool calls · 1 failed", then the agent's summary of what it found. The eight individual tool calls are hidden behind the one card.](/images/docs/chat-tool-activity-card.png)
 
 - While the run is in progress the card shows a motion indicator plus the tool
-  currently executing (`· running <tool>`) — or `· thinking…` while the agent reasons
+  currently executing (`· running <its title>`) — or `· thinking…` while the agent reasons
   between calls, or `· working` when there is nothing more specific to name. When the
   run finishes the indicator settles, with no layout jump: a check mark if every call
   succeeded, a red ✗ if any of them failed.

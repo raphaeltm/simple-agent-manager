@@ -42,8 +42,8 @@ first so the answer is above the fold.
 The collector runs in the VM agent when it holds the workspace role, which Instant containers do
 not. Opening **Resources** on an Instant session shows _"No retained resource history is available
 for this session yet."_ — that is the expected result, not a failure. The same message appears on a
-brand-new VM session that has not yet finished its first chunk, so give a young session a few
-minutes before concluding anything.
+brand-new VM session that has not yet finished its first [chunk](#chunks) — SAM uploads history in
+15-minute slices — so give a young session a few minutes before concluding anything.
 
 ## Reading the panel
 
@@ -97,9 +97,8 @@ The chart loads automatically for the most recent slice of the session:
 - **Blue bands** — tool windows: stretches where the agent had one or more tool calls in flight.
   A fainter band means SAM inferred the end of the window rather than observing it.
 - **An amber marker at the top**, with a dashed line down the chart — an out-of-memory sample.
-- **A small grey dot at the bottom** — a gap or a counter reset. These are easy to miss: the
-  in-app legend calls them "dashed markers", but a gap currently renders as a dot with no line. See
-  [Gaps and resets](#gaps-and-resets) for why they matter.
+- **A small grey dot at the bottom** — a gap or a counter reset. Easy to miss, and worth not
+  missing: see [Gaps and resets](#gaps-and-resets).
 
 Each line is scaled to its **own** peak within the slice, so the two lines are shaped for reading
 against the tool bands — not against each other. A tall green line does not mean CPU is higher
@@ -127,9 +126,9 @@ banner and its count come from the stored summary and are never affected.
 
 **The list is capped.** It shows the most recent 24 chunks
 (`WORKSPACE_RESOURCE_LIST_LIMIT`) — about six hours of a continuously running session at the
-default chunk interval. Older chunks are still retained, but there is currently no way to page back
-to them from the panel or the API. For a long overnight run, the stat cards still cover the whole
-session; the per-sample timeline only covers the tail.
+default chunk interval. Older chunks are still stored and can still be fetched by ID, but nothing
+enumerates them, so there is no way to page back to them from the panel. For a long overnight run,
+the stat cards still cover the whole session; the per-sample timeline only covers the tail.
 
 ### Gaps and resets
 
@@ -161,6 +160,44 @@ The panel is easy to over-read. Four things it cannot tell you:
 
 The drawer states the correlation caveat inline, under the chart, so nobody reads a chart in
 isolation and reports a false cause.
+
+## Was it working, or waiting?
+
+A session that took an hour is not necessarily a session that did an hour of work. The timeline
+separates the two:
+
+- **Tool bands with CPU movement under them** — the agent was running something.
+- **Tool bands with a flat CPU line under them** — the agent was blocked on something external: a
+  network call, a provider API, a slow download, a human. Elapsed time in a tool window is not work.
+- **No tool band at all** — the agent was not executing a tool. Between turns this usually means it
+  was waiting for you; mid-turn it usually means it was generating text.
+
+Only the first case is improved by a bigger machine. The other two are improved by changing what
+the agent is waiting on.
+
+## Right-sizing after you've read the history
+
+The point of the panel is to make a machine-size decision with evidence instead of instinct.
+
+**If you saw an OOM**, raise the memory floor. Set it at whichever level in the
+[requirements chain](/docs/guides/compute-pools/#where-you-can-set-them) the problem belongs to —
+the project default for "everything here needs more", the agent profile for "this agent is heavy",
+the task itself for a one-off. Remember the host reserve: a 4 GiB machine can only back a ~3.5 GiB
+reservation, so asking for exactly 4 GB pushes you onto an 8 GiB machine.
+
+Do **not** use "RAM peak looks close to the machine size" as your trigger. That number includes
+page cache (see [What this does not tell you](#what-this-does-not-tell-you)), so a workspace that
+reads large files reaches it while having plenty of memory to spare. The OOM banner is the signal.
+
+**If CPU peak never approached one core and there was no OOM**, you are likely paying for headroom
+you never used. Lower the requirement, or set the pool's **Workspace strategy** to **Smallest fit**
+so SAM stops reaching for big machines.
+
+**If the timeline was mostly flat with long quiet stretches**, the session was waiting rather than
+computing (see [above](#was-it-working-or-waiting)) — a bigger machine will not help.
+
+See [Compute Pools](/docs/guides/compute-pools/#resource-requirements-how-much-machine-work-asks-for) for where
+each requirement is set and how SAM picks a machine from it.
 
 ## How long it is kept
 
@@ -212,52 +249,14 @@ The same information is available over HTTP at
 `GET /api/projects/:projectId/sessions/:sessionId/resource-history` (also `…/tasks/:taskId/…` and
 `…/workspaces/:workspaceId/…`), with an optional `?chunkId=` for detail.
 
-## Was it working, or waiting?
-
-A session that took an hour is not necessarily a session that did an hour of work. The timeline
-separates the two:
-
-- **Tool bands with CPU movement under them** — the agent was running something.
-- **Tool bands with a flat CPU line under them** — the agent was blocked on something external: a
-  network call, a provider API, a slow download, a human. Elapsed time in a tool window is not work.
-- **No tool band at all** — the agent was not executing a tool. Between turns this usually means it
-  was waiting for you; mid-turn it usually means it was generating text.
-
-Only the first case is improved by a bigger machine. The other two are improved by changing what
-the agent is waiting on.
-
-## Right-sizing after you've read the history
-
-The point of the panel is to make a machine-size decision with evidence instead of instinct.
-
-**If you saw an OOM**, raise the memory floor. Set it at whichever level in the
-[requirements chain](/docs/guides/compute-pools/#where-you-can-set-them) the problem belongs to —
-the project default for "everything here needs more", the agent profile for "this agent is heavy",
-the task itself for a one-off. Remember the host reserve: a 4 GiB machine can only back a ~3.5 GiB
-reservation, so asking for exactly 4 GB pushes you onto an 8 GiB machine.
-
-Do **not** use "RAM peak looks close to the machine size" as your trigger. That number includes
-page cache (see [What this does not tell you](#what-this-does-not-tell-you)), so a workspace that
-reads large files reaches it while having plenty of memory to spare. The OOM banner is the signal.
-
-**If CPU peak never approached one core and there was no OOM**, you are likely paying for headroom
-you never used. Lower the requirement, or set the pool's **Workspace strategy** to **Smallest fit**
-so SAM stops reaching for big machines.
-
-**If the timeline was mostly flat with long quiet stretches**, the session was waiting rather than
-computing (see [above](#was-it-working-or-waiting)) — a bigger machine will not help.
-
-See [Compute Pools](/docs/guides/compute-pools/#resource-requirements-how-much-machine-work-asks-for) for where
-each requirement is set and how SAM picks a machine from it.
-
 ## Troubleshooting
 
-| What you see                                         | What it means                                                                                                                                                                 |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| "No retained resource history is available"          | An Instant session (never collected), a VM session younger than its first chunk, or a session whose raw chunks have passed their retention.                                   |
-| Stat cards present, chart empty                      | The raw chunks expired but the summary is still in retention. The peaks are still trustworthy; the per-sample detail is gone.                                                 |
-| "Resource history could not be loaded."              | The request failed. Reopen the drawer; if it persists, [report it](/docs/guides/reporting-issues/) from the same rail.                                                        |
-| A long flat stretch in the middle of a busy session  | Check the **Samples** card for a gap count, then look for a grey dot on the timeline. A gap is missing data, not idle time.                                                   |
-| A tool window with no CPU or RAM movement under it   | The agent was waiting on something external. Tool windows measure elapsed time, not work done.                                                                                |
-| Tool windows drawn fainter, marked `approximate end` | SAM inferred the window's end at the end of the agent's turn rather than observing the call report back. This is routine for some agents — treat the duration as approximate. |
-| You want a slice from earlier than the listed chunks | The panel lists only the most recent chunks (see [How long it is kept](#how-long-it-is-kept)). Older slices are retained but not currently reachable from the panel.          |
+| What you see                                         | What it means                                                                                                                                                                                                  |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "No retained resource history is available"          | An Instant session (never collected), a VM session younger than its first chunk, or a session whose raw chunks have passed their retention.                                                                    |
+| Stat cards present, chart empty                      | The raw chunks expired but the summary is still in retention. The peaks are still trustworthy; the per-sample detail is gone.                                                                                  |
+| "Resource history could not be loaded."              | The request failed. Reopen the drawer; if it persists, [report it](/docs/guides/reporting-issues/) from the same rail.                                                                                         |
+| A long flat stretch in the middle of a busy session  | Check the **Samples** card for a gap count, then look for a grey dot on the timeline. (The legend calls these "dashed markers", but a gap currently draws only the dot.) A gap is missing data, not idle time. |
+| A tool window with no CPU or RAM movement under it   | The agent was waiting on something external. Tool windows measure elapsed time, not work done.                                                                                                                 |
+| Tool windows drawn fainter, marked `approximate end` | SAM inferred the window's end at the end of the agent's turn rather than observing the call report back. This is routine for some agents — treat the duration as approximate.                                  |
+| You want a slice from earlier than the listed chunks | The panel lists only the most recent chunks (see [Chunks](#chunks)). Older slices are stored but nothing enumerates them.                                                                                      |

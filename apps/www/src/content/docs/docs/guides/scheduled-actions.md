@@ -4,8 +4,7 @@ description: Schedule a message or a new session and manage project event automa
 ---
 
 Open **Events** in a project to schedule work, watch for events, and see what automation is
-already running. It has four sections — **Subscriptions**, **Schedules**, **Standing watches**, and
-**Channels** — and a session-scoped version of the first three lives in every chat.
+already running. Every chat session carries a scoped version of the same thing.
 
 ## Where to find it
 
@@ -37,7 +36,7 @@ session ID (a link back to the chat) and a **Show whole project** button to clea
 always project-wide — that banner says so — because a channel is shared between agents rather than
 owned by one conversation.
 
-### Reading a state badge
+## Reading a state badge
 
 Badges are coloured the same way here as in the admin event inspector, and every badge spells its
 state out in text as well, so you never have to rely on the colour.
@@ -55,7 +54,7 @@ than inferring "finished" from the colour.
 
 ## Schedule once
 
-Choose **Schedule once**, enter a due time, and choose an action:
+In the **Schedules** section, choose **Schedule once**, enter a due time, and pick an action:
 
 - **Message an existing session** sends your prompt to the selected conversation.
   A busy agent receives it through the durable queue. A sleeping session resumes
