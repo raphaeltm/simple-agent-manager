@@ -78,7 +78,7 @@ callers to distinguish a complete empty result from an incomplete or failed sear
       behavior.
 - [x] Add MCP and SAM-session contract coverage, including authorization revocation mid-continuation.
 - [x] Run focused and full API/Workers suites plus every requested local quality gate.
-- [ ] Complete Cloudflare, security, test, constitution, documentation, and task-completion reviews;
+- [x] Complete Cloudflare, security, test, constitution, documentation, and task-completion reviews;
       resolve all blocking findings and record each result in the PR.
 - [ ] Deploy one pinned SHA after checking shared staging occupancy. Prove complete archive-owner
       traversal, multi-page continuation, revoked membership refusal, concurrent chat/search, and
@@ -144,25 +144,71 @@ callers to distinguish a complete empty result from an incomplete or failed sear
   binding, fixed cursor lifetime, independent coverage dimensions, configurable error/repair bounds,
   foreign-project owner exclusion, and exact-scope continuation rejection.
 - Full local gates pass: `pnpm check:fast`; `pnpm typecheck` (19/19 tasks); API Node suite (751
-  files, 10,263 tests); full workerd suite (88 files, 1,180 tests); `pnpm build` (9/9 tasks);
+  files, 10,272 tests); full workerd suite (88 files, 1,180 tests in 3,565 seconds); `pnpm build` (9/9 tasks);
   migration safety; Durable Object migration safety; and Wrangler binding validation.
+- Staging workflow `35922767450` deployed exact tested code SHA
+  `0a7ce28eff81cd1c56f6feee794700a08daf2552` successfully. The shared deployment queue was empty
+  immediately before the one dispatch. The Cloudflare Worker settings API returned the requested
+  values: concurrency `4`, repair sessions `1`, repair chunks `1`, continuation TTL `900000`, cursor
+  max bytes `1048576`, and error limit `20`. GitHub's staging Environment contains no matching
+  overrides. Staging D1 contains zero active VM nodes (268 historical rows are all `deleted`).
+- The available staging Cloudflare token can query and mutate D1 and read analytics, but Workers KV
+  writes fail with Cloudflare HTTP 401. Live `/mcp` probes require a disposable `mcp:<token>` KV entry;
+  the public API intentionally has no token producer that avoids starting an agent runtime. The first
+  harness attempt failed on its first KV write before creating a D1 fixture. A follow-up D1 check found
+  zero `slice-b-*` users and zero temporary routing rows. Human input was requested for narrowly scoped
+  staging KV edit access or a securely provisioned disposable MCP token; no secret should be pasted
+  into task or chat text.
 
 ## Benchmark and architecture decision
 
-Pending pinned staging measurement. This section will separate steady queries from one-time repair and
-will cite billed `durableObjectsPeriodicGroups.sum.duration`; invocation `wallTime` will not be used as
-cost evidence.
+The parent branch's initial pinned candidate was exact pre-Slice-C SHA
+`a85244d4c5f33372eabde653eb60a1be737c679d`, whose Slice B search implementation is the code carved
+here. Workflow `35674059977` measured the same 108-owner staging project before four more sessions were
+archived (264 then; 268 now). Its first traversal repaired and reached 108/108 owners and 264/264
+indexed archive sessions without archive execution or index errors. Three steady 27-page traversals
+reported the following per-page cold/warm p50/p95 and paced end-to-end wall times:
+
+| Query                  | Cold page | Warm p50 | Warm p95 | Complete traversal wall |
+| ---------------------- | --------: | -------: | -------: | ----------------------: |
+| rare `playwright`      |  1,642 ms | 1,672 ms | 2,193 ms |                74.505 s |
+| common `test`          |  3,185 ms |   860 ms | 1,870 ms |                66.446 s |
+| historical `migration` |  1,884 ms |   727 ms | 1,936 ms |                63.495 s |
+
+The wall figures include deliberate 1.25-second inter-page pacing. A hidden no-result query completed
+archive coverage but remained honestly incomplete after 28 pages / 113.596 seconds because every root
+pass reported `root_search_failed`; the bounded root-index repair is the explicit Slice C dependency.
+That prior run did not retain a separate filtered-query number, so fresh empty and filtered measurement
+remain open behind the disposable-MCP-token blocker above.
+
+The parent measurement's Sep 22 billed ProjectData delta combined first-use repair and queries:
+`durableObjectsPeriodicGroups.sum.duration` rose approximately 110 GB-s (72 to 182), rows read rose
+approximately 1.765 million (254.59k to 2.02M), and rows written rose approximately 41.37k (5.25k to
+46.62k). It is a mixed one-time-repair-plus-query delta, not a per-query estimate. The read-only
+production cost audit for Sep 20–22 independently reports 17.73k GB-s, 482.04M rows read, and 2.61M
+rows written overall; the production ProjectData namespace accounts for 16.12k GB-s, 481.30M reads,
+and 2.61M writes. Those aggregate production values provide context only and are not attributed to
+search.
+
+**Decision:** retain the existing bounded shard fanout and implement no separate projection in Slice B.
+At the current 108-owner shape, archive traversal completed reliably with bounded four-owner
+concurrency and sub-3.2-second observed page latency. The minute-scale complete traversal is material,
+but current billed evidence is confounded by one-time repair, and the known non-converging empty path
+belongs to the already-planned Slice C root index. A new projection would add consistency, backfill,
+authorization, and lifecycle machinery without a clean steady-state cost result demonstrating that it
+is needed. Reconsider after Slice C and an aligned repair-free benchmark; do not infer savings from the
+mixed delta.
 
 ## Specialist review evidence
 
-| Reviewer                  | Status  | Outcome |
-| ------------------------- | ------- | ------- |
-| cloudflare-specialist     | PASS    | Owner inventory/fanout, bounded DO/R2 repair, Wrangler/config sync, independent coverage, and strict Slice C exclusion pass |
-| security-auditor          | PASS    | Cursor signing/binding, authorization refresh, tenant isolation, and sanitized errors pass; unbounded query length deferred to idea `01M37Y00HSVM8VWSZCGXV8NDN3` |
-| test-engineer             | PASS    | Vertical MCP continuation plus configurable bounds and error paths pass; 5 focused files / 354 tests |
-| constitution-validator    | PASS    | Six settings remain configurable with bounded defaults; no Principle XI or scope violations |
-| doc-sync-validator        | PASS    | Runtime contracts, caps, per-collection error semantics, and Slice C root-FTS deferral are synchronized |
-| task-completion-validator | PASS    | Implementation and tests satisfy Slice B; staging/benchmark/PR remain the expected pending phases |
+| Reviewer                  | Status | Outcome                                                                                                                                                          |
+| ------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| cloudflare-specialist     | PASS   | Owner inventory/fanout, bounded DO/R2 repair, Wrangler/config sync, independent coverage, and strict Slice C exclusion pass                                      |
+| security-auditor          | PASS   | Cursor signing/binding, authorization refresh, tenant isolation, and sanitized errors pass; unbounded query length deferred to idea `01M37Y00HSVM8VWSZCGXV8NDN3` |
+| test-engineer             | PASS   | Vertical MCP continuation plus configurable bounds and error paths pass; 5 focused files / 354 tests                                                             |
+| constitution-validator    | PASS   | Six settings remain configurable with bounded defaults; no Principle XI or scope violations                                                                      |
+| doc-sync-validator        | PASS   | Runtime contracts, caps, per-collection error semantics, and Slice C root-FTS deferral are synchronized                                                          |
+| task-completion-validator | PASS   | Implementation and tests satisfy Slice B; staging/benchmark/PR remain the expected pending phases                                                                |
 
 ## References
 
