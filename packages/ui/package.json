@@ -38,7 +38,7 @@
     "@storybook/addon-a11y": "10.6.0",
     "@storybook/addon-docs": "10.5.7",
     "@storybook/react": "10.6.0",
-    "@storybook/react-vite": "10.5.7",
+    "@storybook/react-vite": "10.6.0",
     "@tailwindcss/vite": "4.2.3",
     "@testing-library/dom": "catalog:",
     "@testing-library/jest-dom": "catalog:",
