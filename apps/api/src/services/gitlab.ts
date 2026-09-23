@@ -10,6 +10,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
 import { AppError, errors } from '../middleware/error';
+import { getBetterAuthAccountIdForProvider } from './better-auth-account';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getGitLabOAuthConfig } from './platform-config';
 
@@ -153,10 +154,19 @@ async function getDirectGitLabUserAccessTokenResultWithHeaders(
   flow: string
 ): Promise<GitLabAccessTokenResult | null> {
   try {
+    const accountId = await getBetterAuthAccountIdForProvider(env, userId, 'gitlab');
+    if (!accountId) {
+      log.warn('gitlab.user_access_token_account_missing', {
+        flow,
+        userId,
+        tokenPresent: false,
+      });
+      return null;
+    }
     const auth = await createAuth(env);
     const token = await auth.api.getAccessToken({
       headers,
-      body: { providerId: 'gitlab', userId },
+      body: { accountId, userId },
     });
     log.info('gitlab.user_access_token.lookup', {
       flow,

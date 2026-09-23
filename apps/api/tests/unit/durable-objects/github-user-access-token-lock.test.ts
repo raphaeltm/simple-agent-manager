@@ -43,6 +43,18 @@ function makeRequest(userId = 'user-1'): Request {
   });
 }
 
+function makeEnv(accountId: string | null = 'github-account-row') {
+  const first = vi.fn(async () => (accountId ? { id: accountId } : null));
+  const bind = vi.fn(() => ({ first }));
+  const prepare = vi.fn(() => ({ bind }));
+  return {
+    env: { DATABASE: { prepare } },
+    prepare,
+    bind,
+    first,
+  };
+}
+
 describe('GitHubUserAccessTokenLock', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -56,34 +68,36 @@ describe('GitHubUserAccessTokenLock', () => {
     };
     let githubRefreshPosts = 0;
 
+    const getAccessToken = vi.fn(async () => {
+      const snapshot = { ...storedToken };
+      if (snapshot.accessTokenExpiresAt.getTime() <= Date.now()) {
+        githubRefreshPosts += 1;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        storedToken = {
+          accessToken: 'fresh-access',
+          refreshToken: 'refresh-2',
+          accessTokenExpiresAt: new Date(Date.now() + 28_800_000),
+        };
+        return {
+          accessToken: storedToken.accessToken,
+          accessTokenExpiresAt: storedToken.accessTokenExpiresAt,
+          scopes: ['read:user'],
+        };
+      }
+      return {
+        accessToken: snapshot.accessToken,
+        accessTokenExpiresAt: snapshot.accessTokenExpiresAt,
+        scopes: ['read:user'],
+      };
+    });
     mocks.createAuth.mockReturnValue({
       api: {
-        getAccessToken: vi.fn(async () => {
-          const snapshot = { ...storedToken };
-          if (snapshot.accessTokenExpiresAt.getTime() <= Date.now()) {
-            githubRefreshPosts += 1;
-            await new Promise((resolve) => setTimeout(resolve, 25));
-            storedToken = {
-              accessToken: 'fresh-access',
-              refreshToken: 'refresh-2',
-              accessTokenExpiresAt: new Date(Date.now() + 28_800_000),
-            };
-            return {
-              accessToken: storedToken.accessToken,
-              accessTokenExpiresAt: storedToken.accessTokenExpiresAt,
-              scopes: ['read:user'],
-            };
-          }
-          return {
-            accessToken: snapshot.accessToken,
-            accessTokenExpiresAt: snapshot.accessTokenExpiresAt,
-            scopes: ['read:user'],
-          };
-        }),
+        getAccessToken,
       },
     });
 
-    const lock = new GitHubUserAccessTokenLock({}, {} as never);
+    const { env } = makeEnv();
+    const lock = new GitHubUserAccessTokenLock({}, env as never);
     const [first, second] = await Promise.all([
       lock.fetch(makeRequest()),
       lock.fetch(makeRequest()),
@@ -94,6 +108,11 @@ describe('GitHubUserAccessTokenLock', () => {
     await expect(first.json()).resolves.toMatchObject({ accessToken: 'fresh-access' });
     await expect(second.json()).resolves.toMatchObject({ accessToken: 'fresh-access' });
     expect(githubRefreshPosts).toBe(1);
+    expect(getAccessToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: { accountId: 'github-account-row', userId: 'user-1' },
+      })
+    );
   });
 
   it('returns 401 when BetterAuth cannot produce a token', async () => {
@@ -103,7 +122,8 @@ describe('GitHubUserAccessTokenLock', () => {
       },
     });
 
-    const lock = new GitHubUserAccessTokenLock({}, {} as never);
+    const { env } = makeEnv();
+    const lock = new GitHubUserAccessTokenLock({}, env as never);
     const res = await lock.fetch(makeRequest());
 
     expect(res.status).toBe(401);
@@ -112,6 +132,24 @@ describe('GitHubUserAccessTokenLock', () => {
       flow: 'test',
       userId: 'user-1',
       error: 'FAILED_TO_GET_ACCESS_TOKEN',
+    });
+  });
+
+  it('returns 401 before BetterAuth when the user has no linked GitHub account row', async () => {
+    const getAccessToken = vi.fn();
+    mocks.createAuth.mockReturnValue({ api: { getAccessToken } });
+
+    const { env } = makeEnv(null);
+    const lock = new GitHubUserAccessTokenLock({}, env as never);
+    const res = await lock.fetch(makeRequest());
+
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual({ error: 'token_unavailable' });
+    expect(mocks.createAuth).not.toHaveBeenCalled();
+    expect(getAccessToken).not.toHaveBeenCalled();
+    expect(mocks.logWarn).toHaveBeenCalledWith('github.user_access_token_lock.account_missing', {
+      flow: 'test',
+      userId: 'user-1',
     });
   });
 });

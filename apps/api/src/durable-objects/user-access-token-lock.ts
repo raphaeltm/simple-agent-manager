@@ -5,6 +5,7 @@ import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
+import { getBetterAuthAccountIdForProvider } from '../services/better-auth-account';
 
 const requestSchema = v.object({
   userId: v.string(),
@@ -29,7 +30,7 @@ type TokenLockPayload = v.InferOutput<typeof requestSchema>;
  * names are bound in wrangler.toml and must not change.
  */
 export abstract class UserAccessTokenLock extends DurableObject<Env> {
-  protected abstract readonly providerId: string;
+  protected abstract readonly providerId: 'github' | 'gitlab';
 
   private refreshLock: Promise<unknown> = Promise.resolve();
 
@@ -65,10 +66,22 @@ export abstract class UserAccessTokenLock extends DurableObject<Env> {
 
   private async getAccessToken(payload: TokenLockPayload): Promise<Response> {
     try {
+      const accountId = await getBetterAuthAccountIdForProvider(
+        this.env,
+        payload.userId,
+        this.providerId
+      );
+      if (!accountId) {
+        log.warn(`${this.providerId}.user_access_token_lock.account_missing`, {
+          flow: payload.flow,
+          userId: payload.userId,
+        });
+        return Response.json({ error: 'token_unavailable' }, { status: 401 });
+      }
       const auth = await createAuth(this.env);
       const token = await auth.api.getAccessToken({
         headers: new Headers(payload.headers),
-        body: { providerId: this.providerId, userId: payload.userId },
+        body: { accountId, userId: payload.userId },
       });
 
       return Response.json({

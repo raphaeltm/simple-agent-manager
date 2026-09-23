@@ -30,6 +30,16 @@ function makeLockBinding(response: Response) {
   return { binding, stubFetch };
 }
 
+function makeDatabaseBinding(accountId: string | null = 'gitlab-account-row') {
+  return {
+    prepare: vi.fn(() => ({
+      bind: vi.fn(() => ({
+        first: vi.fn(async () => (accountId ? { id: accountId } : null)),
+      })),
+    })),
+  };
+}
+
 describe('getGitLabUserAccessTokenWithHeaders', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -63,16 +73,17 @@ describe('getGitLabUserAccessTokenWithHeaders', () => {
   });
 
   it('falls back to the direct path only when the binding is absent', async () => {
+    const getAccessToken = vi.fn(async () => ({
+      accessToken: 'direct-access',
+      accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
+      scopes: ['api'],
+    }));
     mocks.createAuth.mockResolvedValue({
       api: {
-        getAccessToken: vi.fn(async () => ({
-          accessToken: 'direct-access',
-          accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
-          scopes: ['api'],
-        })),
+        getAccessToken,
       },
     });
-    const env = {} as unknown as Env;
+    const env = { DATABASE: makeDatabaseBinding() } as unknown as Env;
 
     const token = await getGitLabUserAccessTokenWithHeaders(
       env,
@@ -83,6 +94,33 @@ describe('getGitLabUserAccessTokenWithHeaders', () => {
 
     expect(token).toBe('direct-access');
     expect(mocks.createAuth).toHaveBeenCalledTimes(1);
+    expect(getAccessToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: { accountId: 'gitlab-account-row', userId: 'user-1' },
+      })
+    );
+  });
+
+  it('returns null on the direct path when the user has no linked GitLab account row', async () => {
+    const getAccessToken = vi.fn();
+    mocks.createAuth.mockResolvedValue({ api: { getAccessToken } });
+    const env = { DATABASE: makeDatabaseBinding(null) } as unknown as Env;
+
+    const token = await getGitLabUserAccessTokenWithHeaders(
+      env,
+      new Headers(),
+      'user-1',
+      'request'
+    );
+
+    expect(token).toBeNull();
+    expect(mocks.createAuth).not.toHaveBeenCalled();
+    expect(getAccessToken).not.toHaveBeenCalled();
+    expect(mocks.logWarn).toHaveBeenCalledWith('gitlab.user_access_token_account_missing', {
+      flow: 'request',
+      userId: 'user-1',
+      tokenPresent: false,
+    });
   });
 
   it('returns null when the DO lock reports token_unavailable', async () => {

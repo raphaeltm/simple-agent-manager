@@ -40,6 +40,18 @@ function makeRequest(): Request {
   });
 }
 
+function makeEnv(accountId: string | null = 'gitlab-account-row') {
+  const first = vi.fn(async () => (accountId ? { id: accountId } : null));
+  const bind = vi.fn(() => ({ first }));
+  const prepare = vi.fn(() => ({ bind }));
+  return {
+    env: { DATABASE: { prepare } },
+    prepare,
+    bind,
+    first,
+  };
+}
+
 describe('GitLabUserAccessTokenLock', () => {
   beforeEach(() => {
     createAuthMock.mockReset();
@@ -76,7 +88,8 @@ describe('GitLabUserAccessTokenLock', () => {
 
     createAuthMock.mockReturnValue({ api: { getAccessToken } });
 
-    const lock = new GitLabUserAccessTokenLock({} as never, {} as never);
+    const { env } = makeEnv();
+    const lock = new GitLabUserAccessTokenLock({} as never, env as never);
 
     const [res1, res2] = await Promise.all([lock.fetch(makeRequest()), lock.fetch(makeRequest())]);
 
@@ -87,6 +100,11 @@ describe('GitLabUserAccessTokenLock', () => {
     expect(body1.accessToken).toBe('fresh-access');
     expect(body2.accessToken).toBe('fresh-access');
     expect(refreshCount).toBe(1);
+    expect(getAccessToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: { accountId: 'gitlab-account-row', userId: 'user-1' },
+      })
+    );
   });
 
   it('returns 401 token_unavailable when BetterAuth cannot produce a token', async () => {
@@ -95,7 +113,8 @@ describe('GitLabUserAccessTokenLock', () => {
     });
     createAuthMock.mockReturnValue({ api: { getAccessToken } });
 
-    const lock = new GitLabUserAccessTokenLock({} as never, {} as never);
+    const { env } = makeEnv();
+    const lock = new GitLabUserAccessTokenLock({} as never, env as never);
     const res = await lock.fetch(makeRequest());
 
     expect(res.status).toBe(401);
@@ -104,6 +123,24 @@ describe('GitLabUserAccessTokenLock', () => {
       'gitlab.user_access_token_lock.unavailable',
       expect.objectContaining({ flow: 'test', userId: 'user-1' })
     );
+  });
+
+  it('returns 401 before BetterAuth when the user has no linked GitLab account row', async () => {
+    const getAccessToken = vi.fn();
+    createAuthMock.mockReturnValue({ api: { getAccessToken } });
+
+    const { env } = makeEnv(null);
+    const lock = new GitLabUserAccessTokenLock({} as never, env as never);
+    const res = await lock.fetch(makeRequest());
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'token_unavailable' });
+    expect(createAuthMock).not.toHaveBeenCalled();
+    expect(getAccessToken).not.toHaveBeenCalled();
+    expect(logWarnMock).toHaveBeenCalledWith('gitlab.user_access_token_lock.account_missing', {
+      flow: 'test',
+      userId: 'user-1',
+    });
   });
 
   it('rejects non-POST requests', async () => {

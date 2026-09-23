@@ -5,6 +5,7 @@ import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
+import { getBetterAuthAccountIdForProvider } from './better-auth-account';
 import { getTokenType } from './github-route-helpers';
 
 const lockedTokenResponseSchema = v.object({
@@ -56,10 +57,19 @@ async function getDirectGitHubUserAccessTokenWithHeaders(
   flow: string
 ): Promise<string | null> {
   try {
+    const accountId = await getBetterAuthAccountIdForProvider(env, userId, 'github');
+    if (!accountId) {
+      log.warn('github.user_access_token_account_missing', {
+        flow,
+        userId,
+        tokenPresent: false,
+      });
+      return null;
+    }
     const auth = await createAuth(env);
     const token = await auth.api.getAccessToken({
       headers,
-      body: { providerId: 'github', userId },
+      body: { accountId, userId },
     });
     log.info('github.user_access_token.lookup', {
       flow,
