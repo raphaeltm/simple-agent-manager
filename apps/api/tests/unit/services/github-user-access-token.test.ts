@@ -14,15 +14,13 @@ import {
   getGitHubUserAccessTokenForOwner,
   getGitHubUserAccessTokenWithHeaders,
 } from '../../../src/services/github-user-access-token';
+import {
+  expectTrustedOwnerTokenLookup,
+  makeDatabaseBinding,
+} from './better-auth-token-test-helpers';
 
 function makeEnv() {
-  return {
-    DATABASE: {
-      prepare: vi.fn(() => ({
-        bind: vi.fn(() => ({ first: vi.fn(async () => ({ id: 'github-account-row' })) })),
-      })),
-    },
-  } as unknown as Env;
+  return { DATABASE: makeDatabaseBinding('github-account-row') } as unknown as Env;
 }
 
 describe('GitHub user access-token caller context', () => {
@@ -35,9 +33,7 @@ describe('GitHub user access-token caller context', () => {
     await expect(getGitHubUserAccessTokenForOwner(makeEnv(), 'user-1')).resolves.toBe(
       'owner-token'
     );
-    expect(getAccessToken).toHaveBeenCalledWith({
-      body: { accountId: 'github-account-row', userId: 'user-1' },
-    });
+    expectTrustedOwnerTokenLookup(getAccessToken, 'github-account-row');
   });
 
   it('preserves session headers for a request lookup', async () => {

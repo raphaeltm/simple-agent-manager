@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { makeBetterAuthAccountEnv } from './access-token-lock-test-helpers';
+import {
+  expectBetterAuthTokenLookup,
+  expectTrustedOwnerTokenLookup,
+  makeAccessTokenLockRequest,
+  makeBetterAuthAccountEnv,
+} from './access-token-lock-test-helpers';
 
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
@@ -31,18 +36,6 @@ vi.mock('../../../src/lib/logger', () => ({
 
 const { GitHubUserAccessTokenLock } =
   await import('../../../src/durable-objects/github-user-access-token-lock');
-
-function makeRequest(userId = 'user-1', includeHeaders = true): Request {
-  return new Request('https://do-internal/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      userId,
-      flow: 'test',
-      ...(includeHeaders ? { headers: [['cookie', 'session=abc']] } : {}),
-    }),
-  });
-}
 
 describe('GitHubUserAccessTokenLock', () => {
   beforeEach(() => {
@@ -88,8 +81,8 @@ describe('GitHubUserAccessTokenLock', () => {
     const { env } = makeBetterAuthAccountEnv('github-account-row');
     const lock = new GitHubUserAccessTokenLock({}, env as never);
     const [first, second] = await Promise.all([
-      lock.fetch(makeRequest()),
-      lock.fetch(makeRequest()),
+      lock.fetch(makeAccessTokenLockRequest('https://do-internal/token')),
+      lock.fetch(makeAccessTokenLockRequest('https://do-internal/token')),
     ]);
 
     expect(first.status).toBe(200);
@@ -97,11 +90,7 @@ describe('GitHubUserAccessTokenLock', () => {
     await expect(first.json()).resolves.toMatchObject({ accessToken: 'fresh-access' });
     await expect(second.json()).resolves.toMatchObject({ accessToken: 'fresh-access' });
     expect(githubRefreshPosts).toBe(1);
-    expect(getAccessToken).toHaveBeenCalledWith(
-      expect.objectContaining({
-        body: { accountId: 'github-account-row', userId: 'user-1' },
-      })
-    );
+    expectBetterAuthTokenLookup(getAccessToken, 'github-account-row');
   });
 
   it('returns 401 when BetterAuth cannot produce a token', async () => {
@@ -113,7 +102,7 @@ describe('GitHubUserAccessTokenLock', () => {
 
     const { env } = makeBetterAuthAccountEnv('github-account-row');
     const lock = new GitHubUserAccessTokenLock({}, env as never);
-    const res = await lock.fetch(makeRequest());
+    const res = await lock.fetch(makeAccessTokenLockRequest('https://do-internal/token'));
 
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toEqual({ error: 'token_unavailable' });
@@ -130,12 +119,12 @@ describe('GitHubUserAccessTokenLock', () => {
     const { env } = makeBetterAuthAccountEnv('github-account-row');
     const lock = new GitHubUserAccessTokenLock({}, env as never);
 
-    const res = await lock.fetch(makeRequest('user-1', false));
+    const res = await lock.fetch(
+      makeAccessTokenLockRequest('https://do-internal/token', { includeHeaders: false })
+    );
 
     expect(res.status).toBe(200);
-    expect(getAccessToken).toHaveBeenCalledWith({
-      body: { accountId: 'github-account-row', userId: 'user-1' },
-    });
+    expectTrustedOwnerTokenLookup(getAccessToken, 'github-account-row');
   });
 
   it('returns 401 before BetterAuth when the user has no linked GitHub account row', async () => {
@@ -144,7 +133,7 @@ describe('GitHubUserAccessTokenLock', () => {
 
     const { env } = makeBetterAuthAccountEnv(null);
     const lock = new GitHubUserAccessTokenLock({}, env as never);
-    const res = await lock.fetch(makeRequest());
+    const res = await lock.fetch(makeAccessTokenLockRequest('https://do-internal/token'));
 
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toEqual({ error: 'token_unavailable' });

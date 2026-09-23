@@ -23,6 +23,11 @@ import {
   getGitLabUserAccessTokenForOwner,
   getGitLabUserAccessTokenWithHeaders,
 } from '../../../src/services/gitlab';
+import {
+  expectBetterAuthTokenLookup,
+  expectTrustedOwnerTokenLookup,
+  makeDatabaseBinding,
+} from './better-auth-token-test-helpers';
 
 function makeLockBinding(response: Response) {
   const stubFetch = vi.fn(async () => response);
@@ -31,16 +36,6 @@ function makeLockBinding(response: Response) {
     get: vi.fn(() => ({ fetch: stubFetch })),
   };
   return { binding, stubFetch };
-}
-
-function makeDatabaseBinding(accountId: string | null = 'gitlab-account-row') {
-  return {
-    prepare: vi.fn(() => ({
-      bind: vi.fn(() => ({
-        first: vi.fn(async () => (accountId ? { id: accountId } : null)),
-      })),
-    })),
-  };
 }
 
 describe('getGitLabUserAccessTokenWithHeaders', () => {
@@ -86,7 +81,7 @@ describe('getGitLabUserAccessTokenWithHeaders', () => {
         getAccessToken,
       },
     });
-    const env = { DATABASE: makeDatabaseBinding() } as unknown as Env;
+    const env = { DATABASE: makeDatabaseBinding('gitlab-account-row') } as unknown as Env;
 
     const token = await getGitLabUserAccessTokenWithHeaders(
       env,
@@ -97,11 +92,7 @@ describe('getGitLabUserAccessTokenWithHeaders', () => {
 
     expect(token).toBe('direct-access');
     expect(mocks.createAuth).toHaveBeenCalledTimes(1);
-    expect(getAccessToken).toHaveBeenCalledWith(
-      expect.objectContaining({
-        body: { accountId: 'gitlab-account-row', userId: 'user-1' },
-      })
-    );
+    expectBetterAuthTokenLookup(getAccessToken, 'gitlab-account-row');
   });
 
   it('omits headers for a trusted owner lookup', async () => {
@@ -111,12 +102,10 @@ describe('getGitLabUserAccessTokenWithHeaders', () => {
       scopes: ['api'],
     }));
     mocks.createAuth.mockResolvedValue({ api: { getAccessToken } });
-    const env = { DATABASE: makeDatabaseBinding() } as unknown as Env;
+    const env = { DATABASE: makeDatabaseBinding('gitlab-account-row') } as unknown as Env;
 
     await expect(getGitLabUserAccessTokenForOwner(env, 'user-1')).resolves.toBe('owner-access');
-    expect(getAccessToken).toHaveBeenCalledWith({
-      body: { accountId: 'gitlab-account-row', userId: 'user-1' },
-    });
+    expectTrustedOwnerTokenLookup(getAccessToken, 'gitlab-account-row');
   });
 
   it('returns null on the direct path when the user has no linked GitLab account row', async () => {
