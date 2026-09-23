@@ -859,10 +859,16 @@ export class ProjectData extends DurableObject<Env> {
     input: archiveSharding.ArchiveSourceFinalizeDeleteInput
   ): Promise<archiveSharding.ArchiveSourceFinalizeDeleteResult> {
     return this.withArchiveTranscriptLock(() =>
-      measureArchiveSql(this.sql, input.sessionId, 'source_delete', sql => archiveSharding.finalizeSourceDelete(sql, {
-        ...input,
-        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
-      }))
+      measureArchiveSql(this.sql, input.sessionId, 'source_delete', (sql) =>
+        archiveSharding.finalizeSourceDelete(
+          sql,
+          {
+            ...input,
+            hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+          },
+          this.ctx.storage.transactionSync.bind(this.ctx.storage)
+        )
+      )
     );
   }
 
@@ -967,7 +973,16 @@ export class ProjectData extends DurableObject<Env> {
   async archiveTargetCommitChunk(
     input: archiveSharding.ArchiveTargetCommitChunkInput
   ): Promise<archiveSharding.ArchiveTargetCommitChunkResult> {
-    return this.withArchiveTranscriptLock(() => measureArchiveSql(this.sql, input.sessionId, 'target_commit', sql => archiveSharding.commitArchiveTargetChunk(sql, input, this.env)));
+    return this.withArchiveTranscriptLock(() =>
+      measureArchiveSql(this.sql, input.sessionId, 'target_commit', (sql) =>
+        archiveSharding.commitArchiveTargetChunk(
+          sql,
+          input,
+          this.env,
+          this.ctx.storage.transactionSync.bind(this.ctx.storage)
+        )
+      )
+    );
   }
 
   async archiveTargetSeal(
@@ -1069,7 +1084,9 @@ export class ProjectData extends DurableObject<Env> {
     roles: string[] | null = null,
     limit: number = 10
   ) {
-    return archiveSharding.archiveTargetSearchMessages(this.sql, input, query, roles, limit);
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.archiveTargetSearchMessages(this.sql, this.env, input, query, roles, limit)
+    );
   }
 
   archiveTargetSearchProjectMessages(
@@ -1078,7 +1095,16 @@ export class ProjectData extends DurableObject<Env> {
     roles: string[] | null = null,
     limit: number = 10
   ) {
-    return archiveSharding.archiveTargetSearchProjectMessages(this.sql, input, query, roles, limit);
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.archiveTargetSearchProjectMessages(
+        this.sql,
+        this.env,
+        input,
+        query,
+        roles,
+        limit
+      )
+    );
   }
 
   async getMessageToolContent(

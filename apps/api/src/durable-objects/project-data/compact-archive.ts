@@ -32,12 +32,11 @@ function bucket(env: Env): R2Bucket {
   return env.PROJECT_DATA_ARCHIVE_R2;
 }
 
-export async function commitCompactRawChunk(
-  sql: SqlStorage,
+export async function verifyCompactRawChunk(
   env: Env,
   input: ProjectDataArchiveChunk,
   ref: CompactChunkRef
-): Promise<void> {
+): Promise<{ rows: ProjectDataArchiveRow[]; rowIds: string[]; counts: Record<string, number> }> {
   const stored = await readCompactChunk(
     bucket(env),
     ref,
@@ -56,6 +55,15 @@ export async function commitCompactRawChunk(
     const role = String(row.role);
     counts[role] = (counts[role] ?? 0) + 1;
   }
+  return { rows: stored.rows, rowIds: stored.rowIds, counts };
+}
+
+export function commitVerifiedCompactRawChunk(
+  sql: SqlStorage,
+  input: ProjectDataArchiveChunk,
+  ref: CompactChunkRef,
+  verified: { rows: ProjectDataArchiveRow[]; rowIds: string[]; counts: Record<string, number> }
+): void {
   const prior = sql
     .exec(
       'SELECT body_sha256 FROM project_data_archive_raw_chunks WHERE session_id = ? AND ordinal = ?',
@@ -78,10 +86,10 @@ export async function commitCompactRawChunk(
     ref.bytes,
     ref.bodyBytes,
     ref.bodySha256,
-    stored.rows[0]?.created_at ?? null,
-    stored.rows.at(-1)?.created_at ?? null,
-    JSON.stringify(counts),
-    JSON.stringify(stored.rowIds)
+    verified.rows[0]?.created_at ?? null,
+    verified.rows.at(-1)?.created_at ?? null,
+    JSON.stringify(verified.counts),
+    JSON.stringify(verified.rowIds)
   );
 }
 
@@ -113,6 +121,7 @@ type CompactRawFilter = {
   order?: 'asc' | 'desc';
   deadline?: number;
   perChunkTimeoutMs?: number;
+  startAfterOrdinal?: number;
 };
 
 function compactChunkQuery(sessionId: string, cursor: number | null, filter: CompactRawFilter) {
@@ -155,14 +164,15 @@ export async function* compactRawChunks(
     .toArray()[0];
   if (!target) throw new Error('Compact archive target missing');
   const perChunkMs = filter.perChunkTimeoutMs;
-  const sharedDeadline = filter.deadline ?? Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
-  let cursor: number | null = null;
+  const sharedDeadline =
+    filter.deadline ?? Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
+  let cursor: number | null = filter.startAfterOrdinal ?? null;
   for (;;) {
     const { query, params } = compactChunkQuery(sessionId, cursor, filter);
     const row = sql.exec(query, ...params).toArray()[0];
     if (!row) return;
     cursor = Number(row.ordinal);
-    const chunkTimeout = perChunkMs ?? (sharedDeadline - Date.now());
+    const chunkTimeout = perChunkMs ?? sharedDeadline - Date.now();
     if (chunkTimeout <= 0) throw new Error('Compact archive operation deadline exceeded');
     const chunk = await readCompactChunk(
       bucket(env),

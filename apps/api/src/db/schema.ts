@@ -3630,6 +3630,45 @@ export const projectDataArchiveMigrations = sqliteTable(
 
 export type ProjectDataArchiveMigrationRow = typeof projectDataArchiveMigrations.$inferSelect;
 
+export const projectDataArchiveCopyCheckpoints = sqliteTable(
+  'project_data_archive_copy_checkpoints',
+  {
+    migrationId: text('migration_id')
+      .notNull()
+      .references(() => projectDataArchiveMigrations.migrationId, { onDelete: 'cascade' }),
+    tableName: text('table_name', {
+      enum: ['chat_messages', 'chat_messages_grouped', 'tool_payload_archives'],
+    }).notNull(),
+    storageFormat: text('storage_format', { enum: ['sqlite-v1', 'r2-gzip-v1'] }).notNull(),
+    chunkRows: integer('chunk_rows').notNull(),
+    chunkBytes: integer('chunk_bytes').notNull(),
+    nextOrdinal: integer('next_ordinal').notNull().default(0),
+    sourceCursor: text('source_cursor'),
+    complete: integer('complete').notNull().default(0),
+    copiedRows: integer('copied_rows').notNull().default(0),
+    copiedBytes: integer('copied_bytes').notNull().default(0),
+    lastChunkSha256: text('last_chunk_sha256'),
+    leaseEpoch: integer('lease_epoch').notNull().default(0),
+    lastOperation: text('last_operation'),
+    lastOperationId: text('last_operation_id'),
+    lastOperationStartedAt: integer('last_operation_started_at'),
+    lastOperationCompletedAt: integer('last_operation_completed_at'),
+    lastOperationDurationMs: integer('last_operation_duration_ms'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    primaryKey: primaryKey({ columns: [table.migrationId, table.tableName] }),
+    progressIdx: index('idx_project_data_archive_copy_checkpoints_progress').on(
+      table.complete,
+      table.updatedAt,
+      table.migrationId
+    ),
+  })
+);
+
+export type ProjectDataArchiveCopyCheckpointRow =
+  typeof projectDataArchiveCopyCheckpoints.$inferSelect;
+
 export const projectDataSessionLocations = sqliteTable(
   'project_data_session_locations',
   {

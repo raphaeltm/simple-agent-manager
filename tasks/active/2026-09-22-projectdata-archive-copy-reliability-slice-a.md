@@ -37,33 +37,33 @@ work while preserving the existing archive format, reader behavior, and deletion
 
 ### Durable copy and bounded work
 
-- [ ] Add additive D1 migration 0171 and matching schema for per-table archive copy checkpoints.
-- [ ] Add only DO migration 058 with content identical to the parent branch; exclude migration 059.
-- [ ] Add bounded, content-free migration progress evidence for phase, table, ordinal, byte counts,
+- [x] Add additive D1 migration 0171 and matching schema for per-table archive copy checkpoints.
+- [x] Add only DO migration 058 with content identical to staging SHA `a85244d4c`; exclude migration 059.
+- [x] Add bounded, content-free migration progress evidence for phase, table, ordinal, byte counts,
       operation outcome/duration, lease epoch, and request correlation.
-- [ ] Freeze retry layout fields while preserving in-flight and legacy migration layouts/readers.
-- [ ] Advance durable per-table checkpoints only after verified target receipts; reconcile receipts
+- [x] Freeze retry layout fields while preserving in-flight and legacy migration layouts/readers.
+- [x] Advance durable per-table checkpoints only after verified target receipts; reconcile receipts
       ahead of checkpoints and reject missing or incompatible receipts.
-- [ ] Resume at the verified cursor/ordinal with immutable keys and hashes across reset boundaries.
-- [ ] Use byte-identical incremental hashing, avoid duplicate attempt-local reads/decompression, and
+- [x] Resume at the verified cursor/ordinal with immutable keys and hashes across reset boundaries.
+- [x] Use byte-identical incremental hashing, avoid duplicate attempt-local reads/decompression, and
       retain retry-time corruption and final pre-delete verification.
-- [ ] Bound every export page by canonical bytes with a finite integrity-preserving oversized-row path.
-- [ ] Classify timeout stage/cancellation and prevent retry from racing duplicate provider I/O.
-- [ ] Keep source finalization bounded and atomic.
+- [x] Bound every export page by canonical bytes with a finite integrity-preserving oversized-row path.
+- [x] Classify timeout stage/cancellation and prevent retry from racing duplicate provider I/O.
+- [x] Keep source finalization bounded and atomic.
 
 ### Publication and deletion safety
 
-- [ ] Copy and version the materialization watermark/index-state anchor contract.
-- [ ] Build and verify complete destination index coverage before sealing or source deletion.
-- [ ] Refuse deletion when transcript or index proof is missing, inconsistent, corrupt, or unavailable.
-- [ ] Add bounded idempotent repair for incomplete published compact archives without refilling root.
-- [ ] Keep source-or-verified-target visibility during migration/publication/repair with stable dedupe.
-- [ ] Limit `services/project-data.ts` changes to compile-correct verified-target visibility; defer new
+- [x] Copy and version the materialization watermark/index-state anchor contract.
+- [x] Build and verify complete destination index coverage before sealing or source deletion.
+- [x] Refuse deletion when transcript or index proof is missing, inconsistent, corrupt, or unavailable.
+- [x] Add bounded idempotent repair for incomplete published compact archives without refilling root.
+- [x] Keep source-or-verified-target visibility during migration/publication/repair with stable dedupe.
+- [x] Limit `services/project-data.ts` changes to compile-correct verified-target visibility; defer new
       search semantics, continuation, owner inventory/coverage, environment variables, and MCP changes.
 
 ### Tests and gates
 
-- [ ] Add focused unit/workerd coverage for production-shaped byte bounds, oversized rows, receipts,
+- [x] Add focused unit/workerd coverage for production-shaped byte bounds, oversized rows, receipts,
       checkpoints, resume boundaries, repair, hashing, atomic rollback, and proof-gated deletion.
 - [ ] Run focused tests, `pnpm check:fast`, typecheck, full API tests,
       `pnpm quality:migration-safety`, and `pnpm quality:do-migration-safety`.

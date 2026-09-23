@@ -2254,6 +2254,125 @@ export const MIGRATIONS: Migration[] = [
         FROM chat_sessions LIMIT 0`);
     },
   },
+  {
+    // Archive copy receipts carry the exact source continuation that produced an
+    // immutable ordinal. Search coverage is separate derived evidence: transcript
+    // hashes stay byte-compatible with r2-gzip-v1 while incomplete/pruned indexes
+    // can be repaired and verified independently before source deletion.
+    name: '058-archive-copy-receipts-and-search-coverage',
+    run: (sql) => {
+      for (const [column, statement] of [
+        [
+          'source_cursor',
+          'ALTER TABLE project_data_archive_target_chunks ADD COLUMN source_cursor TEXT',
+        ],
+        [
+          'source_has_more',
+          'ALTER TABLE project_data_archive_target_chunks ADD COLUMN source_has_more INTEGER CHECK (source_has_more IS NULL OR source_has_more IN (0, 1))',
+        ],
+      ] as const) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.toLowerCase().includes(`duplicate column name: ${column}`)
+          )
+            throw error;
+        }
+      }
+      for (const [column, statement] of [
+        [
+          'search_index_version',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_version INTEGER',
+        ],
+        [
+          'search_index_state',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_state TEXT',
+        ],
+        [
+          'search_index_message_count',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_message_count INTEGER',
+        ],
+        [
+          'search_index_document_count',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_document_count INTEGER',
+        ],
+        [
+          'search_index_sha256',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_index_sha256 TEXT',
+        ],
+        [
+          'search_indexed_at',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_indexed_at INTEGER',
+        ],
+        [
+          'search_repair_next_ordinal',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_next_ordinal INTEGER',
+        ],
+        [
+          'search_repair_pending_json',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_pending_json TEXT',
+        ],
+        [
+          'search_repair_message_count',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_message_count INTEGER',
+        ],
+        [
+          'search_repair_phase',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_phase TEXT',
+        ],
+        [
+          'search_repair_raw_cursor',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_raw_cursor TEXT',
+        ],
+        [
+          'search_repair_grouped_cursor',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_grouped_cursor TEXT',
+        ],
+        [
+          'search_repair_projection_sha256',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_projection_sha256 TEXT',
+        ],
+        [
+          'search_repair_document_count',
+          'ALTER TABLE project_data_archive_target_sessions ADD COLUMN search_repair_document_count INTEGER',
+        ],
+      ] as const) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.toLowerCase().includes(`duplicate column name: ${column}`)
+          )
+            throw error;
+        }
+      }
+      sql.exec(`SELECT source_cursor, source_has_more
+        FROM project_data_archive_target_chunks LIMIT 0`);
+      sql.exec(`SELECT search_index_version, search_index_state,
+          search_index_message_count, search_index_document_count,
+          search_index_sha256, search_indexed_at, search_repair_next_ordinal,
+          search_repair_pending_json, search_repair_message_count, search_repair_phase,
+          search_repair_raw_cursor, search_repair_grouped_cursor,
+          search_repair_projection_sha256, search_repair_document_count
+        FROM project_data_archive_target_sessions LIMIT 0`);
+      sql.exec(`CREATE TABLE IF NOT EXISTS project_data_archive_search_documents (
+        rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+        projection_id TEXT NOT NULL UNIQUE,
+        document_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_data_archive_search_documents_session
+        ON project_data_archive_search_documents(session_id, created_at DESC, projection_id DESC)`);
+      sql.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS project_data_archive_search_documents_fts
+        USING fts5(content, content='project_data_archive_search_documents', content_rowid='rowid')`);
+    },
+  },
 ];
 
 /**

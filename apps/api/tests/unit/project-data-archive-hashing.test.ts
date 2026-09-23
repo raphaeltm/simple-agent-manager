@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canonicalizeArchiveRows,
   canonicalRowsSha256,
+  createCanonicalRowsChainHasher,
   createCanonicalRowsHasher,
   sha256Hex,
 } from '../../src/project-data-archive/hashing';
@@ -61,5 +62,24 @@ describe('createCanonicalRowsHasher', () => {
     const hasher = createCanonicalRowsHasher(COLUMNS);
     for (const item of rows) hasher.update(item);
     expect(hasher.digestHex()).toBe(await canonicalRowsSha256(COLUMNS, rows));
+  });
+});
+
+describe('createCanonicalRowsChainHasher', () => {
+  it('resumes from a persisted digest and row count without changing the commitment', () => {
+    const rows = Array.from({ length: 17 }, (_, index) => row(index));
+    const uninterrupted = createCanonicalRowsChainHasher(COLUMNS);
+    for (const item of rows) uninterrupted.update(item);
+
+    const firstPage = createCanonicalRowsChainHasher(COLUMNS);
+    for (const item of rows.slice(0, 7)) firstPage.update(item);
+    const resumed = createCanonicalRowsChainHasher(COLUMNS, {
+      digestHex: firstPage.digestHex,
+      rowCount: firstPage.rowCount,
+    });
+    for (const item of rows.slice(7)) resumed.update(item);
+
+    expect(resumed.rowCount).toBe(uninterrupted.rowCount);
+    expect(resumed.digestHex).toBe(uninterrupted.digestHex);
   });
 });

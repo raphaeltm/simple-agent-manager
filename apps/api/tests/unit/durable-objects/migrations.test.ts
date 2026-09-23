@@ -80,14 +80,21 @@ describe('DO Migrations', () => {
       sql.exec(`CREATE TABLE session_inbox (
         id TEXT PRIMARY KEY, delivery_state TEXT, attempt_id TEXT, runtime_identity TEXT
       )`);
-      sql.exec(`INSERT INTO session_inbox VALUES ('existing', 'delivering', 'attempt-before-deploy', 'runtime-before-deploy')`);
-      const migration = MIGRATIONS.find((entry) => entry.name === '046-prompt-delivery-submit-phase');
+      sql.exec(
+        `INSERT INTO session_inbox VALUES ('existing', 'delivering', 'attempt-before-deploy', 'runtime-before-deploy')`
+      );
+      const migration = MIGRATIONS.find(
+        (entry) => entry.name === '046-prompt-delivery-submit-phase'
+      );
       expect(migration).toBeDefined();
       migration!.run(sql);
       migration!.run(sql);
       expect(db.prepare('SELECT * FROM session_inbox').get()).toEqual({
-        id: 'existing', delivery_state: 'delivering', attempt_id: 'attempt-before-deploy',
-        runtime_identity: 'runtime-before-deploy', prompt_delivery_phase: null,
+        id: 'existing',
+        delivery_state: 'delivering',
+        attempt_id: 'attempt-before-deploy',
+        runtime_identity: 'runtime-before-deploy',
+        prompt_delivery_phase: null,
       });
     } finally {
       db.close();
@@ -555,7 +562,8 @@ describe('DO Migrations', () => {
       // project event wake retention repair indexes: 9 from migration 048
       // Additive audience/channel/schedule/wake-seek indexes (049–054): 18.
       // Active mailbox capacity index (055): 1.
-      expect(indexes).toHaveLength(125);
+      // Complete archive-search projection: 1 session seek index (058).
+      expect(indexes).toHaveLength(126);
       expect(indexes.some((query) => query.includes('idx_archive_raw_chunk_time'))).toBe(true);
     });
   });

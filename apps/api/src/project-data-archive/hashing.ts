@@ -72,7 +72,9 @@ export async function canonicalRowsSha256(
   columns: readonly string[],
   rows: readonly Record<string, unknown>[]
 ): Promise<string> {
-  return sha256Hex(canonicalizeArchiveRows(columns, rows));
+  const hasher = createCanonicalRowsHasher(columns);
+  for (const row of rows) hasher.update(row);
+  return hasher.digestHex();
 }
 
 export type CanonicalRowsHasher = {
@@ -83,6 +85,45 @@ export type CanonicalRowsHasher = {
   /** Finalize. The hasher cannot be reused afterwards. */
   digestHex(): string;
 };
+
+export type CanonicalRowsChainHasher = {
+  update(row: Record<string, unknown>): void;
+  readonly rowCount: number;
+  readonly digestHex: string;
+};
+
+const CANONICAL_CHAIN_SEED = createHash('sha256')
+  .update('project-data-archive-canonical-chain-v1', 'utf8')
+  .digest('hex');
+
+/**
+ * A resumable canonical-row commitment. Each row replaces the persisted digest
+ * with SHA-256(previous hex + row separator + canonical row). Unlike a native
+ * streaming hash, the current digest can be stored at a durable page boundary.
+ */
+export function createCanonicalRowsChainHasher(
+  columns: readonly string[],
+  state: { digestHex?: string | null; rowCount?: number | null } = {}
+): CanonicalRowsChainHasher {
+  let digestHex = state.digestHex ?? CANONICAL_CHAIN_SEED;
+  let rowCount = state.rowCount ?? 0;
+  return {
+    get rowCount() {
+      return rowCount;
+    },
+    get digestHex() {
+      return digestHex;
+    },
+    update(row) {
+      digestHex = createHash('sha256')
+        .update(digestHex, 'utf8')
+        .update(ARCHIVE_ROW_SEPARATOR, 'utf8')
+        .update(canonicalizeArchiveRow(columns, row), 'utf8')
+        .digest('hex');
+      rowCount++;
+    },
+  };
+}
 
 /**
  * Incremental equivalent of `canonicalRowsSha256`.

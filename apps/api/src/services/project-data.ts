@@ -1087,24 +1087,39 @@ async function readProjectWideArchiveSearchOwners(
        WHERE project_id = ?
          AND location_state = 'archive_shard'
          AND owner_kind = 'archive_shard'
-       GROUP BY owner_name, generation
+       UNION
+       SELECT target_owner_name AS owner_name, target_generation AS generation
+       FROM project_data_archive_migrations
+       WHERE project_id = ?
+         AND state IN ('target_sealed', 'recovery_manifest_persisted', 'source_deleted')
+         AND target_aggregate_sha256 IS NOT NULL
+         AND target_aggregate_sha256 != ''
      )`
   )
-    .bind(projectId)
+    .bind(projectId, projectId)
     .first<{ count: number }>();
   const total = typeof totalRow?.count === 'number' ? totalRow.count : 0;
   if (limit === 0) return { owners: [], total };
   const rows = await env.DATABASE.prepare(
-    `SELECT owner_name, generation
-     FROM project_data_session_locations
-     WHERE project_id = ?
-       AND location_state = 'archive_shard'
-       AND owner_kind = 'archive_shard'
+    `SELECT owner_name, generation FROM (
+       SELECT owner_name, generation
+       FROM project_data_session_locations
+       WHERE project_id = ?
+         AND location_state = 'archive_shard'
+         AND owner_kind = 'archive_shard'
+       UNION
+       SELECT target_owner_name AS owner_name, target_generation AS generation
+       FROM project_data_archive_migrations
+       WHERE project_id = ?
+         AND state IN ('target_sealed', 'recovery_manifest_persisted', 'source_deleted')
+         AND target_aggregate_sha256 IS NOT NULL
+         AND target_aggregate_sha256 != ''
+     )
      GROUP BY owner_name, generation
      ORDER BY generation DESC, owner_name ASC
      LIMIT ?`
   )
-    .bind(projectId, limit)
+    .bind(projectId, projectId, limit)
     .all<ProjectDataArchiveSearchOwnerRow>();
   return { owners: rows.results ?? [], total };
 }
@@ -1182,9 +1197,13 @@ export async function searchMessagesWithArchiveMetadata(
     };
     try {
       const ownerStub = await getStubForOwner(env, projectId, owner.ownerName);
-      archiveResults.push(
-        ...(await ownerStub.archiveTargetSearchProjectMessages(owner, query, roles, limit))
+      const searchResult = await ownerStub.archiveTargetSearchProjectMessages(
+        owner,
+        query,
+        roles,
+        limit
       );
+      archiveResults.push(...searchResult.results);
     } catch (error) {
       archiveOwnersFailed++;
       reason = 'archive_owner_query_failed';

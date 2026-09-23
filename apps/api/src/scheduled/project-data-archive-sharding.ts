@@ -2,6 +2,7 @@
 import type { ProjectData } from '../durable-objects/project-data';
 import type {
   ArchiveSourceAbandonIntentResult,
+  ArchiveSourceFinalizeDeleteResult,
   ArchiveSourceInspectIntentResult,
   ArchiveSourcePrepareResult,
   ArchiveTargetAbandonResult,
@@ -9,7 +10,13 @@ import type {
 } from '../durable-objects/project-data/archive-sharding';
 import type { Env } from '../env';
 import { createModuleLogger, serializeError } from '../lib/logger';
-import { COMPACT_ARCHIVE_CHUNK_BYTES, COMPACT_ARCHIVE_FORMAT, compactArchiveTimeout, LEGACY_ARCHIVE_FORMAT, writeCompactChunk } from '../project-data-archive/compact-r2';
+import {
+  COMPACT_ARCHIVE_CHUNK_BYTES,
+  COMPACT_ARCHIVE_FORMAT,
+  compactArchiveTimeout,
+  LEGACY_ARCHIVE_FORMAT,
+  writeCompactChunk,
+} from '../project-data-archive/compact-r2';
 import {
   isProjectDataArchiveSourcePrepareRefusal,
   PROJECT_DATA_ARCHIVE_DEFAULT_BUDGET_STALL_ALERT_SWEEPS,
@@ -214,12 +221,24 @@ type ClaimedMigrationRow = MigrationRow & {
   lease_expires_at: number;
 };
 
+type ArchiveCopyCheckpoint = {
+  migration_id: string;
+  table_name: ProjectDataArchiveTableName;
+  storage_format: typeof COMPACT_ARCHIVE_FORMAT | typeof LEGACY_ARCHIVE_FORMAT;
+  chunk_rows: number;
+  chunk_bytes: number;
+  next_ordinal: number;
+  source_cursor: string | null;
+  complete: number;
+  copied_rows: number;
+  copied_bytes: number;
+  last_chunk_sha256: string | null;
+  lease_epoch: number;
+  last_operation_id: string | null;
+};
+
 type ProjectDataArchiveGlobalSweepCadenceStatus =
-  | 'never'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'partial';
+  'never' | 'running' | 'succeeded' | 'failed' | 'partial';
 
 type ProjectDataArchiveGlobalSweepCadenceRow = {
   sweep_name: string;
@@ -493,7 +512,11 @@ function resolveConfig(env: Env): ArchiveCoordinatorConfig {
     0,
     ARCHIVE_MAX_SWEEP_UNIT_OVERHEAD_PERCENT
   );
-  const affordability = resolveSweepAffordability(env, sweepMessageBudget, sweepUnitOverheadPercent);
+  const affordability = resolveSweepAffordability(
+    env,
+    sweepMessageBudget,
+    sweepUnitOverheadPercent
+  );
   return {
     enabled: env.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED === 'true',
     sweepMessageBudget,
@@ -1094,9 +1117,18 @@ function manifestForTarget(
   now: number
 ) {
   return {
-    version: migration.storage_format === COMPACT_ARCHIVE_FORMAT ? 2 : PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
-    ...(migration.storage_format === COMPACT_ARCHIVE_FORMAT ? { storageFormat: COMPACT_ARCHIVE_FORMAT,
-      rawChunks: chunks.filter(chunk => chunk.rawChunkRef).map(chunk => ({ ordinal: chunk.ordinal, ...chunk.rawChunkRef })) } : {}),
+    version:
+      migration.storage_format === COMPACT_ARCHIVE_FORMAT
+        ? 2
+        : PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
+    ...(migration.storage_format === COMPACT_ARCHIVE_FORMAT
+      ? {
+          storageFormat: COMPACT_ARCHIVE_FORMAT,
+          rawChunks: chunks
+            .filter((chunk) => chunk.rawChunkRef)
+            .map((chunk) => ({ ordinal: chunk.ordinal, ...chunk.rawChunkRef })),
+        }
+      : {}),
     projectId: migration.project_id,
     sessionId: migration.session_id,
     migrationId: migration.migration_id,
@@ -1105,8 +1137,8 @@ function manifestForTarget(
     targetGeneration: migration.target_generation,
     terminalVersionSha256,
     aggregateSha256: targetAggregateSha256,
-    chunks: chunks.map((chunk) =>
-      chunk.r2Key ?? targetChunkKey(config, migration, chunk.tableName, chunk.ordinal)
+    chunks: chunks.map(
+      (chunk) => chunk.r2Key ?? targetChunkKey(config, migration, chunk.tableName, chunk.ordinal)
     ),
     chunkHashes: chunks.map((chunk) => chunk.sha256),
     createdAt: now,
@@ -1287,7 +1319,11 @@ function createMessageBudgetPacker(budget: number, strict: boolean) {
   };
 }
 
-function applyMessageBudget(candidates: CandidateRow[], budget: number, strict = false): CandidateRow[] {
+function applyMessageBudget(
+  candidates: CandidateRow[],
+  budget: number,
+  strict = false
+): CandidateRow[] {
   const packer = createMessageBudgetPacker(budget, strict);
   return candidates.filter((candidate) => {
     const commit = packer.admit(candidate);
@@ -1448,7 +1484,9 @@ async function createCandidateJournal(
       now,
       now,
       now,
-      env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? COMPACT_ARCHIVE_FORMAT : LEGACY_ARCHIVE_FORMAT,
+      env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
+        ? COMPACT_ARCHIVE_FORMAT
+        : LEGACY_ARCHIVE_FORMAT,
       projectId,
       sessionId
     ),
@@ -1569,8 +1607,7 @@ async function selectScopedMigrationWork(
     source: 'existing_migration',
   }));
   const remaining = config.sweepSessions - reclaimable.length;
-  if (remaining <= 0)
-    return { migrations: reclaimable, pending: [], pendingSlots: 0, selected };
+  if (remaining <= 0) return { migrations: reclaimable, pending: [], pendingSlots: 0, selected };
 
   // The scoped canary reports `selected` up front, so it packs here rather than reading
   // spare fall-through candidates. Re-packing the same list inside the journaling loop is
@@ -2071,9 +2108,10 @@ async function ensureSourcePrepared(
   // back as a value. A separate pre-check RPC before journaling would spend one extra DO round
   // trip on every candidate that turns out to be eligible (the common case) to avoid a rare
   // unwind that costs two D1 statements in a batch this worker already owns.
-  const outcome = await source.archiveSourcePrepareIntent(
-    { ...sourcePrepareInput(migration, sourceIntentToken, now, config.sessionGraceMs), writeReservation: config.writeReservation }
-  );
+  const outcome = await source.archiveSourcePrepareIntent({
+    ...sourcePrepareInput(migration, sourceIntentToken, now, config.sessionGraceMs),
+    writeReservation: config.writeReservation,
+  });
   if (isProjectDataArchiveSourcePrepareRefusal(outcome)) {
     return { refusal: outcome, migration };
   }
@@ -2291,23 +2329,319 @@ async function enterCopying(
   });
 }
 
+function copyChunkBytes(
+  config: ArchiveCoordinatorConfig,
+  storageFormat: string,
+  tableName: ProjectDataArchiveTableName
+): number {
+  return storageFormat === COMPACT_ARCHIVE_FORMAT && tableName === 'chat_messages'
+    ? Math.min(config.chunkBytes, COMPACT_ARCHIVE_CHUNK_BYTES)
+    : config.chunkBytes;
+}
+
+async function ensureCopyCheckpoints(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  migration: ClaimedMigrationRow,
+  now: number
+): Promise<Map<ProjectDataArchiveTableName, ArchiveCopyCheckpoint>> {
+  const storageFormat = migration.storage_format ?? LEGACY_ARCHIVE_FORMAT;
+  await env.DATABASE.batch(
+    PROJECT_DATA_ARCHIVE_TABLES.map((tableName) =>
+      env.DATABASE.prepare(
+        `INSERT OR IGNORE INTO project_data_archive_copy_checkpoints (
+           migration_id, table_name, storage_format, chunk_rows, chunk_bytes,
+           next_ordinal, source_cursor, complete, copied_rows, copied_bytes,
+           lease_epoch, updated_at
+         ) VALUES (?, ?, ?, ?, ?, 0, NULL, 0, 0, 0, ?, ?)`
+      ).bind(
+        migration.migration_id,
+        tableName,
+        storageFormat,
+        config.chunkRows,
+        copyChunkBytes(config, storageFormat, tableName),
+        migration.lease_epoch,
+        now
+      )
+    )
+  );
+  const rows = await env.DATABASE.prepare(
+    `SELECT migration_id, table_name, storage_format, chunk_rows, chunk_bytes,
+            next_ordinal, source_cursor, complete, copied_rows, copied_bytes,
+            last_chunk_sha256, lease_epoch, last_operation_id
+     FROM project_data_archive_copy_checkpoints
+     WHERE migration_id = ?
+     ORDER BY table_name ASC`
+  )
+    .bind(migration.migration_id)
+    .all<ArchiveCopyCheckpoint>();
+  const checkpoints = new Map<ProjectDataArchiveTableName, ArchiveCopyCheckpoint>();
+  for (const row of rows.results ?? []) {
+    if (!PROJECT_DATA_ARCHIVE_TABLES.includes(row.table_name)) {
+      throw new ProjectDataArchiveCoordinatorStateError(
+        'copy_checkpoint_invalid',
+        `ProjectData archive migration ${migration.migration_id} has an invalid checkpoint table`
+      );
+    }
+    if (
+      row.storage_format !== storageFormat ||
+      !Number.isSafeInteger(row.chunk_rows) ||
+      row.chunk_rows <= 0 ||
+      !Number.isSafeInteger(row.chunk_bytes) ||
+      row.chunk_bytes <= 0
+    ) {
+      throw new ProjectDataArchiveCoordinatorStateError(
+        'copy_layout_mismatch',
+        `ProjectData archive migration ${migration.migration_id} copy layout changed after publication`
+      );
+    }
+    checkpoints.set(row.table_name, row);
+  }
+  if (checkpoints.size !== PROJECT_DATA_ARCHIVE_TABLES.length) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'copy_checkpoint_missing',
+      `ProjectData archive migration ${migration.migration_id} is missing copy checkpoints`
+    );
+  }
+  return checkpoints;
+}
+
+async function markCopyOperationStarted(
+  env: Env,
+  migration: ClaimedMigrationRow,
+  checkpoint: ArchiveCopyCheckpoint,
+  operation: string,
+  now: number
+): Promise<string> {
+  const operationId = crypto.randomUUID();
+  const result = await env.DATABASE.prepare(
+    `UPDATE project_data_archive_copy_checkpoints
+     SET lease_epoch = ?, last_operation = ?, last_operation_id = ?, last_operation_started_at = ?,
+         last_operation_completed_at = NULL, last_operation_duration_ms = NULL, updated_at = ?
+     WHERE migration_id = ? AND table_name = ?
+       AND next_ordinal = ?
+       AND (source_cursor = ? OR (source_cursor IS NULL AND ? IS NULL))
+       AND EXISTS (
+         SELECT 1 FROM project_data_archive_migrations m
+         WHERE m.migration_id = project_data_archive_copy_checkpoints.migration_id
+           AND m.lease_owner = ? AND m.lease_epoch = ? AND m.lease_expires_at > ?
+       )`
+  )
+    .bind(
+      migration.lease_epoch,
+      operation,
+      operationId,
+      now,
+      now,
+      migration.migration_id,
+      checkpoint.table_name,
+      checkpoint.next_ordinal,
+      checkpoint.source_cursor,
+      checkpoint.source_cursor,
+      migration.lease_owner,
+      migration.lease_epoch,
+      now
+    )
+    .run();
+  if ((result.meta.changes ?? 0) !== 1) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'copy_checkpoint_fence_lost',
+      `ProjectData archive migration ${migration.migration_id} could not start ${operation}`
+    );
+  }
+  return operationId;
+}
+
+async function advanceCopyCheckpoint(
+  env: Env,
+  migration: ClaimedMigrationRow,
+  checkpoint: ArchiveCopyCheckpoint,
+  chunk: Pick<ProjectDataArchiveChunk, 'cursor' | 'hasMore' | 'rowCount' | 'byteCount' | 'sha256'>,
+  operationId: string,
+  startedAt: number,
+  now: number
+): Promise<ArchiveCopyCheckpoint> {
+  const result = await env.DATABASE.prepare(
+    `UPDATE project_data_archive_copy_checkpoints
+     SET next_ordinal = next_ordinal + 1,
+         source_cursor = ?, complete = ?,
+         copied_rows = copied_rows + ?, copied_bytes = copied_bytes + ?,
+         last_chunk_sha256 = ?, lease_epoch = ?,
+         last_operation_completed_at = ?, last_operation_duration_ms = ?, updated_at = ?
+     WHERE migration_id = ? AND table_name = ?
+       AND next_ordinal = ?
+       AND (source_cursor = ? OR (source_cursor IS NULL AND ? IS NULL))
+       AND last_operation_id = ?
+       AND EXISTS (
+         SELECT 1 FROM project_data_archive_migrations m
+         WHERE m.migration_id = project_data_archive_copy_checkpoints.migration_id
+           AND m.lease_owner = ? AND m.lease_epoch = ? AND m.lease_expires_at > ?
+       )
+     RETURNING migration_id, table_name, storage_format, chunk_rows, chunk_bytes,
+       next_ordinal, source_cursor, complete, copied_rows, copied_bytes,
+       last_chunk_sha256, lease_epoch, last_operation_id`
+  )
+    .bind(
+      chunk.hasMore ? chunk.cursor : null,
+      chunk.hasMore ? 0 : 1,
+      chunk.rowCount,
+      chunk.byteCount,
+      chunk.sha256,
+      migration.lease_epoch,
+      now,
+      Math.max(0, now - startedAt),
+      now,
+      migration.migration_id,
+      checkpoint.table_name,
+      checkpoint.next_ordinal,
+      checkpoint.source_cursor,
+      checkpoint.source_cursor,
+      operationId,
+      migration.lease_owner,
+      migration.lease_epoch,
+      now
+    )
+    .first<ArchiveCopyCheckpoint>();
+  if (!result) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'copy_checkpoint_fence_lost',
+      `ProjectData archive migration ${migration.migration_id} could not advance ${checkpoint.table_name}`
+    );
+  }
+  return result;
+}
+
+function tableReceipts(
+  targetInfo: ArchiveTargetInspectResult,
+  tableName: ProjectDataArchiveTableName
+): ArchiveTargetInspectResult['chunks'] {
+  return targetInfo.chunks
+    .filter((chunk) => chunk.tableName === tableName)
+    .sort((left, right) => left.ordinal - right.ordinal);
+}
+
 async function copySourceChunks(
+  env: Env,
   source: DurableObjectStub<ProjectData>,
   target: DurableObjectStub<ProjectData>,
   config: ArchiveCoordinatorConfig,
   r2: R2Bucket,
-  migration: MigrationRow,
+  migration: ClaimedMigrationRow,
   now: number
 ): Promise<{ chunkHashes: string[]; chunksCopied: number; rowsCopied: number }> {
   const sourceIntentToken = requireStringField(migration, 'source_intent_token');
-  const chunkHashes: string[] = [];
   let chunksCopied = 0;
   let rowsCopied = 0;
-  const targetInfo = await target.archiveTargetInspectSession(targetInspectInput(migration));
+  let targetInfo = await target.archiveTargetInspectSession(targetInspectInput(migration));
+  const checkpoints = await ensureCopyCheckpoints(env, config, migration, now);
   for (const tableName of PROJECT_DATA_ARCHIVE_TABLES) {
-    let cursor: string | null = null;
-    let ordinal = 0;
-    do {
+    let checkpoint = checkpoints.get(tableName);
+    if (!checkpoint) {
+      throw new ProjectDataArchiveCoordinatorStateError(
+        'copy_checkpoint_missing',
+        `ProjectData archive migration ${migration.migration_id} is missing ${tableName} progress`
+      );
+    }
+    const receipts = tableReceipts(targetInfo, tableName);
+    for (const [ordinal, receipt] of receipts.entries()) {
+      if (receipt.ordinal !== ordinal) {
+        throw new ProjectDataArchiveCoordinatorStateError(
+          'target_chunk_inventory_gap',
+          `ProjectData archive migration ${migration.migration_id} has a ${tableName} receipt gap`
+        );
+      }
+    }
+    if (receipts.length < checkpoint.next_ordinal) {
+      throw new ProjectDataArchiveCoordinatorStateError(
+        'copy_checkpoint_ahead_of_target',
+        `ProjectData archive migration ${migration.migration_id} checkpoint is ahead of target receipts`
+      );
+    }
+
+    // A target commit can succeed immediately before a reset prevents the D1
+    // checkpoint write. Reconcile that durable receipt first. New receipts carry
+    // their exact source continuation; legacy receipts are re-exported once to
+    // prove the same immutable hash and populate it.
+    while (checkpoint.next_ordinal < receipts.length) {
+      const receipt = receipts[checkpoint.next_ordinal];
+      if (!receipt) {
+        throw new ProjectDataArchiveCoordinatorStateError(
+          'target_chunk_inventory_gap',
+          `ProjectData archive migration ${migration.migration_id} has a ${tableName} receipt gap`
+        );
+      }
+      const startedAt = Date.now();
+      const operationId = await markCopyOperationStarted(
+        env,
+        migration,
+        checkpoint,
+        'reconcile_receipt',
+        startedAt
+      );
+      let continuation = {
+        cursor: receipt.sourceCursor,
+        hasMore: receipt.sourceHasMore,
+        rowCount: receipt.rowCount,
+        byteCount: receipt.byteCount,
+        sha256: receipt.sha256,
+      };
+      if (receipt.sourceHasMore === null) {
+        const replay = await source.archiveSourceExportChunk({
+          projectId: migration.project_id,
+          sessionId: migration.session_id,
+          migrationId: migration.migration_id,
+          sourceOwnerName: migration.source_owner_name,
+          targetOwnerName: migration.target_owner_name,
+          targetGeneration: migration.target_generation,
+          sourceIntentToken,
+          tableName,
+          ordinal: checkpoint.next_ordinal,
+          cursor: checkpoint.source_cursor,
+          // Pre-checkpoint receipts do not carry their original source cursor or
+          // frozen layout. Their durable row/byte inventory is sufficient to
+          // replay the exact prefix even when deployment defaults changed.
+          maxRows: Math.max(1, receipt.rowCount),
+          maxBytes: Math.max(checkpoint.chunk_bytes, receipt.byteCount, 1),
+        });
+        if (
+          replay.sha256 !== receipt.sha256 ||
+          replay.rowCount !== receipt.rowCount ||
+          replay.byteCount !== receipt.byteCount
+        ) {
+          throw new ProjectDataArchiveCoordinatorStateError(
+            'copy_receipt_replay_mismatch',
+            `ProjectData archive migration ${migration.migration_id} legacy receipt no longer matches source`
+          );
+        }
+        await target.archiveTargetCommitChunk({ ...replay, now });
+        continuation = replay;
+      }
+      await assertLeaseStillHeld(env, migration);
+      checkpoint = await advanceCopyCheckpoint(
+        env,
+        migration,
+        checkpoint,
+        {
+          ...continuation,
+          cursor: continuation.cursor,
+          hasMore: continuation.hasMore ?? false,
+        },
+        operationId,
+        startedAt,
+        Date.now()
+      );
+    }
+    if (checkpoint.complete === 1) continue;
+
+    for (;;) {
+      const startedAt = Date.now();
+      const operationId = await markCopyOperationStarted(
+        env,
+        migration,
+        checkpoint,
+        'export_commit',
+        startedAt
+      );
       const chunk = await source.archiveSourceExportChunk({
         projectId: migration.project_id,
         sessionId: migration.session_id,
@@ -2317,11 +2651,10 @@ async function copySourceChunks(
         targetGeneration: migration.target_generation,
         sourceIntentToken,
         tableName,
-        ordinal,
-        cursor,
-        maxRows: config.chunkRows,
-        maxBytes: targetInfo.storageFormat === COMPACT_ARCHIVE_FORMAT && tableName === 'chat_messages'
-          ? Math.min(config.chunkBytes, COMPACT_ARCHIVE_CHUNK_BYTES) : config.chunkBytes,
+        ordinal: checkpoint.next_ordinal,
+        cursor: checkpoint.source_cursor,
+        maxRows: checkpoint.chunk_rows,
+        maxBytes: checkpoint.chunk_bytes,
       });
       if (targetInfo.storageFormat === COMPACT_ARCHIVE_FORMAT && tableName === 'chat_messages') {
         const rawChunkRef = await writeCompactChunk(r2, config.r2Prefix, chunk, config.r2TimeoutMs);
@@ -2330,14 +2663,27 @@ async function copySourceChunks(
         await putImmutableJson(r2, chunkKey(config, chunk), chunk);
         await target.archiveTargetCommitChunk({ ...chunk, now });
       }
-      chunkHashes.push(chunk.sha256);
+      await assertLeaseStillHeld(env, migration);
+      checkpoint = await advanceCopyCheckpoint(
+        env,
+        migration,
+        checkpoint,
+        chunk,
+        operationId,
+        startedAt,
+        Date.now()
+      );
       chunksCopied++;
       rowsCopied += chunk.rowCount;
-      cursor = chunk.hasMore ? chunk.cursor : null;
-      ordinal++;
-    } while (cursor);
+      if (!chunk.hasMore) break;
+    }
   }
-  return { chunkHashes, chunksCopied, rowsCopied };
+  targetInfo = await target.archiveTargetInspectSession(targetInspectInput(migration));
+  return {
+    chunkHashes: targetInfo.chunks.map((chunk) => chunk.sha256),
+    chunksCopied,
+    rowsCopied,
+  };
 }
 
 async function sealTargetAndSource(
@@ -2452,9 +2798,17 @@ async function finalizeSourceAndPublish(
   source: DurableObjectStub<ProjectData>,
   migration: ClaimedMigrationRow,
   now: number
-): Promise<{ migration: MigrationRow; recoveredCrashGap: boolean }> {
+): Promise<{
+  migration: MigrationRow;
+  recoveredCrashGap: boolean;
+  sourceFinalization: ArchiveSourceFinalizeDeleteResult & {
+    durationMs: number;
+    reclaimedBytes: number;
+  };
+}> {
   await assertLeaseStillHeld(env, migration);
-  await source.archiveSourceFinalizeDelete({
+  const startedAt = Date.now();
+  const sourceFinalization = await source.archiveSourceFinalizeDelete({
     projectId: migration.project_id,
     sessionId: migration.session_id,
     migrationId: migration.migration_id,
@@ -2499,6 +2853,14 @@ async function finalizeSourceAndPublish(
   return {
     migration: await readMigrationOrThrow(env, migration.migration_id),
     recoveredCrashGap: !casOk,
+    sourceFinalization: {
+      ...sourceFinalization,
+      durationMs: Math.max(0, Date.now() - startedAt),
+      reclaimedBytes: Math.max(
+        0,
+        sourceFinalization.databaseSizeBeforeBytes - sourceFinalization.databaseSizeAfterBytes
+      ),
+    },
   };
 }
 
@@ -2519,7 +2881,13 @@ async function migrateCandidate(
 }> {
   const claimedRow = await claimMigrationLease(env, selected, now, config.leaseMs);
   if (!claimedRow) {
-    return { migrated: false, leaseNotAcquired: true, recoveredCrashGap: false, chunksCopied: 0, rowsCopied: 0 };
+    return {
+      migrated: false,
+      leaseNotAcquired: true,
+      recoveredCrashGap: false,
+      chunksCopied: 0,
+      rowsCopied: 0,
+    };
   }
   try {
     return await migrateClaimedCandidate(env, config, r2, claimedRow, now);
@@ -2593,7 +2961,7 @@ async function migrateClaimedCandidate(
   migration = await enterCopying(env, migration, now);
 
   if (migration.state === 'copying') {
-    const copyResult = await copySourceChunks(source, target, config, r2, migration, now);
+    const copyResult = await copySourceChunks(env, source, target, config, r2, migration, now);
     chunksCopied += copyResult.chunksCopied;
     rowsCopied += copyResult.rowsCopied;
     markPhase('copy');
@@ -2618,9 +2986,14 @@ async function migrateClaimedCandidate(
     if (migration.storage_format === COMPACT_ARCHIVE_FORMAT) {
       const inspected = await target.archiveTargetInspectSession(targetInspectInput(migration));
       await target.archiveTargetSeal({
-        ...sourcePrepareInput(migration, requireStringField(migration, 'source_intent_token'), now, config.sessionGraceMs),
+        ...sourcePrepareInput(
+          migration,
+          requireStringField(migration, 'source_intent_token'),
+          now,
+          config.sessionGraceMs
+        ),
         terminalVersionSha256: prepared.terminalVersionSha256,
-        expectedChunkHashes: inspected.chunks.map(chunk => chunk.sha256),
+        expectedChunkHashes: inspected.chunks.map((chunk) => chunk.sha256),
       });
     }
     const finalized = await finalizeSourceAndPublish(env, config, source, migration, now);
@@ -2634,6 +3007,7 @@ async function migrateClaimedCandidate(
       messageCount: prepared.messageCount,
       chunksCopied,
       rowsCopied,
+      sourceFinalization: finalized.sourceFinalization,
       totalMs: Date.now() - phaseStartedAt,
       phaseDurationsMs,
     });
@@ -3361,8 +3735,12 @@ async function reserveMigrationAttempt(
   migration: MigrationRow,
   reserve: (projectId: string, sessionId: string) => Promise<ArchiveWriteReservation | null>
 ): Promise<ArchiveWriteReservation | null | undefined> {
-  if (migration.storage_format !== COMPACT_ARCHIVE_FORMAT ||
-    migration.state === 'source_deleted' || migration.state === 'published') return undefined;
+  if (
+    migration.storage_format !== COMPACT_ARCHIVE_FORMAT ||
+    migration.state === 'source_deleted' ||
+    migration.state === 'published'
+  )
+    return undefined;
   return reserve(migration.project_id, migration.session_id);
 }
 
@@ -3402,7 +3780,10 @@ async function processArchiveMigrationBatch(input: {
     ensuredOwners.set(projectId, pending);
     return pending;
   };
-  const reserve = async (projectId: string, sessionId: string): Promise<ArchiveWriteReservation | null> => {
+  const reserve = async (
+    projectId: string,
+    sessionId: string
+  ): Promise<ArchiveWriteReservation | null> => {
     const { allowance, factor } = archiveWriteBudgetConfig(input.env);
     // The estimate's own cap is the affordable UNIT count, not the message ceiling: any
     // session whose real row inventory exceeds what the allowance can pay for is
@@ -3419,8 +3800,17 @@ async function processArchiveMigrationBatch(input: {
       Math.max(1, archiveAffordableWriteUnits(allowance, factor))
     );
     const source = await sourceStub(projectId);
-    const estimatedWrites = await source.archiveSourceEstimateWrites(sessionId, factor, estimateCap);
-    const outcome = await reserveArchiveWrites(input.env.DATABASE, estimatedWrites, allowance, input.now);
+    const estimatedWrites = await source.archiveSourceEstimateWrites(
+      sessionId,
+      factor,
+      estimateCap
+    );
+    const outcome = await reserveArchiveWrites(
+      input.env.DATABASE,
+      estimatedWrites,
+      allowance,
+      input.now
+    );
     if (!outcome.reserved) {
       recordBudgetRefusal(input.stats, outcome.reason);
       // `exceeds_allowance` is NOT a deferral: waiting cannot make this session affordable.
@@ -3432,15 +3822,39 @@ async function processArchiveMigrationBatch(input: {
       else log.warn('project_data_archive_write_budget_unaffordable', detail);
       return null;
     }
-    log.info('project_data_archive_write_budget_reserved', { projectId, sessionId, estimatedWrites, allowance });
-    return { reservationId: crypto.randomUUID(), estimatedWrites, factor, maxMessages: estimateCap };
+    log.info('project_data_archive_write_budget_reserved', {
+      projectId,
+      sessionId,
+      estimatedWrites,
+      allowance,
+    });
+    return {
+      reservationId: crypto.randomUUID(),
+      estimatedWrites,
+      factor,
+      maxMessages: estimateCap,
+    };
   };
   const releaseUnused = async (reservation?: ArchiveWriteReservation) => {
     if (!reservation?.reservationId) return;
-    try { await releaseUnusedArchiveReservation(input.env.DATABASE, reservation.reservationId, reservation.estimatedWrites, input.now, input.env); }
-    catch (error) { log.warn('project_data_archive_unused_reservation_release_failed', { ...serializeError(error) }); }
+    try {
+      await releaseUnusedArchiveReservation(
+        input.env.DATABASE,
+        reservation.reservationId,
+        reservation.estimatedWrites,
+        input.now,
+        input.env
+      );
+    } catch (error) {
+      log.warn('project_data_archive_unused_reservation_release_failed', {
+        ...serializeError(error),
+      });
+    }
   };
-  const processOne = async (migration: MigrationRow, writeReservation?: ArchiveWriteReservation): Promise<void> => {
+  const processOne = async (
+    migration: MigrationRow,
+    writeReservation?: ArchiveWriteReservation
+  ): Promise<void> => {
     try {
       const result = await migrateCandidate(
         input.env,
@@ -3511,8 +3925,10 @@ async function processArchiveMigrationBatch(input: {
     if (outOfTime()) return;
     const commitMessageBudget = packer.admit(candidate);
     if (!commitMessageBudget) continue;
-    const reservation = input.env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
-      ? await reserve(candidate.project_id, candidate.session_id) : undefined;
+    const reservation =
+      input.env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
+        ? await reserve(candidate.project_id, candidate.session_id)
+        : undefined;
     if (reservation === null) continue;
     const migration = await createCandidateJournal(input.env, candidate, input.now);
     if (!migration) {
