@@ -1198,6 +1198,56 @@ describe('ProjectData terminal archive sharding bridge', () => {
     }
   );
 
+  it('splits grouped chunks by serialized transport bytes when JSON escaping expands content', async () => {
+    const source = makeSql();
+    try {
+      seedTerminalSession(source.sql);
+      const escapeHeavyContent = '"\\'.repeat(2 * 1024 * 1024);
+      source.sql.exec(
+        `UPDATE chat_messages_grouped SET content = ? WHERE session_id = 'session-archive'`,
+        escapeHeavyContent
+      );
+      source.sql.exec(
+        `INSERT INTO chat_messages_grouped (id, session_id, role, content, created_at)
+         VALUES ('session-archive-group-2', 'session-archive', 'assistant', ?, 1200)`,
+        escapeHeavyContent
+      );
+      await prepareArchiveSourceIntent(source.sql, {
+        projectId: 'project-archive',
+        sessionId: 'session-archive',
+        migrationId: 'migration-escaped-transport',
+        sourceOwnerName: 'project-archive',
+        targetOwnerName: 'project-archive:archive:g1:s1',
+        targetGeneration: 1,
+        sourceIntentToken: 'intent-escaped-transport',
+        now: NOW,
+        minTerminalAgeMs: 0,
+      });
+
+      const chunk = await exportArchiveChunk(source.sql, {
+        projectId: 'project-archive',
+        sessionId: 'session-archive',
+        migrationId: 'migration-escaped-transport',
+        sourceOwnerName: 'project-archive',
+        targetOwnerName: 'project-archive:archive:g1:s1',
+        targetGeneration: 1,
+        sourceIntentToken: 'intent-escaped-transport',
+        tableName: 'chat_messages_grouped',
+        ordinal: 0,
+        maxRows: 10,
+        maxBytes: 16 * 1024 * 1024,
+      });
+
+      expect(chunk.rows).toHaveLength(1);
+      expect(chunk.hasMore).toBe(true);
+      expect(new TextEncoder().encode(JSON.stringify(chunk)).byteLength).toBeLessThan(
+        16 * 1024 * 1024
+      );
+    } finally {
+      source.db.close();
+    }
+  }, 20_000);
+
   it('refuses a single archive row beyond the absolute Durable Object RPC ceiling', async () => {
     const source = makeSql();
     try {

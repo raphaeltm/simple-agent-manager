@@ -1997,6 +1997,8 @@ async function exportArchiveRowsChunk(
     compactCandidates?.rows ?? sql.exec(query, ...params);
   const rows: ProjectDataArchiveRow[] = [];
   let byteCount = 0;
+  let transportByteCount = 0;
+  const transportByteBudget = Math.min(maxBytes, messages.RPC_SIZE_BUDGET_BYTES);
   let hasMore = compactCandidates?.hasMore ?? false;
   for (const candidate of candidates) {
     if (rows.length === maxRows) {
@@ -2004,26 +2006,40 @@ async function exportArchiveRowsChunk(
       break;
     }
     const row = toArchiveRow(candidate, spec.columns);
+    const rowId = strictString(row[spec.keyColumn], `${input.tableName}.${spec.keyColumn}`);
     const candidateBytes = byteLength(canonicalizeArchiveRow(spec.columns, row));
-    if (candidateBytes > messages.RPC_SIZE_BUDGET_BYTES) {
+    const candidateTransportBytes =
+      byteLength(JSON.stringify(row)) +
+      byteLength(JSON.stringify(rowId)) +
+      // One comma in each of the rows and rowIds arrays after the first row.
+      (rows.length > 0 ? 2 : 0);
+    if (
+      candidateBytes > messages.RPC_SIZE_BUDGET_BYTES ||
+      candidateTransportBytes > messages.RPC_SIZE_BUDGET_BYTES
+    ) {
       throw new ProjectDataArchiveInvariantError(
         'archive_row_exceeds_chunk_budget',
         'ProjectData archive row exceeds the Durable Object RPC byte ceiling'
       );
     }
-    if (byteCount + candidateBytes > maxBytes) {
+    if (
+      byteCount + candidateBytes > maxBytes ||
+      transportByteCount + candidateTransportBytes > transportByteBudget
+    ) {
       // A single valid row may exceed the configured target chunk size. Returning
       // it alone gives the migration a finite, integrity-preserving path while the
       // absolute RPC ceiling above still bounds memory and transport size.
       if (rows.length === 0) {
         rows.push(row);
         byteCount = candidateBytes;
+        transportByteCount = candidateTransportBytes;
       }
       hasMore = true;
       break;
     }
     rows.push(row);
     byteCount += candidateBytes;
+    transportByteCount += candidateTransportBytes;
   }
   const lastRow = rows.length > 0 ? rows[rows.length - 1] : null;
   const cursor = lastRow ? spec.cursorFromRow(lastRow) : (input.cursor ?? null);
@@ -3955,7 +3971,7 @@ function searchArchiveProjection(
          LIMIT ?`,
         `%${query.replace(/[%_\\]/g, '\\$&')}%`,
         ...params,
-        Math.min(limit * 2, 1_000)
+        limit * 2
       )
       .toArray();
   }
