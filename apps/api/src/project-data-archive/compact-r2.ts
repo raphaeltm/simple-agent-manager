@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 
-import type { ProjectDataArchiveChunk } from './contract';
+import { PROJECT_DATA_ARCHIVE_MAX_CHUNK_BYTES, type ProjectDataArchiveChunk } from './contract';
 import { sha256Hex } from './hashing';
 
 export const COMPACT_ARCHIVE_FORMAT = 'r2-gzip-v1';
 export const LEGACY_ARCHIVE_FORMAT = 'sqlite-v1';
 // The canonical row byte budget excludes JSON field names, IDs and the chunk envelope.
 export const COMPACT_ARCHIVE_MAX_OBJECT_BYTES = 8 * 1024 * 1024;
+export const ARCHIVE_IMMUTABLE_JSON_MAX_OBJECT_BYTES = PROJECT_DATA_ARCHIVE_MAX_CHUNK_BYTES;
 export const COMPACT_ARCHIVE_CHUNK_BYTES = 2 * 1024 * 1024;
 export const COMPACT_ARCHIVE_DEFAULT_TIMEOUT_MS = 10_000;
 export function compactArchiveTimeout(value?: string): number {
@@ -18,6 +19,16 @@ export class CompactArchiveTimeoutError extends Error {
     super(`Compact archive R2 deadline exceeded (${stage})`);
     this.name = 'CompactArchiveTimeoutError';
   }
+}
+
+export function isCompactArchiveTimeoutError(error: unknown): boolean {
+  return (
+    error instanceof CompactArchiveTimeoutError ||
+    (typeof error === 'object' &&
+      error !== null &&
+      'name' in error &&
+      error.name === 'CompactArchiveTimeoutError')
+  );
 }
 
 async function timed<T>(promise: Promise<T>, deadline: number, stage: string): Promise<T> {
@@ -367,7 +378,7 @@ export async function writeImmutableJson(
   const deadline = Date.now() + timeoutMs;
   const text = JSON.stringify(value);
   const bytes = new TextEncoder().encode(text);
-  if (bytes.byteLength > COMPACT_ARCHIVE_MAX_OBJECT_BYTES) {
+  if (bytes.byteLength > ARCHIVE_IMMUTABLE_JSON_MAX_OBJECT_BYTES) {
     throw new Error('ProjectData archive JSON exceeds object byte limit');
   }
   const bodySha256 = await sha256Hex(text);
@@ -388,7 +399,7 @@ export async function writeImmutableJson(
     }
     const existingBytes = await readBounded(
       existing.body,
-      COMPACT_ARCHIVE_MAX_OBJECT_BYTES,
+      ARCHIVE_IMMUTABLE_JSON_MAX_OBJECT_BYTES,
       deadline
     );
     if (

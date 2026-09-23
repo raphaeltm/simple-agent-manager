@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
+  ARCHIVE_IMMUTABLE_JSON_MAX_OBJECT_BYTES,
   COMPACT_ARCHIVE_MAX_OBJECT_BYTES,
   readCompactChunk,
   writeCompactChunk,
@@ -615,15 +616,25 @@ describe('compact archive bounded failures', () => {
   it('bounds immutable JSON publication and refuses conflicting retry payloads', async () => {
     const { bucket } = memoryR2();
     await expect(
-      writeImmutableJson(bucket, 'too-large.json', 'x'.repeat(COMPACT_ARCHIVE_MAX_OBJECT_BYTES + 1))
+      writeImmutableJson(
+        bucket,
+        'too-large.json',
+        'x'.repeat(ARCHIVE_IMMUTABLE_JSON_MAX_OBJECT_BYTES + 1)
+      )
     ).rejects.toThrow('byte limit');
     expect(bucket.head).not.toHaveBeenCalled();
+
+    await expect(
+      writeImmutableJson(bucket, 'large-tool-row.json', {
+        payload: 'x'.repeat(COMPACT_ARCHIVE_MAX_OBJECT_BYTES + 1),
+      })
+    ).resolves.toBeUndefined();
 
     await writeImmutableJson(bucket, 'manifest.json', { version: 1 });
     await expect(writeImmutableJson(bucket, 'manifest.json', { version: 2 })).rejects.toThrow(
       'conflict'
     );
-    expect(bucket.put).toHaveBeenCalledTimes(1);
+    expect(bucket.put).toHaveBeenCalledTimes(2);
   });
 
   it('does not race a retry against a timed-out immutable provider write', async () => {
@@ -657,12 +668,12 @@ describe('compact archive bounded failures', () => {
       get: vi.fn(),
     } as unknown as R2Bucket;
 
-    await expect(writeImmutableJson(bucket, 'pending.json', { ok: true }, 5)).rejects.toMatchObject(
-      {
-        name: 'CompactArchiveTimeoutError',
-        stage: 'put',
-      }
-    );
+    await expect(
+      writeImmutableJson(bucket, 'pending.json', { ok: true }, 250)
+    ).rejects.toMatchObject({
+      name: 'CompactArchiveTimeoutError',
+      stage: 'put',
+    });
     await expect(writeImmutableJson(bucket, 'pending.json', { ok: true }, 5)).rejects.toMatchObject(
       {
         name: 'CompactArchiveTimeoutError',

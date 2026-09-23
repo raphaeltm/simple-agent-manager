@@ -1582,7 +1582,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
     }
   );
 
-  it('records an R2 deadline as a timed-out copy operation with bounded duration evidence', async () => {
+  it('records a serialized R2 deadline as a timed-out copy operation with bounded duration evidence', async () => {
     const sqlite = new Database(':memory:');
     try {
       createCoordinatorTables(sqlite);
@@ -1590,7 +1590,13 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       const source = createFakeSource({ state: 'intent_prepared', token: 'old-token' });
       const target = createFakeTarget();
       const r2 = {
-        head: vi.fn(() => new Promise<R2Object | null>(() => undefined)),
+        head: vi.fn(async () => {
+          // Durable Object RPC preserves the error name, but not the local
+          // CompactArchiveTimeoutError prototype identity.
+          const error = new Error('Compact archive R2 deadline exceeded (get)');
+          error.name = 'CompactArchiveTimeoutError';
+          throw error;
+        }),
         get: vi.fn(),
         put: vi.fn(),
       } as unknown as R2Bucket;
@@ -1598,7 +1604,6 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
         makeEnv(sqlite, {
           PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
           PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
-          PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS: '5',
           PROJECT_DATA_ARCHIVE_R2: r2,
           PROJECT_DATA: createProjectDataNamespace({
             [SOURCE_OWNER]: source,

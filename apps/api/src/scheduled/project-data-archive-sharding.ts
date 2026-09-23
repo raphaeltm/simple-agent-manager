@@ -14,7 +14,7 @@ import {
   COMPACT_ARCHIVE_CHUNK_BYTES,
   COMPACT_ARCHIVE_FORMAT,
   compactArchiveTimeout,
-  CompactArchiveTimeoutError,
+  isCompactArchiveTimeoutError,
   LEGACY_ARCHIVE_FORMAT,
   writeCompactChunk,
   writeImmutableJson,
@@ -2510,7 +2510,7 @@ async function markCopyOperationFailed(
   error: unknown
 ): Promise<void> {
   const now = Date.now();
-  const outcome = error instanceof CompactArchiveTimeoutError ? 'timed_out' : 'failed';
+  const outcome = isCompactArchiveTimeoutError(error) ? 'timed_out' : 'failed';
   await env.DATABASE.prepare(
     `UPDATE project_data_archive_copy_checkpoints
      SET last_operation = ?, last_operation_completed_at = ?,
