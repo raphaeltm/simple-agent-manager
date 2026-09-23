@@ -37,6 +37,7 @@ SAM keeps a static model catalog in `packages/shared/src/model-catalog.ts` for a
 - `pnpm --filter @simple-agent-manager/shared typecheck`
 - `pnpm --filter @simple-agent-manager/shared test`
 - `pnpm --filter @simple-agent-manager/shared build`
+- `pnpm quality:file-sizes`
 - `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/agent-profiles.test.tsx`
 - `pnpm --filter @simple-agent-manager/web typecheck`
 - `pnpm --filter @simple-agent-manager/web lint` — passes with existing React hook warnings
@@ -44,6 +45,8 @@ SAM keeps a static model catalog in `packages/shared/src/model-catalog.ts` for a
 - Live `models.dev` comparison script: active `opencode`/`opencode-go` IDs match the shared static fallback exactly (`expected: 108`, `actual: 108`, no missing or extra IDs).
 
 ## Review gates
+
+Note: `packages/shared/src/constants/ai-services.ts` was kept under the mandatory 800-line limit by moving the agent-loop filtering helper to `packages/shared/src/constants/ai-model-filtering.ts` while preserving the existing export surface.
 
 - task-completion-validator: PASS — the implementation covers the task checklist and acceptance criteria, including the live OpenCode fallback comparison.
 - test-engineer: PASS — changed catalog groups/model IDs are covered by focused shared tests, the API service contract test, and the web selector test.
