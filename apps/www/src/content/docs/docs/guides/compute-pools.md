@@ -53,7 +53,7 @@ A project's **Infrastructure** tab holds three things, and it is worth knowing w
 | ------------------------------- | ---------------------------------------------------------------------------------------------- |
 | **Default Resources**           | How much machine work asks for, when nothing more specific says otherwise                      |
 | **Scaling & Scheduling**        | The default provider and region, plus how densely nodes are packed and how long they stay warm |
-| **Infrastructure Compute Pool** | Which concrete machines SAM may rent, and how it chooses between them                          |
+| **Infrastructure Compute Pool** | Which concrete machines SAM may rent, and how it chooses between them — for workspaces and for deployments |
 
 The first two feed the pool decisions described below, so they are covered here too.
 
@@ -173,14 +173,38 @@ SAM keeps the two workload roles in sync behind it.
 ## Strategy: which machine gets picked
 
 **Strategy** decides the order SAM considers machines in — both existing nodes it could reuse and
-fresh offerings it could provision. New pools default to **Balanced**.
+fresh offerings it could provision.
 
-| Strategy                 | What it does                                                                                                                                                      |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Balanced** _(default)_ | **Lowest projected utilization first.** Spreads work over the machines you already pay for, leaving headroom on each.                                             |
-| **Pack**                 | **Highest projected utilization that still fits, first.** Fills an existing host before opening another; when provisioning, chooses the largest allowed offering. |
-| **Spread**               | **Fewest neighbouring workspaces first.** Buys isolation and predictable performance at the cost of running more machines.                                        |
-| **Smallest fit**         | **Smallest sufficient capacity first.** Chooses the smallest, then cheapest, sufficient offering and keeps bigger machines free for work that needs them.         |
+| Strategy         | What it does                                                                                                                                                      |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Balanced**     | **Lowest projected utilization first.** Spreads work over the machines you already pay for, leaving headroom on each.                                             |
+| **Pack**         | **Highest projected utilization that still fits, first.** Fills an existing host before opening another; when provisioning, chooses the largest allowed offering. |
+| **Spread**       | **Fewest neighbouring workspaces first.** Buys isolation and predictable performance at the cost of running more machines.                                        |
+| **Smallest fit** | **Smallest sufficient capacity first.** Chooses the smallest, then cheapest, sufficient offering and keeps bigger machines free for work that needs them.         |
+
+### Two strategies, one pool
+
+Agent workspaces and [app deployments](/docs/guides/app-deployments/) want opposite things — a
+workspace is bursty and short-lived, a deployment is steady and long-lived — so the pool editor
+carries **two** strategy fields, chosen from the same four options above:
+
+| Field                     | Applies to                             | Default          |
+| ------------------------- | -------------------------------------- | ---------------- |
+| **Workspace strategy**    | Agent sessions and tasks               | Balanced         |
+| **Deployment strategy**   | App deployment nodes                   | Smallest fit     |
+| **Maximum nodes per user**| How many managed nodes Spread may open | 3                |
+
+Everything else in the pool — the credentials, the allowed offerings, the providers and regions,
+the exhaustion policy — is shared between the two. You curate one list of machines; only the
+_ordering_ differs by workload.
+
+**Maximum nodes per user** only affects **Spread**. Spread keeps opening a new machine for each
+workspace until a user's node count in that pool reaches the limit, then starts packing onto the
+machines already running. It is not a quota on anything else: Balanced, Pack, and Smallest fit
+ignore it, and it does not cap deployment nodes.
+
+All four fields are edited together — **Infrastructure Compute Pool → Edit** on whichever scope
+you own.
 
 A few things worth knowing:
 
@@ -328,19 +352,28 @@ SAM refuses it rather than guessing. A machine SAM cannot measure is never given
 Node Scheduling**. Legacy workspace-count and memory-threshold values remain readable for
 compatibility, but do not gate placement. The disk-pressure threshold is deployment-controlled.
 
-Each compute pool also has a **Maximum nodes per user** setting. Managed workspace nodes are
-user-isolated, so **Spread** provisions separate nodes for that user until their pool usage reaches
-the limit, then packs further sessions onto those nodes. **Pack** chooses the largest allowed
-offering and fills it densely; **Smallest fit** chooses the smallest or cheapest sufficient offering.
+Managed workspace nodes are user-isolated, so **Spread** opens a separate node per workspace for
+that user until their node count in the pool reaches [**Maximum nodes per
+user**](#two-strategies-one-pool), then packs further sessions onto those nodes. **Pack** takes the
+largest allowed offering and fills it densely; **Smallest fit** takes the smallest, then cheapest,
+sufficient offering.
 
-The same pool has a separate **Deployment strategy**. Its provider, regions, credentials, allowed
-offerings, and quota boundaries remain shared with the workspace policy, while deployment
-placement can use different ordering. The default **Smallest fit** behavior first reuses a healthy,
-compatible deployment node when the sum of its declared CPU, memory, and disk reservations still
-fits. If none fits, SAM provisions the smallest allowed machine that can hold the deployment.
-Service resource limits in the deployment manifest determine this reservation; environment names
-such as preview, staging, and production do not select a machine size. Deployments with persistent
-volumes continue to use an exclusive node.
+### How deployment placement differs
+
+App deployments use the pool's [**Deployment strategy**](#two-strategies-one-pool) rather than the
+workspace one. Under the **Smallest fit** default, SAM first looks for a healthy, compatible
+deployment node whose declared CPU, memory, and disk reservations still leave room; only if none
+does will it provision, and then it provisions the smallest allowed machine that can hold the
+deployment.
+
+What drives the size is the **service resource limits in your deployment manifest** — the
+`deploy.resources.limits` block per service, summed across services. Environment names do not:
+calling an environment `production` does not buy it a bigger machine than one called `preview`. If
+a deployment machine is larger than you expected, read the manifest first. See
+[App Deployments](/docs/guides/app-deployments/).
+
+Deployments with persistent volumes still get an exclusive node — a volume is attached to one
+machine, so the environment cannot be relocated or share a host.
 
 ### Warm reuse
 

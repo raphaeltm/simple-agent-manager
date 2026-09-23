@@ -11,14 +11,48 @@ Recent chat updates make the workspace feel more like a persistent work surface:
 
 Agent output streams directly to your browser via WebSocket. You see code being written, terminal commands executing, and the agent's thought process as it happens — no waiting for a complete response.
 
+## The session tool rail
+
+Everything you can do _to_ a session — rather than _say_ to it — lives in the **tool rail** down
+the right edge of the chat. It is the same rail on desktop and mobile, and it is where most of the
+features on this page are opened from.
+
+| Tool          | What it opens                                                                                             | When it appears                        |
+| ------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| **Files**     | The workspace file browser — [File Browsing](#file-browsing)                                              | While the session's workspace is live  |
+| **Git**       | Uncommitted changes in the workspace                                                                      | While the session's workspace is live  |
+| **Timeline**  | A jump list through the session's history                                                                 | Always                                 |
+| **Resources** | CPU, memory, I/O, and OOM history — [Session Resource History](/docs/guides/session-resources/)            | Always                                 |
+| **Events**    | This session's subscriptions, schedules, and watches — [Scheduled actions](/docs/guides/scheduled-actions/) | Always                                 |
+| **Comments**  | Comment threads on this session, with an unresolved count badge                                           | Always                                 |
+| **Retry**     | Re-run the task behind the session                                                                        | When the session has a task            |
+| **Fork**      | Start a new task from this session — [Conversation Forking](#conversation-forking)                        | When the session has a task            |
+| **Report**    | File a problem report — [Reporting Issues](/docs/guides/reporting-issues/)                                | When the deployment has reporting configured |
+| **Complete**  | Mark the task complete                                                                                    | When the task is not already finished  |
+| **Details**   | Session identifiers and the infrastructure it ran on                                                      | Always                                 |
+
+**Files** and **Git** need a running workspace, so they disappear once a session stops or fails.
+Everything else stays — which matters, because inspecting resources, reading the timeline, or
+reporting a problem is usually something you want to do _after_ a session ended.
+
+### Changing how much of the rail you see
+
+The chevron at the top of the rail cycles it through three modes:
+
+1. **Icons** (the default) — a narrow strip of glyphs.
+2. **Icons and labels** — wider, with each tool named. Worth switching on while you learn the rail.
+3. **Hidden** — collapsed to a labelled **Tools** tab on the right edge; click the tab to bring it back.
+
+Your choice is remembered in the browser, per device.
+
 ## File Browsing
 
 While chatting with an agent, you can browse the workspace's file system directly from the chat panel — no need to switch to a terminal.
 
 ### How to Use
 
-- Open the file browser panel to navigate the file tree and view files
-- View git status and diffs to see what the agent changed
+- Open **Files** in the [session tool rail](#the-session-tool-rail) to navigate the file tree and view files
+- Open **Git** to see status and diffs for what the agent changed
 - Click file references in tool-call cards to jump directly to that file (expand the
   tool activity card first — see [Tool Activity Cards](#tool-activity-cards))
 
