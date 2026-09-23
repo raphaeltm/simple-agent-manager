@@ -65,6 +65,41 @@ async function seedTerminalSessionWithMessages(
   return { source, sessionId };
 }
 
+async function prepareCompactArchiveTarget(
+  projectId: string,
+  messageCount: number,
+  refusedFixture: string
+) {
+  const { source, sessionId } = await seedTerminalSessionWithMessages(
+    projectId,
+    messageCount,
+    true
+  );
+  const base = {
+    projectId,
+    sessionId,
+    migrationId: crypto.randomUUID(),
+    sourceOwnerName: projectId,
+    targetOwnerName: `${projectId}:archive:g1:s0`,
+    targetGeneration: 1,
+    sourceIntentToken: crypto.randomUUID(),
+    now: Date.now() + 60_000,
+    minTerminalAgeMs: 0,
+  };
+  const prepared = await source.archiveSourcePrepareIntent(base);
+  if ('refused' in prepared) throw new Error(refusedFixture);
+  const target = projectDataStub(base.targetOwnerName);
+  await target.ensureProjectId(projectId);
+  await target.archiveTargetPrepare({
+    ...base,
+    storageFormat: 'r2-gzip-v1',
+    terminalVersionSha256: prepared.terminalVersionSha256,
+    expectedMessageCount: prepared.messageCount,
+    sessionRow: prepared.sessionRow,
+  });
+  return { source, sessionId, base, prepared, target };
+}
+
 describe('compact R2 archive rollout', () => {
   it('defers without fencing, then migrates, reads and copies back through real R2 and SQLite', async () => {
     const projectId = `compact-archive-${crypto.randomUUID()}`;
@@ -531,29 +566,11 @@ describe('compact archive concurrent mutation fencing', () => {
   it('serializes duplicate chunk commits across R2 awaits before abandoning a partial target', async () => {
     const { writeCompactChunk } = await import('../../src/project-data-archive/compact-r2');
     const projectId = `compact-concurrency-${crypto.randomUUID()}`;
-    const { source, sessionId } = await seedTerminalSessionWithMessages(projectId, 10, true);
-    const base = {
+    const { source, sessionId, base, target } = await prepareCompactArchiveTarget(
       projectId,
-      sessionId,
-      migrationId: crypto.randomUUID(),
-      sourceOwnerName: projectId,
-      targetOwnerName: `${projectId}:archive:g1:s0`,
-      targetGeneration: 1,
-      sourceIntentToken: crypto.randomUUID(),
-      now: Date.now() + 60_000,
-      minTerminalAgeMs: 0,
-    };
-    const prepared = await source.archiveSourcePrepareIntent(base);
-    if ('refused' in prepared) throw new Error('Concurrency fixture refused');
-    const target = projectDataStub(base.targetOwnerName);
-    await target.ensureProjectId(projectId);
-    await target.archiveTargetPrepare({
-      ...base,
-      storageFormat: 'r2-gzip-v1',
-      terminalVersionSha256: prepared.terminalVersionSha256,
-      expectedMessageCount: prepared.messageCount,
-      sessionRow: prepared.sessionRow,
-    });
+      10,
+      'Concurrency fixture refused'
+    );
     const chunk = await source.archiveSourceExportChunk({
       ...base,
       tableName: 'chat_messages',
@@ -641,29 +658,11 @@ describe('compact archive concurrent mutation fencing', () => {
     const { writeCompactChunk } = await import('../../src/project-data-archive/compact-r2');
     const { PROJECT_DATA_ARCHIVE_TABLES } = await import('../../src/project-data-archive/contract');
     const projectId = `compact-finalize-rollback-${crypto.randomUUID()}`;
-    const { source, sessionId } = await seedTerminalSessionWithMessages(projectId, 3, true);
-    const base = {
+    const { source, sessionId, base, prepared, target } = await prepareCompactArchiveTarget(
       projectId,
-      sessionId,
-      migrationId: crypto.randomUUID(),
-      sourceOwnerName: projectId,
-      targetOwnerName: `${projectId}:archive:g1:s0`,
-      targetGeneration: 1,
-      sourceIntentToken: crypto.randomUUID(),
-      now: Date.now() + 60_000,
-      minTerminalAgeMs: 0,
-    };
-    const prepared = await source.archiveSourcePrepareIntent(base);
-    if ('refused' in prepared) throw new Error('Source rollback fixture refused');
-    const target = projectDataStub(base.targetOwnerName);
-    await target.ensureProjectId(projectId);
-    await target.archiveTargetPrepare({
-      ...base,
-      storageFormat: 'r2-gzip-v1',
-      terminalVersionSha256: prepared.terminalVersionSha256,
-      expectedMessageCount: prepared.messageCount,
-      sessionRow: prepared.sessionRow,
-    });
+      3,
+      'Source rollback fixture refused'
+    );
     const hashes: string[] = [];
     for (const tableName of PROJECT_DATA_ARCHIVE_TABLES) {
       let cursor: string | null = null;
