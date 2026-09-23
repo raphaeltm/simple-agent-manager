@@ -28,3 +28,7 @@ The public blog needs a daily technical journal that explains the most useful me
 - [x] It accurately describes the merged task-start and node-cleanup behavior, with sources.
 - [x] The Mermaid diagram renders in the site's Markdown pipeline.
 - [ ] Marketing-site validation passes and the changes are merged through a PR.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2053 (`docs(blog): publish task-start journal (#2053)`). Its checklist reads 9/11 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

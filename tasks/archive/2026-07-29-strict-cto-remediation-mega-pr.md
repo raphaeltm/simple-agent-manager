@@ -48,3 +48,7 @@ Eight remediation PRs have been completed independently and need to be integrate
 - Both Claude and Codex core staging workflows return valid responses.
 - Production deploy succeeds after merge.
 - No individual remediation PR is merged as a substitute for the mega PR.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1697 (`Integrate strict CTO remediation fixes (#1697)`). Its checklist reads 6/15 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

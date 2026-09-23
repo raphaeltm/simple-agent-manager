@@ -32,3 +32,7 @@ R5 findings 1–4 identified CI and development dependency drift in tool downloa
 - Every `go.mod` in the repository has Dependabot `gomod` coverage.
 - Tests fail if these governance properties regress.
 - Documentation explains how to safely update pins and digests.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1747 (`chore: harden dependency governance pins (#1747)`). Its checklist reads 6/8 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

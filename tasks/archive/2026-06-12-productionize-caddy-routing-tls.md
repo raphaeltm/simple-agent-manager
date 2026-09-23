@@ -236,3 +236,7 @@ required for clean E2E verification (also mandated by rule 27). File as a follow
 - DNS service: `apps/api/src/services/dns.ts`
 - Deployment engine: `packages/vm-agent/internal/deploy/engine.go`
 - Cloud-init template: `packages/cloud-init/src/template.ts`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1308 (`Productionize Caddy routing + TLS for app-deployment nodes (#1308)`). Its checklist reads 33/36 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -42,3 +42,7 @@ The Files and Triggers project pages repeat expensive backend work on every requ
 - Multiplayer state and credential attribution health use configurable short-lived server caches with tests.
 - All new cache TTLs have `DEFAULT_*` constants and env overrides.
 - Draft PR is pushed and left open; staging and merge are skipped by explicit instruction.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `perf: cache project files and triggers data`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

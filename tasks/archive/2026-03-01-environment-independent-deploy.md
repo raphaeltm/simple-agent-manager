@@ -51,3 +51,7 @@ Make the deployment pipeline fully environment-independent:
 
 - The `[triggers]` section (crons) is inherited by Wrangler automatically — no special handling needed.
 - `tail_consumers` is intentionally absent from top-level config because it breaks Vitest (Cloudflare issue #9343).
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #230 (`refactor: environment-independent deployment pipeline with staging on PRs (#230)`). Its checklist reads 13/14 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

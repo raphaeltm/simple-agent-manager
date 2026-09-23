@@ -115,3 +115,7 @@ bottom was invisible to every guard, and the existing sidebar specs assert
 `toBeVisible()`, which returns true for an element parked 95px below the fold.
 Every viewport in `playwright.config.ts` is either mobile (drawer, unaffected) or
 1024px+ tall, so nothing exercised a short desktop window.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2092 (`Make the project sidebar nav scrollable on short viewports (#2092)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

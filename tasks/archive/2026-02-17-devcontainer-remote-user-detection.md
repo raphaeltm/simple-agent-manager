@@ -139,3 +139,7 @@ Option 2 is preferred because `devcontainer exec` has higher overhead (CLI start
 - [x] Update documentation (including `AGENTS.md` + `CLAUDE.md` sync)
 - [x] Run impacted test suites and confirm green
 - [ ] Open PR with preflight evidence, wait for CI green, merge
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `fix(vm-agent): resolve devcontainer runtime user consistently`. Its checklist reads 14/15 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

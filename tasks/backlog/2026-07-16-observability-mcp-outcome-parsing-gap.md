@@ -13,7 +13,7 @@ handled 500s and other in-request diagnostics via the MCP path — forcing
 ## Context / where discovered
 
 Discovered while debugging the intermittent sessions-list `INTERNAL_ERROR` on
-large projects (`tasks/active/2026-07-16-fix-sessions-list-internal-error-large-projects.md`).
+large projects (`tasks/archive/2026-07-16-fix-sessions-list-internal-error-large-projects.md`).
 The real prod stack trace could not be read through the observability MCP tool
 because of this gap; root cause had to be established from code inspection +
 local regression tests instead.

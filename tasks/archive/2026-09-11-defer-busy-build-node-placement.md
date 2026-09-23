@@ -98,3 +98,7 @@ Go validation note:
 - Cloudflare review requested checked-in Worker config for `VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS`. Added it to top-level `[vars]` in `apps/api/wrangler.toml`. The optional GitHub Environment override allowlist in `scripts/deploy/sync-wrangler-config.ts` was intentionally left untouched because the task explicitly reserved that file for a sibling PR; deploy generation already copies checked-in top-level vars.
 
 - Focused re-reviews from cloudflare-specialist, go-specialist, test-engineer, architecture review, and performance review all passed after the blocker fixes.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2065 (`Defer placement on busy build nodes (#2065)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

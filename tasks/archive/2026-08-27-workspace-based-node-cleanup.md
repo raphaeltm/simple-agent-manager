@@ -141,7 +141,7 @@ candidate forever.
 - `apps/api/src/services/session-snapshot-upload-relay.ts`
 - `apps/api/src/services/workspace-lifecycle-finalizer.ts`
 - `apps/api/src/services/workspace-placement.ts`
-- `tasks/active/2026-08-26-preserve-restorable-sleeping-sessions.md`
+- `tasks/archive/2026-08-26-preserve-restorable-sleeping-sessions.md`
 - `tasks/archive/2026-08-06-fix-node-reaping-orphan-reconciliation.md`
 - `tasks/archive/2026-08-17-fix-slept-session-classified-as-dead.md`
 - `.claude/rules/47-control-loop-io-budget.md`

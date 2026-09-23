@@ -12,8 +12,8 @@ Mobile commenting is usable, but selected-text drafts render below the source me
 - `apps/web/src/components/project-message-view/comments/useProjectMessageCommentUi.tsx` owns `activeMessageId`, `draft`, selected-text controls, and row actions. This is the right state boundary for opening the desktop rail when a comment entry point is used.
 - `apps/web/src/components/project-message-view/index.tsx` owns `showComments` and lays out the chat as `lg:flex-row`. A desktop rail belongs in this in-layout flex row so the chat and comments are visible simultaneously instead of overlaying each other.
 - `apps/web/src/components/chat/SessionCommentsDrawer.tsx` is currently a portal `<dialog>` with mobile fullscreen and desktop right-side drawer geometry. It remains useful for mobile session-level comment browsing, but desktop needs a non-modal rail for the current request.
-- Prior task `tasks/active/2026-08-24-project-comment-inbox-endpoint.md` documents that an always-visible desktop rail was removed after Raphaël rejected it. This task supersedes only that always-visible behavior: the rail should return as an on-demand surface, not as permanent chrome.
-- Prior task `tasks/active/2026-08-24-fix-comments-navigation-followup.md` and rule `.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md` show that drawer/panel geometry must be validated with real browser screenshots and clipped-overflow checks.
+- Prior task `tasks/archive/2026-08-24-project-comment-inbox-endpoint.md` documents that an always-visible desktop rail was removed after Raphaël rejected it. This task supersedes only that always-visible behavior: the rail should return as an on-demand surface, not as permanent chrome.
+- Prior task `tasks/archive/2026-08-24-fix-comments-navigation-followup.md` and rule `.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md` show that drawer/panel geometry must be validated with real browser screenshots and clipped-overflow checks.
 - Rule `.claude/rules/62-tests-must-observe-the-real-trigger.md` requires tests to click the same controls users click. Coverage must drive selected text, message-level comment buttons, and header/dropdown comments controls, not directly set component props.
 - UI skill requirements require 2-3 layout variants, mobile-first behavior, screenshot evidence at 375x667 and 1280x800, and rubric scores >=4.
 
@@ -93,3 +93,7 @@ Selected direction: variant 3.
 - Mobile whole-message commenting remains inline under the message.
 - The changed surfaces have screenshot-backed validation at 375x667 and 1280x800 with no horizontal or clipped overflow.
 - Screenshots are uploaded to the project library for review.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1907 (`Fix on-demand chat comment surfaces (#1907)`). Its checklist reads 12/13 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

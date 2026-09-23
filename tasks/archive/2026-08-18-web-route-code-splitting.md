@@ -205,3 +205,7 @@ simply downloaded eagerly before.
 - `.claude/rules/17-ui-visual-testing.md`, `.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md`
 - `.claude/rules/03-constitution.md` — Principle XI (no hardcoded values)
 - `tasks/backlog/2026-04-10-web-lazy-loading-error-boundaries-a11y.md` — prior art
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1850 (`perf(web): route-level code splitting — entry chunk 854→77 kB gzip (#1850)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

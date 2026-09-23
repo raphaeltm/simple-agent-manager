@@ -54,3 +54,7 @@ Deployment environments currently behave as if each environment owns a dedicated
 - vm-agent can apply releases for multiple environments without Caddy, Compose project, network, or disk-state collisions.
 - UI accurately communicates that deployment node deletion affects all hosted environments and that environment destroy only deletes the node for the last hosted environment.
 - Draft PR #1356 is updated, remains draft, and is not merged.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1356 (`Add app deployment control surface and policy gate (#1356)`). Its checklist reads 12/17 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

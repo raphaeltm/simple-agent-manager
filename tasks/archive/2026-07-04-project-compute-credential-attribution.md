@@ -60,3 +60,7 @@ Wave 5 for shared-project credential attribution must make project-attached comp
 - `apps/api/src/middleware/project-auth.ts`
 - `tasks/archive/2026-07-04-credential-attribution-health.md`
 - Rules: `.claude/rules/28-credential-resolution-fallback-tests.md`, `.claude/rules/35-vertical-slice-testing.md`, `.claude/rules/44-dual-write-migration-writer-enumeration.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1507 (`Wave 5 project credential attribution pins (#1507)`). Its checklist reads 14/15 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

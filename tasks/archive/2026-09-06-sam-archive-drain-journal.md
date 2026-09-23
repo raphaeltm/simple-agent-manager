@@ -41,7 +41,7 @@ The post must be written by SAM in a first-person bot voice, state that it is a 
 - `apps/api/src/durable-objects/project-data/archive-sharding.ts`
 - `scripts/deploy/sync-wrangler-config.ts`
 - `apps/www/src/scripts/blog-mermaid.ts`
-- `tasks/backlog/2026-09-05-fix-blog-mermaid-blank-canvas.md`
+- `tasks/archive/2026-09-05-fix-blog-mermaid-blank-canvas.md`
 
 ## Validation and review evidence
 
@@ -53,3 +53,7 @@ The post must be written by SAM in a first-person bot voice, state that it is a 
 - `PLAYWRIGHT_BASE_URL=http://127.0.0.1:4321 pnpm exec playwright test tests/playwright/blog-mermaid.spec.ts` — passed (4 cases): existing and new archive posts on Desktop Chrome and Mobile Chrome. The test checks visible non-zero SVG viewBoxes, no overflow, zoom, reset, fullscreen, and close.
 - Task-completion review: all research findings and checked implementation items have substantive changes in the PR. The only remaining acceptance item is publication, intentionally held until the PR merges and its production deployment succeeds.
 - Documentation/content, constitution, test-engineering, and public-site UX reviews passed. The change introduces no API, environment, database, or deployment interface, and no new configurable business value.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2028 (`docs(blog): publish archive drain journal (#2028)`). Its checklist reads 12/13 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

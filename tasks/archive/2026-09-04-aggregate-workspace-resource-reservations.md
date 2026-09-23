@@ -229,3 +229,7 @@ is byte-for-byte `JSON.stringify()` of the same snapshot. No second resolver exi
 - `apps/api/src/services/placement-resolver.ts`
 - `apps/api/tests/workers/vm-admission-control-races.test.ts`
 - PR #1876 and PR #1943
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2021 (`fix(api): reserve aggregate node capacity atomically (#2021)`). Its checklist reads 20/23 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

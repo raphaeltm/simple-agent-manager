@@ -53,3 +53,7 @@ New long-running SAM tasks are often getting fallback titles that are just the f
 - **Why it was not caught**: Existing tests verified that SAM parsed normal `message.content` responses and fell back on empty output, but did not assert the provider-specific payload controls needed to keep the response contract stable for utility calls.
 - **Class of bug**: Provider-compatible API response-contract drift hidden behind a successful HTTP response.
 - **Process fix**: `.claude/rules/02-quality-gates.md` now requires regression tests for utility LLM calls to assert exact provider payload controls, including thinking/reasoning-disable parameters when needed.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Fix task title generation reasoning output`. Its checklist reads 8/10 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

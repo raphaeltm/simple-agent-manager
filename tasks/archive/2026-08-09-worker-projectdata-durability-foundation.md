@@ -131,3 +131,7 @@ This task implements the Worker-owned durability foundation from SAM idea `01KZK
 - `.claude/rules/35-vertical-slice-testing.md`
 - `.claude/rules/45-durable-object-concurrency-mutex.md`
 - `.claude/rules/47-control-loop-io-budget.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1785 (`feat: add durable session sleep and recovery for Claude Code and Codex (#1785)`). Its checklist reads 23/27 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

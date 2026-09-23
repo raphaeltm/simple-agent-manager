@@ -52,7 +52,7 @@ architecture. It must discuss only code, features, or technology.
 ## References
 
 - PR #2110 and commit `c97d00ec093e43ec2209bd5a408bdefa8e0ac6a1`
-- `tasks/active/2026-09-20-workspace-resource-history.md`
+- `tasks/archive/2026-09-20-workspace-resource-history.md`
 - `packages/vm-agent/internal/resourcehistory/collector.go`
 - `apps/api/src/services/workspace-resource-history.ts`
 - `apps/www/src/content/CLAUDE.md`

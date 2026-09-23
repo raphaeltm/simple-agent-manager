@@ -349,3 +349,7 @@ survives the PR.
 - Fork PR under port — <https://github.com/DefangLabs/simple-agent-manager/pull/45> — fetched as
   the local ref `defang-pr45` and diffed against its own base `339b013256a7`, so the deliberate
   divergences are differences from real code rather than from its description.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Port app-deployment race and liveness fixes`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

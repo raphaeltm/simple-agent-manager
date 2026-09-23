@@ -152,3 +152,7 @@ Acceptance bar met: staging still works end-to-end (env-var fallback keeps GITHU
 - `.claude/rules/28-credential-resolution-fallback-tests.md`
 - `.claude/rules/31-migration-safety.md`
 - `.claude/rules/41-credential-snapshot-resilience.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1528 (`feat: first-run admin setup wizard with DB-backed platform config (#1528)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

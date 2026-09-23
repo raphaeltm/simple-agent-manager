@@ -57,3 +57,7 @@ Admin diagnostics need a durable execution owner, inspectable safe events, recov
 - `apps/web/src/components/admin/ErrorList.tsx`
 - `apps/web/src/components/admin/DebugDiagnosisPanel.tsx`
 - `.claude/rules/43-long-running-mcp-tools.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1736 (`Make admin diagnostic runs durable, inspectable, and reliable (#1736)`). Its checklist reads 10/11 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

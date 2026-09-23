@@ -24,7 +24,7 @@ must remain unmerged until Raphaël explicitly authorizes a merge.
 
 ## Research Findings
 
-1. `tasks/active/2026-08-14-fix-stranded-session-sleep-cleanup.md` documents a cross-control-plane
+1. `tasks/archive/2026-08-14-fix-stranded-session-sleep-cleanup.md` documents a cross-control-plane
    lifecycle failure: completion happened while the ACP prompt was still active, the failed sleep
    state was outside the retry selector, and sessions without snapshot rows never entered the
    sweep. Existing tests asserted local call order or seeded only the happy snapshot state.
@@ -168,7 +168,7 @@ explicit local/CI boundary of the task.
 
 ## References
 
-- `tasks/active/2026-08-14-fix-stranded-session-sleep-cleanup.md`
+- `tasks/archive/2026-08-14-fix-stranded-session-sleep-cleanup.md`
 - `tasks/archive/2026-08-07-fix-provisioning-node-cleanup-race.md`
 - `.claude/rules/35-vertical-slice-testing.md`
 - `.claude/rules/47-control-loop-io-budget.md`
@@ -179,3 +179,7 @@ explicit local/CI boundary of the task.
 - `apps/api/src/scheduled/trial-expire.ts`
 - `apps/api/tests/workers/`
 - `packages/vm-agent/internal/server/agent_ws.go`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `docs(tasks): record scheduler security review`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

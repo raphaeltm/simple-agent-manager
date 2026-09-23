@@ -42,7 +42,7 @@ Before implementing, we should confirm which specific failure mode is hitting in
 
 ### Related work
 
-- `tasks/active/2026-02-23-gh-token-empty-in-workspaces.md` — addresses GH_TOKEN being empty at provisioning time (different issue: token absent vs. token expired)
+- `tasks/archive/2026-02-23-gh-token-empty-in-workspaces.md` — addresses GH_TOKEN being empty at provisioning time (different issue: token absent vs. token expired)
 - `docs/notes/2026-03-08-mcp-token-revocation-postmortem.md` — credential lifecycle mismatch lesson (token lifetime must match session lifetime)
 
 ## Two-Part Solution

@@ -254,3 +254,7 @@ about frequency and simultaneously means the cost path is untested rather than p
   reading a large archived session must page. Not a regression from this PR.
 - `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS` is inert as a throughput lever while `_WALL_TIME_MS`
   (10 s) is below one candidate's real duration. The wrangler comment now says so.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2109 (`fix: raise archive sweep message budget to 10000 (step 1) (#2109)`). This file is a completion report, not a checklist. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

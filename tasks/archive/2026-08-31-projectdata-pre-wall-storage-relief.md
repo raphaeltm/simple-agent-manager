@@ -52,9 +52,9 @@ draft PR and stop for coordinator/Fable review.
 - PR #1873 is an open draft sharding PR and is dirty against main; it remains a
   reference only and must not be merged or imported wholesale.
 - Relevant prior task records include
-  `tasks/active/2026-08-26-projectdata-tool-payload-r2-archival.md`,
+  `tasks/archive/2026-08-26-projectdata-tool-payload-r2-archival.md`,
   `tasks/archive/2026-08-24-projectdata-storage-protection.md`, and
-  `tasks/active/2026-08-21-projectdata-storage-safety-firebreak.md`.
+  `tasks/archive/2026-08-21-projectdata-storage-safety-firebreak.md`.
 
 Every finding above is represented in the checklist below.
 
@@ -250,3 +250,7 @@ Additional local validation for the follow-up:
 - `.claude/rules/47-control-loop-io-budget.md`
 - `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`
 - `.claude/rules/59-understand-before-adding.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1978 (`ProjectData pre-wall storage relief (#1978)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -235,3 +235,7 @@ Explicit constraints:
 - `.claude/rules/48-stale-while-revalidate-ui.md`
 - `.claude/rules/56-clipped-overflow-is-invisible-to-document-checks.md`
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1882 (`feat: add message-anchored commenting MVP (#1882)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -3,7 +3,7 @@
 **Status:** active
 **SAM task:** `01M1Q8NH6D8K8QG18JKKYP8PKF`
 **Branch:** `sam/fix-sqlite-bind-variable-yp8pkf`
-**Parent work:** `tasks/active/2026-08-31-projectdata-terminal-archive-sharding.md`
+**Parent work:** `tasks/archive/2026-08-31-projectdata-terminal-archive-sharding.md`
 
 ## Problem
 
@@ -155,3 +155,7 @@ The repository already encodes this: `apps/api/src/lib/d1-limits.ts` exports
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md` — enter through the real trigger
 - `.claude/rules/44-dual-write-migration-enumerate-writers.md` — enumerate every path
 - `.claude/rules/28-credential-resolution-fallback-tests.md` — SQL behaviour needs a real SQL engine
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2022 (`fix(project-data): sub-batch archive chunk verification below the D1 bind ceilin`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

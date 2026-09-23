@@ -547,12 +547,12 @@ catches before any structural assertion runs, so the parsers were never reached.
 
 ## References
 
-- `tasks/active/2026-08-31-projectdata-terminal-archive-sharding.md`
-- `tasks/active/2026-09-01-archive-sharding-rollout-controls.md`
-- `tasks/active/2026-09-02-manual-projectdata-cleanup-and-sharding-cadence.md`
-- `tasks/active/2026-08-26-projectdata-tool-payload-r2-archival.md`
-- `tasks/active/2026-08-27-projectdata-retention-convergence.md`
-- `tasks/active/2026-08-31-projectdata-pre-wall-storage-relief.md`
+- `tasks/archive/2026-08-31-projectdata-terminal-archive-sharding.md`
+- `tasks/archive/2026-09-01-archive-sharding-rollout-controls.md`
+- `tasks/archive/2026-09-02-manual-projectdata-cleanup-and-sharding-cadence.md`
+- `tasks/archive/2026-08-26-projectdata-tool-payload-r2-archival.md`
+- `tasks/archive/2026-08-27-projectdata-retention-convergence.md`
+- `tasks/archive/2026-08-31-projectdata-pre-wall-storage-relief.md`
 - `tasks/archive/2026-07-02-institutionalize-projectdata-wall-time-prevention.md`
 - `apps/api/src/scheduled/project-data-archive-sharding.ts`
 - `apps/api/src/services/project-data-archive-rollout-controls.ts`

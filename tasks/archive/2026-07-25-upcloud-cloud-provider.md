@@ -124,3 +124,7 @@ UpCloud is SAM's first HTTP Basic-auth cloud provider. Its API uses nested respo
 ## Merge protocol
 
 Raphaël explicitly authorizes merge after local validation, all required specialist reviews, staging/no-key verification, and CI are green. Missing real UpCloud credentials are covered by the approved BYO-key exception and do not block merge. Live provider provisioning and persistence validation are deferred to Raphaël's production account after deployment.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1669 (`feat(providers): add UpCloud BYO-key cloud provider (#1669)`). Its checklist reads 29/39 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

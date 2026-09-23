@@ -462,3 +462,7 @@ Instead of users copying auth.json manually, SAM could implement the full OAuth 
 - `apps/web/src/components/AgentKeysSection.tsx` — Settings UI (may need textarea for JSON input)
 - `apps/web/src/components/AgentKeyCard.tsx` — Agent card UI (auto-picks up oauthSupport)
 - `apps/api/src/db/schema.ts` — Database schema (no changes needed)
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #253 (`Add OpenAI Codex OAuth token support with auth.json injection (#253)`). Its checklist reads 11/28 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

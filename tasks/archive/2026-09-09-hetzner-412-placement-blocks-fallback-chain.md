@@ -228,3 +228,7 @@ fallback-chain bug, unfixed), and `ProviderErrorCategory` should be assigned at 
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md` — build the error from its real producer
 - `.claude/rules/02-quality-gates.md` — regression + post-mortem + process fix
 - `.claude/rules/47-control-loop-io-budget.md` — every candidate needs an escape path
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2052 (`Fix Hetzner 412 placement errors halting the capacity-pool fallback chain (#2052`). Its checklist reads 17/18 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

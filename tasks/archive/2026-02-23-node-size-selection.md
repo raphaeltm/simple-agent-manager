@@ -53,3 +53,7 @@ Users cannot select a node/VM size when creating workspaces. The "Launch Workspa
 | `apps/web/src/pages/ProjectOverview.tsx` | Use project default size in quick launch |
 | `apps/web/src/pages/CreateWorkspace.tsx` | Always show size selection |
 | `packages/shared/src/types.ts` | Update project types if needed |
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #180 (`feat: add node size selection across all creation flows (#180)`). Its checklist reads 10/11 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

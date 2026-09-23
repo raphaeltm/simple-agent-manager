@@ -63,3 +63,7 @@ The workspace port forwarding CLI shipped without a true end-to-end staging test
 - Security review: PASS, cookie-based port token forwarding reduces URL token leakage versus query strings.
 - Task completion review: PASS, staging evidence and cleanup align with implementation.
 - Test review: ADDRESSED in commit `3eb137d6`; the CLI test now simulates a remote 302 bootstrap response if `port_token` is sent in the query.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1135 (`Fix workspace port forwarding staging failures (#1135)`). Its checklist reads 11/13 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -39,3 +39,7 @@ Deployment custom-domain CRUD exists in the API, but the production environment 
 - No prototype route, mock data, or fake Apply routes action ships.
 - Backend and frontend contracts are typed and covered by focused tests.
 - Playwright screenshots confirm the Domains tab has no horizontal overflow at 375x667 and 1280x800.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1398 (`Add deployment custom domains UI (#1398)`). Its checklist reads 9/10 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

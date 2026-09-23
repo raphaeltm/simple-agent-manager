@@ -60,3 +60,7 @@ The failed completion then caused the sleep watchdog to fabricate transcript-onl
 - `.claude/rules/27-vm-agent-staging-refresh.md`
 - `.claude/rules/47-control-loop-io-budget.md`
 - `.claude/rules/54-vm-agent-rollout-compatibility.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1836 (`Fix session snapshot direct upload wake pipeline (#1836)`). Its checklist reads 17/18 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

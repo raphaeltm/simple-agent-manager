@@ -50,7 +50,7 @@ The product lifecycle must distinguish **sleeping** from explicit **archive**. S
 - Parent SAM task `01KZS7FYQ718QB6CE6XRGP9MGP`
 - Current SAM task `01KZSZSZZ3BZ7V9BVQ2MDMVRRG`
 - Draft PR #1785
-- `tasks/active/2026-08-09-integrate-durable-execution-foundations.md`
+- `tasks/archive/2026-08-09-integrate-durable-execution-foundations.md`
 - `.claude/rules/23-cross-boundary-contract-tests.md`
 - `.claude/rules/27-vm-agent-staging-refresh.md`
 - `.claude/rules/31-migration-safety.md`
@@ -58,3 +58,7 @@ The product lifecycle must distinguish **sleeping** from explicit **archive**. S
 - `.claude/rules/45-durable-object-concurrency-mutex.md`
 - `.claude/rules/47-control-loop-io-budget.md`
 - `.claude/rules/54-vm-agent-rollout-compatibility.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1785 (`feat: add durable session sleep and recovery for Claude Code and Codex (#1785)`). Its checklist reads 13/15 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

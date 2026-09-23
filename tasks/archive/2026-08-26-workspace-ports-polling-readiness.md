@@ -21,7 +21,7 @@ The 2026-08-25 production stability audit found a high-volume `/ports` readiness
 - Cheap server-side contract opportunity: for exact workspace port-list requests, the wildcard proxy can return a structured non-5xx readiness/lifecycle payload for expected states (`not_ready`, `sleeping`, `stopped`, `deleted`, `gone`) and can normalize upstream port-list 503/unreachable responses as `not_ready`. Token/auth/internal failures should remain real errors.
 - `packages/shared/src/types/workspace.ts` defines `PortsResponse`; extending it keeps VM agent, API, and web response shapes aligned while remaining backwards-compatible with VM-agent responses that only include `{ ports }`.
 - Prior task `tasks/archive/2026-03-31-fix-forwarded-ports-project-view.md` added stale-port retention and token refresh coverage. Preserve that behavior: already-displayed ports must not vanish during background refetch or transient failure.
-- Prior task `tasks/active/2026-08-18-ui-perf-chat-poll-and-memo-quick-wins.md` established hidden-tab polling hygiene and elapsed-gated catch-up semantics. TanStack Query's `refetchIntervalInBackground` must remain false for this hook.
+- Prior task `tasks/archive/2026-08-18-ui-perf-chat-poll-and-memo-quick-wins.md` established hidden-tab polling hygiene and elapsed-gated catch-up semantics. TanStack Query's `refetchIntervalInBackground` must remain false for this hook.
 - Relevant incident lesson from `tasks/archive/2026-08-16-prevent-hidden-harness-work-sleep-and-add-durable-task-waits.md`: unbounded lifecycle-unaware polling is fragile. Polling must be bounded and explicit about ownership/lifecycle state.
 - The comment in `apps/web/src/lib/workspace-status-utils.ts` references `docs/notes/2026-04-03-port-detection-recovery-status-postmortem.md`, but that file is absent on current `main`. Do not rely on that path as evidence.
 - New Vite build-time knobs need wiring in:
@@ -126,3 +126,7 @@ The 2026-08-25 production stability audit found a high-volume `/ports` readiness
 - `security-auditor`: PASS. Terminal-token authentication still runs before lifecycle/gone payloads, token failures remain 401, raw tokens remain out of TanStack query keys, and the port-proxy `Set-Cookie` stripping path is unchanged.
 - `doc-sync-validator`: PASS. Shared `PortsResponse` contract and public Vite configuration reference were updated; no additional public API route documentation is required because this is an existing workspace proxy contract extension.
 - `task-completion-validator`: PASS. Research findings, checklist items, and acceptance criteria are covered by the diff plus automated/manual visual evidence; no uncovered acceptance criteria found before PR/deploy steps.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1918 (`Fix workspace ports polling readiness (#1918)`). Its checklist reads 14/15 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

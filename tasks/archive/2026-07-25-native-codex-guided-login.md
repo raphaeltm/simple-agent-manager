@@ -136,7 +136,7 @@ Technical transport surfaced as product UI, combined with visual-only validation
 
 ## References
 
-- Existing implementation task: `tasks/active/2026-07-23-codex-guided-setup-terminal.md`
+- Existing implementation task: `tasks/archive/2026-07-23-codex-guided-setup-terminal.md`
 - Original guided setup idea: `01KRPWSZWFT0Y06DH9VEXC7CYQ`
 - Follow-up idea: `01KYB847VNB8TZWZ2QPSB9PP8N`
 - OpenAI Codex pinned app-server docs: `rust-v0.142.5/codex-rs/app-server/README.md`
@@ -145,3 +145,7 @@ Technical transport surfaced as product UI, combined with visual-only validation
 - `.claude/rules/17-ui-visual-testing.md`
 - `.claude/rules/25-review-merge-gate.md`
 - `.claude/rules/33-staging-feature-validation.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1666 (`feat: replace Codex setup terminal with native guided login (#1666)`). Its checklist reads 31/37 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

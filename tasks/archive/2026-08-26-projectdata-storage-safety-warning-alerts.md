@@ -262,3 +262,7 @@ an existing operator-visible channel, with a test that observes that channel.
 - `.claude/rules/31-migration-safety.md`
 - `.claude/rules/47-control-loop-io-budget.md`
 - `.claude/rules/59-understand-before-adding.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Fix ProjectData storage warning alerts and cleanup reach`. Its checklist reads 15/16 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

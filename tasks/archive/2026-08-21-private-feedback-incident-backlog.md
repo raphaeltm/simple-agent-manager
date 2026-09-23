@@ -80,3 +80,7 @@ This slice must preserve the existing safety boundary: diagnostic/report/log tex
 - `tasks/archive/2026-07-30-platform-feedback-triage-resilience.md`
 - `tasks/archive/2026-07-30-harden-feedback-idea-boundaries.md`
 - `tasks/backlog/2026-08-11-trigger-paused-reason-signal.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Add admin feedback project configuration`. Its checklist reads 34/37 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

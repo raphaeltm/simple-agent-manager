@@ -1,7 +1,7 @@
 # Stop-and-deliver for interrupt-class durable messages (urgent delivery phase 1)
 
 **SAM idea:** `01M2EPH9WGDYFDQBZCP9QY1FDE` (phase 1 only)
-**Related:** PR #2011 / commit `7c5d85316` (turn-end CAS guard fix), `tasks/active/2026-08-16-session-activity-state-machine.md` (activity wedge context), `.claude/rules/49`, `.claude/rules/57`, `.claude/rules/67`
+**Related:** PR #2011 / commit `7c5d85316` (turn-end CAS guard fix), `tasks/archive/2026-08-16-session-activity-state-machine.md` (activity wedge context), `.claude/rules/49`, `.claude/rules/57`, `.claude/rules/67`
 
 ## Problem
 

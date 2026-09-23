@@ -201,3 +201,7 @@ listener cleanup, and zero post-cancel boundary calls or mutations.
 - `.claude/rules/23-cross-boundary-contract-tests.md`
 - `.claude/rules/35-vertical-slice-testing.md`
 - `.specify/memory/constitution.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1773 (`WP-107: Preserve caller cancellation through provider requests (#1773)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

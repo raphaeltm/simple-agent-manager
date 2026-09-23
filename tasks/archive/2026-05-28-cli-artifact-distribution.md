@@ -40,3 +40,7 @@ SAM deployments need to own and serve their own CLI binaries from the same deplo
 - Focused API tests cover successful download, invalid platform, missing binding, missing object, present version metadata, and missing version metadata.
 - Real staging evidence confirms version metadata and at least macOS arm64 plus one Linux binary download endpoint.
 - Real production evidence confirms version metadata and macOS arm64 download endpoint after merge/deploy.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1138 (`feat: distribute CLI artifacts from deployment R2 (#1138)`). Its checklist reads 9/10 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

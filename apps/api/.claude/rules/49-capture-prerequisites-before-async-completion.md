@@ -21,7 +21,7 @@ blocked `Prompt` returned the peer-disconnect error, so a fully recoverable
 LoadSession-capable prompt was mis-classified as unrecoverable and terminally
 failed. The live read looked correct; the bug only manifested under the
 process-exit-then-error ordering. See
-`tasks/active/2026-06-15-codex-acp-midprompt-disconnect.md` and idea
+`tasks/archive/2026-06-15-codex-acp-midprompt-disconnect.md` and idea
 `01KVQAAPSZQAAM85FZYQHVNRNV`.
 
 ## Class of Bug
@@ -128,7 +128,7 @@ Before merging a change to a long async operation with a deferred handler:
 
 ## References
 
-- Task: `tasks/active/2026-06-15-codex-acp-midprompt-disconnect.md`
+- Task: `tasks/archive/2026-06-15-codex-acp-midprompt-disconnect.md`
 - Idea: `01KVQAAPSZQAAM85FZYQHVNRNV`
 - `.claude/rules/45-durable-object-concurrency-mutex.md` — the DO `await`-interleaving analogue
 - `.claude/rules/46-vm-agent-diagnostic-getter-sync.md` — the goroutine field-sync analogue
@@ -136,4 +136,4 @@ Before merging a change to a long async operation with a deferred handler:
 - `.claude/rules/44-dual-write-migration-enumerate-writers.md` — enumerate every writer
 - `.claude/rules/57-write-only-cross-boundary-state.md` — the three consumers that wedge together
 - `.claude/rules/67-shared-predicates-that-trigger-actions.md` — two callers, two questions
-- Task: `tasks/active/2026-09-03-session-stop-cancel-flow-fixes.md` (the CAS-clock incident)
+- Task: `tasks/archive/2026-09-03-session-stop-cancel-flow-fixes.md` (the CAS-clock incident)

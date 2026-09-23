@@ -224,3 +224,7 @@ fix is now purely per-row fault isolation (the verified fix), plus:
       `tasks/backlog/2026-07-16-project-data-row-fault-isolation-audit.md` for the
       ~10 sibling `project-data/` reads with the identical unguarded `rows.map(parseRow)`.
 - [ ] Staging verification (blocked: no staging access this session).
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1613 (`fix(chat): tolerate malformed session rows in sessions-list read (#1613)`). Its checklist reads 7/13 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

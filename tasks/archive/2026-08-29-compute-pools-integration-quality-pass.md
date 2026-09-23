@@ -34,7 +34,7 @@ Compute pools must be infrastructure-scoped resources backed by concrete provide
 - The screenshot stress data now includes many providers, long owner/source/SKU strings, many regions, missing price, high price, stale/unavailable catalog offerings, filter interactions, and the 375x667 mobile viewport.
 - Manual screenshot QC found one desktop catalog-filter defect: the Max price input could overflow its grid column. The fix adds `min-w-0`/`w-full` sizing constraints to the filter grid and controls. Refreshed screenshots confirm no horizontal clipping on desktop or mobile.
 - Relevant process lessons/rules: `.claude/rules/09-task-tracking.md`, `.claude/rules/10-e2e-verification.md`, `.claude/rules/17-ui-visual-testing.md`, `.claude/rules/25-review-merge-gate.md`, `.claude/rules/28-credential-resolution-fallback-tests.md`, `.claude/rules/31-migration-safety.md`, `.claude/rules/35-vertical-slice-testing.md`, `.claude/rules/44-dual-write-migration-enumerate-writers.md`, `.claude/rules/47-control-loop-io-budget.md`, and `.claude/rules/56-destructive-provider-ownership-proof.md`.
-- Relevant task records: `tasks/archive/2026-08-28-concrete-compute-pool-offerings.md`, `tasks/archive/2026-08-28-provider-native-compute-pool-ui.md`, `tasks/archive/2026-08-28-wave-2a-placement-resolver-migration.md`, and `tasks/active/2026-08-28-repair-compute-pool-default-editing.md`.
+- Relevant task records: `tasks/archive/2026-08-28-concrete-compute-pool-offerings.md`, `tasks/archive/2026-08-28-provider-native-compute-pool-ui.md`, `tasks/archive/2026-08-28-wave-2a-placement-resolver-migration.md`, and `tasks/archive/2026-08-28-repair-compute-pool-default-editing.md`.
 - Staging evidence exists in PR comments for older PR heads, but this pass must not trigger another staging deploy or claim fresh staging validation.
 
 ## Implementation checklist
@@ -123,3 +123,7 @@ Compute pools must be infrastructure-scoped resources backed by concrete provide
 - `.claude/rules/09-task-tracking.md`
 - `.claude/rules/17-ui-visual-testing.md`
 - `.claude/rules/25-review-merge-gate.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `test: strengthen compute pool visual evidence`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

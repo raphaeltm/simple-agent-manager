@@ -241,7 +241,7 @@ PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "8"
 #     against _LEASE_MS, and the cost of a failed attempt (copySourceChunks restarts at ordinal
 #     0 and re-reserves the full estimate; _POISON_AFTER_ATTEMPTS failures strand the session).
 # Sizing evidence, rollout stages and the production measurements behind this value live in
-# tasks/active/2026-09-20-archive-sweep-throughput-step3.md and PR #2109. Behaviour is pinned by
+# tasks/archive/2026-09-20-archive-sweep-throughput-step3.md and PR #2109. Behaviour is pinned by
 # tests/unit/project-data-archive/sweep-message-budget-shipped.test.ts and
 # tests/workers/project-data-archive-sweep-throughput.test.ts.
 PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "10000"

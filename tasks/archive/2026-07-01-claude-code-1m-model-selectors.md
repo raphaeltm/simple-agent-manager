@@ -34,3 +34,7 @@ The Claude Code model list exposes Claude Fable 5 but does not clearly expose th
 - Raw SAM AI proxy allowed models do not include Claude Code-only `[1m]` selector strings.
 - Tests cover the selector list and ensure each selector maps to a known base platform model.
 - PR is created and CI is green before staging deployment.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1464 (`Add Claude Code 1M model selectors (#1464)`). Its checklist reads 5/6 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -63,3 +63,7 @@ SAM's node-pool scheduler still applies legacy workspace-count, co-tenant, and l
 - VM-agent resource monitor, server, and persistence tests pass under the repository-pinned Go 1.26.6 toolchain, including race detection; `go vet` and `gofmt -d` are clean.
 - All specialist re-reviews pass: task completion, Cloudflare/D1, test engineering, UI/UX, constitution, documentation, Go, and security.
 - PR #2108 passes all 25 applicable CI and review checks; CodeRabbit was triggered exactly once and its initial findings are addressed in the follow-up commit.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2108 (`Migrate scheduler packing to explicit resources (#2108)`). Its checklist reads 11/12 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

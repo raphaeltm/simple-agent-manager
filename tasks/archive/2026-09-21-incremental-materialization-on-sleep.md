@@ -277,3 +277,7 @@ implemented before staging.
 - **Out-of-order batch arrival for streaming assistant tokens** (idea `01M315GZ5P6QGSHM6CB730PMR9`).
 - **Idle-cleanup's two `materializeSession` call sites have no test.** Pre-existing; the wiring is
   unchanged by this PR and both now pass the resolved pass config like every other call site.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2117 (`Make sleeping chat sessions searchable with incremental materialization (#2117)`). Its checklist reads 32/35 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

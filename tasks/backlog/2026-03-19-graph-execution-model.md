@@ -22,6 +22,7 @@ The `task_dependencies` table already exists in the schema (with `taskId` + `dep
 ### Fan-Out / Fan-In (Tree)
 
 The more common pattern in existing systems:
+
 1. Orchestrator agent starts
 2. Decomposes into N sub-tasks, dispatches them
 3. Sub-tasks execute (possibly spawning their own sub-tasks)
@@ -34,6 +35,7 @@ The more common pattern in existing systems:
 ### Mutable DAG (Graph)
 
 Each node in the graph can:
+
 1. Execute its work
 2. Declare outputs
 3. Discover that new work is needed and add nodes/edges to the graph
@@ -58,7 +60,7 @@ GraphRunner DO (scheduling, per orchestration run, keyed by runId)
         └── NodeLifecycle DOs (VM management, per node) — existing, unchanged
 ```
 
-The GraphRunner is pure scheduling logic — it doesn't touch infrastructure. TaskRunner keeps doing what it already does (node selection, workspace creation, agent session). GraphRunner decides *when* to start each TaskRunner based on the dependency graph.
+The GraphRunner is pure scheduling logic — it doesn't touch infrastructure. TaskRunner keeps doing what it already does (node selection, workspace creation, agent session). GraphRunner decides _when_ to start each TaskRunner based on the dependency graph.
 
 ### GraphRunner DO
 
@@ -83,6 +85,7 @@ interface GraphRunnerState {
 ```
 
 On each alarm tick:
+
 1. Query D1 for tasks in this run + their dependency edges
 2. Compare against active/completed/failed sets
 3. Find newly unblocked tasks (all dependencies satisfied)
@@ -116,6 +119,7 @@ User says "run this idea"
 ```
 
 **Mode selection heuristic** (system default, user can override):
+
 - Idea has no sub-tasks defined → default `plan-first`
 - Idea already has sub-tasks with dependency edges → default `immediate`
 
@@ -128,20 +132,22 @@ When a TaskRunner finishes, it calls `graphRunner.taskCompleted(taskId, status, 
 
 **Safety net — reconciliation alarm** (every ~30s, configurable via `GRAPH_RUNNER_RECONCILE_INTERVAL_MS`):
 GraphRunner reads all tasks for its run from D1, compares D1 status vs. its in-memory tracking. Catches:
+
 - Dropped callbacks (network blip between DOs — rare on CF but possible)
 - Out-of-band completions (agent called `complete_task` but TaskRunner crashed before sending callback)
 - Stale state after DO eviction (GraphRunner rehydrates from storage, needs to catch up)
 
 **Callback payload**:
+
 ```typescript
 interface TaskCompletionCallback {
   taskId: string;
   status: 'completed' | 'failed' | 'cancelled';
   outputs?: {
-    summary?: string;           // what the agent did
-    branch?: string;            // git branch with changes
-    prUrl?: string;             // PR if created
-    artifacts?: Record<string, string>;  // named outputs for downstream context
+    summary?: string; // what the agent did
+    branch?: string; // git branch with changes
+    prUrl?: string; // PR if created
+    artifacts?: Record<string, string>; // named outputs for downstream context
   };
 }
 ```
@@ -152,7 +158,7 @@ interface TaskCompletionCallback {
 
 - `orchestration_run_id` on tasks table: `NULL` = unattached idea/draft, non-NULL = owned by that run
 - A task with a run ID can't be claimed by another run
-- Re-runs create a *new* run (old run = historical record), don't retry the same run
+- Re-runs create a _new_ run (old run = historical record), don't retry the same run
 - This gives clean separation between "the idea and its decomposition" vs. "a specific execution attempt"
 
 ### Graph State Machine
@@ -182,6 +188,7 @@ interface TaskCompletionCallback {
 ### Node Specification
 
 Each node in the graph should declare:
+
 - **Inputs**: what data/context it needs from upstream nodes (or the original idea)
 - **Outputs**: what it produces that downstream nodes need
 - **Completion signal**: explicit "I'm done, here's my output" (not timeout-based)
@@ -212,6 +219,7 @@ The task runner already handles node provisioning and workspace creation. Parall
 ### Dynamic Graph Mutation
 
 An executing node can:
+
 - Add new nodes to the graph (via an MCP tool or API call)
 - Add new dependency edges
 - NOT remove or modify already-completed nodes
@@ -222,6 +230,7 @@ This is the key difference from fan-out/fan-in: any node can reshape the remaini
 ### Context Propagation
 
 When a node starts, it receives:
+
 - The original idea description and any brainstorming context
 - Outputs declared by its upstream dependencies (via `artifacts` in the completion callback)
 - Optionally, summaries of what other nodes have done (for situational awareness)
@@ -230,24 +239,25 @@ Open question: how much context is too much? A deep graph could accumulate enorm
 
 ## What Exists Today
 
-| Component | Status | Gap |
-|-----------|--------|-----|
-| `task_dependencies` table | Schema exists | Not enforced by task runner |
-| `parentTaskId` on tasks | Schema exists | Used for dispatch lineage, not graph structure |
-| `dispatch_task` MCP tool | Working | Creates independent tasks, no dependency edges |
-| `complete_task` MCP tool | Working | Best-effort, agents sometimes don't call it |
-| Task runner DO | Working | Flat execution only — one task, one workspace |
-| Warm node pooling | Working | Can reuse nodes for graph node execution |
-| `task-graph.ts` cycle detection | Working | Used only for manual task runs, not by TaskRunner |
-| `task-graph.ts` blocked-task check | Working | Used only for manual task runs |
-| `orchestration_runs` table | **Missing** | Proposed in vision doc, never created |
-| `orchestration_run_id` on tasks | **Missing** | No run grouping for tasks |
-| GraphRunner DO | **Missing** | No graph-aware scheduler |
-| TaskRunner → GraphRunner callback | **Missing** | TaskRunner has no awareness of runs |
+| Component                          | Status        | Gap                                               |
+| ---------------------------------- | ------------- | ------------------------------------------------- |
+| `task_dependencies` table          | Schema exists | Not enforced by task runner                       |
+| `parentTaskId` on tasks            | Schema exists | Used for dispatch lineage, not graph structure    |
+| `dispatch_task` MCP tool           | Working       | Creates independent tasks, no dependency edges    |
+| `complete_task` MCP tool           | Working       | Best-effort, agents sometimes don't call it       |
+| Task runner DO                     | Working       | Flat execution only — one task, one workspace     |
+| Warm node pooling                  | Working       | Can reuse nodes for graph node execution          |
+| `task-graph.ts` cycle detection    | Working       | Used only for manual task runs, not by TaskRunner |
+| `task-graph.ts` blocked-task check | Working       | Used only for manual task runs                    |
+| `orchestration_runs` table         | **Missing**   | Proposed in vision doc, never created             |
+| `orchestration_run_id` on tasks    | **Missing**   | No run grouping for tasks                         |
+| GraphRunner DO                     | **Missing**   | No graph-aware scheduler                          |
+| TaskRunner → GraphRunner callback  | **Missing**   | TaskRunner has no awareness of runs               |
 
 ## Implementation Phases
 
 ### Phase 1: Foundation — GraphRunner DO + Run Ownership
+
 - Create `orchestration_runs` table in D1
 - Add `orchestration_run_id` column to tasks table
 - Build GraphRunner DO: alarm-driven scheduler that reads `task_dependencies` and spawns TaskRunner DOs when dependencies are satisfied
@@ -258,6 +268,7 @@ Open question: how much context is too much? A deep graph could accumulate enorm
 - Support `immediate` mode only (graph must be pre-built)
 
 ### Phase 2: Orchestrated Decomposition (plan-first mode)
+
 - "Plan" step that takes an idea and produces a task graph
 - Agent-driven: planner agent reads idea + brainstorming context, uses MCP tools to create sub-tasks + edges
 - Human reviews and approves the graph before execution starts
@@ -265,6 +276,7 @@ Open question: how much context is too much? A deep graph could accumulate enorm
 - System-level mode selection heuristic (no sub-tasks → plan-first, sub-tasks exist → immediate)
 
 ### Phase 3: Dynamic Graph Mutation
+
 - MCP tools for executing agents to add nodes/edges mid-run (`add_graph_node`, `add_graph_edge`)
 - GraphRunner handles graph changes during execution (re-evaluate unblocked tasks on mutation)
 - Cycle detection on every edge addition (already exists in `task-graph.ts`)
@@ -272,6 +284,7 @@ Open question: how much context is too much? A deep graph could accumulate enorm
 - LLM-based completion detection as fallback for agents that don't call `complete_task`
 
 ### Phase 4: Context and Output Propagation
+
 - Tasks declare typed outputs via `artifacts` field on completion callback
 - Downstream tasks receive upstream `artifacts` as input context when started
 - Summarization for deep graphs (avoid context bloat)
@@ -280,6 +293,7 @@ Open question: how much context is too much? A deep graph could accumulate enorm
 ## Open Questions
 
 ### Explored but not yet decided
+
 - **Context propagation depth**: How much upstream context is too much? Summarize at each hop? Only pass direct parent outputs? Configurable per-node?
 - **Graph mutation MCP tools**: Exact tool signatures for `add_graph_node` / `add_graph_edge`. Should agents be able to remove pending (not-yet-started) nodes? What about re-prioritizing?
 - **Planner agent design**: What prompt/profile produces good task decompositions? How does it know the right granularity? Does it have access to the codebase or just the idea description?
@@ -287,6 +301,7 @@ Open question: how much context is too much? A deep graph could accumulate enorm
 - **Git coordination**: Multiple agents working on the same repo. Options: (a) orchestrator merges all task branches, (b) stacked PRs per task, (c) trunk-based with rebasing. Recommendation from vision doc: (a) for orchestrated runs, (b) for direct delegation.
 
 ### Fundamental
+
 - **Termination**: How do we know the whole graph is done? When all leaf nodes (no outgoing edges) are complete? What if a node keeps adding more work? Need a max-nodes-per-run limit as a hard stop.
 - **Cost control**: Unbounded graph growth means unbounded VM costs. Need limits: max nodes per run, max total execution time, max parallel workers. Configurable via `GRAPH_RUNNER_MAX_NODES`, `GRAPH_RUNNER_MAX_DURATION_MS`, `GRAPH_RUNNER_MAX_PARALLEL`.
 - **Visibility**: How does the user see what's happening? Live-updating graph visualization? Timeline view? List with status indicators? Should integrate with the Ideas page redesign.
@@ -294,8 +309,8 @@ Open question: how much context is too much? A deep graph could accumulate enorm
 
 ## Related
 
-- `tasks/backlog/2026-03-19-ideas-page-and-ideation-system.md` — the Ideas system that feeds into this execution model
-- `tasks/backlog/2026-03-09-task-resource-requirements.md` — resource requirements per task node
+- `tasks/archive/2026-03-19-ideas-page-and-ideation-system.md` — the Ideas system that feeds into this execution model
+- `~~tasks/backlog/2026-03-09-task-resource-requirements.md~~ (shipped 2026-09-23: `resource_requirements_json`+`_source`in`apps/api/src/db/schema.ts`)` — resource requirements per task node
 - `tasks/backlog/2026-03-14-unified-session-task-workspace-state-machine.md` — state machine unification
 - `docs/design/orchestration-platform-vision.md` — full orchestration platform vision (Feb 2026)
 - `docs/notes/2026-03-08-orchestrator-maturity-assessment.md` — gap analysis, SAM at Level 2 of 5

@@ -61,7 +61,7 @@
 
 ## References
 
-- ~~`tasks/backlog/2026-03-18-workspace-mcp-server-p1.md`~~ — superseded (workspace tools unified into sam-mcp)
+- ~~`tasks/archive/2026-03-18-workspace-mcp-server-p1.md`~~ — superseded (workspace tools unified into sam-mcp)
 - `apps/api/src/routes/mcp/index.ts` — SAM MCP server (workspace tools in `workspace-tools.ts`)
 - `packages/vm-agent/internal/server/` — VM agent HTTP API
 - `apps/api/src/services/project-data.ts` — control plane data access

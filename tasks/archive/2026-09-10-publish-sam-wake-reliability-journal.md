@@ -59,3 +59,7 @@ an existing sleeping session needs to return.
   in the site's Markdown pipeline.
 - [ ] Narrow marketing-site validation passes and the changes are merged through
   a PR.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2057 (`docs(blog): publish wake reliability journal (#2057)`). Its checklist reads 11/13 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -104,7 +104,7 @@ The provider interface already exposes `locations` and `sizes` properties, but n
 
 ## References
 
-- Subsumes: `tasks/backlog/2026-03-13-fix-hardcoded-provider-defaults.md`
-- Subsumes: `tasks/backlog/2026-03-13-fix-hardcoded-vm-location-in-run-ts.md`
+- Subsumes: `tasks/archive/2026-03-13-fix-hardcoded-provider-defaults.md`
+- Subsumes: `tasks/archive/2026-03-13-fix-hardcoded-vm-location-in-run-ts.md`
 - Provider interface: `packages/providers/src/types.ts`
 - Credential service: `apps/api/src/services/provider-credentials.ts`

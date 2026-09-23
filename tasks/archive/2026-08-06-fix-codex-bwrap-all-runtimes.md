@@ -74,3 +74,7 @@ Rule 23 now requires exact wrapper-only launch configuration assertions on every
 - `.claude/rules/23-cross-boundary-contract-tests.md`
 - Official Codex documentation: https://developers.openai.com/codex/config-reference and https://developers.openai.com/codex/security
 - PRs #1153, #1157, #1675; PR #1709 recovery evidence; SAM task 01KZAGGBDE77XENJPCGTQ4MBK6
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1757 (`fix(vm-agent): disable Codex bwrap across all runtimes (#1757)`). Its checklist reads 10/11 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

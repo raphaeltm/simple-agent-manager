@@ -88,3 +88,7 @@ This is simpler, more robust, and works for both task-mode and conversation-mode
 - [x] All new config values are configurable via environment variables
 - [x] Both task-mode and conversation-mode sessions benefit from direct heartbeats
 - [x] Tests verify heartbeat goroutine starts/stops with Server lifecycle
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #688 (`feat: add direct VM agent ACP heartbeats (#688)`). Its checklist reads 20/21 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

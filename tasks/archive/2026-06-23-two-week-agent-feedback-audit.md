@@ -58,3 +58,7 @@ Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1386
 - Output branch: `sam/workspace-update-01kvsy`
 - Relevant rules: `.claude/rules/09-task-tracking.md`, `.claude/rules/02-quality-gates.md`, `.claude/rules/38-agent-feedback-and-memory.md`
 - Relevant prompt: `.codex/prompts/do.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1426 (`docs: consolidate agent-instruction optimizations from #1264, #1335, #1386 (#142`). Its checklist reads 14/15 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -26,7 +26,7 @@ The grouped incidents fall into three sanitized classes:
 - Prior retained task `tasks/archive/2026-06-05-durable-object-reset-retry.md` established
   that Cloudflare code-update Durable Object resets are transient and should be retried
   rather than recorded as hard session-load failures.
-- `tasks/active/2026-08-26-projectdata-storage-safety-warning-alerts.md` and current main
+- `tasks/archive/2026-08-26-projectdata-storage-safety-warning-alerts.md` and current main
   already route ProjectData `warning` storage states to operator-visible platform alerts and
   add bounded cleanup reach. The live warning is a real capacity signal, not a spoofed or
   code-update error.
@@ -35,7 +35,7 @@ The grouped incidents fall into three sanitized classes:
   The observed warning class is downstream noise from workspace/task lifecycle closure, not
   unsafe message persistence.
 - Recent retained lifecycle work (`tasks/archive/2026-08-26-fix-reconciliation-checkin-attention-expiry.md`,
-  `tasks/active/2026-08-26-shared-agent-session-closure-finalizer.md`, and
+  `tasks/archive/2026-08-26-shared-agent-session-closure-finalizer.md`, and
   `tasks/archive/2026-08-26-instant-execution-step-contract.md`) addresses known causes of
   false task/session runtime deaths and stale lifecycle mirrors. This task should not
   reimplement those broad fixes.
@@ -124,3 +124,7 @@ The grouped incidents fall into three sanitized classes:
     prompt expiry.
   - Task completion: implementation covers the sanitized findings and acceptance criteria;
     remaining push/complete step is tracked separately.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1927 (`Resolve private API incident liveness gaps (#1927)`). Its checklist reads 12/13 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

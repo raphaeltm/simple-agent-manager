@@ -126,3 +126,7 @@ Both B and C may add exports to `apps/web/src/lib/api/index.ts` (coordinator res
 
 - `tasks/backlog/2026-08-07-pre-destroy-safe-evidence-capture.md` — safe allowlisted snapshot before node reaping/heartbeat-death (vm-agent + cleanup sweep).
 - Observability `queryErrors` search sargability + COUNT cost near cap.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1765 (`Debugging experience overhaul: failure visibility, correlation, and admin power`). This file is a completion report, not a checklist. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

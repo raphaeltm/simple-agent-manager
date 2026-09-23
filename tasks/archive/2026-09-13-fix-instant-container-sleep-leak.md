@@ -50,3 +50,7 @@ Source idea: SAM idea `01M2CJ1F6R0GNHBKT6E5T2G9KC`.
 
 - CodeRabbit review `452e20d0-283f-4575-863d-12ed188ab58b` requested two changes after PR #2071 opened: remove the pre-cancel validation hook from coalesced sleep cancellation and include `observedAt` on stale-generation runtime telemetry.
 - Follow-up commit addressed both findings. Targeted validation passed: `pnpm --filter @simple-agent-manager/api exec vitest run tests/integration/session-sleep-lifecycle.test.ts tests/unit/services/acp-activity-admission.test.ts tests/unit/routes/agent-activity-callback.test.ts`, `pnpm --filter @simple-agent-manager/api typecheck`, `pnpm --filter @simple-agent-manager/api lint`, and `git diff --check`.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2071 (`fix: reconcile instant sessions missing sleep intents (#2071)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

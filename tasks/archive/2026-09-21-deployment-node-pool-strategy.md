@@ -107,5 +107,9 @@ Durable product source: SAM idea `01M30N3SR9APZ2E19Y87VHNSVA`.
 - `apps/api/.claude/rules/31-migration-safety.md`
 - `apps/api/.claude/rules/51-runtime-boundary-validation.md`
 - `apps/api/.claude/rules/69-aggregate-capacity-at-final-reservation.md`
-- `tasks/active/2026-06-19-deployment-node-bin-packing.md`
+- `tasks/archive/2026-06-19-deployment-node-bin-packing.md`
 - `tasks/archive/2026-08-07-fix-provisioning-node-cleanup-race.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2114 (`Add deployment-specific node pool placement (#2114)`). Its checklist reads 12/13 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

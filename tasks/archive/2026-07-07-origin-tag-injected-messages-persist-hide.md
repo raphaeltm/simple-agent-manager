@@ -177,3 +177,7 @@ re-verified against my own code; that is when the service-boundary bug surfaced.
   web `lib/api/sessions.ts`, `project-message-view/types.ts`, `AcpConversationItemView.tsx`,
   acp-client `useAcpMessages.types.ts`
 - Rules: 23 (contract), 31 (migration safety), 35 (vertical slice), 44 (dual-write/outbox), 17 (visual)
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1569 (`feat(chat): origin-tag & collapse SAM-injected prompt text (persist + broadcast)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

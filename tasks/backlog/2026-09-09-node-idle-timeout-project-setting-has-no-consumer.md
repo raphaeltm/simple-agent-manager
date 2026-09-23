@@ -24,7 +24,7 @@ which is now misleading: the field is wired to _persistence_, not to _behaviour_
 ## Context
 
 Found while writing the public Compute Pools guide
-(`tasks/active/2026-09-09-document-compute-pools.md`, PR #2050). The field was
+(`tasks/archive/2026-09-09-document-compute-pools.md`, PR #2050). The field was
 deliberately left out of that guide — documenting a control that does nothing
 would be worse than omitting it — so this is tracked here instead.
 

@@ -60,3 +60,7 @@ The VM agent writes system Git config in the devcontainer for the credential hel
 - `packages/vm-agent/internal/bootstrap/bootstrap_test.go`
 - `docs/notes/2026-05-04-devcontainer-gitconfig-lock-postmortem.md`
 - `.claude/rules/06-vm-agent-patterns.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #893 (`fix: tolerate stale devcontainer gitconfig locks (#893)`). Its checklist reads 16/17 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

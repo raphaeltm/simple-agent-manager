@@ -93,3 +93,7 @@ Initial post-final-deploy verifier attempts were temporarily blocked by staging 
 - `.claude/rules/13-staging-verification.md`
 - `.claude/rules/17-ui-visual-testing.md`
 - `.claude/rules/27-vm-agent-staging-refresh.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1483 (`Recoverable ACP session errors (#1483)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

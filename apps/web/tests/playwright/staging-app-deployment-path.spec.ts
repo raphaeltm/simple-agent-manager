@@ -1,6 +1,6 @@
 /**
  * Staging verification for the six app-deployment fixes ported from DefangLabs PR #45
- * (task `tasks/active/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`).
+ * (task `tasks/archive/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`).
  *
  * This is the end-to-end exercise, not a page-load check. It creates a throwaway deployment
  * environment, submits a real Compose release that pulls a public image and declares a named

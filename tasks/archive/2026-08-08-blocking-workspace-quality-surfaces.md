@@ -119,3 +119,7 @@ The checked-in workspace quality validator and its discriminating fixture make p
 - `.claude/rules/02-quality-gates.md`
 - `.claude/rules/17-ui-visual-testing.md`
 - `.specify/memory/constitution.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1774 (`WP-065: Make workspace quality surfaces blocking (#1774)`). Its checklist reads 10/11 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

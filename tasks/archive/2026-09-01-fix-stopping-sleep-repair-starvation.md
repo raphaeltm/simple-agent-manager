@@ -34,3 +34,7 @@ Production audit after PR #1981 showed completed-task workspaces still marked `r
 - Legacy `stopping` rows with null `sleep_stopping_since` are self-healed without resetting an existing value.
 - Terminal-node repair no longer treats an old `stopping` row as protected solely because `sleep_claimed_at` was refreshed.
 - Focused tests pass.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1985 (`Fix stopping sleep repair starvation (#1985)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

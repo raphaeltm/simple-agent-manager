@@ -47,7 +47,7 @@ explicit, so the reversal must be explicit too.
 | Prior constraint | Source | New decision |
 |---|---|---|
 | "JS execution requires an explicit user click — never auto-run in timeline/chat cards" | SAM idea `01KZ6A5AX8YB1ZXXRT53VNE5ZD`, Hard constraints | **Partially reversed.** JS still never runs passively in a timeline/chat card — `DocumentCard.tsx:221` only mounts the modal on click, so opening the artifact remains a deliberate user action. What is removed is the *second, redundant* in-modal confirmation. Opening the file IS the intent signal. |
-| "Tier-0 inert preview behavior is unchanged; the new action is additive" (acceptance criterion 5) | Same idea; `tasks/active/2026-08-04-interactive-html-artifact-preview.md:19` | **Reversed for the library/document HTML branch.** The inert render is removed from that branch because it is strictly worse than the replacement (see Problem #2). |
+| "Tier-0 inert preview behavior is unchanged; the new action is additive" (acceptance criterion 5) | Same idea; `tasks/archive/2026-08-04-interactive-html-artifact-preview.md:19` | **Reversed for the library/document HTML branch.** The inert render is removed from that branch because it is strictly worse than the replacement (see Problem #2). |
 
 **Why removing the sanitized render does not weaken security.** The DOMPurify path
 (`tasks/archive/2026-07-15-harden-html-markdown-preview.md`) existed to make HTML safe to render
@@ -203,7 +203,7 @@ remote `<script>` and remote `<img>` refused, `data:` images and inline CSS stil
       (`:250-255`, `:265-292`) and the direct-open CSP/no-Set-Cookie checks (`:294-303`).
 - [x] 14. Update `apps/www/src/content/docs/docs/architecture/security.md` if it states that
       interactive previews require an explicit click, so docs match reality (rule 01).
-- [x] 15. Archive the stale `tasks/active/2026-08-04-interactive-html-artifact-preview.md` (its
+- [x] 15. Archive the stale `tasks/archive/2026-08-04-interactive-html-artifact-preview.md` (its
       final checklist item is unchecked but the PR merged and the production deploy succeeded —
       verified: Deploy Production run 30942587309, commit b00dac03c) and update SAM idea
       `01KZ6A5AX8YB1ZXXRT53VNE5ZD` to record the auto-run reversal so future agents do not implement
@@ -240,8 +240,12 @@ remote `<script>` and remote `<img>` refused, `data:` images and inline CSS stil
 ## References
 
 - SAM idea `01KZ6A5AX8YB1ZXXRT53VNE5ZD` (authoritative brief for the original feature)
-- `tasks/active/2026-08-04-interactive-html-artifact-preview.md` (PR #1729 record — to archive)
+- `tasks/archive/2026-08-04-interactive-html-artifact-preview.md` (PR #1729 record — to archive)
 - `tasks/archive/2026-07-15-harden-html-markdown-preview.md` (why the DOMPurify path exists)
 - `.claude/rules/02-quality-gates.md`, `.claude/rules/13-staging-verification.md`,
   `.claude/rules/17-ui-visual-testing.md`, `.claude/rules/26-project-chat-first.md`,
   `.claude/rules/48-stale-while-revalidate-ui.md`, `.claude/rules/01-doc-sync.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1735 (`feat(web): auto-run HTML artifact previews full-bleed (#1735)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

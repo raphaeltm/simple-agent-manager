@@ -409,3 +409,7 @@ endpoint/UI Playwright verification.
 - `.claude/rules/60` — request I/O budgets (the fan-out is the violation being fixed)
 - `.claude/rules/11` — project-scoped read requirements
 - `.claude/rules/28` — every attack case needs an owner control
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1897 (`Ship comment navigation UI with project inbox endpoint (#1897)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

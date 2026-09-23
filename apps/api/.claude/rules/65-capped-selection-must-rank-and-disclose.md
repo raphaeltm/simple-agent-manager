@@ -120,7 +120,7 @@ The tells:
 
 ## References
 
-- Task: `tasks/active/2026-08-23-knowledge-injection-relevance-ranking.md` (moves to
+- Task: `tasks/archive/2026-08-23-knowledge-injection-relevance-ranking.md` (moves to
   `tasks/archive/` on completion); research `/engineering/research/token-optimization-research.md` §3.2, §8/R3
 - Implementation: `apps/api/src/durable-objects/project-data/knowledge.ts`
   (`getAllHighConfidenceKnowledge`, `getKnowledgeEntityIndex`)

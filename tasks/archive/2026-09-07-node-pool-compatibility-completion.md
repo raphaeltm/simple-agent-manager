@@ -507,7 +507,7 @@ This checkpoint adds an executable architecture gate for section E without
 checking off section E acceptance. The first cut (`93bfa4246`) was reviewed
 adversarially with injected fixtures and found evadable in eight ways; the
 corrections are recorded in
-`tasks/active/2026-09-07-e1-node-pool-boundary-scanner-corrections.md`.
+`tasks/archive/2026-09-07-e1-node-pool-boundary-scanner-corrections.md`.
 
 The gate lives in `scripts/quality/node-pool-boundary.ts` (modules under
 `scripts/quality/node-pool-boundary/`), is runnable with
@@ -670,7 +670,7 @@ verification table rather than interpreting these historical counts as current.
 own regression suite is 50/50 green. These are reported separately on purpose.
 The corrected composition, with per-file detail and the triage rationale for
 every class that is now correctly NOT reported, is in
-`tasks/active/2026-09-07-e1-node-pool-boundary-scanner-corrections.md`.
+`tasks/archive/2026-09-07-e1-node-pool-boundary-scanner-corrections.md`.
 
 | Class                                            | Count |
 | ------------------------------------------------ | ----: |

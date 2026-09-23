@@ -67,3 +67,7 @@ This task is SAM task `01KZM7QR5CW8T93FMS8X5CDF7A` on branch `sam/resume-ship-du
 - `.claude/rules/47-control-loop-io-budget.md`
 - `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`
 - `.claude/rules/54-vm-agent-rollout-compatibility.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1785 (`feat: add durable session sleep and recovery for Claude Code and Codex (#1785)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

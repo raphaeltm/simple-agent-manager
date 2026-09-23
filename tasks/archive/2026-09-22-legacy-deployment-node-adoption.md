@@ -181,3 +181,7 @@ updated; real-SQL status-gate tests with policy controls; one cross-boundary
 test drives the gate then `placeReleaseOnDeploymentNode` on the APEX fixture.
 Dead `getProjectAgentDeployEnvironmentId` / `isProjectAgentDeployEnabled`
 removed.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2121 (`fix(deploy): let agents target environments parked in error (#2121)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

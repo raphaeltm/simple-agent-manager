@@ -243,3 +243,7 @@ migrated table or resumer predicate must update the implementation and this tabl
 - `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`
 - `.claude/rules/60-request-io-and-bundle-budgets.md`
 - `.claude/rules/67-shared-predicates-that-trigger-actions.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2022 (`fix(project-data): sub-batch archive chunk verification below the D1 bind ceilin`). Its checklist reads 0/17 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

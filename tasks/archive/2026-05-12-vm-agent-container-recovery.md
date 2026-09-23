@@ -58,7 +58,7 @@ Some related work landed in PR #966 and PR #968, but the VM-agent resilience gap
 - Bridge IP cache entries are scoped to the container ID they were resolved from, so fallback containers cannot inherit stale network metadata.
 - Port scanning now treats scan failures as possible stale-container signals, clears the cached ID, re-runs the configured resolver, and emits `port.scanner_container_changed` when a replacement is found.
 - Provider apt mirror injection now backs up source files, rewrites them, validates the mirror through `apt-get update` using temporary list/cache directories, and restores the original sources if validation fails.
-- Root password expiration and cloud-init schema warnings are not directly actionable in this PR: no repo-controlled `chpasswd`/root password template was found, and the existing active task `tasks/active/2026-05-12-vm-agent-cloud-init-firewall-hygiene.md` already records the remaining cloud-init/firewall hygiene track.
+- Root password expiration and cloud-init schema warnings are not directly actionable in this PR: no repo-controlled `chpasswd`/root password template was found, and the existing active task `tasks/backlog/2026-05-12-vm-agent-cloud-init-firewall-hygiene.md` already records the remaining cloud-init/firewall hygiene track.
 
 ## Acceptance Criteria
 

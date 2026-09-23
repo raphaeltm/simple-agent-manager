@@ -154,3 +154,7 @@ The migration's backfill restores the four stranded rows: each already carries a
 terminal-failure `updated_at` far older than any decay window, so the next
 prompt to those sessions claims a wake normally. Three expire 2026-09-15/16;
 `3f38dfc4` expires 2026-09-10T05:22Z and will likely lapse before the deploy.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2054 (`Stop transient wake failures from permanently stranding sleeping sessions (#2054`). Its checklist reads 12/13 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

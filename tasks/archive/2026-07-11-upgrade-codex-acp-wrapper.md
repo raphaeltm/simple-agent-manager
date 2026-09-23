@@ -26,7 +26,7 @@ This is not an AI Gateway feature. Gateway mocks were useful only to prove ACP c
   - send a prompt,
   - receive streamed assistant text and usage.
 - SAM's existing native Codex auth path must remain intact:
-  - `tasks/active/2026-03-03-openai-codex-oauth-token-support.md` documents that Codex OAuth uses `~/.codex/auth.json`; there is no OAuth token env var.
+  - `tasks/archive/2026-03-03-openai-codex-oauth-token-support.md` documents that Codex OAuth uses `~/.codex/auth.json`; there is no OAuth token env var.
   - `packages/vm-agent/internal/acp/session_host_startup.go` writes Codex startup config and injects `NO_BROWSER=1` / refresh proxy env.
   - `packages/vm-agent/internal/acp/gateway.go` chooses command/install metadata and auth-file vs env-var injection.
 - Current old-package references:
@@ -66,7 +66,7 @@ This is not an AI Gateway feature. Gateway mocks were useful only to prove ACP c
 
 - Library note: `Upgrade SAM's Codex ACP Wrapper For GPT-5.6 Sol`
 - Prior SAM conversation: `ca998350-ba3b-4ebe-b3ef-9714184c7761`
-- Existing OAuth task: `tasks/active/2026-03-03-openai-codex-oauth-token-support.md`
+- Existing OAuth task: `tasks/archive/2026-03-03-openai-codex-oauth-token-support.md`
 - Runtime command metadata: `packages/vm-agent/internal/acp/gateway.go`
 - Runtime startup config: `packages/vm-agent/internal/acp/session_host_startup.go`
 - Shared agent catalog: `packages/shared/src/agents.ts`
@@ -109,3 +109,7 @@ This is not an AI Gateway feature. Gateway mocks were useful only to prove ACP c
   - PR `#1563` opened for `upgrade-codex-acp-wrapper`.
   - Initial CI run passed code/test/VM-agent checks but preflight evaluated the original PR body classification from the pull request event payload.
   - PR body was corrected to classify this as cross-component, security-sensitive, and infra work, with official OpenAI docs and npm package source URLs listed in External References.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Upgrade Codex ACP wrapper package`. Its checklist reads 12/13 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

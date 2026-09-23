@@ -125,3 +125,7 @@ Add `digitalocean` as a **fifth cloud provider** (after hetzner, scaleway, gcp, 
 
 - Idea `01KY8JSQHXJT5SR3Z4QM46V2QK` · Blueprint `tasks/archive/2026-07-23-vultr-cloud-provider.md` · Vultr PR #1663 / `5c06da973` (site map) · `packages/providers/src/vultr.ts` + `vultr-volumes.ts` + `vultr-labels.ts` + `kv-tags.ts` · `apps/api/src/services/provider-credentials.ts` · `apps/api/src/services/deployment-volumes.ts:225-235`
 - Rules: 18 (file size), 28 (credential fallback), 35 (vertical slice), 11 (fail-fast), 41 (snapshot resilience), 01 (doc sync), 17 (UI visual), 42 (tracked follow-ups), 03 (Constitution XI)
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1670 (`feat: add DigitalOcean cloud provider and Block Storage (#1670)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

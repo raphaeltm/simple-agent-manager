@@ -199,3 +199,7 @@ A shared mapping must cover the union of both surfaces, and must have a defined 
 - `.claude/rules/60-request-io-and-bundle-budgets.md`, `.claude/rules/48-stale-while-revalidate-ui.md`
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`, `.claude/rules/24`, `.claude/rules/59`
 - `.claude/rules/01-doc-sync.md`, `.claude/rules/03-constitution.md` (Principle XI)
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2098 (`Polish Events page: icons, state colors, empty states, auto-refresh (#2098)`). Its checklist reads 0/25 — most of those boxes are stale, but NOT all of them. The headline work is live (`apps/web/src/lib/event-state-tone.ts`, semantic state colours, icons, count badges, per-section empty states, auto-refresh). One item genuinely did not ship: `PROJECT_SCHEDULES_POLL_MS` was never added, and `SchedulesPanel.tsx:324` still polls on a bare `refetchInterval: 30_000` — which this task's own research section predicted would violate `.claude/rules/60` and Principle XI. Tracked in `tasks/backlog/2026-09-23-schedules-panel-hardcoded-poll-interval.md`. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

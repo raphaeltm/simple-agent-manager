@@ -98,3 +98,7 @@ Full design/research context is in SAM idea `01KZPTT49W10FC1P9G9RQEK8M1`.
 - `apps/api/src/routes/chat-state.ts`
 - `packages/shared/src/types/session.ts`
 - SAM idea `01KZPTT49W10FC1P9G9RQEK8M1`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1805 (`experiment: prototype Buzz ACP bridge to SAM (#1805)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

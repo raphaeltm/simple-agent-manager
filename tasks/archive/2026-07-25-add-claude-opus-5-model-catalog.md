@@ -20,7 +20,7 @@ Any deployment without a `SAM_MODEL` env override has a broken SAM agent-loop de
   tokenizer as Opus 4.8. Deprecations page: Active, retirement "not sooner than
   July 24, 2027".
 - Native-1M Claude 5 models are listed as base IDs per the Sonnet 5 precedent in
-  `tasks/active/2026-07-01-claude-code-1m-model-selectors.md` — no `claude-opus-5[1m]`
+  `tasks/archive/2026-07-01-claude-code-1m-model-selectors.md` — no `claude-opus-5[1m]`
   selector (mirrors `claude-sonnet-5`; negative assertions added).
 - Two canonical hand-maintained lists must both change:
   `packages/shared/src/model-catalog.ts` (`CLAUDE_MODELS`, UI dropdowns) and
@@ -36,7 +36,7 @@ Any deployment without a `SAM_MODEL` env override has a broken SAM agent-loop de
 - Model-agnostic pass-throughs need no change: vm-agent `ANTHROPIC_MODEL` env injection,
   ai-proxy `claude-` prefix routing, `ModelSelect` (renders the shared catalog), API
   catalog routes (delegate to shared).
-- Related open work: `tasks/backlog/2026-07-13-refresh-supported-agent-model-catalog.md`
+- Related open work: `tasks/archive/2026-07-13-refresh-supported-agent-model-catalog.md`
   covers a broader multi-provider refresh (Codex/Gemini/Mistral/OpenCode). This task
   delivers the Claude slice; the backlog task was annotated accordingly.
 
@@ -117,3 +117,7 @@ cross-file tracer, cleanup lenses, conventions, final gap sweep.
 Staging deployment/verification explicitly waived by Raphaël for this PR
 ("Do not deploy to staging", 2026-07-24). Verification = full local gates + CI +
 post-merge production deploy monitoring + production spot-check.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1665 (`feat(models): add Claude Opus 5, prune retired Sonnet 4, fix stale model default`). Its checklist reads 13/15 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -65,3 +65,7 @@ Implement canonical idea `01KXN5YQ9TGN29ZZ8DP2DKAKHN` Phase 0.5: a superadmin-on
 - `.claude/rules/23-cross-boundary-contract-tests.md`
 - `.claude/rules/30-never-ship-broken-features.md`
 - `.claude/rules/35-vertical-slice-testing.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1688 (`feat: add standalone deployment debugging agent (#1688)`). Its checklist reads 16/17 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

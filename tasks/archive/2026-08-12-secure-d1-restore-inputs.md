@@ -152,3 +152,7 @@ source or bypasses non-shell validation.
 - The SAM-provisioned worktree already uses the assigned output branch, so the task
   record is created directly under `tasks/active/` on that branch rather than
   committing a separate task-only change to `main`.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `task: link D1 restore security PR`. Its checklist reads 16/18 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

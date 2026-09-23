@@ -1,7 +1,7 @@
 # Refresh Supported Agent Model Catalog
 
 > **Scope update (2026-07-25):** the Claude Code slice shipped separately in
-> `tasks/active/2026-07-25-add-claude-opus-5-model-catalog.md` — Claude Opus 5 added,
+> `tasks/archive/2026-07-25-add-claude-opus-5-model-catalog.md` — Claude Opus 5 added,
 > retired Sonnet 4 pruned from `PLATFORM_AI_MODELS`, defaults bumped to
 > `claude-sonnet-5`, and retirement/default regression tests added (see
 > `.claude/rules/52-model-catalog-lifecycle.md`). Remaining scope here: Codex,
@@ -67,4 +67,8 @@ SAM's shared static agent model catalog has drifted from current provider and ag
 - Models.dev catalog: https://models.dev/api.json
 - Prior API catalog synchronization: `tasks/archive/2026-05-20-sync-model-catalog-api-offerings.md`
 - Prior dynamic OpenCode catalog work: `tasks/archive/2026-06-27-dynamic-opencode-model-catalog.md`
-- Claude Code 1M selector contract: `tasks/active/2026-07-01-claude-code-1m-model-selectors.md`
+- Claude Code 1M selector contract: `tasks/archive/2026-07-01-claude-code-1m-model-selectors.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `chore: refresh agent model catalog`. Its checklist reads 8/9 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

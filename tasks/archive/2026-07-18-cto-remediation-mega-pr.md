@@ -39,3 +39,7 @@ Multiple targeted remediation PRs from the strict CTO review workflow must be in
 - Real VM path is exercised where possible, with exact evidence or exact quota blocker evidence plus existing-VM coverage.
 - Mega PR is merged to `main`.
 - Production deployment succeeds and is reported with run evidence.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Integrate CTO remediation hardening PRs`. Its checklist reads 6/11 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

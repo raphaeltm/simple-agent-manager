@@ -234,3 +234,7 @@ State proving the deadlock:
 - `.claude/rules/72-error-categories-must-match-the-recovery-action.md` (scoped: `apps/api/`)
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`
 - `.claude/rules/31-migration-safety.md` (scoped: `apps/api/`)
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2069 (`Fix deadlocked ProjectData archive sweep: derive the selection ceiling from the`). Its checklist reads 15/18 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

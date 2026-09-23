@@ -237,3 +237,7 @@ No specialist raised a blocking or advisory code finding.
 - `.claude/rules/06-vm-agent-patterns.md`
 - `tasks/archive/2026-03-12-fix-tls-yaml-indentation-and-process.md`
 - `apps/www/src/content/blog/sams-journal-one-time-things-need-locks.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1582 (`fix(cloud-init): make Caddy runcmd POSIX-compatible (#1582)`). Its checklist reads 17/24 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

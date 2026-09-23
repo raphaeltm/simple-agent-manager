@@ -89,3 +89,7 @@ page-count math.
 - `.claude/rules/47-control-loop-io-budget.md`
 - `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`
 - `.claude/rules/59-understand-before-adding.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Archive ProjectData tool payloads to R2`. Its checklist reads 22/23 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

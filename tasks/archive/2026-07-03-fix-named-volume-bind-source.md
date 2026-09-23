@@ -62,3 +62,7 @@ Server quota was raised by the human; the live verification was rerun and passed
 - **initdb success on fresh volume**: db container logs show `fixing permissions on existing directory /var/lib/postgresql/data ... ok`, `Success. You can now start the database server`, `PostgreSQL init process complete`, `database system is ready to accept connections`. No `initdb: error: directory ... exists but is not empty` (lost+found) failure — the exact bug this task fixes.
 - **Persistence across container recreation**: identical release v2 (`01KWKR3JFAPN003ZX3AVRNFR2Z`) reached `applied`; db logs show `PostgreSQL Database directory appears to contain a database; Skipping initialization` and clean startup — data survived on the volume.
 - Cleanup: environment deleted via API (`nodeDeleted: true`, `volumesDetached: 1`, `volumesDeleted: 1`, `dnsRecordsDeleted: 1`, no warnings). Verified zero remaining environments and nodes.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1482 (`Fix deployment named volume bind sources (#1482)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -53,3 +53,7 @@ A full batch of permanently invalid candidates cannot block subsequent valid wor
 - Three workspace-backed entries previously starved sinceSeptember1–4 were reached and safely deferred with future deadlines because idleness was unknown. No widening of batch10 was needed.
 - Authenticated dashboard/projects Playwright passed10:26:48 with no browser exceptions; both screenshots inspected. No new testVMs/resources/settings. Staging released to waiting node-pool owner.
 - Local completion review PASS covers all implementation criteria; PR/CI/CodeRabbit and production release remain explicit unchecked gates. Mode-selection mismatch and legacy missing-fingerprint node recovery remain separate SAM Ideas, not claimed fixed.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2035 (`fix: unblock sleep queue and preserve final task responses (#2035)`). Its checklist reads 7/8 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

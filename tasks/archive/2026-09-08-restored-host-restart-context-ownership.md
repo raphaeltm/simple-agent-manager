@@ -184,3 +184,7 @@ in-place resume, not only against the replacement path it would have seen before
 **Pre-existing debt noticed, not addressed:** `session_host.go` is 1249 lines, past
 rule 18's mandatory-split threshold. This change does not add to it; the split is
 still owed.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2039 (`fix(vm-agent): restart a restored session host with the host's own context (#203`). This file is a completion report, not a checklist. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

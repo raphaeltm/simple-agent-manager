@@ -242,3 +242,7 @@ archives because those paths delete snapshot state first.
 - `.claude/rules/61-guards-must-cover-every-runtime.md`
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`
 - `.claude/rules/66-ownership-handoff-must-record-the-supersession.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Fix sleeping session archive during teardown`. Its checklist reads 15/16 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -109,3 +109,7 @@ Verdict: PASS
 | D: UI → Backend | N/A | No UI changes or new UI inputs were introduced. |
 | E: Multi-Resource | N/A | No provider/resource selection logic was introduced. |
 | F: Vertical Slice | PASS | Worker-runtime tests cover admin/service-to-DO-to-D1 measurement and service-to-DO purge behavior with real Durable Object SQLite storage. |
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1875 (`ProjectData storage safety firebreak (#1875)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

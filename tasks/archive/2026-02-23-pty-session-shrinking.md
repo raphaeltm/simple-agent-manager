@@ -63,3 +63,7 @@ When returning to a PTY (terminal) session after switching tabs or being away, t
 | File | Change |
 |------|--------|
 | `packages/terminal/src/MultiTerminal.tsx` | Add ResizeObserver, fix tab switch resize logic |
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #177 (`fix(terminal): fix PTY session shrinking on tab switch (#177)`). Its checklist reads 8/9 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

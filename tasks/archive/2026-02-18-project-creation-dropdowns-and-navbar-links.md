@@ -56,6 +56,6 @@ Update the project creation experience to match workspace creation behavior by u
 
 - Added persistent top-level primary navigation in the header via `UserMenu` while retaining profile dropdown actions.
 - Repo selector now behaves as a true dropdown on focus (shows available repositories without requiring typed input first).
-- The `/projects/new` workspace-reuse route introduced in this task caused a regression and was reverted in follow-up task `tasks/backlog/2026-02-18-project-form-dropdown-regression-fix.md`.
+- The `/projects/new` workspace-reuse route introduced in this task caused a regression and was reverted in follow-up task `tasks/archive/2026-02-18-project-form-dropdown-regression-fix.md`.
 - Mobile screenshot captured at `.codex/tmp/playwright-screenshots/landing-mobile.png`.
 - Docs review outcome: no user-facing docs currently describe these navbar or frontend route details, so no additional docs required beyond task records.

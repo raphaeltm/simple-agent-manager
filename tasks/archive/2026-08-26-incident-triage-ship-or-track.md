@@ -76,3 +76,7 @@ This PR will update project agent rules so private incident triage has an explic
 - `apps/api/src/routes/mcp/incident-tools.ts`
 - `apps/api/src/services/platform-feedback-incidents.ts`
 - `.claude/rules/09-task-tracking.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1929 (`Enforce ship-or-track incident triage resolutions (#1929)`). Its checklist reads 15/17 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

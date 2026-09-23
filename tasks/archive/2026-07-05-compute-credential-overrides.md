@@ -89,3 +89,7 @@ This blocks Wave 5 credential attribution validation: a user saving a Hetzner ke
 - `.claude/rules/28-credential-resolution-fallback-tests.md`
 - `.claude/rules/44-dual-write-migration-enumerate-writers.md`
 - `tasks/archive/2026-06-30-fix-production-codex-oauth-refresh-429.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1511 (`Fix project-level compute credential overrides (#1511)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

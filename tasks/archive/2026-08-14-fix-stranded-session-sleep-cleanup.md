@@ -244,3 +244,7 @@ prerequisite state—remains selectable or has a separate reconciler with a dura
 - `apps/api/src/routes/projects/agent-activity-callback.ts`
 - `apps/www/src/content/docs/docs/guides/instant-sessions.md`
 - `apps/www/src/content/docs/docs/reference/configuration.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `docs(sessions): describe legacy upload relay`. Its checklist reads 22/23 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

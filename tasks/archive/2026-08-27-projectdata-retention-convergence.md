@@ -97,3 +97,7 @@ path.
 
 - ProjectData sharding or transcript deletion.
 - One-off production purge.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1940 (`Make ProjectData tool payload retention converge safely (#1940)`). Its checklist reads 13/15 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

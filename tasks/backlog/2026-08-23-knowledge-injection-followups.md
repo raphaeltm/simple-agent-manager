@@ -1,7 +1,7 @@
 # Follow-ups from knowledge-injection relevance ranking (R3)
 
 Deferred findings from the Phase 5 specialist review of
-`tasks/active/2026-08-23-knowledge-injection-relevance-ranking.md`. Each was judged
+`tasks/archive/2026-08-23-knowledge-injection-relevance-ranking.md`. Each was judged
 MEDIUM/LOW and not merge-blocking; the CRITICAL/HIGH findings from that review were fixed
 in the PR itself.
 
@@ -82,6 +82,6 @@ parity directly, or widen the fixture so magnitude changes necessarily reorder i
 
 ## References
 
-- Parent task: `tasks/active/2026-08-23-knowledge-injection-relevance-ranking.md`
+- Parent task: `tasks/archive/2026-08-23-knowledge-injection-relevance-ranking.md`
 - `.claude/rules/65-capped-selection-must-rank-and-disclose.md`
 - `.claude/rules/18-file-size-limits.md`, `.claude/rules/60-request-io-and-bundle-budgets.md`

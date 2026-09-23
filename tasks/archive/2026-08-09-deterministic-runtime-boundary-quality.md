@@ -220,3 +220,7 @@ The durable dependency graph lives in `.workflow-state.md` (gitignored). Coding 
 - `tasks/archive/2026-03-31-adopt-valibot-api-validation.md`
 - `.claude/rules/50-list-read-row-fault-isolation.md`
 - `tasks/backlog/2026-07-16-project-data-row-fault-isolation-audit.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1784 (`quality: add deterministic runtime-boundary program (#1784)`). Its checklist reads 41/64 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -69,3 +69,7 @@ Source: CTO audit task `01M048Y1EGM2310BMQKZGCTZJN`, finding `CTO3-004`.
 - `constitution-validator`: PASS. `serviceAccounts: []` is an explicit security invariant for the provider request, not a configurable business value; no new hardcoded URL, timeout, limit, or deployment identifier is introduced.
 - `doc-sync-validator`: PASS. No documented API, CLI, UI, configuration, data-format, environment variable, or public setup contract changed. Public docs already describe the GCP service account as SAM's provisioning credential and do not document VM metadata-server workload identity.
 - `task-completion-validator`: PASS with PR/CI pending. Research findings are covered by the checklist and diff, acceptance criteria are covered by request-contract tests and local review, no UI/backend propagation path exists, no multi-provider/resource selection logic changed, and the remaining open work is PR creation plus CI monitoring.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `fix(gcp): prevent default service account attachment`. Its checklist reads 11/14 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

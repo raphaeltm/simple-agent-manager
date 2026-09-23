@@ -66,7 +66,7 @@ Direct project-chat Amp sessions also need SAM MCP configuration before ACP `New
 ## References
 
 - `tasks/backlog/2026-05-20-amp-project-chat-mcp-wiring.md`
-- `tasks/active/2026-05-19-amp-acp-integration.md`
+- `tasks/archive/2026-05-19-amp-acp-integration.md`
 - `packages/vm-agent/internal/acp/gateway.go`
 - `packages/vm-agent/internal/acp/session_host_handshake.go`
 - `packages/vm-agent/internal/acp/mcp_servers_test.go`
@@ -77,3 +77,7 @@ Direct project-chat Amp sessions also need SAM MCP configuration before ACP `New
 - `docs/notes/2026-03-08-mcp-token-revocation-postmortem.md`
 - `docs/notes/2026-04-22-chat-agent-session-routing-postmortem.md`
 - `docs/notes/2026-02-28-missing-initial-prompt-postmortem.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1094 (`feat: bridge Amp sessions to SAM MCP via stdio mcp-remote (#1094)`). Its checklist reads 15/17 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

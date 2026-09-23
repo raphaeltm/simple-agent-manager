@@ -242,7 +242,7 @@ scheduled reconciliation + R2 lifecycle
 - VM incident-evidence idea `01KZ6XAFQDWPTQQWEMZ84CEDQQ`
 - Shipped diagnosis idea `01KZ1WR6160C3W6VW165914ZW0`
 - PRs #1688, #1722, #1736; stale superseded PR #1737
-- `tasks/active/2026-08-04-durable-admin-diagnosis-runner.md`
+- `tasks/archive/2026-08-04-durable-admin-diagnosis-runner.md`
 - `tasks/archive/2026-02-14-vm-agent-error-reporting.md`
 - `tasks/archive/2026-03-12-fix-workspace-callback-auth-middleware-leak.md`
 - `tasks/archive/2026-03-30-fix-r2-upload-cors.md`
@@ -257,3 +257,7 @@ scheduled reconciliation + R2 lifecycle
 - `.claude/rules/46-vm-agent-diagnostic-getters.md`
 - [Cloudflare R2 Workers API](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/)
 - [Cloudflare R2 object lifecycles](https://developers.cloudflare.com/r2/buckets/object-lifecycles/)
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1750 (`Complete the same-instance debugging experience (#1750)`). Its checklist reads 49/55 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

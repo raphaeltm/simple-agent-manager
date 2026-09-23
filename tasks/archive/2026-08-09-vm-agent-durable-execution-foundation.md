@@ -73,3 +73,7 @@ Scope is limited to `packages/vm-agent/` and authoritative VM-facing protocol/co
 - `.claude/rules/27-vm-agent-staging-refresh.md`
 - `.claude/rules/34-vm-agent-callback-auth.md`
 - `.claude/rules/54-vm-agent-rollout-compatibility.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1785 (`feat: add durable session sleep and recovery for Claude Code and Codex (#1785)`). Its checklist reads 14/17 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

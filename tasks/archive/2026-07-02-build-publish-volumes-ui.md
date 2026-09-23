@@ -176,3 +176,7 @@ Result — feature working end-to-end, zero errors:
 - `.claude/rules/27-vm-agent-staging-refresh.md`
 - `.claude/rules/30-never-ship-broken-features.md`
 - `.claude/rules/35-vertical-slice-testing.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1478 (`Support build_and_publish volumes and deployment volume UI (#1478)`). Its checklist reads 21/23 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

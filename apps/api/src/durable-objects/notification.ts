@@ -5,7 +5,7 @@
  * Supports Hibernatable WebSockets for real-time push to connected browsers.
  * Accessed via `env.NOTIFICATION.idFromName(userId)`.
  *
- * See: tasks/active/2026-03-16-notification-system-phase1.md
+ * See: tasks/archive/2026-03-16-notification-system-phase2.md
  */
 import type {
   CreateNotificationRequest,

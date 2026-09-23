@@ -119,7 +119,7 @@ Existing `SESSION_ACTIVITY_STALE_THRESHOLD_MS` is reused as the staleness bound.
 - **`activity='error'` is NOT probe-reconciled.** `WORKING_ACTIVITIES` covers only
   `prompting`/`recovering`. Clearing an `error` state erases user-visible error context, so it
   is a product decision rather than a reliability fix. Tracked in
-  `tasks/backlog/2026-08-16-probe-reconcile-wedged-error-activity.md` (rule 42).
+  `tasks/archive/2026-08-16-probe-reconcile-wedged-error-activity.md` (rule 42).
 - **Per-candidate D1 reads are sequential, not batched.** Each candidate costs one workspace
   lookup plus one node-runtime lookup inside `fetchNodeAgent`. Bounded by
   `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES` (10) and matching the existing `reconciliation.ts`
@@ -239,3 +239,7 @@ turn ending (cancel) recording anything at all, because the code recorded nothin
 writes, a staleness bound, probing the authority instead of a proxy, single-point consumer
 fan-out, pre-call observation capture with a CAS guard, and specifically requires a
 live-but-idle wedge test plus a genuinely-working control case.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1840 (`fix(api): reconciled session-activity state machine with probe-backed staleness`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

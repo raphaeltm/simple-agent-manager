@@ -81,3 +81,7 @@ This must be fixed without putting user runtime assets or secrets into Cloudflar
   - The cf-container `claude-code` agent ran the runtime asset check and returned assistant chunks `RUNTIME` + `_ASSETS_OK`, proving `SAM_RUNTIME_ASSET_TEST`, secret env presence, and `.sam-runtime-assets/staging-check.txt` were available.
   - The secret value `staging-secret-do-not-print-01kx4krs8fny-claude` was not observed in session messages during polling.
   - Temporary staging project/workspace cleanup confirmed: zero projects with name prefix `Runtime Assets Staging`.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1561 (`Runtime-neutral env/file/secret injection for instant cf-container ACP (#1561)`). Its checklist reads 14/15 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -148,3 +148,7 @@ This incident class is **a Durable Object alarm or bounded-page control loop wit
 4. a positive liveness/rate monitor whose own production credential path is tested.
 
 The change also adds a separate emergency operations rule so responders can safely stop a runaway loop without normal deploy latency, while preserving the requirement for a reviewed follow-up PR.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1777 (`Fix runaway-cost and infinite-loop control paths (#1777)`). Its checklist reads 0/21 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

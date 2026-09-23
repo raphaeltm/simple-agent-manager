@@ -275,3 +275,7 @@ machine-liveness marker classes.
   pass. The DO wall-time command requires CI-only `DO_*`, Cloudflare account, and token
   inputs, so its GitHub check is the authoritative execution for this branch.
 - Staging was not deployed, dispatched, or otherwise mutated, by explicit user instruction.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `chore: record web push PR evidence`. Its checklist reads 56/57 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

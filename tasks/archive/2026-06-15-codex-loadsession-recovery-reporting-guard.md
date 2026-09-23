@@ -129,3 +129,7 @@ tests must mark it as a known-temporary state. Reviewers must reject
 - `tasks/archive/2026-06-08-vm-agent-codex-prompt-deadlock-recovery.md` (PR #1256)
 - Related trigger task: `2026-06-15-codex-acp-midprompt-disconnect.md`
 - Process fix: `.claude/rules/42-no-untracked-degrading-placeholders.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `fix(vm-agent): report codex LoadSession recovery as recovered`. Its checklist reads 4/5 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

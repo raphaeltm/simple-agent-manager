@@ -2,7 +2,7 @@
 
 **Status:** resolved in PR #2102 — staging verified on 2026-09-19
 **Discovered:** 2026-09-19 on staging, while trying to staging-verify
-`tasks/active/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`.
+`tasks/archive/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`.
 Not caused by that change — see "Not the porting branch" below.
 
 ## Problem
@@ -180,4 +180,4 @@ thing in months to try creating a deployment environment.
   harness-ceiling class
 - `apps/api/.claude/rules/51-server-side-node-class-gates.md` — the predicate that must not be
   weakened
-- Blocked task: `tasks/active/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`
+- Blocked task: `tasks/archive/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`

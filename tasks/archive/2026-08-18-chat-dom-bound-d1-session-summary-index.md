@@ -246,3 +246,7 @@ semantics, so that is the seam rule 18 asks for. No behaviour change; API suite 
 
 - Rules: 02, 05, 17 (virtualized-list), 26, 28, 31, 39, 42, 44, 45, 47, 50, 53, 56, 59, 60
 - `.claude/rules/60-request-io-and-bundle-budgets.md` — the I/O budget this work is measured against
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1859 (`perf: bound chat DOM weight and serve the project session list from D1 (#1859)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -49,3 +49,7 @@ Switching between project chat sessions cold-loads conversations because the pro
 - `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/project-message-view.test.tsx tests/unit/components/chat/project-message-view-resume.test.tsx`
 - `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/project-chat-streaming-poll-audit.spec.ts --config=playwright.config.ts --project='iPhone SE (375x667)' --project='Desktop (1280x800)'`
 - `pnpm test` (full monorepo rerun reached 570/573 API files passing; three failures were one stale expectation since fixed and two MCP hook timeouts that passed in focused rerun)
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Implement browser-side chat message caching`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

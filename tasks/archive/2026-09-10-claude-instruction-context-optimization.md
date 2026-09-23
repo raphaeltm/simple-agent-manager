@@ -48,3 +48,7 @@ Claude sessions in SAM are loading too much repository instruction context. In t
 - No references point to missing files after the move.
 - Agent context-budget changes are measurable with `pnpm quality:agent-context-budget`.
 - `/do` no longer instructs agents to bulk-read `.claude/rules/`.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2056 (`Reduce Claude startup instruction context (#2056)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -35,3 +35,7 @@ Audit the SAM marketing website and public docs to ensure factual claims about a
 - Public website claims are accurate against the current codebase.
 - Any changes are minimal and targeted to factual accuracy.
 - PR description includes a summary table of audited areas and outcome.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1982 (`docs: update website claims audit roadmap wording (#1982)`). Its checklist reads 9/10 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

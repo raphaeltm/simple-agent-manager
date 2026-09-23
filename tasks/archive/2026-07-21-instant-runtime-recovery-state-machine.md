@@ -206,3 +206,7 @@ Local verification gaps are tracked explicitly: the pinned Miniflare/workerd run
 - [Cloudflare Container interface](https://developers.cloudflare.com/containers/container-class/)
 - [Cloudflare Container lifecycle](https://developers.cloudflare.com/containers/platform-details/architecture/)
 - [Cloudflare Container rollouts](https://developers.cloudflare.com/containers/platform-details/rollouts/)
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1660 (`fix: recover Instant sessions across runtime loss (#1660)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -244,3 +244,7 @@ destructive delete.
 - `.claude/rules/24-no-duplicate-ui-controls.md` / `59-understand-before-adding.md` — one validator
 - `.claude/rules/57-write-only-cross-boundary-state.md` — `scope` must be consumed, not just stored
 - `.claude/rules/07-env-and-urls.md` — append-only migration sequence
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1893 (`feat(policies): expiry + scope lifecycle controls (token-optimization R2) (#1893`). Its checklist reads 26/32 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

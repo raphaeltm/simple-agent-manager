@@ -76,3 +76,7 @@ code.
 The documentation/content review found three wording issues and they were fixed before this record: the diagram now shows the retry threshold before automatic work pauses, the timeout is described as covering one complete R2 chunk read, and the conclusion is limited to false failures from a shared deadline. The constitution review passed: this post and its route-test constant add no runtime business logic, configurable values, or deployment URLs. The task-completion re-review passed with no pre-merge implementation gaps.
 
 The final publication criterion deliberately remains unchecked until this PR merges and its production deployment completes. Keep this task active until that evidence is available.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2095 (`docs: publish SAM archive timeout journal (#2095)`). Its checklist reads 11/12 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

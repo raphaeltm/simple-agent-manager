@@ -112,7 +112,7 @@ Tells:
 
 ## References
 
-- Task: `tasks/active/2026-09-08-legacy-node-credential-proof-undeletable.md`; PR #2019 (the
+- Task: `tasks/archive/2026-09-08-legacy-node-credential-proof-undeletable.md`; PR #2019 (the
   tightening), this fix's PR
 - Implementation: `apps/api/src/services/provider-credential-exact.ts`
   (`hasExactProviderCredentialGenerationProof`), `apps/api/src/services/strict-node-deletion.ts`

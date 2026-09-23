@@ -50,14 +50,77 @@ Step 4 was not optional. Two findings only came out of it:
 | ---------------- | -----: | -------: |
 | `tasks/active/`  |    182 |    **1** |
 | `tasks/backlog/` |    310 |  **293** |
-| `tasks/archive/` |    898 | **1077** |
+| `tasks/archive/` |    898 | **1079** |
 
-- **179 archived** from `active/` — work verified shipped.
-- **2 moved to `backlog/`** — stale but still plausibly wanted.
+- **180 archived** from `active/` — work verified shipped.
+- **1 moved to `backlog/`** — stale but still plausibly wanted.
 - **1 left in `active/`** — `2026-09-03-projectdata-production-capacity-emergency.md`, the only
   file whose headline acceptance criterion is measurably unmet.
 - **19 backlog entries removed**, each with verified shipped/duplicate/superseded evidence.
+- **1 backlog entry added** for a rule violation this audit uncovered.
 - **2 backlog entries narrowed/consolidated** rather than deleted.
+
+Nothing was silently dropped, and the arithmetic closes exactly:
+
+```
+before   182 active + 310 backlog +  898 archive = 1390
+after      1 active + 293 backlog + 1079 archive = 1373
+check    1390 - 19 deleted + 1 ledger + 1 new backlog entry = 1373   ✓
+```
+
+(Counts are recursive. `tasks/archive/` contains one pre-existing nested file at
+`tasks/archive/completed/`, unrelated to this PR; counting the "before" recursively and the "after"
+with `-maxdepth 1` is what produced the off-by-one the validators caught.)
+
+## Review round — what the validators changed
+
+Two local reviewers ran against the first cut of this reconciliation and both found real problems.
+Recording them here because the corrections are more instructive than the original pass.
+
+**`doc-sync-validator` — HIGH.** Moving 181 files out of `tasks/active/` broke **34 citations in 26
+files** that referenced those paths. These were not just rule prose: they included
+`apps/api/wrangler.toml:244`, `packages/eslint-plugin-sam/rules.manifest.json` (4 occurrences),
+`scripts/quality/astro-check-baseline.json`, two test files and a Playwright spec. Several rules exist
+as duplicated path-scoped copies (49, 50, 52, 57, 61, 63, 69, 71, 75 under `apps/api/`,
+`packages/providers/`, `packages/shared/`, `packages/vm-agent/`), so they had to be fixed in pairs or
+they would drift again. All 34 rewritten to `tasks/archive/…`; a repo-wide sweep now reports zero
+broken task-file references outside `tasks/`, except three deliberate `e.g.` placeholders in rules 09
+and 14 and two pre-existing dangling refs this PR did not create
+(`packages/vm-agent/internal/bootstrap/bootstrap.go:2461`, and a dated blog post at
+`apps/www/src/content/blog/sams-journal-ready-only-rings-once.md:95` — historical narrative, left alone).
+
+`apps/api/src/durable-objects/notification.ts:8` pointed at a backlog file this audit deleted, so it
+was repointed at `tasks/archive/2026-03-16-notification-system-phase2.md`, which exists.
+
+**`task-completion-validator` — HIGH.** `2026-02-19-task-ui-ux-polish.md` was demoted to `backlog/`
+as "narrow, genuine, not urgent" open work. That was wrong, and the validator proved it item by item:
+the `TaskDelegateDialog` work shipped (`TaskDelegateDialog.tsx:2,41,65`), and the `TaskDetailPanel`
+item targets a component built in `f97c1edcc` and deleted one commit later in `7f424319a`. Three of
+four items shipped, the fourth is moot. The file is now **archived with all four boxes corrected**
+and an explanation of why item 3 is ticked as resolved rather than built.
+
+The lesson: a low checkbox ratio is not evidence of open work, and this audit's own bulk heuristic
+("low ratio ⇒ demote") reproduced the exact error it exists to correct. Every demotion needs the same
+per-item verification an archive decision gets.
+
+**`task-completion-validator` — MEDIUM, and a genuine escape.**
+`2026-09-18-polish-project-events-page-ui.md` was archived as fully shipped. Its headline work is
+live, but one checklist item was not done: `PROJECT_SCHEDULES_POLL_MS` was never added and
+`SchedulesPanel.tsx:324` still polls on a bare `refetchInterval: 30_000`. That task's own research
+section had predicted this would violate `.claude/rules/60` and Principle XI. Filed as
+`tasks/backlog/2026-09-23-schedules-panel-hardcoded-poll-interval.md`, and the archived file's footer
+now says so rather than claiming a clean ship.
+
+**`task-completion-validator` — MEDIUM, on "fix stale checkboxes".** The first cut centralised status
+into this ledger and left all 181 moved files byte-identical (`R100` renames), which is not what the
+task asked for. Mass-ticking 179 files without per-item evidence would have been fabrication, so each
+archived file now carries a one-line provenance footer instead: how it landed on `main`, its checklist
+ratio, and an explicit statement that the remaining boxes are stale and were left rather than ticked
+unverified. Anyone opening an archived file directly now sees the true status without needing this
+ledger.
+
+**Both — LOW.** The archive count in the table above said 1077; the correct recursive count is 1079.
+Fixed. The full-total reconciliation was never wrong.
 
 ## The one task still open
 
@@ -72,10 +135,10 @@ PR #2136 open, Slice C queued).
 
 ## Moved to `backlog/` instead of archived
 
-| File                                         | Why                                                                                                                                                                                                                                                                                                                                                                                  |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `2026-02-20-acp-session-error-observability` | 6/22. The per-session event timeline API (`GET /workspaces/:id/agent-sessions/:sessionId/events`) does not exist in `main`. Real, unstarted, 7 months stale — it is a backlog item, not active work.                                                                                                                                                                                 |
-| `2026-02-19-task-ui-ux-polish`               | 1/4. `StatusBadge` did get the task statuses (`queued`, `delegated` are in `packages/ui/src/components/StatusBadge.tsx`). The remaining `TaskDelegateDialog` item is partly obsoleted by policy `65c2ac35` ("do not expose a manual task-to-running-workspace delegation modal") — yet `TaskDelegateDialog.tsx` is still wired into `ProjectTasks.tsx`. Narrow, genuine, not urgent. |
+| File                                         | Why                                                                                                                                                                                                  |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `2026-02-20-acp-session-error-observability` | 6/22. The per-session event timeline API (`GET /workspaces/:id/agent-sessions/:sessionId/events`) does not exist in `main`. Real, unstarted, 7 months stale — it is a backlog item, not active work. |
+| ~~`2026-02-19-task-ui-ux-polish`~~           | **Reversed during review — archived, not demoted.** Three of its four items shipped and the fourth targets a component deleted in `7f424319a`. See the review-round section above.                   |
 
 ## Backlog entries removed
 

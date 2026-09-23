@@ -174,3 +174,7 @@ Columns touched in this task:
 - `tasks/archive/2026-08-24-superseded-task-killed-after-successful-wake.md`
 - `tasks/archive/2026-08-25-fix-stuck-task-supersession-toctou.md`
 - `tasks/archive/2026-08-26-decouple-vm-liveness-projectdata.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `fix: preserve staging-applied supersession migration`. Its checklist reads 46/47 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

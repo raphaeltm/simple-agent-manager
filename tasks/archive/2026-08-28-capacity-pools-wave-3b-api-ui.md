@@ -87,3 +87,7 @@ surface for humans to inspect the default pool that will be used.
 ## Pull Request
 
 - Child PR: <https://github.com/raphaeltm/simple-agent-manager/pull/1950>
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `feat: expose default capacity pools`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -41,3 +41,7 @@ This is valid technical debt. The function sits on a high-risk runtime boundary 
 - `pnpm typecheck` passes.
 - `pnpm test` passes.
 - `pnpm build` passes.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #941 (`refactor: split VM agent session host (#941)`). Its checklist reads 5/7 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

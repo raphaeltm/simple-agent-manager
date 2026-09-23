@@ -709,3 +709,7 @@ only written.
   (`a8923a52-b1d4-4e0d-9bd9-aa5406face5e`) and the `sam-api-prod` script settings.
 - First deploy after (A) rotates the version once (deploy SHA -> agent source SHA) and
   drains the fleet once. Expected and no worse than any deploy today.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2063 (`Stop every deploy and every busy CPU from evicting reusable nodes (#2063)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

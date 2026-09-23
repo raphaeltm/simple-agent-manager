@@ -48,3 +48,7 @@ PR #1061 attempted to present Gemini CLI as supported, but support must be backe
 ## Task Completion Validation
 
 Verdict: PASS with one environment limitation. All research findings map to checked implementation items, checked items map to the diff, and acceptance criteria have focused test or verification coverage. VM command dispatch has a Go regression test update, but the Go test command could not execute because Go is not installed.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `feat: wire Gemini CLI ACP support`. Its checklist reads 6/7 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -62,3 +62,7 @@ Goal: persist user intent quickly, return durable IDs/status quickly, continue l
 - Follow-up prompt durability was evaluated and deferred to `tasks/backlog/2026-08-03-durable-follow-up-prompt-delivery.md` because it requires a separate durable prompt-delivery state machine for existing sessions.
 - Local verification completed: focused typechecks/tests, full `pnpm test`, full `pnpm build`, and D1/DO migration safety/order gates.
 - Staging verification completed on 2026-08-03: deploy workflow 30797392483 passed; admin diagnosis quick-accepted and recovered run `01KZ3CNRZZQ8AHJB2CNWGSNFBT`; Instant cf-container start quick-accepted in 6.5s with task `01KZ3CNFTECCEA3NMFBAWMP6TA`, session `be166489-2f3e-44b6-b227-0c03d84570eb`, and direct task recovery showed persisted workspace `01KZ3CNG93WS8J4Q285EXKDBCZ`.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1722 (`Make diagnoses and instant starts durable (#1722)`). Its checklist reads 21/22 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

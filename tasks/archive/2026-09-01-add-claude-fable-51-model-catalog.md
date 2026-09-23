@@ -91,3 +91,7 @@ pass the platform AI proxy allowlist.
 - `test-engineer` / `constitution-validator`: WARN for duplicated Claude Code minimum
   version literal inside the shell validation command. Fixed by deriving the command
   from `claudeCodeMinVersion` and adding a regression test.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2001 (`Add Claude Fable 5.1 model support (#2001)`). Its checklist reads 8/9 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

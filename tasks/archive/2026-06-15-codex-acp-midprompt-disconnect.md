@@ -92,3 +92,7 @@ The ACP peer closes JSON-RPC first: SAM receives `peer disconnected before respo
 - **Class of bug**: Deferred completion/error handler reads live mutable state that a concurrent cleanup goroutine can clear between operation start and handler execution. The live read looks correct and only fails under a specific goroutine ordering (process-exit-then-error).
 - **Why it wasn't caught**: Tests set live fields and never modelled the concurrent `monitorProcessExit` clearing them before the error handler ran, so the race-ordering path had zero coverage. Component tests with fully-populated live state passed while the real ordering failed.
 - **Process fix (this PR)**: Added `.claude/rules/49-capture-prerequisites-before-async-completion.md` — deferred handlers must capture their prerequisites at operation start (under the cleanup lock), merge live-first/captured-as-fallback, scope captured fallbacks to the active episode, keep the terminal path explicit+sanitized, and add a discriminating regression test that clears live state after capture. Targets the whole class, not just this ACP instance.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1568 (`fix: recover ACP mid-prompt peer disconnects via captured LoadSession prerequisi`). Its checklist reads 8/14 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

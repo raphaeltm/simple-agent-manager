@@ -2,7 +2,7 @@
 
 **SAM task:** `01M1M75WA3V528VYZCWQGGM3NT`
 **Output branch:** `sam/fix-two-critical-bugs-ggm3nt`
-**Related:** `tasks/active/2026-08-16-session-activity-state-machine.md` (rule 57 implementation — this is the
+**Related:** `tasks/archive/2026-08-16-session-activity-state-machine.md` (rule 57 implementation — this is the
 gap it left), `tasks/archive/2026-08-21-manual-session-sleep.md` (the Stop/Sleep/Archive dock contract),
 `.claude/rules/57`, `.claude/rules/49`, `.claude/rules/44`, `.claude/rules/47`, `.claude/rules/62`
 
@@ -374,3 +374,7 @@ correctness bug in the fix itself, and two audit errors in this very document:
 - `apps/api/src/services/task-terminal-cleanup.ts`
 - `apps/api/src/routes/chat-workspace-resolver.ts`
 - `.claude/rules/49`, `/53`, `/57`, `/44`, `/47`, `/58`, `/62`, `/66`, `/24`, `/59`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2011 (`Fix interrupt reliability and post-interrupt unresponsiveness in project chat (#`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

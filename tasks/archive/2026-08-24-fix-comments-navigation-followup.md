@@ -43,3 +43,7 @@ Raphaël explicitly requested fixing these and getting them to production withou
 - Selecting a chat-message comment from Project → Comments opens the correct session and reveals/highlights the annotated message.
 - Local tests and Playwright visual audits cover the two broken production paths.
 - Staging is not triggered for this task; production deploy is monitored after merge.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1898 (`Fix comments navigation deep links (#1898)`). Its checklist reads 8/9 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

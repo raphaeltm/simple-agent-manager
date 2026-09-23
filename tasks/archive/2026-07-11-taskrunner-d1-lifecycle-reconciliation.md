@@ -97,3 +97,7 @@ the recovered work, all fixed:
 - `.claude/rules/31-migration-safety.md`
 - `.claude/rules/32-cf-api-debugging.md`
 - `.claude/rules/35-vertical-slice-testing.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1567 (`fix: reconcile dead TaskRunner DO/D1 lifecycle promptly (Priority 2) (#1567)`). Its checklist reads 12/14 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -83,3 +83,7 @@ Review hardening applied: project capacity seeds now set `ownerProjectId` from t
 - Child PR: https://github.com/raphaeltm/simple-agent-manager/pull/1949
 - Base: `sam/compute-pools-integration`
 - Head: `sam/execute-task-using-skill-v8p1qk`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `fix: address provider-native pool review gaps`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

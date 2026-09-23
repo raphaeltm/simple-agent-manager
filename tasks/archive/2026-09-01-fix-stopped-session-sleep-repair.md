@@ -35,3 +35,7 @@ Opus review identified the root cause: terminal-session reconciliation and sleep
 - A stale post-capture `stopping` snapshot repairs idempotently if ProjectData session is already sleeping.
 - A false `sleepSession()` with missing/unknown ProjectData session still does not mark D1 sleeping.
 - Existing repair behavior remains unchanged when ProjectData sleep succeeds.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Fix sleep repair for stopped ProjectData sessions`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

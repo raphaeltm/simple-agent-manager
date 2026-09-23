@@ -79,3 +79,7 @@
 - `.claude/rules/47-control-loop-io-budget.md`
 - `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`
 - `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Fix task liveness stale node heartbeat classifier`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

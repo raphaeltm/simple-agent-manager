@@ -242,3 +242,7 @@ The class of waste being removed (a poll that duplicates an already-live push ch
 memo defeated by one unstable prop) is now covered by rule 60's Polling Hygiene clause; the
 shared `useVisibilityAwarePoll` hook exists so future poll sites cannot reintroduce the
 hidden-tab variant by hand.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1849 (`perf(web): gate chat polls on WS liveness and tab visibility, memoize audio hand`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

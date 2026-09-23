@@ -2,7 +2,7 @@
 
 **Status**: backlog
 **Raised by**: `architecture-reviewer` and `constitution-validator` during Phase 5 of
-`tasks/active/2026-09-12-deadlocked-projectdata-archive-sweep-budget-mismatch.md`
+`tasks/archive/2026-09-12-deadlocked-projectdata-archive-sweep-budget-mismatch.md`
 
 ## Problem
 
@@ -54,4 +54,4 @@ separate from it.
 
 - `.claude/rules/18-file-size-limits.md`
 - `apps/api/src/scheduled/project-data-archive-sharding.ts`
-- `tasks/active/2026-09-12-deadlocked-projectdata-archive-sweep-budget-mismatch.md`
+- `tasks/archive/2026-09-12-deadlocked-projectdata-archive-sweep-budget-mismatch.md`

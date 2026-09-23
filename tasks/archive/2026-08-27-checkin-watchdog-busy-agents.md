@@ -96,3 +96,7 @@ tests above.
 - `.claude/rules/61-guards-must-cover-every-runtime.md`
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`
 - `tasks/archive/2026-08-26-fix-reconciliation-checkin-attention-expiry.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Fix SAM check-in watchdog for busy agents`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

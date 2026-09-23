@@ -311,3 +311,7 @@ compiler is satisfied by simply removing the parameter. Nothing is deleted, no
 type breaks, and the check evaporates.
 
 **Process fix.** Added `.claude/rules/63-widening-a-table-can-delete-an-auth-check.md`.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1889 (`feat(library): comment on markdown files in the project library (#1889)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

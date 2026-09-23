@@ -105,3 +105,7 @@ Extend `scripts/quality/deployment-workflow-hardening.test.ts` so both marketing
 - `tasks/archive/2026-04-25-upgrade-wrangler-v4.md`
 - `.claude/rules/22-infrastructure-merge-gate.md`
 - `.claude/rules/30-never-ship-broken-features.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1806 (`fix(ci): restore marketing Pages deployments (#1806)`). Its checklist reads 14/16 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -187,3 +187,7 @@ At 18:10 UTC the prior node row `01M2CX7B90KKPSJFPWJGX0JP6M` was absent and all
 remaining VM node rows were deleted. Its workspace remains `stopping` with no node
 attachment. An absent/deleted database row does not prove provider termination.
 The earlier evidence's claim that the node is still destroying is historical.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1980 (`Layered VM resource management: cgroup isolation, monitoring, eviction (#1980)`). Its checklist reads 27/33 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -216,3 +216,7 @@ resolved credentials via the version-only branch, then written the computed fing
 (`services/nodes.ts:271-275`). The claim in this record is narrower and stands — it was dead on the
 *teardown* path — but it is worth knowing the fence being relied on has real production mileage
 rather than being newly exercised.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `fix(nodes): report only the placement field that is actually absent`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

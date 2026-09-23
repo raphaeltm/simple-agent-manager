@@ -157,3 +157,7 @@ Environment variable validation: new Worker variable `WORKSPACE_RESOURCE_OBJECT_
 - `.claude/rules/23-cross-boundary-contract-tests.md`
 - `.claude/rules/35-vertical-slice-testing.md`
 
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2110 (`Add per-workspace resource history (#2110)`). Its checklist reads 28/30 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

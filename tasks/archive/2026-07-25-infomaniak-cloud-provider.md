@@ -81,3 +81,7 @@ Live provider-key testing is explicitly deferred to Raphaël after merge. All mo
 - Infomaniak Cinder policies: <https://docs.infomaniak.cloud/identity/policies/cinder/>
 - Infomaniak instance creation: <https://docs.infomaniak.cloud/compute/instances/instance_creation_and_deletion/>
 - Infomaniak standard images: <https://docs.infomaniak.cloud/compute/images/standard_images/>
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1668 (`feat(providers): add Infomaniak Public Cloud (#1668)`). Its checklist reads 28/30 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

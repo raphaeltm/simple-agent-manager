@@ -155,3 +155,7 @@ plumbing rather than product behaviour. I added a proper `/api/nodes/node-rail-1
 (it previously fell through to `{}`, which is why the infrastructure block has never been
 visible in any screenshot) but removed the test rather than leave a failing or skipped one.
 Worth fixing if the details panel needs visual coverage later.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1977 (`Finalize session tool rail: lower tab, remove review knob, workspace link cleanu`). Its checklist reads 4/7 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

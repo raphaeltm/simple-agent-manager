@@ -95,3 +95,7 @@ The same production title-generation prompt and Workers AI Gateway request shape
 - Opened PR #2093: https://github.com/raphaeltm/simple-agent-manager/pull/2093
 - PR body includes local validation, staging title examples, direct GLM/Gemma comparison, specialist review evidence, and the GLM thinking-token finding.
 - Updated the PR External References wording to explicitly say "Cloudflare official documentation" after the first Preflight Evidence CI run required the literal official-documentation phrasing for an external API change.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2093 (`Switch task title generation default to Gemma (#2093)`). Its checklist reads 9/10 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -67,8 +67,8 @@ Constitution alignment: the change adds no URLs, timeouts, limits, or environmen
 - Task `01M304HV194SGTNM44B25TMDVP`
 - Original prototype commit `f967ae394bed2c21f100f6cad23e3a2897caf65a`
 - `tasks/archive/2026-07-11-runtime-neutral-session-hibernate-wake.md`
-- `tasks/active/2026-07-21-instant-runtime-recovery-state-machine.md`
-- `tasks/active/2026-08-19-ensure-branch-exists-before-instant-workspace.md`
+- `tasks/archive/2026-07-21-instant-runtime-recovery-state-machine.md`
+- `tasks/archive/2026-08-19-ensure-branch-exists-before-instant-workspace.md`
 
 ## Implementation notes
 

@@ -1,7 +1,7 @@
 # User-Configurable MCP Servers
 
 > **SUPERSEDED (2026-08-23).** Shipped as "MCP Servers" — see
-> `tasks/active/2026-08-23-byo-mcp-servers.md` (moves to `tasks/archive/` on completion) and
+> `tasks/archive/2026-08-23-byo-mcp-servers.md` (moves to `tasks/archive/` on completion) and
 > idea `01M0QDASJCK3YWVX1GETZTSFWZ`. The mechanism below is stale: it predates the ACP
 > `mcpServers` injection pipeline and is framed around `.mcp.json` / devcontainer files, which
 > do not reach web-driven ACP sessions. Do not execute this plan.

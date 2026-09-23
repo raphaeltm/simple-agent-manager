@@ -59,3 +59,7 @@ This task implements two production authentication paths:
 - `docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md`
 - `docs/notes/2026-03-08-mcp-token-revocation-postmortem.md`
 - `docs/notes/2026-05-19-cli-sonar-quality-gap-postmortem.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1147 (`feat: CLI authentication with PATs and OAuth Device Flow (#1147)`). Its checklist reads 11/14 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

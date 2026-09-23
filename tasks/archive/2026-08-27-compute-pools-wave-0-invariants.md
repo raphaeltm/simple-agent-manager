@@ -52,3 +52,7 @@ Wave 0 of compute/node-pools needs regression coverage around today's scheduler 
 - No staging deployment or staging mutation is performed.
 - Local validation commands and results are reported.
 - Any blocker or test gap is documented in the PR and final summary.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `test: pin compute pool placement invariants`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

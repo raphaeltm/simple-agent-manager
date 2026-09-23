@@ -379,3 +379,7 @@ stripping anything), so the risk of a transcription error is a visible abort, no
 - `.claude/rules/39-debug-before-redesign.md`
 - `.claude/rules/30-never-ship-broken-features.md`
 - Project policy `66060db4` (ProjectData rollout: stage first, production mutations last)
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2080 (`Make an inert ProjectData cleanup observable, and buy the archive throughput alr`). Its checklist reads 9/28 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

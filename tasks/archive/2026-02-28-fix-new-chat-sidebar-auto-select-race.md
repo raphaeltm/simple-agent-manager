@@ -134,3 +134,7 @@ Add a `useRef` flag (`newChatIntentRef`) that tracks whether the user explicitly
   - [x] Add post-mortem section to PR template (`.github/pull_request_template.md`)
   - [x] Create migration task for source-contract test files (`tasks/backlog/2026-03-01-migrate-source-contract-tests.md`)
 - [ ] Push and verify CI passes
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #226 (`fix: broken New Chat button + mandatory post-mortems for bug fixes (#226)`). Its checklist reads 19/20 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

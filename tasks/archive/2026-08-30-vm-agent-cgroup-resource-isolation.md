@@ -143,3 +143,7 @@ ancestry inspection has not been performed by this continuation. PR #1980 comple
 preserves that implementation and its shared admission/provisioning memory reserve.
 The old Docker-service-only MemoryMax and fixed 768 MB default are not reapplied.
 Final combined verification is tracked in the active resource-monitoring task.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1980 (`Layered VM resource management: cgroup isolation, monitoring, eviction (#1980)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

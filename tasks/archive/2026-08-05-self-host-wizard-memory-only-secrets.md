@@ -57,7 +57,7 @@ Implement R6 finding 1 only for `apps/www`: generated webhook secret and Pulumi 
 - Cloudflare Pages preview deploy: https://github.com/raphaeltm/simple-agent-manager/actions/runs/30992702046 → success for commit `60dedd82b8489e121045b6031f93f379f78748b3`; preview alias https://sam-keep-generated-self-host.sam-www.pages.dev.
 - `PLAYWRIGHT_BASE_URL=https://sam-keep-generated-self-host.sam-www.pages.dev pnpm --filter @simple-agent-manager/www exec playwright test -c playwright.config.ts tests/playwright/self-host-wizard-secrets.spec.ts --reporter=list --workers=1` → 12 passed across desktop and mobile projects on deployed preview.
 - `pnpm --filter @simple-agent-manager/www build` → passed.
-- `pnpm exec prettier --check apps/www/public/scripts/self-host-wizard.js apps/www/playwright.config.ts apps/www/tests/playwright/self-host-wizard-secrets.spec.ts apps/www/package.json tasks/active/2026-08-05-self-host-wizard-memory-only-secrets.md` → passed.
+- `pnpm exec prettier --check apps/www/public/scripts/self-host-wizard.js apps/www/playwright.config.ts apps/www/tests/playwright/self-host-wizard-secrets.spec.ts apps/www/package.json tasks/archive/2026-08-05-self-host-wizard-memory-only-secrets.md` → passed.
 - `pnpm lint` → passed with pre-existing warnings, 0 errors.
 - `pnpm typecheck` → passed.
 - `pnpm build` → passed.
@@ -76,3 +76,7 @@ Implement R6 finding 1 only for `apps/www`: generated webhook secret and Pulumi 
 
 - PR: https://github.com/raphaeltm/simple-agent-manager/pull/1741 — open and explicitly marked DO NOT MERGE.
 - Initial CI passed all code/test/build/review jobs, then Preflight Evidence failed because the PR body was missing the required hidden Agent Preflight block. PR body was corrected and this evidence commit retriggers CI with the corrected body.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1741 (`Keep self-host generated secrets memory-only (#1741)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

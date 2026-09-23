@@ -46,3 +46,7 @@ while remaining accurate about the technology involved.
   the blog pipeline.
 - [x] Narrow marketing-site validation passes.
 - [ ] The post is merged through a PR.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2067 (`docs(blog): publish atomic release journal (#2067)`). Its checklist reads 11/13 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

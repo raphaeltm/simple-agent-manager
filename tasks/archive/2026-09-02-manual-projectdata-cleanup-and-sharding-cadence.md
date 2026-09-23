@@ -77,9 +77,9 @@ CodeRabbit for this rollout wave.
   - `tasks/archive/2026-07-02-institutionalize-projectdata-wall-time-prevention.md`:
     ProjectData control loops can starve live work when they inherit large
     per-candidate costs.
-  - `tasks/active/2026-08-27-projectdata-retention-convergence.md`:
+  - `tasks/archive/2026-08-27-projectdata-retention-convergence.md`:
     tool payload cleanup must archive to R2 before removing inline payloads.
-  - `tasks/active/2026-08-31-projectdata-pre-wall-storage-relief.md`:
+  - `tasks/archive/2026-08-31-projectdata-pre-wall-storage-relief.md`:
     reclaim evidence must use `sql.databaseSize`, not PRAGMA estimates.
 
 Every finding above is represented in the checklist below.
@@ -220,11 +220,11 @@ Draft PR:
 
 ## References
 
-- `tasks/active/2026-08-31-projectdata-terminal-archive-sharding.md`
-- `tasks/active/2026-09-01-archive-sharding-rollout-controls.md`
-- `tasks/active/2026-08-27-projectdata-retention-convergence.md`
-- `tasks/active/2026-08-31-projectdata-pre-wall-storage-relief.md`
-- `tasks/active/2026-08-26-projectdata-tool-payload-r2-archival.md`
+- `tasks/archive/2026-08-31-projectdata-terminal-archive-sharding.md`
+- `tasks/archive/2026-09-01-archive-sharding-rollout-controls.md`
+- `tasks/archive/2026-08-27-projectdata-retention-convergence.md`
+- `tasks/archive/2026-08-31-projectdata-pre-wall-storage-relief.md`
+- `tasks/archive/2026-08-26-projectdata-tool-payload-r2-archival.md`
 - `tasks/archive/2026-07-02-institutionalize-projectdata-wall-time-prevention.md`
 - `apps/api/src/durable-objects/project-data/tool-payload-cleanup.ts`
 - `apps/api/src/durable-objects/project-data/tool-payload-cleanup-candidates.ts`
@@ -236,3 +236,7 @@ Draft PR:
 - `.claude/rules/47-control-loop-io-budget.md`
 - `.claude/rules/60-request-io-and-bundle-budgets.md`
 - `.claude/rules/67-shared-predicates-that-trigger-actions.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `docs(task): record projectdata cleanup PR evidence`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

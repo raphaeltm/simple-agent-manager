@@ -51,3 +51,7 @@ This is security-sensitive credential work. The PR must be draft or clearly mark
 - `.claude/rules/28-credential-resolution-fallback-tests.md`
 - `.claude/rules/34-vm-agent-callback-auth.md`
 - `.claude/rules/35-vertical-slice-testing.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Harden GitHub token injection authorization boundary`. Its checklist reads 9/19 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

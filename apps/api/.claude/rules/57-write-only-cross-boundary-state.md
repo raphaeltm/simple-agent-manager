@@ -123,4 +123,4 @@ silently for months (rule 34) while logging at Debug (rule 39).
 - `.claude/rules/49-capture-prerequisites-before-async-completion.md` — pre-call capture
 - `.claude/rules/34-vm-agent-callback-auth.md` — why these reports go missing
 - Implementation: `apps/api/src/durable-objects/project-data/session-activity-reconciliation.ts`
-- Task: `tasks/active/2026-08-16-session-activity-state-machine.md`
+- Task: `tasks/archive/2026-08-16-session-activity-state-machine.md`

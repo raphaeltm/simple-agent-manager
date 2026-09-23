@@ -13,7 +13,7 @@ Save is effectively stuck, and zero-config sessions resolving the KV default via
 ## Context (where/when discovered)
 
 Found 2026-07-25 during review of the Claude Opus 5 catalog PR
-(`tasks/active/2026-07-25-add-claude-opus-5-model-catalog.md`). Verified NOT currently
+(`tasks/archive/2026-07-25-add-claude-opus-5-model-catalog.md`). Verified NOT currently
 triggered: production KV default is `@cf/google/gemma-4-26b-a4b-it` (read via CF API,
 2026-07-25). This is a robustness gap for future retirements, especially self-host forks.
 

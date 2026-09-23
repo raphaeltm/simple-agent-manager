@@ -139,7 +139,7 @@ never succeed at all.
 ## References
 
 - Idea `01M0644866Q0000M4HP39WNCZW`; task
-  `tasks/active/2026-09-08-restored-host-restart-context-ownership.md` (moves to
+  `tasks/archive/2026-09-08-restored-host-restart-context-ownership.md` (moves to
   `tasks/archive/` on completion)
 - Implementation: `packages/vm-agent/internal/acp/session_host.go`
   (`lifecycleContext`), `session_host_startup.go` (`startAgentWithSessionMode`)

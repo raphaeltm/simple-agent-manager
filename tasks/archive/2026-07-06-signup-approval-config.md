@@ -50,3 +50,7 @@ Turning approval off should let pending users pass the gate because the gate is 
 - Existing approval PR: https://github.com/raphaeltm/simple-agent-manager/pull/162
 - Env wiring PR: https://github.com/raphaeltm/simple-agent-manager/pull/164
 - Trials runtime-switch precedent: https://github.com/raphaeltm/simple-agent-manager/pull/1368
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `feat: add runtime signup approval setting`. Its checklist reads 17/18 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

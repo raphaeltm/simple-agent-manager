@@ -34,7 +34,7 @@ node apply route-only Caddy changes, and expose observed serving state to users.
   It intentionally appended verified domains to the next signed `ApplyPayload`
   and stated "Deleting a custom domain drops its site block on next apply."
 - Active UI task:
-  `tasks/active/2026-06-24-deployment-custom-domain-ui.md`.
+  `tasks/archive/2026-06-24-deployment-custom-domain-ui.md`.
   The UI shipped the Domains tab, but explicitly kept the deferred activation
   copy because route re-apply was not implemented.
 - Release/callback postmortem task:
@@ -43,7 +43,7 @@ node apply route-only Caddy changes, and expose observed serving state to users.
   routes, and heartbeat/reconcile updates must be scoped to what the node
   actually reported.
 - Caddy routing/TLS task:
-  `tasks/active/2026-06-12-productionize-caddy-routing-tls.md`.
+  `tasks/archive/2026-06-12-productionize-caddy-routing-tls.md`.
   Important constraints: Caddy reload must happen on-node from a signed route
   payload, app-route DNS stays control-plane owned, and real staging must prove
   DNS/TLS/HTTPS on a deployment node.
@@ -425,3 +425,7 @@ implemented and tested here.
 - `packages/vm-agent/internal/deploy/caddy.go`
 - `apps/web/src/components/deployments/DeploymentCustomDomainsPanel.tsx`
 - `apps/web/src/lib/api/deployment.ts`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1602 (`Fix deployment custom domain lifecycle (#1602)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

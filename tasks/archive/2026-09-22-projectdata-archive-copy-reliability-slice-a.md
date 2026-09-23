@@ -162,3 +162,7 @@ Rebased cleanly onto `origin/main` at `c9deee440`, then passed:
 - `apps/api/.claude/rules/31-migration-safety.md`
 - `.claude/rules/25-review-merge-gate.md`
 - `.claude/rules/13-staging-verification.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2133 (`fix(api): resume verified ProjectData archive copies (#2133)`). Its checklist reads 20/21 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -166,3 +166,7 @@ Implementation checklist:
 - `.claude/rules/27-vm-agent-staging-refresh.md`
 - `.claude/rules/34-vm-agent-callback-auth.md`
 - `.claude/rules/35-vertical-slice-testing.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1544 (`SPIKE: run standalone vm-agent in Cloudflare Sandbox (#1544)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

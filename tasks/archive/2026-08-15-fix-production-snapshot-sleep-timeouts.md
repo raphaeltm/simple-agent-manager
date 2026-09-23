@@ -468,3 +468,7 @@ Expected implementation surface:
 - `.claude/rules/54-vm-agent-rollout-compatibility.md`
 - `.claude/rules/27-vm-agent-staging-refresh.md`
 - `.claude/rules/23-cross-boundary-contract-tests.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1828 (`Fix production snapshot sleep timeouts (#1828)`). Its checklist reads 25/28 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

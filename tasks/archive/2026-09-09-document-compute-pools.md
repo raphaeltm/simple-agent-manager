@@ -101,3 +101,7 @@ adding a per-cell assertion to the www Playwright suite and to
   rather than as a settable layer.
 - `maxCoTenants` is resolvable through the API but is not exposed in
   `ResourceRequirementsInput`, so the guide marks it API-only.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2050 (`docs: explain compute (node) pools on the docs site (#2050)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -91,3 +91,7 @@ The runtime boundary is fixed: the container launch environment remains minimal.
 - The production artifact reports version `085943af9ccb69462277badd6d74dbdb5e6d3398` and `sha256:32629127f263428f44972c25a6834f6170d340e71a8c723f568153dab1798b19`; the published production `VmAgentContainer` image digest is `sha256:3310ce14f07186253611f80a83e3b0298e3aebfd466fa04b31f455757c8d7e52`.
 - Independent post-deploy checks returned HTTP 200 from `https://api.simple-agent-manager.org/health` with `status: healthy` and from `https://app.simple-agent-manager.org/`.
 - The task remains in `tasks/active` until the user explicitly confirms completion, as required by `.claude/rules/09-task-tracking.md`.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1570 (`chore: record pr1566 production validation (#1570)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

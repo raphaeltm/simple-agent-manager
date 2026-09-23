@@ -46,3 +46,7 @@ This violates the project security policy: security-sensitive setup failures mus
 - Policy: Fail closed instead of insecure fallback
 - `.claude/rules/32-cf-api-debugging.md`
 - `.codex/prompts/do.md` Phase 6b infrastructure verification
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1462 (`fix: fail closed on Origin CA bootstrap errors (#1462)`). Its checklist reads 13/14 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

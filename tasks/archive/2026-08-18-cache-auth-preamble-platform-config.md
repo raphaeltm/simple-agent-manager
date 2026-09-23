@@ -206,3 +206,7 @@ requires `cached.database === database`, so non-stable identity degrades to "cac
 (losing Step B's win, keeping Step A's) and can never serve a foreign config. The Vitest pool
 reuses module caches across test files, which is what makes `__resetPlatformConfigCacheForTest()`
 load-bearing rather than defensive.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `perf: auth preamble per-isolate cache with platform-config file split (items #1)`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

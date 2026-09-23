@@ -89,3 +89,7 @@ Update VM-agent guidance so high-frequency callback streams must be debounced/co
 - After the prompt completed, state reported `activity=idle`, `runtimeWorkState=inactive`, and `runtimeWorkCount=0`; the live UI stabilized to `Sleep session`.
 - No browser console errors were observed during the live UI check.
 - Cleanup completed: `POST /sessions/:sessionId/stop` returned `workspaceDeleted=true`, and final staging `/api/nodes` plus `/api/workspaces` were both `[]`.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1906 (`Fix CompletionDock activity twitch from ACP reports (#1906)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

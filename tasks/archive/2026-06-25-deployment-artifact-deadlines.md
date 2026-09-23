@@ -70,3 +70,7 @@ Long-running VM work bound to request-scoped or undersized fixed deadlines inste
 ### Process Fix
 
 `.claude/rules/43-long-running-mcp-tools.md` now requires transport phase timeouts plus progress/idle watchdogs for streamed long-running VM operations, env-configurable default constants for timeout windows, slow-progress and stalled tests, and explicit review tracing for request-derived contexts after job acceptance.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Fix deployment artifact deadline handling`. Its checklist reads 11/12 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

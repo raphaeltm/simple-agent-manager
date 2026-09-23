@@ -73,3 +73,7 @@ Wave 1A needs the durable D1/Drizzle foundation for compute/node pools without c
 - `$test-engineer`: PASS — new migration/schema tests cover legacy-null snapshots, scope/default uniqueness, credential-source constraints, candidates/fallbacks, and destructive-statement guard; mapper/shared tests cover type guards and fail-closed invalid persisted values.
 - `$security-auditor`: PASS — capacity sources only reference `credentials`/`platform_credentials`; no token/IV/secret columns were added to pool tables; mapper and shared DTO tests assert no secret-shaped fields.
 - `$task-completion-validator`: PASS — all research findings, checked checklist items, and acceptance criteria are represented in the diff, local validation, and child PR.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `feat: add capacity pool schema foundation`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -47,3 +47,7 @@ The affected user flow is loading a project chat session:
 - Admin users can see enough sanitized diagnostic detail to copy into an agent task.
 - Non-admin users do not receive stack traces or sensitive details.
 - Tests cover the original failure class and the diagnostic response shape.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #917 (`fix: add chat session load error diagnostics (#917)`). Its checklist reads 8/9 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

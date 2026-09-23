@@ -53,3 +53,7 @@ Note: parallel spawned review agents for these checks timed out and were closed;
 - Tests cover config storage, auth redaction, command routing, and request payloads.
 - Documentation explains this is an MVP session-cookie bridge and does not claim PAT/device-flow support exists yet.
 - PR is opened and checks are monitored, but it is not merged.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1058 (`Add SAM CLI MVP (#1058)`). Its checklist reads 11/12 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -53,3 +53,7 @@ The instant workspaces UI is missing in production because PR #1544 merged to `m
 - PR opened: https://github.com/raphaeltm/simple-agent-manager/pull/1551.
 - PR CI first run confirmed the previously failing `VM Agent Test` passes; the remaining preflight evidence failure was PR-body metadata and the PR body has been corrected for the next CI run.
 - Staging deploy triggered: https://github.com/raphaeltm/simple-agent-manager/actions/runs/29079865769.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `Stabilize VM-agent deployment apply watchdog test`. Its checklist reads 5/10 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

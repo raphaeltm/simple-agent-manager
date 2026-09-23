@@ -60,3 +60,7 @@ Fable approved the revised plan in task `01M28SCFYR159DG0XXQG25BZ49`.
 - Test engineer — PASS. Added shared unit coverage for exact adapter v2 units/provenance, API unit coverage for final admission density and lower-class exclusion, and default capacity-pool coverage for resource-only candidate filtering before balanced ranking.
 - Doc sync validator — PASS. Public docs now describe legacy labels as compatibility workload slices and no longer claim the label is provider hardware; documented examples match the code's v2 small/medium/large mapping.
 - Task completion validator — PASS for implementation scope. The task file's completed implementation checklist items are all represented in the diff and validated by tests. PR, staging, and production rollout remain intentionally unchecked until the PR gates complete.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2068 (`Adjust legacy workload slices for bin packing (#2068)`). Its checklist reads 7/8 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

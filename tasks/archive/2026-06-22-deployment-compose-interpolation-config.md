@@ -102,3 +102,7 @@ Source idea: `01KVQANNQPBF4PVJR060VYKNG5` ("App deployments: per-environment Com
 - [x] UI component and Playwright tests for configuration summary/panel, many rows, long keys/values, validation errors, masked secrets, loading/error states, keyboard/focus behavior, and 320/375px no-overflow.
 - [x] Public docs build.
 - [ ] Full local quality suite, specialist review, staging deploy, real VM-agent refresh/provisioning verification, PR CI, merge, and production deploy monitoring per `/do`.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1381 (`Deployments UI subpages + unified Variables/Secrets config (#1381)`). Its checklist reads 60/63 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

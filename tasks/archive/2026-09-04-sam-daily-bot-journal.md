@@ -51,3 +51,7 @@ SAM's public engineering journal needs a daily post only when recent code has a 
 - `apps/api/src/scheduled/project-data-storage-relief-preflight.ts`
 - `apps/api/src/durable-objects/project-data/tool-payload-cleanup-manifest.ts`
 - PR #2014 / commit `831d14e2a05c0bed92f419646828a826f9616c73`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2018 (`docs(blog): add SAM storage preflight journal (#2018)`). Its checklist reads 12/14 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

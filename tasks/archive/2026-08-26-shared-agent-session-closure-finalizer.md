@@ -145,3 +145,7 @@ Historical stale-row repair is explicitly out of scope for this task.
 - `apps/api/src/scheduled/node-cleanup/workspace-phases.ts`
 - `apps/api/src/services/nodes.ts`
 - `apps/api/tests/unit/services/workspace-branch-guard-coverage.test.ts`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1917 (`Centralize workspace lifecycle finalization (#1917)`). Its checklist reads 13/18 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

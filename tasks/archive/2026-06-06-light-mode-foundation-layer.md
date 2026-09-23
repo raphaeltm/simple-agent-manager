@@ -97,3 +97,7 @@ converted to a token MUST keep its dark value byte-for-byte identical.
 - `.claude/rules/01-doc-sync.md` (no dead code), `17-ui-visual-testing.md`,
   `16-no-page-reload-on-mutation.md`, `03-constitution.md` (no hardcoded values).
 - `packages/ui/src/tokens/theme.css`, `apps/web/src/{index,app}.css`, `main.tsx`.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1239 (`feat(web): light mode (consolidated) (#1239)`). Its checklist reads 19/20 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

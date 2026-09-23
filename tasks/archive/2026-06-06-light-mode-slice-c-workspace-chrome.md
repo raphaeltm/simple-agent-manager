@@ -61,3 +61,7 @@ Convert workspace and node-detail chrome surfaces to theme tokens on top of `sam
 - Terminal, diff, code, and `tn-*` utility islands remain Tokyo Night in both themes.
 - No layout or behavior changes are introduced.
 - Quality checks and screenshot-backed visual audit evidence are recorded before PR.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1239 (`feat(web): light mode (consolidated) (#1239)`). Its checklist reads 8/9 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

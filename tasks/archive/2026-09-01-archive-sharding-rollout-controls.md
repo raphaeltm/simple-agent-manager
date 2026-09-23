@@ -93,7 +93,7 @@ production configuration, or run a production canary.
 
 ## References
 
-- `tasks/active/2026-08-31-projectdata-terminal-archive-sharding.md`
+- `tasks/archive/2026-08-31-projectdata-terminal-archive-sharding.md`
 - `apps/api/src/scheduled/project-data-archive-sharding.ts`
 - `apps/api/src/services/project-data-archive-routing.ts`
 - `apps/api/src/routes/admin/project-data-storage.ts`
@@ -102,3 +102,7 @@ production configuration, or run a production canary.
 - `apps/api/tests/unit/scheduled/project-data-archive-sharding.test.ts`
 - `apps/api/tests/workers/project-data-archive-sharding.test.ts`
 - `scripts/deploy/project-data-archive-routing-guard.ts`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2000 (`Add archive-sharding rollout controls (#2000)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

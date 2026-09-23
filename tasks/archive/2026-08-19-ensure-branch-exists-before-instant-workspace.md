@@ -220,3 +220,7 @@ enumerated in the PR; per-runtime best-effort must be justified against a *named
 "known bad" (`missing`) must be distinguished from "could not check" (`unknown`) and only the former
 may block; and the test matrix must include a discriminating control on the runtime that is
 deliberately best-effort, so a later "make it consistent" refactor cannot break it with a green suite.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1863 (`fix(api): ensure the checkout branch exists before launching an Instant workspac`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -40,7 +40,7 @@ The desired v1 product rule is:
 - Relevant prior records:
   - `tasks/archive/2026-07-04-wave-1b-automation-context-membership-auth.md` migrated route authorization to project membership while preserving creator/actor attribution.
   - `tasks/archive/2026-07-04-shared-project-auth-wave-1d.md` explicitly classified runtime asset value attribution as user-scoped at that time; the newer product decision supersedes this for project-scoped runtime resources.
-  - `tasks/active/2026-06-08-harden-github-token-injection.md` hardened final GitHub token vending to verify user∩app repo access and single-repo scoping.
+  - `tasks/archive/2026-06-08-harden-github-token-injection.md` hardened final GitHub token vending to verify user∩app repo access and single-repo scoping.
   - `tasks/archive/2026-06-09-fix-secondary-workspace-git-credential-gate.md` documents that token freshness/exchange remains per-workspace and tightly scoped.
   - `tasks/archive/2026-03-23-scope-callback-tokens.md` documents why `runtime-assets` and `git-token` remain workspace-scoped callback endpoints and must not accept node-level secret access.
 - Relevant rules:
@@ -111,3 +111,7 @@ The desired v1 product rule is:
 - `packages/vm-agent/internal/bootstrap/bootstrap.go`
 - `.claude/rules/11-fail-fast-patterns.md`
 - `.claude/rules/35-vertical-slice-testing.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1607 (`Fix shared-project runtime resources and git tokens (#1607)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -189,7 +189,7 @@ bound on the result set. `chat_messages`, `chat_messages_grouped`, and
 - `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md` — a predicate that cannot fire
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md` — prove the guard discriminating
 - `.claude/rules/11-fail-fast-patterns.md` — fail closed at boundaries
-- Harness-ceiling incident: `tasks/active/2026-09-04-archive-sharding-bind-variable-limit.md`;
+- Harness-ceiling incident: `tasks/archive/2026-09-04-archive-sharding-bind-variable-limit.md`;
   implementation `apps/api/src/durable-objects/project-data/archive-sharding.ts`
   (`readCommittedRowsForChunk`); shared constant `apps/api/src/lib/d1-limits.ts`
 - Memory-ceiling incident: `tasks/archive/2026-09-05-archive-sharding-streaming-hash-abandon-and-size-budget.md`;

@@ -121,3 +121,7 @@ branch and will be reviewed with the code PR.
 - `task-completion-validator` — PASS. Research findings and acceptance criteria map to
   the implemented diff and tests; UI/backend and multi-resource checks are not
   applicable for this scheduled API bookkeeping change.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1899 (`fix(api): suppress normal TaskRunner handoff mismatch warnings (#1899)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

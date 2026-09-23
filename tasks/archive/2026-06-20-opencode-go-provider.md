@@ -158,10 +158,14 @@ Skipped by explicit user instruction. Do not deploy or mutate staging for this w
 - OpenCode model config docs: `https://opencode.ai/docs/models/`
 - OpenCode Go provider metadata: `https://models.dev/providers/opencode-go`
 - Prior task: `tasks/archive/2026-05-29-opencode-managed-inference.md`
-- Prior default change: `tasks/active/2026-06-16-opencode-zen-default.md`
+- Prior default change: `tasks/archive/2026-06-16-opencode-zen-default.md`
 - Relevant rules:
   - `.claude/rules/14-do-workflow-persistence.md`
   - `.claude/rules/28-credential-resolution-fallback-tests.md`
   - `.claude/rules/41-credential-snapshot-resilience.md`
   - `.claude/rules/17-ui-visual-testing.md`
   - `.claude/rules/01-doc-sync.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1374 (`Add OpenCode Go provider for GLM 5.2 (#1374)`). This file is a completion report, not a checklist. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

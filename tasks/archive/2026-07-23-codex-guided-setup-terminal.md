@@ -95,3 +95,7 @@ Connecting an OpenAI Codex (ChatGPT subscription) account to SAM today forces th
 ## References
 - Idea `01KRPWSZWFT0Y06DH9VEXC7CYQ`; spike `tasks/active/2026-07-06-cloudflare-setup-terminal-staging-spike.md`; branch `sam/weve-previously-talked-setting-01kwwm`.
 - Rules: 44 (dual-write writers), 45 (DO mutex), 47 (control-loop budget), 28/41 (credential resolution/snapshot), 34 (callback vs session auth), 23 (cross-boundary contracts), 35 (vertical slice), 31 (migration safety), 17 (UI visual), 30/13 (staging).
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1664 (`feat: Codex guided setup terminal (Cloudflare Sandbox device-auth login) (#1664)`). Its checklist reads 0/21 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

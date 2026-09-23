@@ -29,3 +29,7 @@ Follow-up prompts sent from parent agents to subtasks can reach the VM agent bef
 - Immediate delivery and busy-agent mailbox queue paths both pre-persist the user message.
 - VM reporter reuse of the same message ID is treated as a duplicate by ProjectData.
 - Existing chat prompt senders continue to work without a provided message ID.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1074 (`fix: pre-persist orchestration prompts (#1074)`). Its checklist reads 6/7 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

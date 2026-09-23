@@ -43,3 +43,7 @@ Project library previews need a stronger full-screen experience and safe support
 - `tasks/archive/2026-07-03-typed-tool-call-cards-document-card.md`
 - `tasks/backlog/2026-07-03-harden-markdown-preview-sanitization.md`
 - `.claude/rules/17-ui-visual-testing.md`
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1508 (`Implement File Preview v2 (#1508)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

@@ -173,3 +173,7 @@ responses, matching the existing JWKS precedent at `index.ts:655`.
 - `.claude/rules/24-no-duplicate-ui-controls.md`, `.claude/rules/59-understand-before-adding.md`
 - `.claude/rules/20-cross-origin-cors.md`, `.claude/rules/03-constitution.md` (Principle XI)
 - TanStack persistence: https://tanstack.com/query/v5/docs/framework/react/plugins/persistQueryClient
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1858 (`perf: TanStack Query cache persistence + HTTP Cache-Control headers (#1858)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

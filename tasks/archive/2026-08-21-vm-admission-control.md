@@ -79,3 +79,7 @@ The architecture research is complete. Do not re-run it or revive stale PR #1808
 - Mission dispatch does not create duplicate runner/session starts for queued admission waiters.
 - Admin/reconciliation diagnostics expose current admission state, lease/capacity reason, retry time, deadline, and relevant provider error classification.
 - Staging remains untouched; final handoff includes a staging plan using at most 1-2 staging VMs and cleanup back to zero.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1876 (`Add VM admission control and node-packing backpressure (#1876)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

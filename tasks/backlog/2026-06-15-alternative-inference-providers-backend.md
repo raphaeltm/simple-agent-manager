@@ -279,7 +279,7 @@ no anthropic dialect exists); enum values are valid; no duplicate agentType rows
   tests; no source-contract tests on credential code.
 
 ## Follow-up (UI — AFTER this backend lands)
-- Provider presets in the Connect flow (`tasks/backlog/2026-06-15-composable-credentials-ux.md`);
+- Provider presets in the Connect flow (`tasks/archive/2026-06-15-composable-credentials-ux.md`);
   the Connect flow uses `resolveHarnessDialect()` to grey out incompatible
   harness×provider combinations.
 - Cross-provider cost-comparison UI on the usage dashboard.

@@ -19,7 +19,7 @@ browser slide-over, git status slide-over, search with results / no matches / lo
 ## Context
 
 Discovered while running the Playwright suite for the auto-run HTML artifact preview work
-(`tasks/active/2026-08-04-auto-run-html-artifact-preview.md`). It is **not** caused by that change —
+(`tasks/archive/2026-08-04-auto-run-html-artifact-preview.md`). It is **not** caused by that change —
 the spec was independently confirmed failing at `origin/main` with the preview work absent, and the
 failure counts match exactly (15 per viewport).
 

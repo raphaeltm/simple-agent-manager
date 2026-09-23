@@ -28,3 +28,7 @@ Warm auto-provisioned nodes can end up recorded as `stopped` instead of being de
 - Existing warm-node and max-lifetime cleanup behavior remains intact.
 - Regression test fails before the fix and passes after the fix.
 - Production deploy completes successfully.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1109 (`fix(api): clean up stopped node handoffs (#1109)`). Its checklist reads 6/7 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

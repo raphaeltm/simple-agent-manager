@@ -115,3 +115,7 @@ Final copy-back and normal-settings restoration are in progress. Both temporary 
 Normal-settings restoration34217173448 and smoke passed; livecompact=false/global=true and exact recovered API/UI/tool baseline passed. All temporary GitHub overrides and the authenticated test browser profile were removed. Final fullCI34217093183 and Sonar passed ond609bc285.
 
 CodeRabbit's initial label trigger did not produce a review; Raphaël manually triggered it at11:32UTC. Review at11:46 reported one minor heading nesting issue and one environment-default documentation nit. Promoted the compact archive section to a top-level configuration heading while preserving its anchor, and documented actual defaults in Env comments. No runtime changes. Fresh final-head CI and CodeRabbit follow-up remain required before merge; production activation still requires the exact-plan approval. Shared staging is released to node-pool and these documentation changes require no new deployment.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #2034 (`Reduce archive SQL write amplification with budgeted R2 history (#2034)`). Its checklist reads 10/11 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

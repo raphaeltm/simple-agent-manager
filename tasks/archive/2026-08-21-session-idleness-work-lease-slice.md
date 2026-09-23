@@ -95,3 +95,7 @@ This slice must be independently shippable: extend the existing finite renewable
 - Deleting all older idle proxies (`workspace_activity`, `chat_sessions.updated_at`, terminal keepalive) before authoritative replacement coverage exists.
 - Deploying or mutating staging before the parent grants the single staging slot.
 - Merging the PR.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1874 (`fix: normalize session idleness for ACP tool work (#1874)`). Its checklist reads 21/22 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

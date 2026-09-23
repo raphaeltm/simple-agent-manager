@@ -226,3 +226,7 @@ The **project settings** deep link (`/projects/:id/settings/runtime`, 375px) lef
 **Fix:** after the `scrollIntoView` attempt, a rAF callback re-measures; if the active tab is still clipped within the strip, it aligns the tab's left edge — a genuine snap position — clamped to the strip end (also a valid snap stop). Three new unit tests capture the rAF and install the exact staging-repro geometry (mirroring 375px / 7-tab strip: clip-right + clamp, clip-left + align, already-visible no-op); the two alignment tests were verified to fail against the pre-fix component. Re-verified live on staging after redeploy.
 
 This closes the "untested gap" the PR originally documented for `scrollIntoView` (jsdom no-op — see rule 17's virtualized/scroll-coordinate lesson): the live staging pass was exactly what caught it.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `fix(ui): re-align active tab when scroll-snap leaves it clipped after reveal`. This file is a completion report, not a checklist. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

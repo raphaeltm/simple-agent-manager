@@ -44,3 +44,7 @@ Production deployments are not reaching the deploy step because the latest `main
 - CI devcontainer jobs no longer fail solely because MCR returns `TOOMANYREQUESTS`.
 - Production deployment trigger can run after a successful `main` CI workflow.
 - The fix does not change production VM-agent runtime defaults.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1331 (`ci: avoid live MCR pulls in devcontainer tests (#1331)`). Its checklist reads 6/7 — the remaining boxes are stale. The audit verified the work, not the boxes, so they were left as-is rather than ticked without per-item evidence. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

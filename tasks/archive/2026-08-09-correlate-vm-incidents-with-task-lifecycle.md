@@ -146,3 +146,7 @@ Extend `.claude/rules/23-cross-boundary-contract-tests.md` to require:
 - Go, Cloudflare, test, security, constitution, environment, documentation-sync, and UI/UX specialist reviews passed after their findings were addressed.
 - PR #1779 passed the complete implementation rollup: tests, Playwright visual audits, VM-agent smoke/integration/E2E, Durable Objects, build, typecheck, lint, code quality, UI compliance, Pulumi tests, benchmarks, and SonarCloud. The PR preflight evidence block was corrected before the final synchronization event.
 - Staging was not deployed or verified, per the user's explicit request.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` in commit `docs(tasks): record diagnostic correlation validation`. Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._

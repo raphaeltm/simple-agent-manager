@@ -216,3 +216,7 @@ exercise the owner/admin edit workflow rather than only the read-only happy path
     explicit-location mismatch before a candidate reaches task-runner DO startup.
   - Verified panel error rendering now suppresses effective/scope cards when no cached
     data exists, and project default-pool screenshots now use `.tmp/`.
+
+---
+
+_Archived 2026-09-23 by the weekly queue reconciliation. This work shipped: it landed on `main` via PR #1963 (`Repair default compute pool editing (#1963)`). Its checklist was already complete. Full evidence and method: `tasks/archive/2026-09-23-weekly-queue-reconciliation.md`._
