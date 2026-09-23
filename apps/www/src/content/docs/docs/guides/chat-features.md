@@ -13,29 +13,33 @@ Agent output streams directly to your browser via WebSocket. You see code being 
 
 ## The session tool rail
 
-Everything you can do _to_ a session — rather than _say_ to it — lives in the **tool rail** down
+Most of what you can do _to_ a session — rather than _say_ to it — lives in the **tool rail** down
 the right edge of the chat. It is the same rail on desktop and mobile, and it is where most of the
-features on this page are opened from.
+features on this page are opened from. (The session's lifecycle controls — Interrupt, Sleep,
+Archive — and the agent's plan sit in the dock just below the composer instead, because they act on
+the conversation you are in rather than opening something beside it.)
 
-| Tool          | What it opens                                                                                             | When it appears                        |
-| ------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| **Files**     | The workspace file browser — [File Browsing](#file-browsing)                                              | While the session's workspace is live  |
-| **Git**       | Uncommitted changes in the workspace                                                                      | While the session's workspace is live  |
-| **Timeline**  | A jump list through the session's history                                                                 | Always                                 |
-| **Resources** | CPU, memory, I/O, and OOM history — [Session Resource History](/docs/guides/session-resources/)            | Always                                 |
-| **Events**    | This session's subscriptions, schedules, and watches — [Scheduled actions](/docs/guides/scheduled-actions/) | Always                                 |
-| **Comments**  | Comment threads on this session, with an unresolved count badge                                           | Always                                 |
-| **Retry**     | Re-run the task behind the session                                                                        | When the session has a task            |
-| **Fork**      | Start a new task from this session — [Conversation Forking](#conversation-forking)                        | When the session has a task            |
-| **Report**    | File a problem report — [Reporting Issues](/docs/guides/reporting-issues/)                                | When the deployment has reporting configured |
-| **Complete**  | Mark the task complete                                                                                    | When the task is not already finished  |
-| **Details**   | Session identifiers and the infrastructure it ran on                                                      | Always                                 |
+| Tool          | What it opens                                                                                                                                                      | When it appears                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| **Files**     | The workspace file browser — [File Browsing](#file-browsing)                                                                                                       | While the agent is working                               |
+| **Git**       | Uncommitted changes in the workspace                                                                                                                               | While the agent is working                               |
+| **Timeline**  | A jump list through the session's history                                                                                                                          | Always                                                   |
+| **Resources** | CPU, memory, I/O, and OOM history — [Session Resource History](/docs/guides/session-resources/)                                                                    | Always                                                   |
+| **Events**    | This session's subscriptions, schedules, and watches — [Scheduled actions](/docs/guides/scheduled-actions/)                                                        | Always                                                   |
+| **Comments**  | Comment threads on this session. Unresolved threads show as a dot in icons mode and a count in labels mode; the marker turns amber when a thread is waiting on you | Always                                                   |
+| **Retry**     | Re-run the task behind the session                                                                                                                                 | When the session has a task                              |
+| **Fork**      | Start a new task from this session — [Conversation Forking](#conversation-forking)                                                                                 | When the session has a task                              |
+| **Report**    | File a problem report — [Reporting Issues](/docs/guides/reporting-issues/)                                                                                         | When the deployment has reporting configured             |
+| **Complete**  | Mark the task complete                                                                                                                                             | When the session has a task that is not already finished |
+| **Details**   | Session identifiers and the infrastructure it ran on                                                                                                               | Always                                                   |
 
 ![The session tool rail in icons-and-labels mode, listing Files, Git, Timeline, Resources, Events and Comments, then Retry and Fork after a divider, with Report, Complete and Details pinned at the bottom.](/images/docs/session-tool-rail.png)
 
-**Files** and **Git** need a running workspace, so they disappear once a session stops or fails.
-Everything else stays — which matters, because inspecting resources, reading the timeline, or
-reporting a problem is usually something you want to do _after_ a session ended.
+**Files** and **Git** need a live workspace with an agent still working in it, so they disappear
+the moment the agent finishes its turn — not only when the session stops or fails. If they vanish
+while the workspace still looks up, that is why. Everything else stays, which matters: inspecting
+resources, reading the timeline, or reporting a problem is usually something you want to do _after_
+a session has ended.
 
 The rail is grouped by what each tool acts on: the workspace and its history at the top, the task
 behind the session in the middle, and cross-cutting actions pinned to the bottom so they stay
@@ -110,9 +114,13 @@ compact **activity card** that simply states how many ran — for example
 ![A chat timeline: a user message, the agent's plan in prose, a single collapsed card reading "8 tool calls · 1 failed", then the agent's summary of what it found. The eight individual tool calls are hidden behind the one card.](/images/docs/chat-tool-activity-card.png)
 
 - While the run is in progress the card shows a motion indicator plus the tool
-  currently executing (or `thinking…` while the agent reasons between calls). When
-  the run finishes the indicator settles to a check mark, with no layout jump.
-- If any call failed, the card says so in text — for example `7 tool calls · 2 failed`.
+  currently executing — or `thinking…` while the agent reasons between calls, or just
+  `working` when there is nothing more specific to name. When the run finishes the
+  indicator settles, with no layout jump: a check mark if every call succeeded, a red ✗
+  if any of them failed.
+- If any call failed, the card says so in text as well as colour — for example
+  `7 tool calls · 2 failed`.
+- A single tool call is folded too, into a `1 tool call` card.
 - **Tap the card** to expand it into the individual tool-call cards, in order.
 - **Tap an individual call** to load its output (diff, terminal output, or text).
   Output is fetched on demand, so a long run costs nothing until you ask for it.
@@ -191,9 +199,9 @@ Forking now applies to task-backed chat sessions broadly, including instant-cont
 
 ### How to Fork
 
-1. Hover over a message in the chat history
-2. Click the **Fork** button
-3. SAM generates an AI-powered context summary of the conversation up to that point
+1. Open the session you want to branch from
+2. Click **Fork** in the [session tool rail](#the-session-tool-rail)
+3. SAM generates an AI-powered context summary of the conversation so far
 4. A new session starts with awareness of the previous conversation
 
 ### Context Summarization

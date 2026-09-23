@@ -31,17 +31,18 @@ The practical trade: an Instant session needs **no cloud provider credential**, 
 
 ## What you give up, and what you gain
 
-|                                   | Instant                                            | VM workspace                                             |
-| --------------------------------- | -------------------------------------------------- | -------------------------------------------------------- |
-| Your own cloud credential needed  | No                                                 | Only when no project or platform credential is available |
-| Start time                        | Seconds                                            | Minutes                                                  |
-| Repository clone                  | Yes — partial clone by default                     | Yes                                                      |
-| SAM MCP tools                     | Yes                                                | Yes                                                      |
-| Your `.devcontainer`              | Not built — always a lightweight environment       | Built with the `full` profile                            |
-| Toolchain                         | `git`, `gh`, `curl`, `jq`, `uv`, Node + agent CLIs | Whatever your devcontainer installs                      |
-| Docker inside the workspace       | No                                                 | Yes                                                      |
-| Automatic port detection/exposure | No                                                 | Yes                                                      |
-| Survives runtime teardown         | Yes — via snapshot restore, see below              | Yes — via snapshot and replacement VM restore            |
+|                                                     | Instant                                            | VM workspace                                             |
+| --------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------- |
+| Your own cloud credential needed                    | No                                                 | Only when no project or platform credential is available |
+| Start time                                          | Seconds                                            | Minutes                                                  |
+| Repository clone                                    | Yes — partial clone by default                     | Yes                                                      |
+| SAM MCP tools                                       | Yes                                                | Yes                                                      |
+| Your `.devcontainer`                                | Not built — always a lightweight environment       | Built with the `full` profile                            |
+| Toolchain                                           | `git`, `gh`, `curl`, `jq`, `uv`, Node + agent CLIs | Whatever your devcontainer installs                      |
+| Docker inside the workspace                         | No                                                 | Yes                                                      |
+| Automatic port detection/exposure                   | No                                                 | Yes                                                      |
+| Survives runtime teardown                           | Yes — via snapshot restore, see below              | Yes — via snapshot and replacement VM restore            |
+| [Resource history](/docs/guides/session-resources/) | No — the **Resources** panel stays empty           | Yes — CPU, memory, I/O and OOM events are retained       |
 
 Instant is the right choice for conversation, planning, code reading, and focused edits. Reach for a VM when the agent has to build your stack, run your test suite, start services, or use Docker.
 
@@ -126,6 +127,8 @@ The chat itself is the reliable signal. Find what you're seeing in this table, t
 | **"delivery was interrupted … outcome is unknown"**                                     | Your prompt may or may not have executed | [Check, then decide](#your-prompt-may-or-may-not-have-run) |
 | **"could not restore its last safe checkpoint"**                                        | In-container work in progress is gone    | [Re-state the work](#the-checkpoint-could-not-be-restored) |
 | The composer is gone and the session reads **"This session has ended."**                | Terminal — nothing to recover            | [Start a new chat](#the-session-is-permanently-stopped)    |
+
+None of these fit, and the agent simply stopped mid-sentence on a **VM** session? Open **Resources** in the tool rail and look for the OOM banner — running out of memory is the common cause, and it is the one the chat cannot tell you about. See [Session Resource History](/docs/guides/session-resources/).
 
 Anything else — including a message that delivery "could not be confirmed" — means SAM couldn't classify the failure. Treat it like the interrupted case: check before you resend.
 

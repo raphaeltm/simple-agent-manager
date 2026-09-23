@@ -110,12 +110,12 @@ SAM automatically generates concise titles for ideas using Workers AI:
 
 Configure via environment variables:
 
-| Variable                             | Default               | Description                                |
-| ------------------------------------ | --------------------- | ------------------------------------------ |
+| Variable                             | Default                         | Description                                |
+| ------------------------------------ | ------------------------------- | ------------------------------------------ |
 | `TASK_TITLE_MODEL`                   | `@cf/google/gemma-4-26b-a4b-it` | Workers AI model for title generation      |
-| `TASK_TITLE_GENERATION_ENABLED`      | `true`                | Set `false` to always use truncation       |
-| `TASK_TITLE_TIMEOUT_MS`              | `5000`                | Per-attempt timeout                        |
-| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | `100`                 | Messages at or below this length bypass AI |
+| `TASK_TITLE_GENERATION_ENABLED`      | `true`                          | Set `false` to always use truncation       |
+| `TASK_TITLE_TIMEOUT_MS`              | `5000`                          | Per-attempt timeout                        |
+| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | `100`                           | Messages at or below this length bypass AI |
 
 ## Agent-to-Agent Dispatch
 
