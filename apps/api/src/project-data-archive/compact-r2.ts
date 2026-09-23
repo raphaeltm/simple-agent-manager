@@ -64,6 +64,12 @@ async function timedR2<T>(
   const pending = operations.get(key);
   if (pending) {
     if (pending.stage === stage) {
+      // GET results carry a single-use body stream. Wait for the provider call,
+      // then fetch an independent body for the joining reader.
+      if (stage === 'get') {
+        await timed(pending.promise, deadline, stage);
+        return timedR2(r2, key, deadline, stage, start);
+      }
       return timed(pending.promise as Promise<T>, deadline, stage);
     }
     await timed(pending.promise, deadline, `${stage}_pending`);

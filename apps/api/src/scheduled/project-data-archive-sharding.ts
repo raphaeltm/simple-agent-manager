@@ -13,8 +13,8 @@ import { createModuleLogger, serializeError } from '../lib/logger';
 import {
   COMPACT_ARCHIVE_CHUNK_BYTES,
   COMPACT_ARCHIVE_FORMAT,
-  CompactArchiveTimeoutError,
   compactArchiveTimeout,
+  CompactArchiveTimeoutError,
   LEGACY_ARCHIVE_FORMAT,
   writeCompactChunk,
   writeImmutableJson,
