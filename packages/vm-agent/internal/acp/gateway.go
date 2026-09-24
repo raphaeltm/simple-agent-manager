@@ -21,14 +21,18 @@ import (
 )
 
 const localShellPath = "/bin/sh"
+const geminiInstallPackage = "@google/gemini-cli@0.61.0"
+const opencodeInstallPackage = "opencode-ai@1.18.32"
+const vibeInstallPackage = "mistral-vibe==2.25.8"
+const ampCLIInstallPackage = "@ampcode/cli@0.0.1790261352-g2ab14a"
 
-const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.73.0"
-const claudeCodeMinVersion = "2.1.251"
-const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.260"
+const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.81.2"
+const claudeCodeMinVersion = "2.1.280"
+const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.281"
 const claudeCodeInstallCommand = "npm install -g " + claudeACPInstallPackage + " " + claudeCodeInstallPackage
-const codexACPInstallPackage = "@agentclientprotocol/codex-acp@1.10.0"
-const codexCLIInstallPackage = "@openai/codex@0.153.4"
-const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.10.0 @openai/codex@0.153.4"
+const codexACPInstallPackage = "@agentclientprotocol/codex-acp@1.13.1"
+const codexCLIInstallPackage = "@openai/codex@0.156.1"
+const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.13.1 @openai/codex@0.156.1"
 
 // BootLogReporter sends structured log entries to the control plane.
 // It must be non-nil and have a valid token for logging to work.
@@ -921,18 +925,21 @@ func agentInstallScript(info agentCommandInfo) string {
 		return info.installCmd
 	}
 	return fmt.Sprintf(
-		`node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"; { which npm >/dev/null 2>&1 && [ "$node_major" -ge 20 ]; } || { rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg; apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs npm && npm install -g n && n 22 && hash -r; }; %s`,
+		`node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"; { which npm >/dev/null 2>&1 && [ "$node_major" -ge 22 ]; } || { rm -f /etc/apt/sources.list.d/github-cli.list /etc/apt/keyrings/githubcli-archive-keyring.gpg; apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs npm && npm install -g n && n 22 && hash -r; }; %s`,
 		info.installCmd,
 	)
 }
 
+// The ACP adapter bundles its own Claude SDK. Checking only the companion CLI
+// accepts obsolete SDKs even after `claude update`; validate both install surfaces.
 func claudeCodeVersionCheckCommand() string {
 	minParts := strings.Split(claudeCodeMinVersion, ".")
 	if len(minParts) != 3 {
 		panic("claudeCodeMinVersion must use major.minor.patch")
 	}
 	return fmt.Sprintf(
-		`command -v claude >/dev/null 2>&1 && version="$(claude --version 2>/dev/null | sed -n 's/.*\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2 \3/p' | head -n 1)" && set -- $version && [ "$#" -eq 3 ] && { [ "$1" -gt %s ] || { [ "$1" -eq %s ] && { [ "$2" -gt %s ] || { [ "$2" -eq %s ] && [ "$3" -ge %s ]; }; }; }; }`,
+		`[ "$(claude-agent-acp --version 2>/dev/null)" = "%s" ] && command -v claude >/dev/null 2>&1 && version="$(claude --version 2>/dev/null | sed -n 's/.*\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2 \3/p' | head -n 1)" && set -- $version && [ "$#" -eq 3 ] && { [ "$1" -gt %s ] || { [ "$1" -eq %s ] && { [ "$2" -gt %s ] || { [ "$2" -eq %s ] && [ "$3" -ge %s ]; }; }; }; }`,
+		strings.TrimPrefix(claudeACPInstallPackage, "@agentclientprotocol/claude-agent-acp@"),
 		minParts[0],
 		minParts[0],
 		minParts[1],
@@ -951,10 +958,16 @@ func codexVersionCheckCommand() string {
 	)
 }
 
+// versionCheckCommand compares the complete version token, allowing a CLI's
+// human-readable suffix (Amp includes release time). Inputs are trusted pins.
+func versionCheckCommand(command, version string) string {
+	return fmt.Sprintf(`case "$(%s --version 2>/dev/null)" in "%s"|"%s "*) true ;; *) false ;; esac`, command, version, version)
+}
+
 func agentInstalledCheckScript(info agentCommandInfo) string {
 	checkScript := "command -v " + info.command + " >/dev/null 2>&1"
 	if info.validationCmd != "" {
-		checkScript += " && " + info.validationCmd
+		checkScript += " && { " + info.validationCmd + "; }"
 	}
 	return checkScript
 }
@@ -997,7 +1010,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 	case "openai-codex":
 		// Sandbox and approval overrides are injected through CODEX_CONFIG by
-		// writeCodexStartupConfig. codex-acp (verified through 1.10.0) does not parse Codex CLI -c
+		// writeCodexStartupConfig. codex-acp (verified through 1.13.1) does not parse Codex CLI -c
 		// arguments; its supported config channel is CODEX_CONFIG JSON, which it
 		// forwards to every app-server thread (including spawned subagents).
 		if credentialKind == "oauth-token" {
@@ -1021,34 +1034,38 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 	case "google-gemini":
 		return agentCommandInfo{
-			command:    "gemini",
-			args:       []string{"--acp"},
-			envVarName: "GEMINI_API_KEY",
-			installCmd: "npm install -g @google/gemini-cli@0.50.0",
-			isNpmBased: true,
+			command:       "gemini",
+			args:          []string{"--acp"},
+			envVarName:    "GEMINI_API_KEY",
+			installCmd:    "npm install -g " + geminiInstallPackage,
+			validationCmd: versionCheckCommand("gemini", strings.TrimPrefix(geminiInstallPackage, "@google/gemini-cli@")),
+			isNpmBased:    true,
 		}
 	case "mistral-vibe":
 		return agentCommandInfo{
-			command:    "vibe-acp",
-			envVarName: "MISTRAL_API_KEY",
-			installCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.19.1 --python 3.12 --quiet`,
+			command:       "vibe-acp",
+			envVarName:    "MISTRAL_API_KEY",
+			validationCmd: versionCheckCommand("vibe-acp", "vibe-acp "+strings.TrimPrefix(vibeInstallPackage, "mistral-vibe==")),
+			installCmd:    `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.25.8 --python 3.12 --quiet`,
 		}
 	case "opencode":
 		return agentCommandInfo{
 			command:       "opencode",
 			args:          []string{"acp"},
 			envVarName:    "OPENCODE_API_KEY",
-			installCmd:    "npm install -g opencode-ai@1.18.27",
+			installCmd:    "npm install -g " + opencodeInstallPackage,
+			validationCmd: versionCheckCommand("opencode", strings.TrimPrefix(opencodeInstallPackage, "opencode-ai@")),
 			isNpmBased:    true,
 			injectionMode: "",
 			authFilePath:  "",
 		}
 	case "amp":
 		return agentCommandInfo{
-			command:    "acp-amp",
-			args:       []string{"run"},
-			envVarName: "AMP_API_KEY",
-			installCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @ampcode/cli@0.0.1783785389-g0da70d && UV_PYTHON_INSTALL_DIR=/opt/uv-python uv run --python 3.12 python -c "
+			command:       "acp-amp",
+			args:          []string{"run"},
+			envVarName:    "AMP_API_KEY",
+			validationCmd: versionCheckCommand("amp", strings.TrimPrefix(ampCLIInstallPackage, "@ampcode/cli@")),
+			installCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @ampcode/cli@0.0.1790261352-g2ab14a && UV_PYTHON_INSTALL_DIR=/opt/uv-python uv run --python 3.12 python -c "
 PYTHON_SDK_PATH = "/opt/uv-tools/acp-amp/lib/python3.12/site-packages/acp_amp/driver/python_sdk.py"
 AMP_TYPES_PATH = "/opt/uv-tools/acp-amp/lib/python3.12/site-packages/amp_sdk/types.py"
 
@@ -1090,7 +1107,7 @@ with open(AMP_TYPES_PATH, "w", encoding="utf-8") as handle:
     handle.write(vt)
 print('Patched amp_sdk: visibility default to private')
 "`,
-			// isNpmBased must be true because installCmd chains `npm install -g @ampcode/cli@0.0.1783785389-g0da70d`
+			// isNpmBased must be true because installCmd chains `npm install -g @ampcode/cli@0.0.1790261352-g2ab14a`
 			// after the uv install. The Node.js bootstrap preamble ensures npm is available
 			// inside devcontainers that don't ship with Node.js pre-installed.
 			isNpmBased:    true,

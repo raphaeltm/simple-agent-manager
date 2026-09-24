@@ -75,7 +75,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "oauth-token",
 			wantCommand:    "gemini",
 			wantEnvVar:     "GEMINI_API_KEY",
-			wantInstallCmd: "npm install -g @google/gemini-cli@0.50.0",
+			wantInstallCmd: "npm install -g @google/gemini-cli@0.61.0",
 		},
 		{
 			name:           "Mistral Vibe uses API key",
@@ -83,7 +83,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "vibe-acp",
 			wantEnvVar:     "MISTRAL_API_KEY",
-			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.19.1 --python 3.12 --quiet`,
+			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.25.8 --python 3.12 --quiet`,
 		},
 		{
 			name:           "Amp uses API key",
@@ -91,7 +91,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "acp-amp",
 			wantEnvVar:     "AMP_API_KEY",
-			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @ampcode/cli@0.0.1783785389-g0da70d`,
+			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @ampcode/cli@0.0.1790261352-g2ab14a`,
 		},
 	}
 
@@ -275,11 +275,11 @@ func TestGetAgentCommandInfoClaudeCode(t *testing.T) {
 	}
 }
 
-func TestGetAgentCommandInfoClaudeCodeRequiresFable51CapableCli(t *testing.T) {
+func TestGetAgentCommandInfoClaudeCodeRequiresCatalogCapableCli(t *testing.T) {
 	t.Parallel()
 
 	info := getAgentCommandInfo("claude-code", "api-key")
-	if !strings.Contains(info.installCmd, "@anthropic-ai/claude-code@2.1.260") {
+	if !strings.Contains(info.installCmd, "@anthropic-ai/claude-code@2.1.281") {
 		t.Fatalf("installCmd=%q, want pinned Claude Code CLI", info.installCmd)
 	}
 	minParts := strings.Split(claudeCodeMinVersion, ".")
@@ -392,8 +392,8 @@ func TestCodexInstalledCheckRequiresExactAdapterAndCLI(t *testing.T) {
 		return cmd.Run()
 	}
 
-	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 1.10.0")
-	writeVersionCommand("codex", "codex-cli 0.153.4")
+	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 1.13.1")
+	writeVersionCommand("codex", "codex-cli 0.156.1")
 	if err := runCheck(); err != nil {
 		t.Fatalf("current Codex adapter and CLI should pass validation: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestCodexInstalledCheckRequiresExactAdapterAndCLI(t *testing.T) {
 		t.Fatal("stale Codex adapter unexpectedly passed validation")
 	}
 
-	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 1.10.0")
+	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 1.13.1")
 	writeVersionCommand("codex", "codex-cli 0.153.2")
 	if err := runCheck(); err == nil {
 		t.Fatal("stale Codex CLI unexpectedly passed validation")
@@ -460,7 +460,7 @@ func TestGetAgentCommandInfoMistralVibe(t *testing.T) {
 	if info.envVarName != "MISTRAL_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "MISTRAL_API_KEY")
 	}
-	wantInstall := `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.19.1 --python 3.12 --quiet`
+	wantInstall := `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.25.8 --python 3.12 --quiet`
 	if info.installCmd != wantInstall {
 		t.Fatalf("installCmd=%q, want %q", info.installCmd, wantInstall)
 	}
@@ -506,7 +506,7 @@ func TestGetAgentCommandInfoAmp(t *testing.T) {
 	for _, want := range []string{
 		"uv tool install acp-amp==0.1.3",
 		"--with amp-sdk==0.1.2",
-		"npm install -g @ampcode/cli@0.0.1783785389-g0da70d",
+		"npm install -g @ampcode/cli@0.0.1790261352-g2ab14a",
 		"Patched acp-amp: error handling + MCP config wrapping",
 		"visibility default to private",
 	} {
@@ -515,7 +515,7 @@ func TestGetAgentCommandInfoAmp(t *testing.T) {
 		}
 	}
 	if !info.isNpmBased {
-		t.Fatalf("isNpmBased=false, want true (amp chains npm install for @ampcode/cli@0.0.1783785389-g0da70d)")
+		t.Fatalf("isNpmBased=false, want true (amp chains npm install for @ampcode/cli@0.0.1790261352-g2ab14a)")
 	}
 	if len(info.args) != 1 || info.args[0] != "run" {
 		t.Fatalf("args=%v, want [run]", info.args)
@@ -545,7 +545,7 @@ func TestAgentInstallScriptAmpIncludesNodeBootstrap(t *testing.T) {
 
 	info := getAgentCommandInfo("amp", "api-key")
 	script := agentInstallScript(info)
-	// Amp is isNpmBased=true because it chains `npm install -g @ampcode/cli@0.0.1783785389-g0da70d`.
+	// Amp is isNpmBased=true because it chains `npm install -g @ampcode/cli@0.0.1790261352-g2ab14a`.
 	// agentInstallScript must prepend the Node.js bootstrap preamble so npm is
 	// available in devcontainers that don't ship with Node.js.
 	if !strings.Contains(script, "apt-get install") {
@@ -555,7 +555,7 @@ func TestAgentInstallScriptAmpIncludesNodeBootstrap(t *testing.T) {
 	if !strings.Contains(script, "uv tool install acp-amp") {
 		t.Fatalf("agentInstallScript lost the uv install portion")
 	}
-	if !strings.Contains(script, "npm install -g @ampcode/cli@0.0.1783785389-g0da70d") {
+	if !strings.Contains(script, "npm install -g @ampcode/cli@0.0.1790261352-g2ab14a") {
 		t.Fatalf("agentInstallScript lost the npm install portion")
 	}
 }
