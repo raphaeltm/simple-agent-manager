@@ -71,7 +71,7 @@ function BreakerCard({
 }) {
   const badge = BREAKER_BADGE[breaker.state];
   return (
-    <Card data-testid={`breaker-${breaker.projectId}`}>
+    <Card data-testid={`breaker-${breaker.projectId}`} className="min-w-0">
       <div className="flex flex-col gap-3 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="m-0 min-w-0 break-words text-base font-semibold text-fg-primary">

@@ -48,7 +48,7 @@ function MigrationCard({
 }) {
   const badge = MIGRATION_STATE_BADGE[migration.state] ?? DEFAULT_BADGE;
   return (
-    <Card data-testid={`migration-${migration.migrationId}`}>
+    <Card data-testid={`migration-${migration.migrationId}`} className="min-w-0">
       <div className="flex flex-col gap-3 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="m-0 min-w-0 break-words text-base font-semibold text-fg-primary">

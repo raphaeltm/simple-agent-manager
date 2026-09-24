@@ -1,12 +1,6 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import {
-  assertNoOverflow,
-  makeMockUser,
-  screenshot,
-  screenshotSectionNearHeading,
-  setupAuditRoutes,
-} from './audit-helpers';
+import { assertNoOverflow, makeMockUser, screenshot, setupAuditRoutes } from './audit-helpers';
 
 const ADMIN_USER = makeMockUser({
   email: 'admin@example.com',
@@ -373,108 +367,6 @@ test.describe('AdminStorage', () => {
     await expect(page.getByRole('button', { name: /abandon/i })).toHaveCount(3);
     await page.getByRole('heading', { name: 'Problem migrations' }).scrollIntoViewIfNeeded();
     await screenshot(page, 'admin-storage-problem-migrations');
-    await screenshotSectionNearHeading(
-      page,
-      'Problem migrations',
-      'REVIEW-admin-storage-problem-migrations-section'
-    );
-    // REVIEW DEBUG: find the widest element inside the first migration card
-    const debugInfo = await page.evaluate(() => {
-      const card = document.querySelector('[data-testid="migration-67927ce6"]');
-      if (!card) return 'card not found';
-      const out: string[] = [];
-      out.push(`card clientWidth=${(card as HTMLElement).clientWidth}`);
-      for (const el of Array.from(card.querySelectorAll('*'))) {
-        const w = (el as HTMLElement).scrollWidth;
-        if (w > 375) {
-          const cls = (el.getAttribute('class') ?? '').slice(0, 100);
-          const text = (el.textContent ?? '').trim().slice(0, 60);
-          out.push(`<${el.tagName.toLowerCase()} class="${cls}"> scrollWidth=${w} text="${text}"`);
-        }
-      }
-      return out.join('\n');
-    });
-    console.log('REVIEW DEBUG:\n' + debugInfo);
-    const wordWidths = await page.evaluate(() => {
-      const card = document.querySelector('[data-testid="migration-67927ce6"]');
-      if (!card) return 'no card';
-      const results: Array<[string, number]> = [];
-      for (const dd of Array.from(card.querySelectorAll('dd'))) {
-        const style = getComputedStyle(dd);
-        const words = (dd.textContent ?? '').split(/\s+/);
-        for (const w of words) {
-          if (!w) continue;
-          const span = document.createElement('span');
-          span.style.font = style.font;
-          span.style.fontFamily = style.fontFamily;
-          span.style.fontSize = style.fontSize;
-          span.style.whiteSpace = 'nowrap';
-          span.style.position = 'absolute';
-          span.style.visibility = 'hidden';
-          span.textContent = w;
-          document.body.appendChild(span);
-          results.push([w.slice(0, 50), span.getBoundingClientRect().width]);
-          document.body.removeChild(span);
-        }
-      }
-      results.sort((a, b) => b[1] - a[1]);
-      return results.slice(0, 8).map(([w, wd]) => `${wd.toFixed(0)}px: "${w}"`).join('\n');
-    });
-    console.log('REVIEW WORD WIDTHS:\n' + wordWidths);
-    const gridInfo = await page.evaluate(() => {
-      const dl = document.querySelector('[data-testid="migration-67927ce6"] dl');
-      if (!dl) return 'no dl';
-      const style = getComputedStyle(dl);
-      return JSON.stringify(
-        {
-          gridTemplateColumns: style.gridTemplateColumns,
-          gridAutoColumns: style.gridAutoColumns,
-          width: style.width,
-          minWidth: style.minWidth,
-          boxSizing: style.boxSizing,
-          padding: style.padding,
-        },
-        null,
-        2
-      );
-    });
-    console.log('REVIEW GRID INFO:\n' + gridInfo);
-    const perCellMinContent = await page.evaluate(() => {
-      const dl = document.querySelector('[data-testid="migration-67927ce6"] dl');
-      if (!dl) return 'no dl';
-      const out: string[] = [];
-      for (const cell of Array.from(dl.children)) {
-        const clone = cell.cloneNode(true) as HTMLElement;
-        clone.style.width = 'min-content';
-        clone.style.position = 'absolute';
-        clone.style.visibility = 'hidden';
-        clone.style.display = 'block';
-        document.body.appendChild(clone);
-        const w = clone.getBoundingClientRect().width;
-        out.push(`${w.toFixed(1)}px min-content: "${(cell.textContent ?? '').slice(0, 60)}"`);
-        document.body.removeChild(clone);
-      }
-      return out.join('\n');
-    });
-    console.log('REVIEW PER-CELL MIN-CONTENT:\n' + perCellMinContent);
-    const headerMinContent = await page.evaluate(() => {
-      const card = document.querySelector('[data-testid="migration-67927ce6"]');
-      if (!card) return 'no card';
-      const out: string[] = [];
-      const flexCol = card.querySelector('.flex.flex-col.gap-3.p-4');
-      for (const child of Array.from(flexCol?.children ?? [])) {
-        const clone = child.cloneNode(true) as HTMLElement;
-        clone.style.width = 'min-content';
-        clone.style.position = 'absolute';
-        clone.style.visibility = 'hidden';
-        document.body.appendChild(clone);
-        const w = clone.getBoundingClientRect().width;
-        out.push(`${w.toFixed(1)}px min-content: <${child.tagName.toLowerCase()} class="${(child.getAttribute('class') ?? '').slice(0, 50)}">`);
-        document.body.removeChild(clone);
-      }
-      return out.join('\n');
-    });
-    console.log('REVIEW HEADER MIN-CONTENT:\n' + headerMinContent);
     await assertNoOverflow(page);
   });
 
@@ -486,11 +378,6 @@ test.describe('AdminStorage', () => {
     await expect(page.getByText('No problem migrations.')).toBeVisible();
     await page.getByRole('heading', { name: 'Problem migrations' }).scrollIntoViewIfNeeded();
     await screenshot(page, 'admin-storage-problem-migrations-empty');
-    await screenshotSectionNearHeading(
-      page,
-      'Problem migrations',
-      'REVIEW-admin-storage-problem-migrations-empty-section'
-    );
     await assertNoOverflow(page);
   });
 
