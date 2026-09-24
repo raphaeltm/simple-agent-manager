@@ -34,7 +34,7 @@ features, technology, and code.
 - [x] Include a Mermaid diagram for the multi-store recovery flow.
 - [x] Run narrow marketing-site lint, typecheck, build, link checks, and
       Mermaid browser validation.
-- [ ] Run documentation and task-completion reviews, then create, validate,
+- [x] Run documentation and task-completion reviews, then create, validate,
       merge, and monitor the PR.
 
 ## Acceptance criteria
@@ -46,7 +46,7 @@ features, technology, and code.
 - [x] It does not present unmerged archive-search continuation work as shipped.
 - [x] The diagram makes the distributed sequence clearer and renders on the
       public site.
-- [ ] The site validates, the PR merges, and the production deployment passes.
+- [x] The site validates, the PR merges, and the production deployment passes.
 
 ## Validation evidence
 
@@ -59,6 +59,15 @@ features, technology, and code.
   captured screenshots were reviewed and showed no clipping or layout issues.
 - The first documentation review caught unmerged archive-search claims. They
   were removed before the fresh review and publication.
+
+## Completion evidence
+
+- PR #2141 merged as `e9605b043cb7dc6b14fb9d454ad409383ff3b256`.
+- CI run `36020176512` passed. Its marketing-site job ran lint, type checking,
+  build, links, and desktop/mobile browser tests.
+- The CodeRabbit label workflow `36021359914` completed. CodeRabbit skipped a
+  bot-authored review and reported no findings or review threads.
+- Deploy Marketing Site run `36021508872` passed, publishing the post.
 
 ## References
 
