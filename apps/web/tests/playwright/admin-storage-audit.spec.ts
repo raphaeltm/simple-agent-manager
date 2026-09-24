@@ -385,7 +385,7 @@ test.describe('AdminStorage', () => {
     await page.getByTestId('migration-67927ce6').getByRole('button', { name: /abandon/i }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText('Abandon migration')).toBeVisible();
+    await expect(dialog.getByRole('heading', { name: 'Abandon migration' })).toBeVisible();
     await expect(dialog.getByText('67927ce6')).toBeVisible();
     await expect(dialog.getByText('1d438cc7-aaaa-bbbb-cccc-dddddddddddd')).toBeVisible();
     await screenshot(page, 'admin-storage-abandon-dialog');
