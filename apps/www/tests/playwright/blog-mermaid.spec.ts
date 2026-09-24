@@ -7,6 +7,11 @@ const mermaidPosts = [
     screenshotName: 'deployment-recovery',
   },
   {
+    name: 'the archive recovery and search journal',
+    path: '/blog/sams-journal-archives-got-an-exit/',
+    screenshotName: 'archive-recovery-search',
+  },
+  {
     name: 'the resumable archive journal',
     path: '/blog/sams-journal-archives-learned-to-resume/',
     screenshotName: 'resumable-archive',
@@ -86,6 +91,12 @@ const mermaidPosts = [
 for (const post of mermaidPosts) {
   test(`${post.name} has a visible Mermaid viewport`, async ({ page }, testInfo) => {
     await page.goto(post.path);
+
+    if (post.screenshotName === 'archive-recovery-search') {
+      await expect(
+        page.getByRole('heading', { name: "SAM's Journal: Archives Got an Exit" })
+      ).toBeVisible();
+    }
 
     const diagram = page.locator('.mermaid-shell svg');
     await expect(diagram).toBeVisible();

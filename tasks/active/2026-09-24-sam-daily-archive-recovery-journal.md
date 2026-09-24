@@ -15,12 +15,11 @@ features, technology, and code.
   archive move. With an operator-supplied reason, it can discard a partial copy
   only before source deletion, return the conversation to its original store,
   and leave an audit record; it refuses moves that need copy-back instead.
-- Slice B made project-wide message search follow an authenticated continuation
-  through every archived owner rather than quietly searching only an initial
-  subset. It reports whether the search is still incomplete or had errors.
-- The story crosses the live ProjectData Durable Object, archive shards, D1
-  routing records, and the MCP search caller. A Mermaid diagram will help a
-  non-specialist understand the recovery and search path.
+- The proposed archive-search continuation work is not merged, so it cannot be
+  represented as shipped in this journal.
+- The shipped recovery story crosses the live ProjectData Durable Object,
+  archive shards, and D1 routing records. A Mermaid diagram will help a
+  non-specialist understand that recovery path.
 - The post belongs in `apps/www/src/content/blog/`, using the established SAM
   journal voice. The content guide requires accurate frontmatter, a concise
   title and excerpt, and marketing-site validation.
@@ -30,10 +29,10 @@ features, technology, and code.
 - [x] Verify each public claim against the merged source and task evidence.
 - [x] Write a SAM-authored devlog that begins by saying SAM is a bot keeping a
       daily journal of work in the codebase.
-- [x] Explain archive recovery and complete history search without presuming
-      prior knowledge of Durable Objects, D1, or MCP.
-- [x] Include a Mermaid diagram for the multi-store recovery and search flow.
-- [ ] Run narrow marketing-site lint, typecheck, build, link checks, and
+- [x] Explain archive recovery without presuming prior knowledge of Durable
+      Objects or D1.
+- [x] Include a Mermaid diagram for the multi-store recovery flow.
+- [x] Run narrow marketing-site lint, typecheck, build, link checks, and
       Mermaid browser validation.
 - [ ] Run documentation and task-completion reviews, then create, validate,
       merge, and monitor the PR.
@@ -44,11 +43,22 @@ features, technology, and code.
       a lay reader.
 - [x] It accurately explains that a partial archive copy may be abandoned only
       before the source is deleted, while completed-source cases use recovery.
-- [x] It accurately explains that project-wide search continues through archive
-      owners and identifies incomplete/error outcomes.
-- [ ] The diagram makes the distributed sequence clearer and renders on the
+- [x] It does not present unmerged archive-search continuation work as shipped.
+- [x] The diagram makes the distributed sequence clearer and renders on the
       public site.
 - [ ] The site validates, the PR merges, and the production deployment passes.
+
+## Validation evidence
+
+- `pnpm --filter @simple-agent-manager/www lint`, `typecheck`, `build`, and
+  `check:links` passed on 2026-09-24; the link check found 0 broken internal
+  documentation links.
+- The focused `blog-mermaid.spec.ts` route test passed in Desktop Chrome and
+  Mobile Chrome. It verified the exact page title, a visible non-zero Mermaid
+  SVG, zoom/reset/full-screen controls, and no horizontal overflow. The
+  captured screenshots were reviewed and showed no clipping or layout issues.
+- The first documentation review caught unmerged archive-search claims. They
+  were removed before the fresh review and publication.
 
 ## References
 
