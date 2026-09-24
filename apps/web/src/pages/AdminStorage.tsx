@@ -16,6 +16,7 @@ import {
   adminProjectDataStorageQueryKeys,
   adminProjectDataStorageTelemetryQueryOptions,
 } from '../lib/query-options';
+import { ProblemMigrations } from './admin-storage/ProblemMigrations';
 
 const DEFAULT_CLOSE_REASON = 'Closed from admin UI';
 
@@ -231,6 +232,8 @@ export function AdminStorage() {
           </p>
         )}
       </section>
+
+      <ProblemMigrations />
 
       <section className="grid gap-3">
         <h2 className="m-0 text-base font-semibold text-fg-primary">Storage telemetry</h2>

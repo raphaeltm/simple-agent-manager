@@ -31,6 +31,7 @@
 
 export {
   adminProjectDataArchiveBreakersQueryOptions,
+  adminProjectDataArchiveProblemMigrationsQueryOptions,
   adminProjectDataStorageQueryKeys,
   adminProjectDataStorageTelemetryQueryOptions,
 } from './admin-project-data-storage';

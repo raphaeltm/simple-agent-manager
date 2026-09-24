@@ -1,6 +1,8 @@
 import type {
   AdminProjectDataArchiveCircuitBreakerControlResponse,
   AdminProjectDataArchiveCircuitBreakersResponse,
+  AdminProjectDataArchiveMigrationAbandonResponse,
+  AdminProjectDataArchiveProblemMigrationsResponse,
   AdminProjectDataStorageTelemetryResponse,
 } from '@simple-agent-manager/shared';
 
@@ -37,6 +39,29 @@ export async function closeAdminProjectDataArchiveCircuitBreaker(
     {
       method: 'POST',
       body: JSON.stringify({ state: 'closed', reason }),
+    }
+  );
+}
+
+export async function fetchAdminProjectDataArchiveProblemMigrations(
+  limit?: number
+): Promise<AdminProjectDataArchiveProblemMigrationsResponse> {
+  const params = limit ? `?limit=${limit}` : '';
+  return request<AdminProjectDataArchiveProblemMigrationsResponse>(
+    `/api/admin/project-data/storage/archive-sharding/problem-migrations${params}`
+  );
+}
+
+export async function abandonAdminProjectDataArchiveMigration(
+  projectId: string,
+  migrationId: string,
+  reason: string
+): Promise<AdminProjectDataArchiveMigrationAbandonResponse> {
+  return request<AdminProjectDataArchiveMigrationAbandonResponse>(
+    `/api/admin/project-data/storage/${encodeURIComponent(projectId)}/archive-sharding/migrations/${encodeURIComponent(migrationId)}/abandon`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
     }
   );
 }
