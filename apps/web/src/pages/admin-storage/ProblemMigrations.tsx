@@ -56,7 +56,7 @@ function MigrationCard({
           </h3>
           <Badge label={badge.label} className={badge.className} />
         </div>
-        <dl className="m-0 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
+        <dl className="m-0 min-w-0 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
           <dt className="text-fg-muted">Migration</dt>
           <dd className="m-0 break-all font-mono text-xs text-fg-primary">
             {migration.migrationId}
@@ -181,8 +181,8 @@ export function ProblemMigrations() {
         ))}
         {migrationsQuery.data && migrations.length >= migrationsQuery.data.limit && (
           <p className="m-0 text-xs text-fg-muted">
-            Showing {migrations.length} of at least {migrations.length} problem migrations (limit:{' '}
-            {migrationsQuery.data.limit}). Additional results may exist beyond this limit.
+            Showing the first {migrations.length} problem migrations (limit:{' '}
+            {migrationsQuery.data.limit}). More may exist beyond this limit.
           </p>
         )}
         {migrationsQuery.data &&

@@ -356,7 +356,7 @@ describe('AdminStorage — Problem Migrations', () => {
     renderPage();
 
     expect(
-      await screen.findByText(/showing 25 of at least 25 problem migrations/i)
+      await screen.findByText(/showing the first 25 problem migrations/i)
     ).toBeInTheDocument();
   });
 

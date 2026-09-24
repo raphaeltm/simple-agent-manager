@@ -371,6 +371,7 @@ test.describe('AdminStorage', () => {
     await expect(page.getByTestId('migration-6d6f3099')).toBeVisible();
     await expect(page.getByTestId('migration-failed-abc1')).toBeVisible();
     await expect(page.getByRole('button', { name: /abandon/i })).toHaveCount(3);
+    await page.getByRole('heading', { name: 'Problem migrations' }).scrollIntoViewIfNeeded();
     await screenshot(page, 'admin-storage-problem-migrations');
     await screenshotSectionNearHeading(
       page,
@@ -420,6 +421,60 @@ test.describe('AdminStorage', () => {
       return results.slice(0, 8).map(([w, wd]) => `${wd.toFixed(0)}px: "${w}"`).join('\n');
     });
     console.log('REVIEW WORD WIDTHS:\n' + wordWidths);
+    const gridInfo = await page.evaluate(() => {
+      const dl = document.querySelector('[data-testid="migration-67927ce6"] dl');
+      if (!dl) return 'no dl';
+      const style = getComputedStyle(dl);
+      return JSON.stringify(
+        {
+          gridTemplateColumns: style.gridTemplateColumns,
+          gridAutoColumns: style.gridAutoColumns,
+          width: style.width,
+          minWidth: style.minWidth,
+          boxSizing: style.boxSizing,
+          padding: style.padding,
+        },
+        null,
+        2
+      );
+    });
+    console.log('REVIEW GRID INFO:\n' + gridInfo);
+    const perCellMinContent = await page.evaluate(() => {
+      const dl = document.querySelector('[data-testid="migration-67927ce6"] dl');
+      if (!dl) return 'no dl';
+      const out: string[] = [];
+      for (const cell of Array.from(dl.children)) {
+        const clone = cell.cloneNode(true) as HTMLElement;
+        clone.style.width = 'min-content';
+        clone.style.position = 'absolute';
+        clone.style.visibility = 'hidden';
+        clone.style.display = 'block';
+        document.body.appendChild(clone);
+        const w = clone.getBoundingClientRect().width;
+        out.push(`${w.toFixed(1)}px min-content: "${(cell.textContent ?? '').slice(0, 60)}"`);
+        document.body.removeChild(clone);
+      }
+      return out.join('\n');
+    });
+    console.log('REVIEW PER-CELL MIN-CONTENT:\n' + perCellMinContent);
+    const headerMinContent = await page.evaluate(() => {
+      const card = document.querySelector('[data-testid="migration-67927ce6"]');
+      if (!card) return 'no card';
+      const out: string[] = [];
+      const flexCol = card.querySelector('.flex.flex-col.gap-3.p-4');
+      for (const child of Array.from(flexCol?.children ?? [])) {
+        const clone = child.cloneNode(true) as HTMLElement;
+        clone.style.width = 'min-content';
+        clone.style.position = 'absolute';
+        clone.style.visibility = 'hidden';
+        document.body.appendChild(clone);
+        const w = clone.getBoundingClientRect().width;
+        out.push(`${w.toFixed(1)}px min-content: <${child.tagName.toLowerCase()} class="${(child.getAttribute('class') ?? '').slice(0, 50)}">`);
+        document.body.removeChild(clone);
+      }
+      return out.join('\n');
+    });
+    console.log('REVIEW HEADER MIN-CONTENT:\n' + headerMinContent);
     await assertNoOverflow(page);
   });
 
@@ -429,6 +484,7 @@ test.describe('AdminStorage', () => {
     });
     await openStoragePage(page);
     await expect(page.getByText('No problem migrations.')).toBeVisible();
+    await page.getByRole('heading', { name: 'Problem migrations' }).scrollIntoViewIfNeeded();
     await screenshot(page, 'admin-storage-problem-migrations-empty');
     await screenshotSectionNearHeading(
       page,
