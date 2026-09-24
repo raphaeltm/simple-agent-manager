@@ -7,7 +7,7 @@ The first frontend performance PR covers responsive route preservation plus the 
 ## Research Basis
 
 - SOL research tasks `01KZF578YJ1JG4APXDA4J29EYX`, `01KZF57GTQW3Q6RW3JPP47QRM2`, and `01KZF57MDCMN7KT94MFSDEF5C5`.
-- `tasks/active/2026-08-07-frontend-query-cache-and-rotation-resilience.md`.
+- `tasks/archive/2026-08-07-frontend-query-cache-and-rotation-resilience.md`.
 - Prior cross-user browser-cache incident: `tasks/archive/2026-08-05-namespace-library-cache-by-user.md`.
 - Official TanStack persistence guidance: https://tanstack.com/query/v5/docs/framework/react/plugins/persistQueryClient
 

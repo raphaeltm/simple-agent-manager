@@ -6,7 +6,7 @@
 malformed `chat_sessions` row failed the valibot schema, because it mapped every
 row through a throwing parser (`rows.map(parseChatSessionListRow)`) with no
 per-row try/catch. That specific read was fixed in
-`tasks/active/2026-07-16-fix-sessions-list-internal-error-large-projects.md`
+`tasks/archive/2026-07-16-fix-sessions-list-internal-error-large-projects.md`
 (PR on branch `claude/fix-requested-9f2ry7`) and the class of bug is now codified
 in `.claude/rules/50-list-read-row-fault-isolation.md`.
 

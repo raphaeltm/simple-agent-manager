@@ -55,7 +55,7 @@ natural first read is "my branch broke Durable Objects."
 
 ## Context
 
-Discovered while running Phase 6 of `tasks/active/2026-08-04-auto-run-html-artifact-preview.md`.
+Discovered while running Phase 6 of `tasks/archive/2026-08-04-auto-run-html-artifact-preview.md`.
 That branch's first staging deploy (`30958087671`) succeeded and was fully verified; the two later
 deploys (`30959346237`, `30961280231`) failed purely due to this pinning, after the other branch
 deployed at 23:14:33.

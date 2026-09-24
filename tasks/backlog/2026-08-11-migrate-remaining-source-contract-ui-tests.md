@@ -77,7 +77,7 @@ new tests, to avoid duplicate coverage.
 
 ## Related prior art (same bug class, different files — not a duplicate of this task)
 
-`tasks/backlog/2026-03-01-migrate-source-contract-tests.md` tracks the same fragility class in
+`tasks/backlog/2026-04-01-replace-source-contract-tests.md` tracks the same fragility class in
 six `apps/web/tests/unit/*` files (chat components, task components, TDF-8 state tracking,
 `useChatWebSocket`, landing page, theme tokens). That task predates this one and targets
 different files; it was still open as of this task's creation. Both tasks should eventually
@@ -112,5 +112,5 @@ underlying migration approach/helpers were established there.
 - `.claude/rules/06-technical-patterns.md` — "UI-to-Backend Data Path Verification" (the `calls updateProject with ...` assertion class)
 - `apps/api/tests/unit/project-agent-defaults.test.ts` (lines 1-15 docstring, 429-454 UI section block)
 - `apps/api/tests/unit/project-default-provider.test.ts` (lines 1-19 docstring, 295-312 settings UI block)
-- `tasks/backlog/2026-03-01-migrate-source-contract-tests.md` — same bug class, different files, filed earlier
+- `tasks/backlog/2026-04-01-replace-source-contract-tests.md` — same bug class, different files, filed earlier
 - `tasks/archive/2026-08-10-ai-slop-debt-burndown.md` — the burn-down PR whose prettier rewrap first broke the API-PATCH-route sibling blocks in these same two files

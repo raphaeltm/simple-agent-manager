@@ -21,7 +21,7 @@ As the very first action when starting a `/do` execution, create `.do-state.md`:
 
 ## Task File
 
-<path to the task file, e.g., tasks/active/2026-03-14-notification-system.md>
+<path to the task file, e.g., tasks/active/2026-03-14-my-feature.md>
 
 ## Branch
 

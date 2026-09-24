@@ -119,7 +119,7 @@ Implementation approach:
 ## Prior Art and Context
 
 - **Predecessor task**: `tasks/archive/2026-02-17-acp-reconnect-message-integrity.md` — fixed the original reconnect bugs (async clear race, prompt state, cancel support, token refresh)
-- **Related backlog task**: `tasks/backlog/2026-02-17-acp-session-stuck-after-reconnect.md` — the R3 fix in this task (post-replay authoritative state) is what introduced the current bug
+- **Related backlog task**: `tasks/archive/2026-02-17-acp-session-stuck-after-reconnect.md` — the R3 fix in this task (post-replay authoritative state) is what introduced the current bug
 - **Commit that introduced the bug**: `f75b4c3` ("fix: harden reconnect for ACP chat and terminal sessions")
 - **Ring buffer pattern**: Similar to terminal multiplexer scrollback buffers (tmux, screen) where replay is bounded and late-join viewers get a snapshot. The key lesson from prior art: replay frames should have explicit "begin replay" / "end replay" markers, and the "end replay" state update should never be confused with a "begin replay" signal. The server-side fix (replayCount=0) follows this principle.
 

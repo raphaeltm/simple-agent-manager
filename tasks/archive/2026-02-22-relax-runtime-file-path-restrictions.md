@@ -119,5 +119,5 @@ docker exec -u root -i {containerID} sh -c "mkdir -p '{dir}' && cat > '{path}'"
 
 ## Related
 
-- `tasks/backlog/2026-02-18-project-runtime-env-and-files.md` — original feature spec
-- `tasks/backlog/2026-02-17-devcontainer-remote-user-detection.md` — detecting the devcontainer user (relevant for `~` expansion)
+- `tasks/archive/2026-02-18-project-runtime-env-and-files.md` — original feature spec
+- `tasks/archive/2026-02-17-devcontainer-remote-user-detection.md` — detecting the devcontainer user (relevant for `~` expansion)

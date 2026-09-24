@@ -131,7 +131,7 @@ resource mismatch) hides the very distribution you need in order to find this cl
 
 ## References
 
-- Task: `tasks/active/2026-09-11-agent-version-content-identity-and-cpu-admission.md`
+- Task: `tasks/archive/2026-09-11-agent-version-content-identity-and-cpu-admission.md`
 - Implementation: `scripts/deploy/resolve-vm-agent-release.sh`,
   `apps/api/src/services/workspace-resource-capacity.ts` (`measuredAdmissionDiagnostic`)
 - `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md` — a predicate that cannot fire

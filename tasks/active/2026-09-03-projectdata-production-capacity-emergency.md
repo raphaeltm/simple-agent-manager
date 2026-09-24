@@ -155,10 +155,13 @@ uncertain states must fail closed.
 - [ ] Coordinate a successful staging deployment, exercise the real preflight
       and archival path end to end, prove fail-closed behavior, and return staging
       to zero VMs at rest.
-- [ ] Open the PR, converge CI and CodeRabbit, merge, deploy production, and
+- [x] Open the PR, converge CI and CodeRabbit, merge, deploy production, and
       verify the exact deployed version before asking for mutation approval.
-- [ ] Present the exact production mutation plan and obtain Raphaël's explicit
+      (PR #2014 merged 2026-09-04.)
+- [x] Present the exact production mutation plan and obtain Raphaël's explicit
       approval before any destructive production operation.
+      (Plan `prod-p0-projectdata-01khrjganbbwgdy1nz0kvf0d4j-20260904` is armed in the
+      GitHub `production` Environment with its approved manifest SHA and bounded caps.)
 - [ ] Execute only the approved bounded plan, verify every archive before source
       deletion, stop at or below 90%, and abort on any uncertainty or stop trigger.
 - [ ] Observe storage/growth, archive integrity, errors/overload/CPU, and rows
@@ -544,12 +547,12 @@ catches before any structural assertion runs, so the parsers were never reached.
 
 ## References
 
-- `tasks/active/2026-08-31-projectdata-terminal-archive-sharding.md`
-- `tasks/active/2026-09-01-archive-sharding-rollout-controls.md`
-- `tasks/active/2026-09-02-manual-projectdata-cleanup-and-sharding-cadence.md`
-- `tasks/active/2026-08-26-projectdata-tool-payload-r2-archival.md`
-- `tasks/active/2026-08-27-projectdata-retention-convergence.md`
-- `tasks/active/2026-08-31-projectdata-pre-wall-storage-relief.md`
+- `tasks/archive/2026-08-31-projectdata-terminal-archive-sharding.md`
+- `tasks/archive/2026-09-01-archive-sharding-rollout-controls.md`
+- `tasks/archive/2026-09-02-manual-projectdata-cleanup-and-sharding-cadence.md`
+- `tasks/archive/2026-08-26-projectdata-tool-payload-r2-archival.md`
+- `tasks/archive/2026-08-27-projectdata-retention-convergence.md`
+- `tasks/archive/2026-08-31-projectdata-pre-wall-storage-relief.md`
 - `tasks/archive/2026-07-02-institutionalize-projectdata-wall-time-prevention.md`
 - `apps/api/src/scheduled/project-data-archive-sharding.ts`
 - `apps/api/src/services/project-data-archive-rollout-controls.ts`
@@ -561,3 +564,45 @@ catches before any structural assertion runs, so the parsers were never reached.
 - `.claude/rules/31-migration-safety.md`
 - `.claude/rules/47-control-loop-io-budget.md`
 - `.claude/rules/60-request-io-and-bundle-budgets.md`
+
+---
+
+## Reconciliation — 2026-09-23 (weekly queue audit)
+
+**Verdict: stays active.** This is the only task file left in `tasks/active/`. Everything else
+was archived because its work shipped; this one has not met its own headline acceptance
+criterion.
+
+Proven done (evidence gathered 2026-09-23):
+
+- PR #2014 merged 2026-09-04 and deployed. The relief/preflight code path is live.
+- The GitHub `production` Environment carries the full approved plan:
+  `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED=true`,
+  `…_PLAN_ID=prod-p0-projectdata-01khrjganbbwgdy1nz0kvf0d4j-20260904`,
+  `…_PROJECT_ID=01KHRJGANBBWGDY1NZ0KVF0D4J`, plus every bounded cap
+  (`MAX_ROWS=10000000`, `MAX_BYTES=1250000000`, `MAX_BATCHES=3000`).
+  Read via `gh api repos/raphaeltm/simple-agent-manager/environments/production/variables`,
+  not from `wrangler.toml` — per `.claude/rules/70`, the Environment value is what ships.
+
+Still open — this is why the file stays here:
+
+- Headline acceptance is `sql.databaseSize` **≤ 9,000,000,000 bytes**. The production root
+  ProjectData DO measured **10,103,668,736 bytes** at 2026-09-23 21:48Z, status `degraded`.
+  It is _above_ the configured 10^10 limit, not below the 9 GB target — the gap has widened
+  since this task was written.
+- The post-operation observation window has therefore never been satisfied.
+
+Current live threads that will actually move this number (do not duplicate them here):
+
+- Archive copy reliability **Slice A** — PR #2133, merged 2026-09-23 (`f5ff1e662`).
+- Exhaustive archive search **Slice B** — PR #2136, open as of 2026-09-23.
+- **Slice C** (bounded root history indexing) — queued behind B.
+- Two poisoned SAM migrations (`67927ce6`, `6d6f3099`) are excluded from the drain until
+  abandoned via `POST …/archive-sharding/migrations/:id/abandon`. There is no Admin UI
+  button for abandon yet (the _close breaker_ button shipped in PR #2135).
+- Drain rate after the breaker was closed on 2026-09-23 is roughly **1 session/hour**
+  (sweep budget 8 sessions / 10k messages per hour) against 3,751 remaining terminal
+  sessions. At that rate the backlog does not clear on its own.
+
+Close this task when production `sql.databaseSize` is measured at or below 9 GB and the
+observation window in the acceptance criteria above has been recorded.

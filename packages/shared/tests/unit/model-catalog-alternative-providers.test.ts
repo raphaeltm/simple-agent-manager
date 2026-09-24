@@ -5,29 +5,33 @@ import { getModelGroupsForAgent, getModelsForAgent, isKnownModel } from '../../s
 const OPENCODE_CONSUMERS = ['opencode'] as const;
 
 const EXPECTED_OPENCODE_MODELS = [
+  'opencode/claude-fable-5-1',
   'opencode/claude-fable-5',
+  'opencode/claude-opus-5-5',
   'opencode/claude-opus-5',
   'opencode/claude-sonnet-5',
+  'opencode/gemini-3.8-flash',
   'opencode/gemini-3.7-flash',
   'opencode/gemini-3.6-flash',
+  'opencode/gpt-6-astra',
+  'opencode/gpt-6-sol',
+  'opencode/gpt-6-luna',
   'opencode/gpt-5.6-sol',
-  'opencode/grok-4.6',
-  'opencode/hy3-free',
+  'opencode/grok-4.7',
   'opencode/kimi-k3',
   'opencode/minimax-m3',
-  'opencode/muse-spark-1.2',
-  'opencode/muse-spark-1.2-contributor-free',
-  'opencode/nemotron-3.5-lightning-free',
-  'opencode/x-preview-f-free',
+  'opencode/muse-spark-1.3',
+  'opencode/muse-spark-1.3-contributor-free',
+  'opencode/ling-3.0-flash-fin-free',
   'opencode-go/deepseek-v4-flash-vision-exp',
   'opencode-go/glm-5.2',
   'opencode-go/glm-5.3',
-  'opencode-go/grok-4.5',
+  'opencode-go/gpt-6-luna',
+  'opencode-go/grok-4.7',
   'opencode-go/gpt-5.6-luna',
   'opencode-go/hy3',
   'opencode-go/kimi-k3',
-  'opencode-go/muse-spark-1.2-contributor',
-  'opencode-go/ox-alpha-free',
+  'opencode-go/muse-spark-1.3-contributor',
   'opencode-go/qwen3.8-max',
 ] as const;
 
@@ -54,11 +58,15 @@ describe('OpenCode model catalog entries', () => {
     );
 
     expect(namesById.get('opencode/deepseek-v4-flash')).toBe('DeepSeek V4 Flash');
-    expect(namesById.get('opencode/gpt-5.6-sol')).toBe('GPT-5.6 Sol (50% Off)');
+    expect(namesById.get('opencode/gpt-6-astra')).toBe('GPT-6 Astra');
+    expect(namesById.get('opencode/gpt-5.6-sol')).toBe('GPT-5.6 Sol');
+    expect(namesById.get('opencode/grok-4.7')).toBe('Grok 4.7 (30% Off)');
+    expect(namesById.get('opencode/muse-spark-1.3-contributor-free')).toBe('Muse Spark 1.3 Free');
     expect(namesById.get('opencode-go/deepseek-v4-flash')).toBe('DeepSeek V4 Flash');
     expect(namesById.get('opencode-go/deepseek-v4-pro')).toBe('DeepSeek V4 Pro (New)');
+    expect(namesById.get('opencode-go/gpt-6-luna')).toBe('GPT-6 Luna');
     expect(namesById.get('opencode-go/gpt-5.6-luna')).toBe('GPT-5.6 Luna');
-    expect(namesById.get('opencode-go/hy3')).toBe('Hy3 (8x usage)');
+    expect(namesById.get('opencode-go/hy3')).toBe('Hy3');
     expect(namesById.get('opencode-go/kimi-k3')).toBe('Kimi K3');
   });
 
@@ -98,6 +106,8 @@ describe('OpenCode model catalog entries', () => {
       'opencode/ling-3.0-tiny-free',
       'opencode/longcat-2.0-free',
       'opencode/north-mini-code-free',
+      'opencode/x-preview-f-free',
+      'opencode-go/ox-alpha-free',
       'opencode/qwen3.7-plus',
     ]) {
       expect(

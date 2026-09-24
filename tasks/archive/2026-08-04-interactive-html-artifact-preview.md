@@ -40,7 +40,7 @@ Two constraints from this task were therefore deliberately reversed:
 - "Tier-0 inert rendering is unchanged" → removed for the library HTML branch. The replacement is a
   cross-origin opaque-origin sandboxed document, strictly stronger than a same-page `srcdoc`.
 
-Tracked in `tasks/active/2026-08-04-auto-run-html-artifact-preview.md`. SAM idea
+Tracked in `tasks/archive/2026-08-04-auto-run-html-artifact-preview.md`. SAM idea
 `01KZ6A5AX8YB1ZXXRT53VNE5ZD` has been updated so future agents do not implement the superseded plan.
 
 ## Validation evidence

@@ -39,4 +39,4 @@ SAM's public daily journal should explain the technically meaningful work shippe
 - `pnpm --filter @simple-agent-manager/www build` — passed; the new journal route was generated.
 - `pnpm --filter @simple-agent-manager/www check:links` — passed with 0 broken internal links.
 - Local Chromium review at 1280×800 and 390×844 — title and journal copy rendered clearly, with no horizontal overflow. Screenshots are in `.codex/tmp/playwright-screenshots/`.
-- An attempted Mermaid diagram was removed after visual evidence showed the existing renderer collapses the SVG viewBox to 0×0. The follow-up is `tasks/backlog/2026-09-05-fix-blog-mermaid-blank-canvas.md`.
+- An attempted Mermaid diagram was removed after visual evidence showed the existing renderer collapses the SVG viewBox to 0×0. The follow-up is `tasks/archive/2026-09-05-fix-blog-mermaid-blank-canvas.md`.

@@ -119,7 +119,7 @@ tells:
 
 ## References
 
-- Task: `tasks/active/2026-08-19-ensure-branch-exists-before-instant-workspace.md`
+- Task: `tasks/archive/2026-08-19-ensure-branch-exists-before-instant-workspace.md`
   (moves to `tasks/archive/` on completion)
 - Prior art (the VM-only fix this rule exists to have generalised):
   `tasks/archive/2026-06-02-ensure-branch-exists-before-clone.md`

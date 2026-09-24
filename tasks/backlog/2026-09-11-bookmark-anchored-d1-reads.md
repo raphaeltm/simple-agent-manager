@@ -2,7 +2,7 @@
 
 **Status**: backlog — needs a product decision before implementation
 **Created**: 2026-09-11
-**Parent**: `tasks/active/2026-09-11-cut-api-latency-d1-replication-and-auth-dedup.md`
+**Parent**: `tasks/archive/2026-09-11-cut-api-latency-d1-replication-and-auth-dedup.md`
 **Idea**: `01M27KAF3Z9YEM6VADJKE1ZXC6`
 
 ## Why this exists

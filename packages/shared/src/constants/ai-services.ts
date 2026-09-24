@@ -334,11 +334,19 @@ const OPENAI_GPT56_PREVIEW_PROFILE = {
   intendedRole: 'workspace-agent',
 } satisfies Pick<ModelDefinition, 'contextWindow' | 'toolCallSupport' | 'intendedRole'>;
 
+type OpenAIModelTuple = readonly [string, string, PlatformAIModelTier, number, number, string];
+
+const OPENAI_GPT6_MODELS = [
+  ['gpt-6-astra', 'GPT-6 Astra', 'premium', 0.01, 0.05, 'openai-premium'],
+  ['gpt-6-sol', 'GPT-6 Sol', 'premium', 0.002, 0.01, 'openai-premium'],
+  ['gpt-6-luna', 'GPT-6 Luna', 'standard', 0.0001, 0.0005, 'openai-standard'],
+] as const satisfies readonly OpenAIModelTuple[];
+
 const OPENAI_GPT56_PREVIEW_MODELS = [
   ['gpt-5.6-sol', 'GPT-5.6 Sol', 'premium', 0.005, 0.03, 'openai-premium'],
   ['gpt-5.6-terra', 'GPT-5.6 Terra', 'premium', 0.0025, 0.015, 'openai-premium'],
   ['gpt-5.6-luna', 'GPT-5.6 Luna', 'standard', 0.001, 0.006, 'openai-standard'],
-] as const satisfies readonly [string, string, PlatformAIModelTier, number, number, string][];
+] as const satisfies readonly OpenAIModelTuple[];
 
 /** Models available through the SAM Platform AI proxy.
  * This is the single source of truth — the DEFAULT_AI_PROXY_ALLOWED_MODELS
@@ -476,6 +484,11 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     fallbackGroup: 'anthropic-premium',
   }),
   anthropicModel({
+    id: 'claude-opus-5-5',
+    label: 'Claude Opus 5.5',
+    ...ANTHROPIC_OPUS_PREMIUM_PROFILE,
+  }),
+  anthropicModel({
     id: 'claude-opus-5',
     label: 'Claude Opus 5',
     ...ANTHROPIC_OPUS_PREMIUM_PROFILE,
@@ -502,7 +515,22 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     fallbackGroup: 'anthropic-premium',
   }),
   // --- OpenAI (via AI Gateway) ---
-  // GPT-5.6 preview series
+  // GPT-6 series
+  ...OPENAI_GPT6_MODELS.map(
+    ([id, label, tier, costPer1kInputTokens, costPer1kOutputTokens, fallbackGroup]) =>
+      openAIModel({
+        id,
+        label,
+        tier,
+        costPer1kInputTokens,
+        costPer1kOutputTokens,
+        contextWindow: 1050000,
+        toolCallSupport: 'excellent',
+        intendedRole: 'workspace-agent',
+        fallbackGroup,
+      })
+  ),
+  // GPT-5.6 previous series
   ...OPENAI_GPT56_PREVIEW_MODELS.map(
     ([id, label, tier, costPer1kInputTokens, costPer1kOutputTokens, fallbackGroup]) =>
       openAIModel({
@@ -515,7 +543,7 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
         fallbackGroup,
       })
   ),
-  // GPT-5.5 series (current flagship)
+  // GPT-5.5 / GPT-5.2 previous series
   openAIModel({
     id: 'gpt-5.5-pro',
     label: 'GPT-5.5 Pro',
@@ -538,7 +566,12 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     intendedRole: 'workspace-agent',
     fallbackGroup: 'openai-premium',
   }),
-  // GPT-5.4 series (current)
+  openAIModel({
+    id: 'gpt-5.2',
+    label: 'GPT-5.2',
+    ...OPENAI_CODEX_PREMIUM_PROFILE,
+  }),
+  // GPT-5.4 legacy series
   openAIModel({
     id: 'gpt-5.4-pro',
     label: 'GPT-5.4 Pro',
@@ -749,27 +782,4 @@ export const DEFAULT_SANDBOX_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 /** Default max turns for sandbox agent loop. Override via SANDBOX_AGENT_MAX_TURNS env var. */
 export const DEFAULT_SANDBOX_AGENT_MAX_TURNS = 20;
 
-/** Minimum tool-call support level required for agent loop participation. */
-export const AGENT_LOOP_MIN_TOOL_CALL_SUPPORT: ToolCallSupport = 'good';
-
-/**
- * Filter models suitable for agent loop execution.
- *
- * Returns models with tool-call reliability greater than or equal to `minSupport`
- * and optionally filters by allowed execution scope.
- */
-export function filterModelsForAgentLoop(
-  models: PlatformAIModel[],
-  options?: { scope?: ModelAllowedScope; minSupport?: ToolCallSupport }
-): PlatformAIModel[] {
-  const minSupport = options?.minSupport ?? AGENT_LOOP_MIN_TOOL_CALL_SUPPORT;
-  const supportLevels: ToolCallSupport[] = ['excellent', 'good', 'limited', 'none'];
-  const minIndex = supportLevels.indexOf(minSupport);
-
-  return models.filter((model) => {
-    const modelIndex = supportLevels.indexOf(model.toolCallSupport);
-    if (modelIndex > minIndex) return false;
-    if (options?.scope && !model.allowedScopes.includes(options.scope)) return false;
-    return true;
-  });
-}
+export { AGENT_LOOP_MIN_TOOL_CALL_SUPPORT, filterModelsForAgentLoop } from './ai-model-filtering';

@@ -29,7 +29,7 @@ returns only two documentation hits, both explicitly stating the capability is *
 
 - `apps/www/src/content/docs/docs/reference/configuration.md:645` — "…parent wake behavior, and
   `wait_for_subtasks` remain disabled."
-- `tasks/active/2026-08-09-worker-projectdata-durability-foundation.md:7` — "It deliberately does not
+- `tasks/archive/2026-08-09-worker-projectdata-durability-foundation.md:7` — "It deliberately does not
   … add `wait_for_subtasks`."
 
 → Both must be updated by this change (see checklist). This is a docs-sync obligation, not just a

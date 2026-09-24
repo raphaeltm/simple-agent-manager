@@ -11,7 +11,7 @@ model releases, provider deprecations, or bumping a `DEFAULT_*` model constant.
 retired it (2026-06-15): every SAM-agent-loop call relying on the default would fail
 upstream. Nothing linked default constants to catalog maintenance, and no cadence
 existed for pruning retired Anthropic models (one already existed for Cloudflare
-models). See `tasks/active/2026-07-25-add-claude-opus-5-model-catalog.md` (moves to
+models). See `tasks/archive/2026-07-25-add-claude-opus-5-model-catalog.md` (moves to
 `tasks/archive/` on completion).
 
 ## The Two Canonical Lists (edit both, never one)
@@ -42,7 +42,7 @@ usable but undiscoverable. The cross-catalog invariant test in
 5. **Claude Code `[1m]` selector variants** live ONLY in `CLAUDE_MODELS` (never in
    `PLATFORM_AI_MODELS`), and only for models where Claude Code documents the selector.
    Native-1M models (Claude 5 family) are base IDs — see
-   `tasks/active/2026-07-01-claude-code-1m-model-selectors.md`.
+   `tasks/archive/2026-07-01-claude-code-1m-model-selectors.md`.
 6. **Do not add unverified third-party-gateway IDs** (e.g. `opencode/…`) for a new
    model — the OpenCode catalog updates dynamically from models.dev; the static
    fallback is refreshed against a checked models.dev snapshot, not by analogy.

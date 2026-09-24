@@ -27,7 +27,7 @@ field typed `v.number()`) threw the entire Durable Object RPC, so
 `ORDER BY updated_at DESC LIMIT 100` and the project was write-hot, the bad row
 drifted in and out of the top-100 window, producing an **intermittent**,
 **project-specific** 500 that made the project chat unusable. See
-`tasks/active/2026-07-16-fix-sessions-list-internal-error-large-projects.md`.
+`tasks/archive/2026-07-16-fix-sessions-list-internal-error-large-projects.md`.
 
 ## Class of Bug
 
@@ -104,7 +104,7 @@ Hardening those is tracked in
 
 ## References
 
-- Post-mortem/task: `tasks/active/2026-07-16-fix-sessions-list-internal-error-large-projects.md`
+- Post-mortem/task: `tasks/archive/2026-07-16-fix-sessions-list-internal-error-large-projects.md`
 - `.claude/rules/41-credential-snapshot-resilience.md` — the credential-snapshot analogue
 - `.claude/rules/11-fail-fast-patterns.md` — structured logging at boundaries
 - `.claude/rules/02-quality-gates.md` — regression + process-fix requirements

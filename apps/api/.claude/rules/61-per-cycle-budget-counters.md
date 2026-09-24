@@ -126,7 +126,7 @@ was dead code and the cap was a lifetime cap in every way that mattered.
 
 ## References
 
-- Task: `tasks/active/2026-09-10-wake-attempt-budget-strands-sessions.md`
+- Task: `tasks/archive/2026-09-10-wake-attempt-budget-strands-sessions.md`
 - Implementation: `apps/api/src/services/session-snapshot-recovery-budget.ts`
 - `.claude/rules/72-error-categories-must-match-the-recovery-action.md` — the
   sibling: categorising an error by the provider's vocabulary rather than by what

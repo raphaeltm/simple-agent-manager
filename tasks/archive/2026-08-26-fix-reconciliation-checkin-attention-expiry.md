@@ -17,7 +17,7 @@ assistant message. A long silent tool turn can therefore lose to the 60-second m
 The same expiry path writes a bare D1 task failure in
 `apps/api/src/durable-objects/project-data/attention-expiry.ts`: no `task_status_events` row,
 no `completed_at`, and stale `execution_step`. This is the deferred follow-up from
-`tasks/backlog/2026-08-06-attention-expiry-task-status-events.md` plus the stronger audit finding.
+`tasks/archive/2026-08-06-attention-expiry-task-status-events.md` plus the stronger audit finding.
 
 ## Research findings
 

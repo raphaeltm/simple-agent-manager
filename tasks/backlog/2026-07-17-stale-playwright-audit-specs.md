@@ -6,7 +6,7 @@ Running the complete Playwright audit corpus (78 specs, mobile + desktop) agains
 local preview build of `main` (d6b3d08db) produced **164 failing tests** that fail on
 main today, before any changes. These are audit-spec debt, not product regressions —
 each was root-caused during the 2026-07-17 full-app UX audit
-(`tasks/active/2026-07-17-full-app-ux-audit.md`):
+(`tasks/archive/2026-07-17-full-app-ux-audit.md`):
 
 | Spec | Failures | Root cause |
 |------|----------|-----------|

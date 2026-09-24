@@ -4,7 +4,7 @@
 **Status**: Backlog
 **Priority**: High
 **Estimated Effort**: Medium-Large
-**Depends On**: `tasks/active/2026-03-03-openai-codex-oauth-token-support.md` (Phase 1 must ship first)
+**Depends On**: `tasks/archive/2026-03-03-openai-codex-oauth-token-support.md` (Phase 1 must ship first)
 
 ## Problem Statement
 
@@ -215,7 +215,7 @@ OpenAI's own recommendation for CI/CD and ephemeral environments is to use API k
 - [Issue #9634: Refresh token already used](https://github.com/openai/codex/issues/9634)
 - [Issue #12755: Refresh token error on v0.104.0](https://github.com/openai/codex/issues/12755)
 - [Issue #6036: Failed to refresh token: 401](https://github.com/openai/codex/issues/6036)
-- `tasks/active/2026-03-03-openai-codex-oauth-token-support.md` — Parent task (Phase 1)
+- `tasks/archive/2026-03-03-openai-codex-oauth-token-support.md` — Parent task (Phase 1)
 - `packages/vm-agent/internal/acp/gateway.go` — Current credential injection
 - `packages/vm-agent/internal/acp/session_host.go` — Agent startup with auth.json write
 

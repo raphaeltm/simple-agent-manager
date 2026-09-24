@@ -43,8 +43,8 @@ reader without SAM architecture knowledge can follow.
 
 ## References
 
-- `tasks/active/2026-08-26-shared-agent-session-closure-finalizer.md`
-- `tasks/active/2026-08-25-fix-task-runtime-liveness-heartbeat-classifier.md`
+- `tasks/archive/2026-08-26-shared-agent-session-closure-finalizer.md`
+- `tasks/archive/2026-08-25-fix-task-runtime-liveness-heartbeat-classifier.md`
 - `apps/api/src/services/workspace-lifecycle-finalizer.ts`
 - `apps/api/src/services/task-runtime-liveness.ts`
 - `apps/www/src/content/CLAUDE.md`

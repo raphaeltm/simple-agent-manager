@@ -1,7 +1,7 @@
 # Bound total `project_policies` row growth (retention, not just an active cap)
 
 **Filed from**: PR review of the policy lifecycle controls work
-(`tasks/active/2026-08-23-policy-lifecycle-controls.md`). Raised independently by the
+(`tasks/archive/2026-08-23-policy-lifecycle-controls.md`). Raised independently by the
 security-auditor (MEDIUM) and the performance-reviewer (MEDIUM).
 
 ## Problem

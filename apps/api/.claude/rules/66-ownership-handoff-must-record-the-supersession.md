@@ -143,7 +143,7 @@ Tells:
 
 ## References
 
-- Task: `tasks/active/2026-08-24-superseded-task-killed-after-successful-wake.md`
+- Task: `tasks/archive/2026-08-24-superseded-task-killed-after-successful-wake.md`
   (moves to `tasks/archive/` on completion)
 - Implementation: `apps/api/src/services/task-runtime-liveness.ts`
   (`loadTaskSupersession`, `needsTaskSupersessionProbe`, `supersessionVerdict`)

@@ -42,5 +42,5 @@ Additionally, a pre-existing test (`TestGetAgentExtraEnvVars_MistralVibe`) expec
 
 - `packages/vm-agent/internal/acp/gateway.go` — model env var mapping, config generation
 - `packages/vm-agent/internal/acp/session_host.go` — agent startup flow
-- `tasks/active/2026-03-14-fix-mistral-vibe-acp-metadata.md` — related metadata fix task
+- `tasks/backlog/2026-03-14-fix-mistral-vibe-acp-metadata.md` — related metadata fix task
 - [Mistral Models Documentation](https://docs.mistral.ai/getting-started/models/)

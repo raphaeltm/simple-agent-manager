@@ -2,7 +2,7 @@
 
 ## Closure Note
 
-PR #1702 merged to main at `403c1bd0f89dfffc395f4ba4acdf9bdb84771ef9` before the final validation/review/PR checklist items in this task record were checked. The remaining hotfix issues found after that merge are tracked and addressed by `tasks/active/2026-07-30-feedback-idea-metadata-hotfix.md`; this record is archived so merged work does not remain active with stale unchecked gates.
+PR #1702 merged to main at `403c1bd0f89dfffc395f4ba4acdf9bdb84771ef9` before the final validation/review/PR checklist items in this task record were checked. The remaining hotfix issues found after that merge are tracked and addressed by `tasks/archive/2026-07-30-feedback-idea-metadata-hotfix.md`; this record is archived so merged work does not remain active with stale unchecked gates.
 
 ## Problem
 

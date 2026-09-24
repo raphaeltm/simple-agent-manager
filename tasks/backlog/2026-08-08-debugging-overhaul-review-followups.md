@@ -30,5 +30,5 @@ Non-blocking findings from the five specialist reviews of PR #1765 (debugging-ex
 
 ## References
 
-- PR #1765; `tasks/active/2026-08-07-debugging-experience-overhaul.md`
+- PR #1765; `tasks/archive/2026-08-07-debugging-experience-overhaul.md`
 - Review agents' full reports live in the coordinator session (2026-08-08)

@@ -99,7 +99,7 @@ Debug package analysis revealed four interconnected production issues that cause
 
 - Debug package analysis: `/workspaces/.private/debug-01KRDBGEED1ZS1E8YQSN694P1Q.tar.gz`
 - Previous session: 70b24ab9-1503-443d-a4ba-7e5b4720c14a
-- `tasks/backlog/2026-05-12-fix-agent-auth-failures.md` (superseded by this task)
+- `tasks/archive/2026-05-12-fix-agent-auth-failures.md` (superseded by this task)
 - `docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md`
 - `docs/notes/2026-03-25-deployment-identity-token-middleware-leak-postmortem.md`
 - `.claude/rules/06-api-patterns.md` (Hono middleware scoping)

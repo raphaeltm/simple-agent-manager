@@ -91,4 +91,4 @@ Full root cause analysis was done in the `chat-session-timeouts` branch. Key fin
 ## Related
 
 - Interim fix: `968abb5` (increased default from 10min to 60min)
-- Existing task: `tasks/active/2026-02-20-fix-acp-websocket-connection-lost.md` (WebSocket reliability)
+- Existing task: `tasks/archive/2026-02-20-fix-acp-websocket-connection-lost.md` (WebSocket reliability)

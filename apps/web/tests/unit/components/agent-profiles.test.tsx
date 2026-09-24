@@ -474,17 +474,17 @@ describe('ProfileFormDialog', () => {
     expect(effortSelect).toHaveValue('high');
   });
 
-  it('offers GPT-5.5 Pro for OpenAI Codex profiles', async () => {
+  it('offers GPT-6 Astra for OpenAI Codex profiles', async () => {
     const user = userEvent.setup();
-    const profile = makeProfile({ agentType: 'openai-codex', model: 'gpt-5.5' });
+    const profile = makeProfile({ agentType: 'openai-codex', model: 'gpt-6-sol' });
     render(
       <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} profile={profile} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
 
     await user.click(screen.getByLabelText('Model'));
 
-    expect(screen.getByText('GPT-5.5 Pro')).toBeInTheDocument();
-    expect(screen.getByText('gpt-5.5-pro')).toBeInTheDocument();
+    expect(screen.getByText('GPT-6 Astra')).toBeInTheDocument();
+    expect(screen.getByText('gpt-6-astra')).toBeInTheDocument();
   });
 
   it('shows error when onSave rejects', async () => {

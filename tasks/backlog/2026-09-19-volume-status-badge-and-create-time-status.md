@@ -2,7 +2,7 @@
 
 **Status:** backlog
 **Discovered:** 2026-09-19, during local specialist review of the app-deployment fix port
-(`tasks/active/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`). Both items
+(`tasks/archive/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`). Both items
 are adjacent to that change but deliberately out of its scope.
 
 ## Problem

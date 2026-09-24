@@ -106,7 +106,7 @@ Before merging a migration that relaxes a constraint:
 
 ## References
 
-- Task: `tasks/active/2026-08-22-library-file-commenting.md` (moves to
+- Task: `tasks/archive/2026-08-22-library-file-commenting.md` (moves to
   `tasks/archive/` on completion)
 - Implementation: `apps/api/src/durable-objects/project-data/library-file-comments.ts`,
   DO migration `033-library-file-comment-threads`

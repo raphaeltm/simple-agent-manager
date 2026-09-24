@@ -1,6 +1,6 @@
 ---
 title: Chat Features
-description: File browsing, conversation forking, voice input, text-to-speech, and real-time streaming in SAM's chat interface.
+description: The session tool rail, file browsing, tool activity cards, conversation forking, search, voice input, and text-to-speech in SAM's chat interface.
 ---
 
 SAM's project pages are chat-first interfaces where you interact with AI coding agents in real-time.
@@ -11,14 +11,56 @@ Recent chat updates make the workspace feel more like a persistent work surface:
 
 Agent output streams directly to your browser via WebSocket. You see code being written, terminal commands executing, and the agent's thought process as it happens — no waiting for a complete response.
 
+## The Session Tool Rail
+
+Most of what you can do _to_ a session — rather than _say_ to it — lives in the **tool rail** down
+the right edge of the chat. It is the same rail on desktop and mobile, and it is where most of the
+features on this page are opened from. (The session's lifecycle controls — Interrupt, Sleep,
+Archive — and the agent's plan sit in the dock just above the composer instead, because they act on
+the conversation you are in rather than opening something beside it.)
+
+| Tool          | What it opens                                                                                                                                                      | When it appears                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| **Files**     | The workspace file browser — [File Browsing](#file-browsing)                                                                                                       | While the session is live and has a workspace            |
+| **Git**       | Uncommitted changes in the workspace                                                                                                                               | While the session is live and has a workspace            |
+| **Timeline**  | A jump list through the session's history                                                                                                                          | Always                                                   |
+| **Resources** | CPU, memory, I/O, and OOM history — [Session Resource History](/docs/guides/session-resources/)                                                                    | Always                                                   |
+| **Events**    | This session's subscriptions, schedules, and watches — [Scheduled actions](/docs/guides/scheduled-actions/)                                                        | Always                                                   |
+| **Comments**  | Comment threads on this session. Unresolved threads show as a dot in icons mode and a count in labels mode; the marker turns amber when a thread is waiting on you | Always                                                   |
+| **Retry**     | Re-run the task behind the session                                                                                                                                 | When the session has a task                              |
+| **Fork**      | Start a new task from this session — [Conversation Forking](#conversation-forking)                                                                                 | When the session has a task                              |
+| **Report**    | File a problem report — [Reporting Issues](/docs/guides/reporting-issues/)                                                                                         | When the deployment has reporting configured             |
+| **Complete**  | Mark the task complete                                                                                                                                             | When the session has a task that is not already finished |
+| **Details**   | Session identifiers and the infrastructure it ran on                                                                                                               | Always                                                   |
+
+![The session tool rail in icons-and-labels mode, listing Files, Git, Timeline, Resources, Events and Comments, then Retry and Fork after a divider, with Report, Complete and Details pinned at the bottom.](/images/docs/session-tool-rail.png)
+
+**Files** and **Git** need a linked workspace and a live session, so they disappear once the
+session sleeps or stops. Everything else stays, which matters: inspecting resources, reading the
+timeline, or reporting a problem is usually something you want to do _after_ a session has ended.
+
+The rail is grouped by what each tool acts on: the workspace and its history at the top, the task
+behind the session in the middle, and cross-cutting actions pinned to the bottom so they stay
+reachable however long the top group grows.
+
+### Changing How Much of the Rail You See
+
+The chevron at the top of the rail cycles it through three modes:
+
+1. **Icons** (the default) — a narrow strip of glyphs.
+2. **Icons and labels** — wider, with each tool named. Worth switching on while you learn the rail.
+3. **Hidden** — collapsed to a labelled **Tools** tab on the right edge; click the tab to bring it back.
+
+Your choice is remembered in the browser, per device.
+
 ## File Browsing
 
 While chatting with an agent, you can browse the workspace's file system directly from the chat panel — no need to switch to a terminal.
 
 ### How to Use
 
-- Open the file browser panel to navigate the file tree and view files
-- View git status and diffs to see what the agent changed
+- Open **Files** in the [session tool rail](#the-session-tool-rail) to navigate the file tree and view files
+- Open **Git** to see status and diffs for what the agent changed
 - Click file references in tool-call cards to jump directly to that file (expand the
   tool activity card first — see [Tool Activity Cards](#tool-activity-cards))
 
@@ -67,10 +109,16 @@ keep the conversation readable, SAM folds a run of consecutive tool calls into o
 compact **activity card** that simply states how many ran — for example
 `7 tool calls`.
 
+![A chat timeline: a user message, the agent's plan in prose, a single collapsed card reading "8 tool calls · 1 failed", then the agent's summary of what it found. The eight individual tool calls are hidden behind the one card.](/images/docs/chat-tool-activity-card.png)
+
 - While the run is in progress the card shows a motion indicator plus the tool
-  currently executing (or `thinking…` while the agent reasons between calls). When
-  the run finishes the indicator settles to a check mark, with no layout jump.
-- If any call failed, the card says so in text — for example `7 tool calls · 2 failed`.
+  currently executing (`· running <its title>`) — or `· thinking…` while the agent reasons
+  between calls, or `· working` when there is nothing more specific to name. When the
+  run finishes the indicator settles, with no layout jump: a check mark if every call
+  succeeded, a red ✗ if any of them failed.
+- If any call failed, the card says so in text as well as colour — for example
+  `7 tool calls · 2 failed`.
+- A single tool call is folded too, into a `1 tool call` card.
 - **Tap the card** to expand it into the individual tool-call cards, in order.
 - **Tap an individual call** to load its output (diff, terminal output, or text).
   Output is fetched on demand, so a long run costs nothing until you ask for it.
@@ -143,15 +191,15 @@ Agent responses can be played back as audio. SAM uses Deepgram Aura 2 (via Worke
 
 ## Conversation Forking
 
-You can branch off from any point in a conversation to explore an alternative approach without losing the original thread.
+You can branch off from a conversation to explore an alternative approach without losing the original thread. A fork copies the session's context into a new session — it is session-scoped, not anchored to a particular message.
 
 Forking now applies to task-backed chat sessions broadly, including instant-container and conversation-style sessions. You do not need to know whether the original session started from an idea, a task, or a lightweight chat; if the session is forkable, SAM preserves the lineage and starts the new branch with the right context.
 
 ### How to Fork
 
-1. Hover over a message in the chat history
-2. Click the **Fork** button
-3. SAM generates an AI-powered context summary of the conversation up to that point
+1. Open the session you want to branch from
+2. Click **Fork** in the [session tool rail](#the-session-tool-rail)
+3. SAM generates an AI-powered context summary of the conversation so far
 4. A new session starts with awareness of the previous conversation
 
 ### Context Summarization
@@ -179,10 +227,18 @@ Each `chat_messages` row is a single streaming token, so no row holds a whole wo
 
 Indexing is incremental: it runs every time a session sleeps and again when it stops, fails, or is cleaned up after going idle, and each pass covers only the messages written since the last one.
 
-- **Everything indexed so far**: full-text search with stemming and phrase matching
-- **Messages written since a session was last indexed**: keyword-based fallback search
+- **Everything indexed so far**: full-text search with stemming and phrase matching.
+- **Messages written since a session was last indexed**: keyword-based fallback search. This
+  rescues whole user messages; streaming agent output is split across too many rows for a keyword
+  match, so agent text becomes searchable only once the next pass runs.
+- **Sessions whose index was pruned for storage**: keyword fallback only, permanently. Under
+  storage pressure SAM deletes the grouped rows and index entries for terminal sessions older than
+  a week to reclaim space, and deliberately never re-indexes them — re-indexing would undo the
+  reclaimed bytes. In practice those old sessions are hard to find by search.
 
-Agents can search messages using the `search_messages` MCP tool.
+Agents search messages with the `search_messages` MCP tool. The project chat's own "Search chats"
+box is a different thing: it filters the session list by topic, session ID, and creator, and does
+not look inside messages.
 
 Project-wide search also traverses immutable archive owners. A bounded call can return provisional
 results plus `archiveSearch.continuation`; pass that continuation with the same query, roles, and

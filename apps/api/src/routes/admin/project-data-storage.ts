@@ -33,11 +33,14 @@ import {
 import {
   freezeProjectDataArchiveProject,
   getProjectDataArchiveManualCanaryConfig,
-  getProjectDataArchiveRolloutListConfig,
   getProjectDataArchiveRolloutState,
   listProjectDataArchiveProblemMigrations,
   setProjectDataArchiveCircuitBreaker,
 } from '../../services/project-data-archive-rollout-controls';
+import {
+  adminProjectDataArchiveBreakerRoutes,
+  parseArchiveRolloutLimit,
+} from './project-data-archive-breakers';
 
 const PROJECT_DATA_STORAGE_STATUSES = new Set(['ok', 'notice', 'warning', 'critical', 'degraded']);
 const PROJECT_DATA_STORAGE_CLEANUP_HEALTH_STATES = new Set([
@@ -51,6 +54,11 @@ const DEFAULT_STORAGE_TELEMETRY_LIST_LIMIT = 50;
 const DEFAULT_STORAGE_TELEMETRY_LIST_MAX = 200;
 
 export const adminProjectDataStorageRoutes = new Hono<{ Bindings: Env }>();
+
+adminProjectDataStorageRoutes.route(
+  '/archive-sharding/circuit-breakers',
+  adminProjectDataArchiveBreakerRoutes
+);
 
 function parsePositiveIntegerConfig(raw: string | undefined, fallback: number): number {
   if (!raw?.trim()) return fallback;
@@ -76,15 +84,6 @@ function getStorageTelemetryListConfig(env: Env): { defaultLimit: number; maxLim
 
 function parseStorageTelemetryLimit(rawLimit: string | undefined, env: Env): number {
   const { defaultLimit, maxLimit } = getStorageTelemetryListConfig(env);
-  const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : defaultLimit;
-  if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > maxLimit) {
-    throw errors.badRequest(`limit must be between 1 and ${maxLimit}`);
-  }
-  return parsedLimit;
-}
-
-function parseArchiveRolloutLimit(rawLimit: string | undefined, env: Env): number {
-  const { defaultLimit, maxLimit } = getProjectDataArchiveRolloutListConfig(env);
   const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : defaultLimit;
   if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > maxLimit) {
     throw errors.badRequest(`limit must be between 1 and ${maxLimit}`);

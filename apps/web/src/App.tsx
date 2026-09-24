@@ -50,6 +50,7 @@ const AdminProjectEvents = lazyNamed(
   () => import('./pages/AdminProjectEvents'),
   'AdminProjectEvents'
 );
+const AdminStorage = lazyNamed(() => import('./pages/AdminStorage'), 'AdminStorage');
 const AdminStream = lazyNamed(() => import('./pages/AdminStream'), 'AdminStream');
 const AdminTrials = lazyNamed(() => import('./pages/AdminTrials'), 'AdminTrials');
 const AdminUsers = lazyNamed(() => import('./pages/AdminUsers'), 'AdminUsers');
@@ -379,6 +380,7 @@ export default function App() {
                         <Route path="integrations" element={page(<AdminPlatformConfig />)} />
                         <Route path="credentials" element={page(<AdminPlatformCredentials />)} />
                         <Route path="infrastructure" element={page(<AdminInfrastructure />)} />
+                        <Route path="storage" element={page(<AdminStorage />)} />
                         <Route path="ai-proxy" element={page(<AdminAIProxy />)} />
                         <Route path="trials" element={page(<AdminTrials />)} />
                         <Route path="costs" element={page(<AdminCosts />)} />

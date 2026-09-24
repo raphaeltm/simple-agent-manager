@@ -147,7 +147,7 @@ Tells:
 
 ## References
 
-- Task: `tasks/active/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`
+- Task: `tasks/archive/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`
   (moves to `tasks/archive/` on completion); originally found on the DefangLabs fork
   (DefangLabs/simple-agent-manager PR #45) and confirmed on this install
 - Implementation: `apps/api/src/services/dns-app-routes.ts` (`upsertAppRouteDNSRecord` and

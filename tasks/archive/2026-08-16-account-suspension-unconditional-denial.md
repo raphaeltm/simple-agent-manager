@@ -24,7 +24,7 @@ Suspension must be an unconditional access-denial boundary regardless of signup-
 - `apps/api/src/auth.ts` login-time self-heal already excludes `status='suspended'` from automatic superadmin promotion.
 - Public docs in `apps/www/src/content/docs/docs/guides/self-hosting.mdx` already state login-time self-heal applies to OAuth, token-login, and device-flow and never auto-promotes suspended users. No user/operator doc update is needed for this narrow internal enforcement fix.
 - Relevant incident/task history:
-  - `tasks/active/2026-07-06-signup-approval-config.md` documents that turning approval off lets pending users pass without rewriting them to active.
+  - `tasks/archive/2026-07-06-signup-approval-config.md` documents that turning approval off lets pending users pass without rewriting them to active.
   - `tasks/archive/2026-03-12-fix-workspace-callback-auth-middleware-leak.md` and `tasks/archive/2026-05-12-fix-agent-auth-failures.md` document auth middleware boundary mistakes and the need to test mounted route behavior, not just isolated helpers.
 - Previous SAM task `01KZTNV7NP5Z71QX51P4DDTVZV` / branch `sam/account-suspension-unconditional-immediate-ddtvzv` has no task-specific commits beyond its old base and no PR.
 
@@ -65,7 +65,7 @@ The approval guard modeled signup approval as the top-level gate and returned im
 
 ### Timeline
 
-The runtime signup approval configuration work documented in `tasks/active/2026-07-06-signup-approval-config.md` introduced the shared resolver/gate shape. The CTO audit task `01M048XHK36SVM6RD8QE84W9G1` later identified CTO-A1-001 and supplied current code evidence at `apps/api/src/services/signup-approval.ts` and `apps/api/src/middleware/auth.ts`.
+The runtime signup approval configuration work documented in `tasks/archive/2026-07-06-signup-approval-config.md` introduced the shared resolver/gate shape. The CTO audit task `01M048XHK36SVM6RD8QE84W9G1` later identified CTO-A1-001 and supplied current code evidence at `apps/api/src/services/signup-approval.ts` and `apps/api/src/middleware/auth.ts`.
 
 ### Why it was not caught
 

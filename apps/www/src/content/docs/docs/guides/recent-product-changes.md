@@ -5,32 +5,181 @@ description: User-facing SAM changes from the latest development cycles, with pr
 
 This page summarizes recent changes that affect how people use SAM. Use it as a quick orientation when returning to the product after a week away, then follow the linked guides for the full workflow.
 
-## This cycle
+## This cycle: 16–23 September 2026
 
 ### For everyone
 
-| Change                                | What users notice                                                                                                                                              | Where to use it                   |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| **Comments have somewhere to look**   | A **Comments** page in the project nav collects every thread from chat and the library in one place, grouped by whether it is waiting on you. Chat sessions gain a matching count chip and a comments drawer. | Project → **Comments**; chat session tool rail |
-| **Report an issue in-app**            | A **Report** button in the session tool rail, and a **Report this issue** link on the crash screen. You choose whether to attach technical context. | Session tool rail; crash screen |
-| **Sessions survive runtime teardown** | Sleeping Instant and VM sessions wake from a seven-day snapshot instead of losing harness context or uncommitted work.                                         | Project chat                      |
-| **Starting a chat is durable**        | Closing the tab while a chat is starting no longer strands it — the launch finishes server-side.                                                               | Project chat                      |
-| **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and SAM refuses to auto-push to your default branch.                                    | Any task or chat-started work     |
-| **Codex has its tools on Instant**    | Codex sessions on the Instant runtime now get SAM's MCP tools instead of silently starting without them.                                                       | Any Codex profile                 |
-| **Library cards always render**       | A document an agent shares renders as a rich card no matter which agent sent it.                                                                               | Project chat timeline             |
-| **Machines come from a compute pool** | Workspaces are provisioned from the exact provider instance types your compute pool allows, and work states what it needs in vCPU, memory, and disk instead of a small/medium/large label. | Project → Settings → **Infrastructure**; [Compute Pools](/docs/guides/compute-pools/) |
+| Change                                      | What users notice                                                                                                                                                                                                                   | Where to use it                                                                                              |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Sessions show what they used**            | A **Resources** panel with CPU, memory, and I/O history for a session — including whether it was killed for running out of memory — that outlives the machine.                                                                      | Session tool rail → **Resources**; [Session Resource History](/docs/guides/session-resources/)               |
+| **Long tool runs stop burying the chat**    | A run of consecutive tool calls folds into one card reading "N tool calls". Tap to expand; failures are counted in the text.                                                                                                        | Project chat and workspace chat; [Tool Activity Cards](/docs/guides/chat-features/#tool-activity-cards)      |
+| **Events sit next to the conversation**     | The old "Events & schedules" header link became an **Events** button in the session tool rail that opens a drawer over the chat. The project Events page gained counts, state colours, empty states, and self-refreshing schedules. | Session tool rail → **Events**; Project → **Events**                                                         |
+| **Sleeping chats are searchable**           | An agent asked to search the project now finds work in sessions that are asleep, not just ones that were stopped — which is most of your recent work.                                                                               | `search_messages` (agent tool); not the chat-list search box                                                 |
+| **Wake puts you back on the same commit**   | A woken session restores the exact saved Git checkout — commit, branch, upstream, working tree, index, and clean local-only commits — or reports degraded recovery instead of quietly continuing somewhere else.                    | Any sleeping session                                                                                         |
+| **One pool, two placement strategies**      | A compute pool now orders workspace machines and app-deployment machines separately, with a cap on how many nodes **Spread** may open per user.                                                                                     | Project → Settings → **Infrastructure**; [Compute Pools](/docs/guides/compute-pools/#the-four-policy-fields) |
+| **Deployment size comes from the manifest** | The CPU and memory limits in your Compose services decide which machine a deployment lands on. Environment names do not.                                                                                                            | [App Deployments](/docs/guides/app-deployments/)                                                             |
 
 ### For self-hosters & admins
 
-| Change                         | What it enables                                                                                                                       | Where to configure it                                              |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| **In-app issue reporting**     | Route user reports into a project you watch. The feature stays hidden until you configure it.                                         | Admin → Integrations, with `PLATFORM_FEEDBACK_PROJECT_ID` fallback |
-| **Automated error triage**     | SAM groups recent platform errors hourly and files deduplicated draft Ideas for them.                                                 | `PLATFORM_FEEDBACK_TRIAGE_*`                                       |
-| **Deployment diagnosis agent** | Superadmins can hand an error — or a whole time window — to an AI agent from **Admin → Errors**, and save the result as a draft Idea. | `DEBUG_AGENT_*`                                                    |
-| **Durable diagnosis runs**     | A diagnosis keeps running if you close the tab, with a runs list, status, and retry.                                                  | **Admin → Errors**                                                 |
+| Change                               | What it enables                                                                                                                                                              | Where to configure it                      |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| **One-click instance updates**       | An **Update Self-Hosted Instance** workflow fetches the latest upstream release, fast-forwards your fork, and deploys. Deploy Production's commit SHA input is now optional. | Actions → **Update Self-Hosted Instance**  |
+| **Dated releases to update to**      | Upstream tags the latest successful production deploy daily as `vYYYY.MM.DD`, so "update to a known release" is a real option.                                               | GitHub releases on the upstream repository |
+| **Storage controls in the admin UI** | **Admin → Storage** lists per-project storage telemetry and archive circuit breakers, with a **Close breaker** button that works from a phone.                               | **Admin → Storage**                        |
+| **Errored deployments recover**      | An environment parked in `error` is visible to agent deploy tools again, so a new release can bring it back without manual database surgery.                                 | Deployment environments                    |
+
+### A session can now tell you what it used
+
+Until now, "the agent died and I don't know why" had no answer you could check. Every VM-backed
+workspace now records CPU, memory, disk I/O, and out-of-memory events, and keeps that record for
+months after the machine is gone. Open **Resources** in the session tool rail to read it — the
+amber OOM banner at the top is usually the whole answer.
+
+[Session Resource History](/docs/guides/session-resources/) covers how to read the timeline, how to
+turn a CPU peak into "how many cores was that", what the numbers deliberately cannot tell you, and
+why [Instant sessions](/docs/guides/instant-sessions/) have no history at all.
+
+### Long tool runs no longer bury the conversation
+
+A typical agent turn is a sentence, then thirty tool calls, then another sentence. Rendering every
+call as its own card pushed the agent's actual words off the screen.
+
+Consecutive tool calls now fold into a single compact card reading, for example, `18 tool calls`.
+While the run is live the card shows what is executing right now; when it ends, failures are named
+in the text (`18 tool calls · 2 failed`). Tap the card to expand the individual calls, tap a call to
+load its output. Nothing is fetched until you ask for it, so a 40-call run costs nothing to scroll
+past. Documents an agent shares are never hidden inside a card. The same grouping applies in the
+standalone workspace chat, not only project chat.
+
+See [Tool Activity Cards](/docs/guides/chat-features/#tool-activity-cards).
+
+### Events moved next to the conversation
+
+Session events used to hang off a small "Events & schedules" link in the chat header — easy to miss,
+and it navigated you away from the chat to find out what was scheduled against it.
+
+There is now an **Events** button in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail)
+that opens a drawer over the conversation, with Subscriptions, Schedules, and Watches for that
+session, and a **View full page** link when you want the project-wide view.
+
+The project **Events** page got the same attention: each section carries an icon and a live count,
+schedules refresh themselves every 30 seconds while you are looking at them, state badges are
+colour-coded consistently with the admin inspector, and each empty section explains what would
+appear there instead of looking like a failed load.
+
+See [Scheduled actions and event watches](/docs/guides/scheduled-actions/).
+
+### Search reaches sleeping sessions
+
+SAM's chat search indexes conversations by stitching streaming tokens back into whole messages.
+That pass used to run only when a session stopped, failed, or was cleaned up after going idle —
+which excluded **sleeping** sessions, and sleeping is where most of your recent work lives.
+
+The pass now also runs when a session goes to sleep, and it is incremental: each pass reads only
+what was written since the last one, so indexing a long-running session stays cheap and a session
+that sleeps and wakes repeatedly does not lose the messages in between. User messages written since
+the last pass stay reachable through keyword fallback; streaming agent output is only searchable
+once a pass has run.
+
+Search got narrower in the same week too, and it is worth knowing: under storage pressure SAM now
+prunes the search index for old terminal sessions to reclaim space, and a pruned session is never
+re-indexed. See [Full-Text Search](/docs/guides/chat-features/#full-text-search).
+
+### Waking puts you back on the exact same commit
+
+A snapshot used to capture the working tree and index. It now captures the **Git state**: the saved
+`HEAD` commit, whether you were on a branch or detached, the canonical upstream metadata, the index,
+the working tree, and any clean local-only commits.
+
+Restore verifies the result. If SAM cannot recreate the saved commit and ref state, the wake reports
+degraded recovery rather than silently continuing on a different commit — which is the failure mode
+that quietly loses work, because everything looks fine until you push.
+
+Plan for one trade-off: the repository bundle is captured first out of a shared snapshot budget
+(256 MiB by default), so a large history or a big working tree can crowd out the agent's own HOME
+state. Only commits reachable from the saved `HEAD` are bundled, so work parked on another local
+branch is not captured. If a session carries work you cannot lose, have the agent commit and push
+it.
+
+See [Instant Sessions → What gets restored](/docs/guides/instant-sessions/#what-gets-restored).
+
+### One compute pool, two placement strategies
+
+Agent workspaces are bursty and short-lived; app deployments are steady and long-lived. Ordering
+machines the same way for both was always a compromise.
+
+A pool now has a **Workspace strategy** (default Balanced) and a **Deployment strategy** (default
+Smallest fit), plus **Maximum nodes per user** — the point at which **Spread** stops opening
+machines and starts packing, and a hard ceiling on managed workspace nodes under every strategy.
+The credentials, allowed offerings, providers and regions stay shared: you curate one list of
+machines and only the ordering differs by workload.
+
+Deployment sizing is now driven by the `deploy.resources.limits` you declare per service in your
+Compose manifest, summed across services. Environment names carry no weight — naming something
+`production` does not buy it a larger machine than `preview`. SAM reuses a compatible deployment
+node when the declared reservation fits, and otherwise provisions the smallest allowed machine that
+can hold it.
+
+Packing itself moved onto explicit resources at the same time. The legacy workspace-count and
+memory-percentage gates no longer decide placement; declared CPU, memory, and disk reservations do,
+with disk pressure and CPU saturation as backstops.
+
+See [Compute Pools](/docs/guides/compute-pools/#the-four-policy-fields) and
+[App Deployments](/docs/guides/app-deployments/).
+
+### Updating a self-hosted instance is one workflow
+
+Updating a fork used to mean syncing `main`, finding the exact 40-character SHA at the new tip, and
+pasting it into Deploy Production — a step that was easy to get wrong and impossible from a phone.
+
+Run **Actions → Update Self-Hosted Instance** instead. Leave `release` as `latest` (or name a
+`vYYYY.MM.DD` tag), and the workflow fast-forwards your fork's `main` to that release and triggers
+the production deploy. Upstream now tags the latest successful production deployment daily, so
+those release tags exist to point at. If your fork carries local commits the fast-forward fails
+loudly rather than doing something surprising — merge manually and use Deploy Production, whose
+`target_commit_sha` input is now optional and defaults to your current `main` tip.
+
+See [Self-Hosting → Updating an Existing Self-Hosted Instance](/docs/guides/self-hosting/#updating-an-existing-self-hosted-instance).
+
+### Admins get a Storage page
+
+When a project's archive drain fails repeatedly its circuit breaker opens and archiving for that
+project stops until someone closes it. Nothing closes it automatically, and until now closing it
+meant a hand-rolled superadmin API call from a desktop browser — so a stopped drain could stay
+stopped long after the underlying bug was fixed.
+
+**Admin → Storage** now lists storage telemetry and breaker state — the heaviest projects and any
+open breakers, not an exhaustive list — with a **Close breaker** button that works on a phone. Closing a breaker resumes the scheduled sweep for that
+project; it does not thaw migrations that were already frozen.
+
+See [Self-Hosting → Storage and archive circuit breakers](/docs/guides/self-hosting/#storage-and-archive-circuit-breakers).
+
+## Previous cycle: to 15 September 2026
+
+### For everyone
+
+| Change                                | What users notice                                                                                                                                                                                             | Where to use it                                                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| **Comments have somewhere to look**   | A **Comments** page in the project nav collects every thread from chat and the library in one place, grouped by whether it is waiting on you. Chat sessions gain a matching count chip and a comments drawer. | Project → **Comments**; chat session tool rail                                        |
+| **Report an issue in-app**            | A **Report** button in the session tool rail, and a **Report this issue** link on the crash screen. You choose whether to attach technical context.                                                           | Session tool rail; crash screen                                                       |
+| **Sessions survive runtime teardown** | Sleeping Instant and VM sessions wake from a seven-day snapshot instead of losing harness context or uncommitted work.                                                                                        | Project chat                                                                          |
+| **Starting a chat is durable**        | Closing the tab while a chat is starting no longer strands it — the launch finishes server-side.                                                                                                              | Project chat                                                                          |
+| **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and SAM refuses to auto-push to your default branch.                                                                                   | Any task or chat-started work                                                         |
+| **Codex has its tools on Instant**    | Codex sessions on the Instant runtime now get SAM's MCP tools instead of silently starting without them.                                                                                                      | Any Codex profile                                                                     |
+| **Library cards always render**       | A document an agent shares renders as a rich card no matter which agent sent it.                                                                                                                              | Project chat timeline                                                                 |
+| **Machines come from a compute pool** | Workspaces are provisioned from the exact provider instance types your compute pool allows, and work states what it needs in vCPU, memory, and disk instead of a small/medium/large label.                    | Project → Settings → **Infrastructure**; [Compute Pools](/docs/guides/compute-pools/) |
+
+### For self-hosters & admins
+
+| Change                         | What it enables                                                                                                                                                 | Where to configure it                                              |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| **In-app issue reporting**     | Route user reports into a project you watch. The feature stays hidden until you configure it.                                                                   | Admin → Integrations, with `PLATFORM_FEEDBACK_PROJECT_ID` fallback |
+| **Automated error triage**     | SAM groups recent platform errors hourly and files deduplicated draft Ideas for them.                                                                           | `PLATFORM_FEEDBACK_TRIAGE_*`                                       |
+| **Deployment diagnosis agent** | Superadmins can hand an error — or a whole time window — to an AI agent from **Admin → Errors**, and save the result as a draft Idea.                           | `DEBUG_AGENT_*`                                                    |
+| **Durable diagnosis runs**     | A diagnosis keeps running if you close the tab, with a runs list, status, and retry.                                                                            | **Admin → Errors**                                                 |
 | **Canonical compute pools**    | Project, user, and installation pools are reconciled from each credential's live provider catalog, with a placement strategy and an exhaustion policy per pool. | Project/Settings/Admin → **Infrastructure**; `CAPACITY_POOL_*`     |
 
-## Report an issue without leaving SAM
+### Report an issue without leaving SAM
 
 When an agent misbehaves or a page crashes, you can file a report from where you are. Click **Report** in the session tool rail on the right edge of the chat, or use **Report this issue** on the crash screen.
 
@@ -38,7 +187,7 @@ SAM never attaches technical context silently. A consent checkbox lists the exac
 
 Reports become draft Ideas in a project the deployment nominates. If you don't see a Report button, this deployment hasn't configured one. See [Reporting Issues](/docs/guides/reporting-issues/).
 
-## Persistent sessions recover from runtime loss
+### Persistent sessions recover from runtime loss
 
 [Persistent sessions](/docs/guides/instant-sessions/) now use the same snapshot contract on Instant containers and standard VM workspaces. SAM checkpoints after idle turns and requires a verified final checkpoint before sleep. The snapshot contains the agent's home directory (including harness session state) and repository work in progress, so a replacement runtime can resume instead of starting blank. Credential files are deliberately excluded and re-provisioned fresh on restore.
 
@@ -52,7 +201,7 @@ What you actually see:
 
 Starting an Instant chat is now durable too: SAM accepts the session first and finishes the launch in the background, so closing the tab partway through no longer leaves a chat stuck in a queued state.
 
-## Machines come from a compute pool
+### Machines come from a compute pool
 
 SAM no longer derives hardware from a `small` / `medium` / `large` label. Each scope — project,
 user, and installation — has a **compute pool**: the concrete provider instance types SAM is
@@ -67,7 +216,7 @@ translated for you.
 
 See [Compute Pools](/docs/guides/compute-pools/).
 
-## Agent work lands on its own branch
+### Agent work lands on its own branch
 
 Task workspaces are now checked out on the task's `sam/…` output branch from the moment they're created — cloned from your default branch, then switched. An agent that never thinks about branching still produces a reviewable branch and a PR.
 
@@ -75,11 +224,11 @@ SAM also **refuses to auto-push a completed task while the workspace is still on
 
 See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).
 
-## Codex gets its tools on the Instant runtime
+### Codex gets its tools on the Instant runtime
 
 Codex sessions running on the Instant runtime never received SAM's MCP configuration, so they started with no SAM tools at all and couldn't call `get_instructions`, `dispatch_task`, or anything else. They now get it on every runtime. A Codex session that cannot be given a valid MCP token now fails to start with an explicit error instead of quietly launching a tool-less agent.
 
-## Superadmins can ask an agent to diagnose errors
+### Superadmins can ask an agent to diagnose errors
 
 **Admin → Errors** can hand a single error, or a whole filtered window, to an AI agent that reads bounded, redacted evidence and writes an analysis — with the model, turn count, and token usage against a daily budget shown alongside. Useful diagnoses can be saved as draft Ideas so they become tracked work.
 

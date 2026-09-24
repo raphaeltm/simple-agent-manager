@@ -83,8 +83,8 @@ PR #568 was merged before all specialist reviewers completed. Five backlog tasks
 
 ## References
 
-- tasks/backlog/2026-03-31-browser-sidecar-security-hardening.md
-- tasks/backlog/2026-03-31-browser-sidecar-go-concurrency-fixes.md
-- tasks/backlog/2026-03-31-browser-sidecar-test-coverage.md
-- tasks/backlog/2026-03-31-browser-sidecar-ui-polish.md
-- tasks/backlog/2026-03-31-neko-cloud-init-env-forwarding.md
+- tasks/archive/2026-03-31-browser-sidecar-security-hardening.md
+- tasks/archive/2026-03-31-browser-sidecar-go-concurrency-fixes.md
+- tasks/archive/2026-03-31-browser-sidecar-test-coverage.md
+- tasks/archive/2026-03-31-browser-sidecar-ui-polish.md
+- tasks/archive/2026-03-31-neko-cloud-init-env-forwarding.md

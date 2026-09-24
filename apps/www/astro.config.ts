@@ -44,6 +44,7 @@ export default defineConfig({
             { slug: 'docs/guides/project-files' },
             { slug: 'docs/guides/creating-workspaces' },
             { slug: 'docs/guides/compute-pools' },
+            { slug: 'docs/guides/session-resources' },
             { slug: 'docs/guides/instant-sessions' },
             { slug: 'docs/guides/reporting-issues' },
             { slug: 'docs/guides/recent-product-changes' },

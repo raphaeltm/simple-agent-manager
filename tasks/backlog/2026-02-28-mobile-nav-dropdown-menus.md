@@ -15,7 +15,7 @@ Make better use of dropdown menus to consolidate workspace-specific actions. Gro
 
 ## Context
 
-This is a follow-up to the mobile chat UX overhaul (`tasks/active/2026-02-28-mobile-chat-ux-overhaul.md`). That task addresses the project/chat views; this task specifically targets the workspace view's nav bar density.
+This is a follow-up to the mobile chat UX overhaul (`tasks/backlog/2026-02-28-mobile-chat-ux-overhaul.md`). That task addresses the project/chat views; this task specifically targets the workspace view's nav bar density.
 
 ## Files Likely Involved
 

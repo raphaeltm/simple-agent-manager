@@ -49,11 +49,11 @@ state, strategy, and how many offerings are available.
 
 A project's **Infrastructure** tab holds three things, and it is worth knowing which is which:
 
-| Section                         | What it controls                                                                               |
-| ------------------------------- | ---------------------------------------------------------------------------------------------- |
-| **Default Resources**           | How much machine work asks for, when nothing more specific says otherwise                      |
-| **Scaling & Scheduling**        | The default provider and region, plus how densely nodes are packed and how long they stay warm |
-| **Infrastructure Compute Pool** | Which concrete machines SAM may rent, and how it chooses between them                          |
+| Section                         | What it controls                                                                                           |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Default Resources**           | How much machine work asks for, when nothing more specific says otherwise                                  |
+| **Scaling & Scheduling**        | The default provider and region, plus how densely nodes are packed and how long they stay warm             |
+| **Infrastructure Compute Pool** | Which concrete machines SAM may rent, and how it chooses between them — for workspaces and for deployments |
 
 The first two feed the pool decisions described below, so they are covered here too.
 
@@ -173,14 +173,14 @@ SAM keeps the two workload roles in sync behind it.
 ## Strategy: which machine gets picked
 
 **Strategy** decides the order SAM considers machines in — both existing nodes it could reuse and
-fresh offerings it could provision. New pools default to **Balanced**.
+fresh offerings it could provision.
 
-| Strategy                 | What it does                                                                                                                                                      |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Balanced** _(default)_ | **Lowest projected utilization first.** Spreads work over the machines you already pay for, leaving headroom on each.                                             |
-| **Pack**                 | **Highest projected utilization that still fits, first.** Fills an existing host before opening another; when provisioning, chooses the largest allowed offering. |
-| **Spread**               | **Fewest neighbouring workspaces first.** Buys isolation and predictable performance at the cost of running more machines.                                        |
-| **Smallest fit**         | **Smallest sufficient capacity first.** Chooses the smallest, then cheapest, sufficient offering and keeps bigger machines free for work that needs them.         |
+| Strategy                           | What it does                                                                                                                                                      |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Balanced** _(workspace default)_ | **Lowest projected utilization first.** Spreads work over the machines you already pay for, leaving headroom on each.                                             |
+| **Pack**                           | **Highest projected utilization that still fits, first.** Fills an existing host before opening another; when provisioning, chooses the largest allowed offering. |
+| **Spread**                         | **Fewest neighbouring workspaces first.** Buys isolation and predictable performance at the cost of running more machines.                                        |
+| **Smallest fit**                   | **Smallest sufficient capacity first.** Chooses the smallest, then cheapest, sufficient offering and keeps bigger machines free for work that needs them.         |
 
 A few things worth knowing:
 
@@ -193,6 +193,42 @@ A few things worth knowing:
 
 The session's infrastructure panel spells the applied ordering out in plain language — for
 example, _"Why this node: lowest projected utilization first"_.
+
+### The four policy fields
+
+Agent workspaces and [app deployments](/docs/guides/app-deployments/) want opposite things — a
+workspace is bursty and short-lived, a deployment is steady and long-lived — so the pool carries a
+separate strategy for each. **Infrastructure Compute Pool → Edit** on whichever scope you own shows
+all four settings together:
+
+| Field                      | What it decides                                                  | Default      |
+| -------------------------- | ---------------------------------------------------------------- | ------------ |
+| **Workspace strategy**     | Machine ordering for agent sessions and tasks                    | Balanced     |
+| **Deployment strategy**    | Machine ordering for app deployment nodes                        | Smallest fit |
+| **Exhaustion policy**      | What happens when no permitted machine can be obtained           | Queue        |
+| **Maximum nodes per user** | How many managed workspace nodes one user may run from this pool | 3            |
+
+The credentials, the allowed offerings, and the providers and regions are shared between the two
+workloads. You curate one list of machines; only the _ordering_ differs by workload. The
+**exhaustion policy** is workspace-only — deployment placement does not consult it, so setting
+**Queue** will not make a capacity-starved deployment park and retry.
+
+### Maximum nodes per user
+
+This is two things at once, and the second one surprises people:
+
+- **For Spread, it is the switch-over point.** Spread opens a new machine per workspace until a
+  user's node count in the pool reaches the limit, then starts packing onto the machines already
+  running. The other strategies do not use it this way.
+- **For every strategy, it is a hard ceiling.** Once a user is at the limit, SAM will not provision
+  another node in that pool for them under any strategy. It reuses a machine that fits; if none
+  fits, the work **queues until the overall capacity wait expires — even under Fail** — and then
+  fails with _"Capacity pool node limit (N) reached and no node can fit the request."_ Set the
+  limit to 2 under Balanced and you will hit that wait, not silently get a third node.
+
+It counts **managed workspace nodes only** — nodes you brought yourself and deployment nodes are
+not counted and are not capped by it. A separate installation-wide ceiling (`MAX_NODES_PER_USER`,
+10 by default) applies on top, so raising the pool limit past that has no effect.
 
 ## Exhaustion policy: what happens when nothing is available
 
@@ -215,16 +251,17 @@ the failure names what was tried.
 :::
 
 :::caution
-**One capacity failure ignores the policy.** These three policies govern _per-offering_ scarcity —
-a particular instance type being sold out in a particular region. When the provider instead reports
-that your whole **account** is out of capacity (a Hetzner server-limit error, for example), SAM
-always parks the work and retries after a provider cooldown, even under **Fail**, and gives up only
-when the overall capacity wait expires.
+**Two capacity failures ignore the policy.** These three policies govern _per-offering_ scarcity —
+a particular instance type being sold out in a particular region. Two other cases always park the
+work and retry until the overall capacity wait expires, even under **Fail**:
 
-That is deliberate: trying other instance types against an account that has hit its own limit
-cannot succeed, and just multiplies failed provider calls. But it does mean **Fail** is not a
-guarantee of an immediate error in every capacity situation. If you are hitting this, the fix is
-your provider account's server limit, not the pool.
+- **Your whole account is out of capacity** (a Hetzner server-limit error, for example). Trying
+  other instance types against an account that has hit its own limit cannot succeed, and just
+  multiplies failed provider calls. The fix is your provider account's server limit, not the pool.
+- **The pool's [Maximum nodes per user](#maximum-nodes-per-user) is reached** and no running node
+  can take the work. The fix is the limit, the requirements, or freeing a node.
+
+So **Fail** is not a guarantee of an immediate error in every capacity situation.
 :::
 
 While work is waiting for capacity, the chat's infrastructure section shows "Waiting for capacity"
@@ -328,19 +365,48 @@ SAM refuses it rather than guessing. A machine SAM cannot measure is never given
 Node Scheduling**. Legacy workspace-count and memory-threshold values remain readable for
 compatibility, but do not gate placement. The disk-pressure threshold is deployment-controlled.
 
-Each compute pool also has a **Maximum nodes per user** setting. Managed workspace nodes are
-user-isolated, so **Spread** provisions separate nodes for that user until their pool usage reaches
-the limit, then packs further sessions onto those nodes. **Pack** chooses the largest allowed
-offering and fills it densely; **Smallest fit** chooses the smallest or cheapest sufficient offering.
+Managed workspace nodes are user-isolated, so **Spread** opens a separate node per workspace for
+that user until their node count in the pool reaches [**Maximum nodes per
+user**](#maximum-nodes-per-user), then packs further sessions onto those nodes. **Pack** takes the
+largest allowed offering and fills it densely; **Smallest fit** takes the smallest, then cheapest,
+sufficient offering.
 
-The same pool has a separate **Deployment strategy**. Its provider, regions, credentials, allowed
-offerings, and quota boundaries remain shared with the workspace policy, while deployment
-placement can use different ordering. The default **Smallest fit** behavior first reuses a healthy,
-compatible deployment node when the sum of its declared CPU, memory, and disk reservations still
-fits. If none fits, SAM provisions the smallest allowed machine that can hold the deployment.
-Service resource limits in the deployment manifest determine this reservation; environment names
-such as preview, staging, and production do not select a machine size. Deployments with persistent
-volumes continue to use an exclusive node.
+### How deployment placement differs
+
+For a deployment **without** persistent volumes, SAM always looks for a healthy, compatible
+deployment node whose declared CPU, memory, and disk reservations still leave room before it
+provisions anything — whatever the strategy. Reuse is also capped by how many environments one
+deployment node may host (`MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE`, 5 by default), which is a second
+reason a new machine can appear while an existing one still looks roomy. The pool's
+[**Deployment strategy**](#the-four-policy-fields) only orders the _provisioning_ step; under its
+**Smallest fit** default that means the smallest allowed machine that can hold the deployment.
+
+A deployment **with** persistent volumes skips that search entirely and always gets its own
+machine — see below.
+
+What drives the size is your **deployment manifest**:
+
+- **CPU and memory** come from each service's `deploy.resources.limits`, summed across services.
+  Machine sizing ignores `deploy.resources.reservations` — it is neither read for sizing nor
+  rejected, so a manifest that sets only reservations silently gets the per-service defaults
+  (`DEPLOYMENT_DEFAULT_CPU_LIMIT_MILLIS` and `DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB`). The block is
+  still passed through to Docker, where it constrains the running container — it just does not
+  decide which machine you land on.
+- **Disk** does not come from `limits` at all. Each service reserves 1 GB of root disk by default
+  (`DEPLOYMENT_DEFAULT_ROOT_DISK_MB`), plus each named volume's `x-sam-size-hint-mb`.
+- **Environment names carry no weight.** Calling an environment `production` does not buy it a
+  bigger machine than one called `preview`.
+
+If a deployment machine is larger than you expected, read the manifest first. See
+[App Deployments](/docs/guides/app-deployments/).
+
+If no node can take the deployment and none can be provisioned, the release is marked **failed
+immediately** — deployment placement does not queue and does not retry, so setting the pool's
+exhaustion policy to **Queue** changes nothing here. Free capacity or lower the manifest's limits,
+then submit a new release.
+
+Deployments with persistent volumes still get an exclusive node — a volume is attached to one
+machine, so the environment cannot be relocated or share a host.
 
 ### Warm reuse
 
@@ -377,19 +443,20 @@ remove it so a lower scope applies.
 
 ## Troubleshooting
 
-| Symptom                                                        | Likely cause                                                                                                                                                                                  |
-| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| "Waiting for capacity" that never clears                       | The pool's allowed offerings are sold out in the chosen region. Allow more offerings or regions, or switch the policy to **Fallback chain**.                                                  |
-| Work fails immediately with a capacity error                   | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                                                                           |
-| No offering satisfies the request                              | Requirements exceed every allowed machine — remember the host memory reserve, so a 4 GiB offering tops out at a 3584 MiB reservation. Lower the requirements or allow a bigger instance type. |
-| A new machine is provisioned for every task                    | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's maximum-node limit.                                                            |
-| Workspace machines are bigger or pricier than expected         | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor.                                                           |
-| A deployment machine is bigger than expected                   | Check the service CPU and memory limits in its deployment manifest, the pool's deployment strategy, and which smaller offerings the pool allows.                                              |
-| Editing is disabled                                            | Project pools need owner or admin (`secret:write`); maintainers can view and reconcile but not edit.                                                                                          |
-| The project ignores your personal pool                         | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                               |
-| Everything lands on one cloud although the pool allows several | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                 |
-| Too many, or too few, workspaces share a machine               | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and maximum-node limit.                                                 |
-| Work waits for capacity even though the policy is **Fail**     | The provider reported account-wide exhaustion, which always retries. Check your provider account's server limit.                                                                              |
+| Symptom                                                                | Likely cause                                                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Waiting for capacity" that never clears                               | The pool's allowed offerings are sold out in the chosen region. Allow more offerings or regions, or switch the policy to **Fallback chain**.                                                                                                                                  |
+| Work fails immediately with a capacity error                           | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                                                                                                                                                           |
+| "Capacity pool node limit (N) reached and no node can fit the request" | The user is at **Maximum nodes per user** for this pool and no running node has room. Raise the limit, lower the requirements so an existing node fits, or free a node.                                                                                                       |
+| No offering satisfies the request                                      | Requirements exceed every allowed machine — remember the host memory reserve, so a 4 GiB offering tops out at a 3584 MiB reservation. Lower the requirements or allow a bigger instance type.                                                                                 |
+| A new machine is provisioned for every task                            | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's maximum-node limit.                                                                                                                                            |
+| Workspace machines are bigger or pricier than expected                 | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor. Then open **Resources** on a finished session to see what it actually used ([Session Resource History](/docs/guides/session-resources/)). |
+| A deployment machine is bigger than expected                           | Check the service CPU and memory limits in its deployment manifest, the pool's deployment strategy, and which smaller offerings the pool allows.                                                                                                                              |
+| Editing is disabled                                                    | Project pools need owner or admin (`secret:write`); maintainers can view and reconcile but not edit.                                                                                                                                                                          |
+| The project ignores your personal pool                                 | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                                                                                                               |
+| Everything lands on one cloud although the pool allows several         | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                                                                                                 |
+| Too many, or too few, workspaces share a machine                       | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and maximum-node limit. [Session Resource History](/docs/guides/session-resources/) is the evidence for what the requirements should be.                |
+| Work waits for capacity even though the policy is **Fail**             | Either the provider reported account-wide exhaustion (check your provider account's server limit), or the pool's [Maximum nodes per user](#maximum-nodes-per-user) is reached and no running node has room. Both always wait.                                                 |
 
 ## Where to look when you want the details
 
@@ -399,10 +466,15 @@ remove it so a lower scope applies.
   ordering that was applied, and why the selected node won.
 - The **Nodes** page shows each machine's **Observed hardware** (what the machine reports about
   itself) next to its **Configured offering** (what the pool asked the provider for).
+- A finished session's **Resources** panel shows what that work actually consumed, which is the
+  only evidence that tells you whether a requirement is too high or too low — see
+  [Session Resource History](/docs/guides/session-resources/).
 
 ## Related
 
 - [Workspaces](/docs/guides/creating-workspaces/) — providers, regions, and the workspace lifecycle
+- [Session Resource History](/docs/guides/session-resources/) — what a session actually used, and
+  how to turn that into the right resource requirement
 - [Instant Sessions](/docs/guides/instant-sessions/) — the container runtime, which does not use pools
 - [Core Concepts](/docs/concepts/) — nodes, providers, projects, profiles, and skills
 - [Configuration Reference](/docs/reference/configuration/) — self-hosting environment variables for
