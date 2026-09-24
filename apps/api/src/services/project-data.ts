@@ -1323,8 +1323,35 @@ async function archiveSearchCursorKey(secret: string): Promise<CryptoKey> {
   );
 }
 
+async function compressArchiveSearchCursor(value: ArchiveSearchCursor): Promise<Uint8Array> {
+  const source = new TextEncoder().encode(JSON.stringify(value));
+  const body = new Blob([source]).stream().pipeThrough(new CompressionStream('gzip'));
+  return new Uint8Array(await new Response(body).arrayBuffer());
+}
+
+async function parseArchiveSearchCursor(bytes: Uint8Array): Promise<unknown> {
+  try {
+    // Accept the uncompressed form emitted by the first Slice B build so a rolling
+    // deployment does not invalidate continuations that are already in flight.
+    const decoded =
+      bytes[0] === 0x1f && bytes[1] === 0x8b
+        ? new Uint8Array(
+            await new Response(
+              new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
+            ).arrayBuffer()
+          )
+        : bytes;
+    return JSON.parse(new TextDecoder().decode(decoded));
+  } catch {
+    throw new Error('Invalid archive search continuation body');
+  }
+}
+
 async function encodeArchiveSearchCursor(env: Env, cursor: ArchiveSearchCursor): Promise<string> {
-  const body = base64UrlEncode(new TextEncoder().encode(JSON.stringify(cursor)));
+  // The continuation crosses MCP and agent tool-result boundaries. Compressing the
+  // frozen inventory keeps exhaustive traversal usable even when a project has many
+  // archive owners, while the HMAC below still authenticates every cursor byte.
+  const body = base64UrlEncode(await compressArchiveSearchCursor(cursor));
   const signature = await crypto.subtle.sign(
     'HMAC',
     await archiveSearchCursorKey(env.ENCRYPTION_KEY),
@@ -1354,7 +1381,7 @@ async function decodeArchiveSearchCursor(
     new TextEncoder().encode(body)
   );
   if (!valid) throw new Error('Invalid archive search continuation signature');
-  const parsed: unknown = JSON.parse(new TextDecoder().decode(base64UrlDecode(body)));
+  const parsed = await parseArchiveSearchCursor(base64UrlDecode(body));
   if (!isArchiveSearchCursor(parsed)) throw new Error('Invalid archive search continuation body');
   const cursor = parsed;
   if (

@@ -1,3 +1,4 @@
+import { DEFAULT_SAM_MAX_TOOL_RESULT_BYTES } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -298,6 +299,9 @@ describe('ProjectData project-wide archive search metadata', () => {
       });
       const continuation = first.archiveSearch.continuation;
       expect(continuation).toEqual(expect.any(String));
+      // Agent tool results are capped at 16 KiB by default. The opaque cursor must
+      // stay well below that boundary so callers can see and submit the next page.
+      expect(continuation?.length).toBeLessThan(DEFAULT_SAM_MAX_TOOL_RESULT_BYTES / 2);
       await expect(
         searchMessagesWithArchiveMetadata(
           env,
@@ -363,6 +367,50 @@ describe('ProjectData project-wide archive search metadata', () => {
         sessionsIndexed: 65,
         complete: true,
       });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps every exhaustive-search page within the SAM tool-result budget', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createLocationTable(sqlite);
+      const stubs: Record<string, SearchStub> = { 'project-search': stub({}) };
+      const insert = sqlite.prepare(
+        `INSERT INTO project_data_session_locations
+           (project_id, session_id, location_state, owner_kind, owner_name,
+            generation, migration_id, routing_schema_version, updated_at)
+         VALUES ('project-search', ?, 'archive_shard', 'archive_shard', ?, 1, ?, 1, 1000)`
+      );
+      for (let index = 0; index < 108; index++) {
+        const owner = `project-search:archive:g1:s${String(index).padStart(3, '0')}`;
+        insert.run(`session-${index}`, owner, `migration-${index}`);
+        stubs[owner] = stub({ archive: [row(`message-${index}`, `session-${index}`, index)] });
+      }
+      const env = {
+        ...envForSearch(sqlite, stubs),
+        PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: '4',
+      } as Env;
+
+      let continuation: string | null = null;
+      let pages = 0;
+      do {
+        const page = await searchMessagesWithArchiveMetadata(
+          env,
+          'project-search',
+          'needle',
+          null,
+          null,
+          5,
+          continuation
+        );
+        expect(JSON.stringify(page).length).toBeLessThan(DEFAULT_SAM_MAX_TOOL_RESULT_BYTES);
+        continuation = page.archiveSearch.continuation;
+        pages++;
+      } while (continuation);
+
+      expect(pages).toBe(27);
     } finally {
       sqlite.close();
     }
