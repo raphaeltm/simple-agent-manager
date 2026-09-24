@@ -400,6 +400,63 @@ async function copyAllChunks(
 }
 
 describe('ProjectData terminal archive sharding bridge', () => {
+  it.each([
+    { configured: '2', expectedRepairs: 2 },
+    { configured: '0', expectedRepairs: 1 },
+    { configured: '99', expectedRepairs: 16 },
+  ])(
+    'bounds search-triggered session repair for configured value $configured',
+    async ({ configured, expectedRepairs }) => {
+      const target = makeSql();
+      try {
+        for (let index = 0; index < 17; index++) {
+          const sessionId = `session-repair-${String(index).padStart(2, '0')}`;
+          target.sql.exec(
+            `INSERT INTO chat_sessions (id, status, started_at, created_at, updated_at)
+             VALUES (?, 'stopped', 1, 1, 1)`,
+            sessionId
+          );
+          target.sql.exec(
+            `INSERT INTO project_data_archive_target_sessions
+               (session_id, project_id, migration_id, owner_name, generation,
+                source_owner_name, source_intent_token, state, terminal_version_sha256,
+                created_at, updated_at, sealed_at)
+             VALUES (?, 'project-archive', ?, 'project-archive:archive:g1:s1', 1,
+                     'project-archive', ?, 'sealed', ?, 1, 1, 1)`,
+            sessionId,
+            `migration-${index}`,
+            `intent-${index}`,
+            `terminal-version-${index}`
+          );
+        }
+
+        const search = await archiveTargetSearchProjectMessages(
+          target.sql,
+          { PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS: configured } as never,
+          {
+            kind: 'archive_shard',
+            projectId: 'project-archive',
+            ownerName: 'project-archive:archive:g1:s1',
+            generation: 1,
+          },
+          'needle',
+          null,
+          10
+        );
+
+        expect(search.coverage).toMatchObject({
+          sessionsAvailable: 17,
+          sessionsIndexed: 0,
+          sessionsIncomplete: 17,
+          repairAttempts: expectedRepairs,
+          sessionsRepaired: 0,
+        });
+      } finally {
+        target.db.close();
+      }
+    }
+  );
+
   it('keeps the archive surface inventory explicit and ordered', () => {
     const expected: ProjectDataArchiveSurface[] = [
       'chat_sessions-root-anchor',

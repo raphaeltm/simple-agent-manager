@@ -51,6 +51,11 @@ export const searchTaskMessagesDef: AnthropicToolDef = {
         type: 'number',
         description: `Max results to return. Defaults to ${DEFAULT_LIMIT}, max ${DEFAULT_MAX_LIMIT}.`,
       },
+      continuation: {
+        type: 'string',
+        description:
+          'Project-wide signed continuation returned by archiveSearch.continuation. Repeat the same query, roles, and limit until archiveSearch.complete is true. Cannot be combined with sessionId or taskId.',
+      },
     },
     required: ['projectId', 'query'],
   },
@@ -64,6 +69,7 @@ export async function searchTaskMessages(
     sessionId?: string;
     roles?: string[];
     limit?: number;
+    continuation?: string;
   },
   ctx: ToolContext
 ): Promise<unknown> {
@@ -75,6 +81,9 @@ export async function searchTaskMessages(
   }
   if (input.query.trim().length < 2) {
     return { error: 'query must be at least 2 characters.' };
+  }
+  if (input.continuation?.trim() && (input.sessionId?.trim() || input.taskId?.trim())) {
+    return { error: 'continuation cannot be combined with sessionId or taskId.' };
   }
 
   const env = ctx.env as unknown as Env;
@@ -119,7 +128,8 @@ export async function searchTaskMessages(
     input.query.trim(),
     sessionId,
     roles,
-    limit
+    limit,
+    input.continuation?.trim() || null
   );
 
   return {

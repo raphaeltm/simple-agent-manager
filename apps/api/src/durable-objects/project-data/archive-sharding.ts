@@ -53,9 +53,6 @@ const log = createModuleLogger('project_data.archive_sharding');
 const PENDING_TERMINAL_VERSION_SHA256 = 'pending';
 // Slice A keeps repair deliberately incremental without exposing the project-wide
 // search tuning surface. Slice B owns configurable archive-search concurrency.
-const ARCHIVE_SEARCH_REPAIR_CHUNKS_PER_PASS = 1;
-const ARCHIVE_SEARCH_REPAIR_SESSIONS_PER_PASS = 1;
-
 export class ProjectDataArchiveInvariantError extends Error {
   readonly code = 'PROJECT_DATA_ARCHIVE_INVARIANT';
 
@@ -2946,6 +2943,14 @@ async function repairArchiveSearchProjectionStep(
   if (phase === 'raw') {
     let rawComplete = false;
     if (compactArchive.isCompactArchive(sql, sessionId)) {
+      const configuredChunks = Number.parseInt(
+        env.PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_CHUNKS ?? '',
+        10
+      );
+      const chunkLimit =
+        Number.isSafeInteger(configuredChunks) && configuredChunks > 0
+          ? Math.min(configuredChunks, 64)
+          : 1;
       let chunksRead = 0;
       for await (const chunk of compactArchive.compactRawChunks(sql, env, sessionId, {
         perChunkTimeoutMs: compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS),
@@ -2954,7 +2959,7 @@ async function repairArchiveSearchProjectionStep(
         for (const row of chunk.rows) consume(row);
         nextOrdinal = chunk.ordinal + 1;
         chunksRead++;
-        if (chunksRead >= ARCHIVE_SEARCH_REPAIR_CHUNKS_PER_PASS) break;
+        if (chunksRead >= chunkLimit) break;
       }
       const maxOrdinal = Number(
         sql
@@ -4054,6 +4059,14 @@ export async function archiveTargetSearchProjectMessages(
     input.ownerName,
     input.generation
   );
+  const configuredRepairLimit = Number.parseInt(
+    env?.PROJECT_DATA_ARCHIVE_SEARCH_REPAIR_SESSIONS ?? '',
+    10
+  );
+  const repairLimit =
+    Number.isSafeInteger(configuredRepairLimit) && configuredRepairLimit > 0
+      ? Math.min(configuredRepairLimit, 16)
+      : 1;
   const sessionsIndexedBeforeRepair = countRows(
     sql,
     `SELECT COUNT(*) AS count
@@ -4079,7 +4092,7 @@ export async function archiveTargetSearchProjectMessages(
       input.ownerName,
       input.generation,
       ARCHIVE_SEARCH_INDEX_VERSION,
-      ARCHIVE_SEARCH_REPAIR_SESSIONS_PER_PASS
+      repairLimit
     )
     .toArray();
   const coverageErrors: Array<{ sessionId: string; error: string }> = [];

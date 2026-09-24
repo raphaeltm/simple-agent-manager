@@ -1095,17 +1095,16 @@ export class ProjectData extends DurableObject<Env> {
     roles: string[] | null = null,
     limit: number = 10
   ) {
-    return this.withArchiveTranscriptLock(async () => {
-      const result = await archiveSharding.archiveTargetSearchProjectMessages(
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.archiveTargetSearchProjectMessages(
         this.sql,
         this.env,
         input,
         query,
         roles,
         limit
-      );
-      return result.results;
-    });
+      )
+    );
   }
 
   async getMessageToolContent(

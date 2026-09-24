@@ -332,9 +332,49 @@ describe('search_task_messages', () => {
       'test',
       'resolved-session',
       null,
-      expect.any(Number)
+      expect.any(Number),
+      null
     );
   });
+
+  it('forwards the signed archive continuation', async () => {
+    mockSearchMessages.mockResolvedValueOnce([]);
+    const ctx = buildCtx({ dbFirstResult: OWNED_PROJECT });
+    await searchTaskMessages(
+      { projectId: 'proj-1', query: 'test', continuation: 'signed-continuation' },
+      ctx
+    );
+    expect(mockSearchMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'test',
+      null,
+      null,
+      expect.any(Number),
+      'signed-continuation'
+    );
+  });
+
+  it.each([{ sessionId: 'session-one' }, { taskId: 'task-one' }])(
+    'rejects a continuation combined with exact scope $sessionId$taskId',
+    async (scope) => {
+      const callsBefore = mockSearchMessages.mock.calls.length;
+      const result = await searchTaskMessages(
+        {
+          projectId: 'proj-1',
+          query: 'test',
+          continuation: 'signed-project-wide-cursor',
+          ...scope,
+        },
+        buildCtx({ dbFirstResult: OWNED_PROJECT })
+      );
+
+      expect(result).toEqual({
+        error: 'continuation cannot be combined with sessionId or taskId.',
+      });
+      expect(mockSearchMessages).toHaveBeenCalledTimes(callsBefore);
+    }
+  );
 
   it('dispatches via executeTool', async () => {
     const ctx = buildCtx();

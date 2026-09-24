@@ -3,7 +3,11 @@
  *
  * Also exports TokenRow and groupTokensIntoMessages for use by tests and other modules.
  */
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { requireProjectAccess } from '../../middleware/project-auth';
 import * as projectDataService from '../../services/project-data';
 import { getWorkspaceResourceHistory } from '../../services/workspace-resource-history';
 import {
@@ -253,6 +257,23 @@ export async function handleSearchMessages(
   const roles = rolesResult.roles;
   const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.messageSearchMax);
+  const continuation =
+    typeof params.continuation === 'string' && params.continuation.length > 0
+      ? params.continuation
+      : null;
+  if (sessionId && continuation) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'continuation cannot be combined with sessionId'
+    );
+  }
+
+  await requireProjectAccess(
+    drizzle(env.DATABASE, { schema }),
+    tokenData.projectId,
+    tokenData.userId
+  );
 
   const search = await projectDataService.searchMessagesWithArchiveMetadata(
     env,
@@ -260,7 +281,8 @@ export async function handleSearchMessages(
     query,
     sessionId,
     roles,
-    limit
+    limit,
+    continuation
   );
 
   return jsonRpcSuccess(requestId, {

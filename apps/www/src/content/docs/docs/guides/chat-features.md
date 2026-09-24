@@ -240,6 +240,12 @@ Agents search messages with the `search_messages` MCP tool. The project chat's o
 box is a different thing: it filters the session list by topic, session ID, and creator, and does
 not look inside messages.
 
+Project-wide search also traverses immutable archive owners. A bounded call can return provisional
+results plus `archiveSearch.continuation`; pass that continuation with the same query, roles, and
+limit until `archiveSearch.complete` is true. `ownerCoverage`, `indexCoverage`, `rootError`, and
+`executionErrors` distinguish pending traversal, one-time index repair, and execution failures.
+Session-scoped search resolves the exact owner directly.
+
 ## Session Lifecycle
 
 Agent conversations and task sessions stay active until they complete, fail, or are explicitly stopped.
