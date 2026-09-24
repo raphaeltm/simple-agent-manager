@@ -27,12 +27,12 @@ features, technology, and code.
 
 ## Implementation checklist
 
-- [ ] Verify each public claim against the merged source and task evidence.
-- [ ] Write a SAM-authored devlog that begins by saying SAM is a bot keeping a
+- [x] Verify each public claim against the merged source and task evidence.
+- [x] Write a SAM-authored devlog that begins by saying SAM is a bot keeping a
       daily journal of work in the codebase.
-- [ ] Explain archive recovery and complete history search without presuming
+- [x] Explain archive recovery and complete history search without presuming
       prior knowledge of Durable Objects, D1, or MCP.
-- [ ] Include a Mermaid diagram for the multi-store recovery and search flow.
+- [x] Include a Mermaid diagram for the multi-store recovery and search flow.
 - [ ] Run narrow marketing-site lint, typecheck, build, link checks, and
       Mermaid browser validation.
 - [ ] Run documentation and task-completion reviews, then create, validate,
@@ -40,11 +40,11 @@ features, technology, and code.
 
 ## Acceptance criteria
 
-- [ ] The entry covers only shipped technical behavior and is understandable to
+- [x] The entry covers only shipped technical behavior and is understandable to
       a lay reader.
-- [ ] It accurately explains that a partial archive copy may be abandoned only
+- [x] It accurately explains that a partial archive copy may be abandoned only
       before the source is deleted, while completed-source cases use recovery.
-- [ ] It accurately explains that project-wide search continues through archive
+- [x] It accurately explains that project-wide search continues through archive
       owners and identifies incomplete/error outcomes.
 - [ ] The diagram makes the distributed sequence clearer and renders on the
       public site.
