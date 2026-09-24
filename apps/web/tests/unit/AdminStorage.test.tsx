@@ -369,4 +369,67 @@ describe('AdminStorage — Problem Migrations', () => {
 
     expect(await screen.findByText('D1 unavailable')).toBeInTheDocument();
   });
+
+  it('renders the "Failed" badge for a failed migration', async () => {
+    const failedMigration = {
+      ...FROZEN_MIGRATION,
+      migrationId: 'failed-1',
+      state: 'failed',
+      frozenAt: null,
+    };
+    mocks.fetchAdminProjectDataArchiveProblemMigrations.mockResolvedValue({
+      migrations: [failedMigration],
+      warnings: [],
+      limit: 25,
+    });
+
+    renderPage();
+
+    const card = await screen.findByTestId('migration-failed-1');
+    expect(card).toHaveTextContent('Failed');
+  });
+
+  it('renders "Unknown" badge for an unrecognized state', async () => {
+    const unknownMigration = {
+      ...FROZEN_MIGRATION,
+      migrationId: 'unknown-1',
+      state: 'some_future_state',
+      frozenAt: null,
+    };
+    mocks.fetchAdminProjectDataArchiveProblemMigrations.mockResolvedValue({
+      migrations: [unknownMigration],
+      warnings: [],
+      limit: 25,
+    });
+
+    renderPage();
+
+    const card = await screen.findByTestId('migration-unknown-1');
+    expect(card).toHaveTextContent('Unknown');
+  });
+
+  it('shows skipped row warnings when the backend reports them', async () => {
+    mocks.fetchAdminProjectDataArchiveProblemMigrations.mockResolvedValue({
+      migrations: [FROZEN_MIGRATION],
+      warnings: [{ surface: 'problem_migrations', skippedRows: 2 }],
+      limit: 25,
+    });
+
+    renderPage();
+
+    expect(await screen.findByText(/2 malformed row\(s\) were skipped/)).toBeInTheDocument();
+  });
+
+  it('closes the dialog when cancel is clicked', async () => {
+    renderPage();
+
+    const frozenCard = await screen.findByTestId('migration-67927ce6');
+    fireEvent.click(frozenCard.querySelector('button')!);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+  });
 });

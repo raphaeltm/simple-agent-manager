@@ -1,6 +1,12 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot, setupAuditRoutes } from './audit-helpers';
+import {
+  assertNoOverflow,
+  makeMockUser,
+  screenshot,
+  screenshotSectionNearHeading,
+  setupAuditRoutes,
+} from './audit-helpers';
 
 const ADMIN_USER = makeMockUser({
   email: 'admin@example.com',
@@ -366,6 +372,54 @@ test.describe('AdminStorage', () => {
     await expect(page.getByTestId('migration-failed-abc1')).toBeVisible();
     await expect(page.getByRole('button', { name: /abandon/i })).toHaveCount(3);
     await screenshot(page, 'admin-storage-problem-migrations');
+    await screenshotSectionNearHeading(
+      page,
+      'Problem migrations',
+      'REVIEW-admin-storage-problem-migrations-section'
+    );
+    // REVIEW DEBUG: find the widest element inside the first migration card
+    const debugInfo = await page.evaluate(() => {
+      const card = document.querySelector('[data-testid="migration-67927ce6"]');
+      if (!card) return 'card not found';
+      const out: string[] = [];
+      out.push(`card clientWidth=${(card as HTMLElement).clientWidth}`);
+      for (const el of Array.from(card.querySelectorAll('*'))) {
+        const w = (el as HTMLElement).scrollWidth;
+        if (w > 375) {
+          const cls = (el.getAttribute('class') ?? '').slice(0, 100);
+          const text = (el.textContent ?? '').trim().slice(0, 60);
+          out.push(`<${el.tagName.toLowerCase()} class="${cls}"> scrollWidth=${w} text="${text}"`);
+        }
+      }
+      return out.join('\n');
+    });
+    console.log('REVIEW DEBUG:\n' + debugInfo);
+    const wordWidths = await page.evaluate(() => {
+      const card = document.querySelector('[data-testid="migration-67927ce6"]');
+      if (!card) return 'no card';
+      const results: Array<[string, number]> = [];
+      for (const dd of Array.from(card.querySelectorAll('dd'))) {
+        const style = getComputedStyle(dd);
+        const words = (dd.textContent ?? '').split(/\s+/);
+        for (const w of words) {
+          if (!w) continue;
+          const span = document.createElement('span');
+          span.style.font = style.font;
+          span.style.fontFamily = style.fontFamily;
+          span.style.fontSize = style.fontSize;
+          span.style.whiteSpace = 'nowrap';
+          span.style.position = 'absolute';
+          span.style.visibility = 'hidden';
+          span.textContent = w;
+          document.body.appendChild(span);
+          results.push([w.slice(0, 50), span.getBoundingClientRect().width]);
+          document.body.removeChild(span);
+        }
+      }
+      results.sort((a, b) => b[1] - a[1]);
+      return results.slice(0, 8).map(([w, wd]) => `${wd.toFixed(0)}px: "${w}"`).join('\n');
+    });
+    console.log('REVIEW WORD WIDTHS:\n' + wordWidths);
     await assertNoOverflow(page);
   });
 
@@ -376,6 +430,11 @@ test.describe('AdminStorage', () => {
     await openStoragePage(page);
     await expect(page.getByText('No problem migrations.')).toBeVisible();
     await screenshot(page, 'admin-storage-problem-migrations-empty');
+    await screenshotSectionNearHeading(
+      page,
+      'Problem migrations',
+      'REVIEW-admin-storage-problem-migrations-empty-section'
+    );
     await assertNoOverflow(page);
   });
 
@@ -389,6 +448,79 @@ test.describe('AdminStorage', () => {
     await expect(dialog.getByText('67927ce6')).toBeVisible();
     await expect(dialog.getByText('1d438cc7-aaaa-bbbb-cccc-dddddddddddd')).toBeVisible();
     await screenshot(page, 'admin-storage-abandon-dialog');
+    await assertNoOverflow(page);
+  });
+
+  test('abandoning a migration posts the correct URL and body and refreshes the list', async ({
+    page,
+  }) => {
+    let migrations = structuredClone(PROBLEM_MIGRATIONS);
+    const postBodies: Array<{ path: string; body: unknown }> = [];
+    await dismissOnboardingWizard(page);
+    await page.route('**/api/**', async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path === '/api/auth/get-session') return respondJson(route, 200, ADMIN_USER);
+      if (path === '/api/dashboard/active-tasks') return respondJson(route, 200, { tasks: [] });
+      if (path === '/api/trial-status') return respondJson(route, 200, { isTrial: false });
+      if (path === '/api/projects') return respondJson(route, 200, { projects: [], total: 0 });
+      if (path === '/api/notifications/unread-count') return respondJson(route, 200, { count: 0 });
+      if (path === '/api/notifications') {
+        return respondJson(route, 200, { notifications: [], unreadCount: 0, nextCursor: null });
+      }
+      if (path.startsWith('/api/credentials')) return respondJson(route, 200, []);
+      if (path === '/api/github/installations') return respondJson(route, 200, []);
+      if (path === '/api/workspaces') return respondJson(route, 200, []);
+      if (path.startsWith('/api/provider-catalog'))
+        return respondJson(route, 200, { catalogs: [] });
+      if (path === '/api/admin/project-data/storage') return respondJson(route, 200, TELEMETRY);
+      if (path === '/api/admin/project-data/storage/archive-sharding/circuit-breakers') {
+        return respondJson(route, 200, BREAKERS);
+      }
+      if (path === '/api/admin/project-data/storage/archive-sharding/problem-migrations') {
+        return respondJson(route, 200, migrations);
+      }
+      const abandonMatch = path.match(
+        /^\/api\/admin\/project-data\/storage\/([^/]+)\/archive-sharding\/migrations\/([^/]+)\/abandon$/
+      );
+      if (abandonMatch && request.method() === 'POST') {
+        const body = request.postDataJSON() as { reason: string };
+        postBodies.push({ path, body });
+        migrations = {
+          ...migrations,
+          migrations: migrations.migrations.filter(
+            (m) => m.migrationId !== decodeURIComponent(abandonMatch[2])
+          ),
+        };
+        return respondJson(route, 200, {
+          result: {
+            migrationId: abandonMatch[2],
+            journalState: 'operator_abandoned',
+          },
+        });
+      }
+      return respondJson(route, 200, {});
+    });
+
+    await openStoragePage(page);
+    const frozenCard = page.getByTestId('migration-67927ce6');
+    await frozenCard.getByRole('button', { name: /abandon/i }).click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    await dialog.getByLabel('Reason').fill('Stuck on g1:s62; abandon to unblock drain');
+    await dialog.getByRole('button', { name: /^abandon migration$/i }).click();
+
+    await expect(dialog).toHaveCount(0);
+    await expect(frozenCard).toHaveCount(0);
+    expect(postBodies).toEqual([
+      {
+        path: '/api/admin/project-data/storage/01KHRJGANBBWGDY1NZ0KVF0D4J/archive-sharding/migrations/67927ce6/abandon',
+        body: { reason: 'Stuck on g1:s62; abandon to unblock drain' },
+      },
+    ]);
+    await screenshot(page, 'admin-storage-after-abandon');
     await assertNoOverflow(page);
   });
 });

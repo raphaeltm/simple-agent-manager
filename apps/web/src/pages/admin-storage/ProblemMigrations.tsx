@@ -185,6 +185,14 @@ export function ProblemMigrations() {
             {migrationsQuery.data.limit}). Additional results may exist beyond this limit.
           </p>
         )}
+        {migrationsQuery.data &&
+          migrationsQuery.data.warnings
+            .filter((w) => w.skippedRows > 0)
+            .map((w) => (
+              <p key={w.surface} className="m-0 text-xs text-fg-muted">
+                {w.skippedRows} malformed row(s) were skipped.
+              </p>
+            ))}
       </section>
 
       <Dialog
