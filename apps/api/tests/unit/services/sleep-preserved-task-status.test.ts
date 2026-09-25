@@ -17,6 +17,7 @@ import {
 import { createSchemaTables } from '../../helpers/sqlite-d1';
 
 const NOW = '2026-09-25T11:00:00.000Z';
+const MAX_SLEEP_ATTEMPTS = 9;
 
 describe('sleep-preserved task status authority', () => {
   let sqlite: Database.Database;
@@ -42,7 +43,7 @@ describe('sleep-preserved task status authority', () => {
             manifest_r2_key, expires_at, sleeping_at, sleep_status, sleep_after, capture_generation,
             sleep_attempts, recovery_attempts, created_at, updated_at)
          VALUES ('snapshot-1', 'project-1', 'ws-1', 'user-1', 'chat-1', 'vm', ?, ?, 'manifest.json',
-                 ?, ?, ?, ?, ?, 0, 0, ?, ?)`
+                 ?, ?, ?, ?, ?, ?, 0, ?, ?)`
       )
       .run(
         row.status ?? 'available',
@@ -52,22 +53,38 @@ describe('sleep-preserved task status authority', () => {
         row.sleepStatus ?? null,
         row.sleepAfter ?? null,
         row.captureGeneration ?? null,
+        row.sleepAttempts ?? 0,
         NOW,
         NOW
       );
   }
 
   describe('the given-up sleep definition', () => {
+    const spent = MAX_SLEEP_ATTEMPTS;
     const rows: Array<[string, Partial<SessionSleepAttemptState>, boolean]> = [
-      ['failed with no retry left', { sleepStatus: 'failed' }, true],
-      ['terminally refused', { sleepStatus: 'terminal_failed' }, true],
-      ['failed with a retry scheduled', { sleepStatus: 'failed', sleepAfter: NOW }, false],
+      ['failed with its budget spent', { sleepStatus: 'failed', sleepAttempts: spent }, true],
+      // Raising SESSION_SLEEP_MAX_ATTEMPTS re-arms such a row, and the sweep retries it.
       [
-        'a degraded capture the sweep keeps retrying',
-        { sleepStatus: 'failed', status: 'degraded' },
+        'failed with budget left and no retry time',
+        { sleepStatus: 'failed', sleepAttempts: 3 },
         false,
       ],
-      ['a capture still in progress', { sleepStatus: 'failed', captureGeneration: 'g-2' }, false],
+      ['terminally refused', { sleepStatus: 'terminal_failed' }, true],
+      [
+        'failed with a retry scheduled',
+        { sleepStatus: 'failed', sleepAfter: NOW, sleepAttempts: spent },
+        false,
+      ],
+      [
+        'a degraded capture the sweep keeps retrying',
+        { sleepStatus: 'failed', status: 'degraded', sleepAttempts: spent },
+        false,
+      ],
+      [
+        'a capture still in progress',
+        { sleepStatus: 'failed', captureGeneration: 'g-2', sleepAttempts: spent },
+        false,
+      ],
       ['scheduled', { sleepStatus: 'scheduled', sleepAfter: NOW }, false],
       ['in flight', { sleepStatus: 'preparing' }, false],
       ['asleep', { sleepStatus: 'sleeping', sleepingAt: NOW }, false],
@@ -77,17 +94,21 @@ describe('sleep-preserved task status authority', () => {
     it.each(rows)('%s: TypeScript and SQL agree', (_label, row, exhausted) => {
       seedSnapshot(row);
       const sqlAnswer = sqlite
-        .prepare(`SELECT ${exhaustedSessionSleepSql("'chat-1'")} AS exhausted`)
+        .prepare(`SELECT ${exhaustedSessionSleepSql("'chat-1'", MAX_SLEEP_ATTEMPTS)} AS exhausted`)
         .get() as { exhausted: number };
 
       expect(
-        isSessionSleepExhausted({
-          sleepingAt: row.sleepingAt ?? null,
-          sleepAfter: row.sleepAfter ?? null,
-          sleepStatus: row.sleepStatus ?? null,
-          status: row.status ?? 'available',
-          captureGeneration: row.captureGeneration ?? null,
-        })
+        isSessionSleepExhausted(
+          {
+            sleepingAt: row.sleepingAt ?? null,
+            sleepAfter: row.sleepAfter ?? null,
+            sleepStatus: row.sleepStatus ?? null,
+            sleepAttempts: row.sleepAttempts ?? 0,
+            status: row.status ?? 'available',
+            captureGeneration: row.captureGeneration ?? null,
+          },
+          MAX_SLEEP_ATTEMPTS
+        )
       ).toBe(exhausted);
       expect(sqlAnswer.exhausted === 1).toBe(exhausted);
     });
@@ -142,7 +163,7 @@ describe('sleep-preserved task status authority', () => {
       if (fixture.snapshot) seedSnapshot(fixture.snapshot);
       const row = sqlite
         .prepare(
-          `SELECT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w')} AS owned
+          `SELECT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', MAX_SLEEP_ATTEMPTS)} AS owned
              FROM tasks t JOIN workspaces w ON w.id = t.workspace_id WHERE t.id = 'task-1'`
         )
         .get() as { owned: number };
@@ -160,7 +181,11 @@ describe('sleep-preserved task status authority', () => {
       ],
       [
         'a degraded capture the sweep still retries',
-        { snapshot: { sleepStatus: 'failed', status: 'degraded' } },
+        { snapshot: { sleepStatus: 'failed', status: 'degraded', sleepAttempts: 9 } },
+      ],
+      [
+        'a failed attempt re-armed by a raised budget',
+        { snapshot: { sleepStatus: 'failed', sleepAttempts: 3 } },
       ],
       [
         'a runtime that already slept',
@@ -183,7 +208,7 @@ describe('sleep-preserved task status authority', () => {
       ['no agent session', { agentStatus: null }],
       ['a stopped workspace', { workspaceStatus: 'stopped' }],
       ['a workspace still creating', { workspaceStatus: 'creating' }],
-      ['a sleep with no retry left', { snapshot: { sleepStatus: 'failed' } }],
+      ['a sleep with its budget spent', { snapshot: { sleepStatus: 'failed', sleepAttempts: 9 } }],
       ['a terminally refused sleep', { snapshot: { sleepStatus: 'terminal_failed' } }],
     ])('releases a failed task with %s to the reapers', (_label, fixture) => {
       expect(owned(fixture)).toBe(false);

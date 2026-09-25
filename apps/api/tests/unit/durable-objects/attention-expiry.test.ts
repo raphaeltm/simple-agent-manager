@@ -8,6 +8,7 @@ import { processExpiredAttentionMarkers } from '../../../src/durable-objects/pro
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import {
   failedTaskIncompleteSnapshotMessage,
+  failedTaskNoticeId,
   failedTaskWorkLossMessage,
 } from '../../../src/services/failed-task-preservation';
 import { persistMessage } from '../../../src/services/project-data';
@@ -685,7 +686,7 @@ describe('delivery-aware attention expiry', () => {
         'system',
         failedTaskIncompleteSnapshotMessage('transcript-only', 'vm'),
         null,
-        'failed-task-snapshot-incomplete-task-1'
+        failedTaskNoticeId('snapshot-incomplete', 'task-1', 'session-1')
       );
       expect(failSession).not.toHaveBeenCalled();
       expect(cleanupTaskRun).not.toHaveBeenCalled();
@@ -712,6 +713,70 @@ describe('delivery-aware attention expiry', () => {
       expect(cleanupTaskRun).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ['prompting past the hard ceiling', { activity: 'prompting' }],
+      [
+        'running harness work past the hard ceiling',
+        {
+          activity: 'idle',
+          activityAt: START + 1_000,
+          promptStartedAt: null,
+          runtimeWorkState: 'active' as const,
+          runtimeWorkUpdatedAt: START + 1_000,
+          runtimeWorkProgressAt: START + 1_000,
+        },
+      ],
+    ])(
+      'releases a live runtime whose check-in expired with the agent %s',
+      async (_label, state) => {
+        // The watchdog's own verdict is that this turn will not end. A preservation
+        // sleep would wait on it (the drain follows activity), and every capture
+        // would race the turn's re-reports: tear it down now and say so.
+        env.TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS = '120000';
+        seedLiveVmRuntime();
+        checkinMarker();
+        insertActiveAcpState({
+          promptStartedAt: START + 1_000,
+          activityAt: START + 122_000,
+          ...state,
+        });
+        vi.setSystemTime(START + 130_000);
+
+        await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+        expect(taskRow()).toMatchObject({
+          status: 'failed',
+          error_message: 'Agent became unresponsive after SAM check-in',
+        });
+        expect(snapshotRow()).toBeUndefined();
+        expect(persistMessage).toHaveBeenCalledWith(
+          env,
+          PROJECT_ID,
+          'session-1',
+          'system',
+          failedTaskWorkLossMessage('agent_unresponsive'),
+          null,
+          failedTaskNoticeId('work-loss', 'task-1', 'session-1')
+        );
+        expect(failSession).toHaveBeenCalledOnce();
+        await vi.waitFor(() => expect(cleanupTaskRun).toHaveBeenCalledWith('task-1', env));
+      }
+    );
+
+    it('still preserves a live runtime whose check-in expired on an idle agent (control)', async () => {
+      seedLiveVmRuntime();
+      checkinMarker();
+      insertActiveAcpState({ activity: 'idle', activityAt: START - 60_000, promptStartedAt: null });
+
+      await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+      expect(taskRow().status).toBe('failed');
+      expect(snapshotRow()).toMatchObject({ sleep_status: 'scheduled' });
+      expect(persistMessage).not.toHaveBeenCalled();
+      expect(failSession).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
+    });
+
     it('says the work was not preserved before failing the session and tearing down', async () => {
       seedLiveVmRuntime('failed');
       checkinMarker();
@@ -726,7 +791,7 @@ describe('delivery-aware attention expiry', () => {
         'system',
         failedTaskWorkLossMessage('no_resumable_agent_session'),
         null,
-        'failed-task-work-loss-task-1'
+        failedTaskNoticeId('work-loss', 'task-1', 'session-1')
       );
       expect(failSession).toHaveBeenCalledOnce();
       expect(vi.mocked(persistMessage).mock.invocationCallOrder[0]).toBeLessThan(

@@ -13,7 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
 import type { Env } from '../../src/env';
-import { failedTaskWorkLossMessage } from '../../src/services/failed-task-preservation';
+import {
+  failedTaskNoticeId,
+  failedTaskWorkLossMessage,
+} from '../../src/services/failed-task-preservation';
 import {
   seedAgentSession,
   seedInstallation,
@@ -134,7 +137,7 @@ describe('attention expiry from a real ProjectData alarm', () => {
     });
     expect(await systemMessages(stub, chatSessionId)).toEqual([
       expect.objectContaining({
-        id: `failed-task-work-loss-${taskId}`,
+        id: failedTaskNoticeId('work-loss', taskId, chatSessionId),
         content: failedTaskWorkLossMessage('no_resumable_agent_session'),
       }),
     ]);

@@ -460,6 +460,7 @@ describe('runNodeCleanupSweep', () => {
 
       const env = createMockEnv(responses, {
         CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT: '3',
+        SESSION_SLEEP_MAX_ATTEMPTS: '4',
       });
 
       const result = await runNodeCleanupSweep(env);
@@ -480,7 +481,7 @@ describe('runNodeCleanupSweep', () => {
       // Behaviour against real SQL: tests/workers/scheduled-node-cleanup.test.ts.
       expect(terminalQuery).toContain("t.status IN ('completed', 'failed', 'cancelled')");
       expect(terminalQuery).toContain(
-        `AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w')}`
+        `AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', 4)}`
       );
     });
   });

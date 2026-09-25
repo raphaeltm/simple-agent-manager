@@ -133,6 +133,7 @@ async function seedPendingSleepSnapshot(input: {
   chatSessionId: string;
   sleepStatus: 'scheduled' | 'failed';
   sleepAfter: string | null;
+  sleepAttempts?: number;
 }): Promise<void> {
   const now = new Date().toISOString();
   await env.DATABASE.prepare(
@@ -140,7 +141,7 @@ async function seedPendingSleepSnapshot(input: {
        (id, project_id, workspace_id, user_id, chat_session_id, runtime, status, degradation,
         manifest_r2_key, expires_at, sleep_status, sleep_after, recovery_attempts,
         sleep_attempts, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'vm', 'pending', 'none', ?, ?, ?, ?, 0, 2, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, 'vm', 'pending', 'none', ?, ?, ?, ?, 0, ?, ?, ?)`
   )
     .bind(
       input.id,
@@ -152,6 +153,7 @@ async function seedPendingSleepSnapshot(input: {
       new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       input.sleepStatus,
       input.sleepAfter,
+      input.sleepAttempts ?? 2,
       now,
       now
     )
@@ -572,15 +574,16 @@ describe('runNodeCleanupSweep — vertical slice', () => {
     it('reaps a failed task workspace once the sleep lifecycle can no longer take it', async () => {
       // The reapers are the durable backstop for a preservation that cannot finish:
       // an agent session that errored after the sleep was queued (the sweep can
-      // never claim it), or a sleep that gave up. A queued sleep the sweep can still
-      // claim stays exempt.
+      // never claim it), or a sleep whose retry budget is spent. A queued sleep, or
+      // a failed one the sweep will still retry, stays exempt.
       await seedBaseData();
       const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       const now = new Date().toISOString();
-      for (const [suffix, agentStatus, sleepStatus, sleepAfter] of [
-        ['queued', 'running', 'scheduled', now],
-        ['errored', 'error', 'scheduled', now],
-        ['exhausted', 'running', 'failed', null],
+      for (const [suffix, agentStatus, sleepStatus, sleepAfter, sleepAttempts] of [
+        ['queued', 'running', 'scheduled', now, 0],
+        ['errored', 'error', 'scheduled', now, 0],
+        ['retrying', 'running', 'failed', null, 2],
+        ['exhausted', 'running', 'failed', null, 3],
       ] as const) {
         const nodeId = `node-nc-failed-backstop-${suffix}`;
         const wsId = `ws-nc-failed-backstop-${suffix}`;
@@ -605,9 +608,14 @@ describe('runNodeCleanupSweep — vertical slice', () => {
           chatSessionId,
           sleepStatus,
           sleepAfter,
+          sleepAttempts,
         });
       }
-      const testEnv = { ...env, ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000' } as unknown as Env;
+      const testEnv = {
+        ...env,
+        ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000',
+        SESSION_SLEEP_MAX_ATTEMPTS: '3',
+      } as unknown as Env;
 
       const result = await runNodeCleanupSweep(testEnv);
 
@@ -617,6 +625,9 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       });
       expect(await getWorkspaceStatus('ws-nc-failed-backstop-errored')).toMatchObject({
         status: 'stopped',
+      });
+      expect(await getWorkspaceStatus('ws-nc-failed-backstop-retrying')).toMatchObject({
+        status: 'running',
       });
       expect(await getWorkspaceStatus('ws-nc-failed-backstop-exhausted')).toMatchObject({
         status: 'stopped',
