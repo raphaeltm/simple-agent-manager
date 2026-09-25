@@ -260,3 +260,21 @@ The tasks were `01M3BB7KNY7N0480AM6YN0ZSJD`, `01M3BB8BXAHWBYZD94Q5NJD8WN` and
 - Prior incident: `tasks/archive/2026-09-09-hetzner-412-placement-blocks-fallback-chain.md`
 - Idea `01M236QPGGC6B150FG4QHT17MW` (items 2 and the 2026-09-25 recurrence; items 1, 3–8
   remain open)
+
+## PR #2145 completion continuation (2026-09-25)
+
+Both inspected follow-up tasks ended at the session/model limit at 16:12Z, not a technical rejection.
+This prerequisite branch combines capacity/region work with the restore blockers so one final staging
+pass can verify the entire preserved-conversation wake before either change ships.
+
+- Restored the pushed VM job-context change from `7526dbe3c`.
+- Removed premature snapshot failure from the retryable agent step; terminal `failTask` remains the authority.
+- MCP token ownership transfers only after the caller persists it successfully. Bootstrap failures
+  revoke unowned tokens; TaskRunner retries retain owned tokens and terminal failure revokes them.
+- New real-SQLite regression slice: 7 tests. Before fixes, both wake retries and token handoff fail
+  (3 red); after fixes all 7 pass. Covers user/durable wakes and terminal/no-owner/rejected-owner controls.
+- Local review found further gaps being addressed before staging: provider deletion precedes durable
+  claim cleanup; detached VM restore needs teardown ownership and panic containment.
+- [ ] Complete review findings and discriminating tests.
+- [ ] Combined staging: failed task snapshot, fresh VM wake, preserved file and agent answer; cleanup.
+- [ ] Local reviews, CI/CodeRabbit, merge prerequisite then rebase preservation PR, monitor deploys.
