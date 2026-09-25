@@ -8,6 +8,7 @@ import type {
 import {
   cacheAcpActivityBinding,
   coalesceAcpActivityAfterProjectDataTransient,
+  coalescedFlushDelayMs,
   getAcpActivityAdmissionConfig,
   getAcpActivityAdmissionSnapshotForTests,
   getCachedAcpActivityBinding,
@@ -247,5 +248,24 @@ describe('ACP activity admission controller', () => {
       }),
       env
     );
+  });
+});
+
+describe('coalescedFlushDelayMs', () => {
+  const config = { coalesceWindowMs: 2_000, coalesceTtlMs: 60_000 };
+
+  it('doubles the coalesce window per transient flush failure', () => {
+    expect([0, 1, 2, 3, 4].map((retries) => coalescedFlushDelayMs(config, retries))).toEqual([
+      2_000, 4_000, 8_000, 16_000, 32_000,
+    ]);
+  });
+
+  it('never waits longer than the pending TTL, which is what bounds the report anyway', () => {
+    expect(coalescedFlushDelayMs(config, 5)).toBe(60_000);
+    expect(coalescedFlushDelayMs(config, 50)).toBe(60_000);
+  });
+
+  it('falls back to the window when the TTL is shorter than it', () => {
+    expect(coalescedFlushDelayMs({ coalesceWindowMs: 5_000, coalesceTtlMs: 1_000 }, 3)).toBe(5_000);
   });
 });

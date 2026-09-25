@@ -146,9 +146,12 @@ import {
   type ProjectDataArchiveOwnerRef,
 } from '../project-data-archive/contract';
 import {
+  classifyDurableObjectError,
   computeDurableObjectRetryDelayMs,
+  type DurableObjectErrorClass,
   getDurableObjectRetryConfig,
   isDurableObjectStorageFullError,
+  isRetryableForIdempotentDurableObjectOperation,
   isTransientDurableObjectError,
 } from './durable-object-retry';
 import {
@@ -359,31 +362,67 @@ async function callProjectDataNoRetry<T>(
   }
 }
 
-async function callProjectDataWithRetry<T>(
-  env: Env,
-  projectId: string,
-  operation: string,
-  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>
-): Promise<T> {
+/**
+ * How a ProjectData RPC may be retried. `mutation` (the default) retries only failures the object
+ * rejected before doing anything (`isTransientDurableObjectError`). `idempotent_read` may also retry
+ * a CPU-limit reset or a lost connection, whose outcome is ambiguous — safe only when repeating the
+ * call cannot duplicate an effect. Heavy calls must never be marked idempotent_read: a request that
+ * itself burned the CPU allowance would reset the object again.
+ */
+type ProjectDataRpcRetryPolicy = 'idempotent_read' | 'mutation';
+
+async function retryProjectDataRpc<T>(input: {
+  env: Env;
+  projectId: string;
+  operation: string;
+  policy: ProjectDataRpcRetryPolicy;
+  resolveStub: () => Promise<DurableObjectStub<ProjectData>>;
+  /** Any DO failure means this isolate could not observe the DO's state: forget ensure memos. */
+  forgetEnsured: () => void;
+  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>;
+}): Promise<T> {
+  const { env, projectId, operation, policy } = input;
   const retryConfig = getDurableObjectRetryConfig(env);
+  const retryable =
+    policy === 'idempotent_read'
+      ? isRetryableForIdempotentDurableObjectOperation
+      : isTransientDurableObjectError;
   let lastError: unknown;
+  let firstErrorClass: DurableObjectErrorClass = null;
 
   for (let attempt = 1; attempt <= retryConfig.maxAttempts; attempt++) {
     try {
-      const stub = await getStub(env, projectId);
-      return await call(stub);
+      const stub = await input.resolveStub();
+      const result = await input.call(stub);
+      if (attempt > 1) {
+        log.info('project_data.do_rpc_retry_succeeded', {
+          projectId,
+          operation,
+          policy,
+          attempts: attempt,
+          firstErrorClass,
+        });
+      }
+      return result;
     } catch (err) {
       lastError = err;
-      // Any DO failure means this isolate could not observe the DO's state, so
-      // drop its belief that projectId is persisted and let the next attempt
-      // re-ensure. Idempotent, and defence in depth only — see the memo module.
-      forgetEnsuredProject(env, projectId);
+      input.forgetEnsured();
 
       if (isDurableObjectStorageFullError(err)) {
         throw toProjectDataStorageFullError(projectId, operation, err);
       }
 
-      if (attempt >= retryConfig.maxAttempts || !isTransientDurableObjectError(err)) {
+      const errorClass = classifyDurableObjectError(err);
+      firstErrorClass ??= errorClass;
+      if (!retryable(err)) throw err;
+      if (attempt >= retryConfig.maxAttempts) {
+        log.warn('project_data.do_rpc_retry_exhausted', {
+          projectId,
+          operation,
+          policy,
+          attempts: attempt,
+          errorClass,
+        });
         throw err;
       }
 
@@ -395,9 +434,11 @@ async function callProjectDataWithRetry<T>(
       log.warn('project_data.do_rpc_retry', {
         projectId,
         operation,
+        policy,
         attempt,
         maxAttempts: retryConfig.maxAttempts,
         delayMs,
+        errorClass,
         error: err instanceof Error ? err.message : String(err),
       });
       await sleep(delayMs);
@@ -411,54 +452,42 @@ async function callProjectDataWithRetry<T>(
   );
 }
 
+async function callProjectDataWithRetry<T>(
+  env: Env,
+  projectId: string,
+  operation: string,
+  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>,
+  policy: ProjectDataRpcRetryPolicy = 'mutation'
+): Promise<T> {
+  return retryProjectDataRpc({
+    env,
+    projectId,
+    operation,
+    policy,
+    resolveStub: () => getStub(env, projectId),
+    // Defence in depth only — see the memo module.
+    forgetEnsured: () => forgetEnsuredProject(env, projectId),
+    call,
+  });
+}
+
 async function callProjectDataOwnerWithRetry<T>(
   env: Env,
   projectId: string,
   ownerName: string,
   operation: string,
-  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>
+  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>,
+  policy: ProjectDataRpcRetryPolicy = 'mutation'
 ): Promise<T> {
-  const retryConfig = getDurableObjectRetryConfig(env);
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= retryConfig.maxAttempts; attempt++) {
-    try {
-      const stub = await getStubForOwner(env, projectId, ownerName);
-      return await call(stub);
-    } catch (err) {
-      lastError = err;
-      forgetEnsuredOwner(env, ownerName);
-
-      if (isDurableObjectStorageFullError(err)) {
-        throw toProjectDataStorageFullError(projectId, operation, err);
-      }
-
-      if (attempt >= retryConfig.maxAttempts || !isTransientDurableObjectError(err)) {
-        throw err;
-      }
-
-      const delayMs = computeDurableObjectRetryDelayMs(
-        attempt,
-        retryConfig.baseDelayMs,
-        retryConfig.maxDelayMs
-      );
-      log.warn('project_data.do_rpc_retry', {
-        projectId,
-        operation,
-        attempt,
-        maxAttempts: retryConfig.maxAttempts,
-        delayMs,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      await sleep(delayMs);
-    }
-  }
-
-  throw normalizeProjectDataRpcError(
+  return retryProjectDataRpc({
+    env,
     projectId,
     operation,
-    lastError ?? new Error('ProjectData DO retry exhausted without an error')
-  );
+    policy,
+    resolveStub: () => getStubForOwner(env, projectId, ownerName),
+    forgetEnsured: () => forgetEnsuredOwner(env, ownerName),
+    call,
+  });
 }
 
 function sleep(ms: number): Promise<void> {
@@ -912,8 +941,12 @@ export async function listSessions(
   taskId: string | null = null,
   createdByUserId: string | null = null
 ): Promise<{ sessions: Record<string, unknown>[]; total: number; hasMore: boolean }> {
-  return callProjectDataWithRetry(env, projectId, 'listSessions', (stub) =>
-    stub.listSessions(status, limit, offset, taskId, createdByUserId)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listSessions',
+    (stub) => stub.listSessions(status, limit, offset, taskId, createdByUserId),
+    'idempotent_read'
   );
 }
 
@@ -956,8 +989,12 @@ export async function getSession(
   projectId: string,
   sessionId: string
 ): Promise<Record<string, unknown> | null> {
-  return callProjectDataWithRetry(env, projectId, 'getSession', (stub) =>
-    stub.getSession(sessionId)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getSession',
+    (stub) => stub.getSession(sessionId),
+    'idempotent_read'
   );
 }
 
@@ -973,12 +1010,19 @@ export async function getMessages(
   order: 'asc' | 'desc' = 'desc'
 ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
   const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
-  return callProjectDataOwnerWithRetry(env, projectId, owner.ownerName, 'getMessages', (stub) => {
-    if (owner.kind === 'root') {
-      return stub.archiveSourceGetMessages(owner, limit, before, after, roles, compact, order);
-    }
-    return stub.archiveTargetGetMessages(owner, limit, before, after, roles, compact, order);
-  });
+  return callProjectDataOwnerWithRetry(
+    env,
+    projectId,
+    owner.ownerName,
+    'getMessages',
+    (stub) => {
+      if (owner.kind === 'root') {
+        return stub.archiveSourceGetMessages(owner, limit, before, after, roles, compact, order);
+      }
+      return stub.archiveTargetGetMessages(owner, limit, before, after, roles, compact, order);
+    },
+    'idempotent_read'
+  );
 }
 
 export async function getMessageToolContent(
@@ -1299,8 +1343,12 @@ export async function listCommentThreads(
   projectId: string,
   input: ListCommentThreadsInput
 ): Promise<MessageCommentListResponse> {
-  return callProjectDataWithRetry(env, projectId, 'listCommentThreads', (stub) =>
-    stub.listCommentThreads(input)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listCommentThreads',
+    (stub) => stub.listCommentThreads(input),
+    'idempotent_read'
   );
 }
 
@@ -1310,8 +1358,12 @@ export async function getCommentThread(
   sessionId: string,
   threadId: string
 ): Promise<MessageCommentThread | null> {
-  return callProjectDataWithRetry(env, projectId, 'getCommentThread', (stub) =>
-    stub.getCommentThread({ sessionId, threadId })
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getCommentThread',
+    (stub) => stub.getCommentThread({ sessionId, threadId }),
+    'idempotent_read'
   );
 }
 
@@ -1369,8 +1421,12 @@ export async function listProjectCommentInbox(
   projectId: string,
   input: ListProjectCommentThreadsInput
 ): Promise<ProjectCommentInboxResult> {
-  return callProjectDataWithRetry(env, projectId, 'listProjectCommentInbox', (stub) =>
-    stub.listProjectCommentInbox(input)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listProjectCommentInbox',
+    (stub) => stub.listProjectCommentInbox(input),
+    'idempotent_read'
   );
 }
 
@@ -1555,8 +1611,12 @@ export async function listFileCommentThreads(
   projectId: string,
   input: ListFileCommentThreadsInput
 ): Promise<ListFileCommentThreadsResult> {
-  return callProjectDataWithRetry(env, projectId, 'listFileCommentThreads', (stub) =>
-    stub.listFileCommentThreads(input)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listFileCommentThreads',
+    (stub) => stub.listFileCommentThreads(input),
+    'idempotent_read'
   );
 }
 
@@ -1745,8 +1805,12 @@ export async function listActivityEvents(
   before: number | null = null,
   sessionId: string | null = null
 ): Promise<{ events: Record<string, unknown>[]; hasMore: boolean }> {
-  return callProjectDataWithRetry(env, projectId, 'listActivityEvents', (stub) =>
-    stub.listActivityEvents(eventType, limit, before, sessionId)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'listActivityEvents',
+    (stub) => stub.listActivityEvents(eventType, limit, before, sessionId),
+    'idempotent_read'
   );
 }
 
@@ -1816,8 +1880,12 @@ export async function getTaskAcpLivenessSignals(
     nowMs?: number;
   }
 ): Promise<TaskAcpLivenessSignals> {
-  return callProjectDataWithRetry(env, projectId, 'getTaskAcpLivenessSignals', (stub) =>
-    stub.getTaskAcpLivenessSignals(opts)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getTaskAcpLivenessSignals',
+    (stub) => stub.getTaskAcpLivenessSignals(opts),
+    'idempotent_read'
   );
 }
 
@@ -1910,8 +1978,12 @@ export async function recordSessionTurnEnd(
 
 /** Get the persisted session state snapshot (for page load catch-up). */
 export async function getSessionState(env: Env, projectId: string, sessionId: string) {
-  return callProjectDataWithRetry(env, projectId, 'getSessionState', (stub) =>
-    stub.getSessionState(sessionId)
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getSessionState',
+    (stub) => stub.getSessionState(sessionId),
+    'idempotent_read'
   );
 }
 
@@ -2513,11 +2585,19 @@ export async function forwardWebSocket(
   projectId: string,
   request: Request
 ): Promise<Response> {
-  return callProjectDataWithRetry(env, projectId, 'forwardWebSocket', (stub) => {
-    const url = new URL(request.url);
-    url.pathname = '/ws';
-    return stub.fetch(new Request(url.toString(), request));
-  });
+  // A WebSocket upgrade creates no state a repeat could duplicate; a retried attempt simply
+  // accepts a fresh socket if the first one never reached the object.
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'forwardWebSocket',
+    (stub) => {
+      const url = new URL(request.url);
+      url.pathname = '/ws';
+      return stub.fetch(new Request(url.toString(), request));
+    },
+    'idempotent_read'
+  );
 }
 
 // =========================================================================
