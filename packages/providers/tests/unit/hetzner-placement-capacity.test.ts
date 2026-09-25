@@ -94,7 +94,7 @@ describe('Hetzner 412 placement failures are transient capacity', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('surfaces a 412 whose category is unassigned, and reads it as transient capacity', async () => {
+  it('surfaces a 412 categorized at construction, and reads it as transient capacity', async () => {
     const err = await captureCreateError(alwaysRespond(() => placementResponse()));
 
     expect(err).toBeInstanceOf(ProviderError);
@@ -104,9 +104,13 @@ describe('Hetzner 412 placement failures are transient capacity', () => {
     // drop `providerCode`, quietly testing a different error than production produces.
     expect(providerError.message).toBe('hetzner API error (412): error during placement');
     expect(providerError.providerCode).toBe('placement_error');
-    // Fidelity guard: if `providerFetch` ever starts assigning a category, this test stops
-    // exercising the branch it exists to protect and must be revisited.
-    expect(providerError.category).toBe('unknown');
+    // `createVM` categorizes at construction (`.claude/rules/72` req 3). Revisited 2026-09-25
+    // when that landed: the fidelity guard now sits on the cause, which is the error exactly as
+    // `providerFetch` built it — category unassigned — so this still proves the classifier ran
+    // on the real producer's error rather than on a hand-fed category.
+    expect(providerError.category).toBe('transient_capacity');
+    expect(providerError.cause).toBeInstanceOf(ProviderError);
+    expect((providerError.cause as ProviderError).category).toBe('unknown');
     // The assertion the incident turns on. False before the fix.
     expect(isTransientCapacityError(providerError)).toBe(true);
   });
@@ -117,7 +121,8 @@ describe('Hetzner 412 placement failures are transient capacity', () => {
     const providerError = err as ProviderError;
     expect(providerError.message).toBe('hetzner API error (412): error during placement');
     expect(providerError.providerCode).toBeUndefined();
-    expect(providerError.category).toBe('unknown');
+    expect(providerError.category).toBe('transient_capacity');
+    expect((providerError.cause as ProviderError).category).toBe('unknown');
     expect(isTransientCapacityError(providerError)).toBe(true);
   });
 
@@ -197,7 +202,11 @@ describe('cross-provider isolation', () => {
   });
 
   it('owner control: the identical error from Hetzner IS capacity', () => {
-    const hetzner = new ProviderError('hetzner', 412, 'hetzner API error (412): error during placement');
+    const hetzner = new ProviderError(
+      'hetzner',
+      412,
+      'hetzner API error (412): error during placement'
+    );
     expect(isTransientCapacityError(hetzner)).toBe(true);
     expect(isHetznerPlacementCapacityError(hetzner)).toBe(true);
   });

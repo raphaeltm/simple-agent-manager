@@ -151,26 +151,37 @@ export class HetznerProvider implements Provider {
     const deadline = Date.now() + this.capacityRetryBudgetMs;
     let lastCapacityError: ProviderError | undefined;
 
-    for (
-      let capacityAttempt = 0;
-      capacityAttempt < this.capacityRetryMaxAttempts;
-      capacityAttempt++
-    ) {
-      try {
-        return await this.attemptCreateWithPlacementFallback(
-          nativeConfig,
-          allowLocationFallback,
-          context
-        );
-      } catch (err) {
-        lastCapacityError = await this.retryAfterCapacityError(
-          err,
-          capacityAttempt,
-          deadline,
-          nativeConfig,
-          context
-        );
+    try {
+      for (
+        let capacityAttempt = 0;
+        capacityAttempt < this.capacityRetryMaxAttempts;
+        capacityAttempt++
+      ) {
+        try {
+          return await this.attemptCreateWithPlacementFallback(
+            nativeConfig,
+            allowLocationFallback,
+            context
+          );
+        } catch (err) {
+          lastCapacityError = await this.retryAfterCapacityError(
+            err,
+            capacityAttempt,
+            deadline,
+            nativeConfig,
+            context
+          );
+        }
       }
+    } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
+      // `providerFetch` builds every HTTP error with category 'unknown'. Categorize it here, where
+      // it leaves the provider, so the control plane reads `category` rather than re-running a
+      // classifier behind a status allowlist (`.claude/rules/72`). This is what lets a
+      // `403 resource_limit_exceeded` reach callers as `quota_exceeded` — proof the create was
+      // rejected before any server existed — instead of an unexplained 'unknown'. It runs after
+      // the retry loop above, so that loop's own decisions are unchanged.
+      throw mapHetznerProviderError(err);
     }
 
     // Unreachable, but TypeScript needs it
