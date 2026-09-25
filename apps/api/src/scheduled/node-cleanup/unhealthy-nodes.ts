@@ -223,6 +223,130 @@ async function preserveWorkspace(
   }
 }
 
+async function releaseUnhealthyNode(
+  db: CleanupDb,
+  env: Env,
+  node: Candidate,
+  episode: string,
+  nowIso: string,
+  config: CleanupConfig,
+  result: NodeCleanupResult,
+  boundaries: UnhealthyNodeBoundaries
+): Promise<void> {
+  const strandedTasks = await listStrandedNodeTasks(env, node.id);
+  const destroyed = await boundaries.release(db, env, nowIso, node, {
+    logEvent: 'node_cleanup.unhealthy_releasing',
+    failureLogEvent: 'node_cleanup.unhealthy_release_failed',
+    successMessage: 'Released unhealthy managed node',
+    failureMessagePrefix: 'Failed to release unhealthy managed node',
+    recoveryType: 'unhealthy_node_release',
+    failureRecoveryType: 'unhealthy_node_release_failed',
+    failureBackoffMs: config.unhealthyRetryMs,
+    allowActiveWorkspaces: true,
+    allowManagedRunningProvenance: true,
+    expectedLastHeartbeatAt: node.last_heartbeat_at,
+    requireWorkspaceIdle: false,
+    requestDeadlineMs: Date.now() + config.stoppedHandoffRequestTimeoutMs,
+    context: { episodeStartedAt: episode, reason: 'heartbeat_loss_exceeded_release_window' },
+  });
+  if (destroyed !== 'destroyed') {
+    result.unhealthyHeld++;
+    if (destroyed === 'failed') result.errors++;
+    await record(
+      env,
+      node,
+      'held',
+      destroyed === 'failed' ? 'provider_deletion_failed' : 'cleanup_claim_refused',
+      nowIso
+    );
+    return;
+  }
+  result.unhealthyReleased++;
+  await record(env, node, 'released', 'heartbeat_loss_exceeded_release_window', nowIso);
+  const failures = await terminalizeStrandedNodeTasks(
+    env,
+    node.id,
+    strandedTasks,
+    'heartbeat_lost'
+  );
+  if (failures > 0) {
+    await record(
+      env,
+      node,
+      'task_terminalization_failed',
+      'post_release_transition_failed',
+      nowIso
+    );
+  }
+}
+
+async function processUnhealthyCandidate(
+  db: CleanupDb,
+  env: Env,
+  node: Candidate,
+  now: Date,
+  config: CleanupConfig,
+  result: NodeCleanupResult,
+  boundaries: UnhealthyNodeBoundaries,
+  fleetLoss: boolean
+): Promise<void> {
+  const nowIso = now.toISOString();
+  const episode = node.last_heartbeat_at ?? node.created_at;
+  const decision = decideUnhealthyNode(node, now.getTime(), config);
+  if (decision === 'healthy') return;
+  const health = deriveNodeHealth(
+    {
+      status: node.status,
+      createdAt: node.created_at,
+      lastHeartbeatAt: node.last_heartbeat_at,
+      heartbeatStaleAfterSeconds: node.heartbeat_stale_after_seconds,
+      healthStatus: node.health_status,
+    },
+    now.getTime()
+  );
+  const observed = await env.DATABASE.prepare(
+    `UPDATE nodes SET health_status = ?
+         WHERE id = ? AND status = 'running' AND last_heartbeat_at IS ?`
+  )
+    .bind(health, node.id, node.last_heartbeat_at)
+    .run();
+  if ((observed.meta.changes ?? 0) !== 1) return;
+  await record(env, node, health, 'node_heartbeat_missing', nowIso);
+  const fleetEscalationDue =
+    now.getTime() - Date.parse(episode) >=
+    config.unhealthyReleaseAfterMs + config.unhealthyDrainAfterMs;
+  if (fleetLoss) {
+    result.unhealthyHeld++;
+    const reason = fleetEscalationDue
+      ? 'fleet_heartbeat_intake_escalation_required'
+      : 'fleet_heartbeat_intake_unverified';
+    await record(env, node, fleetEscalationDue ? 'escalated' : 'held', reason, nowIso);
+    if (fleetEscalationDue) {
+      log.error('node_cleanup.fleet_heartbeat_intake_escalation_required', {
+        nodeId: node.id,
+        episodeStartedAt: episode,
+      });
+    }
+    return;
+  }
+  if (decision === 'waiting') {
+    result.unhealthyHeld++;
+    await record(env, node, 'held', 'drain_window_not_elapsed', nowIso);
+    return;
+  }
+  const workspaces = await loadWorkspaces(env, node.id);
+  const preservationDeadlineMs = Date.now() + config.unhealthyPreservationTimeoutMs;
+  for (const workspace of workspaces) {
+    await preserveWorkspace(env, node, workspace, nowIso, boundaries, preservationDeadlineMs);
+  }
+  await record(env, node, 'draining', 'heartbeat_loss_exceeded_drain_window', nowIso);
+  if (decision !== 'release' && workspaces.some((w) => w.status !== 'sleeping')) {
+    result.unhealthyHeld++;
+    return;
+  }
+  await releaseUnhealthyNode(db, env, node, episode, nowIso, config, result, boundaries);
+}
+
 /** One isolated cleanup phase; each selected node is also isolated from its peers. */
 export async function sweepUnhealthyNodes(
   db: CleanupDb,
@@ -261,104 +385,7 @@ export async function sweepUnhealthyNodes(
 
   for (const node of candidates.results) {
     try {
-      const episode = node.last_heartbeat_at ?? node.created_at;
-      const decision = decideUnhealthyNode(node, now.getTime(), config);
-      if (decision === 'healthy') continue;
-      const health = deriveNodeHealth(
-        {
-          status: node.status,
-          createdAt: node.created_at,
-          lastHeartbeatAt: node.last_heartbeat_at,
-          heartbeatStaleAfterSeconds: node.heartbeat_stale_after_seconds,
-          healthStatus: node.health_status,
-        },
-        now.getTime()
-      );
-      const observed = await env.DATABASE.prepare(
-        `UPDATE nodes SET health_status = ?
-         WHERE id = ? AND status = 'running' AND last_heartbeat_at IS ?`
-      )
-        .bind(health, node.id, node.last_heartbeat_at)
-        .run();
-      if ((observed.meta.changes ?? 0) !== 1) continue;
-      await record(env, node, health, 'node_heartbeat_missing', nowIso);
-      const fleetEscalationDue =
-        now.getTime() - Date.parse(episode) >=
-        config.unhealthyReleaseAfterMs + config.unhealthyDrainAfterMs;
-      if (fleetLoss) {
-        result.unhealthyHeld++;
-        const reason = fleetEscalationDue
-          ? 'fleet_heartbeat_intake_escalation_required'
-          : 'fleet_heartbeat_intake_unverified';
-        await record(env, node, fleetEscalationDue ? 'escalated' : 'held', reason, nowIso);
-        if (fleetEscalationDue) {
-          log.error('node_cleanup.fleet_heartbeat_intake_escalation_required', {
-            nodeId: node.id,
-            episodeStartedAt: episode,
-          });
-        }
-        continue;
-      }
-      if (decision === 'waiting') {
-        result.unhealthyHeld++;
-        await record(env, node, 'held', 'drain_window_not_elapsed', nowIso);
-        continue;
-      }
-      const workspaces = await loadWorkspaces(env, node.id);
-      const preservationDeadlineMs = Date.now() + config.unhealthyPreservationTimeoutMs;
-      for (const workspace of workspaces) {
-        await preserveWorkspace(env, node, workspace, nowIso, boundaries, preservationDeadlineMs);
-      }
-      await record(env, node, 'draining', 'heartbeat_loss_exceeded_drain_window', nowIso);
-      if (decision !== 'release' && workspaces.some((w) => w.status !== 'sleeping')) {
-        result.unhealthyHeld++;
-        continue;
-      }
-      const strandedTasks = await listStrandedNodeTasks(env, node.id);
-      const destroyed = await boundaries.release(db, env, nowIso, node, {
-        logEvent: 'node_cleanup.unhealthy_releasing',
-        failureLogEvent: 'node_cleanup.unhealthy_release_failed',
-        successMessage: 'Released unhealthy managed node',
-        failureMessagePrefix: 'Failed to release unhealthy managed node',
-        recoveryType: 'unhealthy_node_release',
-        failureRecoveryType: 'unhealthy_node_release_failed',
-        failureBackoffMs: config.unhealthyRetryMs,
-        allowActiveWorkspaces: true,
-        allowManagedRunningProvenance: true,
-        expectedLastHeartbeatAt: node.last_heartbeat_at,
-        requireWorkspaceIdle: false,
-        requestDeadlineMs: Date.now() + config.stoppedHandoffRequestTimeoutMs,
-        context: { episodeStartedAt: episode, reason: 'heartbeat_loss_exceeded_release_window' },
-      });
-      if (destroyed === 'destroyed') {
-        result.unhealthyReleased++;
-        await record(env, node, 'released', 'heartbeat_loss_exceeded_release_window', nowIso);
-        const failures = await terminalizeStrandedNodeTasks(
-          env,
-          node.id,
-          strandedTasks,
-          'heartbeat_lost'
-        );
-        if (failures > 0) {
-          await record(
-            env,
-            node,
-            'task_terminalization_failed',
-            'post_release_transition_failed',
-            nowIso
-          );
-        }
-      } else {
-        result.unhealthyHeld++;
-        if (destroyed === 'failed') result.errors++;
-        await record(
-          env,
-          node,
-          'held',
-          destroyed === 'failed' ? 'provider_deletion_failed' : 'cleanup_claim_refused',
-          nowIso
-        );
-      }
+      await processUnhealthyCandidate(db, env, node, now, config, result, boundaries, fleetLoss);
     } catch (error) {
       result.errors++;
       log.error('node_cleanup.unhealthy_candidate_failed', {

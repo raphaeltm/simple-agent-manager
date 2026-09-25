@@ -20,7 +20,7 @@ export async function checkinFailureReason(env: Env, workspaceId: string | null)
       }>();
     if (!row?.nodeId)
       return 'SAM check-in expired after the workspace lost its node; agent progress is unknown';
-    const beatAt = row.lastHeartbeatAt ? Date.parse(row.lastHeartbeatAt) : NaN;
+    const beatAt = row.lastHeartbeatAt ? Date.parse(row.lastHeartbeatAt) : Number.NaN;
     if (
       !Number.isFinite(beatAt) ||
       Date.now() - beatAt > Math.max(1, row.staleAfterSeconds ?? 1) * 1000

@@ -218,8 +218,13 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
   their tests, then were restored.
 - Split the oversized `session-sleep.ts` into queue, eligibility, execution, and cleanup modules;
   its public export path stays stable. All resulting source modules are below the 500-line ceiling.
-- Draft PR #2147 is open. Remaining gates: full API suite rerun, coordinated real-VM staging,
-  CI/CodeRabbit, merge, production monitoring.
+- SonarCloud flagged cognitive complexity in the moved sleep executor and new unhealthy-node sweep.
+  The sleep executor now separates workspace loading, pre-teardown safety checks, teardown, and
+  final cleanup; the unhealthy sweep separates one-node decisions from provider release. The
+  flagged `NaN` style issue was corrected. Focused regressions and typecheck pass; full API and
+  follow-up Sonar analysis are running.
+- Draft PR #2147 is open. Remaining gates: coordinated real-VM staging, final CI/CodeRabbit,
+  merge, production monitoring.
 
 ## Open question
 
