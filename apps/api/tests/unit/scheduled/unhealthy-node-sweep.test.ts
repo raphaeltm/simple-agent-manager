@@ -168,15 +168,21 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
     );
   });
 
-  it('ends a fleet-wide hold on a finite bound', async () => {
-    seedNode('fleet-expired-1', 41, false);
+  it('escalates a fleet-wide outage without deleting busy nodes on a timer', async () => {
+    seedNode('fleet-expired-1', 41);
     seedNode('fleet-expired-2', 41, false);
     seedNode('fleet-expired-3', 41, false);
+    sqlite
+      .prepare(`UPDATE workspaces SET updated_at = ? WHERE node_id = ?`)
+      .run(NOW.toISOString(), 'fleet-expired-1');
     await sweep();
 
-    expect(order).toEqual(['release', 'release', 'release']);
+    expect(order).toEqual([]);
+    expect(sqlite.prepare(`SELECT status FROM nodes WHERE id = 'fleet-expired-1'`).get()).toEqual({
+      status: 'running',
+    });
     expect((await listNodeHealthEvents(env, 'fleet-expired-1')).map((e) => e.reason)).toContain(
-      'fleet_hold_window_exceeded'
+      'fleet_heartbeat_intake_escalation_required'
     );
   });
 
@@ -199,7 +205,28 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
     await sweep();
 
     expect(order).toEqual(['notice', 'sleep', 'release']);
-    expect(sqlite.prepare(`SELECT id FROM nodes WHERE id = 'event-store-down'`).get()).toBeUndefined();
+    expect(
+      sqlite.prepare(`SELECT id FROM nodes WHERE id = 'event-store-down'`).get()
+    ).toBeUndefined();
+  });
+
+  it('releases when a preservation RPC never answers', async () => {
+    seedNode('sleep-rpc-hung', 31);
+    env.NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS = '20';
+    boundaries.sleep = vi.fn(() => {
+      order.push('sleep');
+      return new Promise<void>(() => {});
+    }) as UnhealthyNodeBoundaries['sleep'];
+
+    await sweep();
+
+    expect(order).toEqual(['notice', 'sleep', 'release']);
+    expect(
+      sqlite.prepare(`SELECT id FROM nodes WHERE id = 'sleep-rpc-hung'`).get()
+    ).toBeUndefined();
+    expect((await listNodeHealthEvents(env, 'sleep-rpc-hung')).map((e) => e.event)).toContain(
+      'sleep_unavailable'
+    );
   });
 
   it('refuses deletion when a heartbeat arrives after selection', async () => {

@@ -23,6 +23,7 @@ export const DEFAULT_NODE_UNHEALTHY_RELEASE_AFTER_MS = 1_800_000;
 export const DEFAULT_NODE_UNHEALTHY_FLEET_MAX_FRACTION = 0.5;
 export const DEFAULT_NODE_UNHEALTHY_FLEET_MIN_NODES = 3;
 export const DEFAULT_NODE_UNHEALTHY_RETRY_MS = 60_000;
+export const DEFAULT_NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS = 5_000;
 
 export function parseMs(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -54,6 +55,7 @@ export interface CleanupConfig {
   unhealthyFleetMaxFraction: number;
   unhealthyFleetMinNodes: number;
   unhealthyRetryMs: number;
+  unhealthyPreservationTimeoutMs: number;
   /** VM-agent timeout for background calls — see rule 47. */
   agentTimeoutMs: number;
   stoppedHandoffSweepBudgetMs: number;
@@ -127,6 +129,10 @@ function buildCleanupConfig(env: Env): CleanupConfig {
       DEFAULT_NODE_UNHEALTHY_FLEET_MIN_NODES
     ),
     unhealthyRetryMs: parseMs(env.NODE_UNHEALTHY_RETRY_MS, DEFAULT_NODE_UNHEALTHY_RETRY_MS),
+    unhealthyPreservationTimeoutMs: parseMs(
+      env.NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS,
+      DEFAULT_NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS
+    ),
     gracePeriodMs: parseMs(env.NODE_WARM_GRACE_PERIOD_MS, DEFAULT_NODE_WARM_GRACE_PERIOD_MS),
     maxLifetimeMs: parseMs(env.MAX_AUTO_NODE_LIFETIME_MS, DEFAULT_MAX_AUTO_NODE_LIFETIME_MS),
     absoluteMaxLifetimeMs: parseMs(

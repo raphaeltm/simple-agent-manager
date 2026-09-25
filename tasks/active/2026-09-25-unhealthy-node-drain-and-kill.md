@@ -95,7 +95,8 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
   (heartbeat dead while agents work) is exactly this incident; after fix 1 it has no known cause, and
   the drain preserves idle sessions before release either way.
 - A fleet guard refuses to drain when more than a configurable fraction of running nodes are silent at
-  once (that pattern is a control-plane heartbeat-intake failure, not N dead nodes).
+  once (that pattern may be a control-plane heartbeat-intake failure, not N dead nodes). It records
+  a bounded escalation event rather than treating elapsed time as proof that busy nodes died.
 - Node health transitions go to a new append-only D1 table `node_health_events` (no FK, survives node
   deletion), deduplicated per heartbeat-loss episode by a unique key; the drain also writes the
   persisted `health_status` so placement's SQL filter stops lagging.
@@ -182,8 +183,9 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
 - API typecheck passes; 89 focused reconciliation, attention, and unhealthy-node unit tests pass.
 - The existing node-cleanup Workers suite passes (22/22); a new test through
   `runNodeCleanupSweep` verifies notice → sleep request → release and durable event retention.
-- SQLite-backed tests now also cover early release after the session sleeps, a finite fleet-loss
-  hold, and release when append-only health-event writes fail. A real SQLite claim verified that the
+- SQLite-backed tests now also cover early release after the session sleeps, fleet-wide intake loss
+  with a busy node past the escalation window, a hung preservation RPC, and release when append-only
+  health-event writes fail. A real SQLite claim verified that the
   existing warm-placement guard requires its first threshold bind; an apparent extra-bind review
   finding was ruled out by a failing surgical removal.
 - Root typecheck, lint, and format checks pass. A full API rerun follows updates to source-contract
@@ -198,6 +200,9 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
 - Surgical revert: removing the UI health-refresh heartbeat comparison made
   `does not overwrite a heartbeat that arrived after the node was read` fail; restoring the
   comparison passed. The same SQLite-backed test also verifies the missing-heartbeat event.
+- Surgical revert: removing the fleet-loss hold made the beyond-escalation busy-node test fail;
+  removing the sleep RPC deadline left the hung-request test blocked until the external five-second
+  test timeout. Both guards were restored and the focused suites passed.
 - Draft PR #2147 is open. Remaining gates: full API suite rerun, coordinated real-VM staging,
   CI/CodeRabbit, merge, production monitoring.
 

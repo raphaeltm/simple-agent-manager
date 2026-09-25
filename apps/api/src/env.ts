@@ -418,6 +418,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   NODE_UNHEALTHY_FLEET_MAX_FRACTION?: string; // Fleet-wide loss guard (default: 0.5)
   NODE_UNHEALTHY_FLEET_MIN_NODES?: string; // Minimum managed workspace VMs before fleet guard applies (default: 3)
   NODE_UNHEALTHY_RETRY_MS?: string; // Retry failed unhealthy-node provider deletion (default: 60000)
+  NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS?: string; // Per-node budget for chat notices and sleep requests (default: 5000)
   NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS?: string; // Stopped-node phase wall-time budget (default: 20000)
   NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS?: string; // Stopped-node provider/DNS budget per candidate (default: 5000)
   WORKSPACE_CLEANUP_SWEEP_LIMIT?: string; // Max workspace candidates per cleanup phase per cron run (default: 50)
