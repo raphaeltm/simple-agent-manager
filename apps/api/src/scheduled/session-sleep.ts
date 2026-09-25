@@ -5,7 +5,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { noteFailedTaskPreservationCapture } from '../services/failed-task-preservation';
 import {
   releaseExhaustedFailedTaskPreservation,
   releaseStalledFailedTaskPreservation,
@@ -51,26 +50,25 @@ export interface SessionSleepSweepContext {
 
 /**
  * A failed task's sleep is its work preservation (`failed-task-preservation.ts`).
- * After a slept attempt, surface an incomplete snapshot; after a failed or given-up
- * one, tear the runtime down once the sleep has no retry left; after a deferral,
- * tear it down once the claimer can no longer take it or the failure has waited
- * too long (`.claude/rules/47`). Each no-ops for any other task, and never throws
- * into the sweep.
+ * After a failed or given-up attempt, tear the runtime down once the sleep has no
+ * retry left; after a deferral, tear it down once the claimer can no longer take
+ * it or the episode has waited too long (`.claude/rules/47`). An incomplete
+ * capture is surfaced where every sleep finalizes
+ * (`finalizeSessionSnapshotSleeping`). Each no-ops for any other task, and never
+ * throws into the sweep.
  */
 async function settleFailedTaskPreservation(
   env: Env,
   candidate: { chatSessionId: string; workspaceId: string | null },
-  outcome: 'slept' | 'failed' | 'deferred'
+  outcome: 'failed' | 'deferred'
 ): Promise<void> {
   const { chatSessionId, workspaceId } = candidate;
   const settled =
-    outcome === 'slept'
-      ? noteFailedTaskPreservationCapture(env, { chatSessionId })
-      : outcome === 'failed'
-        ? releaseExhaustedFailedTaskPreservation(env, { chatSessionId })
-        : workspaceId
-          ? releaseStalledFailedTaskPreservation(env, { chatSessionId, workspaceId })
-          : Promise.resolve(false);
+    outcome === 'failed'
+      ? releaseExhaustedFailedTaskPreservation(env, { chatSessionId })
+      : workspaceId
+        ? releaseStalledFailedTaskPreservation(env, { chatSessionId, workspaceId })
+        : Promise.resolve(false);
   await settled.catch((error: unknown) => {
     log.warn('session_sleep_sweep.failed_task_preservation_settle_failed', {
       chatSessionId,
@@ -100,7 +98,6 @@ async function sleepClaimedSession(
       reason: 'Idle timeout elapsed',
       sleepClaimId: claimId,
     });
-    await settleFailedTaskPreservation(env, candidate, 'slept');
     return { status: 'slept', exhausted: false };
   } catch (error) {
     const attempts = candidate.sleepAttempts + 1;
