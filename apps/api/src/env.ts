@@ -262,7 +262,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS?: string; // Final checkpoint request-acceptance timeout (default: 300000)
   SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS?: string; // No-progress final checkpoint watchdog after acceptance (default: 120000)
   SESSION_SNAPSHOT_POLL_INTERVAL_MS?: string; // D1 completion poll interval for final checkpoints (default: 1000)
-  SESSION_SNAPSHOT_OPERATION_TIMEOUT?: string; // VM-agent checkpoint operation deadline as a Go duration (default: 15m)
+  SESSION_SNAPSHOT_OPERATION_TIMEOUT?: string; // VM-agent checkpoint/restore deadline and TaskRunner restore retry window, as a Go duration (default: 15m)
   SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL?: string; // VM-agent progress callback throttle as a Go duration (default: 15s)
   SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT?: string; // VM-agent progress callback timeout as a Go duration (default: 5s)
   SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES?: string; // Max snapshot control-plane JSON request size (default: 262144)

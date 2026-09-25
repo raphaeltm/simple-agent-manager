@@ -91,7 +91,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS` — Budget for vm-agent acceptance of the final checkpoint request (default: `300000`)
 - `SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS` — No-progress watchdog after a final checkpoint is accepted (default: `120000`)
 - `SESSION_SNAPSHOT_POLL_INTERVAL_MS` — D1 poll interval while waiting for final checkpoint progress/completion (default: `1000`)
-- `SESSION_SNAPSHOT_OPERATION_TIMEOUT` — VM-agent checkpoint operation deadline, passed to new VM nodes and Instant containers as a Go duration (default: `15m`)
+- `SESSION_SNAPSHOT_OPERATION_TIMEOUT` — VM-agent checkpoint/restore deadline, passed to new VM nodes and Instant containers as a Go duration (default: `15m`). Snapshot TaskRunner restore retries pin this duration plus `SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS` at the first restore RPC; retries/restarts cannot renew it. Other steps retain the retry-count limit.
 - `SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL` — VM-agent snapshot progress callback throttle, passed to new VM nodes and Instant containers as a Go duration (default: `15s`)
 - `SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT` — VM-agent snapshot progress callback timeout, passed to new VM nodes and Instant containers as a Go duration (default: `5s`)
 - `SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES` — Maximum snapshot coordination JSON body (default: `262144`)

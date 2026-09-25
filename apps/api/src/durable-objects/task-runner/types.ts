@@ -41,6 +41,8 @@ export interface StepResults {
   chatSessionId: string | null;
   agentSessionId: string | null;
   agentStarted: boolean;
+  /** First restore RPC operation deadline plus one request window to retrieve its result. */
+  snapshotRestoreDeadlineAt?: number | null;
   /** Opaque MCP token for agent platform awareness (stored in KV) */
   mcpToken: string | null;
   /** VM size actually provisioned for an auto-provisioned node. May be smaller
