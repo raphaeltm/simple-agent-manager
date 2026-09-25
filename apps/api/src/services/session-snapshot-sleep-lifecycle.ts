@@ -416,7 +416,7 @@ export async function scheduleSessionSnapshotSleep(
     resetAttempts?: boolean;
     runtime?: string;
   } = {}
-): Promise<void> {
+): Promise<boolean> {
   const sleepAfterMs =
     options.sleepAfterMs === undefined
       ? options.runtime === 'cf-container'
@@ -431,7 +431,7 @@ export async function scheduleSessionSnapshotSleep(
         eq(schema.sessionSnapshots.degradation, 'none')
       );
   const resetAttempts = options.resetAttempts ?? !options.allowIncomplete;
-  await db
+  const result = await db
     .update(schema.sessionSnapshots)
     .set({
       sleepStatus: 'scheduled',
@@ -461,6 +461,8 @@ export async function scheduleSessionSnapshotSleep(
         )
       )
     );
+  // True when this call left the row holding a scheduled intent.
+  return (result.meta.changes ?? 0) > 0;
 }
 
 export { cancelScheduledSessionSleep } from './session-snapshot-sleep-cancel';

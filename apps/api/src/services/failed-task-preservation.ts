@@ -4,16 +4,18 @@
  * A failed task used to be torn down on the spot (`failSession` then
  * `cleanupTaskRun`). That destroyed uncommitted and unpushed work in its
  * workspace, and left a ProjectData chat session that snapshot recovery refuses
- * to wake (`wakeSessionForSnapshotRecovery` accepts `sleeping`, never `failed`).
- * A failed task now gets what a completed one gets: a final snapshot, then a
- * sleep, so the conversation stays wakeable, forkable and retryable for the
- * snapshot TTL (policy `a3780107`; idea `01M1XGHX7NQZQYWQRV5C1PJ60N`).
+ * to wake: `wakeSessionForSnapshotRecovery` only wakes a `sleeping` session onto
+ * its replacement workspace, never a `failed` one. A failed task now gets what a
+ * completed one gets: a final snapshot, then a sleep, so the conversation stays
+ * wakeable, forkable and retryable for the snapshot TTL (policy `a3780107`; idea
+ * `01M1XGHX7NQZQYWQRV5C1PJ60N`).
  *
  * Entry points that consult {@link preserveFailedTaskWork} (`.claude/rules/44`
  * and `/61` — every live-work path into failed-task cleanup, on both runtimes):
  *
  * - `cleanupTerminalTaskResources` for `status: 'failed'` without destructive
- *   intent: the VM / standalone-agent failure callback and the task status route.
+ *   intent: the VM / standalone-agent failure callback, the task status route and
+ *   explicit run cleanup (`cleanupRequestedTaskRun`).
  * - `attention-expiry.ts` for expired human-input and SAM check-in markers.
  *
  * Deliberately NOT routed here: explicit archive/delete (`destructiveSessionEnd`,
@@ -22,11 +24,11 @@
  * compaction-loop / runaway-cost kill switches, whose intent is an immediate stop.
  *
  * The session-sleep machinery treats `failed` like `completed` through the one
- * shared authority in `sleep-preserved-task-status.ts`, and the sleep sweep hands
- * an exhausted preservation back here ({@link releaseExhaustedFailedTaskPreservation})
+ * shared authority in `sleep-preserved-task-status.ts`, and the sleep sweep gives
+ * up on a preservation that can no longer complete (`failed-task-preservation-release.ts`),
  * so a runtime that can never be snapshotted is still torn down (`.claude/rules/47`).
  */
-import { and, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -34,7 +36,14 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
 import { queueWorkspaceSessionSleep } from './session-sleep';
-import { cleanupTaskRun } from './task-runner';
+import { chatSessionTaskOwnerJoins } from './session-sleep-task-owner';
+import { scheduleSessionSnapshotSleep } from './session-snapshots';
+import {
+  SLEEP_CLAIMABLE_NODE_ROLE,
+  SLEEP_CLAIMABLE_WORKSPACE_STATUSES,
+  SLEEP_RESUMABLE_AGENT_SESSION_STATUSES,
+  SLEEP_SNAPSHOT_NODE_RUNTIMES,
+} from './sleep-preserved-task-status';
 import { loadTaskSleepPreservation } from './task-sleep-preservation';
 
 /** Why a failed task's runtime could not be handed to the sleep lifecycle. */
@@ -64,14 +73,6 @@ export function withholdsFailedTaskTeardown(
 }
 
 export const FAILED_TASK_SLEEP_REASON = 'Task failed';
-
-// These mirror the sleep lifecycle's own preconditions, so a runtime is only
-// handed over when the sleep sweep can actually claim it:
-// `reconcileUnscheduledSessionSleeps` (scheduled/session-sleep.ts) and
-// `queueWorkspaceSessionSleep` / `sleepWorkspaceSession` (services/session-sleep.ts).
-const LIVE_WORKSPACE_STATUSES = ['running', 'recovery'];
-const SNAPSHOT_RUNTIMES = ['vm', 'cf-container'];
-const RESUMABLE_AGENT_SESSION_STATUSES = ['running', 'recovery', 'sleeping'];
 
 interface PreservationWorkspace {
   id: string;
@@ -109,24 +110,71 @@ async function loadPreservationWorkspace(
     .where(
       and(
         eq(schema.agentSessions.workspaceId, workspaceId),
-        inArray(schema.agentSessions.status, RESUMABLE_AGENT_SESSION_STATUSES)
+        inArray(schema.agentSessions.status, SLEEP_RESUMABLE_AGENT_SESSION_STATUSES)
       )
     )
     .limit(1);
   return { ...workspace, agentSessionId: agentSession?.id ?? null };
 }
 
+/**
+ * The sleep claimer's own preconditions (`reconcileUnscheduledSessionSleeps`), read
+ * from the shared constants, so a runtime is only handed over when the sleep sweep
+ * can actually claim it.
+ */
 function liveRuntimeGap(workspace: PreservationWorkspace | null): FailedTaskPreservationGap | null {
   if (!workspace) return 'no_workspace';
-  if (!LIVE_WORKSPACE_STATUSES.includes(workspace.status)) return 'workspace_not_live';
+  if (!(SLEEP_CLAIMABLE_WORKSPACE_STATUSES as readonly string[]).includes(workspace.status)) {
+    return 'workspace_not_live';
+  }
   // The sleep is queued against the workspace's own chat link. A wake handoff
   // nulls it, and then this workspace no longer owns the conversation.
   if (!workspace.chatSessionId) return 'no_chat_session';
-  if (workspace.nodeRole !== 'workspace' || !SNAPSHOT_RUNTIMES.includes(workspace.runtime ?? '')) {
+  if (
+    workspace.nodeRole !== SLEEP_CLAIMABLE_NODE_ROLE ||
+    !(SLEEP_SNAPSHOT_NODE_RUNTIMES as readonly string[]).includes(workspace.runtime ?? '')
+  ) {
     return 'unsupported_runtime';
   }
   if (!workspace.agentSessionId) return 'no_resumable_agent_session';
   return null;
+}
+
+/** Why the sleep lifecycle can no longer claim this failed task's runtime, if it can't. */
+export async function failedTaskRuntimeGap(
+  env: Env,
+  projectId: string,
+  workspaceId: string
+): Promise<FailedTaskPreservationGap | null> {
+  return liveRuntimeGap(await loadPreservationWorkspace(env, projectId, workspaceId));
+}
+
+/**
+ * Queue the failed runtime's sleep as a NEW sleep episode, and report whether the
+ * row now holds a due intent. `queueWorkspaceSessionSleep` never resets the retry
+ * budget, because its reconciler caller runs every tick and must not launder a
+ * crashing row into unlimited retries. A task failure is a one-off terminal event
+ * — positive evidence of a new episode (`.claude/rules/61`) — so a budget an
+ * earlier, unrelated sleep of this still-running workspace spent must not end
+ * preservation before it has made a single attempt.
+ */
+async function queueFailedTaskSleepEpisode(
+  env: Env,
+  workspace: PreservationWorkspace & { chatSessionId: string }
+): Promise<boolean> {
+  await queueWorkspaceSessionSleep(env, {
+    workspaceId: workspace.id,
+    userId: workspace.userId,
+    reason: FAILED_TASK_SLEEP_REASON,
+    sleepAfterMs: 0,
+  });
+  return scheduleSessionSnapshotSleep(
+    drizzle(env.DATABASE, { schema }),
+    env,
+    workspace.chatSessionId,
+    new Date(),
+    { sleepAfterMs: 0, allowIncomplete: true, resetAttempts: true }
+  );
 }
 
 function decided(
@@ -150,9 +198,10 @@ function decided(
  * task row must already be `failed`; this never changes task or session status.
  *
  * Order matters: a live runtime is always (re)queued first, because an earlier
- * idle-sleep intent may be far in the future and a failure must sleep now. Only
- * when no live runtime can be handed over does the chat's existing sleep state
- * decide, read through the same predicate the resumer reads (`.claude/rules/58`).
+ * idle-sleep intent may be far in the future and a failure must sleep now. When
+ * no due intent results — no live runtime, or a sleep already in flight or done
+ * — the chat's existing sleep state decides, read through the same predicate the
+ * resumer reads (`.claude/rules/58`).
  */
 export async function preserveFailedTaskWork(
   env: Env,
@@ -183,15 +232,15 @@ export async function preserveFailedTaskWork(
   }
 
   let gap = liveRuntimeGap(workspace);
-  if (!gap && workspace) {
+  if (!gap && workspace?.chatSessionId) {
     try {
-      await queueWorkspaceSessionSleep(env, {
-        workspaceId: workspace.id,
-        userId: workspace.userId,
-        reason: FAILED_TASK_SLEEP_REASON,
-        sleepAfterMs: 0,
+      const queued = await queueFailedTaskSleepEpisode(env, {
+        ...workspace,
+        chatSessionId: workspace.chatSessionId,
       });
-      return decided(input, { outcome: 'sleep_queued' });
+      if (queued) return decided(input, { outcome: 'sleep_queued' });
+      // Nothing due was written: the row is asleep, mid-sleep, or in a state the
+      // sleep lifecycle does not schedule from. The check below tells them apart.
     } catch (err) {
       log.warn('task.failure_preservation.sleep_queue_failed', {
         taskId: input.taskId,
@@ -200,8 +249,8 @@ export async function preserveFailedTaskWork(
         source: input.source,
         error: err instanceof Error ? err.message : String(err),
       });
-      gap = 'sleep_queue_failed';
     }
+    gap = 'sleep_queue_failed';
   }
 
   const sleep = await loadTaskSleepPreservation(env.DATABASE, env, {
@@ -209,12 +258,19 @@ export async function preserveFailedTaskWork(
     projectId: input.projectId,
     chatSessionId: input.chatSessionId ?? workspace?.chatSessionId ?? null,
   });
-  if (sleep.outcome === 'preserve') return decided(input, { outcome: 'already_asleep' });
+  if (sleep.outcome === 'preserve') {
+    // The conversation slept before it failed; its snapshot may already be
+    // incomplete, and no later sleep will be there to say so.
+    const chatSessionId = input.chatSessionId ?? workspace?.chatSessionId ?? null;
+    if (chatSessionId) await noteFailedTaskPreservationCapture(env, { chatSessionId });
+    return decided(input, { outcome: 'already_asleep' });
+  }
   if (sleep.outcome === 'unknown') return decided(input, { outcome: 'unknown' });
   return decided(input, { outcome: 'not_preservable', gap: gap ?? 'workspace_not_live' });
 }
 
-export type FailedTaskWorkLossReason = FailedTaskPreservationGap | 'snapshot_retry_exhausted';
+export type FailedTaskWorkLossReason =
+  FailedTaskPreservationGap | 'snapshot_retry_exhausted' | 'snapshot_unavailable';
 
 const WORK_LOSS_DETAIL: Record<FailedTaskWorkLossReason, string> = {
   no_workspace: 'the task has no workspace record',
@@ -224,6 +280,7 @@ const WORK_LOSS_DETAIL: Record<FailedTaskWorkLossReason, string> = {
   no_resumable_agent_session: "the workspace's agent session had already ended",
   sleep_queue_failed: 'the workspace snapshot could not be scheduled',
   snapshot_retry_exhausted: 'the workspace snapshot kept failing until its retry budget ran out',
+  snapshot_unavailable: 'the workspace was no longer available to snapshot',
 };
 
 export function failedTaskWorkLossMessage(reason: FailedTaskWorkLossReason): string {
@@ -261,13 +318,26 @@ export async function surfaceFailedTaskWorkLoss(
     taskId: input.taskId,
     projectId: input.projectId,
     chatSessionId: input.chatSessionId,
+    messageId: `failed-task-work-loss-${input.taskId}`,
     content: failedTaskWorkLossMessage(input.reason),
   });
 }
 
+/**
+ * Persist a system notice under a per-task message id. Failure callbacks can be
+ * replayed (`task.callback.idempotent`), so the same notice must land once: an
+ * identical replay resolves to the existing message, and a differing one is
+ * refused and logged instead of stacking a second notice.
+ */
 async function persistSystemNotice(
   env: Env,
-  input: { taskId: string; projectId: string; chatSessionId: string; content: string }
+  input: {
+    taskId: string;
+    projectId: string;
+    chatSessionId: string;
+    messageId: string;
+    content: string;
+  }
 ): Promise<void> {
   try {
     await projectDataService.persistMessage(
@@ -276,118 +346,63 @@ async function persistSystemNotice(
       input.chatSessionId,
       'system',
       input.content,
-      null
+      null,
+      input.messageId
     );
   } catch (err) {
     log.warn('task.failure_preservation.surface_failed', {
       taskId: input.taskId,
       projectId: input.projectId,
       chatSessionId: input.chatSessionId,
+      messageId: input.messageId,
       error: err instanceof Error ? err.message : String(err),
     });
   }
 }
 
-interface PreservationSnapshotOwner {
+export interface PreservationSnapshotOwner {
   projectId: string | null;
+  runtime: string;
   sleepingAt: string | null;
   sleepStatus: string | null;
   sleepAfter: string | null;
+  sleepAttempts: number;
   status: string;
   degradation: string;
+  captureGeneration: string | null;
   taskId: string | null;
   taskStatus: string | null;
   taskErrorMessage: string | null;
 }
 
-/**
- * The snapshot row joined to the task that owns the chat, resolved exactly as the
- * sleep path resolves it (`sleepWorkspaceSession`): the ProjectData summary's
- * task first, then the legacy `tasks.chat_session_id` link.
- */
-async function loadPreservationSnapshotOwner(
+/** The snapshot row joined to the task that owns its chat, as the sleep path resolves it. */
+export async function loadPreservationSnapshotOwner(
   env: Env,
   chatSessionId: string
 ): Promise<PreservationSnapshotOwner | null> {
   const db = drizzle(env.DATABASE, { schema });
+  const owner = chatSessionTaskOwnerJoins(schema.sessionSnapshots.chatSessionId);
   const [row] = await db
     .select({
       projectId: schema.sessionSnapshots.projectId,
+      runtime: schema.sessionSnapshots.runtime,
       sleepingAt: schema.sessionSnapshots.sleepingAt,
       sleepStatus: schema.sessionSnapshots.sleepStatus,
       sleepAfter: schema.sessionSnapshots.sleepAfter,
+      sleepAttempts: schema.sessionSnapshots.sleepAttempts,
       status: schema.sessionSnapshots.status,
       degradation: schema.sessionSnapshots.degradation,
+      captureGeneration: schema.sessionSnapshots.captureGeneration,
       taskId: schema.tasks.id,
       taskStatus: schema.tasks.status,
       taskErrorMessage: schema.tasks.errorMessage,
     })
     .from(schema.sessionSnapshots)
-    .leftJoin(
-      schema.sessionSummaries,
-      eq(schema.sessionSummaries.id, schema.sessionSnapshots.chatSessionId)
-    )
-    .leftJoin(
-      schema.tasks,
-      or(
-        eq(schema.tasks.id, schema.sessionSummaries.taskId),
-        and(
-          isNull(schema.sessionSummaries.taskId),
-          eq(schema.tasks.chatSessionId, schema.sessionSnapshots.chatSessionId)
-        )
-      )
-    )
+    .leftJoin(schema.sessionSummaries, owner.summary)
+    .leftJoin(schema.tasks, owner.task)
     .where(eq(schema.sessionSnapshots.chatSessionId, chatSessionId))
     .limit(1);
   return row ?? null;
-}
-
-/**
- * Bounded escape for a failed task whose preservation sleep can never complete
- * (`.claude/rules/47`, `.claude/rules/58` requirement 3). Called by the sleep sweep
- * after a failed sleep attempt; it acts only once the row is truly out of
- * retries — `failed`/`terminal_failed` with no scheduled retry — so a repairable
- * capture that is still being retried is left alone. Completed tasks keep the
- * pre-existing behaviour. Returns true when it tore the runtime down.
- */
-export async function releaseExhaustedFailedTaskPreservation(
-  env: Env,
-  input: { chatSessionId: string }
-): Promise<boolean> {
-  const owner = await loadPreservationSnapshotOwner(env, input.chatSessionId);
-  if (
-    !owner?.taskId ||
-    !owner.projectId ||
-    owner.taskStatus !== 'failed' ||
-    owner.sleepingAt ||
-    owner.sleepAfter !== null ||
-    (owner.sleepStatus !== 'failed' && owner.sleepStatus !== 'terminal_failed')
-  ) {
-    return false;
-  }
-  await surfaceFailedTaskWorkLoss(env, {
-    taskId: owner.taskId,
-    projectId: owner.projectId,
-    chatSessionId: input.chatSessionId,
-    reason: 'snapshot_retry_exhausted',
-    source: 'session_sleep.preservation_exhausted',
-  });
-  try {
-    await projectDataService.failSession(
-      env,
-      owner.projectId,
-      input.chatSessionId,
-      owner.taskErrorMessage
-    );
-  } catch (err) {
-    log.warn('task.failure_preservation.exhausted_session_fail_failed', {
-      taskId: owner.taskId,
-      chatSessionId: input.chatSessionId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-  await cleanupTaskRun(owner.taskId, env);
-  return true;
 }
 
 /** Degradations that mean the workspace files themselves were not fully captured. */
@@ -396,7 +411,9 @@ const FILE_LOSS_DEGRADATIONS = new Set(['transcript-only', 'wip-skipped', 'entri
 /**
  * After a failed task's workspace has slept, say so when its snapshot is missing
  * workspace files. Without this a degraded capture is indistinguishable from a
- * complete one until the user wakes the session and finds the changes gone.
+ * complete one until the user wakes the session and finds the changes gone. An
+ * Instant workspace wakes in place only, and its container is kept only for a
+ * complete snapshot (`cleanupTaskRun`), so any degradation means no restore at all.
  */
 export async function noteFailedTaskPreservationCapture(
   env: Env,
@@ -409,7 +426,7 @@ export async function noteFailedTaskPreservationCapture(
     owner.taskStatus !== 'failed' ||
     !owner.sleepingAt ||
     owner.status !== 'degraded' ||
-    !FILE_LOSS_DEGRADATIONS.has(owner.degradation)
+    (owner.runtime !== 'cf-container' && !FILE_LOSS_DEGRADATIONS.has(owner.degradation))
   ) {
     return;
   }
@@ -423,13 +440,18 @@ export async function noteFailedTaskPreservationCapture(
     taskId: owner.taskId,
     projectId: owner.projectId,
     chatSessionId: input.chatSessionId,
-    content: failedTaskIncompleteSnapshotMessage(owner.degradation),
+    messageId: `failed-task-snapshot-incomplete-${owner.taskId}`,
+    content: failedTaskIncompleteSnapshotMessage(owner.degradation, owner.runtime),
   });
 }
 
-export function failedTaskIncompleteSnapshotMessage(degradation: string): string {
+export function failedTaskIncompleteSnapshotMessage(degradation: string, runtime: string): string {
+  const consequence =
+    runtime === 'cf-container'
+      ? 'so this Instant workspace cannot be restored.'
+      : 'so some uncommitted or unpushed changes may be missing when it wakes.';
   return (
     `Task failed. SAM saved this conversation, but its workspace snapshot is incomplete ` +
-    `(${degradation}), so some uncommitted or unpushed changes may be missing when it wakes.`
+    `(${degradation}), ${consequence}`
   );
 }

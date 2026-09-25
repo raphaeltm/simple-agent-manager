@@ -5,10 +5,11 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { noteFailedTaskPreservationCapture } from '../services/failed-task-preservation';
 import {
-  noteFailedTaskPreservationCapture,
   releaseExhaustedFailedTaskPreservation,
-} from '../services/failed-task-preservation';
+  releaseUnclaimableFailedTaskPreservation,
+} from '../services/failed-task-preservation-release';
 import {
   checkAutomaticSessionSleepEligibility,
   sleepWorkspaceSession,
@@ -49,20 +50,26 @@ export interface SessionSleepSweepContext {
 
 /**
  * A failed task's sleep is its work preservation (`failed-task-preservation.ts`).
- * After a slept attempt, surface an incomplete snapshot; after a failed one, tear
- * the runtime down once the persisted row has no retry left (`.claude/rules/47`).
- * Both helpers no-op for any other task, and never throw into the sweep.
+ * After a slept attempt, surface an incomplete snapshot; after a failed or given-up
+ * one, tear the runtime down once the sleep has no retry left; after a deferral,
+ * tear it down once the claimer can no longer take it (`.claude/rules/47`). Each
+ * no-ops for any other task, and never throws into the sweep.
  */
 async function settleFailedTaskPreservation(
   env: Env,
-  chatSessionId: string,
-  outcome: 'slept' | 'failed'
+  candidate: { chatSessionId: string; workspaceId: string | null },
+  outcome: 'slept' | 'failed' | 'deferred'
 ): Promise<void> {
-  const settle =
+  const { chatSessionId, workspaceId } = candidate;
+  const settled =
     outcome === 'slept'
-      ? noteFailedTaskPreservationCapture
-      : releaseExhaustedFailedTaskPreservation;
-  await settle(env, { chatSessionId }).catch((error: unknown) => {
+      ? noteFailedTaskPreservationCapture(env, { chatSessionId })
+      : outcome === 'failed'
+        ? releaseExhaustedFailedTaskPreservation(env, { chatSessionId })
+        : workspaceId
+          ? releaseUnclaimableFailedTaskPreservation(env, { chatSessionId, workspaceId })
+          : Promise.resolve(false);
+  await settled.catch((error: unknown) => {
     log.warn('session_sleep_sweep.failed_task_preservation_settle_failed', {
       chatSessionId,
       outcome,
@@ -91,7 +98,7 @@ async function sleepClaimedSession(
       reason: 'Idle timeout elapsed',
       sleepClaimId: claimId,
     });
-    await settleFailedTaskPreservation(env, candidate.chatSessionId, 'slept');
+    await settleFailedTaskPreservation(env, candidate, 'slept');
     return { status: 'slept', exhausted: false };
   } catch (error) {
     const attempts = candidate.sleepAttempts + 1;
@@ -119,7 +126,7 @@ async function sleepClaimedSession(
       exhausted,
       error: lifecycleError,
     });
-    await settleFailedTaskPreservation(env, candidate.chatSessionId, 'failed');
+    await settleFailedTaskPreservation(env, candidate, 'failed');
     return { status: 'failed', exhausted };
   }
 }
@@ -244,6 +251,17 @@ export async function runSessionSleepSweep(
     .limit(batchSize);
   stats.selected = candidates.length;
 
+  // Releases do network I/O (chat notice, teardown): keep them off the sweep's
+  // critical path whenever the caller can hold the work open.
+  const settleInBackground = async (
+    candidate: (typeof candidates)[number],
+    outcome: 'failed' | 'deferred'
+  ): Promise<void> => {
+    const settled = settleFailedTaskPreservation(env, candidate, outcome);
+    if (context) context.waitUntil(settled);
+    else await settled;
+  };
+
   for (const candidate of candidates) {
     if (Date.now() - startedAt >= wallBudgetMs) {
       stats.budgetExhausted = true;
@@ -252,7 +270,10 @@ export async function runSessionSleepSweep(
     let claimId: string;
     try {
       if (!candidate.workspaceId) {
-        if (await terminalizeMissingSleepSource(db, candidate, now)) stats.exhausted++;
+        if (await terminalizeMissingSleepSource(db, candidate, now)) {
+          stats.exhausted++;
+          await settleInBackground(candidate, 'failed');
+        }
         continue;
       }
       if (
@@ -276,9 +297,7 @@ export async function runSessionSleepSweep(
           })
           .where(eq(schema.sessionSnapshots.id, candidate.snapshotId));
         stats.exhausted++;
-        const release = settleFailedTaskPreservation(env, candidate.chatSessionId, 'failed');
-        if (context) context.waitUntil(release);
-        else await release;
+        await settleInBackground(candidate, 'failed');
         continue;
       }
       claimId = crypto.randomUUID();
@@ -291,9 +310,13 @@ export async function runSessionSleepSweep(
         });
         if (!eligibility.eligible) {
           if (eligibility.reason === 'workspace_metadata_missing') {
-            if (await terminalizeMissingSleepSource(db, candidate, now)) stats.exhausted++;
+            if (await terminalizeMissingSleepSource(db, candidate, now)) {
+              stats.exhausted++;
+              await settleInBackground(candidate, 'failed');
+            }
           } else {
             stats.deferred++;
+            await settleInBackground(candidate, 'deferred');
           }
           continue;
         }
