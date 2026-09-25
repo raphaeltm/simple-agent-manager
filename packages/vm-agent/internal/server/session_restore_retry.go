@@ -20,7 +20,14 @@ type sessionRestoreAttempt struct {
 	err           error
 }
 
-func (s *Server) runSessionRestore(ctx context.Context, input *sessionSnapshotHandlerInput, restore func() map[string]interface{}) (map[string]interface{}, error) {
+// runSessionRestore admits one restore per workspace session and waits for its
+// result. The restore is accepted work (.claude/rules/43): it runs on its own
+// context, so a caller that stops waiting cannot cut it short. VM nodes sit
+// behind a Cloudflare proxy that answers 524 after 100 s, while a wake onto a
+// fresh devcontainer can spend longer than that installing the agent inside the
+// restore. Bound to the request, that install was killed and the attempt cached
+// "degraded" for a snapshot that was complete. A retry now joins the attempt.
+func (s *Server) runSessionRestore(ctx context.Context, input *sessionSnapshotHandlerInput, restore func(context.Context) map[string]interface{}) (map[string]interface{}, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -34,12 +41,7 @@ func (s *Server) runSessionRestore(ctx context.Context, input *sessionSnapshotHa
 		if existing.chatSessionID != input.chatSessionID || existing.agentType != input.agentType {
 			return nil, fmt.Errorf("session restore identity conflicts")
 		}
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("wait for session restore: %w", ctx.Err())
-		case <-existing.done:
-			return existing.result, existing.err
-		}
+		return awaitSessionRestore(ctx, existing)
 	}
 	// Admission and ordinary host creation share sessionHostMu, including the
 	// host factory's post-I/O recheck. Snapshot files belong to the workspace,
@@ -87,6 +89,17 @@ func (s *Server) runSessionRestore(ctx context.Context, input *sessionSnapshotHa
 	}
 	s.sessionRestores[key] = attempt
 	s.sessionHostMu.Unlock()
+	go s.completeSessionRestore(attempt, input, restore)
+	return awaitSessionRestore(ctx, attempt)
+}
+
+// completeSessionRestore owns one restore attempt from admission to its cached
+// result. Its lifetime is the attempt's, not any request's (.claude/rules/71):
+// bounded by SESSION_SNAPSHOT_OPERATION_TIMEOUT, the same deadline the
+// background capture that produced the snapshot runs under.
+func (s *Server) completeSessionRestore(attempt *sessionRestoreAttempt, input *sessionSnapshotHandlerInput, restore func(context.Context) map[string]interface{}) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.sessionSnapshotOperationTimeout())
+	defer cancel()
 	defer func() {
 		close(attempt.done)
 		s.clearRemovedWorkspaceRestores(input.workspaceID)
@@ -94,15 +107,25 @@ func (s *Server) runSessionRestore(ctx context.Context, input *sessionSnapshotHa
 	// Persist a non-adoption fence before token, HOME/WIP, or ACP effects.
 	if err := s.persistSessionRestoreFence(input.workspaceID, input.sessionID); err != nil {
 		attempt.err = err
-		return nil, err
+		return
 	}
 	// Only the reserved operation may replace routing credentials.
 	if input.workspaceCallbackToken != "" {
 		s.upsertWorkspaceRuntime(input.workspaceID, "", "", "", input.workspaceCallbackToken)
 	}
-	attempt.result = restore()
+	attempt.result = restore(ctx)
 	attempt.err = nil
-	return attempt.result, nil
+}
+
+// awaitSessionRestore returns the attempt's result once it finishes, or stops
+// waiting when the caller does. Stopping to wait never stops the attempt.
+func awaitSessionRestore(ctx context.Context, attempt *sessionRestoreAttempt) (map[string]interface{}, error) {
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("wait for session restore: %w", ctx.Err())
+	case <-attempt.done:
+		return attempt.result, attempt.err
+	}
 }
 
 // A deletion first removes the runtime/registry, then releases completed
