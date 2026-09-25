@@ -58,8 +58,17 @@ export function decideUnhealthyNode(
   const lastContact = Date.parse(node.last_heartbeat_at ?? node.created_at);
   if (!Number.isFinite(lastContact)) return 'waiting';
   const lostForMs = Math.max(0, now - lastContact);
-  const unhealthyAfterMs = Math.max(1, node.heartbeat_stale_after_seconds) * 2_000;
-  if (lostForMs <= unhealthyAfterMs) return 'healthy';
+  const health = deriveNodeHealth(
+    {
+      status: 'running',
+      healthStatus: 'healthy',
+      createdAt: node.created_at,
+      lastHeartbeatAt: node.last_heartbeat_at,
+      heartbeatStaleAfterSeconds: node.heartbeat_stale_after_seconds,
+    },
+    now
+  );
+  if (health !== 'unhealthy') return 'healthy';
   if (lostForMs < config.unhealthyDrainAfterMs) return 'waiting';
   return lostForMs >= config.unhealthyReleaseAfterMs ? 'release' : 'drain';
 }

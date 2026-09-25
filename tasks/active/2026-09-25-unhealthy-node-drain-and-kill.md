@@ -182,14 +182,21 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
 - API typecheck passes; 89 focused reconciliation, attention, and unhealthy-node unit tests pass.
 - The existing node-cleanup Workers suite passes (22/22); a new test through
   `runNodeCleanupSweep` verifies notice → sleep request → release and durable event retention.
+- SQLite-backed tests now also cover early release after the session sleeps, a finite fleet-loss
+  hold, and release when append-only health-event writes fail. A real SQLite claim verified that the
+  existing warm-placement guard requires its first threshold bind; an apparent extra-bind review
+  finding was ruled out by a failing surgical removal.
+- Root typecheck, lint, and format checks pass. A full API rerun follows updates to source-contract
+  tests after splitting oversized modules. Specialist security, Cloudflare, and completion reviews
+  were completed; their actionable findings are addressed on branch head `3525cfc10`.
 - Surgical revert: omitting the exact-heartbeat cleanup claim made
   `refuses deletion when a heartbeat arrives after selection` fail because it deleted the
   recovered node. Restored the guard and the test passed.
 - Surgical revert: ignoring runtime-work progress made
   `keeps a long prompt running while its runtime work is making progress` fail with
   `cancel_prompt` instead of `observe_prompt`. Restored the guard and the test passed.
-- Remaining gates: full lint/build, specialist review, coordinated real-VM staging,
-  PR/CI/CodeRabbit, merge, production monitoring.
+- Draft PR #2147 is open. Remaining gates: full API suite rerun, coordinated real-VM staging,
+  CI/CodeRabbit, merge, production monitoring.
 
 ## Open question
 
