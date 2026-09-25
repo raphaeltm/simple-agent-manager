@@ -393,6 +393,7 @@ async function persistSystemNotice(
 export interface PreservationSnapshotOwner {
   projectId: string | null;
   taskFailedAt: string | null;
+  restoredAt: string | null;
   runtime: string;
   sleepingAt: string | null;
   sleepStatus: string | null;
@@ -417,6 +418,7 @@ export async function loadPreservationSnapshotOwner(
     .select({
       projectId: schema.sessionSnapshots.projectId,
       runtime: schema.sessionSnapshots.runtime,
+      restoredAt: schema.sessionSnapshots.restoredAt,
       sleepingAt: schema.sessionSnapshots.sleepingAt,
       sleepStatus: schema.sessionSnapshots.sleepStatus,
       sleepAfter: schema.sessionSnapshots.sleepAfter,

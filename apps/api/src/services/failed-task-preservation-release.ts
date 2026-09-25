@@ -9,7 +9,7 @@
  * `sleepLifecycleOwnsTerminalTaskWorkspaceSql` stops exempting a failed task's
  * workspace once its sleep is exhausted or the claimer can no longer take it.
  */
-import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -25,14 +25,19 @@ import {
 } from './failed-task-preservation';
 import * as projectDataService from './project-data';
 import { TERMINAL_SESSION_SLEEP_STATUS } from './session-snapshot-sleep-failure';
-import { isSessionSleepExhausted, sessionSleepMaxAttempts } from './sleep-preserved-task-status';
+import {
+  isSessionSleepExhausted,
+  sessionSleepMaxAttempts,
+  SLEEP_RESUMABLE_AGENT_SESSION_STATUSES,
+} from './sleep-preserved-task-status';
 import { cleanupTaskRun } from './task-runner';
 
 /**
  * Longest a failed task's runtime may stay awake waiting for its preservation
- * sleep, measured from the failure. Normally the sleep lands within a sweep or
- * two; this bounds an agent that keeps a turn open (a hung prompt under an
- * unbounded prompt timeout) and a runtime whose activity state never resolves.
+ * sleep, measured from the start of its current episode (`preservationWaitedTooLong`).
+ * Normally the sleep lands within a sweep or two; this bounds an agent that keeps
+ * one turn open (a hung prompt under an unbounded prompt timeout) and a runtime
+ * whose activity state never resolves.
  */
 export const DEFAULT_FAILED_TASK_PRESERVATION_MAX_WAIT_MS = 8 * 60 * 60 * 1000;
 
@@ -143,13 +148,83 @@ export async function releaseExhaustedFailedTaskPreservation(
   );
 }
 
+function timeOf(value: string | null): number {
+  const parsed = Date.parse(value ?? '');
+  // An unreadable time cannot prove the wait is still bounded.
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * When the agent's current turn started, read as the sweep's own eligibility check
+ * reads it (`checkAutomaticSessionSleepEligibility`): the workspace's latest
+ * resumable agent session, then its ProjectData state. `null` when no turn is
+ * recorded; `undefined` when the lookup failed.
+ */
+async function currentTurnStartedAt(
+  env: Env,
+  projectId: string,
+  workspaceId: string
+): Promise<number | null | undefined> {
+  try {
+    const [agentSession] = await drizzle(env.DATABASE, { schema })
+      .select({ id: schema.agentSessions.id })
+      .from(schema.agentSessions)
+      .where(
+        and(
+          eq(schema.agentSessions.workspaceId, workspaceId),
+          inArray(schema.agentSessions.status, SLEEP_RESUMABLE_AGENT_SESSION_STATUSES)
+        )
+      )
+      .orderBy(desc(schema.agentSessions.createdAt))
+      .limit(1);
+    if (!agentSession) return null;
+    const state = await projectDataService.getSessionState(env, projectId, agentSession.id);
+    const startedAt = state?.promptStartedAt;
+    return typeof startedAt === 'number' && Number.isFinite(startedAt) ? startedAt : null;
+  } catch (err) {
+    log.warn('task.failure_preservation.turn_lookup_failed', {
+      projectId,
+      workspaceId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return undefined;
+  }
+}
+
+/**
+ * The maximum wait runs from the latest sign that the conversation's current
+ * episode began: the failure, an in-place wake (an Instant conversation wakes
+ * under the same failed task), or the start of the agent's current turn. A user
+ * who keeps the conversation busy restarts it with every turn; only one turn that
+ * never ends, or a state that never resolves, runs it out (`.claude/rules/74`).
+ * A failed turn lookup withholds the teardown until the next sweep.
+ */
+async function preservationWaitedTooLong(
+  env: Env,
+  owner: FailedTaskOwner,
+  workspaceId: string,
+  now: Date
+): Promise<boolean> {
+  const maxWaitMs = parsePositiveInt(
+    env.FAILED_TASK_PRESERVATION_MAX_WAIT_MS,
+    DEFAULT_FAILED_TASK_PRESERVATION_MAX_WAIT_MS
+  );
+  const episodeStartedAt = Math.max(timeOf(owner.taskFailedAt), timeOf(owner.restoredAt));
+  // The turn lookup costs a ProjectData call: make it only when the cheap anchors
+  // already say the wait is over.
+  if (now.getTime() - episodeStartedAt <= maxWaitMs) return false;
+  const turnStartedAt = await currentTurnStartedAt(env, owner.projectId, workspaceId);
+  if (turnStartedAt === undefined) return false;
+  return now.getTime() - Math.max(episodeStartedAt, turnStartedAt ?? 0) > maxWaitMs;
+}
+
 /**
  * Called by the sleep sweep when it defers a candidate, which spends no attempt,
  * so the retry budget alone cannot end a preservation that keeps being deferred.
  * Releases when the runtime can no longer be claimed — a fatal agent error flips
  * the agent session to `error` after the sleep was queued, or a reaper stopped the
- * workspace — or once the failure is older than the maximum wait
- * (`FAILED_TASK_PRESERVATION_MAX_WAIT_MS`). Returns true when it released.
+ * workspace — or once the current episode has waited longer than
+ * `FAILED_TASK_PRESERVATION_MAX_WAIT_MS`. Returns true when it released.
  */
 export async function releaseStalledFailedTaskPreservation(
   env: Env,
@@ -159,14 +234,11 @@ export async function releaseStalledFailedTaskPreservation(
   const owner = failedTaskOwner(await loadPreservationSnapshotOwner(env, input.chatSessionId));
   if (!owner || owner.sleepingAt) return false;
   const gap = await failedTaskRuntimeGap(env, owner.projectId, input.workspaceId);
-  const failedAt = Date.parse(owner.taskFailedAt ?? '');
-  const maxWaitMs = parsePositiveInt(
-    env.FAILED_TASK_PRESERVATION_MAX_WAIT_MS,
-    DEFAULT_FAILED_TASK_PRESERVATION_MAX_WAIT_MS
-  );
-  // An unreadable failure time cannot prove the wait is still bounded.
-  const waitedTooLong = !Number.isFinite(failedAt) || now.getTime() - failedAt > maxWaitMs;
-  const reason = gap ?? (waitedTooLong ? 'preservation_timed_out' : null);
+  const reason =
+    gap ??
+    ((await preservationWaitedTooLong(env, owner, input.workspaceId, now))
+      ? 'preservation_timed_out'
+      : null);
   if (!reason) return false;
   return abandonFailedTaskPreservation(env, owner, input.chatSessionId, reason);
 }

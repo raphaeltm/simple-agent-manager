@@ -4,7 +4,7 @@ import { transitionTaskToTerminal } from '../../services/task-terminal-transitio
 import type { NotificationService } from '../notification';
 import * as activity from './activity';
 import * as attention from './attention';
-import { isAcpSessionMidTurn, loadLatestActiveAcpActivity } from './latest-acp-activity';
+import { assessCheckinActivity, loadLatestActiveAcpActivity } from './checkin-activity';
 import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
 import { activeWorkHardStallMs, reconciliationDeadlineMs } from './reconciliation-thresholds';
 import type { Env } from './types';
@@ -266,14 +266,17 @@ async function failExpiredTaskMarker(
 
   // Most expiries hit a conversation that already slept while it waited: keep it
   // asleep and wakeable instead of failing the session (idea 01M1XGHX7NQZQYWQRV5C1PJ60N).
-  // A check-in that expires on an agent still mid-turn is the watchdog's verdict
-  // that the turn will not end: a sleep would wait on it, and every capture would
-  // race its minute-by-minute re-report. That runtime is released now, as before.
+  // A check-in whose agent reported work since it was asked, and kept that turn
+  // open past the hard ceiling, is the watchdog's verdict that the turn will not
+  // end: a sleep would wait on it, and every capture would race its re-reports.
+  // That runtime is released now. A turn that reported nothing since the check-in
+  // is unproven, not stalled, and is preserved like any other failure.
   const workerEnv = env as unknown as WorkerEnv;
   const preservationService = await import('../../services/failed-task-preservation');
   const unresponsiveMidTurn =
     marker.kind === 'reconciliation_checkin' &&
-    isAcpSessionMidTurn(loadLatestActiveAcpActivity(sql, marker));
+    assessCheckinActivity(env, marker, loadLatestActiveAcpActivity(sql, marker), Date.now())
+      .stalledPastCeiling;
   const preservation = unresponsiveMidTurn
     ? ({ outcome: 'not_preservable', gap: 'agent_unresponsive' } as const)
     : await preservationService.preserveFailedTaskWork(workerEnv, {
@@ -335,98 +338,6 @@ async function cleanupExpiredTaskRun(env: Env, workspaceId: string, taskId: stri
   }
 }
 
-function toFreshNumber(value: unknown, floor: number): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value >= floor ? value : null;
-}
-
-function toPositiveNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
-}
-
-function maxFreshEvidence(floor: number, ...values: unknown[]): number | null {
-  const freshValues = values
-    .map((value) => toFreshNumber(value, floor))
-    .filter((value): value is number => value !== null);
-  return freshValues.length > 0 ? Math.max(...freshValues) : null;
-}
-
-interface ActiveCheckinEvidence {
-  evidenceAt: number;
-  extendedExpiry: number;
-  evidenceKinds: string[];
-  promptCeilingAt: number | null;
-  runtimeWorkCeilingAt: number | null;
-}
-
-function activeCheckinEvidence(
-  env: Env,
-  marker: ExpiredAttentionMarker,
-  active: Record<string, unknown>,
-  now: number
-): ActiveCheckinEvidence | null {
-  const hardStallMs = activeWorkHardStallMs(env);
-  const deadlineMs = reconciliationDeadlineMs(env);
-  const activityName = typeof active.activity === 'string' ? active.activity : null;
-  const runtimeWorkState =
-    typeof active.runtime_work_state === 'string' ? active.runtime_work_state : null;
-  const evidenceKinds: string[] = [];
-  const ceilings: number[] = [];
-  let evidenceAt = 0;
-  let promptCeilingAt: number | null = null;
-  let runtimeWorkCeilingAt: number | null = null;
-
-  if (activityName === 'prompting' || activityName === 'recovering') {
-    const activityEvidenceAt = maxFreshEvidence(
-      marker.createdAt,
-      active.prompt_started_at,
-      active.activity_at
-    );
-    const promptAnchor =
-      toPositiveNumber(active.prompt_started_at) ??
-      toPositiveNumber(active.activity_at) ??
-      activityEvidenceAt;
-
-    if (activityEvidenceAt !== null && promptAnchor !== null) {
-      promptCeilingAt = promptAnchor + hardStallMs;
-      if (promptCeilingAt > now) {
-        evidenceAt = Math.max(evidenceAt, activityEvidenceAt);
-        ceilings.push(promptCeilingAt);
-        evidenceKinds.push('prompt_activity');
-      }
-    }
-  }
-
-  if (runtimeWorkState === 'active' || runtimeWorkState === 'settling') {
-    const runtimeWorkEvidenceAt = maxFreshEvidence(
-      marker.createdAt,
-      active.runtime_work_progress_at,
-      active.runtime_work_updated_at
-    );
-    const runtimeWorkAnchor =
-      toPositiveNumber(active.runtime_work_progress_at) ??
-      toPositiveNumber(active.runtime_work_updated_at) ??
-      runtimeWorkEvidenceAt;
-
-    if (runtimeWorkEvidenceAt !== null && runtimeWorkAnchor !== null) {
-      runtimeWorkCeilingAt = runtimeWorkAnchor + hardStallMs;
-      if (runtimeWorkCeilingAt > now) {
-        evidenceAt = Math.max(evidenceAt, runtimeWorkEvidenceAt);
-        ceilings.push(runtimeWorkCeilingAt);
-        evidenceKinds.push('runtime_work');
-      }
-    }
-  }
-
-  if (evidenceAt <= 0 || ceilings.length === 0) return null;
-  return {
-    evidenceAt,
-    extendedExpiry: Math.min(now + deadlineMs, ...ceilings),
-    evidenceKinds,
-    promptCeilingAt,
-    runtimeWorkCeilingAt,
-  };
-}
-
 function deferActiveReconciliationCheckin(
   sql: SqlStorage,
   env: Env,
@@ -439,7 +350,7 @@ function deferActiveReconciliationCheckin(
   const runtimeWorkState =
     typeof active.runtime_work_state === 'string' ? active.runtime_work_state : null;
   const now = Date.now();
-  const evidence = activeCheckinEvidence(env, marker, active, now);
+  const evidence = assessCheckinActivity(env, marker, active, now).deferral;
   if (!evidence) return false;
 
   attention.extendAttentionExpiry(sql, marker.id, evidence.extendedExpiry);
