@@ -682,6 +682,55 @@ describe('failed-task work preservation vertical slice', () => {
     expect(snapshotRow()).toMatchObject({ sleep_status: 'scheduled', sleeping_at: null });
   });
 
+  it('bounds a hung turn on a woken Instant conversation however often messages arrive', async () => {
+    // Every delivery attempt to an Instant session re-runs the in-place wake writer
+    // (`commitContainerWake`), even while its agent is busy. Only the real wake may
+    // date the episode, or a hung turn that keeps receiving messages never ends.
+    seedFailedTask('cf-container', 'failed', new Date(START.getTime() - 9 * HOUR).toISOString());
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
+    expect(await runSessionSleepSweep(env, START)).toMatchObject({ slept: 1 });
+    mocks.persistMessage.mockClear();
+    mocks.cleanupTaskRun.mockClear();
+
+    const wokeAt = new Date(START.getTime() + HOUR);
+    vi.setSystemTime(wokeAt);
+    await markSessionSnapshotAwakeInPlace(env, 'chat-1', 'task-1', 'workspace-1');
+    sqlite.prepare(`UPDATE nodes SET status = 'running' WHERE id = 'node-1'`).run();
+    sqlite.prepare(`UPDATE workspaces SET status = 'running' WHERE id = 'workspace-1'`).run();
+    sqlite.prepare(`UPDATE agent_sessions SET status = 'running' WHERE id = 'agent-1'`).run();
+    projectDataStatus = 'active';
+
+    // The follow-up's turn hangs, re-reporting every minute; a queued message is
+    // retried against the busy container just before the sweep runs.
+    const later = new Date(wokeAt.getTime() + 9 * HOUR);
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'prompting',
+      activityAt: later.getTime() - 60_000,
+      promptStartedAt: wokeAt.getTime(),
+    });
+    vi.setSystemTime(new Date(later.getTime() - 60_000));
+    await markSessionSnapshotAwakeInPlace(env, 'chat-1', 'task-1', 'workspace-1');
+    vi.setSystemTime(later);
+    const background: Promise<unknown>[] = [];
+
+    const sweep = await runSessionSleepSweep(env, later, {
+      waitUntil: (promise) => background.push(promise),
+    });
+    await Promise.all(background);
+
+    expect(sweep).toMatchObject({ claimed: 0, deferred: 1 });
+    expect(mocks.persistMessage).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'chat-1',
+      'system',
+      failedTaskWorkLossMessage('preservation_timed_out'),
+      null,
+      WORK_LOSS_NOTICE_ID
+    );
+    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env);
+  });
+
   it('restarts the maximum wait for each turn on a live failed conversation', async () => {
     // Never slept: the user kept the failed conversation busy for hours. Each new
     // turn is fresh work, not a hung one.
