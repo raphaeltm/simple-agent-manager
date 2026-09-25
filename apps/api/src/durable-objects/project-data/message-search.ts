@@ -313,13 +313,14 @@ function readGroupedRowsInOrder(
   const byRid = new Map<number, Record<string, unknown>>();
   for (let start = 0; start < ranked.length; start += D1_MAX_BOUND_PARAMETERS) {
     const rids = ranked.slice(start, start + D1_MAX_BOUND_PARAMETERS).map((c) => c.rid);
+    const placeholders = rids.map(() => '?').join(', ');
     const rows = sql
       .exec(
         `SELECT m.rowid AS rid, m.id, m.session_id, m.role, m.content, m.created_at,
                 s.topic AS session_topic, s.task_id AS session_task_id
          FROM chat_messages_grouped m
          JOIN chat_sessions s ON s.id = m.session_id
-         WHERE m.rowid IN (${rids.map(() => '?').join(', ')})`,
+         WHERE m.rowid IN (${placeholders})`,
         ...rids
       )
       .toArray();
@@ -402,13 +403,14 @@ function searchMessagesLike(
   );
   params.push(limit);
 
+  const whereClause = conditions.join(' AND ');
   const rows = sql
     .exec(
       `SELECT m.id, m.session_id, m.role, m.content, m.created_at,
               s.topic AS session_topic, s.task_id AS session_task_id
        FROM chat_messages m
        JOIN chat_sessions s ON s.id = m.session_id
-       WHERE ${conditions.join(' AND ')}
+       WHERE ${whereClause}
        ORDER BY m.created_at DESC
        LIMIT ?`,
       ...params
