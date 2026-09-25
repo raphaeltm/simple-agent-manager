@@ -181,13 +181,20 @@ export async function deleteNodeRoute(c: Context<{ Bindings: Env }>) {
 
   await finalizeNodeLifecycleDeletion(c.env, nodeId, userId);
 
-  await recordNodeHealthEvent(c.env, {
-    nodeId,
-    episodeStartedAt: node.lastHeartbeatAt ?? node.createdAt,
-    event: 'deleted_by_owner',
-    reason: 'owner_requested_node_deletion',
-    createdAt: new Date().toISOString(),
-  });
+  try {
+    await recordNodeHealthEvent(c.env, {
+      nodeId,
+      episodeStartedAt: node.lastHeartbeatAt ?? node.createdAt,
+      event: 'deleted_by_owner',
+      reason: 'owner_requested_node_deletion',
+      createdAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    log.error('node_delete.health_event_failed', {
+      nodeId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   const transitionFailures = await terminalizeStrandedNodeTasks(
     c.env,
     nodeId,
