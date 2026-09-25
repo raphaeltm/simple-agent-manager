@@ -710,7 +710,7 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `MSG_MAX_MESSAGE_UPLOAD_BYTES` — Max content plus tool metadata bytes for one logical upload (default: 8388608)
 - `MSG_MAX_MESSAGE_UPLOAD_PARTS` — Max parts per uploaded field (default: 256)
 
-The API applies `MAX_MESSAGES_PAYLOAD_BYTES` (default: 262144) to the actual serialized request, `MESSAGE_SIZE_THRESHOLD` (default: 102400) to each ordinary message or upload part, and `MAX_MESSAGE_UPLOAD_BYTES` / `MAX_MESSAGE_UPLOAD_PARTS` (defaults: 8388608 / 256) to reassembly. `MAX_MESSAGE_UPLOAD_SESSION_BYTES` (default: 16777216) caps all staged bytes per session, including interrupted uploads. Configure both sides together when changing transport limits.
+The API applies `MAX_MESSAGES_PAYLOAD_BYTES` (default: 262144) to the actual serialized request, `MESSAGE_SIZE_THRESHOLD` (default: 102400) to each ordinary message or upload part, and `MAX_MESSAGE_UPLOAD_BYTES` / `MAX_MESSAGE_UPLOAD_PARTS` (defaults: 8388608 / 256) to reassembly. `MAX_MESSAGE_UPLOAD_SESSION_BYTES` (default: 16777216) caps staged bytes per session; `MAX_MESSAGE_UPLOAD_STAGED_BYTES` (default: 67108864) and `MAX_MESSAGE_UPLOAD_STAGED_PARTS` (default: 4096) cap all staged bytes and parts in the project object, including interrupted uploads. Configure both sides together when changing transport limits.
 
 ### ACP (Agent Communication Protocol)
 

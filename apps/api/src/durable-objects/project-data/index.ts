@@ -669,6 +669,18 @@ export class ProjectData extends DurableObject<Env> {
     });
   }
 
+  /** Operator readback of exact partial bytes; this is not a transcript read. */
+  async readMessageUploadQuarantine(sessionId: string, messageId: string) {
+    return messageUpload.readMessageUploadQuarantine(this.sql, sessionId, messageId);
+  }
+
+  listMessageUploadQuarantine(
+    limit: number,
+    after: messageUpload.MessageUploadInventoryCursor | null
+  ) {
+    return messageUpload.listMessageUploadQuarantine(this.sql, limit, after);
+  }
+
   async commitMessageUpload(
     input: messageUpload.MessageUploadCommit
   ): Promise<messagePersistence.MessageBatchPersistenceResult> {

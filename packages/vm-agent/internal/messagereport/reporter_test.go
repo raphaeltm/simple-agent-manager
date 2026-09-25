@@ -331,6 +331,27 @@ func TestFlush_SuccessfulPOST(t *testing.T) {
 	}
 }
 
+func TestFlush_NoContentDoesNotAcknowledgePersistence(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	cfg.RetryMaxElapsed = time.Millisecond
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+	if err := r.Enqueue(Message{MessageID: "not-acknowledged", Role: "assistant", Content: "keep", Timestamp: "2024-01-01T00:00:00Z"}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	r.Shutdown()
+	assertOutboxCount(t, db, 1, "terminal 204 must retain original row")
+}
+
 func TestFlush_TransientError_Retries(t *testing.T) {
 	var attempts int32
 
@@ -821,8 +842,8 @@ func TestReadBatch_IncludesToolMetadataInJSONByteBudget(t *testing.T) {
 	defer r.Shutdown()
 
 	rows := []outboxRow{
-		{id: 1, messageID: "m1", sessionID: "s1", role: "tool", content: "a", toolMetadata: sql.NullString{String: strings.Repeat("m", 80), Valid: true}, createdAt: "2024-01-01T00:00:00Z"},
-		{id: 2, messageID: "m2", sessionID: "s1", role: "tool", content: "b", toolMetadata: sql.NullString{String: strings.Repeat("m", 80), Valid: true}, createdAt: "2024-01-01T00:00:01Z"},
+		{id: 1, messageID: "m1", sessionID: "sess-1", role: "tool", content: "a", toolMetadata: sql.NullString{String: strings.Repeat("m", 80), Valid: true}, createdAt: "2024-01-01T00:00:00Z"},
+		{id: 2, messageID: "m2", sessionID: "sess-1", role: "tool", content: "b", toolMetadata: sql.NullString{String: strings.Repeat("m", 80), Valid: true}, createdAt: "2024-01-01T00:00:01Z"},
 	}
 	size, err := marshaledBatchSize(rows[:1])
 	if err != nil {

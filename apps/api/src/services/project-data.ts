@@ -850,6 +850,28 @@ export async function storeMessageUploadPart(
   );
 }
 
+export async function listMessageUploadQuarantine(
+  env: Env,
+  projectId: string,
+  limit: number,
+  after: import('../durable-objects/project-data/message-upload').MessageUploadInventoryCursor | null
+) {
+  return callProjectDataNoRetry(env, projectId, 'listMessageUploadQuarantine', (stub) =>
+    stub.listMessageUploadQuarantine(limit, after)
+  );
+}
+
+export async function readMessageUploadQuarantine(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  messageId: string
+) {
+  return callProjectDataNoRetry(env, projectId, 'readMessageUploadQuarantine', (stub) =>
+    stub.readMessageUploadQuarantine(sessionId, messageId)
+  );
+}
+
 export async function commitMessageUpload(
   env: Env,
   projectId: string,

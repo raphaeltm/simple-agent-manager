@@ -90,7 +90,9 @@ export function useSessionLifecycle(
           if (page >= DEFAULT_CHAT_TIMELINE_MAX_PAGES || delta.messages.length === 0) {
             throw new Error('Message delta could not be drained');
           }
-          const nextAfter = messagePageCursor(delta.messages.at(-1)!);
+          const lastDeltaMessage = delta.messages.at(-1);
+          if (!lastDeltaMessage) throw new Error('Message delta could not be drained');
+          const nextAfter = messagePageCursor(lastDeltaMessage);
           if (nextAfter === after) throw new Error('Message delta cursor did not advance');
           after = nextAfter;
           delta = await getChatSession(projectId, sessionId, { signal, after });

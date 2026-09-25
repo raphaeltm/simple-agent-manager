@@ -2382,6 +2382,7 @@ export const MIGRATIONS: Migration[] = [
         field TEXT NOT NULL,
         part INTEGER NOT NULL,
         data TEXT NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
         abandoned_at INTEGER,
         PRIMARY KEY (session_id, message_id, field, part)
       )`);

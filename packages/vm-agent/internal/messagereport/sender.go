@@ -133,7 +133,7 @@ func (r *Reporter) sendBatchWithRetry(batch []outboxRow, url, token, wsID string
 }
 
 func (r *Reporter) handleBatchResponse(batch []outboxRow, url, token, wsID string, statusCode int, responseBody string, postErr error) (bool, error) {
-	if postErr == nil && statusCode >= 200 && statusCode < 300 {
+	if postErr == nil && statusCode >= 200 && statusCode < 300 && statusCode != http.StatusNoContent {
 		return true, nil
 	}
 	if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
@@ -293,7 +293,7 @@ func (r *Reporter) sendSingleWithSizeFallback(ctx context.Context, url, token, w
 	if err != nil {
 		return err
 	}
-	if postErr == nil && statusCode >= 200 && statusCode < 300 {
+	if postErr == nil && statusCode >= 200 && statusCode < 300 && statusCode != http.StatusNoContent {
 		return nil
 	}
 	if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {

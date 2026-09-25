@@ -132,7 +132,18 @@ export function registerMessageUploadRoute<
       if (new TextEncoder().encode(input.data).byteLength > deps.maxMessageBytes(c.env)) {
         throw errors.badRequest('Message upload part exceeds individual content limit');
       }
-      await projectDataService.storeMessageUploadPart(c.env, currentWorkspace.projectId, input);
+      try {
+        await projectDataService.storeMessageUploadPart(c.env, currentWorkspace.projectId, input);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          (error.message.includes('upload quarantine exceeds') ||
+            error.message.includes('upload is abandoned'))
+        ) {
+          throw errors.conflict(error.message);
+        }
+        throw error;
+      }
       return c.json({ accepted: true });
     }
     if (

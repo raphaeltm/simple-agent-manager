@@ -24,6 +24,8 @@ export type MessageUploadCommit = {
 const DEFAULT_MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_PARTS = 256;
 const DEFAULT_MAX_SESSION_BYTES = 16 * 1024 * 1024;
+const DEFAULT_MAX_STAGED_BYTES = 64 * 1024 * 1024;
+const DEFAULT_MAX_STAGED_PARTS = 4096;
 
 function uploadLimit(env: Env): number {
   const parsed = Number.parseInt(env.MAX_MESSAGE_UPLOAD_BYTES || '', 10);
@@ -38,6 +40,16 @@ function partLimit(env: Env): number {
 function sessionLimit(env: Env): number {
   const parsed = Number.parseInt(env.MAX_MESSAGE_UPLOAD_SESSION_BYTES || '', 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_SESSION_BYTES;
+}
+
+function stagedLimit(env: Env): number {
+  const parsed = Number.parseInt(env.MAX_MESSAGE_UPLOAD_STAGED_BYTES || '', 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_STAGED_BYTES;
+}
+
+function stagedPartLimit(env: Env): number {
+  const parsed = Number.parseInt(env.MAX_MESSAGE_UPLOAD_STAGED_PARTS || '', 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_STAGED_PARTS;
 }
 
 function committedMessage(
@@ -70,7 +82,7 @@ export function storeMessageUploadPart(sql: SqlStorage, env: Env, input: Message
   if (bytes === 0 || bytes > uploadLimit(env)) throw new Error('Invalid message upload part size');
   const existing = sql
     .exec(
-      'SELECT data FROM message_upload_parts WHERE session_id = ? AND message_id = ? AND field = ? AND part = ? AND abandoned_at IS NULL',
+      'SELECT data, abandoned_at FROM message_upload_parts WHERE session_id = ? AND message_id = ? AND field = ? AND part = ?',
       input.sessionId,
       input.messageId,
       input.field,
@@ -78,6 +90,9 @@ export function storeMessageUploadPart(sql: SqlStorage, env: Env, input: Message
     )
     .toArray()[0];
   if (existing) {
+    if (existing.abandoned_at !== null) {
+      throw new Error('Message upload is abandoned in quarantine');
+    }
     if (existing.data !== input.data) throw new Error('Conflicting message upload part');
     return;
   }
@@ -91,12 +106,24 @@ export function storeMessageUploadPart(sql: SqlStorage, env: Env, input: Message
   if (Number(total?.bytes ?? 0) + bytes > uploadLimit(env)) {
     throw new Error('Message upload exceeds logical size limit');
   }
-  const sessionBytes = sql.exec(
-    'SELECT SUM(LENGTH(CAST(data AS BLOB))) AS bytes FROM message_upload_parts WHERE session_id = ?',
-    input.sessionId
-  ).toArray()[0];
+  const sessionBytes = sql
+    .exec(
+      'SELECT SUM(LENGTH(CAST(data AS BLOB))) AS bytes FROM message_upload_parts WHERE session_id = ?',
+      input.sessionId
+    )
+    .toArray()[0];
   if (Number(sessionBytes?.bytes ?? 0) + bytes > sessionLimit(env)) {
     throw new Error('Session upload staging exceeds size limit');
+  }
+  const stagedBytes = sql
+    .exec('SELECT SUM(LENGTH(CAST(data AS BLOB))) AS bytes FROM message_upload_parts')
+    .toArray()[0];
+  if (Number(stagedBytes?.bytes ?? 0) + bytes > stagedLimit(env)) {
+    throw new Error('Project upload quarantine exceeds size limit');
+  }
+  const stagedParts = sql.exec('SELECT COUNT(*) AS count FROM message_upload_parts').toArray()[0];
+  if (Number(stagedParts?.count ?? 0) >= stagedPartLimit(env)) {
+    throw new Error('Project upload quarantine exceeds part limit');
   }
   sql.exec(
     'INSERT INTO message_upload_parts (session_id, message_id, field, part, data) VALUES (?, ?, ?, ?, ?)',
@@ -179,4 +206,89 @@ export function clearMessageUpload(sql: SqlStorage, input: MessageUploadCommit):
     input.sessionId,
     input.messageId
   );
+}
+
+/** Internal-only readback for interrupted uploads; never reports a partial message as persisted. */
+export async function readMessageUploadQuarantine(
+  sql: SqlStorage,
+  sessionId: string,
+  messageId: string
+): Promise<{
+  status: 'pending' | 'abandoned';
+  createdAt: number;
+  abandonedAt: number | null;
+  fields: Array<{ field: string; part: number; data: string; sha256: string }>;
+} | null> {
+  const rows = sql
+    .exec(
+      'SELECT field, part, data, created_at, abandoned_at FROM message_upload_parts WHERE session_id = ? AND message_id = ? ORDER BY field, part',
+      sessionId,
+      messageId
+    )
+    .toArray();
+  if (rows.length === 0) return null;
+  return {
+    status: rows[0]!.abandoned_at === null ? 'pending' : 'abandoned',
+    createdAt: Number(rows[0]!.created_at),
+    abandonedAt: rows[0]!.abandoned_at === null ? null : Number(rows[0]!.abandoned_at),
+    fields: await Promise.all(
+      rows.map(async (row) => ({
+        field: String(row.field),
+        part: Number(row.part),
+        data: String(row.data),
+        sha256: await sha256(String(row.data)),
+      }))
+    ),
+  };
+}
+
+export type MessageUploadInventoryCursor = {
+  createdAt: number;
+  sessionId: string;
+  messageId: string;
+};
+
+/** Bounded operator inventory; every record is reachable by its total-order key. */
+export function listMessageUploadQuarantine(
+  sql: SqlStorage,
+  limit: number,
+  after: MessageUploadInventoryCursor | null
+) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw new Error('Invalid message upload inventory limit');
+  }
+  const rows = sql
+    .exec(
+      `SELECT * FROM (
+         SELECT session_id, message_id, MIN(created_at) AS created_at,
+                MAX(abandoned_at) AS abandoned_at, COUNT(*) AS parts,
+                SUM(LENGTH(CAST(data AS BLOB))) AS bytes
+         FROM message_upload_parts GROUP BY session_id, message_id
+       ) AS inventory
+       WHERE (? = 0 OR (created_at, session_id, message_id) > (?, ?, ?))
+       ORDER BY created_at ASC, session_id ASC, message_id ASC LIMIT ?`,
+      after ? 1 : 0,
+      after?.createdAt ?? 0,
+      after?.sessionId ?? '',
+      after?.messageId ?? '',
+      limit + 1
+    )
+    .toArray();
+  const uploads = rows.slice(0, limit).map((row) => ({
+    sessionId: String(row.session_id),
+    messageId: String(row.message_id),
+    status: row.abandoned_at === null ? 'pending' : 'abandoned',
+    createdAt: Number(row.created_at),
+    abandonedAt: row.abandoned_at === null ? null : Number(row.abandoned_at),
+    parts: Number(row.parts),
+    bytes: Number(row.bytes),
+  }));
+  const last = uploads.at(-1);
+  return {
+    uploads,
+    nextCursor:
+      rows.length > limit && last
+        ? { createdAt: last.createdAt, sessionId: last.sessionId, messageId: last.messageId }
+        : null,
+  };
 }

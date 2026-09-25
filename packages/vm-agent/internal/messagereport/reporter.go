@@ -165,8 +165,8 @@ func (r *Reporter) SetWorkspaceID(id string) {
 // messages. Call this when a warm node is reused for a new task so that
 // messages are tagged with the correct chat session.
 //
-// Unsent rows from earlier sessions remain in SQLite. Flush selects only the
-// current session, so a warm-node switch cannot delete or misroute them.
+// The callback API rejects old-session writes after a workspace is relinked.
+// Clear prior-session rows under flushMu so they cannot block the new session.
 func (r *Reporter) SetSessionID(id string) {
 	if r == nil {
 		return
@@ -182,6 +182,14 @@ func (r *Reporter) SetSessionID(id string) {
 	oldSessionID := r.sessionID
 
 	if oldSessionID != "" && oldSessionID != id {
+		cleared, err := r.clearOutboxForSession(oldSessionID)
+		if err != nil {
+			slog.Error("messagereport: failed to clear outbox on session switch",
+				"error", err, "oldSessionId", oldSessionID, "newSessionId", id)
+		} else if cleared > 0 {
+			slog.Warn("messagereport: cleared stale outbox messages on session switch",
+				"cleared", cleared, "oldSessionId", oldSessionID, "newSessionId", id)
+		}
 		slog.Info("messagereport: session ID updated",
 			"sessionId", id, "previousSessionId", oldSessionID)
 	}
@@ -192,8 +200,7 @@ func (r *Reporter) SetSessionID(id string) {
 	r.sessionID = id
 }
 
-// clearOutboxForSession is used only after an authoritative terminal callback;
-// session switching never calls it.
+// clearOutboxForSession removes rows for one session only.
 func (r *Reporter) clearOutboxForSession(sessionID string) (int64, error) {
 	result, err := r.db.Exec("DELETE FROM message_outbox WHERE session_id = ?", sessionID)
 	if err != nil {

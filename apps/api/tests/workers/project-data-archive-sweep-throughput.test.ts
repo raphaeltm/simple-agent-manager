@@ -153,13 +153,23 @@ function messagesFor(prefix: string, count: number): SeededMessage[] {
 async function seedTerminalSession(
   source: DurableObjectStub<ProjectDataTestDouble>,
   prefix: string,
-  count: number
+  count: number,
+  pendingUpload?: { messageId: string; data: string }
 ): Promise<{ sessionId: string; messageCount: number; seeded: SeededMessage[] }> {
   const sessionId = await source.createSession(null, prefix);
   const seeded = messagesFor(prefix, count);
   // Persist in slices: one full-session RPC argument exceeds the DO RPC size budget.
   for (let offset = 0; offset < seeded.length; offset += 250) {
     await source.persistMessageBatch(sessionId, seeded.slice(offset, offset + 250));
+  }
+  if (pendingUpload) {
+    await source.storeMessageUploadPart({
+      sessionId,
+      messageId: pendingUpload.messageId,
+      field: 'content',
+      part: 0,
+      data: pendingUpload.data,
+    });
   }
   await source.stopSession(sessionId);
   await source.runSummarySyncForTest();
@@ -469,6 +479,27 @@ async function runCeilingCase(prefix: string, ceiling: number) {
 }
 
 describe('archive sweep message budget as a selection ceiling', () => {
+  it('archives a terminal transcript while preserving incomplete upload bytes for operator readback', async () => {
+    const { projectId, source } = await newArchiveProject('upload-quarantine');
+    const pending = { messageId: 'unfinished-upload', data: 'partial 🌊 bytes' };
+    const session = await seedTerminalSession(source, 'quarantine', 7, pending);
+    await isolateSweepFixture(projectId, { clearCadence: true });
+    await withArchiveEnv(sweepEnv(SHIPPED_SWEEP_MESSAGE_BUDGET), async () => {
+      const stats = await runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000));
+      expect(stats).toMatchObject({ skipped: false, migrated: 1, failed: 0 });
+      expect(await readLocation(projectId, session.sessionId)).toMatchObject({
+        location_state: 'archive_shard',
+      });
+      expect(await source.getMessageCount(session.sessionId)).toBe(0);
+      await expectTranscriptPreserved(projectId, session.sessionId, session.seeded);
+      const quarantine = await source.readMessageUploadQuarantine(
+        session.sessionId,
+        pending.messageId
+      );
+      expect(quarantine).toMatchObject({ status: 'abandoned', fields: [{ data: pending.data }] });
+    });
+  });
+
   it('hides a session above the previous budget and archives it intact at the shipped ceiling', async () => {
     const result = await runCeilingCase('shipped', SHIPPED_SWEEP_MESSAGE_BUDGET);
 
