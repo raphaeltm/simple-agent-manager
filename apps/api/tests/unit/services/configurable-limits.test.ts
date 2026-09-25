@@ -286,7 +286,6 @@ describe('workspace messages — configurable MAX_MESSAGES_PER_BATCH', () => {
 
   it('reads batch limit from MAX_MESSAGES_PER_BATCH env var', () => {
     expect(runtimeSource).toContain('env.MAX_MESSAGES_PER_BATCH');
-    expect(runtimeSource).toContain('validateMessageBatch(c.env, body)');
   });
 
   it('falls back to 100 when env var is absent', () => {

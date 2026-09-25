@@ -678,7 +678,7 @@ export class ProjectData extends DurableObject<Env> {
     limit: number,
     after: messageUpload.MessageUploadInventoryCursor | null
   ) {
-    return messageUpload.listMessageUploadQuarantine(this.sql, limit, after);
+    return messageUpload.listMessageUploadQuarantine(this.sql, this.env, limit, after);
   }
 
   async commitMessageUpload(

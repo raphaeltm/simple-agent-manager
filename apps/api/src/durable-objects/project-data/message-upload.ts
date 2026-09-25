@@ -26,6 +26,7 @@ const DEFAULT_MAX_PARTS = 256;
 const DEFAULT_MAX_SESSION_BYTES = 16 * 1024 * 1024;
 const DEFAULT_MAX_STAGED_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_STAGED_PARTS = 4096;
+const DEFAULT_MAX_INVENTORY_LIMIT = 100;
 
 function uploadLimit(env: Env): number {
   const parsed = Number.parseInt(env.MAX_MESSAGE_UPLOAD_BYTES || '', 10);
@@ -50,6 +51,11 @@ function stagedLimit(env: Env): number {
 function stagedPartLimit(env: Env): number {
   const parsed = Number.parseInt(env.MAX_MESSAGE_UPLOAD_STAGED_PARTS || '', 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_STAGED_PARTS;
+}
+
+export function resolveMessageUploadInventoryLimit(env: Env): number {
+  const parsed = Number.parseInt(env.MAX_MESSAGE_UPLOAD_INVENTORY_LIMIT || '', 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_INVENTORY_LIMIT;
 }
 
 function committedMessage(
@@ -226,11 +232,12 @@ export async function readMessageUploadQuarantine(
       messageId
     )
     .toArray();
-  if (rows.length === 0) return null;
+  const first = rows[0];
+  if (!first) return null;
   return {
-    status: rows[0]!.abandoned_at === null ? 'pending' : 'abandoned',
-    createdAt: Number(rows[0]!.created_at),
-    abandonedAt: rows[0]!.abandoned_at === null ? null : Number(rows[0]!.abandoned_at),
+    status: first.abandoned_at === null ? 'pending' : 'abandoned',
+    createdAt: Number(first.created_at),
+    abandonedAt: first.abandoned_at === null ? null : Number(first.abandoned_at),
     fields: await Promise.all(
       rows.map(async (row) => ({
         field: String(row.field),
@@ -251,10 +258,15 @@ export type MessageUploadInventoryCursor = {
 /** Bounded operator inventory; every record is reachable by its total-order key. */
 export function listMessageUploadQuarantine(
   sql: SqlStorage,
+  env: Env,
   limit: number,
   after: MessageUploadInventoryCursor | null
 ) {
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+  if (
+    !Number.isSafeInteger(limit) ||
+    limit < 1 ||
+    limit > resolveMessageUploadInventoryLimit(env)
+  ) {
     throw new Error('Invalid message upload inventory limit');
   }
   const rows = sql

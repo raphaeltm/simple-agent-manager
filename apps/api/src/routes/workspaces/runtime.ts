@@ -62,7 +62,6 @@ import {
   type WorkspaceDeletionCallbackKind,
 } from '../../services/workspace-deletion-callback-signal';
 import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
-import { registerMessageUploadRoute } from './message-upload';
 import { getDecryptedAgentKey, getDecryptedCredentialRecord } from '../credentials';
 import { assertRepositoryAccess } from '../projects/_helpers';
 import {
@@ -74,6 +73,7 @@ import {
   verifyWorkspaceCallbackAuth,
   type WorkspaceCallbackIdentitySnapshot,
 } from './_helpers';
+import { registerMessageUploadRoute } from './message-upload';
 
 /** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
 const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(

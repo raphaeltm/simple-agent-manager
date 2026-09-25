@@ -24,6 +24,8 @@ Timestamp-only cursors omit tied messages at a page boundary. VM reporter payloa
 
 First independent review rejected a fragment-row approach because no reader reassembled it. That implementation has been replaced by a dedicated upload path that writes exactly one original transcript row. Re-review and staging remain gates.
 
+The second review found interrupted-upload quarantine and old-session outbox issues. The upload path now enforces per-session and project-wide byte/part caps, exposes superadmin-only paginated inventory and exact hashed readback, and marks incomplete parts abandoned after terminal archive grace without presenting them as persisted messages. A real archive sweep passed through source deletion, archived transcript reads, and root quarantine readback. The old-session outbox change was reverted because the callback API rejects writes after relink; that pre-existing lifecycle has a separate backlog record. Reporter `204` responses do not acknowledge persistence. Go, API Worker, admin route, root lint/typecheck/test/build, and mobile/desktop Playwright chat audit passed. Staging, PR review, merge, and production monitoring remain open.
+
 ## Acceptance
 
 No persisted transcript row is skipped or duplicated solely because of a tie at a page boundary. Reporter delivery never represents a truncated marker as full content and never deletes unsent bytes after a size rejection. Request bodies stay within the configured limit. Retries are idempotent.

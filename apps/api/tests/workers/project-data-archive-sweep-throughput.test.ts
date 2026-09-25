@@ -491,7 +491,14 @@ describe('archive sweep message budget as a selection ceiling', () => {
         location_state: 'archive_shard',
       });
       expect(await source.getMessageCount(session.sessionId)).toBe(0);
-      await expectTranscriptPreserved(projectId, session.sessionId, session.seeded);
+      const archived = await readArchivedTranscript(
+        projectId,
+        session.sessionId,
+        session.seeded.length
+      );
+      expect(archived.map((message) => ({ id: message.id, content: message.content }))).toEqual(
+        session.seeded.map((message) => ({ id: message.messageId, content: message.content }))
+      );
       const quarantine = await source.readMessageUploadQuarantine(
         session.sessionId,
         pending.messageId

@@ -97,6 +97,9 @@ const SESSIONS = [makeSession({ id: 'session-1', topic: 'Active Chat Session' })
 // ---------------------------------------------------------------------------
 
 async function setupApiMocks(page: Page) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('sam-onboarding-wizard-dismissed-user-test-1', 'true');
+  });
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -105,7 +108,8 @@ async function setupApiMocks(page: Page) {
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/credentials')) return respond(200, []);
     if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
     if (path === '/api/trial/status') return respond(200, { available: false });
@@ -148,7 +152,8 @@ async function setupApiMocks(page: Page) {
       return respond(200, MOCK_PROJECT);
     }
 
-    if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    if (path === '/api/projects')
+      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
 
     return respond(200, {});
   });
@@ -177,6 +182,7 @@ test.describe('Chat layout scroll containment — Desktop', () => {
     await setupApiMocks(page);
     await page.goto('/projects/proj-test-1/chat/session-1');
     await page.waitForTimeout(1500);
+    await expect(page.getByText(/Assistant message 49/)).toBeVisible();
 
     const bodyScrollable = await page.evaluate(() => {
       return document.documentElement.scrollHeight > document.documentElement.clientHeight;
@@ -234,6 +240,7 @@ test.describe('Chat layout scroll containment — Mobile', () => {
     await setupApiMocks(page);
     await page.goto('/projects/proj-test-1/chat/session-1');
     await page.waitForTimeout(1500);
+    await expect(page.getByText(/Assistant message 49/)).toBeVisible();
 
     const bodyScrollable = await page.evaluate(() => {
       return document.documentElement.scrollHeight > document.documentElement.clientHeight;

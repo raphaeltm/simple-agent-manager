@@ -353,7 +353,8 @@ describe('chatRoutes agent session routing', () => {
       null,
       null,
       undefined,
-      true
+      true,
+      'desc'
     );
   });
 
@@ -384,7 +385,8 @@ describe('chatRoutes agent session routing', () => {
       null,
       null,
       undefined,
-      true
+      true,
+      'desc'
     );
   });
 
@@ -412,7 +414,8 @@ describe('chatRoutes agent session routing', () => {
       null,
       null,
       undefined,
-      true
+      true,
+      'desc'
     );
   });
 
@@ -436,7 +439,8 @@ describe('chatRoutes agent session routing', () => {
       null,
       null,
       undefined,
-      true
+      true,
+      'desc'
     );
   });
 

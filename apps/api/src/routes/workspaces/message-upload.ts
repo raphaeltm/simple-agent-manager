@@ -8,8 +8,8 @@ import * as projectDataService from '../../services/project-data';
 import { signalWorkspaceDeletionUnconfirmedCallback } from '../../services/workspace-deletion-callback-signal';
 import {
   sameWorkspaceCallbackIdentity,
-  type WorkspaceCallbackIdentitySnapshot,
   verifyWorkspaceCallbackAuth,
+  type WorkspaceCallbackIdentitySnapshot,
 } from './_helpers';
 
 type RuntimeContext = Context<{ Bindings: Env }>;
@@ -78,6 +78,33 @@ const MessageUploadSchema = v.variant('action', [
   }),
 ]);
 
+function throwUploadError(error: unknown): never {
+  if (error instanceof Error) {
+    const reason = error.message;
+    if (
+      reason.includes('upload quarantine exceeds') ||
+      reason.includes('upload staging exceeds') ||
+      reason.includes('upload is abandoned') ||
+      reason.includes('upload conflicts') ||
+      reason.includes('upload ID belongs to another session') ||
+      reason.includes('upload session is unavailable') ||
+      reason.includes('Conflicting message upload part')
+    ) {
+      throw errors.conflict(reason);
+    }
+    if (
+      reason.includes('Invalid message upload') ||
+      reason.includes('upload exceeds logical size') ||
+      reason.includes('upload is incomplete') ||
+      reason.includes('upload digest mismatch') ||
+      reason.includes('upload has no content')
+    ) {
+      throw errors.badRequest(reason);
+    }
+  }
+  throw error;
+}
+
 /** Upload private bounded parts, then commit one canonical message after verification. */
 export function registerMessageUploadRoute<
   W extends WorkspaceCallbackIdentitySnapshot & { projectId: string | null; status: string },
@@ -135,14 +162,7 @@ export function registerMessageUploadRoute<
       try {
         await projectDataService.storeMessageUploadPart(c.env, currentWorkspace.projectId, input);
       } catch (error) {
-        if (
-          error instanceof Error &&
-          (error.message.includes('upload quarantine exceeds') ||
-            error.message.includes('upload is abandoned'))
-        ) {
-          throw errors.conflict(error.message);
-        }
-        throw error;
+        throwUploadError(error);
       }
       return c.json({ accepted: true });
     }
@@ -156,11 +176,16 @@ export function registerMessageUploadRoute<
     ) {
       throw errors.badRequest('Invalid message upload manifest');
     }
-    const committed = await projectDataService.commitMessageUpload(
-      c.env,
-      currentWorkspace.projectId,
-      input
-    );
+    let committed: Awaited<ReturnType<typeof projectDataService.commitMessageUpload>>;
+    try {
+      committed = await projectDataService.commitMessageUpload(
+        c.env,
+        currentWorkspace.projectId,
+        input
+      );
+    } catch (error) {
+      throwUploadError(error);
+    }
     if (committed.limitReached) {
       return deps.sessionLimitResponse(c, {
         workspaceId,
