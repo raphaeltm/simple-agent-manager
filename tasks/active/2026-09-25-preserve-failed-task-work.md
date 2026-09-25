@@ -197,7 +197,9 @@ sees the queued intent, past the completion-drain window; covered by
 - [x] Review round 3 tests, each proven discriminating by a surgical revert: wake anchor (unit + in-place Instant wake through the real sweep and wake writer), turn anchor (unit + live VM conversation through the real sweep), lookup failure withheld, unproven-silence check-in preserved, stall flags per work kind (prompt, recovering, active and settling harness work), stale-claim exhaustion interleave, catch-branch escape.
 - [x] Review round 4 fixes (see the round 4 table): the in-place wake writer re-dates `restored_at` only on a real asleep-to-awake transition (after a pure-move split of `session-snapshot-recovery-lifecycle.ts`); a failed turn lookup withholds the teardown only up to twice the wait; the unprovable claim-id condition dropped.
 - [x] Review round 4 tests, each proven discriminating: writer test (a second delivery attempt to an awake session keeps `restored_at`), integration reproduction (a hung turn on a woken Instant conversation with a later delivery attempt is released at the maximum wait), lookup ceiling (both sides).
-- [ ] Staging: a real failed task on a VM with an uncommitted file ends sleeping with a snapshot; wake restores the file; clean up.
+- [x] Staging: a real failed task on a VM with an uncommitted file ends sleeping with a complete snapshot holding the file (see the staging section).
+- [x] Staging findings fixed in this branch: a reply sent in the first minutes after a sleep was dropped (delivery now retries transient wake refusals, with the review's corrections); the Instant container's own idle sleep skipped the incomplete-snapshot note (the note now runs where every sleep finalizes).
+- [ ] Staging wake of the preserved VM conversation: blocked by two wake-path defects that predate this branch (backlog tasks filed); human decision requested 2026-09-25 13:40Z. Do not merge before it is answered.
 
 ## Review round 1 (2026-09-25): findings and dispositions
 
@@ -269,6 +271,32 @@ It confirmed all five round 3 findings closed, that `assessCheckinActivity` deci
 | LOW-1: a persistently failing turn lookup withheld the teardown with no bound                                                                                                                                                       | Fixed: withheld only up to twice the wait                                                                                                                                                                                                                |
 | LOW-2: the exhaustion write's claim-id condition could not be proven (a re-claim always spends an attempt); the wake test called the writer directly                                                                                | Dropped the condition (attempts and status remain, both proven); the new integration test re-runs the writer the way each delivery attempt does                                                                                                          |
 | LOW-3: the turn start comes from the VM clock, so skew shifts the bound                                                                                                                                                             | Accepted: bounded by the skew. The suggested clamp to `now` would make a future-dated turn look new at every sweep                                                                                                                                       |
+
+## Staging verification (2026-09-25)
+
+Deploys `36132231645` (head `856b4889d`), `36139922635` (`4eb23c105`), `36142368046` (`65d6f1fc7`); Test Project 1, smallest VM (cx23).
+
+**VM, preserved.** Task `01M3C7R3WJPJNN33RY86QFQEG2` wrote the uncommitted `failed-preservation-3a57b7045711.txt` and was failed through the status route at 12:25:29.
+
+- The task went `failed` and the workspace stayed `running`.
+- The sleep intent was pulled forward to the failure time as a new episode (0 attempts), and ProjectData stayed `active`.
+- The sweep claimed it at 12:26:37 and slept it by 12:27:08: a final generation with `wip.bundle` and `home.tar`, `available`/`none`, expiring 7 days later.
+- ProjectData went `sleeping`. No work-loss notice was posted.
+- Screenshots `.codex/tmp/playwright-screenshots/failed-preservation-{1-failed,2-sleeping}-*.png` show the "Failed / Retryable" banner and the wake composer.
+
+**VM, wake.**
+
+- First follow-up (12:28:20): dropped with `terminal_target` after one attempt. The replaced workspace's deletion proof landed only at 12:31:52 and delivery treated the refusal as permanent. Fixed in this branch (delivery retry).
+- Second (13:01:32) and third (13:30:55) follow-ups: both woke the session. The recovery restored the snapshot onto a new VM, but both attempts failed the same way. The agent install in the new devcontainer ran inside a synchronous request, which got a 524 at 100 s and was killed; the TaskRunner's retry then restored but could not commit because the first error had marked the recovery failed.
+- Neither defect depends on task status. Filed as `tasks/backlog/2026-09-25-wake-agent-install-bound-to-request.md` and `tasks/backlog/2026-09-25-recovery-step-retry-cannot-commit.md`. Production wakes over 7 days show neither (62 wakes; 13 failures, all for other reasons).
+
+**Instant.** Task `01M3CC6705K7P29PB7G0JFBJZV` was failed at 13:32:15.
+
+- The preservation sleep was queued (0 attempts) with the container still live.
+- The container's own idle timeout slept it at 13:32:37, before the sweep. The snapshot was a checkpoint whose WIP `git bundle` failed on the partial clone (`wip-skipped`), an Instant limitation that predates this branch.
+- The chat got no incomplete-snapshot note. Fixed in this branch: the note now runs in `finalizeSessionSnapshotSleeping`.
+
+Cleanup: nodes `01M3C7R9ZXQXT6GN8ZQMAWYGR8` (stopped by warm expiry), `01M3CAGP04E3YEXMD43G3NM04Q` and `01M3CC67F1N0B5ZY4KKJNXXJ29` (deleted).
 
 ## Acceptance criteria
 
