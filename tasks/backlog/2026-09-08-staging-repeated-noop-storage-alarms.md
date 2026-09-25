@@ -17,3 +17,12 @@ These are separate projects from the archive canary. No causal connection to the
 ## Acceptance criteria
 
 No-op alarms have a bounded cadence, while due cleanup and other project work still execute. Document the confirmed cause and measured cost impact.
+
+## Related work (2026-09-25)
+
+The ProjectData alarm now runs only the sections that are due and logs every tick as
+`project_data.alarm.completed` with the sections it ran, skipped, or failed and their rows read
+(`apps/api/src/durable-objects/project-data/alarm-sections.ts`, task
+`2026-09-25-projectdata-root-overload.md`). Storage safety therefore no longer runs on ticks another
+section drove, and the section driving any remaining high-frequency ticks is named in that log. Not
+verified against these staging projects; re-check with the new log before closing this item.

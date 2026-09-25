@@ -175,6 +175,20 @@ export type Env = {
   PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS?: string;
   PROJECT_DATA_ARCHIVE_R2_PREFIX?: string;
   PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS?: string;
+  /** Newest full-text matches ranked per ProjectData search (default 2000). */
+  PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT?: string;
+  /** Full-text entries a session-scoped search may walk to fill its window (default 20000). */
+  PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT?: string;
+  /** Newest raw messages the keyword search fallback scans (default 50000). */
+  PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT?: string;
+  /** Run only due ProjectData alarm sections per tick (default true; false runs every section). */
+  PROJECT_DATA_ALARM_SECTION_GATING_ENABLED?: string;
+  /** Max interval between ProjectData alarm ticks that run every section (default 900000). */
+  PROJECT_DATA_ALARM_FULL_RUN_INTERVAL_MS?: string;
+  /** A section due within this many ms of the tick runs in it (default 2000). */
+  PROJECT_DATA_ALARM_DUE_TOLERANCE_MS?: string;
+  /** ProjectData alarm sections at or above this wall time log a warning (default 1000). */
+  PROJECT_DATA_ALARM_SLOW_SECTION_MS?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS?: string;

@@ -4,7 +4,7 @@
  * runtime death.
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
 import type { Env } from '../../src/env';
@@ -16,6 +16,7 @@ import {
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
+import { alarmCompletions, letHeartbeatDeadlinePass } from './support/project-data-alarm';
 
 function getProjectStub(projectId: string): DurableObjectStub<ProjectData> {
   return env.PROJECT_DATA.get(
@@ -44,6 +45,10 @@ async function withRuntimeEnv<T>(
 }
 
 describe('ProjectData alarm VM liveness safety', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('preserves a VM-backed ACP session when only ProjectData heartbeat data is stale', async () => {
     const prefix = `projectdata-vm-alarm-${Date.now()}-${crypto.randomUUID()}`;
     const userId = `${prefix}-user`;
@@ -95,6 +100,7 @@ describe('ProjectData alarm VM liveness safety', () => {
       );
     });
 
+    const logSpy = vi.spyOn(console, 'log');
     await withRuntimeEnv(
       {
         ACP_SESSION_DETECTION_WINDOW_MS: '1000',
@@ -102,12 +108,19 @@ describe('ProjectData alarm VM liveness safety', () => {
       },
       async () => {
         await runInDurableObject(stub, async (instance, state) => {
+          await letHeartbeatDeadlinePass(instance, state.storage, acpSession.id, 1000);
           await instance.alarm();
           await state.storage.deleteAlarm();
         });
       }
     );
 
+    // The heartbeat section examined the stale row: surviving is its decision, not a skip.
+    expect(
+      alarmCompletions(logSpy).some((completion) =>
+        completion.ranSections.includes('runtime_heartbeat_timeouts')
+      )
+    ).toBe(true);
     expect((await stub.getAcpSession(acpSession.id))?.status).toBe('running');
 
     const interruptedEvents = await runInDurableObject(stub, async (_instance, state) =>
@@ -220,6 +233,7 @@ describe('ProjectData alarm VM liveness safety', () => {
       // that unsafe alarm call would still flip this exact stale mirror.
     });
 
+    const logSpy2 = vi.spyOn(console, 'log');
     await withRuntimeEnv(
       {
         SESSION_ACTIVITY_STALE_THRESHOLD_MS: '1000',
@@ -230,6 +244,10 @@ describe('ProjectData alarm VM liveness safety', () => {
         TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(365 * 24 * 60 * 60 * 1000),
         TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(2 * 365 * 24 * 60 * 60 * 1000),
         TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS: '100',
+        // Every lifecycle section must examine the stale mirror in this one tick, whether or not
+        // its own schedule is due yet: the assertions below are absences, and a skipped section
+        // would satisfy them too. Gated ticks are covered in project-data-alarm-sections tests.
+        PROJECT_DATA_ALARM_SECTION_GATING_ENABLED: 'false',
       },
       async () => {
         await runInDurableObject(stub, async (instance, state) => {
@@ -238,6 +256,13 @@ describe('ProjectData alarm VM liveness safety', () => {
         });
       }
     );
+    expect(
+      alarmCompletions(logSpy2, projectId).some((completion) =>
+        ['runtime_heartbeat_timeouts', 'task_reconciliation', 'session_activity_probe'].every(
+          (section) => completion.ranSections.includes(section)
+        )
+      )
+    ).toBe(true);
 
     expect((await stub.getSessionState(acpSession.id))?.activity).toBe('prompting');
     const localEvidence = await runInDurableObject(stub, async (_instance, state) => ({

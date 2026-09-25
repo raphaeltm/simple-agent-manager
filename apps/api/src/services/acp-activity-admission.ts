@@ -114,6 +114,12 @@ interface RecentActivityState {
 
 interface PendingActivityState extends AcpActivityPendingSnapshot {
   flushScheduled: boolean;
+  /**
+   * Flushes of this pending state that ProjectData answered with a transient failure. Carried
+   * across newer reports that coalesce into it, so a stream of reports during an outage cannot
+   * reset the backoff; the state is deleted (and the count with it) once a flush succeeds.
+   */
+  flushRetries: number;
 }
 
 interface BindingCacheEntry {
@@ -479,13 +485,21 @@ function coalescePendingActivity(input: {
     reason: input.reason,
     version: ++pendingVersionCounter,
     flushScheduled: existing?.flushScheduled ?? false,
+    flushRetries: existing?.flushRetries ?? 0,
   };
   pendingActivityByKey.set(input.key, pending);
 
   if (!pending.flushScheduled) {
     pending.flushScheduled = true;
     pendingActivityByKey.set(input.key, pending);
-    schedulePendingFlush(input.env, input.config, input.key, input.waitUntil, input.flush);
+    schedulePendingFlush(
+      input.env,
+      input.config,
+      input.key,
+      input.waitUntil,
+      input.flush,
+      coalescedFlushDelayMs(input.config, pending.flushRetries)
+    );
   }
 
   recordAcpActivityCallbackMetric(
@@ -514,14 +528,32 @@ function coalescePendingActivity(input: {
   };
 }
 
+/**
+ * Delay before the next coalesced flush: the coalesce window, doubling per transient failure and
+ * capped at the pending TTL. On 2026-09-24 the SAM root object was unreachable for 33 minutes; a
+ * fixed 2 s retry would have flushed each session up to 30 times a minute into a dead object —
+ * more load than the VM retries this coalescing replaces. The TTL still bounds how long a pending
+ * report is kept at all.
+ */
+export function coalescedFlushDelayMs(
+  config: Pick<AcpActivityAdmissionConfig, 'coalesceWindowMs' | 'coalesceTtlMs'>,
+  flushRetries: number
+): number {
+  return Math.min(
+    config.coalesceWindowMs * 2 ** Math.max(0, flushRetries),
+    Math.max(config.coalesceWindowMs, config.coalesceTtlMs)
+  );
+}
+
 function schedulePendingFlush(
   env: Env,
   config: AcpActivityAdmissionConfig,
   key: string,
   waitUntil: WaitUntilFn,
-  flush: AcpActivityFlushHandler
+  flush: AcpActivityFlushHandler,
+  delayMs: number
 ): void {
-  const promise = delay(config.coalesceWindowMs)
+  const promise = delay(delayMs)
     .then(() => flushPendingActivity(env, config, key, waitUntil, flush))
     .catch((err) => {
       log.warn('acp_activity.coalesced_flush_failed', {
@@ -606,10 +638,18 @@ async function flushPendingActivity(
     return;
   }
 
+  latest.flushRetries += 1;
   if (!latest.flushScheduled) {
     latest.flushScheduled = true;
     pendingActivityByKey.set(key, latest);
-    schedulePendingFlush(env, config, key, waitUntil, flush);
+    schedulePendingFlush(
+      env,
+      config,
+      key,
+      waitUntil,
+      flush,
+      coalescedFlushDelayMs(config, latest.flushRetries)
+    );
   }
 }
 

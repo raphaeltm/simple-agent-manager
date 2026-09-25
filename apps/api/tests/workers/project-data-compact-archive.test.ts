@@ -229,12 +229,19 @@ describe('compact R2 archive rollout', () => {
         }),
       ]);
       expect(
-        (await projectDataService.searchMessages(testEnv, projectId, 'payload', sessionId)).length
+        (
+          await projectDataService.searchMessagesWithArchiveMetadata(
+            testEnv,
+            projectId,
+            'payload',
+            sessionId
+          )
+        ).results.length
       ).toBeGreaterThan(0);
       expect(
-        (await projectDataService.searchMessages(testEnv, projectId, 'payload')).some(
-          (row) => row.sessionId === sessionId
-        )
+        (
+          await projectDataService.searchMessagesWithArchiveMetadata(testEnv, projectId, 'payload')
+        ).results.some((row) => row.sessionId === sessionId)
       ).toBe(true);
     };
     await verifyToolsAndSearch();

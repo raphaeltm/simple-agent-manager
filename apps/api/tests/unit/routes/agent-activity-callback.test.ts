@@ -679,6 +679,9 @@ describe('agent activity callback', () => {
       })
     );
 
+    // First flush (window 2 s) hits the overload and backs off to 4 s.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(mocks.projectData.reportAcpSessionActivity).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(2000);
     expect(mocks.projectData.reportAcpSessionActivity).not.toHaveBeenCalled();
 
@@ -691,6 +694,78 @@ describe('agent activity callback', () => {
       'agent-session-1',
       'prompting',
       expect.objectContaining({ promptStartedAt: 100 })
+    );
+  });
+
+  it.each([
+    ['a lost connection (the 2026-09-24 outage)', 'Network connection lost.'],
+    ['a CPU-limit reset', 'Durable Object exceeded its CPU time limit and was reset.'],
+  ])(
+    'coalesces an intermediate report through %s instead of answering 500',
+    async (_label, message) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-24T16:10:00.000Z'));
+      mocks.projectData.getAcpSession
+        .mockRejectedValueOnce(new Error(message))
+        .mockResolvedValue(assignedAcpSession());
+      const app = await createTestApp();
+
+      const response = await postActivity(app, {
+        activity: 'prompting',
+        nodeId: 'node-1',
+        promptStartedAt: 100,
+        agentType: 'openai-codex',
+      });
+
+      // 204, not 500: a 5xx makes the VM re-send the same report up to five times.
+      expect(response.status).toBe(204);
+      expect(mocks.log.info).toHaveBeenCalledWith(
+        'acp_activity.telemetry',
+        expect.objectContaining({ outcome: 'coalesced', reason: 'project_data_transient' })
+      );
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('backs coalesced flushes off exponentially while the object stays unreachable', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-24T16:02:00.000Z'));
+    mocks.projectData.getAcpSession.mockRejectedValue(new Error('Network connection lost.'));
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'prompting',
+      nodeId: 'node-1',
+      promptStartedAt: 100,
+      agentType: 'openai-codex',
+    });
+    expect(response.status).toBe(204);
+
+    // Past the 60 s pending TTL. Flushes at +2, +6, +14, +30 s; the next would land after the
+    // TTL, so the report is dropped. A fixed 2 s retry made ~30 calls into the dead object here.
+    await vi.advanceTimersByTimeAsync(70_000);
+
+    const lookups = mocks.projectData.getAcpSession.mock.calls.length;
+    expect(lookups).toBe(1 + 4);
+    expect(mocks.projectData.reportAcpSessionActivity).not.toHaveBeenCalled();
+  });
+
+  it('still surfaces a lost connection on a terminal report so the VM retries it', async () => {
+    mocks.projectData.getAcpSession.mockRejectedValue(new Error('Network connection lost.'));
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'error',
+      nodeId: 'node-1',
+      agentType: 'openai-codex',
+      statusError: 'agent crashed',
+    });
+
+    expect(response.status).toBe(500);
+    expect(mocks.log.info).not.toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({ outcome: 'coalesced' })
     );
   });
 

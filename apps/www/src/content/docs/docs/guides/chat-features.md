@@ -236,6 +236,16 @@ Indexing is incremental: it runs every time a session sleeps and again when it s
   a week to reclaim space, and deliberately never re-indexes them — re-indexing would undo the
   reclaimed bytes. In practice those old sessions are hard to find by search.
 
+Search work is bounded by configured windows rather than by how much history the project holds
+(`searchMessagesWithCoverage()` in `apps/api/src/durable-objects/project-data/message-search.ts`).
+Full-text ranking scores and reads only the newest `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` matches
+(2,000 by default), and the keyword fallback scans the newest
+`PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT` raw messages (50,000 by default). The index still counts
+a term's matches once per search, which takes tens of milliseconds even for hundreds of thousands of
+matches. Small projects never reach either limit. In very large projects, a search that reached one
+says so: the `rootSearch` field flags it and `coverageNotes` explains what was not searched, so an
+empty result then does not prove the text is absent.
+
 Agents search messages with the `search_messages` MCP tool. The project chat's own "Search chats"
 box is a different thing: it filters the session list by topic, session ID, and creator, and does
 not look inside messages.

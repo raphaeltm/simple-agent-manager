@@ -288,6 +288,14 @@ function makeStatefulTaskRow(overrides: Partial<StatefulTaskRow> = {}): Stateful
 }
 
 // Mock DO namespace — includes RPC methods used by project-data service
+let mockRootSearchCoverage = {
+  ftsCandidateLimit: 2000,
+  ftsCandidatesTruncated: false,
+  keywordScanRowLimit: 50000,
+  keywordFallbackRan: true,
+  keywordScanTruncated: false,
+};
+
 const mockDoStub = {
   fetch: vi.fn().mockResolvedValue(new Response('ok')),
   ensureProjectId: vi.fn(),
@@ -333,9 +341,17 @@ const mockDoStub = {
   archiveSourceGetMessageCount: vi.fn().mockReturnValue(0),
   archiveTargetGetMessageCount: vi.fn().mockReturnValue(0),
   searchMessages: vi.fn().mockReturnValue([]),
-  archiveSourceSearchMessages: vi.fn(
-    (owner: { sessionId: string }, query: string, roles: string[] | null, limit: number) =>
-      mockDoStub.searchMessages(query, owner.sessionId, roles, limit)
+  searchMessagesWithCoverage: vi.fn(
+    (query: string, sessionId: string | null, roles: string[] | null, limit: number) => ({
+      results: mockDoStub.searchMessages(query, sessionId, roles, limit),
+      coverage: mockRootSearchCoverage,
+    })
+  ),
+  archiveSourceSearchMessagesWithCoverage: vi.fn(
+    (owner: { sessionId: string }, query: string, roles: string[] | null, limit: number) => ({
+      results: mockDoStub.searchMessages(query, owner.sessionId, roles, limit),
+      coverage: mockRootSearchCoverage,
+    })
   ),
   archiveTargetSearchMessages: vi.fn(
     (owner: { sessionId: string }, query: string, roles: string[] | null, limit: number) =>
@@ -1945,6 +1961,40 @@ describe('MCP Routes', () => {
       expect(data.results).toHaveLength(1);
       expect(data.results[0].snippet).toContain('authentication');
       expect(data.query).toBe('authentication');
+      expect(data.rootSearch).toEqual(mockRootSearchCoverage);
+      expect(data.coverageNotes).toEqual([]);
+    });
+
+    it('discloses a truncated root search so an empty result is not read as absence', async () => {
+      const complete = mockRootSearchCoverage;
+      mockRootSearchCoverage = {
+        ...complete,
+        ftsCandidatesTruncated: true,
+        keywordScanTruncated: true,
+      };
+      try {
+        mockDoStub.searchMessages.mockReturnValue([]);
+        const res = await mcpRequest(
+          app,
+          jsonRpcRequest('tools/call', {
+            name: 'search_messages',
+            arguments: { query: 'authentication' },
+          })
+        );
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        const data = JSON.parse(body.result.content[0].text);
+        expect(data.count).toBe(0);
+        expect(data.rootSearch).toMatchObject({
+          ftsCandidatesTruncated: true,
+          keywordScanTruncated: true,
+        });
+        expect(data.coverageNotes).toHaveLength(2);
+        expect(data.coverageNotes.join(' ')).toContain('newest 50000 raw messages');
+      } finally {
+        mockRootSearchCoverage = complete;
+      }
     });
 
     it('should reject empty query', async () => {

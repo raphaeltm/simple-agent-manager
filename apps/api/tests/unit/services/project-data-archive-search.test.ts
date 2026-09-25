@@ -2,8 +2,10 @@ import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import type { MessageSearchCoverage } from '../../../src/durable-objects/project-data/message-search';
 import type { Env } from '../../../src/env';
 import { searchMessagesWithArchiveMetadata } from '../../../src/services/project-data';
+import { describeRootSearchCoverage } from '../../../src/services/project-data-search-coverage';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 type SearchRow = {
@@ -18,8 +20,16 @@ type SearchRow = {
 
 type SearchStub = {
   ensureProjectId: ReturnType<typeof vi.fn>;
-  searchMessages: ReturnType<typeof vi.fn>;
+  searchMessagesWithCoverage: ReturnType<typeof vi.fn>;
   archiveTargetSearchProjectMessages: ReturnType<typeof vi.fn>;
+};
+
+const COMPLETE_ROOT_COVERAGE: MessageSearchCoverage = {
+  ftsCandidateLimit: 2000,
+  ftsCandidatesTruncated: false,
+  keywordScanRowLimit: 50000,
+  keywordFallbackRan: true,
+  keywordScanTruncated: false,
 };
 
 function row(id: string, sessionId: string, createdAt: number): SearchRow {
@@ -36,12 +46,16 @@ function row(id: string, sessionId: string, createdAt: number): SearchRow {
 
 function stub(input: {
   root?: SearchRow[];
+  rootCoverage?: MessageSearchCoverage;
   archive?: SearchRow[];
   failArchive?: boolean;
 }): SearchStub {
   return {
     ensureProjectId: vi.fn(async () => undefined),
-    searchMessages: vi.fn(async () => input.root ?? []),
+    searchMessagesWithCoverage: vi.fn(async () => ({
+      results: input.root ?? [],
+      coverage: input.rootCoverage ?? COMPLETE_ROOT_COVERAGE,
+    })),
     archiveTargetSearchProjectMessages: vi.fn(async () => {
       if (input.failArchive) throw new Error('archive owner unavailable');
       return input.archive ?? [];
@@ -87,7 +101,41 @@ describe('ProjectData project-wide archive search metadata', () => {
         archiveOwnersQueried: 0,
         archiveOwnersOmitted: 0,
       });
-      expect(root.searchMessages).toHaveBeenCalledWith('needle', null, null, 10);
+      expect(root.searchMessagesWithCoverage).toHaveBeenCalledWith('needle', null, null, 10);
+      expect(result.rootSearch).toEqual(COMPLETE_ROOT_COVERAGE);
+      expect(describeRootSearchCoverage(result.rootSearch)).toEqual([]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('passes the root search windows through so a truncated root search is disclosed', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createLocationTable(sqlite);
+      const truncated: MessageSearchCoverage = {
+        ftsCandidateLimit: 2000,
+        ftsCandidatesTruncated: true,
+        keywordScanRowLimit: 50000,
+        keywordFallbackRan: true,
+        keywordScanTruncated: true,
+      };
+      const root = stub({ root: [], rootCoverage: truncated });
+      const result = await searchMessagesWithArchiveMetadata(
+        envForSearch(sqlite, { 'project-search': root }),
+        'project-search',
+        'needle',
+        null,
+        null,
+        10
+      );
+
+      expect(result.results).toEqual([]);
+      expect(result.rootSearch).toEqual(truncated);
+      const notes = describeRootSearchCoverage(result.rootSearch);
+      expect(notes).toHaveLength(2);
+      expect(notes[0]).toContain('newest 2000 matching messages');
+      expect(notes[1]).toContain('newest 50000 raw messages');
     } finally {
       sqlite.close();
     }
