@@ -42,11 +42,11 @@ import { buildProvisioningExhaustionPlan } from './node-provisioning-exhaustion'
 import { handleProvisioningAttemptFailure } from './node-provisioning-failure';
 import { enforceComputeQuota, enforceUserNodeLimit } from './node-provisioning-gates';
 import { rankProvisioningCandidates } from './node-provisioning-ranking';
+import { adoptProvisionedNodeAfterCrash } from './node-provisioning-recovery';
 import {
   discardProviderRejectedNode,
   recordProviderRejectedNode,
 } from './node-provisioning-rejected-node';
-import { adoptProvisionedNodeAfterCrash } from './node-provisioning-recovery';
 import { trySelectReusableNodeForProvisioning } from './node-provisioning-reuse';
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
