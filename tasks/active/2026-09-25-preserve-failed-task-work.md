@@ -199,7 +199,7 @@ sees the queued intent, past the completion-drain window; covered by
 - [x] Review round 4 tests, each proven discriminating: writer test (a second delivery attempt to an awake session keeps `restored_at`), integration reproduction (a hung turn on a woken Instant conversation with a later delivery attempt is released at the maximum wait), lookup ceiling (both sides).
 - [x] Staging: a real failed task on a VM with an uncommitted file ends sleeping with a complete snapshot holding the file (see the staging section).
 - [x] Staging findings fixed in this branch: a reply sent in the first minutes after a sleep was dropped (delivery now retries transient wake refusals, with the review's corrections); the Instant container's own idle sleep skipped the incomplete-snapshot note (the note now runs where every sleep finalizes).
-- [ ] Staging wake of the preserved VM conversation: blocked by two wake-path defects that predate this branch (backlog tasks filed); human decision requested 2026-09-25 13:40Z. Do not merge before it is answered.
+- [ ] Staging wake of the preserved VM conversation: completion run is implementing the prerequisite wake fixes and verifying the complete flow. Keep `needs-human-review` until the preserved agent answers and the final deployed code passes all merge gates.
 
 ## Review round 1 (2026-09-25): findings and dispositions
 
@@ -325,3 +325,49 @@ Cleanup: nodes `01M3C7R9ZXQXT6GN8ZQMAWYGR8` (stopped by warm expiry), `01M3CAGP0
 - `node-phases.ts` (623 lines) was split first: Phase 0 moved to `terminal-cf-container-phase.ts` as a pure move, in commit 1fe9d7cf8.
 - Local results: API unit+integration 10,305/10,305 passing; API lint and typecheck clean.
 - Cost (rule 76): R2 storage is 50 GB, steady, projected at $0.60/month over the allowance. Average snapshot size is 33.8 MB (7-day production manifests; max 231.5 MB, cap 256 MiB). Expect about 5 newly preserved failed tasks a week at 7-day retention: roughly 0.17 GB steady state (about 1.3 GB worst case), under $0.05/month.
+
+## Completion run (2026-09-25, task `01M3CVZKHVS0VF4T34KAS4W37X`)
+
+The prior completion `01M3CJQJT3MP8P0CSYDW299MGV` and prerequisite
+`01M3CJP0552JVAAWAJBEEVR1JV` were inspected: both ended at the session/model limit around
+16:12Z, not a technical rejection. No duplicate completion was active. The prerequisite branch
+contains the recovered quota/region work, detached restore ownership, and retryable recovery/token
+fixes. Preservation behavior was compared across all 74 original changed files after rebasing.
+
+Combined candidate `b0989c9b2` passed serialized staging deployment
+[36176727375](https://github.com/raphaeltm/simple-agent-manager/actions/runs/36176727375).
+There were no active staging nodes or deployment runs before starting.
+
+- Existing TestProject1: source task `01M3D0XSKXDSC5Q2Y367EAHRV9`, conversation
+  `dc72ba09-932e-4371-b59b-9787fdc2c190`, workspace `01M3D18DWCGW1YGRBFXJPZ4FRC`.
+- Source node `01M3D0XZPW5TNRGJ35ED3PDE2R`: fresh `cx23` in `fsn1`; first heartbeat
+  19:36:11.297Z, about 97 seconds after VM boot; ready 19:38:29.697Z. Agent build `3584eb57e`.
+- At 19:40:41Z the actual agent reported `PRESERVE_READY` after creating the uncommitted file
+  `/workspaces/crewai/pr2145-preservation-proof.txt`. Its random contents never entered chat/tool
+  output. SHA-256: `28c2d840d96509f81aafd4d68cf86140c5125ccaa1963eead6190c33d2f1147f`.
+- Real task-status failure returned 200. Snapshot `01M3D1B4JGQ2VDXBCTYER6BVK6` became
+  `available` / `none`, with HOME and WIP, standard seven-day expiry. Automatic sleep completed
+  19:46:46.860Z. Desktop/mobile Playwright showed Sleeping, the Failed banner, and wake composer.
+- Source node DELETE returned 200 and its D1 row disappeared. The route returns success only
+  after runtime termination is confirmed; the complete sleeping snapshot remained.
+- A separate helper conversation provisioned fresh `cx23` node `01M3D1QK7BYF2RGM8AM9J350C6`
+  in `hel1` and answered `HOST_READY`. First heartbeat 19:49:56.861Z, about 86 seconds after boot;
+  ready 19:51:31.590Z. This tests reuse of other-region capacity, not provisioning by wake itself.
+- The original conversation's UI accepted a wake prompt (202). Recovery task
+  `01M3D236GQ1R0D1YM4RDRCPYBX` selected that Helsinki node for replacement workspace
+  `01M3D23C4YM7XNCYR5VERM05N2`. The prompt supplied neither the secret contents nor expected hash.
+  Recovery committed at 19:55:16.376Z. At 19:55:40.748Z the resumed agent read the file with
+  a real tool call and answered `WAKE_OK` with the identical SHA-256 and untracked Git status.
+  The source task remained failed; the replacement task reached in-progress with no error.
+- All three source/helper/recovery workspace DELETEs returned 200 with `deletionStatus: confirmed`.
+  Both VM node deletions confirmed runtime termination. D1 then showed zero active staging nodes,
+  no created workspaces/nodes, no test snapshot, and no abandoned isolated fixture project.
+  Existing TestProject1 and its shared pool were retained.
+- Desktop/mobile Playwright showed the active restored conversation. Dashboard, projects, and
+  settings loaded with no page errors. The existing onboarding overlay did not prevent provisioning.
+
+A final timeout audit found another prerequisite gap: repeated proxy timeouts can exhaust generic
+step retries before the detached restore deadline. Terminal failure then revokes the replacement's
+MCP token while restore is still running. The original snapshot remains safe, but slow wakes can
+still fail. A scoped persisted restore deadline and discriminating tests are being implemented;
+this newly identified guard is not in the staging candidate above. Do not merge unverified code.
