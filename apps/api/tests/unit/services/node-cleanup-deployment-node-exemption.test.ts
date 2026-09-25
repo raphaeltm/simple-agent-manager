@@ -133,7 +133,8 @@ beforeEach(() => {
     CREATE TABLE session_snapshots (
       chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL,
       degradation TEXT NOT NULL, expires_at TEXT NOT NULL,
-      sleeping_at TEXT, sleep_status TEXT, sleep_after TEXT, capture_generation TEXT
+      sleeping_at TEXT, sleep_status TEXT, sleep_after TEXT, capture_generation TEXT,
+      sleep_attempts INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE agent_sessions (id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT);
   `);
