@@ -300,10 +300,10 @@ export async function runSessionSleepSweep(
               eq(schema.sessionSnapshots.id, candidate.snapshotId),
               // Only the row this sweep selected: a sleep episode restarted since
               // (a new failure resets the budget), or a stale claim whose owner has
-              // since moved it on (`preparing` -> `stopping`), is left alone.
+              // since moved it on (`preparing` -> `stopping`), is left alone. A
+              // re-claim always spends an attempt, so the attempts cover it.
               eq(schema.sessionSnapshots.sleepAttempts, candidate.sleepAttempts),
               sql`${schema.sessionSnapshots.sleepStatus} IS ${candidate.sleepStatus}`,
-              sql`${schema.sessionSnapshots.sleepClaimId} IS ${candidate.sleepClaimId}`,
               isNull(schema.sessionSnapshots.sleepingAt)
             )
           );
