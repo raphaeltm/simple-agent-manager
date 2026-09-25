@@ -21,7 +21,7 @@ import (
 func newRestoreRetryTestServer(t *testing.T) (*Server, *sessionSnapshotHandlerInput) {
 	t.Helper()
 	s, _ := newMcpTestServer(t)
-	s.workspaces["ws"] = &WorkspaceRuntime{ID: "ws", ProjectID: "project", CallbackToken: "original"}
+	s.workspaces["ws"] = &WorkspaceRuntime{ID: "ws", ProjectID: "project", Status: "running", CallbackToken: "original"}
 	if _, _, err := s.agentSessions.CreateRouted("ws", "session", "Original", "", "project", "chat"); err != nil {
 		t.Fatal(err)
 	}
@@ -458,8 +458,8 @@ func TestRestoreAttemptEndsAtTheSnapshotOperationDeadline(t *testing.T) {
 	}()
 	select {
 	case rec := <-responses:
-		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"degraded"`) {
-			t.Fatalf("restore past its deadline = %d %s, want a settled degraded attempt", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), context.DeadlineExceeded.Error()) {
+			t.Fatalf("restore past its deadline = %d %s, want an explicit deadline failure", rec.Code, rec.Body.String())
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the restore attempt outlived the snapshot operation deadline")

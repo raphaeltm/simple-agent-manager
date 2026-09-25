@@ -16,6 +16,7 @@ type sessionRestoreAttempt struct {
 	chatSessionID string
 	agentType     string
 	done          chan struct{}
+	cancel        context.CancelFunc
 	result        map[string]interface{}
 	err           error
 }
@@ -36,6 +37,12 @@ func (s *Server) runSessionRestore(ctx context.Context, input *sessionSnapshotHa
 	}
 	key := input.workspaceID + ":" + input.sessionID
 	s.sessionHostMu.Lock()
+	select {
+	case <-s.done:
+		s.sessionHostMu.Unlock()
+		return nil, fmt.Errorf("server is stopping")
+	default:
+	}
 	if existing := s.sessionRestores[key]; existing != nil {
 		s.sessionHostMu.Unlock()
 		if existing.chatSessionID != input.chatSessionID || existing.agentType != input.agentType {
@@ -80,41 +87,18 @@ func (s *Server) runSessionRestore(ctx context.Context, input *sessionSnapshotHa
 		s.sessionHostMu.Unlock()
 		return nil, fmt.Errorf("workspace snapshot restore already in progress")
 	}
+	restoreCtx, cancel := context.WithTimeout(context.Background(), s.sessionSnapshotOperationTimeout())
 	attempt := &sessionRestoreAttempt{
 		chatSessionID: input.chatSessionID, agentType: input.agentType,
-		done: make(chan struct{}), err: fmt.Errorf("session restore did not finish"),
+		done: make(chan struct{}), cancel: cancel, err: fmt.Errorf("session restore did not finish"),
 	}
 	if s.sessionRestores == nil {
 		s.sessionRestores = make(map[string]*sessionRestoreAttempt)
 	}
 	s.sessionRestores[key] = attempt
 	s.sessionHostMu.Unlock()
-	go s.completeSessionRestore(attempt, input, restore)
+	go s.completeSessionRestore(restoreCtx, attempt, input, runtime, restore)
 	return awaitSessionRestore(ctx, attempt)
-}
-
-// completeSessionRestore owns one restore attempt from admission to its cached
-// result. Its lifetime is the attempt's, not any request's (.claude/rules/71):
-// bounded by SESSION_SNAPSHOT_OPERATION_TIMEOUT, the same deadline the
-// background capture that produced the snapshot runs under.
-func (s *Server) completeSessionRestore(attempt *sessionRestoreAttempt, input *sessionSnapshotHandlerInput, restore func(context.Context) map[string]interface{}) {
-	ctx, cancel := context.WithTimeout(context.Background(), s.sessionSnapshotOperationTimeout())
-	defer cancel()
-	defer func() {
-		close(attempt.done)
-		s.clearRemovedWorkspaceRestores(input.workspaceID)
-	}()
-	// Persist a non-adoption fence before token, HOME/WIP, or ACP effects.
-	if err := s.persistSessionRestoreFence(input.workspaceID, input.sessionID); err != nil {
-		attempt.err = err
-		return
-	}
-	// Only the reserved operation may replace routing credentials.
-	if input.workspaceCallbackToken != "" {
-		s.upsertWorkspaceRuntime(input.workspaceID, "", "", "", input.workspaceCallbackToken)
-	}
-	attempt.result = restore(ctx)
-	attempt.err = nil
 }
 
 // awaitSessionRestore returns the attempt's result once it finishes, or stops
