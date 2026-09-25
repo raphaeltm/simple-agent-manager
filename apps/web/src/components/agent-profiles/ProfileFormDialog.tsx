@@ -17,7 +17,7 @@ import {
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { Button, Dialog, Input } from '@simple-agent-manager/ui';
-import { type FC, type ReactNode, useEffect, useState } from 'react';
+import { type FC, type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { ModelSelect } from '../ModelSelect';
 import {
@@ -300,8 +300,29 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset form when opening/closing or when profile changes
+  /**
+   * Populate the form once per (open, profile id) — deliberately NOT keyed on the
+   * `profile` object.
+   *
+   * `agentProfiles` is a TanStack cache entry shared by five surfaces, so the same
+   * row arrives as a new object whenever it is refetched or written back by a
+   * mutation elsewhere. Keying this effect on identity meant a background refresh
+   * re-ran every `setX(profile.…)` below and silently reverted whatever the user had
+   * typed. An edit form must load its row when it opens and then leave the user's
+   * in-progress edits alone.
+   *
+   * `profile` is read through a ref so the populate effect does not take a
+   * dependency on its identity. The sync effect is declared first, so it has already
+   * committed the latest row by the time the populate effect runs.
+   */
+  const profileRef = useRef(profile);
   useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
+  const profileId = profile?.id ?? null;
+
+  useEffect(() => {
+    const profile = profileRef.current;
     if (isOpen && profile) {
       const profileRuntime = profile.runtime ?? '';
       setName(profile.name);
@@ -347,7 +368,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       setGithubCliPolicy(DEFAULT_GITHUB_CLI_POLICY);
     }
     setError(null);
-  }, [isOpen, profile]);
+  }, [isOpen, profileId]);
 
   const effortOptions = getSupportedEffortsForAgent(agentType).map((value) => ({
     value,

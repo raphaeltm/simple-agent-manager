@@ -78,6 +78,26 @@ export function useModalInteraction({
 }: UseModalInteractionOptions): void {
   const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
 
+  /**
+   * `onEscape` is read through a ref so it stays OUT of the effect's dep array.
+   *
+   * Almost every caller passes an inline arrow (`onClose={() => setOpen(false)}`),
+   * which is a new function identity on each of the parent's renders. With
+   * `onEscape` as a dependency, an ordinary parent re-render — a ProjectData
+   * WebSocket session event, a session-sync poll tick — tore this entire effect
+   * down and set it back up. Teardown calls `previouslyFocused.focus()` and setup
+   * calls `modal.focus()`, so the field the user was typing into got blurred every
+   * time. On a phone a blur closes the software keyboard, which made the agent
+   * profile dialog unusable. The effect models the modal's open/close lifecycle,
+   * so it must depend on `enabled` — not on callback identity.
+   *
+   * See `.claude/rules/64-unstable-prop-identity-remounts-subtrees.md`.
+   */
+  const onEscapeRef = useRef(onEscape);
+  useEffect(() => {
+    onEscapeRef.current = onEscape;
+  }, [onEscape]);
+
   useEffect(() => {
     if (!enabled) return;
 
@@ -97,7 +117,7 @@ export function useModalInteraction({
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onEscape?.();
+        onEscapeRef.current?.();
         return;
       }
 
@@ -148,5 +168,5 @@ export function useModalInteraction({
       }
       previouslyFocusedElementRef.current = null;
     };
-  }, [enabled, isolateBackground, lockScroll, modalRef, onEscape, restoreFocus]);
+  }, [enabled, isolateBackground, lockScroll, modalRef, restoreFocus]);
 }
