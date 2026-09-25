@@ -8,7 +8,10 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { stopNodeResources } from '../../services/nodes';
 import { persistError } from '../../services/observability';
-import { sleepLifecycleOwnsTerminalTaskWorkspaceSql } from '../../services/sleep-preserved-task-status';
+import {
+  sessionSleepMaxAttempts,
+  sleepLifecycleOwnsTerminalTaskWorkspaceSql,
+} from '../../services/sleep-preserved-task-status';
 import { type CleanupConfig, markNodeCleanupBackoff, type NodeCleanupResult } from './shared';
 
 /**
@@ -37,7 +40,7 @@ export async function sweepTerminalCfContainers(
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        AND w.status IN ('running', 'creating', 'recovery', 'sleeping', 'stopped')
        AND t.status IN ('completed', 'failed', 'cancelled')
-       AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w')}
+       AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', sessionSleepMaxAttempts(env))}
        AND NOT EXISTS (
          SELECT 1 FROM tasks active
          WHERE active.workspace_id = w.id

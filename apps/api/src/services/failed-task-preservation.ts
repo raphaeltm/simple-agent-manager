@@ -28,7 +28,7 @@
  * up on a preservation that can no longer complete (`failed-task-preservation-release.ts`),
  * so a runtime that can never be snapshotted is still torn down (`.claude/rules/47`).
  */
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -53,7 +53,9 @@ export type FailedTaskPreservationGap =
   | 'no_chat_session'
   | 'unsupported_runtime'
   | 'no_resumable_agent_session'
-  | 'sleep_queue_failed';
+  | 'sleep_queue_failed'
+  /** The check-in watchdog failed an agent that is still mid-turn (`attention-expiry.ts`). */
+  | 'agent_unresponsive';
 
 export type FailedTaskPreservation =
   /** A live runtime: its snapshot-backed sleep is queued. */
@@ -156,25 +158,29 @@ export async function failedTaskRuntimeGap(
  * crashing row into unlimited retries. A task failure is a one-off terminal event
  * — positive evidence of a new episode (`.claude/rules/61`) — so a budget an
  * earlier, unrelated sleep of this still-running workspace spent must not end
- * preservation before it has made a single attempt.
+ * preservation before it has made a single attempt. The reset runs first, so an
+ * existing row is never due with the stale budget, and again after the queue
+ * (which creates the row when missing) to confirm an intent was written.
  */
 async function queueFailedTaskSleepEpisode(
   env: Env,
   workspace: PreservationWorkspace & { chatSessionId: string }
 ): Promise<boolean> {
+  const db = drizzle(env.DATABASE, { schema });
+  const startEpisode = () =>
+    scheduleSessionSnapshotSleep(db, env, workspace.chatSessionId, new Date(), {
+      sleepAfterMs: 0,
+      allowIncomplete: true,
+      resetAttempts: true,
+    });
+  await startEpisode();
   await queueWorkspaceSessionSleep(env, {
     workspaceId: workspace.id,
     userId: workspace.userId,
     reason: FAILED_TASK_SLEEP_REASON,
     sleepAfterMs: 0,
   });
-  return scheduleSessionSnapshotSleep(
-    drizzle(env.DATABASE, { schema }),
-    env,
-    workspace.chatSessionId,
-    new Date(),
-    { sleepAfterMs: 0, allowIncomplete: true, resetAttempts: true }
-  );
+  return startEpisode();
 }
 
 function decided(
@@ -262,7 +268,16 @@ export async function preserveFailedTaskWork(
     // The conversation slept before it failed; its snapshot may already be
     // incomplete, and no later sleep will be there to say so.
     const chatSessionId = input.chatSessionId ?? workspace?.chatSessionId ?? null;
-    if (chatSessionId) await noteFailedTaskPreservationCapture(env, { chatSessionId });
+    if (chatSessionId) {
+      // Best effort: the note must never turn a kept conversation into an error.
+      await noteFailedTaskPreservationCapture(env, { chatSessionId }).catch((err: unknown) => {
+        log.warn('task.failure_preservation.capture_note_failed', {
+          taskId: input.taskId,
+          chatSessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
     return decided(input, { outcome: 'already_asleep' });
   }
   if (sleep.outcome === 'unknown') return decided(input, { outcome: 'unknown' });
@@ -270,7 +285,10 @@ export async function preserveFailedTaskWork(
 }
 
 export type FailedTaskWorkLossReason =
-  FailedTaskPreservationGap | 'snapshot_retry_exhausted' | 'snapshot_unavailable';
+  | FailedTaskPreservationGap
+  | 'snapshot_retry_exhausted'
+  | 'snapshot_unavailable'
+  | 'preservation_timed_out';
 
 const WORK_LOSS_DETAIL: Record<FailedTaskWorkLossReason, string> = {
   no_workspace: 'the task has no workspace record',
@@ -279,8 +297,10 @@ const WORK_LOSS_DETAIL: Record<FailedTaskWorkLossReason, string> = {
   unsupported_runtime: 'this workspace runtime cannot be snapshotted',
   no_resumable_agent_session: "the workspace's agent session had already ended",
   sleep_queue_failed: 'the workspace snapshot could not be scheduled',
+  agent_unresponsive: 'the agent stopped responding in the middle of a turn',
   snapshot_retry_exhausted: 'the workspace snapshot kept failing until its retry budget ran out',
   snapshot_unavailable: 'the workspace was no longer available to snapshot',
+  preservation_timed_out: 'the workspace stayed busy too long after the failure to be snapshotted',
 };
 
 export function failedTaskWorkLossMessage(reason: FailedTaskWorkLossReason): string {
@@ -318,17 +338,27 @@ export async function surfaceFailedTaskWorkLoss(
     taskId: input.taskId,
     projectId: input.projectId,
     chatSessionId: input.chatSessionId,
-    messageId: `failed-task-work-loss-${input.taskId}`,
+    messageId: failedTaskNoticeId('work-loss', input.taskId, input.chatSessionId),
     content: failedTaskWorkLossMessage(input.reason),
   });
 }
 
 /**
- * Persist a system notice under a per-task message id. Failure callbacks can be
- * replayed (`task.callback.idempotent`), so the same notice must land once: an
- * identical replay resolves to the existing message, and a differing one is
- * refused and logged instead of stacking a second notice.
+ * A notice's message id: one per task run and conversation. Failure callbacks can
+ * be replayed (`task.callback.idempotent`), so the same notice must land once — an
+ * identical replay resolves to the existing message, a differing one is refused
+ * and logged. The chat id is part of it because a failed task can be re-run into
+ * a new conversation, and message ids are unique across the whole project.
  */
+export function failedTaskNoticeId(
+  kind: 'work-loss' | 'snapshot-incomplete',
+  taskId: string,
+  chatSessionId: string
+): string {
+  return `failed-task-${kind}-${taskId}-${chatSessionId}`;
+}
+
+/** Persist a system notice under its per-task, per-conversation message id. */
 async function persistSystemNotice(
   env: Env,
   input: {
@@ -362,6 +392,7 @@ async function persistSystemNotice(
 
 export interface PreservationSnapshotOwner {
   projectId: string | null;
+  taskFailedAt: string | null;
   runtime: string;
   sleepingAt: string | null;
   sleepStatus: string | null;
@@ -396,6 +427,9 @@ export async function loadPreservationSnapshotOwner(
       taskId: schema.tasks.id,
       taskStatus: schema.tasks.status,
       taskErrorMessage: schema.tasks.errorMessage,
+      taskFailedAt: sql<
+        string | null
+      >`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
     })
     .from(schema.sessionSnapshots)
     .leftJoin(schema.sessionSummaries, owner.summary)
@@ -440,7 +474,7 @@ export async function noteFailedTaskPreservationCapture(
     taskId: owner.taskId,
     projectId: owner.projectId,
     chatSessionId: input.chatSessionId,
-    messageId: `failed-task-snapshot-incomplete-${owner.taskId}`,
+    messageId: failedTaskNoticeId('snapshot-incomplete', owner.taskId, input.chatSessionId),
     content: failedTaskIncompleteSnapshotMessage(owner.degradation, owner.runtime),
   });
 }

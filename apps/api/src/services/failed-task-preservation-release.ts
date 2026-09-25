@@ -9,7 +9,7 @@
  * `sleepLifecycleOwnsTerminalTaskWorkspaceSql` stops exempting a failed task's
  * workspace once its sleep is exhausted or the claimer can no longer take it.
  */
-import { and, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -25,9 +25,16 @@ import {
 } from './failed-task-preservation';
 import * as projectDataService from './project-data';
 import { TERMINAL_SESSION_SLEEP_STATUS } from './session-snapshot-sleep-failure';
-import { DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS } from './session-snapshots';
-import { isSessionSleepExhausted } from './sleep-preserved-task-status';
+import { isSessionSleepExhausted, sessionSleepMaxAttempts } from './sleep-preserved-task-status';
 import { cleanupTaskRun } from './task-runner';
+
+/**
+ * Longest a failed task's runtime may stay awake waiting for its preservation
+ * sleep, measured from the failure. Normally the sleep lands within a sweep or
+ * two; this bounds an agent that keeps a turn open (a hung prompt under an
+ * unbounded prompt timeout) and a runtime whose activity state never resolves.
+ */
+export const DEFAULT_FAILED_TASK_PRESERVATION_MAX_WAIT_MS = 8 * 60 * 60 * 1000;
 
 type FailedTaskOwner = PreservationSnapshotOwner & { taskId: string; projectId: string };
 
@@ -38,17 +45,20 @@ function failedTaskOwner(owner: PreservationSnapshotOwner | null): FailedTaskOwn
 
 /**
  * End the preservation's sleep episode so the sweep stops retrying it and the
- * reapers see it as given up. Never touches a sleep that is in flight or done;
- * false means the row moved on and the caller must leave it alone.
+ * reapers see it as given up. A compare-and-set on exactly the row state the
+ * caller read: a sleep in flight, a completed sleep, or a fresh episode queued in
+ * between (a replayed failure callback, an explicit run cleanup) is left alone.
  */
 async function endFailedTaskSleepEpisode(
   env: Env,
+  owner: FailedTaskOwner,
   chatSessionId: string,
   reason: FailedTaskWorkLossReason
 ): Promise<boolean> {
   const now = new Date().toISOString();
+  const snapshots = schema.sessionSnapshots;
   const result = await drizzle(env.DATABASE, { schema })
-    .update(schema.sessionSnapshots)
+    .update(snapshots)
     .set({
       sleepStatus: TERMINAL_SESSION_SLEEP_STATUS,
       sleepAfter: null,
@@ -60,16 +70,15 @@ async function endFailedTaskSleepEpisode(
     })
     .where(
       and(
-        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        isNull(schema.sessionSnapshots.sleepingAt),
+        eq(snapshots.chatSessionId, chatSessionId),
+        isNull(snapshots.sleepingAt),
         or(
-          isNull(schema.sessionSnapshots.sleepStatus),
-          inArray(schema.sessionSnapshots.sleepStatus, [
-            'scheduled',
-            'failed',
-            TERMINAL_SESSION_SLEEP_STATUS,
-          ])
-        )
+          isNull(snapshots.sleepStatus),
+          inArray(snapshots.sleepStatus, ['scheduled', 'failed', TERMINAL_SESSION_SLEEP_STATUS])
+        ),
+        sql`${snapshots.sleepStatus} IS ${owner.sleepStatus}`,
+        sql`${snapshots.sleepAfter} IS ${owner.sleepAfter}`,
+        eq(snapshots.sleepAttempts, owner.sleepAttempts)
       )
     );
   return (result.meta.changes ?? 0) > 0;
@@ -81,7 +90,7 @@ async function abandonFailedTaskPreservation(
   chatSessionId: string,
   reason: FailedTaskWorkLossReason
 ): Promise<boolean> {
-  if (!(await endFailedTaskSleepEpisode(env, chatSessionId, reason))) return false;
+  if (!(await endFailedTaskSleepEpisode(env, owner, chatSessionId, reason))) return false;
   await surfaceFailedTaskWorkLoss(env, {
     taskId: owner.taskId,
     projectId: owner.projectId,
@@ -120,13 +129,10 @@ export async function releaseExhaustedFailedTaskPreservation(
 ): Promise<boolean> {
   const owner = failedTaskOwner(await loadPreservationSnapshotOwner(env, input.chatSessionId));
   if (!owner) return false;
-  const maxAttempts = parsePositiveInt(
-    env.SESSION_SLEEP_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS
-  );
+  const maxAttempts = sessionSleepMaxAttempts(env);
   const budgetSpent =
     !owner.sleepingAt && owner.sleepStatus === 'failed' && owner.sleepAttempts >= maxAttempts;
-  if (!isSessionSleepExhausted(owner) && !budgetSpent) return false;
+  if (!isSessionSleepExhausted(owner, maxAttempts) && !budgetSpent) return false;
   return abandonFailedTaskPreservation(
     env,
     owner,
@@ -138,19 +144,29 @@ export async function releaseExhaustedFailedTaskPreservation(
 }
 
 /**
- * Called by the sleep sweep when it defers a candidate. A failed task's runtime
- * can stop being claimable after its sleep was queued — a fatal agent error flips
- * the agent session to `error`, or a reaper stops the workspace — and the sweep
- * would then defer it forever without spending an attempt. Returns true when it
- * released.
+ * Called by the sleep sweep when it defers a candidate, which spends no attempt,
+ * so the retry budget alone cannot end a preservation that keeps being deferred.
+ * Releases when the runtime can no longer be claimed — a fatal agent error flips
+ * the agent session to `error` after the sleep was queued, or a reaper stopped the
+ * workspace — or once the failure is older than the maximum wait
+ * (`FAILED_TASK_PRESERVATION_MAX_WAIT_MS`). Returns true when it released.
  */
-export async function releaseUnclaimableFailedTaskPreservation(
+export async function releaseStalledFailedTaskPreservation(
   env: Env,
-  input: { chatSessionId: string; workspaceId: string }
+  input: { chatSessionId: string; workspaceId: string },
+  now = new Date()
 ): Promise<boolean> {
   const owner = failedTaskOwner(await loadPreservationSnapshotOwner(env, input.chatSessionId));
   if (!owner || owner.sleepingAt) return false;
   const gap = await failedTaskRuntimeGap(env, owner.projectId, input.workspaceId);
-  if (!gap) return false;
-  return abandonFailedTaskPreservation(env, owner, input.chatSessionId, gap);
+  const failedAt = Date.parse(owner.taskFailedAt ?? '');
+  const maxWaitMs = parsePositiveInt(
+    env.FAILED_TASK_PRESERVATION_MAX_WAIT_MS,
+    DEFAULT_FAILED_TASK_PRESERVATION_MAX_WAIT_MS
+  );
+  // An unreadable failure time cannot prove the wait is still bounded.
+  const waitedTooLong = !Number.isFinite(failedAt) || now.getTime() - failedAt > maxWaitMs;
+  const reason = gap ?? (waitedTooLong ? 'preservation_timed_out' : null);
+  if (!reason) return false;
+  return abandonFailedTaskPreservation(env, owner, input.chatSessionId, reason);
 }

@@ -11,7 +11,9 @@ import { cleanupTerminalTaskResourcesOrThrow } from './task-terminal-cleanup';
  * up a failed run must not destroy work SAM would otherwise snapshot. Its runtime
  * is still torn down — by the sleep, right after the snapshot — or immediately,
  * with a notice in the chat, when the work cannot be preserved. Completed and
- * cancelled runs keep the direct teardown.
+ * cancelled runs keep the direct teardown. Only teardown is caller-scoped
+ * (`requiredUserId`): queueing the sleep is non-destructive, and is what the idle
+ * sweep would do to that runtime anyway.
  */
 export async function cleanupRequestedTaskRun(
   env: Env,

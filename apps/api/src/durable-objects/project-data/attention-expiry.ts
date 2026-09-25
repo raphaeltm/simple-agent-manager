@@ -4,6 +4,7 @@ import { transitionTaskToTerminal } from '../../services/task-terminal-transitio
 import type { NotificationService } from '../notification';
 import * as activity from './activity';
 import * as attention from './attention';
+import { isAcpSessionMidTurn, loadLatestActiveAcpActivity } from './latest-acp-activity';
 import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
 import { activeWorkHardStallMs, reconciliationDeadlineMs } from './reconciliation-thresholds';
 import type { Env } from './types';
@@ -265,15 +266,23 @@ async function failExpiredTaskMarker(
 
   // Most expiries hit a conversation that already slept while it waited: keep it
   // asleep and wakeable instead of failing the session (idea 01M1XGHX7NQZQYWQRV5C1PJ60N).
+  // A check-in that expires on an agent still mid-turn is the watchdog's verdict
+  // that the turn will not end: a sleep would wait on it, and every capture would
+  // race its minute-by-minute re-report. That runtime is released now, as before.
   const workerEnv = env as unknown as WorkerEnv;
   const preservationService = await import('../../services/failed-task-preservation');
-  const preservation = await preservationService.preserveFailedTaskWork(workerEnv, {
-    taskId: marker.taskId,
-    projectId,
-    workspaceId: marker.workspaceId,
-    chatSessionId: marker.sessionId,
-    source,
-  });
+  const unresponsiveMidTurn =
+    marker.kind === 'reconciliation_checkin' &&
+    isAcpSessionMidTurn(loadLatestActiveAcpActivity(sql, marker));
+  const preservation = unresponsiveMidTurn
+    ? ({ outcome: 'not_preservable', gap: 'agent_unresponsive' } as const)
+    : await preservationService.preserveFailedTaskWork(workerEnv, {
+        taskId: marker.taskId,
+        projectId,
+        workspaceId: marker.workspaceId,
+        chatSessionId: marker.sessionId,
+        source,
+      });
   if (preservationService.withholdsFailedTaskTeardown(preservation)) {
     log.info('attention_marker.expired_work_preserved', {
       markerId: marker.id,
@@ -423,29 +432,7 @@ function deferActiveReconciliationCheckin(
   env: Env,
   marker: ExpiredAttentionMarker
 ): boolean {
-  const activeRows = sql
-    .exec(
-      `SELECT acp.id AS acp_session_id,
-              acp.status AS acp_status,
-              ss.activity AS activity,
-              ss.activity_at AS activity_at,
-              ss.prompt_started_at AS prompt_started_at,
-              ss.runtime_work_state AS runtime_work_state,
-              ss.runtime_work_updated_at AS runtime_work_updated_at,
-              ss.runtime_work_progress_at AS runtime_work_progress_at
-       FROM acp_sessions acp
-       LEFT JOIN session_state ss ON ss.session_id = acp.id
-       WHERE acp.chat_session_id = ?
-         AND acp.status IN ('assigned', 'running')
-         AND (? IS NULL OR acp.workspace_id = ?)
-       ORDER BY COALESCE(acp.started_at, acp.assigned_at, acp.updated_at, acp.created_at) DESC
-       LIMIT 1`,
-      marker.sessionId,
-      marker.workspaceId,
-      marker.workspaceId
-    )
-    .toArray();
-  const active = activeRows[0];
+  const active = loadLatestActiveAcpActivity(sql, marker);
   if (!active) return false;
 
   const activityName = typeof active.activity === 'string' ? active.activity : null;
