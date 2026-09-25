@@ -26,7 +26,7 @@ All measurements: Workers Observability (`CF_PRODUCTION_DEBUGGING_TOKEN`), prod 
      16:02:07-16:02:47 (9 overload + 1 CPU reset), 09-20 19:58:05 (CPU reset), 09-23 15:10:50,
      09-23 22:25:53, 09-24 15:15:18. 12 of 13 overload rows + all CPU resets are explained.
    - 09-24 15:15:38 `mcp.tool_call_failed {"tool":"search_messages","error":"Error: Durable Object
-     exceeded its CPU time limit and was reset."}` — the daily blog agent's project-wide search.
+exceeded its CPU time limit and was reset."}` — the daily blog agent's project-wide search.
    - Other >1 s CPU root RPCs: `archiveSourceFinalizeDelete` ×33 (1.6-6.5 s; archive drain, out of
      scope), `archiveSourceSearchMessages` ×2 (up to 4.7 s; session-scoped search), `sleepSession`,
      `stopSession`, `failSession`, `admitProjectEvent` (1-2 s).
@@ -91,6 +91,7 @@ All measurements: Workers Observability (`CF_PRODUCTION_DEBUGGING_TOKEN`), prod 
 ## Implementation Checklist
 
 ### A. Bounded root search (primary fix; idea 01M27M86R544BQX86VZANZGSQ2 §3 / task scope 4)
+
 - [ ] Extract search from `messages.ts` (719 lines) into `message-search.ts`; keep re-exports.
 - [ ] FTS half: candidate window = newest `ftsCandidateLimit` matches (floor rowid via capped
       `ORDER BY rowid DESC LIMIT`), bm25 only for rowid >= floor; session-scoped search narrows the
@@ -98,7 +99,7 @@ All measurements: Workers Observability (`CF_PRODUCTION_DEBUGGING_TOKEN`), prod 
 - [ ] LIKE half: project-wide newest `keywordScanRowLimit` rows by rowid; session-scoped newest rows
       of that session by `(session_id, created_at)`; existing unindexed-tail predicate unchanged.
 - [ ] Coverage result `{ftsCandidateLimit, ftsCandidatesTruncated, keywordScanRowLimit,
-      keywordScanTruncated}`; env `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` (default 2000) and
+keywordScanTruncated}`; env `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` (default 2000) and
       `PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT` (default 50000) with `DEFAULT_*` constants.
 - [ ] ProjectData RPC `searchMessagesWithCoverage`; `searchMessages` stays array-returning and bounded;
       `archiveSourceSearchMessages` bounded with env bounds.
@@ -110,6 +111,7 @@ All measurements: Workers Observability (`CF_PRODUCTION_DEBUGGING_TOKEN`), prod 
       is a rowid range (EXPLAIN QUERY PLAN); disclosure reaches the MCP response.
 
 ### B. Alarm per-section measurement (task scope 1)
+
 - [ ] Section runner: per-section `status` (ran/skipped_not_due/failed), `durationMs`, `rowsRead`,
       `rowsWritten`; one `project_data.alarm.completed` log with projectId, totalDurationMs,
       mode (full/gated), ran/skipped/failed section names, slowest section; warn log per slow section
@@ -118,6 +120,7 @@ All measurements: Workers Observability (`CF_PRODUCTION_DEBUGGING_TOKEN`), prod 
       meter is active.
 
 ### C. Run only due alarm sections (task scope 2)
+
 - [ ] `computeProjectDataAlarmSections()` returns per-section times (single source for scheduling and
       gating); `computeProjectDataAlarmTime` = min over them (unchanged behavior).
 - [ ] In-memory per-section pending due map, min-accumulated on every `recalculateAlarm`, overwritten
@@ -134,6 +137,7 @@ All measurements: Workers Observability (`CF_PRODUCTION_DEBUGGING_TOKEN`), prod 
       isolation (throwing section does not stop later ones; failed ≠ skipped in log), cascade.
 
 ### D. CPU-reset / connection-lost classification (task scope 3; idea 01M1XKK208SJV9VJA4BXP2KBHT)
+
 - [ ] `isDurableObjectCpuLimitResetError`, `isDurableObjectConnectionLostError` exact predicates;
       `isTransientDurableObjectError` unchanged (rule 67).
 - [ ] `callProjectDataWithRetry` takes an explicit idempotency declaration; CPU-reset and
@@ -144,6 +148,7 @@ All measurements: Workers Observability (`CF_PRODUCTION_DEBUGGING_TOKEN`), prod 
       (no duplicate); shared predicate not widened (no-widening test).
 
 ### E. Activity callback amplification (task scope 5, API side)
+
 - [ ] Activity coalescing fallback (lookup, persist, flush) also engages on CPU-limit reset and
       `Network connection lost.` via a composed predicate.
 - [ ] Coalesced flush retries back off exponentially (bounded by the pending TTL) instead of every
@@ -152,6 +157,7 @@ All measurements: Workers Observability (`CF_PRODUCTION_DEBUGGING_TOKEN`), prod 
       persistent outage; terminal/non-intermediate reports still surface errors.
 
 ### F. Follow-ups / docs
+
 - [ ] File idea: immortal workspace idle-timeout candidate (finding 5).
 - [ ] Docs: env vars in `apps/api/.env.example`, env-reference skill, configuration reference;
       MCP tool description; architecture docs if they describe search/alarm behavior.
