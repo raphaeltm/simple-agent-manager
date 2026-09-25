@@ -407,7 +407,15 @@ function readProjectKeywordWindow(
   sql: SqlStorage,
   scanRowLimit: number
 ): { floorRowid: number | null; truncated: boolean } {
-  const row = sql.exec('SELECT MIN(rowid) AS lo, MAX(rowid) AS hi FROM chat_messages').toArray()[0];
+  // Two scalar subqueries, not `SELECT MIN(rowid), MAX(rowid)`: SQLite's min/max optimization
+  // reads one b-tree edge only when a query has a single min() or max(); both in one SELECT is a
+  // full table scan — the very cost this window exists to avoid.
+  const row = sql
+    .exec(
+      `SELECT (SELECT MIN(rowid) FROM chat_messages) AS lo,
+              (SELECT MAX(rowid) FROM chat_messages) AS hi`
+    )
+    .toArray()[0];
   if (typeof row?.lo !== 'number' || typeof row.hi !== 'number') {
     return { floorRowid: null, truncated: false };
   }
