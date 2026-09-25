@@ -1,5 +1,8 @@
 import { parsePositiveInt } from '../lib/route-helpers';
-import { isSleepPreservedTerminalTaskStatus } from './sleep-preserved-task-status';
+import {
+  isSleepPreservedTerminalTaskStatus,
+  SLEEP_PRESERVED_DRAIN_FOLLOWS_ACTIVITY,
+} from './sleep-preserved-task-status';
 
 export const DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS = 5 * 60 * 1000;
 
@@ -133,7 +136,7 @@ export function getFreshHarnessWorkLeaseExpiry(
  * ProjectData parent-wake delivery path when its children finish, so keeping it
  * awake merely to hold a place in the lineage burns compute for no benefit.
  *
- * Sleep and completed-task ledger cleanup use this predicate. Converting the remaining shutdown
+ * Sleep and completed/failed-task ledger cleanup use this predicate. Converting the remaining shutdown
  * timers (ProjectData idle cleanup, workspace idle timeout) onto it is tracked
  * as a follow-up in idea `01M08VJDHK3MNYMZCQF5AJC17P`; they still use
  * schedule/workspace-activity candidate selection plus `classifyTaskRuntimeLiveness()`.
@@ -183,15 +186,21 @@ export function classifySessionIdleness(input: {
   // see `SLEEP_PRESERVED_TERMINAL_TASK_STATUSES`) can retain a stale `prompting`
   // transition forever. Treat that state as idle only after the normal idle
   // interval has elapsed, so a final response is preserved but old terminal
-  // sessions cannot strand compute. For a failed task this is also what lets a
-  // hung prompt (e.g. an expired SAM check-in) reach its preservation snapshot.
+  // sessions cannot strand compute.
   const sleepPreservedTerminalTask = isSleepPreservedTerminalTaskStatus(input.taskStatus);
   if (sleepPreservedTerminalTask && activity !== 'idle') {
     // complete_task runs inside the prompt: an hours-old prompting transition
     // does not mean the response following that tool has already drained. A
-    // failure is anchored the same way, on the moment the task went terminal.
+    // failed task drains from the failure alone: a hung prompt keeps re-reporting
+    // `prompting`, which must not hold its preservation snapshot off for hours.
     const completedAt = Date.parse(input.taskCompletedAt ?? '');
-    const drainAnchor = Math.max(activityAt ?? 0, Number.isFinite(completedAt) ? completedAt : 0);
+    const failureOrCompletionAt = Number.isFinite(completedAt) ? completedAt : 0;
+    const drainFollowsActivity =
+      isSleepPreservedTerminalTaskStatus(input.taskStatus) &&
+      SLEEP_PRESERVED_DRAIN_FOLLOWS_ACTIVITY[input.taskStatus];
+    const drainAnchor = drainFollowsActivity
+      ? Math.max(activityAt ?? 0, failureOrCompletionAt)
+      : failureOrCompletionAt;
     if (!drainAnchor) {
       return {
         idle: false,

@@ -10,6 +10,7 @@ import {
   finishSleepingWorkspaceComputeCleanup,
   markWorkspaceNodeWarmIfEmpty,
 } from '../services/session-sleep';
+import { chatSessionTaskOwnerJoins } from '../services/session-sleep-task-owner';
 import { markSessionSnapshotSleeping } from '../services/session-snapshot-sleep-lifecycle';
 import { sessionSleepInFlightMaxAgeMs } from '../services/session-snapshot-sleep-predicate';
 
@@ -38,7 +39,10 @@ async function projectDataSessionAlreadyClosedForSleep(
     return null;
   });
   const status = typeof session?.status === 'string' ? session.status : null;
-  return status === 'sleeping' || status === 'stopped';
+  // A failed session is closed too: a terminal reconciler can fail a failed
+  // task's session after its sleep passed the point of no return, and the sleep
+  // must still finish its teardown rather than hold the runtime at `stopping`.
+  return status === 'sleeping' || status === 'stopped' || status === 'failed';
 }
 
 function repairBatchSize(env: Env): number {
@@ -66,6 +70,7 @@ export async function runSessionSleepLifecycleRepair(
 ): Promise<SessionSleepLifecycleRepairStats> {
   const db = drizzle(env.DATABASE, { schema });
   const cutoff = new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString();
+  const snapshotChatOwner = chatSessionTaskOwnerJoins(schema.sessionSnapshots.chatSessionId);
   const rows = await db
     .select({
       snapshotId: schema.sessionSnapshots.id,
@@ -83,20 +88,8 @@ export async function runSessionSleepLifecycleRepair(
     .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.sessionSnapshots.workspaceId))
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.sessionSnapshots.nodeId))
     .leftJoin(schema.projects, eq(schema.projects.id, schema.sessionSnapshots.projectId))
-    .leftJoin(
-      schema.sessionSummaries,
-      eq(schema.sessionSummaries.id, schema.sessionSnapshots.chatSessionId)
-    )
-    .leftJoin(
-      schema.tasks,
-      or(
-        eq(schema.tasks.id, schema.sessionSummaries.taskId),
-        and(
-          isNull(schema.sessionSummaries.taskId),
-          eq(schema.tasks.chatSessionId, schema.sessionSnapshots.chatSessionId)
-        )
-      )
-    )
+    .leftJoin(schema.sessionSummaries, snapshotChatOwner.summary)
+    .leftJoin(schema.tasks, snapshotChatOwner.task)
     .where(
       and(
         isNull(schema.sessionSnapshots.sleepingAt),

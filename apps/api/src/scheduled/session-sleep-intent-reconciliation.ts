@@ -10,6 +10,12 @@ import {
   DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS,
   sessionLifecycleError,
 } from '../services/session-snapshots';
+import {
+  SLEEP_CLAIMABLE_NODE_ROLE,
+  SLEEP_CLAIMABLE_WORKSPACE_STATUSES,
+  SLEEP_RESUMABLE_AGENT_SESSION_STATUSES,
+  SLEEP_SNAPSHOT_NODE_RUNTIMES,
+} from '../services/sleep-preserved-task-status';
 
 /**
  * Discovery half of the session-sleep sweep (`runSessionSleepSweep`): give every
@@ -22,6 +28,7 @@ export async function reconcileUnscheduledSessionSleeps(
   batchSize: number,
   now: Date
 ): Promise<number> {
+  // Claimable-runtime constants are shared with this claimer's mirrors.
   // Bounded D1-only discovery. Each successful candidate receives a persisted
   // sleep deadline and leaves this selector; queueWorkspaceSessionSleep does no
   // VM-agent I/O. Runtime activity is checked later, immediately before claim.
@@ -39,7 +46,7 @@ export async function reconcileUnscheduledSessionSleeps(
       schema.agentSessions,
       and(
         eq(schema.agentSessions.workspaceId, schema.workspaces.id),
-        inArray(schema.agentSessions.status, ['running', 'recovery', 'sleeping'])
+        inArray(schema.agentSessions.status, SLEEP_RESUMABLE_AGENT_SESSION_STATUSES)
       )
     )
     .leftJoin(
@@ -48,9 +55,9 @@ export async function reconcileUnscheduledSessionSleeps(
     )
     .where(
       and(
-        inArray(schema.workspaces.status, ['running', 'recovery']),
-        eq(schema.nodes.nodeRole, 'workspace'),
-        inArray(schema.nodes.runtime, ['vm', 'cf-container']),
+        inArray(schema.workspaces.status, SLEEP_CLAIMABLE_WORKSPACE_STATUSES),
+        eq(schema.nodes.nodeRole, SLEEP_CLAIMABLE_NODE_ROLE),
+        inArray(schema.nodes.runtime, SLEEP_SNAPSHOT_NODE_RUNTIMES),
         isNotNull(schema.workspaces.projectId),
         isNotNull(schema.workspaces.chatSessionId),
         isNull(schema.sessionSnapshots.sleepingAt),
