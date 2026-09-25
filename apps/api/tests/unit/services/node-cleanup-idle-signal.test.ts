@@ -166,7 +166,8 @@ beforeEach(() => {
     -- (sleepLifecycleOwnsTerminalTaskWorkspaceSql).
     CREATE TABLE session_snapshots (
       chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending',
-      sleeping_at TEXT, sleep_status TEXT, sleep_after TEXT, capture_generation TEXT
+      sleeping_at TEXT, sleep_status TEXT, sleep_after TEXT, capture_generation TEXT,
+      sleep_attempts INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE compute_usage (
       id TEXT PRIMARY KEY, workspace_id TEXT, user_id TEXT, ended_at TEXT
