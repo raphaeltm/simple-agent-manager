@@ -34,12 +34,7 @@ export async function fetchPaginatedHetznerList(
     throwIfProviderRequestAborted(options.context);
     recordHetznerListPage(seenPages, page, options.operation);
 
-    const url = buildHetznerListUrl(
-      options.resource,
-      options.baseParams,
-      options.labelParts,
-      page
-    );
+    const url = buildHetznerListUrl(options.resource, options.baseParams, options.labelParts, page);
     const response = await providerFetch(
       'hetzner',
       url,
@@ -69,4 +64,10 @@ export async function fetchPaginatedHetznerList(
       category: 'invalid_config',
     }
   );
+}
+
+/** Hetzner `label_selector` terms for an exact-match label filter. */
+export function hetznerLabelSelectorParts(labels?: Record<string, string>): string[] {
+  if (!labels) return [];
+  return Object.entries(labels).map(([key, value]) => `${key}=${value}`);
 }
