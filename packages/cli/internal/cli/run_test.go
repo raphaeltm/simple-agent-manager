@@ -341,6 +341,8 @@ func TestTasksDispatchRejectsMalformedResourceFlags(t *testing.T) {
 		{name: "nan", args: []string{"--min-memory-gb=NaN"}, want: "--min-memory-gb must be a finite positive number"},
 		{name: "infinity", args: []string{"--min-disk-gb=+Inf"}, want: "--min-disk-gb must be a finite non-negative number"},
 		{name: "bool", args: []string{"--exclusive-node=maybe"}, want: "--exclusive-node must be true or false"},
+		{name: "retired co-tenant cap with value", args: []string{"--max-co-tenants=3"}, want: "--max-co-tenants was removed"},
+		{name: "retired co-tenant cap bare", args: []string{"--max-co-tenants"}, want: "--max-co-tenants was removed"},
 	}
 
 	for _, tt := range tests {

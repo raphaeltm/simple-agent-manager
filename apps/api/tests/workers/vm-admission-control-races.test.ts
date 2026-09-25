@@ -1350,19 +1350,26 @@ describe('VM admission control D1 races', () => {
     ).resolves.toBe(false);
   });
 
-  it('atomically grants only one final reservation for the last workspace slot', async () => {
+  it('atomically grants only one final reservation when two requests race for the last CPU budget', async () => {
     const nodeId = 'node-vm-admission-last-slot';
     await makeReadyNode(nodeId, USER_ID, 'medium');
+    // Scarcity comes from the resource budget, never from a workspace count: a medium node has
+    // 4 vCPU, so two concurrent 4-vCPU reservations can only ever admit one of them.
+    const wholeNodeCpu = reservation({ cpuMillis: 4000 });
 
     const outcomes = await Promise.all([
       reserveWorkspacePlacement(
         env.DATABASE,
-        placement('workspace-vm-admission-last-slot-a', nodeId),
+        placement('workspace-vm-admission-last-slot-a', nodeId, {
+          resolvedReservation: wholeNodeCpu,
+        }),
         admissionPolicy()
       ),
       reserveWorkspacePlacement(
         env.DATABASE,
-        placement('workspace-vm-admission-last-slot-b', nodeId),
+        placement('workspace-vm-admission-last-slot-b', nodeId, {
+          resolvedReservation: wholeNodeCpu,
+        }),
         admissionPolicy()
       ),
     ]);

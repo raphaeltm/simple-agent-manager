@@ -464,7 +464,19 @@ func parseSubmitOptions(parsed parsedArgs) (TaskSubmitOptions, error) {
 	}, nil
 }
 
+// retiredResourceFlags are flags SAM used to accept and has since removed. They fail
+// loudly instead of being silently dropped by the permissive parser: a caller relying on
+// an old cap would otherwise believe it was applied.
+var retiredResourceFlags = map[string]string{
+	"max-co-tenants": "SAM no longer caps workspaces per node by count; placement uses --min-vcpu, --min-memory-gb, --min-disk-gb, and --exclusive-node",
+}
+
 func parseResourceRequirementFlags(parsed parsedArgs) (*ResourceRequirements, error) {
+	for name, reason := range retiredResourceFlags {
+		if _, present := parsed.Flags[name]; present || hasValuelessFlagOccurrence(parsed, name) {
+			return nil, fmt.Errorf("--%s was removed: %s", name, reason)
+		}
+	}
 	resource := ResourceRequirements{}
 	set := false
 
