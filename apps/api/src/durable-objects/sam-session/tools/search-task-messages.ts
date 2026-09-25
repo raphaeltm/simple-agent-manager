@@ -7,6 +7,7 @@
  */
 import type { Env } from '../../../env';
 import * as projectDataService from '../../../services/project-data';
+import { describeRootSearchCoverage } from '../../../services/project-data-search-coverage';
 import type { AnthropicToolDef, ToolContext } from '../types';
 import { resolveProjectWithOwnership } from './helpers';
 
@@ -137,6 +138,6 @@ export async function searchTaskMessages(
     projectId: project.id,
     archiveSearch: search.archiveSearch,
     rootSearch: search.rootSearch,
-    coverageNotes: projectDataService.describeRootSearchCoverage(search.rootSearch),
+    coverageNotes: describeRootSearchCoverage(search.rootSearch),
   };
 }

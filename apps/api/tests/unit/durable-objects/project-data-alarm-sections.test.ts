@@ -100,7 +100,7 @@ describe('ProjectDataAlarmSectionScheduler', () => {
     const scheduler = warmScheduler();
     scheduler.observe(
       times({ mailbox_delivery_sweep: T0 + 1_000, storage_safety: T0 + 600_000 }),
-      new Set(),
+      new Map(),
       T0
     );
 
@@ -115,10 +115,10 @@ describe('ProjectDataAlarmSectionScheduler', () => {
     // the first computed time instead of chasing it forever.
     const scheduler = warmScheduler();
     const minDelay = 180_000;
-    scheduler.observe(times({ runtime_heartbeat_timeouts: T0 + minDelay }), new Set(), T0);
+    scheduler.observe(times({ runtime_heartbeat_timeouts: T0 + minDelay }), new Map(), T0);
     for (let rpc = 1; rpc <= 20; rpc++) {
       const now = T0 + rpc * 10_000;
-      scheduler.observe(times({ runtime_heartbeat_timeouts: now + minDelay }), new Set(), now);
+      scheduler.observe(times({ runtime_heartbeat_timeouts: now + minDelay }), new Map(), now);
     }
 
     expect(scheduler.nextDueAt()).toBe(T0 + minDelay);
@@ -127,18 +127,18 @@ describe('ProjectDataAlarmSectionScheduler', () => {
 
   it('pulls a section earlier when fresh work becomes due sooner', () => {
     const scheduler = warmScheduler();
-    scheduler.observe(times({ task_waits: T0 + 60_000 }), new Set(), T0);
-    scheduler.observe(times({ task_waits: 0 }), new Set(), T0 + 1);
+    scheduler.observe(times({ task_waits: T0 + 60_000 }), new Map(), T0);
+    scheduler.observe(times({ task_waits: 0 }), new Map(), T0 + 1);
 
     expect(dueSections(scheduler, T0 + 2)).toEqual(['task_waits']);
   });
 
   it('replaces the remembered time only for sections that ran', () => {
     const scheduler = warmScheduler();
-    scheduler.observe(times({ attention_expiry: T0, task_reconciliation: T0 }), new Set(), T0);
+    scheduler.observe(times({ attention_expiry: T0, task_reconciliation: T0 }), new Map(), T0);
     scheduler.observe(
       times({ attention_expiry: T0 + 600_000, task_reconciliation: T0 + 600_000 }),
-      new Set<ProjectDataAlarmSection>(['attention_expiry']),
+      new Map<ProjectDataAlarmSection, number>([['attention_expiry', T0 + 1]]),
       T0 + 1
     );
 
@@ -147,8 +147,8 @@ describe('ProjectDataAlarmSectionScheduler', () => {
 
   it('forgets a section once it ran and has nothing further scheduled', () => {
     const scheduler = warmScheduler();
-    scheduler.observe(times({ project_event_retention: T0 }), new Set(), T0);
-    scheduler.observe(times(), new Set<ProjectDataAlarmSection>(['project_event_retention']), T0);
+    scheduler.observe(times({ project_event_retention: T0 }), new Map(), T0);
+    scheduler.observe(times(), new Map([['project_event_retention', T0]]), T0);
 
     expect(scheduler.nextDueAt()).toBeNull();
   });
@@ -178,7 +178,7 @@ describe('ProjectDataAlarmSectionScheduler', () => {
     // The expired marker is still there, so the fresh schedule says "due since epoch".
     scheduler.observe(
       times({ attention_expiry: 5 }),
-      new Set<ProjectDataAlarmSection>(['attention_expiry']),
+      new Map<ProjectDataAlarmSection, number>([['attention_expiry', T0]]),
       T0
     );
 
@@ -189,9 +189,99 @@ describe('ProjectDataAlarmSectionScheduler', () => {
     ]);
   });
 
+  it('holds a section that keeps failing off by the floor after every failure', () => {
+    const scheduler = warmScheduler();
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const at = T0 + cycle * PROJECT_DATA_ALARM_FAILED_SECTION_RETRY_MS;
+      scheduler.recordFailure('attention_expiry', at);
+      scheduler.observe(
+        times({ attention_expiry: 5 }),
+        new Map<ProjectDataAlarmSection, number>([['attention_expiry', at]]),
+        at
+      );
+      expect(scheduler.nextDueAt()).toBe(at + PROJECT_DATA_ALARM_FAILED_SECTION_RETRY_MS);
+      expect(dueSections(scheduler, at + 1)).toEqual([]);
+    }
+  });
+
+  describe('a deadline that arrives while the section is already running', () => {
+    const WINDOW = 300_000;
+
+    it('stays due when the run looked before it and the recalculation clamps past it', () => {
+      const scheduler = warmScheduler();
+      const deadline = T0 + 1_500;
+      scheduler.observe(times({ runtime_heartbeat_timeouts: deadline }), new Map(), T0);
+      // Within the due tolerance, so the section runs early at T0 and finds nothing stale yet.
+      expect(dueSections(scheduler, T0)).toEqual(['runtime_heartbeat_timeouts']);
+      const tickEnd = deadline + 1_500;
+
+      // By the time the tick recalculates, the heartbeat is overdue and the schedule clamps it.
+      scheduler.observe(
+        times({ runtime_heartbeat_timeouts: tickEnd + WINDOW }),
+        new Map([['runtime_heartbeat_timeouts', T0]]),
+        tickEnd
+      );
+
+      expect(scheduler.nextDueAt()).toBe(deadline);
+      expect(dueSections(scheduler, tickEnd + 1)).toEqual(['runtime_heartbeat_timeouts']);
+    });
+
+    it('yields to the fresh schedule once a run has started after the deadline', () => {
+      const scheduler = warmScheduler();
+      const deadline = T0 - 10;
+      scheduler.observe(times({ runtime_heartbeat_timeouts: deadline }), new Map(), T0 - 20);
+
+      // The run saw the overdue session (e.g. deferred it); re-arming at `now` would hot-loop.
+      scheduler.observe(
+        times({ runtime_heartbeat_timeouts: T0 + 5 + WINDOW }),
+        new Map([['runtime_heartbeat_timeouts', T0]]),
+        T0 + 5
+      );
+
+      expect(scheduler.nextDueAt()).toBe(T0 + 5 + WINDOW);
+    });
+
+    it('takes a later fresh time when the deadline has not arrived yet', () => {
+      const scheduler = warmScheduler();
+      scheduler.observe(times({ runtime_heartbeat_timeouts: T0 + 1_000 }), new Map(), T0);
+
+      // A heartbeat landed during the tick and legitimately moved the deadline out.
+      scheduler.observe(
+        times({ runtime_heartbeat_timeouts: T0 + 90_000 }),
+        new Map([['runtime_heartbeat_timeouts', T0]]),
+        T0 + 100
+      );
+
+      expect(scheduler.nextDueAt()).toBe(T0 + 90_000);
+    });
+
+    it('forgets it when the section no longer has anything scheduled', () => {
+      const scheduler = warmScheduler();
+      scheduler.observe(times({ runtime_heartbeat_timeouts: T0 + 1_000 }), new Map(), T0);
+
+      scheduler.observe(times(), new Map([['runtime_heartbeat_timeouts', T0]]), T0 + 2_000);
+
+      expect(scheduler.nextDueAt()).toBeNull();
+    });
+
+    it('still holds a failed section off for the retry floor', () => {
+      const scheduler = warmScheduler();
+      scheduler.observe(times({ runtime_heartbeat_timeouts: T0 + 500 }), new Map(), T0);
+      scheduler.recordFailure('runtime_heartbeat_timeouts', T0);
+
+      scheduler.observe(
+        times({ runtime_heartbeat_timeouts: T0 + 1_000 + WINDOW }),
+        new Map([['runtime_heartbeat_timeouts', T0]]),
+        T0 + 1_000
+      );
+
+      expect(scheduler.nextDueAt()).toBe(T0 + PROJECT_DATA_ALARM_FAILED_SECTION_RETRY_MS);
+    });
+  });
+
   it('cascades a wait or wake into prompt delivery within the same tick', () => {
     const scheduler = warmScheduler();
-    scheduler.observe(times({ task_waits: T0 }), new Set(), T0);
+    scheduler.observe(times({ task_waits: T0 }), new Map(), T0);
     const plan = scheduler.planTick(CONFIG, T0 + 1);
     expect(plan.isDue('prompt_delivery')).toBe(false);
 
@@ -208,7 +298,7 @@ describe('ProjectDataAlarmTick', () => {
     const scheduler = warmScheduler();
     scheduler.observe(
       times({ runtime_heartbeat_timeouts: T0, attention_expiry: T0, prompt_delivery: T0 }),
-      new Set(),
+      new Map(),
       T0
     );
     const tick = new ProjectDataAlarmTick(
@@ -243,9 +333,11 @@ describe('ProjectDataAlarmTick', () => {
     expect(onError).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'marker table locked' })
     );
-    expect(tick.consumedSections()).toEqual(
-      new Set(['runtime_heartbeat_timeouts', 'attention_expiry', 'prompt_delivery'])
-    );
+    expect([...tick.consumedSections().keys()]).toEqual([
+      'runtime_heartbeat_timeouts',
+      'attention_expiry',
+      'prompt_delivery',
+    ]);
     const [completed] = logged(infoSpy, 'project_data.alarm.completed');
     expect(completed).toMatchObject({
       projectId: 'project-1',

@@ -82,7 +82,7 @@ import {
   CommentValidationError,
 } from '../durable-objects/project-data/comment-contracts';
 import type { ProjectDataGroupedFtsCleanupResult } from '../durable-objects/project-data/grouped-fts-cleanup';
-import type { MessageSearchCoverage } from '../durable-objects/project-data/message-search';
+import type { SearchResult } from '../durable-objects/project-data/message-search';
 import {
   ProjectEventAckPolicyError,
   ProjectEventAckStateError,
@@ -145,21 +145,15 @@ import {
   type ProjectDataArchiveLocation,
   type ProjectDataArchiveOwnerRef,
 } from '../project-data-archive/contract';
-import {
-  classifyDurableObjectError,
-  computeDurableObjectRetryDelayMs,
-  type DurableObjectErrorClass,
-  getDurableObjectRetryConfig,
-  isDurableObjectStorageFullError,
-  isRetryableForIdempotentDurableObjectOperation,
-  isTransientDurableObjectError,
-} from './durable-object-retry';
+import { isDurableObjectStorageFullError } from './durable-object-retry';
 import {
   assertExactWriteAllowed,
   isProjectDataArchiveExactRoutingEnabled,
   resolveExactReadOwner,
 } from './project-data-archive-routing';
 import { ensureOncePerIsolate, forgetEnsuredProjectData } from './project-data-ensure-memo';
+import { type ProjectDataRpcRetryPolicy, retryProjectDataRpc } from './project-data-rpc-retry';
+import type { ProjectDataRootSearchCoverage } from './project-data-search-coverage';
 import { toProjectDataStorageFullError } from './project-data-storage-errors';
 import {
   buildSessionLifecycleEventInput,
@@ -362,96 +356,6 @@ async function callProjectDataNoRetry<T>(
   }
 }
 
-/**
- * How a ProjectData RPC may be retried. `mutation` (the default) retries only failures the object
- * rejected before doing anything (`isTransientDurableObjectError`). `idempotent_read` may also retry
- * a CPU-limit reset or a lost connection, whose outcome is ambiguous — safe only when repeating the
- * call cannot duplicate an effect. Heavy calls must never be marked idempotent_read: a request that
- * itself burned the CPU allowance would reset the object again.
- */
-type ProjectDataRpcRetryPolicy = 'idempotent_read' | 'mutation';
-
-async function retryProjectDataRpc<T>(input: {
-  env: Env;
-  projectId: string;
-  operation: string;
-  policy: ProjectDataRpcRetryPolicy;
-  resolveStub: () => Promise<DurableObjectStub<ProjectData>>;
-  /** Any DO failure means this isolate could not observe the DO's state: forget ensure memos. */
-  forgetEnsured: () => void;
-  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>;
-}): Promise<T> {
-  const { env, projectId, operation, policy } = input;
-  const retryConfig = getDurableObjectRetryConfig(env);
-  const retryable =
-    policy === 'idempotent_read'
-      ? isRetryableForIdempotentDurableObjectOperation
-      : isTransientDurableObjectError;
-  let lastError: unknown;
-  let firstErrorClass: DurableObjectErrorClass = null;
-
-  for (let attempt = 1; attempt <= retryConfig.maxAttempts; attempt++) {
-    try {
-      const stub = await input.resolveStub();
-      const result = await input.call(stub);
-      if (attempt > 1) {
-        log.info('project_data.do_rpc_retry_succeeded', {
-          projectId,
-          operation,
-          policy,
-          attempts: attempt,
-          firstErrorClass,
-        });
-      }
-      return result;
-    } catch (err) {
-      lastError = err;
-      input.forgetEnsured();
-
-      if (isDurableObjectStorageFullError(err)) {
-        throw toProjectDataStorageFullError(projectId, operation, err);
-      }
-
-      const errorClass = classifyDurableObjectError(err);
-      firstErrorClass ??= errorClass;
-      if (!retryable(err)) throw err;
-      if (attempt >= retryConfig.maxAttempts) {
-        log.warn('project_data.do_rpc_retry_exhausted', {
-          projectId,
-          operation,
-          policy,
-          attempts: attempt,
-          errorClass,
-        });
-        throw err;
-      }
-
-      const delayMs = computeDurableObjectRetryDelayMs(
-        attempt,
-        retryConfig.baseDelayMs,
-        retryConfig.maxDelayMs
-      );
-      log.warn('project_data.do_rpc_retry', {
-        projectId,
-        operation,
-        policy,
-        attempt,
-        maxAttempts: retryConfig.maxAttempts,
-        delayMs,
-        errorClass,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      await sleep(delayMs);
-    }
-  }
-
-  throw normalizeProjectDataRpcError(
-    projectId,
-    operation,
-    lastError ?? new Error('ProjectData DO retry exhausted without an error')
-  );
-}
-
 async function callProjectDataWithRetry<T>(
   env: Env,
   projectId: string,
@@ -467,6 +371,7 @@ async function callProjectDataWithRetry<T>(
     resolveStub: () => getStub(env, projectId),
     // Defence in depth only — see the memo module.
     forgetEnsured: () => forgetEnsuredProject(env, projectId),
+    normalizeError: (err) => normalizeProjectDataRpcError(projectId, operation, err),
     call,
   });
 }
@@ -486,12 +391,9 @@ async function callProjectDataOwnerWithRetry<T>(
     policy,
     resolveStub: () => getStubForOwner(env, projectId, ownerName),
     forgetEnsured: () => forgetEnsuredOwner(env, ownerName),
+    normalizeError: (err) => normalizeProjectDataRpcError(projectId, operation, err),
     call,
   });
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 type ProjectDataEventInput<T extends { projectId: string }> = Omit<T, 'projectId'>;
@@ -1070,16 +972,8 @@ export async function getMessageCount(
   return stub.archiveTargetGetMessageCount(owner, roles);
 }
 
-/** Search messages across sessions by keyword. */
-export type ProjectDataMessageSearchResult = {
-  id: string;
-  sessionId: string;
-  role: string;
-  snippet: string;
-  createdAt: number;
-  sessionTopic: string | null;
-  sessionTaskId: string | null;
-};
+/** Search messages across sessions by keyword; the DO's own result shape, not a parallel copy. */
+export type ProjectDataMessageSearchResult = SearchResult;
 
 export type ProjectDataArchiveSearchMetadata = {
   partial: boolean;
@@ -1096,34 +990,6 @@ export type ProjectDataArchiveSearchMetadata = {
   archiveOwnersOmitted: number;
   archiveOwnerLimit: number;
 };
-
-/**
- * What the root object's bounded search windows skipped (`message-search.ts`). `null` when the root
- * was not queried because the session lives on an archive shard.
- */
-export type ProjectDataRootSearchCoverage = MessageSearchCoverage;
-
-/**
- * Plain-language disclosure of a truncated root search, for consumers (agents) that cannot notice
- * results they were never shown. Empty when nothing was skipped.
- */
-export function describeRootSearchCoverage(
-  coverage: ProjectDataRootSearchCoverage | null
-): string[] {
-  if (!coverage) return [];
-  const notes: string[] = [];
-  if (coverage.ftsCandidatesTruncated) {
-    notes.push(
-      `Full-text ranking considered only the newest ${coverage.ftsCandidateLimit} matching messages; older matches exist but were not ranked. Add more specific words or narrow with sessionId to reach them.`
-    );
-  }
-  if (coverage.keywordScanTruncated) {
-    notes.push(
-      `The keyword fallback for not-yet-indexed text scanned only the newest ${coverage.keywordScanRowLimit} raw messages; older unindexed text was not searched.`
-    );
-  }
-  return notes;
-}
 
 export type ProjectDataSearchMessagesWithArchiveMetadataResult = {
   results: ProjectDataMessageSearchResult[];
@@ -1318,18 +1184,6 @@ export async function searchMessagesWithArchiveMetadata(
       archiveOwnerLimit,
     },
   };
-}
-
-export async function searchMessages(
-  env: Env,
-  projectId: string,
-  query: string,
-  sessionId: string | null = null,
-  roles: string[] | null = null,
-  limit: number = 10
-): Promise<ProjectDataMessageSearchResult[]> {
-  return (await searchMessagesWithArchiveMetadata(env, projectId, query, sessionId, roles, limit))
-    .results;
 }
 
 // =========================================================================

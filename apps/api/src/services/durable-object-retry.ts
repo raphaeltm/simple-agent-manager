@@ -3,6 +3,13 @@ import { parsePositiveInt } from '../lib/route-helpers';
 export const DEFAULT_DO_RETRY_MAX_ATTEMPTS = 8;
 export const DEFAULT_DO_RETRY_BASE_DELAY_MS = 100;
 export const DEFAULT_DO_RETRY_MAX_DELAY_MS = 250;
+/**
+ * Attempts for an idempotent call whose connection to the object was lost. A blip clears on the
+ * next attempt; an outage (2026-09-24: 33 minutes, every call failing in ~190 ms) does not clear
+ * within any retry budget, so spending the full `DO_RETRY_MAX_ATTEMPTS` there only multiplies
+ * failing calls and delays the error.
+ */
+export const DEFAULT_DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS = 3;
 
 const TRANSIENT_DURABLE_OBJECT_PATTERNS = [
   /durable object reset because its code was updated/i,
@@ -41,12 +48,15 @@ export interface DurableObjectRetryEnv {
   DO_RETRY_MAX_ATTEMPTS?: string;
   DO_RETRY_BASE_DELAY_MS?: string;
   DO_RETRY_MAX_DELAY_MS?: string;
+  DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS?: string;
 }
 
 export interface DurableObjectRetryConfig {
   maxAttempts: number;
   baseDelayMs: number;
   maxDelayMs: number;
+  /** Never more than `maxAttempts`. */
+  connectionLostMaxAttempts: number;
 }
 
 export function isTransientDurableObjectError(err: unknown): boolean {
@@ -89,11 +99,7 @@ export function isRetryableForIdempotentDurableObjectOperation(err: unknown): bo
  * failures without echoing error text. `null` means "not a platform-level object failure".
  */
 export type DurableObjectErrorClass =
-  | 'storage_full'
-  | 'cpu_limit_reset'
-  | 'connection_lost'
-  | 'transient'
-  | null;
+  'storage_full' | 'cpu_limit_reset' | 'connection_lost' | 'transient' | null;
 
 export function classifyDurableObjectError(err: unknown): DurableObjectErrorClass {
   if (isDurableObjectStorageFullError(err)) return 'storage_full';
@@ -104,10 +110,18 @@ export function classifyDurableObjectError(err: unknown): DurableObjectErrorClas
 }
 
 export function getDurableObjectRetryConfig(env: DurableObjectRetryEnv): DurableObjectRetryConfig {
+  const maxAttempts = parsePositiveInt(env.DO_RETRY_MAX_ATTEMPTS, DEFAULT_DO_RETRY_MAX_ATTEMPTS);
   return {
-    maxAttempts: parsePositiveInt(env.DO_RETRY_MAX_ATTEMPTS, DEFAULT_DO_RETRY_MAX_ATTEMPTS),
+    maxAttempts,
     baseDelayMs: parsePositiveInt(env.DO_RETRY_BASE_DELAY_MS, DEFAULT_DO_RETRY_BASE_DELAY_MS),
     maxDelayMs: parsePositiveInt(env.DO_RETRY_MAX_DELAY_MS, DEFAULT_DO_RETRY_MAX_DELAY_MS),
+    connectionLostMaxAttempts: Math.min(
+      maxAttempts,
+      parsePositiveInt(
+        env.DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS,
+        DEFAULT_DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS
+      )
+    ),
   };
 }
 

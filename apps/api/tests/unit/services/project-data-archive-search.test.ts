@@ -4,10 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { MessageSearchCoverage } from '../../../src/durable-objects/project-data/message-search';
 import type { Env } from '../../../src/env';
-import {
-  describeRootSearchCoverage,
-  searchMessagesWithArchiveMetadata,
-} from '../../../src/services/project-data';
+import { searchMessagesWithArchiveMetadata } from '../../../src/services/project-data';
+import { describeRootSearchCoverage } from '../../../src/services/project-data-search-coverage';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 type SearchRow = {

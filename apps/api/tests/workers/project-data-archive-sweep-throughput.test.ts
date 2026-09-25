@@ -307,14 +307,18 @@ async function expectTranscriptPreserved(
   }
 
   // Search resolves through the archive shard, session-scoped and project-wide.
-  const scoped = await projectDataService.searchMessages(
+  const { results: scoped } = await projectDataService.searchMessagesWithArchiveMetadata(
     testEnv,
     projectId,
     'assistant',
     sessionId
   );
   expect(scoped.length).toBeGreaterThan(0);
-  const projectWide = await projectDataService.searchMessages(testEnv, projectId, 'assistant');
+  const { results: projectWide } = await projectDataService.searchMessagesWithArchiveMetadata(
+    testEnv,
+    projectId,
+    'assistant'
+  );
   expect(projectWide.some((row) => row.sessionId === sessionId)).toBe(true);
 }
 

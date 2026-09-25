@@ -3778,7 +3778,6 @@ export function archiveSourceSearchMessagesWithCoverage(
   return messages.searchMessagesWithCoverage(sql, query, input.sessionId, roles, limit, bounds);
 }
 
-
 export async function archiveTargetReadMessages(
   sql: SqlStorage,
   env: Env,

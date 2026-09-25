@@ -872,6 +872,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   DO_RETRY_MAX_ATTEMPTS?: string;
   DO_RETRY_BASE_DELAY_MS?: string;
   DO_RETRY_MAX_DELAY_MS?: string;
+  DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS?: string;
   // Max per-isolate memo entries for ProjectData DOs with a persisted projectId
   PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES?: string;
   /**

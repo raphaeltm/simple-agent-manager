@@ -5,6 +5,7 @@
  */
 import type { Env } from '../../env';
 import * as projectDataService from '../../services/project-data';
+import { describeRootSearchCoverage } from '../../services/project-data-search-coverage';
 import { getWorkspaceResourceHistory } from '../../services/workspace-resource-history';
 import {
   getMcpLimits,
@@ -282,7 +283,7 @@ export async function handleSearchMessages(
             query,
             archiveSearch: search.archiveSearch,
             rootSearch: search.rootSearch,
-            coverageNotes: projectDataService.describeRootSearchCoverage(search.rootSearch),
+            coverageNotes: describeRootSearchCoverage(search.rootSearch),
           },
           null,
           2

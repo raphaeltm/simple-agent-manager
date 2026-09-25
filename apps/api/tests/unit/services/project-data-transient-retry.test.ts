@@ -3,11 +3,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import {
   forwardWebSocket,
+  getMessages,
   getSession,
   getSessionState,
   linkSessionToTask,
   listSessions,
 } from '../../../src/services/project-data';
+import {
+  PROJECT_DATA_UNAVAILABLE,
+  ProjectDataUnavailableError,
+} from '../../../src/services/project-data-rpc-retry';
 
 function transientReset(): Error {
   return new Error(
@@ -34,7 +39,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function envForStub(stub: Record<string, unknown>): Env {
+function envForStub(stub: Record<string, unknown>, overrides: Record<string, string> = {}): Env {
   return {
     PROJECT_DATA: {
       idFromName: vi.fn((projectId: string) => ({
@@ -45,6 +50,7 @@ function envForStub(stub: Record<string, unknown>): Env {
     DO_RETRY_MAX_ATTEMPTS: '2',
     DO_RETRY_BASE_DELAY_MS: '1',
     DO_RETRY_MAX_DELAY_MS: '1',
+    ...overrides,
   } as unknown as Env;
 }
 
@@ -157,9 +163,17 @@ describe('ProjectData transient retry wrappers', () => {
       getSession: getSessionMock,
     };
 
-    await expect(getSession(envForStub(stub), 'project-1', 'session-1')).rejects.toThrow(
-      'exceeded its CPU time limit'
+    const error = await getSession(envForStub(stub), 'project-1', 'session-1').catch(
+      (err: unknown) => err
     );
+    // A stable, retryable 503 rather than the platform's text.
+    expect(error).toBeInstanceOf(ProjectDataUnavailableError);
+    expect(error).toMatchObject({
+      statusCode: 503,
+      error: PROJECT_DATA_UNAVAILABLE,
+      details: { projectId: 'project-1', operation: 'getSession', errorClass: 'cpu_limit_reset' },
+    });
+    expect((error as Error).message).not.toContain('CPU time limit');
     // DO_RETRY_MAX_ATTEMPTS = 2 in envForStub.
     expect(getSessionMock).toHaveBeenCalledTimes(2);
     expect(loggedEvents(warnSpy, 'project_data.do_rpc_retry_exhausted')).toEqual([
@@ -169,6 +183,64 @@ describe('ProjectData transient retry wrappers', () => {
         errorClass: 'cpu_limit_reset',
       }),
     ]);
+  });
+
+  it('retries a CPU-limit reset on the per-owner message read as well', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const page = { messages: [{ id: 'm1' }], hasMore: false };
+    const readMock = vi.fn().mockRejectedValueOnce(cpuLimitReset()).mockResolvedValueOnce(page);
+    const stub = {
+      ensureProjectId: vi.fn().mockResolvedValue(undefined),
+      archiveSourceGetMessages: readMock,
+    };
+
+    await expect(getMessages(envForStub(stub), 'project-1', 'session-1')).resolves.toEqual(page);
+    expect(readMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up on a lost connection sooner than on other retryable failures', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const getSessionMock = vi.fn().mockRejectedValue(connectionLost());
+    const stub = {
+      ensureProjectId: vi.fn().mockResolvedValue(undefined),
+      getSession: getSessionMock,
+    };
+
+    const error = await getSession(
+      envForStub(stub, { DO_RETRY_MAX_ATTEMPTS: '8' }),
+      'project-1',
+      'session-1'
+    ).catch((err: unknown) => err);
+
+    expect(error).toMatchObject({
+      statusCode: 503,
+      details: { errorClass: 'connection_lost' },
+    });
+    // DEFAULT_DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS = 3, well inside the general budget of 8.
+    expect(getSessionMock).toHaveBeenCalledTimes(3);
+    expect(loggedEvents(warnSpy, 'project_data.do_rpc_retry_exhausted')).toEqual([
+      expect.objectContaining({ attempts: 3, errorClass: 'connection_lost' }),
+    ]);
+  });
+
+  it('keeps the full budget and the raw error for other retryable failures (control)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const getSessionMock = vi.fn().mockRejectedValue(transientReset());
+    const stub = {
+      ensureProjectId: vi.fn().mockResolvedValue(undefined),
+      getSession: getSessionMock,
+    };
+
+    const error = await getSession(
+      envForStub(stub, { DO_RETRY_MAX_ATTEMPTS: '8' }),
+      'project-1',
+      'session-1'
+    ).catch((err: unknown) => err);
+
+    expect(error).not.toBeInstanceOf(ProjectDataUnavailableError);
+    expect((error as Error).message).toContain('exceeded timeout');
+    expect(getSessionMock).toHaveBeenCalledTimes(8);
   });
 
   it('never repeats a mutation whose outcome a CPU reset or lost connection made ambiguous', async () => {

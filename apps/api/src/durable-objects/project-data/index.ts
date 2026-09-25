@@ -3062,10 +3062,13 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   /**
-   * `consumed` lists alarm sections that just ran, so their remembered due time is replaced rather
-   * than kept; every other caller only ever moves a section's remembered due time earlier.
+   * `consumed` maps alarm sections that just ran to when each started, so their remembered due time
+   * is replaced rather than kept; every other caller only ever moves a section's remembered due
+   * time earlier.
    */
-  private async recalculateAlarm(consumed?: ReadonlySet<ProjectDataAlarmSection>): Promise<void> {
+  private async recalculateAlarm(
+    consumed?: ReadonlyMap<ProjectDataAlarmSection, number>
+  ): Promise<void> {
     const times = computeProjectDataAlarmSectionTimes(this.sql, this.env);
     this.alarmSections.observe(times, consumed);
     // The scheduler's memory already holds every fresh time (min-folded) plus the retry floor of

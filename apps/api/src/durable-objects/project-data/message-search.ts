@@ -11,25 +11,35 @@
  * See `tasks/active/2026-09-25-projectdata-root-overload.md`.
  *
  * Both halves now examine a bounded window:
- * - Full-text: bm25 ranks only the newest `ftsCandidateLimit` matching grouped rows. When fewer
- *   match, every match is ranked, exactly as before. A session-scoped search counts only that
- *   session's matches, walking at most `ftsScanLimit` newer index entries to find them.
+ * - Full-text: bm25 ranks only the newest `ftsCandidateLimit` matching grouped rows, scored in the
+ *   one scan that finds them. When fewer match, every match is ranked, exactly as before. A
+ *   session-scoped search counts only that session's matches, examining at most `ftsScanLimit`
+ *   index entries inside the session's rowid span. (bm25's IDF count and the step over newer
+ *   matches outside a session's span stay linear in the term's matches; see `searchMessagesFts`.)
  * - Keyword fallback: scans only the newest `keywordScanRowLimit` raw rows — project-wide by rowid
  *   (insertion order), session-scoped by that session's own newest rows.
  *
  * A consumer cannot notice what it was never shown, so every search reports `coverage`, and callers
  * surface it (`.claude/rules/65`).
  */
-import { buildSafeFtsQuery } from '../../lib/fts5';
+import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { parseSearchResultRow, type SearchResultParsed } from './row-schemas';
+import {
+  appendRoleCondition,
+  buildFtsQuery,
+  mapSearchRows,
+  type SearchResult,
+} from './message-search-rows';
+
+export type { SearchResult } from './message-search-rows';
+export { buildFtsQuery, extractSnippet } from './message-search-rows';
 
 /** Newest full-text matches ranked by bm25. Older matches are not ranked. */
 export const DEFAULT_PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT = 2_000;
 /**
- * Full-text index entries a session-scoped search may walk (newest first, inside the session's
- * rowid span) while collecting that session's newest `ftsCandidateLimit` matches.
+ * Full-text index entries inside a session's rowid span that a session-scoped search examines
+ * (newest first) while collecting that session's newest `ftsCandidateLimit` matches.
  */
 export const DEFAULT_PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT = 20_000;
 /** Newest raw messages the keyword fallback examines. Older rows are not scanned. */
@@ -68,16 +78,6 @@ export function resolveMessageSearchBounds(env: MessageSearchBoundsEnv): Message
     ),
   };
 }
-
-export type SearchResult = {
-  id: string;
-  sessionId: string;
-  role: string;
-  snippet: string;
-  createdAt: number;
-  sessionTopic: string | null;
-  sessionTaskId: string | null;
-};
 
 /**
  * What a search did NOT look at. `*Truncated` is true only when rows outside the window exist, so
@@ -150,6 +150,28 @@ interface RowidSpan {
   hi: number;
 }
 
+/** A full-text match inside the candidate window, scored while the index was walked. */
+interface FtsCandidate {
+  rid: number;
+  score: number;
+  role: unknown;
+}
+
+interface FtsCandidateWindow {
+  candidates: FtsCandidate[];
+  truncated: boolean;
+}
+
+/**
+ * Full-text ranking over a window of the newest matches.
+ *
+ * bm25 is computed inside a newest-first scan that `LIMIT` stops, so rows past the window are never
+ * visited by this statement; ranking and the row reads that follow touch only the window. What no
+ * window can bound: bm25 counts every match of each phrase once per query for its IDF, and a
+ * session-scoped scan must step over the newer matches of other sessions to reach its span. Both
+ * are linear in the term's matches at tens of nanoseconds each (~30-60 ms for 500 K matches,
+ * measured) — the per-match scoring, joins and content reads this replaced cost 25-32 s.
+ */
 function searchMessagesFts(
   sql: SqlStorage,
   query: string,
@@ -162,63 +184,32 @@ function searchMessagesFts(
   if (!ftsQuery) return { results: [], truncated: false };
 
   try {
-    let span: RowidSpan | null = null;
     let window: FtsCandidateWindow;
     if (sessionId) {
       // A session's grouped rows are written by its own materialization passes, so every one of
       // them sits inside this span. Newer matches past its end can never belong to it.
-      span = readGroupedRowidSpan(sql, sessionId);
+      const span = readGroupedRowidSpan(sql, sessionId);
       if (!span) return { results: [], truncated: false };
       window = readSessionFtsCandidateWindow(sql, ftsQuery, sessionId, span, bounds);
     } else {
       window = readProjectFtsCandidateWindow(sql, ftsQuery, bounds.ftsCandidateLimit);
     }
 
-    const conditions: string[] = ['f.chat_messages_grouped_fts MATCH ?'];
-    const params: (string | number)[] = [ftsQuery];
-    if (span) {
-      // Both ends, always: without the lower one a session whose window is not full would let
-      // FTS5 walk every older match in the project.
-      conditions.push('f.rowid BETWEEN ? AND ?', 'm.session_id = ?');
-      params.push(window.floorRowid ?? span.lo, span.hi, sessionId as string);
-    } else if (window.floorRowid !== null) {
-      conditions.push('f.rowid >= ?');
-      params.push(window.floorRowid);
-    }
-    appendRoleCondition(conditions, params, roles);
-    params.push(limit);
-
-    // bm25() is the default FTS5 `rank`. Naming it lets the window above stay a rowid range the
-    // virtual table consumes (plan `INDEX 0:M1>`) instead of `ORDER BY rank` asking FTS5 to score
-    // every match first. Ties break on recency, then id, so repeated calls agree.
-    const rows = sql
-      .exec(
-        `SELECT m.id, m.session_id, m.role, m.content, m.created_at,
-                s.topic AS session_topic, s.task_id AS session_task_id,
-                bm25(chat_messages_grouped_fts) AS score
-         FROM chat_messages_grouped_fts f
-         JOIN chat_messages_grouped m ON m.rowid = f.rowid
-         JOIN chat_sessions s ON s.id = m.session_id
-         WHERE ${conditions.join(' AND ')}
-         ORDER BY score, m.created_at DESC, m.id
-         LIMIT ?`,
-        ...params
-      )
-      .toArray();
-    return { results: mapSearchRows(rows, query, 'fts'), truncated: window.truncated };
+    // Ties break on ascending rowid — exactly what `ORDER BY rank` returned, and what the archive
+    // shard's `searchArchiveProjection` still returns — so a session reads the same results before
+    // and after it is archived.
+    const ranked = window.candidates
+      .filter((candidate) => !roles?.length || roles.includes(String(candidate.role)))
+      .sort((a, b) => a.score - b.score || a.rid - b.rid)
+      .slice(0, limit);
+    return {
+      results: mapSearchRows(readGroupedRowsInOrder(sql, ranked), query, 'fts'),
+      truncated: window.truncated,
+    };
   } catch (e) {
     log.error('messages.fts5_search_failed', { error: String(e) });
     return { results: [], truncated: false };
   }
-}
-
-/**
- * `floorRowid` is the oldest rowid the ranked query may consider; `null` leaves it unconstrained,
- * which is exactly the pre-window behavior and happens whenever fewer matches exist than the window.
- */
-interface FtsCandidateWindow {
-  floorRowid: number | null;
-  truncated: boolean;
 }
 
 function readGroupedRowidSpan(sql: SqlStorage, sessionId: string): RowidSpan | null {
@@ -233,34 +224,39 @@ function readGroupedRowidSpan(sql: SqlStorage, sessionId: string): RowidSpan | n
     : null;
 }
 
-/** Walks the doclist newest first — no scoring, no joins — to the window's oldest entry. */
+/** The newest `candidateLimit` matches; one extra row only says that older matches exist. */
 function readProjectFtsCandidateWindow(
   sql: SqlStorage,
   ftsQuery: string,
   candidateLimit: number
 ): FtsCandidateWindow {
-  // The row at OFFSET limit-1 is the oldest one inside the window; a second row means more
-  // matches exist than the window ranks.
   const rows = sql
     .exec(
-      `SELECT rowid AS rid FROM chat_messages_grouped_fts
-       WHERE chat_messages_grouped_fts MATCH ?
-       ORDER BY rowid DESC
-       LIMIT 2 OFFSET ?`,
+      `SELECT w.rid AS rid, w.score AS score, m.role AS role
+       FROM (
+         SELECT rowid AS rid, bm25(chat_messages_grouped_fts) AS score
+         FROM chat_messages_grouped_fts
+         WHERE chat_messages_grouped_fts MATCH ?
+         ORDER BY rowid DESC
+         LIMIT ?
+       ) w
+       JOIN chat_messages_grouped m ON m.rowid = w.rid
+       ORDER BY w.rid DESC`,
       ftsQuery,
-      candidateLimit - 1
+      candidateLimit + 1
     )
     .toArray();
-  const floor = rows[0]?.rid;
-  if (typeof floor !== 'number' || rows.length < 2) return { floorRowid: null, truncated: false };
-  return { floorRowid: floor, truncated: true };
+  return {
+    candidates: toFtsCandidates(rows.slice(0, candidateLimit)),
+    truncated: rows.length > candidateLimit,
+  };
 }
 
 /**
  * A session's matches are interleaved with other sessions' rows inside its span, so counting raw
- * doclist entries would spend the window on other sessions. This walks at most `ftsScanLimit`
- * entries newest first and keeps only this session's, so the window is the session's newest
- * `ftsCandidateLimit` matches unless the scan cap is reached first.
+ * index entries would spend the window on other sessions. This examines at most `ftsScanLimit`
+ * entries of the span, newest first, and keeps only this session's, so the window is the
+ * session's newest `ftsCandidateLimit` matches unless the scan cap is reached first.
  */
 function readSessionFtsCandidateWindow(
   sql: SqlStorage,
@@ -271,9 +267,11 @@ function readSessionFtsCandidateWindow(
 ): FtsCandidateWindow {
   const rows = sql
     .exec(
-      `SELECT scanned.rid AS rid, m.session_id = ? AS in_session
+      `SELECT scanned.rid AS rid, scanned.score AS score, m.role AS role,
+              m.session_id = ? AS in_session
        FROM (
-         SELECT rowid AS rid FROM chat_messages_grouped_fts
+         SELECT rowid AS rid, bm25(chat_messages_grouped_fts) AS score
+         FROM chat_messages_grouped_fts
          WHERE chat_messages_grouped_fts MATCH ? AND rowid BETWEEN ? AND ?
          ORDER BY rowid DESC
          LIMIT ?
@@ -289,21 +287,52 @@ function readSessionFtsCandidateWindow(
     .toArray();
   const scanCapped = rows.length > bounds.ftsScanLimit;
   const scanned = scanCapped ? rows.slice(0, bounds.ftsScanLimit) : rows;
-  let sessionMatches = 0;
-  for (let i = 0; i < scanned.length; i++) {
-    const row = scanned[i];
-    if (row?.in_session !== 1 || typeof row.rid !== 'number') continue;
-    sessionMatches++;
-    if (sessionMatches < bounds.ftsCandidateLimit) continue;
-    // A full window. More of this session's matches may sit in the unscanned remainder, so a
-    // capped scan must report truncation even if none appear in what was scanned.
-    const moreInScan = scanned.slice(i + 1).some((older) => older?.in_session === 1);
-    return { floorRowid: row.rid, truncated: moreInScan || scanCapped };
+  const inSession = scanned.filter((row) => row.in_session === 1);
+  // More of this session's matches may sit in the unscanned remainder, so a capped scan reports
+  // truncation even when the window did not fill.
+  return {
+    candidates: toFtsCandidates(inSession.slice(0, bounds.ftsCandidateLimit)),
+    truncated: scanCapped || inSession.length > bounds.ftsCandidateLimit,
+  };
+}
+
+function toFtsCandidates(rows: Record<string, unknown>[]): FtsCandidate[] {
+  const candidates: FtsCandidate[] = [];
+  for (const row of rows) {
+    if (typeof row.rid !== 'number' || typeof row.score !== 'number') continue;
+    candidates.push({ rid: row.rid, score: row.score, role: row.role });
   }
-  const oldestScanned = scanned[scanned.length - 1]?.rid;
-  return scanCapped && typeof oldestScanned === 'number'
-    ? { floorRowid: oldestScanned, truncated: true }
-    : { floorRowid: null, truncated: false };
+  return candidates;
+}
+
+/** Result rows for the ranked candidates, in rank order, within the bound-parameter ceiling. */
+function readGroupedRowsInOrder(
+  sql: SqlStorage,
+  ranked: readonly FtsCandidate[]
+): Record<string, unknown>[] {
+  const byRid = new Map<number, Record<string, unknown>>();
+  for (let start = 0; start < ranked.length; start += D1_MAX_BOUND_PARAMETERS) {
+    const rids = ranked.slice(start, start + D1_MAX_BOUND_PARAMETERS).map((c) => c.rid);
+    const rows = sql
+      .exec(
+        `SELECT m.rowid AS rid, m.id, m.session_id, m.role, m.content, m.created_at,
+                s.topic AS session_topic, s.task_id AS session_task_id
+         FROM chat_messages_grouped m
+         JOIN chat_sessions s ON s.id = m.session_id
+         WHERE m.rowid IN (${rids.map(() => '?').join(', ')})`,
+        ...rids
+      )
+      .toArray();
+    for (const row of rows) {
+      if (typeof row.rid === 'number') byRid.set(row.rid, row);
+    }
+  }
+  const ordered: Record<string, unknown>[] = [];
+  for (const candidate of ranked) {
+    const row = byRid.get(candidate.rid);
+    if (row) ordered.push(row);
+  }
+  return ordered;
 }
 
 /**
@@ -439,62 +468,4 @@ function readSessionKeywordWindow(
     )
     .toArray()[0];
   return { floorCreatedAt, truncated: older !== undefined };
-}
-
-function appendRoleCondition(
-  conditions: string[],
-  params: (string | number)[],
-  roles: string[] | null
-): void {
-  if (!roles || roles.length === 0) return;
-  conditions.push(`m.role IN (${roles.map(() => '?').join(', ')})`);
-  params.push(...roles);
-}
-
-/** One malformed row degrades to a missing result, never a failed search (`.claude/rules/50`). */
-function mapSearchRows(
-  rows: Record<string, unknown>[],
-  query: string,
-  source: 'fts' | 'keyword'
-): SearchResult[] {
-  const results: SearchResult[] = [];
-  for (const row of rows) {
-    try {
-      results.push(toSearchResult(parseSearchResultRow(row), query));
-    } catch (error) {
-      log.warn('messages.search_row_skipped', {
-        source,
-        messageId: typeof row.id === 'string' ? row.id : null,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  return results;
-}
-
-function toSearchResult(parsed: SearchResultParsed, query: string): SearchResult {
-  return {
-    id: parsed.id,
-    sessionId: parsed.sessionId,
-    role: parsed.role,
-    snippet: extractSnippet(parsed.content, query),
-    createdAt: parsed.createdAt,
-    sessionTopic: parsed.sessionTopic,
-    sessionTaskId: parsed.sessionTaskId,
-  };
-}
-
-export function buildFtsQuery(query: string): string | null {
-  return buildSafeFtsQuery(query);
-}
-
-export function extractSnippet(content: string, query: string): string {
-  const lowerContent = content.toLowerCase();
-  const matchIdx = lowerContent.indexOf(query.toLowerCase());
-  if (matchIdx === -1) {
-    return content.slice(0, 200) + (content.length > 200 ? '...' : '');
-  }
-  const start = Math.max(0, matchIdx - 80);
-  const end = Math.min(content.length, matchIdx + query.length + 120);
-  return (start > 0 ? '...' : '') + content.slice(start, end) + (end < content.length ? '...' : '');
 }

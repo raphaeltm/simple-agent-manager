@@ -102,28 +102,44 @@ export class ProjectDataAlarmSectionScheduler {
   private lastFullRunAt: number | null = null;
 
   /**
-   * Fold a fresh schedule computation in. Sections in `consumed` just ran, so their memory is
-   * replaced; every other section keeps the earlier of its remembered and fresh time.
+   * Fold a fresh schedule computation in. Every section not in `consumed` keeps the earlier of its
+   * remembered and fresh time. A section in `consumed` ran, starting at the mapped time, so its
+   * memory is replaced — except for a remembered due time that fell between that start and `now`.
+   * The run looked at state before that deadline arrived, and a recomputation after it passes is
+   * clamped (heartbeat: a whole detection window later), so it stays due until a run starts after
+   * it. A failed section is then held off until its retry floor.
    */
   observe(
     times: ProjectDataAlarmSectionTimes,
-    consumed: ReadonlySet<ProjectDataAlarmSection> = new Set(),
+    consumed: ReadonlyMap<ProjectDataAlarmSection, number> = new Map(),
     now: number = Date.now()
   ): void {
     for (const section of PROJECT_DATA_ALARM_SECTIONS) {
-      let fresh = times[section];
+      const fresh = times[section];
+      const remembered = this.pending.get(section);
+      const startedAt = consumed.get(section);
+      let next: number | null;
+      if (startedAt === undefined) {
+        next =
+          remembered === undefined
+            ? fresh
+            : fresh === null
+              ? remembered
+              : Math.min(remembered, fresh);
+      } else {
+        const unexamined =
+          remembered !== undefined &&
+          remembered >= startedAt &&
+          remembered <= now &&
+          fresh !== null &&
+          fresh > remembered;
+        next = unexamined ? remembered : fresh;
+      }
       const failedUntil = this.failedUntil.get(section);
       if (failedUntil !== undefined) {
         if (failedUntil <= now) this.failedUntil.delete(section);
-        else if (fresh !== null) fresh = Math.max(fresh, failedUntil);
+        else if (next !== null) next = Math.max(next, failedUntil);
       }
-      const remembered = this.pending.get(section);
-      const next =
-        consumed.has(section) || remembered === undefined
-          ? fresh
-          : fresh === null
-            ? remembered
-            : Math.min(remembered, fresh);
       if (next === null) this.pending.delete(section);
       else this.pending.set(section, next);
     }
@@ -202,9 +218,9 @@ export interface SqlRowMeter {
 }
 
 /**
- * Wraps `SqlStorage` so cursors opened while a meter is active are counted. Only `exec` and
- * `databaseSize` are used by ProjectData; the cast is confined to this boundary. Work that
- * interleaves during an awaiting section's I/O is counted toward that section.
+ * Wraps `SqlStorage` so cursors opened while a meter is active are counted. Every member is
+ * forwarded — `exec` is the only one that observes anything — so the cast stays confined to this
+ * boundary. Work that interleaves during an awaiting section's I/O is counted toward that section.
  */
 export function createRowMeteredSqlStorage(sql: SqlStorage): {
   sql: SqlStorage;
@@ -219,6 +235,12 @@ export function createRowMeteredSqlStorage(sql: SqlStorage): {
     },
     get databaseSize() {
       return sql.databaseSize;
+    },
+    get Cursor() {
+      return sql.Cursor;
+    },
+    get Statement() {
+      return sql.Statement;
     },
   };
   return {
@@ -247,6 +269,8 @@ export type ProjectDataAlarmSectionStatus = 'ran' | 'skipped_not_due' | 'failed'
 export interface ProjectDataAlarmSectionOutcome extends SqlRowCounts {
   section: ProjectDataAlarmSection;
   status: ProjectDataAlarmSectionStatus;
+  /** When the section began looking at state; `null` when it was skipped. */
+  startedAt: number | null;
   /** Wall time; advances only across awaited I/O (see `SqlRowMeter`). */
   durationMs: number;
   error?: string;
@@ -277,6 +301,7 @@ export class ProjectDataAlarmTick {
       this.outcomes.push({
         section,
         status: 'skipped_not_due',
+        startedAt: null,
         durationMs: 0,
         rowsRead: 0,
         rowsWritten: 0,
@@ -307,6 +332,7 @@ export class ProjectDataAlarmTick {
     this.outcomes.push({
       section,
       status,
+      startedAt,
       durationMs: Date.now() - startedAt,
       ...rows,
       ...(error ? { error } : {}),
@@ -314,11 +340,13 @@ export class ProjectDataAlarmTick {
     this.plan.cascadeFrom(section);
   }
 
-  /** Sections whose remembered due time the next recalculation must replace. */
-  consumedSections(): Set<ProjectDataAlarmSection> {
-    return new Set(
-      this.outcomes.filter((o) => o.status !== 'skipped_not_due').map((o) => o.section)
-    );
+  /** Sections that ran (or failed) this tick, with when each began — see `observe`. */
+  consumedSections(): Map<ProjectDataAlarmSection, number> {
+    const consumed = new Map<ProjectDataAlarmSection, number>();
+    for (const outcome of this.outcomes) {
+      if (outcome.startedAt !== null) consumed.set(outcome.section, outcome.startedAt);
+    }
+    return consumed;
   }
 
   complete(projectId: string | null): void {

@@ -7,7 +7,12 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { PROJECT_DATA_ALARM_SECTIONS } from '../../src/durable-objects/project-data/alarm-schedule';
+import {
+  computeProjectDataAlarmSectionTimes,
+  PROJECT_DATA_ALARM_FAILED_SECTION_RETRY_MS,
+  PROJECT_DATA_ALARM_SECTIONS,
+} from '../../src/durable-objects/project-data/alarm-schedule';
+import type { Env } from '../../src/durable-objects/project-data/types';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 type Completion = {
@@ -94,5 +99,121 @@ describe('ProjectData alarm sections', () => {
     const last = completions(logSpy, projectId).at(-1);
     expect(last).toMatchObject({ mode: 'full', fullRunReason: 'gating_disabled' });
     expect(last?.ranSections).toContain('storage_safety');
+  });
+
+  it('runs everything when the schedule cannot be computed at the start of a tick', async () => {
+    const logSpy = vi.spyOn(console, 'log');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const projectId = `alarm-sections-unscheduled-${crypto.randomUUID()}`;
+    const stub = stubFor(projectId);
+    await stub.ensureProjectId(projectId);
+
+    const outcome = await runInDurableObject(stub, async (instance, state) => {
+      await instance.alarm();
+      // Only the ticks below run while the stored id is broken.
+      await state.storage.deleteAlarm();
+      // Every section's schedule reads the stored project id first; a value that is not text
+      // makes the whole computation throw. (The instance keeps its cached id for the sections.)
+      state.storage.sql.exec(`UPDATE do_meta SET value = X'00' WHERE key = 'projectId'`);
+      try {
+        await instance.alarm();
+        return 'resolved';
+      } catch {
+        // The closing recalculation fails the same way; the platform retries the alarm.
+        return 'rejected';
+      } finally {
+        state.storage.sql.exec(`UPDATE do_meta SET value = ? WHERE key = 'projectId'`, projectId);
+      }
+    });
+
+    expect(outcome).toBe('rejected');
+    const last = completions(logSpy, projectId).at(-1);
+    expect(last).toMatchObject({ mode: 'full', fullRunReason: 'schedule_unavailable' });
+    expect([...(last?.ranSections ?? []), ...(last?.failedSections ?? [])].sort()).toEqual(
+      [...PROJECT_DATA_ALARM_SECTIONS].sort()
+    );
+  });
+
+  it("isolates one section's broken schedule and run from every other section", async () => {
+    const logSpy = vi.spyOn(console, 'log');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const projectId = `alarm-sections-isolated-${crypto.randomUUID()}`;
+    const stub = stubFor(projectId);
+    await stub.ensureProjectId(projectId);
+
+    const result = await runInDurableObject(stub, async (instance, state) => {
+      const instanceEnv = (instance as unknown as { env: Env & Record<string, string | undefined> })
+        .env;
+      const now = Date.now();
+      await state.storage.deleteAlarm();
+      const before = computeProjectDataAlarmSectionTimes(state.storage.sql, instanceEnv, now);
+      state.storage.sql.exec(
+        'ALTER TABLE task_wait_subscriptions RENAME TO task_wait_subscriptions_hidden'
+      );
+      instanceEnv.PROJECT_DATA_ALARM_SECTION_GATING_ENABLED = 'false';
+      try {
+        const broken = computeProjectDataAlarmSectionTimes(state.storage.sql, instanceEnv, now);
+        await instance.alarm();
+        return { before, broken, now };
+      } finally {
+        delete instanceEnv.PROJECT_DATA_ALARM_SECTION_GATING_ENABLED;
+        state.storage.sql.exec(
+          'ALTER TABLE task_wait_subscriptions_hidden RENAME TO task_wait_subscriptions'
+        );
+      }
+    });
+
+    // The broken section is retried after the floor; every other schedule is untouched (a few
+    // read the live clock rather than `now`, so allow the milliseconds between the two reads).
+    expect(result.broken.task_waits).toBe(result.now + PROJECT_DATA_ALARM_FAILED_SECTION_RETRY_MS);
+    for (const section of PROJECT_DATA_ALARM_SECTIONS) {
+      if (section === 'task_waits') continue;
+      const [before, broken] = [result.before[section], result.broken[section]];
+      if (before === null) expect(broken).toBeNull();
+      else expect(Math.abs((broken ?? Number.NaN) - before)).toBeLessThan(1_000);
+    }
+    // Its run fails alone: the sections after it still ran in the same tick.
+    const last = completions(logSpy, projectId).at(-1);
+    expect(last?.failedSections).toEqual(['task_waits']);
+    expect(last?.ranSections).toEqual(
+      PROJECT_DATA_ALARM_SECTIONS.filter((section) => section !== 'task_waits')
+    );
+  });
+
+  it('a wait that comes due runs prompt delivery in the same gated tick', async () => {
+    const logSpy = vi.spyOn(console, 'log');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const projectId = `alarm-sections-cascade-${crypto.randomUUID()}`;
+    const stub = stubFor(projectId);
+    await stub.ensureProjectId(projectId);
+
+    await runInDurableObject(stub, async (instance, state) => {
+      await instance.alarm();
+      const now = Date.now();
+      state.storage.sql.exec(
+        `INSERT INTO task_wait_subscriptions
+           (id, parent_task_id, parent_session_id, wait_condition, state, child_count,
+            wake_deadline, next_reconcile_at, wake_delivery_id, created_at, updated_at)
+         VALUES (?, 'parent-task', 'parent-session', 'all', 'active', 1, ?, ?, ?, ?, ?)`,
+        crypto.randomUUID(),
+        now + 24 * 60 * 60 * 1000,
+        now + 50,
+        crypto.randomUUID(),
+        now,
+        now
+      );
+      // A write recalculates the alarm; the tick below stands in for the alarm it armed.
+      await (instance as unknown as { recalculateAlarm(): Promise<void> }).recalculateAlarm();
+      await state.storage.deleteAlarm();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await instance.alarm();
+    });
+
+    const last = completions(logSpy, projectId).at(-1);
+    expect(last).toMatchObject({ mode: 'gated', fullRunReason: null });
+    expect([...(last?.ranSections ?? []), ...(last?.failedSections ?? [])]).toContain('task_waits');
+    // Prompt delivery has nothing of its own scheduled; it runs because the wait section did.
+    expect(last?.ranSections).toContain('prompt_delivery');
+    expect(last?.skippedSections).toContain('storage_safety');
   });
 });

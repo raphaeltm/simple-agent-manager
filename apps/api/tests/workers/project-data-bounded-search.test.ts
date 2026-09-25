@@ -69,6 +69,24 @@ function insertMessage(sql: SqlStorage, sessionId: string, role: string, content
   );
 }
 
+/** Indexed (grouped + full-text) rows written directly, so a test can hold thousands of them. */
+function indexedRows(sql: SqlStorage, sessionId: string, count: number, text: string): void {
+  for (let i = 0; i < count; i++) {
+    sql.exec(
+      `INSERT INTO chat_messages_grouped (id, session_id, role, content, created_at)
+       VALUES (?, ?, 'user', ?, ?)`,
+      crypto.randomUUID(),
+      sessionId,
+      `${text} ${i}`,
+      nextTime()
+    );
+  }
+}
+
+function rebuildFullTextIndex(sql: SqlStorage): void {
+  sql.exec(`INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts) VALUES('rebuild')`);
+}
+
 function fillerRows(sql: SqlStorage, sessionId: string, count: number): void {
   for (let i = 0; i < count; i++) insertMessage(sql, sessionId, 'user', `routine update ${i}`);
 }
@@ -187,6 +205,58 @@ describe('bounded ProjectData message search', () => {
       // Control: a window larger than the matches ranks all of them and reports no truncation.
       expect(complete.results).toHaveLength(6);
       expect(complete.coverage.ftsCandidatesTruncated).toBe(false);
+    });
+  });
+
+  it('full-text search reads only its window, however many rows match', async () => {
+    const stub = freshStub();
+    await stub.ensureProjectId(`bounded-search-${crypto.randomUUID()}`);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const sql = state.storage.sql;
+      insertSession(sql, 'busy', 'stopped');
+      indexedRows(sql, 'busy', 3_000, 'zymurgy note');
+      rebuildFullTextIndex(sql);
+
+      const bounded = meteredSearch(sql, 'zymurgy', null, { ...WIDE, ftsCandidateLimit: 50 });
+      const unbounded = meteredSearch(sql, 'zymurgy', null, WIDE);
+
+      expect(bounded.results).toHaveLength(10);
+      expect(bounded.coverage).toMatchObject({
+        ftsCandidatesTruncated: true,
+        keywordFallbackRan: false,
+      });
+      // The shape that keeps CPU bounded: the window plus the rows returned, not every match.
+      expect(bounded.rowsRead).toBeLessThan(500);
+      // Control: a window as large as the match set reads every match.
+      expect(unbounded.rowsRead).toBeGreaterThan(3_000);
+      expect(unbounded.coverage.ftsCandidatesTruncated).toBe(false);
+    });
+  });
+
+  it('a session-scoped full-text search walks the index once', async () => {
+    const stub = freshStub();
+    await stub.ensureProjectId(`bounded-search-${crypto.randomUUID()}`);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const sql = state.storage.sql;
+      insertSession(sql, 'target', 'stopped');
+      insertSession(sql, 'busy', 'stopped');
+      indexedRows(sql, 'target', 20, 'zymurgy target note');
+      indexedRows(sql, 'busy', 3_000, 'zymurgy busy note');
+      rebuildFullTextIndex(sql);
+
+      const search = meteredSearch(sql, 'zymurgy', 'target', {
+        ...WIDE,
+        ftsCandidateLimit: 5,
+        ftsScanLimit: 100,
+      });
+
+      expect(search.results).toHaveLength(5);
+      expect(search.results.every((r) => r.sessionId === 'target')).toBe(true);
+      expect(search.coverage.ftsCandidatesTruncated).toBe(true);
+      // Reaching an old session's span steps over every newer match once (FTS5 cannot seek to a
+      // rowid bound); scoring in that same scan means there is no second walk.
+      expect(search.rowsRead).toBeGreaterThan(3_000);
+      expect(search.rowsRead).toBeLessThan(4_000);
     });
   });
 

@@ -58,6 +58,15 @@ async function withProjectDataStorageEnv<T>(
   }
 }
 
+/**
+ * Back-to-back `alarm()` calls here stand in for time passing. With section gating on, a follow-up
+ * tick runs only the sections whose schedule is due, and storage safety's is never less than a
+ * minute away (`STORAGE_SAFETY_MIN_ALARM_SPACING_MS`), so tests that step the cleanup through
+ * several passes run every tick in full to reach its own recheck and cursor logic. Gated ticks are
+ * covered in `project-data-alarm-sections.test.ts`.
+ */
+const EVERY_TICK_RUNS_STORAGE_SAFETY = { PROJECT_DATA_ALARM_SECTION_GATING_ENABLED: 'false' };
+
 async function readTelemetry(projectId: string) {
   return env.DATABASE.prepare(
     `SELECT
@@ -386,7 +395,7 @@ describe('ProjectData storage safety firebreak', () => {
     await stub.createSession(null, 'Storage measurement cadence');
 
     await withProjectDataStorageEnv(
-      { PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS: '86400000' },
+      { ...EVERY_TICK_RUNS_STORAGE_SAFETY, PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS: '86400000' },
       async () => {
         await runInDurableObject(stub, async (instance) => instance.alarm());
         const first = await readTelemetry(projectId);
@@ -514,6 +523,7 @@ describe('ProjectData storage safety firebreak', () => {
 
     await withProjectDataStorageEnv(
       {
+        ...EVERY_TICK_RUNS_STORAGE_SAFETY,
         PROJECT_DATA_STORAGE_LIMIT_BYTES: '10000',
         PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS: '86400000',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: '0.2',
@@ -752,6 +762,7 @@ describe('ProjectData storage safety firebreak', () => {
 
     await withProjectDataStorageEnv(
       {
+        ...EVERY_TICK_RUNS_STORAGE_SAFETY,
         PROJECT_DATA_STORAGE_LIMIT_BYTES: '10000',
         PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS: '86400000',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: '0.2',
