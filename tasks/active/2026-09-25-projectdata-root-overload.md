@@ -88,27 +88,43 @@ exceeded its CPU time limit and was reset."}` — the daily blog agent's project
     per-section wall time reads ~0 for purely synchronous SQL sections. Per-section `rowsRead` /
     `rowsWritten` (SqlStorageCursor) attribute synchronous work.
 
+11. **FTS5 and rowid bounds (measured in the workers runtime and better-sqlite3 during review):**
+    a ranked query with `rowid >= floor` or `BETWEEN lo AND hi` still iterates every match of the
+    term (rows read 3,170 for a 50-row window over 3,020 matches) — FTS5 checks the bound per row.
+    A newest-first `ORDER BY rowid DESC LIMIT n` scan does stop early (50 rows read). bm25's IDF also
+    counts each phrase's matches once per query (`xQueryPhrase`). So full-text cost keeps one linear
+    pass over the term's matches (~60-70 ns each; ~30-60 ms at 500 K) no matter what; the window bounds
+    scoring, joins and content reads, which is what cost 25-32 s. A session-scoped scan additionally
+    steps over newer matches of other sessions before reaching its span.
+12. **Existing tests drove the alarm with back-to-back forced ticks** (`instance.alarm()` twice) and
+    SQL-aged state into the past. Under gating those ticks skip sections that are not due, so four
+    tests failed and several absence-style tests passed vacuously; see checklist G.
+
 ## Implementation Checklist
 
 ### A. Bounded root search (primary fix; idea 01M27M86R544BQX86VZANZGSQ2 §3 / task scope 4)
 
 - [x] Extract search from `messages.ts` (719 lines) into `message-search.ts`; keep re-exports.
-- [x] FTS half: candidate window = newest `ftsCandidateLimit` matches (floor rowid via capped
-      `ORDER BY rowid DESC LIMIT`), bm25 only for rowid >= floor; session-scoped search narrows the
-      window to the session's grouped rowid span; deterministic tie-break.
+- [x] FTS half: candidate window = newest `ftsCandidateLimit` matches, scored by bm25 inside one
+      `ORDER BY rowid DESC LIMIT` scan (review round: a `rowid >= floor` ranked query still iterated
+      every match — FTS5 checks rowid bounds per row); session-scoped search scans the session's
+      grouped rowid span once; ties break on ascending rowid (= `ORDER BY rank`, = archive shard).
 - [x] LIKE half: project-wide newest `keywordScanRowLimit` rows by rowid; session-scoped newest rows
       of that session by `(session_id, created_at)`; existing unindexed-tail predicate unchanged.
 - [x] Coverage result `{ftsCandidateLimit, ftsCandidatesTruncated, keywordScanRowLimit,
 keywordScanTruncated}`; env `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` (default 2000) and
       `PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT` (default 50000) with `DEFAULT_*` constants.
-- [x] ProjectData RPC `searchMessagesWithCoverage`; `searchMessages` stays array-returning and bounded;
-      `archiveSourceSearchMessages` bounded with env bounds.
+- [x] ProjectData RPCs `searchMessagesWithCoverage` / `archiveSourceSearchMessagesWithCoverage`
+      with env bounds; the array-returning RPCs and the service `searchMessages()` wrapper lost their
+      last production callers and were removed (tests use the coverage variants).
 - [x] Service `searchMessagesWithArchiveMetadata` returns `rootSearchCoverage`; MCP `search_messages`
       response + tool description disclose it (rule 65); SAM `search_task_messages` tool too if it
       renders archive metadata.
-- [x] Tests (workers runtime, real DO SQLite): results identical to old behavior under the bounds;
-      window excludes rows beyond the bound and reports truncation; session-scoped bound; LIKE plan
-      is a rowid range (EXPLAIN QUERY PLAN); disclosure reaches the MCP response.
+- [x] Tests (workers runtime, real DO SQLite): results identical to old behavior under the bounds
+      (incl. across archive migration — compact-archive suite); window excludes rows beyond the bound
+      and reports truncation; session-scoped bound; the bounded SHAPE is proven by rows read per
+      search (keyword and full-text; plans were checked with EXPLAIN QUERY PLAN during development);
+      disclosure reaches the MCP and SAM tool responses.
 
 ### B. Alarm per-section measurement (task scope 1)
 
@@ -142,7 +158,11 @@ keywordScanTruncated}`; env `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` (default 2
       `isTransientDurableObjectError` unchanged (rule 67).
 - [x] `callProjectDataWithRetry` takes an explicit idempotency declaration; CPU-reset and
       connection-lost are retried ONLY for idempotent reads (allowlist); mutations unchanged.
-- [x] Stable sanitized error code for exhausted CPU-limit resets in `normalizeProjectDataRpcError`.
+- [x] Stable sanitized error on exhaustion: an idempotent read that runs out of attempts on a
+      CPU-limit reset or lost connection throws `ProjectDataUnavailableError` (503
+      `PROJECT_DATA_UNAVAILABLE`, `services/project-data-rpc-retry.ts`); mutations keep the raw error.
+- [x] Lost connections get their own attempt budget (`DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS`,
+      default 3, capped at `DO_RETRY_MAX_ATTEMPTS`) — a sustained outage is not multiplied 8x.
 - [x] Retry telemetry: `project_data.do_rpc_retry_succeeded` / `..._exhausted`.
 - [x] Tests: first-attempt CPU reset then success for a read; bounded exhaustion; mutation not retried
       (no duplicate); shared predicate not widened (no-widening test).
@@ -155,6 +175,26 @@ keywordScanTruncated}`; env `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` (default 2
       coalesce window.
 - [x] Tests: 204 + coalesced (no VM retry) on connection-lost; flush retry count bounded under a
       persistent outage; terminal/non-intermediate reports still surface errors.
+
+### G. Review round (local reviewers, 2026-09-25)
+
+- [x] Scheduler: a remembered deadline between a section's start and the tick's recalculation stays
+      due (heartbeat would otherwise slip a full 5-min detection window after an early/full run).
+- [x] Unwired `PROJECT_DATA_ALARM_DUE_TOLERANCE_MS` / `_SLOW_SECTION_MS` added to deploy sync + both
+      `wrangler_sync_env` blocks.
+- [x] Retry core → `services/project-data-rpc-retry.ts`; coverage describer →
+      `services/project-data-search-coverage.ts`; row helpers → `message-search-rows.ts`
+      (`services/project-data.ts` now smaller than on main; `message-search.ts` < 500 lines).
+- [x] Metered `SqlStorage` forwards `Cursor` / `Statement`.
+- [x] Existing workers tests that drove back-to-back forced ticks: heartbeat tests now reproduce the
+      production sequence (deadline observed, then passes) with a liveness assertion; multi-pass
+      storage-safety tests run full ticks explicitly; absence-style alarm tests assert the section ran.
+- [x] New real-alarm tests: schedule-refresh failure → full run; one section's broken schedule and run
+      isolated; gated cascade into prompt delivery; FTS rows-read shape (project and session).
+- [x] Docs: search cost wording corrected (bm25's IDF pass stays linear in matches); coalescing
+      backoff; new retry knob.
+- [x] Deferred (MEDIUM, pre-existing pattern): error text logged as plain strings bypasses the
+      logger's Error redaction → `tasks/backlog/2026-09-25-structured-log-error-text-redaction.md`.
 
 ### F. Follow-ups / docs
 
