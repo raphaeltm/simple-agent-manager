@@ -21,8 +21,8 @@
  * is the real default and is marked as such.
  */
 import type { ProviderCatalog } from './catalog';
-import { admissionRefusal, rankHosts, rankOfferings, usageOf } from './ranking';
 import type { RankedCandidate } from './ranking';
+import { admissionRefusal, rankHosts, rankOfferings, usageOf } from './ranking';
 import type {
   CreateLabOptions,
   ExhaustionPolicy,
@@ -43,7 +43,7 @@ import {
 } from './types';
 
 // Re-exported so every consumer keeps importing the model from one place.
-export * from './types';
+export type { RankedCandidate } from './ranking';
 export {
   admissionRefusal,
   cpuBudgetMillis,
@@ -54,7 +54,7 @@ export {
   usableMemoryMb,
   usageOf,
 } from './ranking';
-export type { RankedCandidate } from './ranking';
+export * from './types';
 
 // ---------------------------------------------------------------------------
 // Lifecycle

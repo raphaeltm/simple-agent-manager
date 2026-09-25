@@ -7,15 +7,15 @@ import {
   defaultSeedFleet,
   HOST_MEMORY_RESERVE_MB,
   LAB,
+  type LabNode,
   rankOfferings,
   setStockout,
   simulate,
   step,
   STRATEGIES,
+  type Strategy,
   submit,
   usageOf,
-  type LabNode,
-  type Strategy,
   type WorkloadShape,
 } from '../src/components/placement/model';
 
