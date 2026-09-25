@@ -37,6 +37,7 @@ import {
   handleLeaseResult,
   waitOrThrowForCapacityPoolNodeLimit,
 } from './node-provisioning-admission';
+import { coreQuotaExclusionReason, type CoreQuotaRejection } from './node-provisioning-core-quota';
 import { buildProvisioningExhaustionPlan } from './node-provisioning-exhaustion';
 import { handleProvisioningAttemptFailure } from './node-provisioning-failure';
 import { enforceComputeQuota, enforceUserNodeLimit } from './node-provisioning-gates';
@@ -238,9 +239,13 @@ export async function handleNodeProvisioning(
   );
   await persistPlacementDiagnostics(state, rc, { attempts: diagnosticAttempts, queue: {} });
 
+  // Offerings an account core quota has already ruled out, filled in by the failure
+  // handler. Skipped attempts keep `not-attempted`, with the handler's reason.
+  const coreQuotaRejections: CoreQuotaRejection[] = [];
   for (const [i, attempt] of exhaustionPlan.attempts.entries()) {
     const diagnosticAttempt = diagnosticAttempts[i];
     if (!diagnosticAttempt) throw new Error('Missing provisioning attempt diagnostic');
+    if (coreQuotaExclusionReason(attempt, coreQuotaRejections)) continue;
     diagnosticAttempt.outcome = 'pending';
     await persistPlacementDiagnostics(state, rc, { attempts: diagnosticAttempts });
     const size = attempt.vmSize;
@@ -393,6 +398,7 @@ export async function handleNodeProvisioning(
         diagnosticAttempts,
         admissionIdentity,
         createdNode,
+        coreQuotaRejections,
       });
       if (outcome === 'next-attempt') continue;
       return;
