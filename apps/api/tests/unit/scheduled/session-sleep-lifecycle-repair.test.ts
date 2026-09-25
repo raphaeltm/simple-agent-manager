@@ -254,6 +254,9 @@ describe('session sleep lifecycle repair', () => {
   it.each([
     ['stopped', 'terminal reconciliation stopped it'],
     ['sleeping', 'ProjectData already slept it'],
+    // A failed task's preservation sleep can pass the point of no return after a
+    // terminal reconciler failed its session; the teardown must still finish.
+    ['failed', "terminal reconciliation failed a failed task's session"],
   ])('repairs a stale stopping row when ProjectData is already %s (%s)', async (status) => {
     const result = await runStaleRepairForProjectDataStatus(status);
 
@@ -289,7 +292,7 @@ describe('session sleep lifecycle repair', () => {
 
   it.each([
     [null, 'missing'],
-    ['failed', 'unsupported'],
+    ['active', 'still open'],
   ])('does not repair a stale stopping row when ProjectData status is %s (%s)', async (status) => {
     const result = await runStaleRepairForProjectDataStatus(status);
 
@@ -304,7 +307,10 @@ describe('session sleep lifecycle repair', () => {
       status: 'running',
     });
     expect(
-      sqlite.prepare(`SELECT sleep_status FROM session_snapshots WHERE id = 'snapshot-1'`).pluck().get()
+      sqlite
+        .prepare(`SELECT sleep_status FROM session_snapshots WHERE id = 'snapshot-1'`)
+        .pluck()
+        .get()
     ).toBe('stopping');
   });
 });

@@ -95,7 +95,7 @@ describe('VM-agent failure callback preserves the failed task work', () => {
       .run(agentSessionStatus, NOW.toISOString());
   }
 
-  function postFailedCallback(): Promise<Response> {
+  function postCallback(body: Record<string, unknown>): Promise<Response> {
     return app.request(
       '/api/projects/project-1/tasks/task-1/status/callback',
       {
@@ -104,15 +104,19 @@ describe('VM-agent failure callback preserves the failed task work', () => {
           Authorization: `Bearer ${fakeCallbackToken()}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          toStatus: 'failed',
-          reason: 'Agent prompt failed',
-          errorMessage: "You've hit your usage limit",
-        }),
+        body: JSON.stringify(body),
       },
       { DATABASE: createSqliteD1(sqlite) },
       { waitUntil: (promise: Promise<unknown>) => mocks.waitUntil.push(promise) }
     );
+  }
+
+  function postFailedCallback(): Promise<Response> {
+    return postCallback({
+      toStatus: 'failed',
+      reason: 'Agent prompt failed',
+      errorMessage: "You've hit your usage limit",
+    });
   }
 
   function snapshotRow() {
@@ -175,6 +179,38 @@ describe('VM-agent failure callback preserves the failed task work', () => {
     expect(mocks.persistMessage).not.toHaveBeenCalled();
   });
 
+  it("keeps the failure's error when a later step report arrives", async () => {
+    // A preserved failed task's agent can keep working and reporting steps (e.g.
+    // `awaiting_followup` after a follow-up turn). A step report is progress, not
+    // an outcome, and must not erase why the task failed.
+    seed('running');
+    expect((await postFailedCallback()).status).toBe(200);
+
+    const stepReport = await postCallback({ executionStep: 'awaiting_followup' });
+
+    expect(stepReport.status).toBe(200);
+    expect(
+      sqlite
+        .prepare(`SELECT status, execution_step, error_message FROM tasks WHERE id = 'task-1'`)
+        .get()
+    ).toEqual({
+      status: 'failed',
+      execution_step: 'awaiting_followup',
+      error_message: "You've hit your usage limit",
+    });
+  });
+
+  it('still clears a live task error on a step report (control)', async () => {
+    seed('running');
+    sqlite.prepare(`UPDATE tasks SET error_message = 'transient provider error'`).run();
+
+    expect((await postCallback({ executionStep: 'awaiting_followup' })).status).toBe(200);
+
+    expect(
+      sqlite.prepare(`SELECT status, error_message FROM tasks WHERE id = 'task-1'`).get()
+    ).toEqual({ status: 'in_progress', error_message: null });
+  });
+
   it('stays non-destructive when the VM agent repeats the failure callback', async () => {
     seed('running');
 
@@ -199,7 +235,8 @@ describe('VM-agent failure callback preserves the failed task work', () => {
       'chat-1',
       'system',
       failedTaskWorkLossMessage('no_resumable_agent_session'),
-      null
+      null,
+      'failed-task-work-loss-task-1'
     );
     expect(mocks.failSession).toHaveBeenCalledWith(
       expect.anything(),

@@ -8,11 +8,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
+  failedTaskIncompleteSnapshotMessage,
   failedTaskWorkLossMessage,
   noteFailedTaskPreservationCapture,
   preserveFailedTaskWork,
-  releaseExhaustedFailedTaskPreservation,
 } from '../../../src/services/failed-task-preservation';
+import {
+  releaseExhaustedFailedTaskPreservation,
+  releaseUnclaimableFailedTaskPreservation,
+} from '../../../src/services/failed-task-preservation-release';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
@@ -38,6 +42,8 @@ const INPUT = {
   chatSessionId: 'chat-1',
   source: 'test',
 };
+const WORK_LOSS_NOTICE_ID = 'failed-task-work-loss-task-1';
+const INCOMPLETE_SNAPSHOT_NOTICE_ID = 'failed-task-snapshot-incomplete-task-1';
 
 describe('preserveFailedTaskWork', () => {
   let sqlite: Database.Database;
@@ -81,11 +87,16 @@ describe('preserveFailedTaskWork', () => {
 
   function seedSnapshot(overrides: Record<string, string | number | null> = {}) {
     const row = {
+      runtime: 'vm',
       status: 'available',
       degradation: 'none',
       sleeping_at: new Date(NOW.getTime() - 60_000).toISOString(),
       sleep_status: 'sleeping',
       sleep_after: null,
+      sleep_attempts: 0,
+      sleep_claim_id: null,
+      sleep_claimed_at: null,
+      capture_generation: null,
       expires_at: new Date(NOW.getTime() + 24 * 60 * 60 * 1000).toISOString(),
       ...overrides,
     };
@@ -93,18 +104,24 @@ describe('preserveFailedTaskWork', () => {
       .prepare(
         `INSERT INTO session_snapshots
            (id, project_id, workspace_id, user_id, chat_session_id, runtime, status, degradation,
-            manifest_r2_key, expires_at, sleeping_at, sleep_status, sleep_after,
-            recovery_attempts, sleep_attempts, created_at, updated_at)
-         VALUES ('snapshot-1', 'project-1', 'ws-1', 'user-1', 'chat-1', 'vm', ?, ?,
-                 'manifest.json', ?, ?, ?, ?, 0, 0, ?, ?)`
+            manifest_r2_key, expires_at, sleeping_at, sleep_status, sleep_after, sleep_attempts,
+            sleep_claim_id, sleep_claimed_at, capture_generation, recovery_attempts,
+            created_at, updated_at)
+         VALUES ('snapshot-1', 'project-1', 'ws-1', 'user-1', 'chat-1', ?, ?, ?,
+                 'manifest.json', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
       )
       .run(
+        row.runtime,
         row.status,
         row.degradation,
         row.expires_at,
         row.sleeping_at,
         row.sleep_status,
         row.sleep_after,
+        row.sleep_attempts,
+        row.sleep_claim_id,
+        row.sleep_claimed_at,
+        row.capture_generation,
         NOW.toISOString(),
         NOW.toISOString()
       );
@@ -123,6 +140,15 @@ describe('preserveFailedTaskWork', () => {
     return sqlite
       .prepare(
         `SELECT sleep_status, sleep_after FROM session_snapshots WHERE chat_session_id = 'chat-1'`
+      )
+      .get();
+  }
+
+  function sleepRow() {
+    return sqlite
+      .prepare(
+        `SELECT sleep_status, sleep_after, sleep_attempts, sleep_claim_id
+           FROM session_snapshots WHERE chat_session_id = 'chat-1'`
       )
       .get();
   }
@@ -178,13 +204,104 @@ describe('preserveFailedTaskWork', () => {
     expect(sleepIntent()).toEqual({ sleep_status: 'scheduled', sleep_after: NOW.toISOString() });
   });
 
+  it('starts a fresh sleep budget when an earlier sleep of this runtime spent its own', async () => {
+    // An earlier, unrelated idle sleep exhausted its retries; the workspace kept
+    // running. Without a fresh budget the sweep would release this failure on its
+    // first look, without a single attempt (`.claude/rules/61`).
+    seedRuntime();
+    seedSnapshot({
+      status: 'pending',
+      sleeping_at: null,
+      sleep_status: 'failed',
+      sleep_after: null,
+      sleep_attempts: 9,
+    });
+
+    await expect(preserveFailedTaskWork(env, INPUT)).resolves.toEqual({
+      outcome: 'sleep_queued',
+    });
+    expect(sleepRow()).toEqual({
+      sleep_status: 'scheduled',
+      sleep_after: NOW.toISOString(),
+      sleep_attempts: 0,
+      sleep_claim_id: null,
+    });
+  });
+
+  it('does not claim a sleep was queued when the row cannot hold an intent', async () => {
+    // An earlier sleep was refused terminally ("cannot sleep from status stopped")
+    // and the workspace was later restarted. The queue writes nothing for a
+    // `terminal_failed` row, so reporting `sleep_queued` would leave the runtime
+    // exempt from the reapers and never slept.
+    seedRuntime();
+    seedSnapshot({
+      status: 'pending',
+      sleeping_at: null,
+      sleep_status: 'terminal_failed',
+      sleep_after: null,
+    });
+
+    await expect(preserveFailedTaskWork(env, INPUT)).resolves.toEqual({
+      outcome: 'not_preservable',
+      gap: 'sleep_queue_failed',
+    });
+    expect(sleepRow()).toMatchObject({ sleep_status: 'terminal_failed', sleep_after: null });
+  });
+
+  it('leaves a sleep that is already in flight to finish', async () => {
+    seedRuntime();
+    seedSnapshot({
+      status: 'pending',
+      sleeping_at: null,
+      sleep_status: 'preparing',
+      sleep_attempts: 3,
+      sleep_claim_id: 'claim-1',
+      sleep_claimed_at: NOW.toISOString(),
+    });
+
+    await expect(preserveFailedTaskWork(env, INPUT)).resolves.toEqual({
+      outcome: 'already_asleep',
+    });
+    expect(sleepRow()).toEqual({
+      sleep_status: 'preparing',
+      sleep_after: null,
+      sleep_attempts: 3,
+      sleep_claim_id: 'claim-1',
+    });
+  });
+
   it('keeps a conversation that already slept (the production shape)', async () => {
+    seedTask('failed');
     seedRuntime({ workspaceStatus: 'deleted', agentStatus: 'sleeping' });
     seedSnapshot();
 
     await expect(preserveFailedTaskWork(env, INPUT)).resolves.toEqual({
       outcome: 'already_asleep',
     });
+    // Liveness: a complete snapshot is not reported as incomplete.
+    expect(mocks.persistMessage).not.toHaveBeenCalled();
+  });
+
+  it('says so when a conversation that already slept has an incomplete snapshot', async () => {
+    // The production shape behind the task's own example: the conversation slept
+    // with a transcript-only snapshot long before it failed, and no later sleep
+    // would ever run to report that.
+    seedTask('failed');
+    seedRuntime({ workspaceStatus: 'deleted', agentStatus: 'sleeping' });
+    seedSnapshot({ status: 'degraded', degradation: 'transcript-only' });
+
+    await expect(preserveFailedTaskWork(env, INPUT)).resolves.toEqual({
+      outcome: 'already_asleep',
+    });
+    expect(mocks.persistMessage).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'chat-1',
+      'system',
+      failedTaskIncompleteSnapshotMessage('transcript-only', 'vm'),
+      null,
+      INCOMPLETE_SNAPSHOT_NOTICE_ID
+    );
   });
 
   it('keeps a conversation whose workspace row no longer links the chat', async () => {
@@ -203,6 +320,7 @@ describe('preserveFailedTaskWork', () => {
     ['unsupported_runtime', { runtime: 'deployment' }],
     ['unsupported_runtime', { nodeRole: 'deployment' }],
     ['no_resumable_agent_session', { agentStatus: 'failed' }],
+    ['no_resumable_agent_session', { agentStatus: 'error' }],
     ['no_resumable_agent_session', { agentStatus: null }],
   ] as const)('reports %s when no runtime can be handed over', async (gap, runtime) => {
     seedRuntime(runtime);
@@ -262,20 +380,15 @@ describe('preserveFailedTaskWork', () => {
   });
 
   describe('releaseExhaustedFailedTaskPreservation', () => {
-    it('tears down and surfaces once a failed task has no retry left', async () => {
-      seedTask('failed');
-      seedSnapshot({ sleeping_at: null, sleep_status: 'failed', sleep_after: null });
-
-      await expect(
-        releaseExhaustedFailedTaskPreservation(env, { chatSessionId: 'chat-1' })
-      ).resolves.toBe(true);
+    function expectReleased(reason: 'snapshot_retry_exhausted' | 'snapshot_unavailable') {
       expect(mocks.persistMessage).toHaveBeenCalledWith(
         env,
         'project-1',
         'chat-1',
         'system',
-        failedTaskWorkLossMessage('snapshot_retry_exhausted'),
-        null
+        failedTaskWorkLossMessage(reason),
+        null,
+        WORK_LOSS_NOTICE_ID
       );
       expect(mocks.failSession).toHaveBeenCalledWith(
         env,
@@ -284,10 +397,66 @@ describe('preserveFailedTaskWork', () => {
         'Agent prompt failed'
       );
       expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env);
+      // The episode is ended, so neither the sweep nor a later release retries it.
+      expect(sleepRow()).toMatchObject({ sleep_status: 'terminal_failed', sleep_after: null });
+    }
+
+    it('tears down and surfaces once a failed task has no retry left', async () => {
+      seedTask('failed');
+      seedSnapshot({ sleeping_at: null, sleep_status: 'failed', sleep_after: null });
+
+      await expect(
+        releaseExhaustedFailedTaskPreservation(env, { chatSessionId: 'chat-1' })
+      ).resolves.toBe(true);
+      expectReleased('snapshot_retry_exhausted');
+    });
+
+    it('releases a terminally refused sleep on its first attempt', async () => {
+      // `failSessionSnapshotSleepBeforeTeardown` writes `terminal_failed` with no
+      // retry for "Workspace cannot sleep from status stopped".
+      seedTask('failed');
+      seedSnapshot({ sleeping_at: null, sleep_status: 'terminal_failed', sleep_after: null });
+
+      await expect(
+        releaseExhaustedFailedTaskPreservation(env, { chatSessionId: 'chat-1' })
+      ).resolves.toBe(true);
+      expectReleased('snapshot_unavailable');
     });
 
     it.each([
+      ['a degraded capture', { status: 'degraded', degradation: 'transcript-only' }],
+      ['a capture in progress', { capture_generation: 'generation-2' }],
+    ] as const)(
+      'stops retrying %s once the budget is spent, unlike other sleeps',
+      async (_label, repairable) => {
+        seedTask('failed');
+        seedSnapshot({
+          sleeping_at: null,
+          sleep_status: 'failed',
+          sleep_after: new Date(NOW.getTime() + 5 * 60 * 1000).toISOString(),
+          sleep_attempts: 9,
+          ...repairable,
+        });
+
+        await expect(
+          releaseExhaustedFailedTaskPreservation(env, { chatSessionId: 'chat-1' })
+        ).resolves.toBe(true);
+        expectReleased('snapshot_retry_exhausted');
+      }
+    );
+
+    it.each([
       ['a retry is still scheduled', { sleep_status: 'failed', sleep_after: NOW.toISOString() }],
+      [
+        'a repairable capture is still inside its budget',
+        {
+          sleep_status: 'failed',
+          sleep_after: NOW.toISOString(),
+          status: 'degraded',
+          degradation: 'transcript-only',
+          sleep_attempts: 8,
+        },
+      ],
       ['the sleep is still in flight', { sleep_status: 'preparing', sleep_after: null }],
       ['the conversation slept', { sleep_status: 'sleeping', sleep_after: null }],
     ] as const)('leaves it alone while %s', async (_label, sleep) => {
@@ -302,6 +471,7 @@ describe('preserveFailedTaskWork', () => {
       ).resolves.toBe(false);
       expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
       expect(mocks.failSession).not.toHaveBeenCalled();
+      expect(sleepRow()).toMatchObject({ sleep_status: sleep.sleep_status });
     });
 
     it('never acts for a completed task', async () => {
@@ -311,6 +481,96 @@ describe('preserveFailedTaskWork', () => {
       await expect(
         releaseExhaustedFailedTaskPreservation(env, { chatSessionId: 'chat-1' })
       ).resolves.toBe(false);
+      expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('releaseUnclaimableFailedTaskPreservation', () => {
+    const RELEASE_INPUT = { chatSessionId: 'chat-1', workspaceId: 'ws-1' };
+
+    function seedQueuedFailure() {
+      seedTask('failed');
+      seedSnapshot({
+        status: 'pending',
+        sleeping_at: null,
+        sleep_status: 'scheduled',
+        sleep_after: NOW.toISOString(),
+      });
+    }
+
+    it.each([
+      // A fatal agent error (prompt timeout, unrecoverable crash) lands after the
+      // failure callback queued the sleep: the sweep can never claim it now.
+      ['no_resumable_agent_session', { agentStatus: 'error' }],
+      // A reaper stopped the workspace before the sweep reached it.
+      ['workspace_not_live', { workspaceStatus: 'stopped' }],
+    ] as const)('releases a queued preservation once %s', async (gap, runtime) => {
+      seedQueuedFailure();
+      seedRuntime(runtime);
+
+      await expect(releaseUnclaimableFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(
+        true
+      );
+      expect(mocks.persistMessage).toHaveBeenCalledWith(
+        env,
+        'project-1',
+        'chat-1',
+        'system',
+        failedTaskWorkLossMessage(gap),
+        null,
+        WORK_LOSS_NOTICE_ID
+      );
+      expect(mocks.failSession).toHaveBeenCalledWith(
+        env,
+        'project-1',
+        'chat-1',
+        'Agent prompt failed'
+      );
+      expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env);
+      expect(sleepRow()).toMatchObject({ sleep_status: 'terminal_failed', sleep_after: null });
+    });
+
+    it('leaves a runtime the sweep can still claim alone', async () => {
+      seedQueuedFailure();
+      seedRuntime();
+
+      await expect(releaseUnclaimableFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(
+        false
+      );
+      expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+      expect(mocks.persistMessage).not.toHaveBeenCalled();
+      expect(sleepRow()).toMatchObject({ sleep_status: 'scheduled' });
+    });
+
+    it('does not interrupt a sleep that is already in flight', async () => {
+      seedTask('failed');
+      seedRuntime({ agentStatus: 'error' });
+      seedSnapshot({
+        status: 'pending',
+        sleeping_at: null,
+        sleep_status: 'stopping',
+        sleep_claim_id: 'claim-1',
+        sleep_claimed_at: NOW.toISOString(),
+      });
+
+      await expect(releaseUnclaimableFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(
+        false
+      );
+      expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+      expect(sleepRow()).toMatchObject({ sleep_status: 'stopping', sleep_claim_id: 'claim-1' });
+    });
+
+    it.each([
+      ['a completed task', 'completed', { status: 'pending', sleeping_at: null }],
+      ['a failed task whose conversation slept', 'failed', {}],
+    ] as const)('never acts for %s', async (_label, taskStatus, snapshot) => {
+      seedTask(taskStatus);
+      seedRuntime({ agentStatus: 'error' });
+      seedSnapshot({ sleep_status: 'scheduled', sleep_after: NOW.toISOString(), ...snapshot });
+
+      await expect(releaseUnclaimableFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(
+        false
+      );
       expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
     });
   });
@@ -329,15 +589,35 @@ describe('preserveFailedTaskWork', () => {
           'project-1',
           'chat-1',
           'system',
-          expect.stringContaining(`(${degradation})`),
-          null
+          failedTaskIncompleteSnapshotMessage(degradation, 'vm'),
+          null,
+          INCOMPLETE_SNAPSHOT_NOTICE_ID
         );
       }
     );
 
+    it('tells an Instant user the workspace cannot be restored for any degradation', async () => {
+      // An Instant workspace wakes in place only, and `cleanupTaskRun` keeps its
+      // container only for a complete snapshot.
+      seedTask('failed');
+      seedSnapshot({ runtime: 'cf-container', status: 'degraded', degradation: 'home-skipped' });
+
+      await noteFailedTaskPreservationCapture(env, { chatSessionId: 'chat-1' });
+
+      expect(mocks.persistMessage).toHaveBeenCalledWith(
+        env,
+        'project-1',
+        'chat-1',
+        'system',
+        expect.stringContaining('this Instant workspace cannot be restored'),
+        null,
+        INCOMPLETE_SNAPSHOT_NOTICE_ID
+      );
+    });
+
     it.each([
       ['a complete snapshot', 'failed', { status: 'available', degradation: 'none' }],
-      ['a home-only degradation', 'failed', { status: 'degraded', degradation: 'home-skipped' }],
+      ['a home-only VM degradation', 'failed', { status: 'degraded', degradation: 'home-skipped' }],
       ['a completed task', 'completed', { status: 'degraded', degradation: 'transcript-only' }],
     ] as const)('stays quiet for %s', async (_label, taskStatus, snapshot) => {
       seedTask(taskStatus);

@@ -248,10 +248,10 @@ describe('classifySessionIdleness', () => {
     it.each(['prompt-turn-ended', 'idle-interval-elapsed'] as const)(
       'drains a hung prompt for the idle interval after the failure, then releases it, under %s',
       (policy) => {
-        const hungPrompt = {
-          activity: 'prompting',
-          activityAt: NOW.getTime() - 3 * 60 * 60 * 1000,
-        };
+        // The production shape (rule 62): the VM agent re-reports `prompting` every
+        // minute for as long as the prompt hangs, so the activity clock is always
+        // fresh. Only the failure time can bound the drain.
+        const hungPrompt = { activity: 'prompting', activityAt: NOW.getTime() - 60_000 };
         const failedAt = new Date(NOW.getTime() - 60_000).toISOString();
 
         expect(
@@ -272,6 +272,23 @@ describe('classifySessionIdleness', () => {
         ).toMatchObject({ idle: true, conclusive: true, reason: 'completed_prompt_stale' });
       }
     );
+
+    it('keeps a completed task draining while its final prompt still reports (control)', () => {
+      // A completed task's final response streams inside the prompt that called
+      // complete_task, so a fresh re-report still extends its drain.
+      expect(
+        classify({
+          taskStatus: 'completed',
+          taskCompletedAt: new Date(NOW.getTime() - IDLE_AFTER_MS - 1).toISOString(),
+          state: { activity: 'prompting', activityAt: NOW.getTime() - 60_000 },
+        })
+      ).toMatchObject({
+        idle: false,
+        conclusive: true,
+        reason: 'prompt_turn_active',
+        retryAt: new Date(NOW.getTime() - 60_000 + IDLE_AFTER_MS),
+      });
+    });
 
     it('does not widen to cancelled tasks, whose runtime is torn down directly', () => {
       // Control (rule 67): cancelled is not sleep-preserved. An idle one still
