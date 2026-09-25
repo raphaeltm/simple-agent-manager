@@ -35,7 +35,8 @@ import { SLEEP_RESUMABLE_AGENT_SESSION_STATUSES } from './sleep-preserved-task-s
 import { cleanupTaskRun } from './task-runner';
 import { sleepVmAgentContainer } from './vm-agent-container';
 
-const workspaceChatOwner = chatSessionTaskOwnerJoins(schema.workspaces.chatSessionId);
+// Built per query, not at module load: tests partially mock the schema module.
+const workspaceChatOwner = () => chatSessionTaskOwnerJoins(schema.workspaces.chatSessionId);
 
 export async function finishSleepingWorkspaceComputeCleanup(
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -249,8 +250,8 @@ export async function checkAutomaticSessionSleepEligibility(
       taskCompletedAt: sql<string | null>`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
     })
     .from(schema.workspaces)
-    .leftJoin(schema.sessionSummaries, workspaceChatOwner.summary)
-    .leftJoin(schema.tasks, workspaceChatOwner.task)
+    .leftJoin(schema.sessionSummaries, workspaceChatOwner().summary)
+    .leftJoin(schema.tasks, workspaceChatOwner().task)
     .where(
       and(eq(schema.workspaces.id, input.workspaceId), eq(schema.workspaces.userId, input.userId))
     )
@@ -329,8 +330,8 @@ export async function sleepWorkspaceSession(
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .leftJoin(schema.sessionSummaries, workspaceChatOwner.summary)
-    .leftJoin(schema.tasks, workspaceChatOwner.task)
+    .leftJoin(schema.sessionSummaries, workspaceChatOwner().summary)
+    .leftJoin(schema.tasks, workspaceChatOwner().task)
     .leftJoin(schema.projects, eq(schema.projects.id, schema.workspaces.projectId))
     .where(
       and(eq(schema.workspaces.id, input.workspaceId), eq(schema.workspaces.userId, input.userId))

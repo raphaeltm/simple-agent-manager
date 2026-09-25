@@ -162,6 +162,12 @@ beforeEach(() => {
       id TEXT PRIMARY KEY, workspace_id TEXT, user_id TEXT, status TEXT,
       stopped_at TEXT, error_message TEXT, updated_at TEXT
     );
+    -- Read by the terminal-task ownership predicate
+    -- (sleepLifecycleOwnsTerminalTaskWorkspaceSql).
+    CREATE TABLE session_snapshots (
+      chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending',
+      sleeping_at TEXT, sleep_status TEXT, sleep_after TEXT, capture_generation TEXT
+    );
     CREATE TABLE compute_usage (
       id TEXT PRIMARY KEY, workspace_id TEXT, user_id TEXT, ended_at TEXT
     );
