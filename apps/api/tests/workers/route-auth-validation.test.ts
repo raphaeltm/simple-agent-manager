@@ -1087,6 +1087,78 @@ describe('node-level ACP heartbeat auth', () => {
 });
 
 // =============================================================================
+// Node-level ACP heartbeat for a drained project on a live node (2026-09-25)
+// =============================================================================
+
+describe('node-level ACP heartbeat for a drained project on a live node', () => {
+  const DRAINED_PROJECT_ID = `${TEST_PREFIX}-drained-proj`;
+  const DRAINED_DELETED_WORKSPACE_ID = `${TEST_PREFIX}-drained-deleted-ws`;
+  const DRAINED_STOPPING_WORKSPACE_ID = `${TEST_PREFIX}-drained-stopping-ws`;
+
+  beforeAll(async () => {
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO projects
+         (id, user_id, name, normalized_name, installation_id, repository, created_by, created_at, updated_at)
+       VALUES (?, ?, 'drained-project', 'drained-project', ?, 'test-owner/drained', ?, datetime('now'), datetime('now'))`
+    )
+      .bind(DRAINED_PROJECT_ID, USER_ID, PROJECT_ID + '-inst', USER_ID)
+      .run();
+    // The deleted workspace is inserted first so an unordered LIMIT 1 would pick
+    // it; only the stopping one can still have a runtime calling back.
+    for (const [id, status] of [
+      [DRAINED_DELETED_WORKSPACE_ID, 'deleted'],
+      [DRAINED_STOPPING_WORKSPACE_ID, 'stopping'],
+    ]) {
+      await env.DATABASE.prepare(
+        `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'test-repo', 'main', ?, 'cx22', 'fsn1', datetime('now'), datetime('now'))`
+      )
+        .bind(id, USER_ID, NODE_ID, DRAINED_PROJECT_ID, id, status)
+        .run();
+    }
+  });
+
+  it('answers nothing-to-refresh instead of telling the live node it is gone', async () => {
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${DRAINED_PROJECT_ID}/node-acp-heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${nodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nodeId: NODE_ID }),
+      }
+    );
+
+    expect(response.status).toBe(204);
+    const signal = await env.DATABASE.prepare(
+      `SELECT workspace_id AS workspaceId FROM workspace_callback_signal_claims
+        WHERE callback_kind = 'node_acp_heartbeat' AND workspace_id IN (?, ?)`
+    )
+      .bind(DRAINED_DELETED_WORKSPACE_ID, DRAINED_STOPPING_WORKSPACE_ID)
+      .all<{ workspaceId: string }>();
+    expect(signal.results).toEqual([{ workspaceId: DRAINED_STOPPING_WORKSPACE_ID }]);
+  });
+
+  it('still answers gone when the node itself is gone (control)', async () => {
+    const response = await SELF.fetch(
+      `https://api.test.example.com/api/projects/${DRAINED_PROJECT_ID}/node-acp-heartbeat`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${deletedNodeCallbackToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ nodeId: DELETED_NODE_ID }),
+      }
+    );
+
+    expect(response.status).toBe(410);
+  });
+});
+
+// =============================================================================
 // Contract test: VM agent heartbeat request format matches API expectations
 // =============================================================================
 

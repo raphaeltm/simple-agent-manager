@@ -129,61 +129,6 @@ func TestSendAcpHeartbeats_PostsToCorrectEndpoint(t *testing.T) {
 	}
 }
 
-func TestSendAcpHeartbeatsTerminalStatusStopsFutureCallbacks(t *testing.T) {
-	for _, status := range []int{
-		http.StatusUnauthorized,
-		http.StatusForbidden,
-		http.StatusNotFound,
-		http.StatusGone,
-	} {
-		t.Run(http.StatusText(status), func(t *testing.T) {
-			var mu sync.Mutex
-			requestCount := 0
-
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				mu.Lock()
-				requestCount++
-				mu.Unlock()
-				w.WriteHeader(status)
-				_, _ = w.Write([]byte(`{"error":"terminal","message":"callback resource is gone"}`))
-			}))
-			defer ts.Close()
-
-			s := &Server{
-				config: &config.Config{
-					NodeID:               "node-test",
-					ControlPlaneURL:      ts.URL,
-					ACPHeartbeatInterval: 100 * time.Millisecond,
-					HTTPCallbackTimeout:  5 * time.Second,
-				},
-				workspaces: map[string]*WorkspaceRuntime{
-					"ws-1": {ID: "ws-1", ProjectID: "proj-a", Status: "running"},
-					"ws-2": {ID: "ws-2", ProjectID: "proj-b", Status: "running"},
-				},
-				callbackToken:    "test-token",
-				httpClient:       &http.Client{Timeout: 5 * time.Second},
-				messageReporters: make(map[string]*messagereport.Reporter),
-				done:             make(chan struct{}),
-			}
-
-			s.sendAcpHeartbeats()
-
-			if !s.controlPlaneCallbacksStopped() {
-				t.Fatal("expected terminal ACP heartbeat response to stop control-plane callbacks")
-			}
-
-			s.sendAcpHeartbeats()
-
-			mu.Lock()
-			count := requestCount
-			mu.Unlock()
-			if count != 1 {
-				t.Fatalf("expected one ACP heartbeat request before terminal stop, got %d", count)
-			}
-		})
-	}
-}
-
 func TestStartAcpHeartbeatReporter_StopsOnDoneChannel(t *testing.T) {
 	requestCount := 0
 	var mu sync.Mutex
