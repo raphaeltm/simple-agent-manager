@@ -227,12 +227,12 @@ async function releaseUnhealthyNode(
   db: CleanupDb,
   env: Env,
   node: Candidate,
-  episode: string,
   nowIso: string,
   config: CleanupConfig,
   result: NodeCleanupResult,
   boundaries: UnhealthyNodeBoundaries
 ): Promise<void> {
+  const episode = node.last_heartbeat_at ?? node.created_at;
   const strandedTasks = await listStrandedNodeTasks(env, node.id);
   const destroyed = await boundaries.release(db, env, nowIso, node, {
     logEvent: 'node_cleanup.unhealthy_releasing',
@@ -285,11 +285,14 @@ async function processUnhealthyCandidate(
   env: Env,
   node: Candidate,
   now: Date,
-  config: CleanupConfig,
-  result: NodeCleanupResult,
-  boundaries: UnhealthyNodeBoundaries,
-  fleetLoss: boolean
+  context: {
+    config: CleanupConfig;
+    result: NodeCleanupResult;
+    boundaries: UnhealthyNodeBoundaries;
+    fleetLoss: boolean;
+  }
 ): Promise<void> {
+  const { config, result, boundaries, fleetLoss } = context;
   const nowIso = now.toISOString();
   const episode = node.last_heartbeat_at ?? node.created_at;
   const decision = decideUnhealthyNode(node, now.getTime(), config);
@@ -344,7 +347,7 @@ async function processUnhealthyCandidate(
     result.unhealthyHeld++;
     return;
   }
-  await releaseUnhealthyNode(db, env, node, episode, nowIso, config, result, boundaries);
+  await releaseUnhealthyNode(db, env, node, nowIso, config, result, boundaries);
 }
 
 /** One isolated cleanup phase; each selected node is also isolated from its peers. */
@@ -385,7 +388,12 @@ export async function sweepUnhealthyNodes(
 
   for (const node of candidates.results) {
     try {
-      await processUnhealthyCandidate(db, env, node, now, config, result, boundaries, fleetLoss);
+      await processUnhealthyCandidate(db, env, node, now, {
+        config,
+        result,
+        boundaries,
+        fleetLoss,
+      });
     } catch (error) {
       result.errors++;
       log.error('node_cleanup.unhealthy_candidate_failed', {

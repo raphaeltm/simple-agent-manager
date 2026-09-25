@@ -221,8 +221,10 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
 - SonarCloud flagged cognitive complexity in the moved sleep executor and new unhealthy-node sweep.
   The sleep executor now separates workspace loading, pre-teardown safety checks, teardown, and
   final cleanup; the unhealthy sweep separates one-node decisions from provider release. The
-  flagged `NaN` style issue was corrected. Focused regressions and typecheck pass; full API and
-  follow-up Sonar analysis are running.
+  flagged `NaN` style issue was corrected. The follow-up Sonar pass identified two helper
+  signatures over the parameter limit and one teardown helper two complexity points over; these
+  are now split into smaller operations. Focused regressions, typecheck, and lint pass; a final
+  Sonar rerun remains.
 - Draft PR #2147 is open. Remaining gates: coordinated real-VM staging, final CI/CodeRabbit,
   merge, production monitoring.
 

@@ -187,6 +187,30 @@ async function verifyAndBeginSleepTeardown(
   return verified;
 }
 
+async function ensureProjectDataSleeping(env: Env, workspace: SleepWorkspace): Promise<void> {
+  const chatSession = await projectDataService.getSession(
+    env,
+    workspace.projectId,
+    workspace.chatSessionId
+  );
+  if (!chatSession) throw new Error('ProjectData chat session is missing');
+  if (chatSession.status === 'sleeping') return;
+  const slept = await projectDataService.sleepSession(
+    env,
+    workspace.projectId,
+    workspace.chatSessionId
+  );
+  if (slept) return;
+  const repaired = await projectDataService.getSession(
+    env,
+    workspace.projectId,
+    workspace.chatSessionId
+  );
+  if (repaired?.status !== 'sleeping') {
+    throw new Error('ProjectData refused the durable sleeping transition');
+  }
+}
+
 async function completeSleepTeardown(
   env: Env,
   workspace: SleepWorkspace,
@@ -195,31 +219,7 @@ async function completeSleepTeardown(
   verified: Awaited<ReturnType<typeof getRestorableSessionSnapshot>>
 ) {
   const db = drizzle(env.DATABASE, { schema });
-  let snapshot = verified;
-  const chatSession = await projectDataService.getSession(
-    env,
-    workspace.projectId,
-    workspace.chatSessionId
-  );
-  if (!chatSession) throw new Error('ProjectData chat session is missing');
-  const chatStatus = typeof chatSession.status === 'string' ? chatSession.status : null;
-  if (chatStatus !== 'sleeping') {
-    const slept = await projectDataService.sleepSession(
-      env,
-      workspace.projectId,
-      workspace.chatSessionId
-    );
-    if (!slept) {
-      const repaired = await projectDataService.getSession(
-        env,
-        workspace.projectId,
-        workspace.chatSessionId
-      );
-      if (repaired?.status !== 'sleeping') {
-        throw new Error('ProjectData refused the durable sleeping transition');
-      }
-    }
-  }
+  await ensureProjectDataSleeping(env, workspace);
 
   // `stopping` is durable before this I/O. An interrupted or ambiguous stop
   // is retried forward; it is never rolled back to a deliverable active chat.
@@ -273,7 +273,7 @@ async function completeSleepTeardown(
     { sleepWarning }
   );
   if (!finalized) {
-    snapshot = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
+    const snapshot = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
     if (!snapshot?.sleepingAt || snapshot.sleepStatus !== 'sleeping') {
       throw new Error('Verified snapshot lost availability before sleep commit');
     }
