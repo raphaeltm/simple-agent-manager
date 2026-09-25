@@ -321,7 +321,7 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
     // tests/workers/scheduled-node-cleanup.test.ts.
     expect(nodeCleanupSource).toContain("t.status IN ('completed', 'failed', 'cancelled')");
     expect(nodeCleanupSource).toContain(
-      "AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w')}"
+      "AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', sessionSleepMaxAttempts(env))}"
     );
     expect(nodeCleanupSource).not.toContain("t.status IN ('failed', 'cancelled')");
     // Must NOT have any active task still referencing it

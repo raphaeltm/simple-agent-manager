@@ -241,76 +241,93 @@ describe('session sleep lifecycle repair', () => {
     ).toBeNull();
   });
 
-  async function runStaleRepairForProjectDataStatus(projectDataStatus: string | null) {
+  async function runStaleRepairForProjectDataStatus(
+    projectDataStatus: string | null,
+    taskStatus = 'in_progress'
+  ) {
     mocks.sleepSession.mockResolvedValueOnce(false);
     mocks.getSession.mockResolvedValueOnce(
       projectDataStatus === null ? null : { status: projectDataStatus }
     );
+    sqlite.prepare(`UPDATE tasks SET status = ? WHERE id = 'task-1'`).run(taskStatus);
     insertStaleStoppingSnapshot(sqlite);
 
     return runSessionSleepLifecycleRepair(env, new Date('2026-08-12T01:00:00.000Z'));
   }
 
   it.each([
-    ['stopped', 'terminal reconciliation stopped it'],
-    ['sleeping', 'ProjectData already slept it'],
+    ['stopped', 'in_progress', 'terminal reconciliation stopped it'],
+    ['sleeping', 'in_progress', 'ProjectData already slept it'],
     // A failed task's preservation sleep can pass the point of no return after a
     // terminal reconciler failed its session; the teardown must still finish.
-    ['failed', "terminal reconciliation failed a failed task's session"],
-  ])('repairs a stale stopping row when ProjectData is already %s (%s)', async (status) => {
-    const result = await runStaleRepairForProjectDataStatus(status);
+    ['failed', 'failed', "terminal reconciliation failed a failed task's session"],
+  ])(
+    'repairs a stale stopping row when ProjectData is already %s (%s task: %s)',
+    async (status, taskStatus) => {
+      const result = await runStaleRepairForProjectDataStatus(status, taskStatus);
 
-    expect(result).toMatchObject({
-      selected: 1,
-      repaired: 1,
-      skipped: 0,
-      projectDataErrors: 0,
-      errors: 0,
-    });
-    expect(mocks.sleepSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
-    expect(mocks.getSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
-    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()).toEqual({
-      status: 'sleeping',
-    });
-    expect(
-      sqlite
-        .prepare(
-          `SELECT sleep_status, sleeping_at, sleep_claim_id, sleep_claimed_at
+      expect(result).toMatchObject({
+        selected: 1,
+        repaired: 1,
+        skipped: 0,
+        projectDataErrors: 0,
+        errors: 0,
+      });
+      expect(mocks.sleepSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
+      expect(mocks.getSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
+      expect(
+        sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()
+      ).toEqual({
+        status: 'sleeping',
+      });
+      expect(
+        sqlite
+          .prepare(
+            `SELECT sleep_status, sleeping_at, sleep_claim_id, sleep_claimed_at
              FROM session_snapshots WHERE id = 'snapshot-1'`
-        )
-        .get()
-    ).toEqual({
-      sleep_status: 'sleeping',
-      sleeping_at: '2026-08-12T01:00:00.000Z',
-      sleep_claim_id: null,
-      sleep_claimed_at: null,
-    });
-    expect(
-      sqlite.prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-1'`).pluck().get()
-    ).toEqual(expect.any(String));
-  });
+          )
+          .get()
+      ).toEqual({
+        sleep_status: 'sleeping',
+        sleeping_at: '2026-08-12T01:00:00.000Z',
+        sleep_claim_id: null,
+        sleep_claimed_at: null,
+      });
+      expect(
+        sqlite.prepare(`SELECT ended_at FROM compute_usage WHERE id = 'usage-1'`).pluck().get()
+      ).toEqual(expect.any(String));
+    }
+  );
 
   it.each([
-    [null, 'missing'],
-    ['active', 'still open'],
-  ])('does not repair a stale stopping row when ProjectData status is %s (%s)', async (status) => {
-    const result = await runStaleRepairForProjectDataStatus(status);
+    [null, 'in_progress', 'missing'],
+    ['active', 'in_progress', 'still open'],
+    // Scoped to failed tasks (rule 67): any other task's failed session keeps
+    // its pre-existing handling.
+    ['failed', 'in_progress', "a live task's failed session"],
+  ])(
+    'does not repair a stale stopping row when ProjectData status is %s (%s task: %s)',
+    async (status, taskStatus) => {
+      const result = await runStaleRepairForProjectDataStatus(status, taskStatus);
 
-    expect(result).toMatchObject({
-      selected: 1,
-      repaired: 0,
-      skipped: 0,
-      projectDataErrors: 1,
-      errors: 0,
-    });
-    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()).toEqual({
-      status: 'running',
-    });
-    expect(
-      sqlite
-        .prepare(`SELECT sleep_status FROM session_snapshots WHERE id = 'snapshot-1'`)
-        .pluck()
-        .get()
-    ).toBe('stopping');
-  });
+      expect(result).toMatchObject({
+        selected: 1,
+        repaired: 0,
+        skipped: 0,
+        projectDataErrors: 1,
+        errors: 0,
+      });
+      expect(
+        sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()
+      ).toEqual({
+        status: 'running',
+      });
+      expect(
+        sqlite
+          .prepare(`SELECT sleep_status FROM session_snapshots WHERE id = 'snapshot-1'`)
+          .pluck()
+          .get()
+      ).toBe('stopping');
+    }
+  );
 });

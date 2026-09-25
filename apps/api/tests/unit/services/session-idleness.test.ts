@@ -245,50 +245,32 @@ describe('classifySessionIdleness', () => {
       ).toMatchObject({ idle: true, conclusive: true, reason: 'idle' });
     });
 
-    it.each(['prompt-turn-ended', 'idle-interval-elapsed'] as const)(
-      'drains a hung prompt for the idle interval after the failure, then releases it, under %s',
-      (policy) => {
-        // The production shape (rule 62): the VM agent re-reports `prompting` every
-        // minute for as long as the prompt hangs, so the activity clock is always
-        // fresh. Only the failure time can bound the drain.
-        const hungPrompt = { activity: 'prompting', activityAt: NOW.getTime() - 60_000 };
-        const failedAt = new Date(NOW.getTime() - 60_000).toISOString();
+    it.each(['completed', 'failed'] as const)(
+      'keeps a %s task draining while its agent still reports a turn',
+      (taskStatus) => {
+        // The drain follows activity for BOTH statuses: a failed agent still working
+        // after the failure must not be slept mid-turn, because
+        // `sleepWorkspaceSession` aborts on every activity change and would spend the
+        // failed task's retry budget. A HUNG failed prompt is bounded elsewhere (the
+        // check-in watchdog and the preservation maximum wait).
+        const working = { activity: 'prompting', activityAt: NOW.getTime() - 60_000 };
+        const longAgo = new Date(NOW.getTime() - IDLE_AFTER_MS - 1).toISOString();
 
-        expect(
-          classify({ policy, taskStatus: 'failed', taskCompletedAt: failedAt, state: hungPrompt })
-        ).toMatchObject({
+        expect(classify({ taskStatus, taskCompletedAt: longAgo, state: working })).toMatchObject({
           idle: false,
           conclusive: true,
           reason: 'prompt_turn_active',
-          retryAt: new Date(Date.parse(failedAt) + IDLE_AFTER_MS),
+          retryAt: new Date(NOW.getTime() - 60_000 + IDLE_AFTER_MS),
         });
         expect(
           classify({
-            policy,
-            taskStatus: 'failed',
-            taskCompletedAt: new Date(NOW.getTime() - IDLE_AFTER_MS - 1).toISOString(),
-            state: hungPrompt,
+            taskStatus,
+            taskCompletedAt: longAgo,
+            state: { activity: 'prompting', activityAt: OLD_IDLE_ACTIVITY_AT },
           })
         ).toMatchObject({ idle: true, conclusive: true, reason: 'completed_prompt_stale' });
       }
     );
-
-    it('keeps a completed task draining while its final prompt still reports (control)', () => {
-      // A completed task's final response streams inside the prompt that called
-      // complete_task, so a fresh re-report still extends its drain.
-      expect(
-        classify({
-          taskStatus: 'completed',
-          taskCompletedAt: new Date(NOW.getTime() - IDLE_AFTER_MS - 1).toISOString(),
-          state: { activity: 'prompting', activityAt: NOW.getTime() - 60_000 },
-        })
-      ).toMatchObject({
-        idle: false,
-        conclusive: true,
-        reason: 'prompt_turn_active',
-        retryAt: new Date(NOW.getTime() - 60_000 + IDLE_AFTER_MS),
-      });
-    });
 
     it('does not widen to cancelled tasks, whose runtime is torn down directly', () => {
       // Control (rule 67): cancelled is not sleep-preserved. An idle one still

@@ -15,7 +15,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import { AppError } from '../../../src/middleware/error';
 import { taskCallbackRoute } from '../../../src/routes/tasks/callback';
-import { failedTaskWorkLossMessage } from '../../../src/services/failed-task-preservation';
+import {
+  failedTaskNoticeId,
+  failedTaskWorkLossMessage,
+} from '../../../src/services/failed-task-preservation';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
@@ -236,7 +239,7 @@ describe('VM-agent failure callback preserves the failed task work', () => {
       'system',
       failedTaskWorkLossMessage('no_resumable_agent_session'),
       null,
-      'failed-task-work-loss-task-1'
+      failedTaskNoticeId('work-loss', 'task-1', 'chat-1')
     );
     expect(mocks.failSession).toHaveBeenCalledWith(
       expect.anything(),

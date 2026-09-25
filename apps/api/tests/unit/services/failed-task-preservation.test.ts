@@ -9,13 +9,14 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
   failedTaskIncompleteSnapshotMessage,
+  failedTaskNoticeId,
   failedTaskWorkLossMessage,
   noteFailedTaskPreservationCapture,
   preserveFailedTaskWork,
 } from '../../../src/services/failed-task-preservation';
 import {
   releaseExhaustedFailedTaskPreservation,
-  releaseUnclaimableFailedTaskPreservation,
+  releaseStalledFailedTaskPreservation,
 } from '../../../src/services/failed-task-preservation-release';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -42,8 +43,9 @@ const INPUT = {
   chatSessionId: 'chat-1',
   source: 'test',
 };
-const WORK_LOSS_NOTICE_ID = 'failed-task-work-loss-task-1';
-const INCOMPLETE_SNAPSHOT_NOTICE_ID = 'failed-task-snapshot-incomplete-task-1';
+const WORK_LOSS_NOTICE_ID = failedTaskNoticeId('work-loss', 'task-1', 'chat-1');
+const INCOMPLETE_SNAPSHOT_NOTICE_ID = failedTaskNoticeId('snapshot-incomplete', 'task-1', 'chat-1');
+const SPENT_BUDGET = 9; // DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS
 
 describe('preserveFailedTaskWork', () => {
   let sqlite: Database.Database;
@@ -127,13 +129,15 @@ describe('preserveFailedTaskWork', () => {
       );
   }
 
-  function seedTask(status: string) {
+  function seedTask(status: string, failedAt = NOW.toISOString()) {
     sqlite
       .prepare(
-        `INSERT INTO tasks (id, project_id, user_id, workspace_id, chat_session_id, status, error_message)
-         VALUES ('task-1', 'project-1', 'user-1', 'ws-1', 'chat-1', ?, 'Agent prompt failed')`
+        `INSERT INTO tasks
+           (id, project_id, user_id, workspace_id, chat_session_id, status, error_message,
+            completed_at, updated_at)
+         VALUES ('task-1', 'project-1', 'user-1', 'ws-1', 'chat-1', ?, 'Agent prompt failed', ?, ?)`
       )
-      .run(status);
+      .run(status, failedAt, failedAt);
   }
 
   function sleepIntent() {
@@ -142,6 +146,27 @@ describe('preserveFailedTaskWork', () => {
         `SELECT sleep_status, sleep_after FROM session_snapshots WHERE chat_session_id = 'chat-1'`
       )
       .get();
+  }
+
+  /** Run `concurrent` just before the next write to session_snapshots executes. */
+  function interleaveBeforeSnapshotWrite(concurrent: () => void) {
+    const base = createSqliteD1(sqlite) as unknown as Record<string, unknown> & {
+      prepare(query: string): unknown;
+    };
+    let armed = true;
+    env = {
+      ...env,
+      DATABASE: {
+        ...base,
+        prepare: (query: string) => {
+          if (armed && /^update "session_snapshots"/i.test(query)) {
+            armed = false;
+            concurrent();
+          }
+          return base.prepare(query);
+        },
+      } as unknown as D1Database,
+    } as Env;
   }
 
   function sleepRow() {
@@ -304,6 +329,20 @@ describe('preserveFailedTaskWork', () => {
     );
   });
 
+  it('keeps the conversation even when the incomplete-snapshot note cannot be read', async () => {
+    // Best effort: a transient read failure must not turn a kept conversation into
+    // an error (and a 500 on the failure callback).
+    seedTask('failed');
+    seedRuntime({ workspaceStatus: 'deleted', agentStatus: 'sleeping' });
+    seedSnapshot({ status: 'degraded', degradation: 'transcript-only' });
+    sqlite.exec('DROP TABLE session_summaries');
+
+    await expect(preserveFailedTaskWork(env, INPUT)).resolves.toEqual({
+      outcome: 'already_asleep',
+    });
+    expect(mocks.persistMessage).not.toHaveBeenCalled();
+  });
+
   it('keeps a conversation whose workspace row no longer links the chat', async () => {
     // A wake handoff nulls workspaces.chat_session_id; the task's own link decides.
     seedRuntime({ workspaceStatus: 'deleted', chatSessionId: null, agentStatus: 'sleeping' });
@@ -403,7 +442,12 @@ describe('preserveFailedTaskWork', () => {
 
     it('tears down and surfaces once a failed task has no retry left', async () => {
       seedTask('failed');
-      seedSnapshot({ sleeping_at: null, sleep_status: 'failed', sleep_after: null });
+      seedSnapshot({
+        sleeping_at: null,
+        sleep_status: 'failed',
+        sleep_after: null,
+        sleep_attempts: SPENT_BUDGET,
+      });
 
       await expect(
         releaseExhaustedFailedTaskPreservation(env, { chatSessionId: 'chat-1' })
@@ -474,9 +518,42 @@ describe('preserveFailedTaskWork', () => {
       expect(sleepRow()).toMatchObject({ sleep_status: sleep.sleep_status });
     });
 
+    it('does not end an episode a fresh failure restarted after it read the row', async () => {
+      // A replayed failure callback (or an explicit run cleanup) starts a fresh
+      // episode between the release's read and its write: the compare-and-set on
+      // the row it read leaves the new episode alone (`.claude/rules/45`).
+      seedTask('failed');
+      seedSnapshot({
+        sleeping_at: null,
+        sleep_status: 'failed',
+        sleep_after: null,
+        sleep_attempts: SPENT_BUDGET,
+      });
+      interleaveBeforeSnapshotWrite(() => {
+        sqlite
+          .prepare(
+            `UPDATE session_snapshots SET sleep_status = 'scheduled', sleep_after = ?,
+               sleep_attempts = 0 WHERE chat_session_id = 'chat-1'`
+          )
+          .run(NOW.toISOString());
+      });
+
+      await expect(
+        releaseExhaustedFailedTaskPreservation(env, { chatSessionId: 'chat-1' })
+      ).resolves.toBe(false);
+      expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+      expect(mocks.persistMessage).not.toHaveBeenCalled();
+      expect(sleepRow()).toMatchObject({ sleep_status: 'scheduled', sleep_attempts: 0 });
+    });
+
     it('never acts for a completed task', async () => {
       seedTask('completed');
-      seedSnapshot({ sleeping_at: null, sleep_status: 'failed', sleep_after: null });
+      seedSnapshot({
+        sleeping_at: null,
+        sleep_status: 'failed',
+        sleep_after: null,
+        sleep_attempts: SPENT_BUDGET,
+      });
 
       await expect(
         releaseExhaustedFailedTaskPreservation(env, { chatSessionId: 'chat-1' })
@@ -485,7 +562,7 @@ describe('preserveFailedTaskWork', () => {
     });
   });
 
-  describe('releaseUnclaimableFailedTaskPreservation', () => {
+  describe('releaseStalledFailedTaskPreservation', () => {
     const RELEASE_INPUT = { chatSessionId: 'chat-1', workspaceId: 'ws-1' };
 
     function seedQueuedFailure() {
@@ -508,9 +585,7 @@ describe('preserveFailedTaskWork', () => {
       seedQueuedFailure();
       seedRuntime(runtime);
 
-      await expect(releaseUnclaimableFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(
-        true
-      );
+      await expect(releaseStalledFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(true);
       expect(mocks.persistMessage).toHaveBeenCalledWith(
         env,
         'project-1',
@@ -534,9 +609,7 @@ describe('preserveFailedTaskWork', () => {
       seedQueuedFailure();
       seedRuntime();
 
-      await expect(releaseUnclaimableFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(
-        false
-      );
+      await expect(releaseStalledFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(false);
       expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
       expect(mocks.persistMessage).not.toHaveBeenCalled();
       expect(sleepRow()).toMatchObject({ sleep_status: 'scheduled' });
@@ -553,9 +626,7 @@ describe('preserveFailedTaskWork', () => {
         sleep_claimed_at: NOW.toISOString(),
       });
 
-      await expect(releaseUnclaimableFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(
-        false
-      );
+      await expect(releaseStalledFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(false);
       expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
       expect(sleepRow()).toMatchObject({ sleep_status: 'stopping', sleep_claim_id: 'claim-1' });
     });
@@ -568,10 +639,50 @@ describe('preserveFailedTaskWork', () => {
       seedRuntime({ agentStatus: 'error' });
       seedSnapshot({ sleep_status: 'scheduled', sleep_after: NOW.toISOString(), ...snapshot });
 
-      await expect(releaseUnclaimableFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(
-        false
-      );
+      await expect(releaseStalledFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(false);
       expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+    });
+
+    it('releases a claimable runtime whose preservation has waited too long', async () => {
+      // Rule 47's maximum residence: a turn that never ends, or an activity state
+      // that never resolves, defers forever without spending an attempt.
+      seedTask('failed', new Date(NOW.getTime() - 9 * 60 * 60 * 1000).toISOString());
+      seedSnapshot({
+        status: 'pending',
+        sleeping_at: null,
+        sleep_status: 'scheduled',
+        sleep_after: NOW.toISOString(),
+      });
+      seedRuntime();
+
+      await expect(releaseStalledFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(true);
+      expect(mocks.persistMessage).toHaveBeenCalledWith(
+        env,
+        'project-1',
+        'chat-1',
+        'system',
+        failedTaskWorkLossMessage('preservation_timed_out'),
+        null,
+        WORK_LOSS_NOTICE_ID
+      );
+      expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env);
+    });
+
+    it('honours a configured maximum wait', async () => {
+      seedTask('failed', new Date(NOW.getTime() - 2 * 60 * 60 * 1000).toISOString());
+      seedSnapshot({
+        status: 'pending',
+        sleeping_at: null,
+        sleep_status: 'scheduled',
+        sleep_after: NOW.toISOString(),
+      });
+      seedRuntime();
+      const shortWait = { ...env, FAILED_TASK_PRESERVATION_MAX_WAIT_MS: '3600000' } as Env;
+
+      await expect(releaseStalledFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(false);
+      await expect(releaseStalledFailedTaskPreservation(shortWait, RELEASE_INPUT)).resolves.toBe(
+        true
+      );
     });
   });
 
