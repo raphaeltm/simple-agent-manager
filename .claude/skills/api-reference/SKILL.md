@@ -56,7 +56,7 @@ user-invocable: false
 - `GET /api/projects/:projectId/sessions` — List chat sessions for a project
 - `GET /api/projects/:projectId/sessions/:sessionId` — Get chat session detail with recent messages; message `before`/`after` use the same cursor forms as the list route below
 - `GET /api/projects/:projectId/sessions/:sessionId/state` — Get lightweight ACP activity state for a chat session
-- `GET /api/projects/:projectId/sessions/:sessionId/messages` — List persisted session messages (supports `roles`, `before`, `after`, `limit`, `compact`, `order=asc|desc`). `before` and `after` accept legacy exclusive millisecond timestamps or an exact JSON array cursor `[createdAt,sequence,id]`; use the array formed from the page edge to resume across tied timestamps.
+- `GET /api/projects/:projectId/sessions/:sessionId/messages` — List persisted session messages (supports `roles`, `before`, `after`, `limit`, `compact`, `order=asc|desc`). `before` and `after` accept legacy exclusive millisecond timestamps or an exact JSON array cursor `[createdAt,sequence,id]`; use the array formed from the page edge to resume across tied timestamps. An `after`-only request defaults to ascending order so finite pages can be drained without skipping unseen rows.
 - `GET /api/projects/:projectId/sessions/:sessionId/messages/:messageId/tool-content` — Lazy-load stored tool content for compact messages, falling back to the private R2 archive when inline payloads have been stripped
 - `GET /api/projects/:projectId/sessions/:sessionId/comments` — List message-anchored comment threads (supports `messageId`, `status=open|sent|resolved`, `afterSequence`, `limit`)
 - `POST /api/projects/:projectId/sessions/:sessionId/comments` — Create a message-anchored comment thread (`{ messageId, body, quote?, clientMutationId? }`)
@@ -138,6 +138,8 @@ Project event pull loop: create a subscription with the narrowest useful filter,
 - `POST /api/admin/project-data/storage/:projectId/emergency-purge` — Run a bounded ProjectData emergency purge of oldest `activity_events` and `acp_session_events` rows only
 
 ## Agent Sessions
+
+VM transcript callbacks use `POST /api/workspaces/:id/messages` for bounded ordinary batches. `POST /api/workspaces/:id/messages/upload` accepts callback-authenticated `part` requests followed by a `commit` manifest for one oversized logical message. Parts remain private until ProjectData verifies both field hashes and commits the original message ID, role, content, metadata, timestamp, origin, and sequence. Identical retries are acknowledged; conflicting uploads fail.
 
 - `GET /api/workspaces/:id/agent-sessions` — List workspace agent sessions
 - `POST /api/workspaces/:id/agent-sessions` — Create agent session (optional `worktreePath` binds session to a worktree)

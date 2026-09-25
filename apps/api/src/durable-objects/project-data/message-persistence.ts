@@ -17,6 +17,7 @@ export type BatchMessageInput = {
   timestamp: string;
   sequence?: number;
   origin?: string | null;
+  preserveToolMetadata?: boolean;
 };
 
 export type MessagePersistenceHooks = {

@@ -32,19 +32,9 @@ export function messageIsWithinCursor(
     return column === 'before' ? timestamp < cursor : timestamp > cursor;
   const sequence = Number(row.sequence);
   const id = String(row.id);
-  const comparison =
-    timestamp === cursor.createdAt
-      ? sequence === cursor.sequence
-        ? id < cursor.id
-          ? -1
-          : id > cursor.id
-            ? 1
-            : 0
-        : sequence < cursor.sequence
-          ? -1
-          : 1
-      : timestamp < cursor.createdAt
-        ? -1
-        : 1;
+  let comparison = 0;
+  if (timestamp !== cursor.createdAt) comparison = timestamp < cursor.createdAt ? -1 : 1;
+  else if (sequence !== cursor.sequence) comparison = sequence < cursor.sequence ? -1 : 1;
+  else if (id !== cursor.id) comparison = id < cursor.id ? -1 : 1;
   return column === 'before' ? comparison < 0 : comparison > 0;
 }

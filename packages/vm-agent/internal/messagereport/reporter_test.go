@@ -165,48 +165,6 @@ func waitForOutboxCount(t *testing.T, db *sql.DB, want int, context string) {
 	assertOutboxCount(t, db, want, context)
 }
 
-func storedContentAfterOversizedEnqueue(t *testing.T, limit int, messageID string) string {
-	t.Helper()
-	db := openTestDB(t)
-	cfg := testConfig("http://localhost", "ws-1")
-	cfg.MaxMessageContentBytes = limit
-	r, err := New(db, cfg)
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	defer r.Shutdown()
-
-	if err := r.Enqueue(Message{
-		MessageID: messageID,
-		Role:      "assistant",
-		Content:   strings.Repeat("x", 128),
-		Timestamp: "2024-01-01T00:00:00Z",
-	}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-
-	rows, err := db.Query("SELECT content FROM message_outbox ORDER BY id ASC")
-	if err != nil {
-		t.Fatalf("select content: %v", err)
-	}
-	defer rows.Close()
-	var stored strings.Builder
-	for rows.Next() {
-		var content string
-		if err := rows.Scan(&content); err != nil {
-			t.Fatal(err)
-		}
-		if len(content) > limit {
-			t.Fatalf("fragment exceeds content limit: %d", len(content))
-		}
-		stored.WriteString(content)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	return stored.String()
-}
-
 func recordingBatchSizeHandler(t *testing.T, mu *sync.Mutex, batchSizes *[]int) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -804,16 +762,23 @@ func TestBatchMaxBytes_RespectedInFlush(t *testing.T) {
 
 	db := openTestDB(t)
 	cfg := testConfig(ts.URL, "ws-1")
-	cfg.BatchMaxSize = 100  // high limit
-	cfg.BatchMaxBytes = 230 // one serialized row fits; two do not
+	cfg.BatchMaxSize = 100 // high limit
+	singleBytes, err := marshaledBatchSize([]outboxRow{{
+		id: 1, messageID: "m0", sessionID: cfg.SessionID, role: "user",
+		content: "this is a thirty char message!", createdAt: "2024-01-01T00:00:00Z",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.BatchMaxBytes = singleBytes + 1
 	r, err := New(db, cfg)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
 	r.SetToken("test-token")
 
-	// BatchMaxBytes is measured against the full JSON request body. One
-	// message fits the configured budget, but the next must form a new batch.
+	// BatchMaxBytes is measured against the full JSON request body. With a
+	// The serialized limit fits one row, but adding a second exceeds it.
 	for i := 0; i < 5; i++ {
 		_ = r.Enqueue(Message{
 			MessageID: fmt.Sprintf("m%d", i),
@@ -975,10 +940,10 @@ func TestFlush_SizeFallback409DisablesReporter(t *testing.T) {
 	enqueueAssistantPair(t, r)
 	r.flush()
 
-	assertOutboxCount(t, db, 0, "outbox after fallback session limit")
+	assertOutboxCount(t, db, 2, "outbox retained after fallback session limit")
 
-	if err := r.Enqueue(Message{MessageID: "m2", Role: "assistant", Content: "dropped", Timestamp: "2024-01-01T00:00:02Z"}); err != nil {
-		t.Fatalf("enqueue after limit: %v", err)
+	if err := r.Enqueue(Message{MessageID: "m2", Role: "assistant", Content: "rejected", Timestamp: "2024-01-01T00:00:02Z"}); err == nil {
+		t.Fatal("expected explicit enqueue error after session limit")
 	}
 	time.Sleep(150 * time.Millisecond)
 	r.Shutdown()
@@ -1079,40 +1044,6 @@ func TestShutdown_CancelsSizeFallbackRequest(t *testing.T) {
 	}
 }
 
-func TestEnqueue_OversizedContentSurvivesFragmentation(t *testing.T) {
-	const maxMessageBytes = 32
-	stored := storedContentAfterOversizedEnqueue(t, maxMessageBytes, "oversized")
-	if stored != strings.Repeat("x", 128) {
-		t.Fatalf("stored content changed: %q", stored)
-	}
-}
-
-func TestFlush_IndividualThreshold400RetainsOriginalData(t *testing.T) {
-	var requests atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests.Add(1)
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":"BAD_REQUEST","message":"Individual message content exceeds 102400 byte limit"}`))
-	}))
-	defer ts.Close()
-	db, reporter := newTokenReporter(t, ts.URL, "ws-1")
-	content := "original content"
-	metadata := strings.Repeat("m", 2048)
-	if err := reporter.Enqueue(Message{MessageID: "oversized-tool", Role: "assistant", Content: content,
-		ToolMetadata: metadata, Timestamp: "2024-01-01T00:00:00Z"}); err != nil {
-		t.Fatal(err)
-	}
-	waitForCondition(t, time.Second, func() bool { return requests.Load() > 0 })
-	reporter.Shutdown()
-	var gotContent, gotMetadata string
-	if err := db.QueryRow("SELECT content, tool_metadata FROM message_outbox WHERE message_id = ?", "oversized-tool").Scan(&gotContent, &gotMetadata); err != nil {
-		t.Fatal(err)
-	}
-	if gotContent != content || gotMetadata != metadata {
-		t.Fatal("size rejection changed or deleted queued data")
-	}
-}
-
 func TestFlush_SessionLimit409DisablesReporterUntilSessionSwitch(t *testing.T) {
 	var requests int32
 	var receivedMu sync.Mutex
@@ -1146,16 +1077,16 @@ func TestFlush_SessionLimit409DisablesReporterUntilSessionSwitch(t *testing.T) {
 		t.Fatalf("enqueue m1: %v", err)
 	}
 	waitForCondition(t, 2*time.Second, func() bool { return atomic.LoadInt32(&requests) == 1 })
-	waitForOutboxCount(t, db, 0, "outbox after session limit")
+	waitForOutboxCount(t, db, 1, "outbox retained after session limit")
 
-	if err := r.Enqueue(Message{MessageID: "m2", Role: "assistant", Content: "dropped", Timestamp: "2024-01-01T00:00:01Z"}); err != nil {
-		t.Fatalf("enqueue m2 after limit: %v", err)
+	if err := r.Enqueue(Message{MessageID: "m2", Role: "assistant", Content: "rejected", Timestamp: "2024-01-01T00:00:01Z"}); err == nil {
+		t.Fatal("expected explicit enqueue error after limit")
 	}
 	time.Sleep(150 * time.Millisecond)
 	if got := atomic.LoadInt32(&requests); got != 1 {
 		t.Fatalf("expected no retry or new request after limit, got %d requests", got)
 	}
-	assertOutboxCount(t, db, 0, "outbox after dropped post-limit enqueue")
+	assertOutboxCount(t, db, 1, "outbox after rejected post-limit enqueue")
 
 	r.SetSessionID("sess-2")
 	if err := r.Enqueue(Message{MessageID: "m3", Role: "assistant", Content: "new session", Timestamp: "2024-01-01T00:00:02Z"}); err != nil {
@@ -1840,50 +1771,6 @@ func TestReadBatch_OrdersByID(t *testing.T) {
 			t.Fatalf("outbox IDs not monotonic: batch[%d].id=%d <= batch[%d].id=%d",
 				i, batch[i].id, i-1, batch[i-1].id)
 		}
-	}
-}
-
-func TestEnqueue_PreservesOversizedContentInOrder(t *testing.T) {
-	db := openTestDB(t)
-	cfg := testConfig("http://localhost", "ws-1")
-	cfg.MaxMessageContentBytes = 1024
-	r, err := New(db, cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	defer r.Shutdown()
-
-	oversized := strings.Repeat("x", cfg.MaxMessageContentBytes+1000)
-	msg := Message{
-		MessageID: "msg-oversized",
-		Role:      "assistant",
-		Content:   oversized,
-	}
-	if err := r.Enqueue(msg); err != nil {
-		t.Fatalf("Enqueue failed: %v", err)
-	}
-
-	rows, err := db.Query("SELECT content FROM message_outbox ORDER BY id")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var restored strings.Builder
-	for rows.Next() {
-		var part string
-		if err := rows.Scan(&part); err != nil {
-			t.Fatal(err)
-		}
-		if len(part) > cfg.MaxMessageContentBytes {
-			t.Fatalf("fragment too large: %d", len(part))
-		}
-		restored.WriteString(part)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if restored.String() != oversized {
-		t.Fatal("oversized content was not preserved")
 	}
 }
 

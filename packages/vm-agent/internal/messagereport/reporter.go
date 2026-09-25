@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/workspace/vm-agent/internal/config"
 	_ "modernc.org/sqlite"
@@ -88,6 +89,12 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 	if cfg.MaxMessageContentBytes <= 0 {
 		cfg.MaxMessageContentBytes = defaults.MaxMessageContentBytes
 	}
+	if cfg.MaxMessageUploadBytes <= 0 {
+		cfg.MaxMessageUploadBytes = defaults.MaxMessageUploadBytes
+	}
+	if cfg.MaxMessageUploadParts <= 0 {
+		cfg.MaxMessageUploadParts = defaults.MaxMessageUploadParts
+	}
 	if cfg.OutboxMaxSize <= 0 {
 		cfg.OutboxMaxSize = defaults.OutboxMaxSize
 	}
@@ -158,19 +165,15 @@ func (r *Reporter) SetWorkspaceID(id string) {
 // messages. Call this when a warm node is reused for a new task so that
 // messages are tagged with the correct chat session.
 //
-// Any unsent messages from the previous session are cleared from the outbox
-// to prevent cross-contamination when a warm node is reused. The flushMu
-// is held during the clear to ensure no in-progress flush can ship stale
-// messages after the outbox is cleared.
+// Unsent rows from earlier sessions remain in SQLite. Flush selects only the
+// current session, so a warm-node switch cannot delete or misroute them.
 func (r *Reporter) SetSessionID(id string) {
 	if r == nil {
 		return
 	}
 
-	// Acquire flushMu FIRST to block any concurrent flush, then hold mu through
-	// the outbox clear and session update. Enqueue also holds mu through its
-	// insert, so a concurrent enqueue either lands before the clear and is
-	// removed with the old session, or waits and uses the new session ID.
+	// Acquire flushMu first so an in-flight flush finishes before the session
+	// changes. Enqueue holds mu while choosing its session and inserting.
 	r.flushMu.Lock()
 	defer r.flushMu.Unlock()
 
@@ -178,19 +181,7 @@ func (r *Reporter) SetSessionID(id string) {
 	defer r.mu.Unlock()
 	oldSessionID := r.sessionID
 
-	// Clear stale messages from the previous session BEFORE updating the
-	// session ID to prevent a race where Enqueue reads the new sessionID
-	// while old messages are still in the outbox.
 	if oldSessionID != "" && oldSessionID != id {
-		cleared, err := r.clearOutboxForSession(oldSessionID)
-		if err != nil {
-			slog.Error("messagereport: failed to clear outbox on session switch",
-				"error", err, "oldSessionId", oldSessionID, "newSessionId", id)
-		} else if cleared > 0 {
-			slog.Warn("messagereport: cleared stale outbox messages on session switch",
-				"cleared", cleared, "oldSessionId", oldSessionID, "newSessionId", id)
-		}
-
 		slog.Info("messagereport: session ID updated",
 			"sessionId", id, "previousSessionId", oldSessionID)
 	}
@@ -201,10 +192,8 @@ func (r *Reporter) SetSessionID(id string) {
 	r.sessionID = id
 }
 
-// clearOutboxForSession removes messages for a specific session from the
-// outbox. Returns the number of rows deleted. Using a session-scoped delete
-// avoids accidentally clearing messages that were already enqueued for the
-// new session in a narrow race window.
+// clearOutboxForSession is used only after an authoritative terminal callback;
+// session switching never calls it.
 func (r *Reporter) clearOutboxForSession(sessionID string) (int64, error) {
 	result, err := r.db.Exec("DELETE FROM message_outbox WHERE session_id = ?", sessionID)
 	if err != nil {
@@ -234,7 +223,7 @@ func (r *Reporter) Enqueue(msg Message) error {
 	defer r.mu.Unlock()
 
 	if r.messageLimitReached {
-		return nil
+		return fmt.Errorf("messagereport: session message limit reached; message not enqueued")
 	}
 	if r.terminalPersistenceFailure {
 		return nil
@@ -273,34 +262,26 @@ func (r *Reporter) Enqueue(msg Message) error {
 			"action", "rejected")
 		return fmt.Errorf("messagereport: cannot enqueue message without session ID")
 	}
+	if msg.Content == "" || !utf8.ValidString(msg.Content) || !utf8.ValidString(msg.ToolMetadata) {
+		return fmt.Errorf("messagereport: message %s requires nonempty UTF-8 content and valid UTF-8 metadata", msg.MessageID)
+	}
 
-	msg.SessionID = sessionID
-	fragmentCount := 0
-	if err := transportMessages(msg, r.cfg, func(Message) error { fragmentCount++; return nil }); err != nil {
-		return err
+	maxUploadBytes := min(r.cfg.MaxMessageUploadBytes, DefaultConfig().MaxMessageUploadBytes)
+	if len(msg.Content)+len(msg.ToolMetadata) > maxUploadBytes {
+		return fmt.Errorf("messagereport: message %s exceeds logical upload limit (%d bytes)", msg.MessageID, maxUploadBytes)
 	}
-	if count+fragmentCount > r.cfg.OutboxMaxSize {
-		return fmt.Errorf("messagereport: outbox full (%d+%d/%d)", count, fragmentCount, r.cfg.OutboxMaxSize)
-	}
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("messagereport: begin outbox insert: %w", err)
-	}
-	defer tx.Rollback()
-	// Atomic insert keeps a multipart message from being only partly queued.
-	err = transportMessages(msg, r.cfg, func(part Message) error {
-		_, err := tx.Exec(
-			`INSERT OR IGNORE INTO message_outbox
-				(message_id, session_id, role, content, tool_metadata, created_at, origin)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			part.MessageID, sessionID, part.Role, part.Content, part.ToolMetadata, part.Timestamp, part.Origin,
-		)
-		return err
-	})
+
+	// INSERT OR IGNORE for crash-recovery dedup on message_id UNIQUE constraint.
+	_, err := r.db.Exec(
+		`INSERT OR IGNORE INTO message_outbox
+			(message_id, session_id, role, content, tool_metadata, created_at, origin)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		msg.MessageID, sessionID, msg.Role, msg.Content, msg.ToolMetadata, msg.Timestamp, msg.Origin,
+	)
 	if err != nil {
 		return fmt.Errorf("messagereport: insert outbox: %w", err)
 	}
-	return tx.Commit()
+	return nil
 }
 
 // Shutdown signals the background goroutine to stop, performs a final flush,
@@ -345,6 +326,12 @@ func (r *Reporter) flushLoop() {
 func (r *Reporter) flush() {
 	r.flushMu.Lock()
 	defer r.flushMu.Unlock()
+	r.mu.Lock()
+	limitReached := r.messageLimitReached
+	r.mu.Unlock()
+	if limitReached {
+		return
+	}
 
 	for {
 		batch, err := r.readBatch()
@@ -381,12 +368,50 @@ type outboxRow struct {
 }
 
 func (r *Reporter) readBatch() ([]outboxRow, error) {
+	r.mu.Lock()
+	sessionID := r.sessionID
+	r.mu.Unlock()
+	sizes, err := r.db.Query(
+		`SELECT id, LENGTH(CAST(content AS BLOB)) + COALESCE(LENGTH(CAST(tool_metadata AS BLOB)), 0)
+		 FROM message_outbox WHERE session_id = ? ORDER BY id ASC LIMIT ?`,
+		sessionID, r.cfg.BatchMaxSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	loadCount := 0
+	var overLimitID int64
+	maxUploadBytes := min(r.cfg.MaxMessageUploadBytes, DefaultConfig().MaxMessageUploadBytes)
+	for sizes.Next() {
+		var id int64
+		var bytes int
+		if err := sizes.Scan(&id, &bytes); err != nil {
+			sizes.Close()
+			return nil, err
+		}
+		if bytes > maxUploadBytes {
+			overLimitID = id
+			break
+		}
+		loadCount++
+	}
+	if err := sizes.Err(); err != nil {
+		sizes.Close()
+		return nil, err
+	}
+	sizes.Close()
+	if overLimitID != 0 && loadCount == 0 {
+		return nil, fmt.Errorf("messagereport: outbox message %d exceeds logical upload limit; retained", overLimitID)
+	}
+	if loadCount == 0 {
+		return nil, nil
+	}
 	rows, err := r.db.Query(
 		`SELECT id, message_id, session_id, role, content, tool_metadata, created_at, origin
-		 FROM message_outbox
+		 FROM message_outbox WHERE session_id = ?
 		 ORDER BY id ASC
 		 LIMIT ?`,
-		r.cfg.BatchMaxSize,
+		sessionID, loadCount,
 	)
 	if err != nil {
 		return nil, err
@@ -427,7 +452,6 @@ func (r *Reporter) markMessageLimitReached(batch []outboxRow, responseBody strin
 		"sessionId", sessionID,
 		"responseBody", responseBody,
 	)
-	r.deleteBatch(batch)
 }
 
 // MarkTerminal disables future sends for this reporter after an owner outside

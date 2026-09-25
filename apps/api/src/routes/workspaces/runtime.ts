@@ -18,6 +18,7 @@ import { type Context, Hono } from 'hono';
 import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
+import { resolveToolMetadataMaxBytes } from '../../durable-objects/project-data/tool-metadata-storage';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
@@ -61,6 +62,7 @@ import {
   type WorkspaceDeletionCallbackKind,
 } from '../../services/workspace-deletion-callback-signal';
 import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
+import { registerMessageUploadRoute } from './message-upload';
 import { getDecryptedAgentKey, getDecryptedCredentialRecord } from '../credentials';
 import { assertRepositoryAccess } from '../projects/_helpers';
 import {
@@ -388,7 +390,9 @@ function resolveMaxMessageBytes(env: Env): number {
 
 function validateMessageEntry(
   msg: MessageBatchBody['messages'][number],
-  maxMessageBytes: number
+  maxMessageBytes: number,
+  maxMetadataBytes: number,
+  requireFullPreservation: boolean
 ): void {
   if (!msg.messageId) {
     throw errors.badRequest('Each message must have a messageId string');
@@ -404,15 +408,31 @@ function validateMessageEntry(
   if (!msg.content) {
     throw errors.badRequest('Each message must have non-empty content');
   }
-  if (msg.content.length > maxMessageBytes) {
+  const contentBytes = requireFullPreservation
+    ? new TextEncoder().encode(msg.content).byteLength
+    : msg.content.length;
+  if (contentBytes > maxMessageBytes) {
     throw errors.badRequest(`Individual message content exceeds ${maxMessageBytes} byte limit`);
+  }
+  if (
+    requireFullPreservation &&
+    msg.toolMetadata &&
+    new TextEncoder().encode(msg.toolMetadata).byteLength > maxMetadataBytes
+  ) {
+    throw errors.badRequest(
+      `Individual message tool metadata exceeds ${maxMetadataBytes} byte limit`
+    );
   }
   if (!msg.timestamp) {
     throw errors.badRequest('Each message must have a timestamp string');
   }
 }
 
-function validateMessageBatch(env: Env, body: MessageBatchBody): string {
+function validateMessageBatch(
+  env: Env,
+  body: MessageBatchBody,
+  requireFullPreservation: boolean
+): string {
   if (body.messages.length === 0) {
     throw errors.badRequest('messages array must not be empty');
   }
@@ -426,9 +446,10 @@ function validateMessageBatch(env: Env, body: MessageBatchBody): string {
     throw errors.badRequest('messages array must not be empty');
   }
   const maxMessageBytes = resolveMaxMessageBytes(env);
+  const maxMetadataBytes = resolveToolMetadataMaxBytes(env);
   const sessionId = firstMessage.sessionId;
   for (const msg of body.messages) {
-    validateMessageEntry(msg, maxMessageBytes);
+    validateMessageEntry(msg, maxMessageBytes, maxMetadataBytes, requireFullPreservation);
     if (msg.sessionId !== sessionId) {
       throw errors.badRequest('All messages in a batch must target the same sessionId');
     }
@@ -1845,7 +1866,11 @@ runtimeRoutes.post('/:id/messages', async (c) => {
   }
 
   const body = await parseMessageBatchRequest(c);
-  const sessionId = validateMessageBatch(c.env, body);
+  const sessionId = validateMessageBatch(
+    c.env,
+    body,
+    c.req.header('X-SAM-Message-Preservation') === 'required'
+  );
 
   // Rule 49: re-read immediately before crossing into ProjectData. Deletion or
   // reassignment that wins while the body is read must suppress all persistence.
@@ -1919,6 +1944,19 @@ runtimeRoutes.post('/:id/messages', async (c) => {
     persisted: result.persisted,
     duplicates: result.duplicates,
   });
+});
+
+registerMessageUploadRoute(runtimeRoutes, {
+  loadWorkspace: loadMessageWorkspace,
+  maybeTerminal: maybeTerminalMessageWorkspaceResponse,
+  assertAccepts: assertMessageWorkspaceAcceptsBatch,
+  terminalResponse: terminalMessagePersistenceResponse,
+  sessionLimitResponse: sessionLimitReachedResponse,
+  readBody: readRequestBodyWithLimit,
+  maxPayloadBytes: (env) =>
+    parsePositiveInt(env.MAX_MESSAGES_PAYLOAD_BYTES as string, DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES),
+  maxMessageBytes: resolveMaxMessageBytes,
+  validMessageRole: (role) => VALID_MESSAGE_ROLES.has(role),
 });
 
 // Legacy compatibility endpoint for node-side bootstrap exchange.

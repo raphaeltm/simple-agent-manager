@@ -834,6 +834,38 @@ export async function persistMessageBatch(
   );
 }
 
+export async function storeMessageUploadPart(
+  env: Env,
+  projectId: string,
+  input: import('../durable-objects/project-data/message-upload').MessageUploadPart
+): Promise<void> {
+  await assertExactWriteAllowedIfArchiveEnabled(
+    env,
+    projectId,
+    input.sessionId,
+    'storeMessageUploadPart'
+  );
+  return callProjectDataNoRetry(env, projectId, 'storeMessageUploadPart', (stub) =>
+    stub.storeMessageUploadPart(input)
+  );
+}
+
+export async function commitMessageUpload(
+  env: Env,
+  projectId: string,
+  input: import('../durable-objects/project-data/message-upload').MessageUploadCommit
+): Promise<{ persisted: number; duplicates: number; limitReached: boolean }> {
+  await assertExactWriteAllowedIfArchiveEnabled(
+    env,
+    projectId,
+    input.sessionId,
+    'commitMessageUpload'
+  );
+  return callProjectDataNoRetry(env, projectId, 'commitMessageUpload', (stub) =>
+    stub.commitMessageUpload(input)
+  );
+}
+
 export async function listSessions(
   env: Env,
   projectId: string,

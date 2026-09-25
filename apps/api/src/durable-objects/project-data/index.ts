@@ -58,6 +58,7 @@ import * as libraryFileComments from './library-file-comments';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messagePersistence from './message-persistence';
+import * as messageUpload from './message-upload';
 import * as messages from './messages';
 import * as missionState from './missions';
 import * as policies from './policies';
@@ -659,6 +660,52 @@ export class ProjectData extends DurableObject<Env> {
         batchMessages
       )
     );
+  }
+
+  async storeMessageUploadPart(input: messageUpload.MessageUploadPart): Promise<void> {
+    return this.withArchiveTranscriptLock(() => {
+      messages.assertTranscriptWriteAllowed(this.sql, input.sessionId, 'storeMessageUploadPart');
+      messageUpload.storeMessageUploadPart(this.sql, this.env, input);
+    });
+  }
+
+  async commitMessageUpload(
+    input: messageUpload.MessageUploadCommit
+  ): Promise<messagePersistence.MessageBatchPersistenceResult> {
+    return this.withArchiveTranscriptLock(async () => {
+      messages.assertTranscriptWriteAllowed(this.sql, input.sessionId, 'commitMessageUpload');
+      const assembled = await messageUpload.assembleMessageUpload(this.sql, this.env, input);
+      if (!assembled) {
+        messageUpload.clearMessageUpload(this.sql, input);
+        return {
+          persisted: 0,
+          duplicates: 1,
+          limitReached: false,
+          maxMessages: 0,
+          remainingCapacity: 0,
+        };
+      }
+      const result = await messagePersistence.persistMessageBatchWithSideEffects(
+        this.sql,
+        this.env,
+        this.messagePersistenceHooks(),
+        input.sessionId,
+        [
+          {
+            messageId: input.messageId,
+            role: input.role,
+            content: assembled.content,
+            toolMetadata: assembled.toolMetadata,
+            timestamp: input.timestamp,
+            origin: input.origin,
+            sequence: input.sequence,
+            preserveToolMetadata: true,
+          },
+        ]
+      );
+      if (!result.limitReached) messageUpload.clearMessageUpload(this.sql, input);
+      return result;
+    });
   }
 
   async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {

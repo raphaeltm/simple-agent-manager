@@ -2,6 +2,7 @@ import {
   DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
   DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+  DEFAULT_CHAT_TIMELINE_MAX_PAGES,
 } from '@simple-agent-manager/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -82,14 +83,23 @@ export function useSessionLifecycle(
       const cached = queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey);
       const latestCached = cached?.messages.at(-1);
       if (cached && latestCached) {
-        const delta = await getChatSession(projectId, sessionId, {
-          signal,
-          after: messagePageCursor(latestCached),
-        });
+        let after = messagePageCursor(latestCached);
+        let delta = await getChatSession(projectId, sessionId, { signal, after });
+        const newMessages = [...delta.messages];
+        for (let page = 1; delta.hasMore; page++) {
+          if (page >= DEFAULT_CHAT_TIMELINE_MAX_PAGES || delta.messages.length === 0) {
+            throw new Error('Message delta could not be drained');
+          }
+          const nextAfter = messagePageCursor(delta.messages.at(-1)!);
+          if (nextAfter === after) throw new Error('Message delta cursor did not advance');
+          after = nextAfter;
+          delta = await getChatSession(projectId, sessionId, { signal, after });
+          newMessages.push(...delta.messages);
+        }
         return {
           ...delta,
-          messages: mergeMessages(cached.messages, delta.messages, 'append'),
-          hasMore: cached.hasMore || delta.hasMore,
+          messages: mergeMessages(cached.messages, newMessages, 'append'),
+          hasMore: cached.hasMore,
         };
       }
 

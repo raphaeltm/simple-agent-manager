@@ -823,6 +823,13 @@ function assertEligibleTerminalSource(
       'ProjectData archive refuses sessions while retryable tool-payload cleanup is unresolved'
     );
   }
+  // A terminal callback can interrupt a multipart upload. Preserve its bytes in
+  // the root object for inspection without holding archival eligibility forever.
+  sql.exec(
+    'UPDATE message_upload_parts SET abandoned_at = ? WHERE session_id = ? AND abandoned_at IS NULL',
+    now,
+    sessionId
+  );
 }
 
 /**

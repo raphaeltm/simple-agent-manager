@@ -47,7 +47,7 @@ function makeMessage(id: string, createdAt: number) {
     content: `message ${id}`,
     toolMetadata: null,
     createdAt,
-    sequence: null,
+    sequence: createdAt,
   };
 }
 

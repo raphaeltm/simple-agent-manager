@@ -114,8 +114,7 @@ function getBeforeCursor(
       Number.isSafeInteger(parsed[0]) &&
       Number.isSafeInteger(parsed[1]) &&
       typeof parsed[2] === 'string' &&
-      parsed[2].length > 0 &&
-      parsed[2].length <= 256
+      parsed[2].length > 0
     ) {
       return { createdAt: parsed[0], sequence: parsed[1], id: parsed[2] };
     }
@@ -277,7 +276,8 @@ chatRoutes.get('/:sessionId', async (c) => {
       before,
       after,
       undefined,
-      compact
+      compact,
+      after !== null && before === null ? 'asc' : 'desc'
     );
   } catch (err) {
     return recordChatSessionLoadFailure(c, {
@@ -391,7 +391,11 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
   const before = getBeforeCursor(c.req.query('before'));
   const after = getBeforeCursor(c.req.query('after'));
   const roles = getRequestedRoles(c.req.query('roles') ?? c.req.query('role'));
-  const order = getMessageOrder(c.req.query('order'));
+  const order = c.req.query('order')
+    ? getMessageOrder(c.req.query('order'))
+    : after !== null && before === null
+      ? 'asc'
+      : 'desc';
 
   const compactDefault = (c.env.CHAT_COMPACT_MODE_DEFAULT ?? '').toLowerCase();
   const defaultCompact = compactDefault === 'false' ? false : DEFAULT_CHAT_COMPACT_MODE;

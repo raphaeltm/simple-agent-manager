@@ -68,8 +68,7 @@ func marshaledBatchSize(batch []outboxRow) (int, error) {
 func (r *Reporter) sendBatch(batch []outboxRow) error {
 	token, wsID, messageLimitReached, terminalPersistenceFailure := r.senderState()
 	if messageLimitReached {
-		r.deleteBatch(batch)
-		return nil
+		return fmt.Errorf("session message limit reached; outbox retained")
 	}
 	if terminalPersistenceFailure {
 		r.deleteBatch(batch)
@@ -87,6 +86,9 @@ func (r *Reporter) sendBatch(batch []outboxRow) error {
 	body, err := buildBatchBody(batch)
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
+	}
+	if len(batch) == 1 && (len(body) > r.cfg.BatchMaxBytes || len(batch[0].content) > r.cfg.MaxMessageContentBytes) {
+		return r.sendLargeMessage(batch[0], token, wsID)
 	}
 
 	url := strings.TrimRight(r.cfg.Endpoint, "/") +
@@ -135,11 +137,11 @@ func (r *Reporter) handleBatchResponse(batch []outboxRow, url, token, wsID strin
 		return true, nil
 	}
 	if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
-		return true, r.sendSizeFallback(url, token, batch)
+		return true, r.sendSizeFallback(url, token, wsID, batch)
 	}
 	if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
 		r.markMessageLimitReached(batch, responseBody)
-		return true, nil
+		return true, sessionMessageLimitError{responseBody: responseBody}
 	}
 	if isTerminalBatchResponse(statusCode) {
 		r.markTerminalPersistenceFailure(batch, statusCode, responseBody)
@@ -250,7 +252,7 @@ func (e terminalPersistenceError) Error() string {
 	return fmt.Sprintf("terminal persistence error status=%d body=%s", e.statusCode, e.responseBody)
 }
 
-func (r *Reporter) sendSizeFallback(url, token string, batch []outboxRow) error {
+func (r *Reporter) sendSizeFallback(url, token, workspaceID string, batch []outboxRow) error {
 	ctx, cancel := r.contextUntilStop()
 	defer cancel()
 
@@ -259,10 +261,10 @@ func (r *Reporter) sendSizeFallback(url, token string, batch []outboxRow) error 
 			return fmt.Errorf("shutdown during fallback: %w", err)
 		}
 
-		if err := r.sendSingleWithSizeFallback(ctx, url, token, row); err != nil {
+		if err := r.sendSingleWithSizeFallback(ctx, url, token, workspaceID, row); err != nil {
 			if limitErr, ok := err.(sessionMessageLimitError); ok {
 				r.markMessageLimitReached(batch, limitErr.responseBody)
-				return nil
+				return err
 			}
 			if permanentErr, ok := err.(fallbackPermanentError); ok {
 				slog.Warn("messagereport: fallback permanent error, retaining batch",
@@ -283,7 +285,7 @@ func (r *Reporter) sendSizeFallback(url, token string, batch []outboxRow) error 
 	return nil
 }
 
-func (r *Reporter) sendSingleWithSizeFallback(ctx context.Context, url, token string, row outboxRow) error {
+func (r *Reporter) sendSingleWithSizeFallback(ctx context.Context, url, token, workspaceID string, row outboxRow) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("shutdown during fallback: %w", err)
 	}
@@ -291,24 +293,11 @@ func (r *Reporter) sendSingleWithSizeFallback(ctx context.Context, url, token st
 	if err != nil {
 		return err
 	}
-	return fallbackCandidateResult(row, statusCode, responseBody, postErr)
-}
-
-func (r *Reporter) postFallbackCandidate(ctx context.Context, url, token string, candidate apiMessage) (int, string, error, error) {
-	body, err := buildBatchPayload([]apiMessage{candidate})
-	if err != nil {
-		return 0, "", nil, fmt.Errorf("marshal fallback payload: %w", err)
-	}
-	statusCode, responseBody, postErr := r.doPostWithContext(ctx, url, token, body)
-	return statusCode, responseBody, postErr, nil
-}
-
-func fallbackCandidateResult(row outboxRow, statusCode int, responseBody string, postErr error) error {
 	if postErr == nil && statusCode >= 200 && statusCode < 300 {
 		return nil
 	}
 	if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
-		return fmt.Errorf("message %s exceeds control-plane payload limit: %s", row.messageID, responseBody)
+		return r.sendLargeMessage(row, token, workspaceID)
 	}
 	if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
 		return sessionMessageLimitError{responseBody: responseBody}
@@ -320,6 +309,15 @@ func fallbackCandidateResult(row outboxRow, statusCode int, responseBody string,
 		return fallbackPermanentError{statusCode: statusCode, responseBody: responseBody}
 	}
 	return fmt.Errorf("fallback transient error status=%d err=%v body=%s", statusCode, postErr, responseBody)
+}
+
+func (r *Reporter) postFallbackCandidate(ctx context.Context, url, token string, candidate apiMessage) (int, string, error, error) {
+	body, err := buildBatchPayload([]apiMessage{candidate})
+	if err != nil {
+		return 0, "", nil, fmt.Errorf("marshal fallback payload: %w", err)
+	}
+	statusCode, responseBody, postErr := r.doPostWithContext(ctx, url, token, body)
+	return statusCode, responseBody, postErr, nil
 }
 
 func (r *Reporter) contextUntilStop() (context.Context, context.CancelFunc) {
@@ -340,6 +338,7 @@ func (r *Reporter) doPostWithContext(ctx context.Context, url, token string, bod
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-SAM-Message-Preservation", "required")
 
 	resp, err := r.client.Do(req)
 	if err != nil {

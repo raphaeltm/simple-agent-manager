@@ -297,6 +297,34 @@ async function expectTranscriptPreserved(
   expect(read.map((row) => String(row.role))).toEqual(seeded.map((message) => message.role));
   expect(read.map((row) => String(row.content))).toEqual(seeded.map((message) => message.content));
 
+  const backwardIds: string[] = [];
+  let before: { createdAt: number; sequence: number; id: string } | null = null;
+  for (let page = 0; page <= Math.ceil(seeded.length / TRANSCRIPT_PAGE_LIMIT) + 1; page++) {
+    const result = await projectDataService.getMessages(
+      testEnv,
+      projectId,
+      sessionId,
+      TRANSCRIPT_PAGE_LIMIT,
+      before,
+      null,
+      undefined,
+      false,
+      'desc'
+    );
+    if (result.messages.length === 0) break;
+    backwardIds.unshift(...result.messages.map((row) => String(row.id)));
+    const first = result.messages[0]!;
+    const next = {
+      createdAt: Number(first.createdAt),
+      sequence: Number(first.sequence),
+      id: String(first.id),
+    };
+    expect(next).not.toEqual(before);
+    before = next;
+    if (!result.hasMore) break;
+  }
+  expect(backwardIds).toEqual(seeded.map((message) => message.messageId));
+
   // Tool payloads travel with the transcript rather than being dropped on the way to R2.
   //
   // The count assertion covers every tool row; the payload fetch samples FIRST, MIDDLE and LAST

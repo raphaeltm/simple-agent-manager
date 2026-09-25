@@ -37,6 +37,27 @@ describe('ProjectData message pagination with tied timestamps', () => {
     }
     expect(forward).toEqual(seed.map((row) => row.messageId));
 
+    const overlapping = await stub.getMessages(
+      sessionId,
+      3,
+      { createdAt: 1_000_000, sequence: 5, id: 'tie-4' },
+      { createdAt: 1_000_000, sequence: 1, id: 'tie-0' },
+      undefined,
+      false,
+      'asc'
+    );
+    expect(overlapping.messages.map((row) => row.id)).toEqual(['tie-1', 'tie-2', 'tie-3']);
+    const repeatedFirstPage = await stub.getMessages(
+      sessionId,
+      2,
+      null,
+      null,
+      undefined,
+      false,
+      'asc'
+    );
+    expect(repeatedFirstPage.messages.map((row) => row.id)).toEqual(['tie-0', 'tie-1']);
+
     let before: Cursor | null = null;
     const backward: string[] = [];
     for (let page = 0; page < 5; page++) {

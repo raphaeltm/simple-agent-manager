@@ -7,7 +7,7 @@ import {
   PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES,
   type ProjectDataArchiveSourceIntentState,
 } from '../../project-data-archive/contract';
-import { type MessageCursor,messageCursorPredicate } from './message-cursor';
+import { type MessageCursor, messageCursorPredicate } from './message-cursor';
 import {
   insertNewMessage,
   nextSequence,
@@ -72,7 +72,11 @@ function parseArchiveSourceIntentState(value: unknown): ProjectDataArchiveSource
     : null;
 }
 
-function assertTranscriptWriteAllowed(sql: SqlStorage, sessionId: string, operation: string): void {
+export function assertTranscriptWriteAllowed(
+  sql: SqlStorage,
+  sessionId: string,
+  operation: string
+): void {
   let row: Record<string, unknown> | undefined;
   try {
     row = sql
@@ -138,6 +142,7 @@ export function persistMessageBatch(
     timestamp: string;
     sequence?: number;
     origin?: string | null;
+    preserveToolMetadata?: boolean;
   }>
 ): {
   persisted: number;
@@ -241,7 +246,12 @@ export function persistMessageBatch(
 
     const createdAt = new Date(msg.timestamp).getTime() || now;
     const sequence = msg.sequence ?? nextSeq++;
-    const boundedToolMetadata = boundToolMetadataForStorage(msg.toolMetadata, env);
+    // The upload protocol already enforces a bounded logical size and verifies
+    // every byte before this single canonical insert. Trimming here would turn
+    // an acknowledged upload into silent transcript loss.
+    const boundedToolMetadata = msg.preserveToolMetadata
+      ? { value: msg.toolMetadata, truncated: false, originalBytes: 0, storedBytes: 0 }
+      : boundToolMetadataForStorage(msg.toolMetadata, env);
     if (boundedToolMetadata.truncated) {
       log.warn('messages.batch_tool_metadata_truncated_for_storage', {
         sessionId,
@@ -427,6 +437,9 @@ export function formatMessageRows(
   for (const [i, row] of candidateRows.entries()) {
     cumulativeBytes += estimateRowBytes(row);
     if (cumulativeBytes > RPC_SIZE_BUDGET_BYTES) {
+      if (i === 0) {
+        throw new Error(`Message ${String(row.id)} exceeds the message page RPC budget`);
+      }
       safeCount = i; // exclude this row and everything after
       hasMore = true;
       log.warn('messages.rpc_size_guard_truncated', {
