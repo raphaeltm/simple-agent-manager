@@ -151,22 +151,22 @@ predicate the resumer reads (rule 58).
 
 ## Checklist
 
-- [ ] Add `failed-task-preservation.ts` with the decision, degraded surfacing, and exhaustion/degraded-capture hooks.
-- [ ] Add a named sleep-owned terminal-status authority; consume it in `classifySessionIdleness`, `cancelScheduledSessionSleep`, `isCompletingSessionProtected`, and node-cleanup Phase 0 + Phase 4.
-- [ ] Route `cleanupTerminalTaskResources` failed (non-destructive) through preservation.
-- [ ] Route attention expiry (both kinds) through preservation; `stopWorkspace: false`.
-- [ ] Sleep sweep: exhaustion fallback + degraded-capture note for failed tasks.
-- [ ] Unit tests: decision outcomes (live VM, live cf-container, already asleep, unknown, each not-preservable reason).
-- [ ] Vertical slice (rule 62): failed task with a dirty live workspace, driven from `cleanupTerminalTaskResources` through the real sleep sweep, ends with a verified snapshot, a sleeping workspace, and ProjectData `sleeping` (never `failed`). A real SQL engine drives the D1 state.
-- [ ] Route-level test: VM callback `toStatus: failed` queues sleep and does not tear down.
-- [ ] Attention-expiry tests: already-asleep session stays wakeable (no `failSession`); live session queues sleep; not-preservable still cleans up.
-- [ ] Control tests: Archive (`destructiveSessionEnd`) and task DELETE still tear down immediately for a `failed` task; parent stop stays `cancelled` + destructive.
-- [ ] Node-cleanup tests (real SQL): failed + chat session is not reaped; failed without chat, and cancelled, still reaped (discriminating).
-- [ ] Classifier/cancel/drain tests for `failed`, plus a `cancelled` control (not widened).
-- [ ] Exhaustion fallback test: exhausted failed preservation tears down and surfaces; exhausted completed task is unchanged.
-- [ ] Docs: update public docs that describe failed-task cleanup/sleep behavior.
-- [ ] Cost note (rule 76): `pnpm quality:cloudflare-cost` baseline + incremental R2 estimate in PR.
-- [ ] Follow-up ideas: UI `wakeAttemptFailed` proxy; kill-switch preservation; append transcript-only evidence to `01M04SB5QS0ASYKDSZR8FFSY38`.
+- [x] Add `failed-task-preservation.ts` with the decision, degraded surfacing, and exhaustion/degraded-capture hooks.
+- [x] Add a named sleep-owned terminal-status authority; consume it in `classifySessionIdleness`, `cancelScheduledSessionSleep`, `isCompletingSessionProtected`, and node-cleanup Phase 0 + Phase 4. Refinement: the reapers leave a failed task's workspace alone only while an agent session can be slept (`sleepLifecycleOwnsTerminalTaskWorkspaceSql`), so the rule-47 escape for unclaimable workspaces survives (the pre-existing recovery-workspace test proved it).
+- [x] Route `cleanupTerminalTaskResources` failed (non-destructive) through preservation.
+- [x] Route attention expiry (both kinds) through preservation; `stopWorkspace: false`.
+- [x] Sleep sweep: exhaustion fallback + degraded-capture note for failed tasks.
+- [x] Unit tests: decision outcomes (live VM, live cf-container, already asleep, unknown, each not-preservable reason). `tests/unit/services/failed-task-preservation.test.ts` (27, real SQLite; project predicate deletion verified red).
+- [x] Vertical slice (rule 62): failed task with a dirty live workspace, driven from `cleanupTerminalTaskResources` through the real sleep sweep, ends with a verified snapshot, a sleeping workspace, and ProjectData `sleeping` (never `failed`). A real SQL engine drives the D1 state. `tests/integration/failed-task-preservation.test.ts`: also the resumer claim gate accepts it; 4 incident tests red on surgical pre-fix revert.
+- [x] Route-level test: VM callback `toStatus: failed` queues sleep and does not tear down. `tests/unit/routes/task-callback-failed-preservation.test.ts` (real SQL, idempotent repeat); red pre-fix.
+- [x] Attention-expiry tests: already-asleep session stays wakeable (no `failSession`); live session queues sleep; not-preservable still cleans up. Plus lookup-failure withholds; all 4 red pre-fix.
+- [x] Control tests: Archive (`destructiveSessionEnd`) and task DELETE still tear down immediately for a `failed` task; parent stop stays `cancelled` + destructive. The Archive control is in both the ordering unit test and the vertical slice. Task DELETE uses the same `destructiveSessionEnd` branch. `cancelled` keeps its path, and the cancelled controls in the classifier, fence and reaper tests prove it was not widened.
+- [x] Node-cleanup tests (real SQL): failed + chat session is not reaped; failed without chat, and cancelled, still reaped (discriminating). The workers suite covers both phases, and discrimination was verified both ways: pre-fix → 2 red; an unconditional failed exemption → 3 red, including the pre-existing recovery-workspace escape test.
+- [x] Classifier/cancel/drain tests for `failed`, plus a `cancelled` control (not widened). Each is red pre-fix; the controls stay green.
+- [x] Exhaustion fallback test: exhausted failed preservation tears down and surfaces; exhausted completed task is unchanged.
+- [x] Docs: update public docs that describe failed-task cleanup/sleep behavior (`architecture/overview.md`, `guides/chat-features.md`, `reference/configuration.md` `SESSION_SLEEP_AFTER_MS`).
+- [x] Cost note (rule 76): `pnpm quality:cloudflare-cost` baseline + incremental R2 estimate in PR.
+- [x] Follow-up ideas: UI `wakeAttemptFailed` proxy (01M3BVZYGE7AAKQZDYCM7PXJ7N); kill-switch preservation (01M3BVZR6AZ0S4F5Q2JRKSEX09); late execution-step callback clears a failed task's error (01M3BVZH8GCR2KXH19KFPX5D86); completed-task exhausted sleep (01M3BW047BN1SPA3YBQ68SV4T8); transcript-only evidence appended to `01M04SB5QS0ASYKDSZR8FFSY38`.
 - [ ] Staging: a real failed task on a VM with an uncommitted file ends sleeping with a snapshot; wake restores the file; clean up.
 
 ## Acceptance criteria
@@ -182,3 +182,12 @@ predicate the resumer reads (rule 58).
 - Rules: 58, 66, 61, 44, 62, 67, 47, 18 (scoped copies under `apps/api/.claude/rules/`)
 - `apps/api/src/services/task-terminal-cleanup.ts`, `task-runner.ts`, `session-sleep.ts`, `task-sleep-preservation.ts`
 - Policies: `a3780107`, `486d1dd1`, `e8897480`, `d08d64dc`, `a974b04f`, `2adacc8f`
+
+## Implementation notes
+
+- Cancelling a failed agent's prompt was rejected: the VM agent answers a cancel with `awaiting_followup`, and that callback clears `tasks.error_message`. Filed as bug idea 01M3BVZH8GCR2KXH19KFPX5D86. Hung prompts instead drain for `SESSION_SLEEP_AFTER_MS` after the failure (classifier), then snapshot. A still-working prompt keeps fencing the claim and exhausts into the teardown fallback, so it is bounded.
+- The ProjectData DO path (attention expiry) loads the preservation module by dynamic import, matching the file's existing pattern. It surfaces through `projectDataService.persistMessage`, a self-RPC; `reconcileTaskWaits` already does the same from this alarm.
+- `node-phases.ts` (623 lines) was split first: Phase 0 moved to `terminal-cf-container-phase.ts` as a pure move, in commit 1fe9d7cf8.
+- Local results: API unit+integration 10,305/10,305 passing; API lint and typecheck clean.
+- Cost (rule 76): R2 storage is 50 GB, steady, projected at $0.60/month over the allowance. Average snapshot size is 33.8 MB (7-day production manifests; max 231.5 MB, cap 256 MiB). Expect about 5 newly preserved failed tasks a week at 7-day retention: roughly 0.17 GB steady state (about 1.3 GB worst case), under $0.05/month.
+
