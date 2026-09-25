@@ -99,6 +99,15 @@ async function seedCheckIn(agentSessionStatus: string) {
   return { stub, projectId, chatSessionId, taskId, workspaceId, markerId: marker.id };
 }
 
+/**
+ * The expiry decision is made by whichever alarm reads the expired marker first.
+ * A platform alarm the fixture armed can already be running when the marker is
+ * expired; it then resolves the marker across its own I/O awaits and the manual
+ * call below finds nothing to do. Assertions on the decision's effects therefore
+ * wait for them instead of assuming the manual call made the decision.
+ */
+const DECISION_TIMEOUT = { timeout: 5_000 };
+
 async function expireCheckIn(
   stub: DurableObjectStub<ProjectData>,
   markerId: string
@@ -150,21 +159,30 @@ describe('attention expiry from a real ProjectData alarm', () => {
 
     await expireCheckIn(stub, markerId);
 
-    expect(await taskRow(taskId)).toEqual({
-      status: 'failed',
-      error_message: 'Agent became unresponsive after SAM check-in',
-    });
+    await vi.waitFor(
+      async () =>
+        expect(await taskRow(taskId)).toEqual({
+          status: 'failed',
+          error_message: 'Agent became unresponsive after SAM check-in',
+        }),
+      DECISION_TIMEOUT
+    );
+    await vi.waitFor(
+      async () => expect((await stub.getSession(chatSessionId))?.status).toBe('failed'),
+      DECISION_TIMEOUT
+    );
+    // The notice is written before the session is failed.
     expect(await systemMessages(stub, chatSessionId)).toEqual([
       expect.objectContaining({
         id: failedTaskNoticeId('work-loss', taskId, chatSessionId),
         content: failedTaskWorkLossMessage('no_resumable_agent_session'),
       }),
     ]);
-    expect((await stub.getSession(chatSessionId))?.status).toBe('failed');
     // The teardown runs after the alarm and still completes.
-    await vi.waitFor(async () => expect(await workspaceStatus(workspaceId)).toBe('stopped'), {
-      timeout: 5_000,
-    });
+    await vi.waitFor(
+      async () => expect(await workspaceStatus(workspaceId)).toBe('stopped'),
+      DECISION_TIMEOUT
+    );
   });
 
   it('queues a snapshot-backed sleep and leaves the conversation open when the runtime is live', async () => {
@@ -172,14 +190,22 @@ describe('attention expiry from a real ProjectData alarm', () => {
 
     await expireCheckIn(stub, markerId);
 
-    expect((await taskRow(taskId))?.status).toBe('failed');
-    expect(
-      await env.DATABASE.prepare(
-        'SELECT status, sleep_status FROM session_snapshots WHERE chat_session_id = ?'
-      )
-        .bind(chatSessionId)
-        .first()
-    ).toEqual({ status: 'pending', sleep_status: 'scheduled' });
+    await vi.waitFor(
+      async () => expect((await taskRow(taskId))?.status).toBe('failed'),
+      DECISION_TIMEOUT
+    );
+    await vi.waitFor(
+      async () =>
+        expect(
+          await env.DATABASE.prepare(
+            'SELECT status, sleep_status FROM session_snapshots WHERE chat_session_id = ?'
+          )
+            .bind(chatSessionId)
+            .first()
+        ).toEqual({ status: 'pending', sleep_status: 'scheduled' }),
+      DECISION_TIMEOUT
+    );
+    // The sleep is queued last, so the decision is complete: nothing else follows.
     expect((await stub.getSession(chatSessionId))?.status).toBe('active');
     expect(await systemMessages(stub, chatSessionId)).toEqual([]);
     expect(await workspaceStatus(workspaceId)).toBe('running');
