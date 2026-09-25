@@ -195,6 +195,9 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
 - Surgical revert: ignoring runtime-work progress made
   `keeps a long prompt running while its runtime work is making progress` fail with
   `cancel_prompt` instead of `observe_prompt`. Restored the guard and the test passed.
+- Surgical revert: removing the UI health-refresh heartbeat comparison made
+  `does not overwrite a heartbeat that arrived after the node was read` fail; restoring the
+  comparison passed. The same SQLite-backed test also verifies the missing-heartbeat event.
 - Draft PR #2147 is open. Remaining gates: full API suite rerun, coordinated real-VM staging,
   CI/CodeRabbit, merge, production monitoring.
 
