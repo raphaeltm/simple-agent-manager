@@ -115,4 +115,45 @@ describe('direct workspace resource inheritance through HTTP and persisted reser
     }
   );
 
+  it.each([
+    ['minVcpu', { minVcpu: 0 }],
+    ['exclusiveNode', { exclusiveNode: 'yes' }],
+  ])(
+    'rejects an invalid %s before allocation',
+    async (field, resourceRequirements) => {
+      const f = fixture();
+      const app = new Hono<{ Bindings: Env }>();
+      registerWorkspaceCreateRoute(app);
+      const externalFetch = vi.fn(async () => {
+        throw new Error('External HTTP unavailable in test');
+      });
+      vi.stubGlobal('fetch', externalFetch);
+
+      const response = await app.request(
+        '/',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'Invalid workspace',
+            projectId: 'project-1',
+            resourceRequirements,
+          }),
+        },
+        f.env
+      );
+
+      // Invalid known fields short-circuit before any node or workspace row exists and before
+      // any provider/GitHub call is attempted.
+      expect(response.status).toBe(400);
+      expect(((await response.json()) as { message: string }).message).toContain(
+        `resourceRequirements.${field}`
+      );
+      expect(f.sqlite.prepare('SELECT COUNT(*) AS count FROM workspaces').get()).toEqual({
+        count: 0,
+      });
+      expect(f.sqlite.prepare('SELECT COUNT(*) AS count FROM nodes').get()).toEqual({ count: 0 });
+      expect(externalFetch).not.toHaveBeenCalled();
+    }
+  );
 });
