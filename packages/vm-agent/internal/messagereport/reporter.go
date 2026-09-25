@@ -13,11 +13,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// truncationMarker is appended to content that was truncated.
-const truncationMarker = "\n\n[truncated]"
-
-const omittedMessageMarker = "[message omitted: exceeded message transport limit]"
-
 // Message is the unit of work enqueued into the outbox.
 type Message struct {
 	MessageID    string `json:"messageId"`
@@ -279,30 +274,33 @@ func (r *Reporter) Enqueue(msg Message) error {
 		return fmt.Errorf("messagereport: cannot enqueue message without session ID")
 	}
 
-	// Truncate oversized content to match the API's individual-message limit.
-	// sendBatch still has a size fallback for JSON overhead and tool metadata.
-	maxBytes := r.cfg.MaxMessageContentBytes
-	if len(msg.Content) > maxBytes {
-		slog.Warn("messagereport: truncating oversized message content",
-			"messageId", msg.MessageID,
-			"originalBytes", len(msg.Content),
-			"maxBytes", maxBytes,
-			"workspaceId", workspaceID,
-		)
-		msg.Content = truncateContentToLimit(msg.Content, maxBytes)
+	msg.SessionID = sessionID
+	fragmentCount := 0
+	if err := transportMessages(msg, r.cfg, func(Message) error { fragmentCount++; return nil }); err != nil {
+		return err
 	}
-
-	// INSERT OR IGNORE for crash-recovery dedup on message_id UNIQUE constraint.
-	_, err := r.db.Exec(
-		`INSERT OR IGNORE INTO message_outbox
-			(message_id, session_id, role, content, tool_metadata, created_at, origin)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		msg.MessageID, sessionID, msg.Role, msg.Content, msg.ToolMetadata, msg.Timestamp, msg.Origin,
-	)
+	if count+fragmentCount > r.cfg.OutboxMaxSize {
+		return fmt.Errorf("messagereport: outbox full (%d+%d/%d)", count, fragmentCount, r.cfg.OutboxMaxSize)
+	}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("messagereport: begin outbox insert: %w", err)
+	}
+	defer tx.Rollback()
+	// Atomic insert keeps a multipart message from being only partly queued.
+	err = transportMessages(msg, r.cfg, func(part Message) error {
+		_, err := tx.Exec(
+			`INSERT OR IGNORE INTO message_outbox
+				(message_id, session_id, role, content, tool_metadata, created_at, origin)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			part.MessageID, sessionID, part.Role, part.Content, part.ToolMetadata, part.Timestamp, part.Origin,
+		)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("messagereport: insert outbox: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // Shutdown signals the background goroutine to stop, performs a final flush,

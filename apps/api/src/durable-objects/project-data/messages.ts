@@ -7,6 +7,7 @@ import {
   PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES,
   type ProjectDataArchiveSourceIntentState,
 } from '../../project-data-archive/contract';
+import { type MessageCursor,messageCursorPredicate } from './message-cursor';
 import {
   insertNewMessage,
   nextSequence,
@@ -348,8 +349,8 @@ export function getMessages(
   sql: SqlStorage,
   sessionId: string,
   limit: number = 1000,
-  before: number | null = null,
-  after: number | null = null,
+  before: MessageCursor | null = null,
+  after: MessageCursor | null = null,
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc',
@@ -360,13 +361,15 @@ export function getMessages(
   const params: (string | number)[] = [sessionId];
 
   if (before !== null) {
-    query += ' AND created_at < ?';
-    params.push(before);
+    const predicate = messageCursorPredicate('before', before);
+    query += ` AND ${predicate.sql}`;
+    params.push(...predicate.values);
   }
 
   if (after !== null) {
-    query += ' AND created_at > ?';
-    params.push(after);
+    const predicate = messageCursorPredicate('after', after);
+    query += ` AND ${predicate.sql}`;
+    params.push(...predicate.values);
   }
 
   if (roles && roles.length > 0) {
@@ -376,7 +379,7 @@ export function getMessages(
   }
 
   const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
-  query += ` ORDER BY created_at ${orderDirection}, sequence ${orderDirection} LIMIT ?`;
+  query += ` ORDER BY created_at ${orderDirection}, sequence ${orderDirection}, id ${orderDirection} LIMIT ?`;
   params.push(limit + 1);
 
   const rows = sql.exec(query, ...params).toArray();
@@ -384,7 +387,10 @@ export function getMessages(
 }
 
 function parseListedMessage(
-  row: Record<string, unknown>, sessionId: string, compact: boolean, compactOptions?: CompactMessageOptions
+  row: Record<string, unknown>,
+  sessionId: string,
+  compact: boolean,
+  compactOptions?: CompactMessageOptions
 ): Record<string, unknown> | null {
   try {
     return compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row);
@@ -401,8 +407,12 @@ function parseListedMessage(
 }
 
 export function formatMessageRows(
-  rows: Record<string, unknown>[], sessionId: string, limit: number,
-  compact: boolean, order: 'asc' | 'desc', compactOptions?: CompactMessageOptions
+  rows: Record<string, unknown>[],
+  sessionId: string,
+  limit: number,
+  compact: boolean,
+  order: 'asc' | 'desc',
+  compactOptions?: CompactMessageOptions
 ): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let hasMore = rows.length > limit;
   const candidateRows = hasMore ? rows.slice(0, limit) : rows;

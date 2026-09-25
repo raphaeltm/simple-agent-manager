@@ -13,6 +13,7 @@ import {
   listChatSessions,
   type SessionSummaryItem,
 } from '../api';
+import { messagePageCursor } from '../api/sessions';
 
 /**
  * Cross-project chat session summaries, served by a single D1 query each.
@@ -37,9 +38,21 @@ export const chatQueryKeys = {
   sessionMessages: (queryScope: string, projectId: string, sessionId: string) =>
     ['auth', queryScope, 'sessions', 'messages', projectId, sessionId] as const,
   timelineMessages: (queryScope: string, projectId: string, sessionId: string, maxPages: number) =>
-    [...chatQueryKeys.all(queryScope), 'timeline-messages', projectId, sessionId, { maxPages }] as const,
+    [
+      ...chatQueryKeys.all(queryScope),
+      'timeline-messages',
+      projectId,
+      sessionId,
+      { maxPages },
+    ] as const,
   timelineActivity: (queryScope: string, projectId: string, sessionId: string, limit: number) =>
-    [...chatQueryKeys.all(queryScope), 'timeline-activity', projectId, sessionId, { limit }] as const,
+    [
+      ...chatQueryKeys.all(queryScope),
+      'timeline-activity',
+      projectId,
+      sessionId,
+      { limit },
+    ] as const,
 };
 
 /** Compat shape: consumers of `ChatSessionListItem` expect `createdAt`. */
@@ -51,11 +64,7 @@ function withCreatedAt(sessions: SessionSummaryItem[]): ChatSessionSummary[] {
   return sessions.map((session) => ({ ...session, createdAt: session.startedAt }));
 }
 
-export function recentChatsQueryOptions(
-  queryScope: string,
-  limit: number,
-  staleThreshold: number
-) {
+export function recentChatsQueryOptions(queryScope: string, limit: number, staleThreshold: number) {
   return queryOptions({
     queryKey: chatQueryKeys.recent(queryScope, limit, staleThreshold),
     queryFn: async () => {
@@ -114,7 +123,7 @@ export async function fetchTimelineUserMessages(
   maxPages: number
 ): Promise<ChatMessageResponse[]> {
   const messagePages: ChatMessageResponse[][] = [];
-  let before: number | undefined;
+  let before: string | undefined;
   let pages = 0;
 
   while (pages++ < maxPages) {
@@ -127,8 +136,10 @@ export async function fetchTimelineUserMessages(
     if (result.messages.length === 0) break;
 
     messagePages.unshift(result.messages);
-    const nextBefore = result.messages[0]?.createdAt;
-    if (nextBefore === undefined || nextBefore === before) break;
+    const oldestMessage = result.messages[0];
+    if (!oldestMessage) break;
+    const nextBefore = messagePageCursor(oldestMessage);
+    if (nextBefore === before) break;
     before = nextBefore;
 
     if (!result.hasMore) break;

@@ -3661,8 +3661,8 @@ export function archiveSourceReadMessages(
   env: Env,
   input: ProjectDataArchiveExactReadInput,
   limit: number,
-  before: number | null,
-  after: number | null,
+  before: import('./message-cursor').MessageCursor | null,
+  after: import('./message-cursor').MessageCursor | null,
   roles: string[] | undefined,
   compact: boolean,
   order: 'asc' | 'desc'

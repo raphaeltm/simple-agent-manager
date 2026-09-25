@@ -43,6 +43,7 @@ import type {
   ChatSessionDetailResponse,
   ChatSessionResponse,
 } from '../../lib/api/sessions';
+import { messagePageCursor } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
 import { useWorkspaceChatSocket } from './useWorkspaceChatSocket';
 
@@ -294,7 +295,7 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     setLoadingMore(true);
     try {
       const data = await getChatSession(projectId, sessionId, {
-        before: firstMessage.createdAt,
+        before: messagePageCursor(firstMessage),
       });
       setMessages((prev) => {
         const merged = mergeMessages(prev, data.messages, 'prepend');

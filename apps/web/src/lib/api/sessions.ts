@@ -106,6 +106,14 @@ export interface ChatMessageResponse {
   origin?: 'user' | 'system' | null;
 }
 
+/** Exact cursor for message pagination; numeric timestamps remain accepted by the API. */
+export function messagePageCursor(message: ChatMessageResponse): string {
+  if (!Number.isSafeInteger(message.sequence)) {
+    throw new Error('Message sequence is required for lossless pagination');
+  }
+  return JSON.stringify([message.createdAt, message.sequence, message.id]);
+}
+
 /** Persisted session state snapshot from the DO (for catch-up on page load). */
 export interface SessionStateSnapshot {
   activity: 'idle' | 'prompting' | 'recovering' | 'error' | 'stopped';
@@ -336,7 +344,12 @@ export async function getAllChats(
 export async function getChatSession(
   projectId: string,
   sessionId: string,
-  params: { limit?: number; before?: number; after?: number; signal?: AbortSignal } = {}
+  params: {
+    limit?: number;
+    before?: number | string;
+    after?: number | string;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<ChatSessionDetailResponse> {
   const searchParams = new URLSearchParams();
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
@@ -370,8 +383,8 @@ export async function listChatMessages(
   sessionId: string,
   params: {
     limit?: number;
-    before?: number;
-    after?: number;
+    before?: number | string;
+    after?: number | string;
     roles?: string[];
     compact?: boolean;
     order?: 'asc' | 'desc';

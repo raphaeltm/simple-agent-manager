@@ -25,9 +25,8 @@ type Config struct {
 	// BatchMaxBytes is the maximum marshaled JSON payload size per batch.
 	BatchMaxBytes int
 
-	// MaxMessageContentBytes is the maximum message content size before
-	// truncation. This should stay below the Worker request body limit so an
-	// oversized single message does not make the batch permanently fail.
+	// MaxMessageContentBytes is the maximum content size of one transport
+	// message. Larger inputs are split into reversible fragments.
 	MaxMessageContentBytes int
 
 	// OutboxMaxSize is the maximum number of messages retained in the SQLite

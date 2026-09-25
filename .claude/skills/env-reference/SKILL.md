@@ -705,7 +705,7 @@ Generated deployments validate and pass these values through cloud-init to newly
 
 ### Message Reporting
 
-- `MSG_MAX_MESSAGE_CONTENT_BYTES` — Max single persisted message content before truncation (default: 102400)
+- `MSG_MAX_MESSAGE_CONTENT_BYTES` — Max content bytes per reporter transport fragment (default: 102400); larger messages are split into ordered, reconstructable fragments
 
 ### ACP (Agent Communication Protocol)
 

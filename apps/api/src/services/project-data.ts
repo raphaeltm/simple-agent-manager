@@ -905,8 +905,8 @@ export async function getMessages(
   projectId: string,
   sessionId: string,
   limit: number = 100,
-  before: number | null = null,
-  after: number | null = null,
+  before: import('../durable-objects/project-data/message-cursor').MessageCursor | null = null,
+  after: import('../durable-objects/project-data/message-cursor').MessageCursor | null = null,
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc'

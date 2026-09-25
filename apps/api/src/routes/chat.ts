@@ -98,13 +98,31 @@ function getSessionMessageLimit(env: Env, requestedLimit?: string): number {
   return Math.min(limit, effectiveMax);
 }
 
-function getBeforeCursor(rawBefore?: string): number | null {
+function getBeforeCursor(
+  rawBefore?: string
+): import('../durable-objects/project-data/message-cursor').MessageCursor | null {
   if (!rawBefore) return null;
-  const before = Number.parseInt(rawBefore, 10);
-  if (!Number.isFinite(before)) {
-    throw errors.badRequest('before must be a valid timestamp');
+  if (/^-?\d+$/.test(rawBefore)) {
+    const timestamp = Number(rawBefore);
+    if (Number.isSafeInteger(timestamp)) return timestamp;
   }
-  return before;
+  try {
+    const parsed: unknown = JSON.parse(rawBefore);
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 3 &&
+      Number.isSafeInteger(parsed[0]) &&
+      Number.isSafeInteger(parsed[1]) &&
+      typeof parsed[2] === 'string' &&
+      parsed[2].length > 0 &&
+      parsed[2].length <= 256
+    ) {
+      return { createdAt: parsed[0], sequence: parsed[1], id: parsed[2] };
+    }
+  } catch {
+    /* invalid cursor below */
+  }
+  throw errors.badRequest('cursor must be a timestamp or [createdAt,sequence,id]');
 }
 
 function getRequestedRoles(rawRoles?: string): string[] | undefined {
@@ -236,9 +254,9 @@ chatRoutes.get('/:sessionId', async (c) => {
 
   const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
   const beforeParam = c.req.query('before');
-  const before = beforeParam ? Number.parseInt(beforeParam, 10) : null;
+  const before = getBeforeCursor(beforeParam);
   const afterParam = c.req.query('after');
-  const after = afterParam ? Number.parseInt(afterParam, 10) : null;
+  const after = getBeforeCursor(afterParam);
   const configuredDeltaLimit = Number.parseInt(c.env.CHAT_SESSION_DELTA_MESSAGE_LIMIT || '', 10);
   const deltaLimit =
     Number.isFinite(configuredDeltaLimit) && configuredDeltaLimit > 0

@@ -26,6 +26,7 @@ import {
   resetIdleTimer,
   sendFollowUpPrompt,
 } from '../../lib/api';
+import { messagePageCursor } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
 import { chatQueryKeys, chatSessionMessagesQueryOptions } from '../../lib/query-options';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
@@ -79,11 +80,11 @@ export function useSessionLifecycle(
     enabled: Boolean(queryScope && projectId && sessionId),
     queryFn: async ({ signal }) => {
       const cached = queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey);
-      const latestCachedAt = cached?.messages.at(-1)?.createdAt;
-      if (cached && typeof latestCachedAt === 'number') {
+      const latestCached = cached?.messages.at(-1);
+      if (cached && latestCached) {
         const delta = await getChatSession(projectId, sessionId, {
           signal,
-          after: latestCachedAt,
+          after: messagePageCursor(latestCached),
         });
         return {
           ...delta,
@@ -636,7 +637,7 @@ export function useSessionLifecycle(
     setLoadingMore(true);
     try {
       const data = await getChatSession(projectId, sessionId, {
-        before: firstMessage.createdAt,
+        before: messagePageCursor(firstMessage),
       });
       setMessages((prev) => {
         const merged = mergeMessages(prev, data.messages, 'prepend');
@@ -669,7 +670,9 @@ export function useSessionLifecycle(
 
       setLoadingMore(true);
       try {
-        let before: number | undefined = oldest === Infinity ? undefined : oldest;
+        let before: string | undefined = messagesRef.current[0]
+          ? messagePageCursor(messagesRef.current[0])
+          : undefined;
         const accumulated: ChatMessageResponse[] = [];
         // Safety bound: never loop unbounded even if the server misreports hasMore.
         const maxPages =
@@ -689,7 +692,7 @@ export function useSessionLifecycle(
           const firstMessage = data.messages[0];
           if (!firstMessage) break; // Unreachable — the length check above guarantees this.
           oldest = firstMessage.createdAt;
-          before = oldest;
+          before = messagePageCursor(firstMessage);
           more = data.hasMore;
         }
         if (accumulated.length > 0) {

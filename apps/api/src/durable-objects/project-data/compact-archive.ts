@@ -11,6 +11,7 @@ import {
   type ProjectDataArchiveRow,
 } from '../../project-data-archive/contract';
 import { canonicalRowsSha256, createCanonicalRowsHasher } from '../../project-data-archive/hashing';
+import { type MessageCursor,messageIsWithinCursor } from './message-cursor';
 import { estimateRowBytes, RPC_SIZE_BUDGET_BYTES } from './messages';
 import type { Env } from './types';
 
@@ -116,6 +117,8 @@ function reference(row: Record<string, unknown>): CompactChunkRef {
 type CompactRawFilter = {
   before?: number | null;
   after?: number | null;
+  beforeInclusive?: boolean;
+  afterInclusive?: boolean;
   roles?: string[];
   messageId?: string;
   order?: 'asc' | 'desc';
@@ -133,11 +136,11 @@ function compactChunkQuery(sessionId: string, cursor: number | null, filter: Com
     params.push(cursor);
   }
   if (filter.before != null) {
-    query += ' AND first_created_at < ?';
+    query += filter.beforeInclusive ? ' AND first_created_at <= ?' : ' AND first_created_at < ?';
     params.push(filter.before);
   }
   if (filter.after != null) {
-    query += ' AND last_created_at > ?';
+    query += filter.afterInclusive ? ' AND last_created_at >= ?' : ' AND last_created_at > ?';
     params.push(filter.after);
   }
   if (filter.roles?.length) {
@@ -221,17 +224,16 @@ export async function compactRawDigest(
 
 export type CompactRawPageOptions = {
   limit: number;
-  before: number | null;
-  after: number | null;
+  before: MessageCursor | null;
+  after: MessageCursor | null;
   roles?: string[];
   order: 'asc' | 'desc';
 };
 
 function matchesRawPage(row: ProjectDataArchiveRow, options: CompactRawPageOptions): boolean {
-  const timestamp = Number(row.created_at);
   return !(
-    (options.before !== null && timestamp >= options.before) ||
-    (options.after !== null && timestamp <= options.after) ||
+    (options.before !== null && !messageIsWithinCursor(row, 'before', options.before)) ||
+    (options.after !== null && !messageIsWithinCursor(row, 'after', options.after)) ||
     (options.roles?.length && !options.roles.includes(String(row.role)))
   );
 }
@@ -246,8 +248,10 @@ export async function compactRawPage(
   const result: ProjectDataArchiveRow[] = [];
   let bytes = 0;
   for await (const chunk of compactRawChunks(sql, env, sessionId, {
-    before,
-    after,
+    before: typeof before === 'number' ? before : before?.createdAt,
+    after: typeof after === 'number' ? after : after?.createdAt,
+    beforeInclusive: before !== null && typeof before !== 'number',
+    afterInclusive: after !== null && typeof after !== 'number',
     roles,
     order,
   })) {

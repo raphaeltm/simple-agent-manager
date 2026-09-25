@@ -265,13 +265,13 @@ func (r *Reporter) sendSizeFallback(url, token string, batch []outboxRow) error 
 				return nil
 			}
 			if permanentErr, ok := err.(fallbackPermanentError); ok {
-				slog.Warn("messagereport: fallback permanent error, discarding batch",
+				slog.Warn("messagereport: fallback permanent error, retaining batch",
 					"statusCode", permanentErr.statusCode,
 					"count", len(batch),
 					"messageId", row.messageID,
 					"responseBody", permanentErr.responseBody,
 				)
-				return nil
+				return err
 			}
 			if terminalErr, ok := err.(terminalPersistenceError); ok {
 				r.markTerminalPersistenceFailure(batch, terminalErr.statusCode, terminalErr.responseBody)
@@ -284,23 +284,14 @@ func (r *Reporter) sendSizeFallback(url, token string, batch []outboxRow) error 
 }
 
 func (r *Reporter) sendSingleWithSizeFallback(ctx context.Context, url, token string, row outboxRow) error {
-	candidates := r.sizeFallbackCandidates(row)
-	for i, candidate := range candidates {
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("shutdown during fallback: %w", err)
-		}
-
-		statusCode, responseBody, postErr, err := r.postFallbackCandidate(ctx, url, token, candidate)
-		if err != nil {
-			return err
-		}
-		tryNext, resultErr := fallbackCandidateResult(row, i, statusCode, responseBody, postErr)
-		if tryNext {
-			continue
-		}
-		return resultErr
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("shutdown during fallback: %w", err)
 	}
-	return fmt.Errorf("fallback candidates exhausted for message %s", row.messageID)
+	statusCode, responseBody, postErr, err := r.postFallbackCandidate(ctx, url, token, rowToAPIMessage(row))
+	if err != nil {
+		return err
+	}
+	return fallbackCandidateResult(row, statusCode, responseBody, postErr)
 }
 
 func (r *Reporter) postFallbackCandidate(ctx context.Context, url, token string, candidate apiMessage) (int, string, error, error) {
@@ -312,35 +303,23 @@ func (r *Reporter) postFallbackCandidate(ctx context.Context, url, token string,
 	return statusCode, responseBody, postErr, nil
 }
 
-func fallbackCandidateResult(row outboxRow, candidateIndex int, statusCode int, responseBody string, postErr error) (tryNext bool, err error) {
+func fallbackCandidateResult(row outboxRow, statusCode int, responseBody string, postErr error) error {
 	if postErr == nil && statusCode >= 200 && statusCode < 300 {
-		logFallbackSuccess(row, candidateIndex)
-		return false, nil
+		return nil
 	}
 	if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
-		return true, nil
+		return fmt.Errorf("message %s exceeds control-plane payload limit: %s", row.messageID, responseBody)
 	}
 	if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
-		return false, sessionMessageLimitError{responseBody: responseBody}
+		return sessionMessageLimitError{responseBody: responseBody}
 	}
 	if isTerminalBatchResponse(statusCode) {
-		return false, terminalPersistenceError{statusCode: statusCode, responseBody: responseBody}
+		return terminalPersistenceError{statusCode: statusCode, responseBody: responseBody}
 	}
 	if isPermanentBatchError(statusCode) {
-		return false, fallbackPermanentError{statusCode: statusCode, responseBody: responseBody}
+		return fallbackPermanentError{statusCode: statusCode, responseBody: responseBody}
 	}
-	return false, fmt.Errorf("fallback transient error status=%d err=%v body=%s", statusCode, postErr, responseBody)
-}
-
-func logFallbackSuccess(row outboxRow, candidateIndex int) {
-	if candidateIndex == 0 {
-		return
-	}
-	slog.Warn("messagereport: delivered oversized message fallback",
-		"messageId", row.messageID,
-		"role", row.role,
-		"fallbackIndex", candidateIndex,
-	)
+	return fmt.Errorf("fallback transient error status=%d err=%v body=%s", statusCode, postErr, responseBody)
 }
 
 func (r *Reporter) contextUntilStop() (context.Context, context.CancelFunc) {
@@ -348,33 +327,6 @@ func (r *Reporter) contextUntilStop() (context.Context, context.CancelFunc) {
 		return context.WithCancel(context.Background())
 	}
 	return context.WithCancel(r.stopCtx)
-}
-
-func (r *Reporter) sizeFallbackCandidates(row outboxRow) []apiMessage {
-	trimmed := rowToAPIMessage(row)
-	trimmed.Content = truncateContentToLimit(trimmed.Content, r.cfg.MaxMessageContentBytes)
-
-	withoutMetadata := trimmed
-	withoutMetadata.ToolMetadata = ""
-
-	omitted := withoutMetadata
-	omitted.Content = omittedMessageMarker
-
-	return []apiMessage{trimmed, withoutMetadata, omitted}
-}
-
-func truncateContentToLimit(content string, maxBytes int) string {
-	if maxBytes <= 0 {
-		return ""
-	}
-	if maxBytes <= len(truncationMarker) {
-		return truncationMarker[:maxBytes]
-	}
-	if len(content) <= maxBytes {
-		return content
-	}
-	keep := maxBytes - len(truncationMarker)
-	return content[:keep] + truncationMarker
 }
 
 func (r *Reporter) doPost(url, token string, body []byte) (int, string, error) {
