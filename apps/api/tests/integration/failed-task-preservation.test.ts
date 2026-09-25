@@ -23,6 +23,7 @@ import {
 } from '../../src/services/failed-task-preservation';
 import {
   claimSessionSnapshotRecovery,
+  finalizeSessionSnapshotSleeping,
   markSessionSnapshotAwakeInPlace,
 } from '../../src/services/session-snapshots';
 import { cleanupTerminalTaskResources } from '../../src/services/task-terminal-cleanup';
@@ -402,6 +403,48 @@ describe('failed-task work preservation vertical slice', () => {
       'chat-1',
       'system',
       failedTaskIncompleteSnapshotMessage('transcript-only', 'vm'),
+      null,
+      failedTaskNoticeId('snapshot-incomplete', 'task-1', 'chat-1')
+    );
+    expect(mocks.failSession).not.toHaveBeenCalled();
+  });
+
+  it('says so when an Instant container sleeps a failed task on its own idle timeout', async () => {
+    // Staging, 2026-09-25: the container's own idle sleep won the race with the
+    // sweep 22s after the failure, from a checkpoint whose WIP bundle had failed.
+    // That path finalizes through the same writer (as `VmAgentContainer` calls it),
+    // so the chat still hears that the files were not captured.
+    seedFailedTask('cf-container');
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots
+         SET status = 'degraded', degradation = 'wip-skipped', manifest_r2_key = 'm.json',
+             sleep_status = 'stopping', sleep_claim_id = 'container-claim', sleep_stopping_since = ?
+         WHERE chat_session_id = 'chat-1'`
+      )
+      .run(START.toISOString());
+
+    await expect(
+      finalizeSessionSnapshotSleeping(
+        drizzle(env.DATABASE, { schema }),
+        env,
+        'chat-1',
+        'container-claim',
+        START,
+        {
+          sleepWarning: 'Workspace slept with degraded snapshot (wip-skipped)',
+        }
+      )
+    ).resolves.toBe(true);
+
+    expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping', degradation: 'wip-skipped' });
+    expect(mocks.persistMessage).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'chat-1',
+      'system',
+      failedTaskIncompleteSnapshotMessage('wip-skipped', 'cf-container'),
       null,
       failedTaskNoticeId('snapshot-incomplete', 'task-1', 'chat-1')
     );
