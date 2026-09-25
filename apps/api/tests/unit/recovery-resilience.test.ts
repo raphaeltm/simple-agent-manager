@@ -16,7 +16,13 @@ const stuckTasksSource = readFileSync(
 );
 // node-cleanup.ts was split into a directory (rule 18). These structural assertions
 // apply to the sweep as a whole, so read every module and concatenate.
-const nodeCleanupSource = ['index.ts', 'shared.ts', 'node-phases.ts', 'workspace-phases.ts']
+const nodeCleanupSource = [
+  'index.ts',
+  'shared.ts',
+  'result.ts',
+  'node-phases.ts',
+  'workspace-phases.ts',
+]
   .map((file) => readFileSync(resolve(process.cwd(), `src/scheduled/node-cleanup/${file}`), 'utf8'))
   .join('\n');
 const timeoutSource = readFileSync(resolve(process.cwd(), 'src/services/timeout.ts'), 'utf8');
@@ -313,9 +319,7 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
     // Failed/cancelled work is terminal. Completed conversations remain
     // persistent unless the workspace has no chat to resume.
     expect(nodeCleanupSource).toContain("t.status IN ('failed', 'cancelled')");
-    expect(nodeCleanupSource).toContain(
-      "(t.status = 'completed' AND w.chat_session_id IS NULL)"
-    );
+    expect(nodeCleanupSource).toContain("(t.status = 'completed' AND w.chat_session_id IS NULL)");
     // Must NOT have any active task still referencing it
     expect(nodeCleanupSource).toContain('NOT EXISTS');
     expect(nodeCleanupSource).toContain("t.status IN ('queued', 'delegated', 'in_progress')");

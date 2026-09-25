@@ -43,7 +43,7 @@ export async function listNodeHealthEvents(env: Env, nodeId: string): Promise<No
   const rows = await env.DATABASE.prepare(
     `SELECT node_id AS nodeId, episode_started_at AS episodeStartedAt,
             event, reason, created_at AS createdAt
-     FROM node_health_events WHERE node_id = ? ORDER BY created_at ASC`
+     FROM node_health_events WHERE node_id = ? ORDER BY created_at ASC, rowid ASC`
   )
     .bind(nodeId)
     .all<NodeHealthEvent>();

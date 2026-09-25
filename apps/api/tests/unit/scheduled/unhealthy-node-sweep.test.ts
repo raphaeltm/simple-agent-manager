@@ -140,6 +140,22 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
     expect(events.filter((event) => event.event === 'sleep_requested')).toHaveLength(1);
   });
 
+  it('releases once the session has slept, before the release deadline', async () => {
+    seedNode('slept-node', 12);
+    boundaries.sleep = vi.fn(async () => {
+      order.push('sleep');
+      sqlite
+        .prepare(`UPDATE workspaces SET status = 'sleeping' WHERE node_id = ?`)
+        .run('slept-node');
+    }) as UnhealthyNodeBoundaries['sleep'];
+
+    await sweep();
+    await sweep();
+
+    expect(order).toEqual(['notice', 'sleep', 'release']);
+    expect(sqlite.prepare(`SELECT id FROM nodes WHERE id = 'slept-node'`).get()).toBeUndefined();
+  });
+
   it('holds deletion when multiple nodes lose heartbeat together', async () => {
     seedNode('fleet-1', 31, false);
     seedNode('fleet-2', 31, false);
@@ -150,6 +166,40 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
     expect((await listNodeHealthEvents(env, 'fleet-1')).map((e) => e.reason)).toContain(
       'fleet_heartbeat_intake_unverified'
     );
+  });
+
+  it('ends a fleet-wide hold on a finite bound', async () => {
+    seedNode('fleet-expired-1', 41, false);
+    seedNode('fleet-expired-2', 41, false);
+    seedNode('fleet-expired-3', 41, false);
+    await sweep();
+
+    expect(order).toEqual(['release', 'release', 'release']);
+    expect((await listNodeHealthEvents(env, 'fleet-expired-1')).map((e) => e.reason)).toContain(
+      'fleet_hold_window_exceeded'
+    );
+  });
+
+  it('releases at the deadline even when health-event writes fail', async () => {
+    seedNode('event-store-down', 31);
+    const database = env.DATABASE;
+    env = {
+      ...env,
+      DATABASE: {
+        ...database,
+        prepare(sql: string) {
+          if (sql.includes('INSERT OR IGNORE INTO node_health_events')) {
+            throw new Error('event store unavailable');
+          }
+          return database.prepare(sql);
+        },
+      } as D1Database,
+    };
+
+    await sweep();
+
+    expect(order).toEqual(['notice', 'sleep', 'release']);
+    expect(sqlite.prepare(`SELECT id FROM nodes WHERE id = 'event-store-down'`).get()).toBeUndefined();
   });
 
   it('refuses deletion when a heartbeat arrives after selection', async () => {

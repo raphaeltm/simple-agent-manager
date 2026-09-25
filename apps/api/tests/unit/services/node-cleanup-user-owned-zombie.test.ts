@@ -39,7 +39,8 @@ vi.mock('../../../src/services/node-agent', () => ({
   // Background sweeps must not inherit the interactive VM-agent timeout (rule 47).
   getNodeAgentBackgroundRequestTimeoutMs: vi.fn().mockReturnValue(5_000),
 }));
-vi.mock('../../../src/services/project-data', () => ({
+vi.mock('../../../src/services/project-data', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/project-data')>()),
   stopSession: vi.fn().mockResolvedValue(undefined),
   cleanupWorkspaceActivity: vi.fn().mockResolvedValue(undefined),
 }));
@@ -55,7 +56,8 @@ vi.mock('../../../src/services/observability', () => ({
 vi.mock('../../../src/services/workspace-lifecycle-finalizer', () => ({
   finalizeWorkspaceLifecycleClosure: vi.fn().mockResolvedValue({}),
 }));
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 

@@ -100,25 +100,29 @@ export async function refreshNodeHealth(
     return node;
   }
 
+  const updatedAt = new Date().toISOString();
+  const updated = await env.DATABASE.prepare(
+    `UPDATE nodes SET health_status = ?, updated_at = ?
+     WHERE id = ? AND status = ? AND last_heartbeat_at IS ? AND health_status = ?`
+  )
+    .bind(computedHealth, updatedAt, node.id, node.status, node.lastHeartbeatAt, node.healthStatus)
+    .run();
+  if ((updated.meta.changes ?? 0) !== 1) {
+    const [current] = await db.select().from(schema.nodes).where(eq(schema.nodes.id, node.id));
+    return current ?? node;
+  }
+
   await recordNodeHealthEvent(env, {
     nodeId: node.id,
     episodeStartedAt: node.lastHeartbeatAt ?? node.createdAt,
     event: computedHealth,
     reason: computedHealth === 'healthy' ? 'node_heartbeat_resumed' : 'node_heartbeat_missing',
-    createdAt: new Date().toISOString(),
+    createdAt: updatedAt,
   });
-
-  await db
-    .update(schema.nodes)
-    .set({
-      healthStatus: computedHealth,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.nodes.id, node.id));
 
   return {
     ...node,
     healthStatus: computedHealth,
-    updatedAt: new Date().toISOString(),
+    updatedAt,
   };
 }

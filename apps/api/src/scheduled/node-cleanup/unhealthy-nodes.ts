@@ -71,13 +71,22 @@ async function record(
   reason: string,
   nowIso: string
 ): Promise<void> {
-  await recordNodeHealthEvent(env, {
-    nodeId: node.id,
-    episodeStartedAt: node.last_heartbeat_at ?? node.created_at,
-    event,
-    reason,
-    createdAt: nowIso,
-  });
+  try {
+    await recordNodeHealthEvent(env, {
+      nodeId: node.id,
+      episodeStartedAt: node.last_heartbeat_at ?? node.created_at,
+      event,
+      reason,
+      createdAt: nowIso,
+    });
+  } catch (error) {
+    log.error('node_cleanup.health_event_failed', {
+      nodeId: node.id,
+      event,
+      reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 async function loadWorkspaces(env: Env, nodeId: string): Promise<Workspace[]> {
@@ -88,6 +97,30 @@ async function loadWorkspaces(env: Env, nodeId: string): Promise<Workspace[]> {
     .bind(nodeId)
     .all<Workspace>();
   return rows.results;
+}
+
+async function wasRecorded(
+  env: Env,
+  node: Candidate,
+  event: string,
+  workspaceId: string
+): Promise<boolean> {
+  try {
+    return await hasNodeHealthEvent(
+      env,
+      node.id,
+      node.last_heartbeat_at ?? node.created_at,
+      event,
+      workspaceId
+    );
+  } catch (error) {
+    log.error('node_cleanup.health_event_lookup_failed', {
+      nodeId: node.id,
+      event,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
 }
 
 async function preserveWorkspace(
@@ -101,7 +134,7 @@ async function preserveWorkspace(
   const episode = node.last_heartbeat_at ?? node.created_at;
   const messageId = `node-health:${node.id}:${workspace.id}:${Date.parse(episode)}`;
   const content = `SAM lost contact with node ${node.id}. It is attempting to preserve this session before releasing the node. Work still in the agent's current turn may not have reached the chat transcript.`;
-  if (!(await hasNodeHealthEvent(env, node.id, episode, 'session_notice', workspace.id))) {
+  if (!(await wasRecorded(env, node, 'session_notice', workspace.id))) {
     try {
       await boundaries.notice(
         env,
@@ -125,7 +158,7 @@ async function preserveWorkspace(
 
   if (
     workspace.status === 'sleeping' ||
-    (await hasNodeHealthEvent(env, node.id, episode, 'sleep_requested', workspace.id))
+    (await wasRecorded(env, node, 'sleep_requested', workspace.id))
   )
     return;
   try {
@@ -168,6 +201,7 @@ export async function sweepUnhealthyNodes(
   )
     .bind(nowIso, nowIso, config.nodeSweepLimit)
     .all<Candidate>();
+  if (candidates.results.length === 0) return;
 
   const fleet = await env.DATABASE.prepare(
     `SELECT COUNT(*) AS total,
@@ -178,7 +212,7 @@ export async function sweepUnhealthyNodes(
     .bind(new Date(now.getTime() - config.unhealthyDrainAfterMs).toISOString())
     .first<{ total: number; silent: number }>();
   const fleetLoss =
-    (fleet?.total ?? 0) >= 3 &&
+    (fleet?.total ?? 0) >= config.unhealthyFleetMinNodes &&
     (fleet?.silent ?? 0) / (fleet?.total ?? 1) >= config.unhealthyFleetMaxFraction;
 
   for (const node of candidates.results) {
@@ -204,10 +238,16 @@ export async function sweepUnhealthyNodes(
         .run();
       if ((observed.meta.changes ?? 0) !== 1) continue;
       await record(env, node, health, 'node_heartbeat_missing', nowIso);
-      if (fleetLoss) {
+      const fleetHoldExpired =
+        now.getTime() - Date.parse(episode) >=
+        config.unhealthyReleaseAfterMs + config.unhealthyDrainAfterMs;
+      if (fleetLoss && !fleetHoldExpired) {
         result.unhealthyHeld++;
         await record(env, node, 'held', 'fleet_heartbeat_intake_unverified', nowIso);
         continue;
+      }
+      if (fleetLoss) {
+        await record(env, node, 'draining', 'fleet_hold_window_exceeded', nowIso);
       }
       if (decision === 'waiting') {
         result.unhealthyHeld++;

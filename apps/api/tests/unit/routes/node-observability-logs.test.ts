@@ -56,7 +56,8 @@ vi.mock('../../../src/services/telemetry', () => ({
   recordNodeRoutingMetric: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
 }));
 
