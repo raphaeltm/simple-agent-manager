@@ -109,15 +109,15 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
 ## Implementation checklist
 
 ### A. Root cause (vm-agent + API)
-- [ ] vm-agent: reserve the node-wide latch for node identity callbacks via a typed operation; ACP
+- [x] vm-agent: reserve the node-wide latch for node identity callbacks via a typed operation; ACP
       heartbeat (per project) and task callback (per task) terminal statuses no longer latch the node
-- [ ] vm-agent: tests through the real loops/senders (httptest): a 410 for one project leaves the node
+- [x] vm-agent: tests through the real loops/senders (httptest): a 410 for one project leaves the node
       heartbeat, other projects' ACP heartbeats and message reporters running; task callback 404/410
       does not latch; control: node heartbeat 410 still latches. Update tests that pinned the old
       node-wide behaviour
-- [ ] API: live node + project with no active workspace on it -> 204 without refreshing sessions (no
+- [x] API: live node + project with no active workspace on it -> 204 without refreshing sessions (no
       410, no arbitrary-workspace signal); 403 tenant binding and node-kind 410 unchanged
-- [ ] API: route tests for the new branch plus controls (active workspace refresh, deleted node 410)
+- [x] API: route tests for the new branch plus controls (active workspace refresh, deleted node 410)
 
 ### B. Node health record (observability)
 - [ ] D1 migration `node_health_events` (append-only, no FK, unique episode key) + Drizzle schema
