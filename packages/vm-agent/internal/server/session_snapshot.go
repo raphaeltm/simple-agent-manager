@@ -209,8 +209,8 @@ func (s *Server) handleRestoreAgentSession(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	result, err := s.runSessionRestore(r.Context(), input, func() map[string]interface{} {
-		result, restoreErr := s.restoreSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.agentType, input.callbackToken)
+	result, err := s.runSessionRestore(r.Context(), input, func(ctx context.Context) map[string]interface{} {
+		result, restoreErr := s.restoreSessionSnapshot(ctx, input.runtime, input.sessionID, input.chatSessionID, input.agentType, input.callbackToken)
 		if restoreErr != nil {
 			_ = s.reportSnapshotRestoreResult(context.Background(), input.workspaceID, input.chatSessionID, "degraded", restoreErr.Error(), input.callbackToken)
 			s.prepareFreshSessionAfterDegradedRestore(input.workspaceID, input.sessionID, restoreErr)
