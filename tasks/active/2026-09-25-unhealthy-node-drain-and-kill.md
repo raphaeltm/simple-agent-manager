@@ -225,6 +225,11 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
   signatures over the parameter limit and one teardown helper two complexity points over; these
   are now split into smaller operations. Focused regressions, typecheck, lint, and the full API
   suite (757 files / 10,330 tests) pass at `12bb5c02b`; a final Sonar rerun remains.
+- Sonar's next pass had no code-smell issues but failed its duplicated-new-lines gate (4.9% vs
+  3%). Its duplicate blocks were the three raw diagnostic downloads moved during the node route
+  split and repeated sleep compute cleanup. Those now share one download handler and one sleep
+  cleanup path. Focused sleep regressions (77), typecheck, and lint pass; full API and Sonar
+  reruns remain for this final deduplication.
 - Staging deploy run `36188818700` succeeded, including smoke tests, pinned to earlier reviewed
   head `4529b8ba3`. Migration `0172_node_health_events` applied: staging D1 has the empty
   `node_health_events` table. No VM

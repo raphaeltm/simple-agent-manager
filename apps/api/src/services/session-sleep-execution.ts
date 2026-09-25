@@ -98,6 +98,43 @@ async function loadSleepWorkspace(env: Env, workspaceId: string, userId: string)
 
 type SleepWorkspace = Awaited<ReturnType<typeof loadSleepWorkspace>>;
 
+async function scheduleSleepingWorkspaceDeletion(
+  env: Env,
+  workspace: SleepWorkspace,
+  logEvent: string
+): Promise<void> {
+  if (workspace.nodeRuntime === 'cf-container') return;
+  const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(workspace.nodeId));
+  await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle)
+    .scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, workspace.userId)
+    .catch((error) => {
+      log.warn(logEvent, {
+        workspaceId: workspace.id,
+        nodeId: workspace.nodeId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+}
+
+async function finishSleepComputeCleanup(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  env: Env,
+  workspace: SleepWorkspace
+): Promise<void> {
+  await finishSleepingWorkspaceComputeCleanup(db, env, {
+    workspaceId: workspace.id,
+    taskId: workspace.taskId ?? null,
+    warmNodeTimeoutMs: workspace.warmNodeTimeoutMs ?? null,
+  });
+  await markWorkspaceNodeWarmIfEmpty(db, env, {
+    nodeId: workspace.nodeId,
+    nodeRole: workspace.nodeRole ?? '',
+    runtime: workspace.nodeRuntime,
+    userId: workspace.userId,
+    warmNodeTimeoutMs: workspace.warmNodeTimeoutMs ?? null,
+  });
+}
+
 async function verifyAndBeginSleepTeardown(
   env: Env,
   workspace: SleepWorkspace,
@@ -298,30 +335,12 @@ async function finishAlreadySleeping(
     snapshot.sleepingAt
   ) {
     await projectDataService.sleepSession(env, workspace.projectId, workspace.chatSessionId);
-    if (workspace.nodeRuntime !== 'cf-container') {
-      const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(workspace.nodeId));
-      await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle)
-        .scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, workspace.userId)
-        .catch((error) => {
-          log.warn('session_sleep.workspace_deletion_reschedule_failed', {
-            workspaceId: workspace.id,
-            nodeId: workspace.nodeId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-    }
-    await finishSleepingWorkspaceComputeCleanup(db, env, {
-      workspaceId: workspace.id,
-      taskId: workspace.taskId ?? null,
-      warmNodeTimeoutMs: workspace.warmNodeTimeoutMs ?? null,
-    });
-    await markWorkspaceNodeWarmIfEmpty(db, env, {
-      nodeId: workspace.nodeId,
-      nodeRole: workspace.nodeRole ?? '',
-      runtime: workspace.nodeRuntime,
-      userId: workspace.userId,
-      warmNodeTimeoutMs: workspace.warmNodeTimeoutMs ?? null,
-    });
+    await scheduleSleepingWorkspaceDeletion(
+      env,
+      workspace,
+      'session_sleep.workspace_deletion_reschedule_failed'
+    );
+    await finishSleepComputeCleanup(db, env, workspace);
     return {
       status: 'sleeping',
       workspaceId: workspace.id,
@@ -359,31 +378,12 @@ async function finishSleepCleanup(
       });
   }
 
-  if (workspace.nodeRuntime !== 'cf-container') {
-    const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(workspace.nodeId));
-    await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle)
-      .scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, workspace.userId)
-      .catch((error) => {
-        log.warn('session_sleep.workspace_deletion_schedule_failed', {
-          workspaceId: workspace.id,
-          nodeId: workspace.nodeId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-  }
-
-  await finishSleepingWorkspaceComputeCleanup(db, env, {
-    workspaceId: workspace.id,
-    taskId: workspace.taskId ?? null,
-    warmNodeTimeoutMs: workspace.warmNodeTimeoutMs ?? null,
-  });
-  await markWorkspaceNodeWarmIfEmpty(db, env, {
-    nodeId: workspace.nodeId,
-    nodeRole: workspace.nodeRole ?? '',
-    runtime: workspace.nodeRuntime,
-    userId: workspace.userId,
-    warmNodeTimeoutMs: workspace.warmNodeTimeoutMs ?? null,
-  });
+  await scheduleSleepingWorkspaceDeletion(
+    env,
+    workspace,
+    'session_sleep.workspace_deletion_schedule_failed'
+  );
+  await finishSleepComputeCleanup(db, env, workspace);
 
   log.info('session_sleep.completed', {
     workspaceId: workspace.id,

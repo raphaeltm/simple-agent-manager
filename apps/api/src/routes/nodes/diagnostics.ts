@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import type { Env } from '../../env';
 import { getUserId } from '../../middleware/auth';
@@ -208,116 +208,75 @@ nodeDiagnosticsRoutes.get('/:id/logs/stream', async (c) => {
   );
 });
 
-/**
- * GET /:id/events/export — Download the raw SQLite event database from the VM Agent.
- * Streams the binary file through to the browser as an attachment download.
- */
-nodeDiagnosticsRoutes.get('/:id/events/export', async (c) => {
+interface NodeDownload {
+  path: string;
+  contentType: string;
+  filename: string;
+  extension: string;
+  errorMessage: string;
+  includeLength?: boolean;
+}
+
+async function downloadNodeDiagnostics(
+  c: Context<{ Bindings: Env }>,
+  options: NodeDownload
+): Promise<Response> {
   const nodeId = c.req.param('id');
+  if (!nodeId) throw errors.notFound('Node');
   const userId = getUserId(c);
   const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-  if (node.status !== 'running') {
-    throw errors.badRequest('Node is not running');
-  }
+  if (!node) throw errors.notFound('Node');
+  if (node.status !== 'running') throw errors.badRequest('Node is not running');
 
   try {
-    const response = await nodeAgentRawRequest(nodeId, c.env, '/events/export', userId);
+    const response = await nodeAgentRawRequest(nodeId, c.env, options.path, userId);
     if (!response.ok) {
       const body = await response.text().catch(() => '');
       throw new Error(`VM agent returned ${response.status}: ${body}`);
     }
-
-    return new Response(response.body, {
-      status: 200,
-      headers: {
-        'Content-Type': response.headers.get('Content-Type') || 'application/x-sqlite3',
-        'Content-Disposition':
-          response.headers.get('Content-Disposition') ||
-          `attachment; filename="events-${nodeId}.db"`,
-        'Content-Length': response.headers.get('Content-Length') || '',
-      },
-    });
+    const headers: Record<string, string> = {
+      'Content-Type': response.headers.get('Content-Type') || options.contentType,
+      'Content-Disposition':
+        response.headers.get('Content-Disposition') ||
+        `attachment; filename="${options.filename}-${nodeId}.${options.extension}"`,
+    };
+    if (options.includeLength)
+      headers['Content-Length'] = response.headers.get('Content-Length') || '';
+    return new Response(response.body, { status: 200, headers });
   } catch {
-    throw errors.badRequest('Could not download events database — node agent may be unreachable');
+    throw errors.badRequest(options.errorMessage);
   }
-});
+}
 
-/**
- * GET /:id/metrics/export — Download the raw SQLite metrics database from the VM Agent.
- * Streams the binary file through to the browser as an attachment download.
- */
-nodeDiagnosticsRoutes.get('/:id/metrics/export', async (c) => {
-  const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
+/** Download raw VM Agent diagnostic artifacts for an owned, running node. */
+nodeDiagnosticsRoutes.get('/:id/events/export', (c) =>
+  downloadNodeDiagnostics(c, {
+    path: '/events/export',
+    contentType: 'application/x-sqlite3',
+    filename: 'events',
+    extension: 'db',
+    errorMessage: 'Could not download events database — node agent may be unreachable',
+    includeLength: true,
+  })
+);
 
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-  if (node.status !== 'running') {
-    throw errors.badRequest('Node is not running');
-  }
+nodeDiagnosticsRoutes.get('/:id/metrics/export', (c) =>
+  downloadNodeDiagnostics(c, {
+    path: '/metrics/export',
+    contentType: 'application/x-sqlite3',
+    filename: 'metrics',
+    extension: 'db',
+    errorMessage: 'Could not download metrics database — node agent may be unreachable',
+    includeLength: true,
+  })
+);
 
-  try {
-    const response = await nodeAgentRawRequest(nodeId, c.env, '/metrics/export', userId);
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`VM agent returned ${response.status}: ${body}`);
-    }
-
-    return new Response(response.body, {
-      status: 200,
-      headers: {
-        'Content-Type': response.headers.get('Content-Type') || 'application/x-sqlite3',
-        'Content-Disposition':
-          response.headers.get('Content-Disposition') ||
-          `attachment; filename="metrics-${nodeId}.db"`,
-        'Content-Length': response.headers.get('Content-Length') || '',
-      },
-    });
-  } catch {
-    throw errors.badRequest('Could not download metrics database — node agent may be unreachable');
-  }
-});
-
-/**
- * GET /:id/debug-package — Download a tar.gz archive with all diagnostic data
- * from the VM Agent: logs (cloud-init, journald, Docker), metrics DB, events DB,
- * system info, boot events, and system state snapshots.
- */
-nodeDiagnosticsRoutes.get('/:id/debug-package', async (c) => {
-  const nodeId = c.req.param('id');
-  const userId = getUserId(c);
-  const node = await requireNodeOwnership(c, nodeId);
-
-  if (!node) {
-    throw errors.notFound('Node');
-  }
-  if (node.status !== 'running') {
-    throw errors.badRequest('Node is not running');
-  }
-
-  try {
-    const response = await nodeAgentRawRequest(nodeId, c.env, '/debug-package', userId);
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`VM agent returned ${response.status}: ${body}`);
-    }
-
-    return new Response(response.body, {
-      status: 200,
-      headers: {
-        'Content-Type': response.headers.get('Content-Type') || 'application/gzip',
-        'Content-Disposition':
-          response.headers.get('Content-Disposition') ||
-          `attachment; filename="debug-${nodeId}.tar.gz"`,
-      },
-    });
-  } catch {
-    throw errors.badRequest('Could not download debug package — node agent may be unreachable');
-  }
-});
+nodeDiagnosticsRoutes.get('/:id/debug-package', (c) =>
+  downloadNodeDiagnostics(c, {
+    path: '/debug-package',
+    contentType: 'application/gzip',
+    filename: 'debug',
+    extension: 'tar.gz',
+    errorMessage: 'Could not download debug package — node agent may be unreachable',
+  })
+);
