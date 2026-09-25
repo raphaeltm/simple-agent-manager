@@ -58,7 +58,7 @@ function projectStub(projectId: string): DurableObjectStub<ProjectData> {
   ) as DurableObjectStub<ProjectData>;
 }
 
-async function seedExpiredCheckIn(agentSessionStatus: string) {
+async function seedCheckIn(agentSessionStatus: string) {
   const prefix = `attn-preserve-${crypto.randomUUID()}`;
   const userId = `${prefix}-user`;
   const installationId = `${prefix}-install`;
@@ -86,22 +86,41 @@ async function seedExpiredCheckIn(agentSessionStatus: string) {
     chatSessionId,
     executionStep: 'running',
   });
-  await stub.createAttentionMarker({
+  const marker = await stub.createAttentionMarker({
     sessionId: chatSessionId,
     taskId,
     workspaceId,
     kind: 'reconciliation_checkin',
     source: 'sam_orchestrator',
     reason: 'Agent idle — SAM check-in sent',
-    expiresAt: Date.now() - 1_000,
+    // Do not arm an already-due automatic alarm while the fixture is being built.
+    expiresAt: null,
   });
-  return { stub, projectId, chatSessionId, taskId, workspaceId };
+  return { stub, projectId, chatSessionId, taskId, workspaceId, markerId: marker.id };
 }
 
-async function runAlarm(stub: DurableObjectStub<ProjectData>): Promise<void> {
+async function expireCheckIn(
+  stub: DurableObjectStub<ProjectData>,
+  markerId: string
+): Promise<void> {
   await runInDurableObject(stub, async (instance, state) => {
-    await instance.alarm();
     await state.storage.deleteAlarm();
+    // A manual alarm call is not a platform alarm delivery: production RPCs can
+    // recalculate its schedule mid-flight and start a second, automatic alarm.
+    // Control only timer delivery here; the handler, SQLite, D1 and self-RPC stay real.
+    const scheduleAlarm = vi.spyOn(state.storage, 'setAlarm').mockResolvedValue(undefined);
+    try {
+      const expired = state.storage.sql.exec(
+        'UPDATE session_attention_markers SET expires_at = ? WHERE id = ? AND resolved_at IS NULL RETURNING id',
+        Date.now() - 1_000,
+        markerId
+      );
+      expect(expired.toArray()).toEqual([{ id: markerId }]);
+      await instance.alarm();
+    } finally {
+      await state.storage.deleteAlarm();
+      scheduleAlarm.mockRestore();
+    }
   });
 }
 
@@ -127,9 +146,9 @@ async function systemMessages(stub: DurableObjectStub<ProjectData>, chatSessionI
 describe('attention expiry from a real ProjectData alarm', () => {
   it('says the work was not preserved, through its own RPC, before failing the session', async () => {
     // The agent session already ended, so there is nothing to snapshot.
-    const { stub, chatSessionId, taskId, workspaceId } = await seedExpiredCheckIn('failed');
+    const { stub, chatSessionId, taskId, workspaceId, markerId } = await seedCheckIn('failed');
 
-    await runAlarm(stub);
+    await expireCheckIn(stub, markerId);
 
     expect(await taskRow(taskId)).toEqual({
       status: 'failed',
@@ -149,9 +168,9 @@ describe('attention expiry from a real ProjectData alarm', () => {
   });
 
   it('queues a snapshot-backed sleep and leaves the conversation open when the runtime is live', async () => {
-    const { stub, chatSessionId, taskId, workspaceId } = await seedExpiredCheckIn('running');
+    const { stub, chatSessionId, taskId, workspaceId, markerId } = await seedCheckIn('running');
 
-    await runAlarm(stub);
+    await expireCheckIn(stub, markerId);
 
     expect((await taskRow(taskId))?.status).toBe('failed');
     expect(
