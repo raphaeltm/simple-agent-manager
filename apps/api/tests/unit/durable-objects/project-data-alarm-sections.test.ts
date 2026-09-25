@@ -291,6 +291,51 @@ describe('ProjectDataAlarmSectionScheduler', () => {
   });
 });
 
+describe('ProjectDataAlarmSectionScheduler persistence', () => {
+  it('carries gating, due times and failure floors to a fresh instance', () => {
+    const scheduler = warmScheduler();
+    scheduler.observe(
+      times({ task_waits: T0 + 5_000, storage_safety: T0 + 600_000 }),
+      new Map(),
+      T0
+    );
+    scheduler.recordFailure('attention_expiry', T0);
+
+    const restored = ProjectDataAlarmSectionScheduler.restore(scheduler.serialize());
+
+    // Not a first tick: the previous instance's full run is remembered.
+    expect(dueSections(restored, T0 + 5_000)).toEqual(['task_waits']);
+    expect(restored.nextDueAt()).toBe(T0 + 5_000);
+    restored.observe(
+      times({ attention_expiry: 5 }),
+      new Map<ProjectDataAlarmSection, number>([['attention_expiry', T0 + 1]]),
+      T0 + 1
+    );
+    expect(dueSections(restored, T0 + 2)).not.toContain('attention_expiry');
+  });
+
+  it('runs everything when there is no persisted memory or it cannot be read', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    for (const persisted of [null, '', 'not json', '{"v":99}', '[1,2]']) {
+      const plan = ProjectDataAlarmSectionScheduler.restore(persisted).planTick(CONFIG, T0);
+      expect(plan).toMatchObject({ mode: 'full', fullRunReason: 'first_tick' });
+    }
+  });
+
+  it('ignores entries it does not recognise instead of trusting them', () => {
+    const restored = ProjectDataAlarmSectionScheduler.restore(
+      JSON.stringify({
+        v: 1,
+        pending: { task_waits: T0, not_a_section: T0, storage_safety: 'soon' },
+        failedUntil: {},
+        lastFullRunAt: T0,
+      })
+    );
+
+    expect(dueSections(restored, T0 + 1)).toEqual(['task_waits']);
+  });
+});
+
 describe('ProjectDataAlarmTick', () => {
   it('isolates a throwing section and reports failed, skipped, and ran separately', async () => {
     const infoSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

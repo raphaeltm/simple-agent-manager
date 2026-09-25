@@ -36,6 +36,7 @@ import {
 } from './alarm-schedule';
 import {
   createRowMeteredSqlStorage,
+  PROJECT_DATA_ALARM_SCHEDULE_META_KEY,
   ProjectDataAlarmSectionScheduler,
   ProjectDataAlarmTick,
   resolveProjectDataAlarmGatingConfig,
@@ -92,6 +93,7 @@ import * as sessionWakeProgress from './session-wake-progress';
 import * as sessions from './sessions';
 import * as storageReliefMeasurement from './storage-relief-measurement';
 import * as storageSafety from './storage-safety';
+import { readStorageSafetyMeta, writeStorageSafetyMeta } from './storage-safety-meta';
 import { readTaskAcpLivenessSignals } from './task-runtime-liveness';
 import { resolveTaskWaitConfig } from './task-wait-config';
 import { processTaskWaits } from './task-wait-supervisor';
@@ -128,8 +130,10 @@ export class ProjectData extends DurableObject<Env> {
   private sql: SqlStorage;
   /** Attributes SQLite rows to the alarm section that read/wrote them (`alarm-sections.ts`). */
   private readonly sqlRowMeter: SqlRowMeter;
-  /** Which alarm sections are due; in-isolate memory, so a fresh instance runs every section. */
-  private readonly alarmSections = new ProjectDataAlarmSectionScheduler();
+  /** Which alarm sections are due; restored from `do_meta` so gating survives eviction. */
+  private alarmSections = new ProjectDataAlarmSectionScheduler();
+  /** The scheduler memory as last written, so an unchanged recalculation writes nothing. */
+  private persistedAlarmSchedule: string | null = null;
   private summarySyncTimer: ReturnType<typeof setTimeout> | null = null;
   /** Serializes summary syncs — see `runSummarySyncLocked` (rule 45). */
   private summarySyncLock: Promise<unknown> = Promise.resolve();
@@ -148,7 +152,34 @@ export class ProjectData extends DurableObject<Env> {
       this.ctx.storage.transactionSync(() => {
         runMigrations(this.sql);
       });
+      this.restoreAlarmSections();
     });
+  }
+
+  private restoreAlarmSections(): void {
+    try {
+      const persisted = readStorageSafetyMeta(this.sql, PROJECT_DATA_ALARM_SCHEDULE_META_KEY);
+      this.alarmSections = ProjectDataAlarmSectionScheduler.restore(persisted);
+      this.persistedAlarmSchedule = persisted;
+    } catch (error) {
+      log.error('alarm.schedule_state_restore_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /** Never throws: losing the memory only means a full run, and the alarm must still be set. */
+  private persistAlarmSections(): void {
+    const serialized = this.alarmSections.serialize();
+    if (serialized === this.persistedAlarmSchedule) return;
+    try {
+      writeStorageSafetyMeta(this.sql, PROJECT_DATA_ALARM_SCHEDULE_META_KEY, serialized);
+      this.persistedAlarmSchedule = serialized;
+    } catch (error) {
+      log.error('alarm.schedule_state_persist_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private getProjectId(): string | null {
@@ -3078,6 +3109,7 @@ export class ProjectData extends DurableObject<Env> {
   ): Promise<void> {
     const times = computeProjectDataAlarmSectionTimes(this.sql, this.env);
     this.alarmSections.observe(times, consumed);
+    this.persistAlarmSections();
     // The scheduler's memory already holds every fresh time (min-folded) plus the retry floor of
     // any section that just threw; reading fresh times directly would bypass that floor and
     // re-arm a failing overdue section at `now` on every tick.

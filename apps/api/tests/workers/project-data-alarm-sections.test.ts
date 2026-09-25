@@ -12,6 +12,7 @@ import {
   PROJECT_DATA_ALARM_FAILED_SECTION_RETRY_MS,
   PROJECT_DATA_ALARM_SECTIONS,
 } from '../../src/durable-objects/project-data/alarm-schedule';
+import { PROJECT_DATA_ALARM_SCHEDULE_META_KEY } from '../../src/durable-objects/project-data/alarm-sections';
 import type { Env } from '../../src/durable-objects/project-data/types';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
@@ -241,5 +242,56 @@ describe('ProjectData alarm sections', () => {
     expect(waitTick?.ranSections).toContain('prompt_delivery');
     // Liveness of the gate itself: a section with nothing scheduled was skipped in that tick.
     expect(waitTick?.skippedSections).toContain('attention_expiry');
+  });
+
+  describe('when the object is evicted between ticks', () => {
+    /** Resets the object; the next request constructs a fresh instance from its storage. */
+    async function evict(stub: DurableObjectStub<ProjectDataTestDouble>): Promise<void> {
+      await runInDurableObject(stub, (_instance, state) => {
+        state.abort('test eviction');
+      }).catch(() => {});
+    }
+
+    async function tickBeforeAndAfterEviction(keepPersistedMemory: boolean) {
+      const logSpy = vi.spyOn(console, 'log');
+      const projectId = `alarm-sections-evicted-${crypto.randomUUID()}`;
+      const stub = stubFor(projectId);
+      const persisted = await runInDurableObject(stub, async (instance, state) => {
+        await prepareManualTicks(instance, state, projectId);
+        await instance.alarm();
+        await state.storage.deleteAlarm();
+        const row = state.storage.sql
+          .exec('SELECT value FROM do_meta WHERE key = ?', PROJECT_DATA_ALARM_SCHEDULE_META_KEY)
+          .toArray()[0];
+        if (!keepPersistedMemory) {
+          state.storage.sql.exec(
+            'DELETE FROM do_meta WHERE key = ?',
+            PROJECT_DATA_ALARM_SCHEDULE_META_KEY
+          );
+        }
+        return row?.value;
+      });
+      await evict(stub);
+      // An aborted object's stub stays broken; a new one reaches the fresh instance.
+      await runInDurableObject(stubFor(projectId), async (instance) => {
+        await instance.alarm();
+      });
+      return { persisted, ticks: completions(logSpy, projectId) };
+    }
+
+    it('keeps gating: the fresh instance restores the persisted schedule', async () => {
+      const { persisted, ticks } = await tickBeforeAndAfterEviction(true);
+
+      expect(typeof persisted).toBe('string');
+      expect(ticks.map((tick) => tick.fullRunReason)).toEqual(['first_tick', null]);
+      expect(ticks[1]).toMatchObject({ mode: 'gated' });
+      expect(ticks[1]?.skippedSections).toContain('attention_expiry');
+    });
+
+    it('runs everything after eviction when nothing was persisted (control)', async () => {
+      const { ticks } = await tickBeforeAndAfterEviction(false);
+
+      expect(ticks.map((tick) => tick.fullRunReason)).toEqual(['first_tick', 'first_tick']);
+    });
   });
 });

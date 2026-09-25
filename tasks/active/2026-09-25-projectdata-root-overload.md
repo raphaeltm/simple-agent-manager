@@ -193,6 +193,10 @@ keywordScanTruncated}`; env `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` (default 2
       isolated; gated cascade into prompt delivery; FTS rows-read shape (project and session).
 - [x] Docs: search cost wording corrected (bm25's IDF pass stays linear in matches); coalescing
       backoff; new retry knob.
+- [x] Validator re-run: `reconcileTaskWaits` returned (not awaited) a promise that could reject
+      before adoption, which workerd reported as unhandled (full workers run exited 1 with every test
+      green); now awaited. The scheduled-actions background recalculation logs its own failure.
+      Alarm-section tests arm no automatic alarm and let the clock move before manual ticks.
 - [x] Deferred (MEDIUM, pre-existing pattern): error text logged as plain strings bypasses the
       logger's Error redaction → `tasks/backlog/2026-09-25-structured-log-error-text-redaction.md`.
 

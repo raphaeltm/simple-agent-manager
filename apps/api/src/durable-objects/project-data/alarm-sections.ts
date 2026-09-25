@@ -13,15 +13,21 @@
  * time any recalculation computed since that section last ran, and overwrites it only after the
  * section runs. A section therefore runs no later than today's alarm would have fired for it.
  *
+ * The memory is persisted in `do_meta` (`serialize` / `restore`). A ProjectData object is evicted
+ * whenever it idles for a few seconds: on staging (2026-09-25) every minute-spaced tick ran on a
+ * fresh instance, so memory kept only in the isolate would have made every tick a full run.
+ *
  * Safety nets, because a section whose schedule under-reports its own work used to be carried by
  * other sections' ticks:
  * - every tick first folds in a fresh schedule computation, so a state change no writer followed
  *   with a recalculation is still seen (at once for unclamped schedules, after the section's own
  *   minimum delay for clamped ones); if that computation fails, the tick runs everything;
- * - the first tick of every Durable Object instance runs everything (the memory is in-isolate);
+ * - an object with no readable persisted memory runs everything on its first tick;
  * - a full run happens at least every `PROJECT_DATA_ALARM_FULL_RUN_INTERVAL_MS`;
  * - `PROJECT_DATA_ALARM_SECTION_GATING_ENABLED=false` restores run-everything ticks.
  */
+import { isJsonRecord } from '@simple-agent-manager/shared';
+
 import { createModuleLogger } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import {
@@ -95,11 +101,60 @@ export interface ProjectDataAlarmTickPlan {
   cascadeFrom(section: ProjectDataAlarmSection): void;
 }
 
-/** In-isolate scheduling memory for one ProjectData instance. */
+/** `do_meta` key holding the scheduler's memory across Durable Object instances. */
+export const PROJECT_DATA_ALARM_SCHEDULE_META_KEY = 'alarmSectionSchedule';
+const PERSISTED_SCHEDULE_VERSION = 1;
+
+/** Scheduling memory for one ProjectData object; persisted between instances by the caller. */
 export class ProjectDataAlarmSectionScheduler {
   private readonly pending = new Map<ProjectDataAlarmSection, number>();
   private readonly failedUntil = new Map<ProjectDataAlarmSection, number>();
   private lastFullRunAt: number | null = null;
+
+  /**
+   * The memory a previous instance persisted. Anything missing or unreadable starts over, which
+   * makes the next tick a full run — the safe direction.
+   */
+  static restore(serialized: string | null): ProjectDataAlarmSectionScheduler {
+    const scheduler = new ProjectDataAlarmSectionScheduler();
+    if (!serialized) return scheduler;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(serialized) as unknown;
+    } catch (error) {
+      log.warn('schedule_state_unreadable', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return scheduler;
+    }
+    if (!isJsonRecord(parsed) || parsed.v !== PERSISTED_SCHEDULE_VERSION) {
+      log.warn('schedule_state_unreadable', { error: 'unexpected shape or version' });
+      return scheduler;
+    }
+    const pending = isJsonRecord(parsed.pending) ? parsed.pending : {};
+    const failedUntil = isJsonRecord(parsed.failedUntil) ? parsed.failedUntil : {};
+    for (const section of PROJECT_DATA_ALARM_SECTIONS) {
+      const due = pending[section];
+      if (typeof due === 'number' && Number.isFinite(due)) scheduler.pending.set(section, due);
+      const failed = failedUntil[section];
+      if (typeof failed === 'number' && Number.isFinite(failed)) {
+        scheduler.failedUntil.set(section, failed);
+      }
+    }
+    if (typeof parsed.lastFullRunAt === 'number' && Number.isFinite(parsed.lastFullRunAt)) {
+      scheduler.lastFullRunAt = parsed.lastFullRunAt;
+    }
+    return scheduler;
+  }
+
+  serialize(): string {
+    return JSON.stringify({
+      v: PERSISTED_SCHEDULE_VERSION,
+      pending: Object.fromEntries(this.pending),
+      failedUntil: Object.fromEntries(this.failedUntil),
+      lastFullRunAt: this.lastFullRunAt,
+    });
+  }
 
   /**
    * Fold a fresh schedule computation in. Every section not in `consumed` keeps the earlier of its
