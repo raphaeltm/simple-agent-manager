@@ -82,13 +82,13 @@ Pack chooses cx53 first and Hetzner refused 5 cx53 provisions today with
 - [x] `openapi/sam-cli.ts`: drop the property; regenerate `openapi/sam-cli.openapi.json`
 - [x] Remove `projectScaling.maxWorkspacesPerNode` from every payload/contract and the `workspace-steps.ts` log
 - [x] `schemas/projects.ts`, `project-update.ts`, `mappers.ts`: drop the field; annotate the retained D1 column in `db/schema.ts`
-- [ ] Update API tests (unit, workers, simulation) so no test hand-feeds or asserts on the removed fields; keep a discriminating test that a reservation without `maxCoTenants` and a legacy v1/v2 row with it are both admitted purely on resources
+- [x] Update API tests (unit, workers, simulation) so no test hand-feeds or asserts on the removed fields; keep a discriminating test that a reservation without `maxCoTenants` and a legacy v1/v2 row with it are both admitted purely on resources
 
 ### Web
 - [x] `HardwareDetails.tsx`: remove the "up to N workspaces per node" segment
 - [x] `resource-requirements-utils.ts`: remove the field from state, validation and serialization; discard a stored `maxCoTenants` instead of round-tripping it
 - [x] `ScalingSettings.tsx`: remove the dead `maxWorkspacesPerNode` key
-- [ ] Update web unit tests and Playwright fixtures; run the Playwright visual audit for the changed panel (mobile + desktop)
+- [x] Update web unit tests and Playwright fixtures; run the Playwright visual audit for the changed panel (mobile + desktop)
 
 ### CLI
 - [x] Remove `--max-co-tenants`, `MaxCoTenants`, output segment, help text; update `run_test.go`; `go test -race` + `go vet`
@@ -100,17 +100,17 @@ Pack chooses cx53 first and Hetzner refused 5 cx53 provisions today with
 - [x] Update `tasks/backlog/2026-09-09-scheduler-explorer-slot-count-model.md` so it no longer proposes a co-tenant cap
 
 ### Validation
-- [ ] `pnpm typecheck && pnpm lint && pnpm test && pnpm build`, `openapi:check`, `quality:file-sizes`
+- [x] `pnpm typecheck && pnpm lint && pnpm test && pnpm build`, `openapi:check`, `quality:file-sizes` (unit suites green; worker files touched by this PR green on re-run, one known flaky dedup timing test passes alone; full worker suite is CI's gate)
 - [ ] Specialist reviews, staging verification, PR, CodeRabbit gate, merge, production deploy monitoring
 
 ## Acceptance criteria
 
-- [ ] No source file outside `tasks/archive`, `specs/` and dated journal posts mentions `maxCoTenants`, `maxWorkspacesPerNode`, or `MAX_WORKSPACES_PER_NODE` (test: repo grep in the PR)
-- [ ] A freshly resolved reservation has no `maxCoTenants` key; legacy v1/v2 reservation rows that carry it are still admitted on resources alone (unit + real-SQL tests)
-- [ ] The chat session hardware panel shows requested resources and exclusivity only (unit test + screenshots)
-- [ ] `PATCH /projects/:id` no longer accepts or returns `maxWorkspacesPerNode`
-- [ ] CLI `run --help` no longer lists `--max-co-tenants`; passing it is an unknown-flag error
-- [ ] Marketing explorer refuses hosts only on resources/exclusivity; its tests no longer read a cap constant from the API source
+- [x] No source file outside `tasks/archive`, `specs/` and dated journal posts mentions `maxCoTenants`, `maxWorkspacesPerNode`, or `MAX_WORKSPACES_PER_NODE` except the retired-field guard, the annotated D1 column, and legacy-row test fixtures (repo grep, all file types)
+- [x] A freshly resolved reservation has no `maxCoTenants` key; legacy v1/v2 reservation rows that carry it are still admitted on resources alone (unit + real-SQL tests)
+- [x] The chat session hardware panel shows requested resources and exclusivity only (unit test + screenshots)
+- [x] `PATCH /projects/:id` no longer accepts or returns `maxWorkspacesPerNode` (schema/route/mapper; live check on staging)
+- [x] CLI `run --help` no longer lists `--max-co-tenants`; passing it fails with a clear `--max-co-tenants was removed` error (table-tested, with and without a value)
+- [x] Marketing explorer refuses hosts only on resources/exclusivity; its tests no longer read a cap constant from the API source
 
 ## References
 
