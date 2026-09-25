@@ -294,6 +294,11 @@ async function failExpiredTaskMarker(
   });
   await failSession(marker.sessionId, errorMessage);
   hooks.scheduleSummarySync?.();
+  // Off the alarm's critical path (`.claude/rules/47`). The object stays alive
+  // while this I/O is pending (`ctx.waitUntil` has no effect in a Durable Object),
+  // and should it never finish, the node-cleanup reapers still take the runtime:
+  // `sleepLifecycleOwnsTerminalTaskWorkspaceSql` releases every failed workspace
+  // the sleep lifecycle neither holds nor can claim.
   if (marker.workspaceId) {
     void cleanupExpiredTaskRun(env, marker.workspaceId, marker.taskId);
   }

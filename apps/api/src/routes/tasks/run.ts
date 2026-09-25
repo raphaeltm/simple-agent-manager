@@ -35,6 +35,7 @@ import {
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
+import { cleanupRequestedTaskRun } from '../../services/requested-task-run-cleanup';
 import {
   collectStoredResourceRequirementLayers,
   createPersistedTaskResourcePlanJson,
@@ -47,7 +48,6 @@ import {
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
 import { isTaskBlocked } from '../../services/task-graph';
-import { cleanupTaskRun } from '../../services/task-runner';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
 import { requireProjectTaskById } from './_helpers';
@@ -520,9 +520,8 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
 /**
  * POST /projects/:projectId/tasks/:taskId/run/cleanup
  *
- * Trigger cleanup of a completed/failed task run.
- * Stops the workspace and optionally the auto-provisioned node.
- * This can be called manually or is triggered automatically by the callback mechanism.
+ * Explicitly clean up a terminal task run: stops the workspace and optionally the
+ * auto-provisioned node. A failed run's work is snapshotted first (`cleanupRequestedTaskRun`).
  */
 runRoutes.post('/:taskId/run/cleanup', requireAuth(), requireApproved(), async (c) => {
   const auth = getAuth(c);
@@ -546,7 +545,7 @@ runRoutes.post('/:taskId/run/cleanup', requireAuth(), requireApproved(), async (
     );
   }
 
-  c.executionCtx.waitUntil(cleanupTaskRun(task.id, c.env, undefined, userId));
+  c.executionCtx.waitUntil(cleanupRequestedTaskRun(c.env, task, projectId, userId));
 
   return c.json({ success: true, message: 'Cleanup initiated' });
 });
