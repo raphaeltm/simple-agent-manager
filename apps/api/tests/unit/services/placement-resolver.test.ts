@@ -28,7 +28,6 @@ function reservation(
     memoryMb: 4096,
     diskMb: 20 * 1024,
     exclusiveNode: false,
-    maxCoTenants: 1,
     source: 'platform' as const,
     sourceId: 'platform',
     ...overrides,

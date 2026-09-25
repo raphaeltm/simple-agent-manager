@@ -223,7 +223,6 @@ export async function seedWorkspace(
           memoryMb: 1024,
           diskMb: 1024,
           exclusiveNode: false,
-          maxCoTenants: 4,
           source: 'platform',
           sourceId: 'platform',
           version: 1,

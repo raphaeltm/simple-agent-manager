@@ -66,7 +66,6 @@ describe('direct workspace resource inheritance through HTTP and persisted reser
           minMemoryGb: 1,
           minDiskGb: 2,
           exclusiveNode: false,
-          maxCoTenants: 8,
         })
       );
       const app = new Hono<{ Bindings: Env }>();
@@ -116,40 +115,4 @@ describe('direct workspace resource inheritance through HTTP and persisted reser
     }
   );
 
-  it.each([1.5, Number.MAX_SAFE_INTEGER + 1])(
-    'rejects invalid co-tenant count %s before allocation',
-    async (maxCoTenants) => {
-      const f = fixture();
-      const app = new Hono<{ Bindings: Env }>();
-      registerWorkspaceCreateRoute(app);
-      const externalFetch = vi.fn(async () => {
-        throw new Error('External HTTP unavailable in test');
-      });
-      vi.stubGlobal('fetch', externalFetch);
-
-      const response = await app.request(
-        '/',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: 'Invalid workspace',
-            projectId: 'project-1',
-            resourceRequirements: { maxCoTenants },
-          }),
-        },
-        f.env
-      );
-
-      expect(response.status).toBe(400);
-      expect(((await response.json()) as { message: string }).message).toContain(
-        'resourceRequirements.maxCoTenants'
-      );
-      expect(f.sqlite.prepare('SELECT COUNT(*) AS count FROM workspaces').get()).toEqual({
-        count: 0,
-      });
-      expect(f.sqlite.prepare('SELECT COUNT(*) AS count FROM nodes').get()).toEqual({ count: 0 });
-      expect(externalFetch).not.toHaveBeenCalled();
-    }
-  );
 });

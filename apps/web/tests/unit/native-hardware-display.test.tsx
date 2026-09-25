@@ -73,12 +73,24 @@ describe('hardware provenance at the public display boundary', () => {
       })
     ).toBe('2 vCPU (compatibility estimate) · 5 GB RAM · 0 GB disk');
   });
-  it('preserves an explicit sharing request and its co-tenant limit', () => {
+  it('preserves an explicit sharing request and never renders the retired co-tenant cap', () => {
+    // Legacy rows still carry maxCoTenants; the scheduler ignores it, so the panel must too.
     expect(
       requestedResources({
         resourceRequirementsJson: JSON.stringify({ exclusiveNode: false, maxCoTenants: 2 }),
       })
-    ).toBe('node sharing allowed · up to 2 workspaces per node');
+    ).toBe('node sharing allowed');
+    expect(
+      requestedResources({
+        resolvedReservationJson: JSON.stringify({
+          cpuMillis: 400,
+          memoryMb: 820,
+          diskMb: 2048,
+          exclusiveNode: false,
+          maxCoTenants: 2,
+        }),
+      })
+    ).toBe('0.4 vCPU · 0.8 GB RAM · 2 GB disk · node sharing allowed');
   });
   it('never renders arbitrary persisted source identities or diagnostics', () => {
     expect(

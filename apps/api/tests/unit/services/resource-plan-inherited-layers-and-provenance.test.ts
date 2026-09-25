@@ -207,7 +207,7 @@ describe('persisted reservation roundtrip preserves full semantic provenance', (
 
   it('preserves exclusiveNode false and disk 0 alongside the new fields', () => {
     const reservation = resolveResourceReservation(
-      { task: { minVcpu: 1, minMemoryGb: 1, minDiskGb: 0, exclusiveNode: false, maxCoTenants: 3 } },
+      { task: { minVcpu: 1, minMemoryGb: 1, minDiskGb: 0, exclusiveNode: false } },
       BASE
     );
     const readBack = readPersistedTaskResourcePlan({

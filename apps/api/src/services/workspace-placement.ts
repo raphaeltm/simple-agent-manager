@@ -5,11 +5,7 @@ import type {
   VMSize,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import {
-  DEFAULT_NODE_CPU_THRESHOLD_PERCENT,
-  DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT,
-  resolveResourceReservation,
-} from '@simple-agent-manager/shared';
+import { resolveResourceReservation } from '@simple-agent-manager/shared';
 
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
@@ -21,12 +17,6 @@ import type { PlacementAuthorityNodeClass } from './placement-authority';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
   ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
-  DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT,
-  DEFAULT_WORKSPACE_ADMISSION_CPU_SHARE_BUDGET_PERCENT,
-  DEFAULT_WORKSPACE_ADMISSION_DISK_PRESSURE_THRESHOLD_PERCENT,
-  DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
-  DEFAULT_WORKSPACE_ADMISSION_MEMORY_SCORE_WEIGHT_PERCENT,
-  DEFAULT_WORKSPACE_ADMISSION_METRICS_TTL_MS,
   isResolvedResourceReservation,
   RESOURCE_REQUIREMENTS_SOURCE_SQL,
   type WorkspaceAdmissionPolicy,
@@ -78,7 +68,7 @@ export interface WorkspacePlacementTaskLifecycleGuard {
 export async function reserveWorkspacePlacement(
   database: D1Database,
   input: WorkspacePlacementInput,
-  policyOrMaxWorkspaces: WorkspaceAdmissionPolicy | number
+  policy: WorkspaceAdmissionPolicy
 ): Promise<boolean> {
   if (
     input.resolvedReservation !== undefined &&
@@ -86,7 +76,7 @@ export async function reserveWorkspacePlacement(
   ) {
     return false;
   }
-  const admission = buildWorkspaceAdmissionSql(input, policyOrMaxWorkspaces);
+  const admission = buildWorkspaceAdmissionSql(input, policy);
   const taskLifecyclePredicate = buildTaskLifecyclePlacementPredicate(input.taskLifecycleGuard);
   const result = await database
     .prepare(
@@ -148,7 +138,7 @@ export async function reserveWorkspacePlacement(
 export async function attachPrecreatedWorkspacePlacement(
   database: D1Database,
   input: WorkspacePlacementInput,
-  policyOrMaxWorkspaces: WorkspaceAdmissionPolicy | number
+  policy: WorkspaceAdmissionPolicy
 ): Promise<boolean> {
   if (
     input.resolvedReservation !== undefined &&
@@ -156,7 +146,7 @@ export async function attachPrecreatedWorkspacePlacement(
   ) {
     return false;
   }
-  const admission = buildWorkspaceAdmissionSql(input, policyOrMaxWorkspaces);
+  const admission = buildWorkspaceAdmissionSql(input, policy);
   const result = await database
     .prepare(
       `${admission.sql},
@@ -323,7 +313,7 @@ function buildWorkspaceAdmissionSql(
     | 'capacityPlacementSnapshot'
     | 'authorityNodeClass'
   >,
-  policyOrMaxWorkspaces: WorkspaceAdmissionPolicy | number
+  policy: WorkspaceAdmissionPolicy
 ): {
   sql: string;
   binds: Array<string | number | null>;
@@ -333,10 +323,6 @@ function buildWorkspaceAdmissionSql(
   const resolvedReservation =
     input.resolvedReservation ??
     resolveResourceReservation({}, { projectId: input.projectId, userId: input.userId });
-  const policy =
-    typeof policyOrMaxWorkspaces === 'number'
-      ? legacyWorkspaceAdmissionPolicy(policyOrMaxWorkspaces)
-      : policyOrMaxWorkspaces;
   const capacityPredicate = buildPlacementAuthoritySqlPredicate({
     userId: input.userId,
     projectId: input.projectId,
@@ -490,24 +476,6 @@ function workspaceAdmissionEligibilitySql(): string {
          )`;
 }
 
-function legacyWorkspaceAdmissionPolicy(maxWorkspaces: number): WorkspaceAdmissionPolicy {
-  return {
-    maxWorkspaces,
-    cpuShareBudgetPercent: DEFAULT_WORKSPACE_ADMISSION_CPU_SHARE_BUDGET_PERCENT,
-    hostMemoryReserveMb: DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
-    diskPressureThresholdPercent: DEFAULT_WORKSPACE_ADMISSION_DISK_PRESSURE_THRESHOLD_PERCENT,
-    metricsTtlMs: DEFAULT_WORKSPACE_ADMISSION_METRICS_TTL_MS,
-    // These two duplicated the shared defaults as literals and were left behind
-    // when the CPU ceiling moved. This helper backs the numeric overload of
-    // reserveWorkspacePlacement — the FINAL atomic reservation, which
-    // `.claude/rules/69` names as the correctness boundary — so a stale value
-    // here silently reinstates the old veto for any caller that uses it.
-    cpuThresholdPercent: DEFAULT_NODE_CPU_THRESHOLD_PERCENT,
-    memoryThresholdPercent: DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT,
-    cpuScoreWeightPercent: DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT,
-    memoryScoreWeightPercent: DEFAULT_WORKSPACE_ADMISSION_MEMORY_SCORE_WEIGHT_PERCENT,
-  };
-}
 
 function validReservationJsonSql(expression: string): string {
   return `(json_valid(${expression})
@@ -519,16 +487,6 @@ function validReservationJsonSql(expression: string): string {
     AND json_extract(${expression}, '$.memoryMb') > 0
     AND json_type(${expression}, '$.diskMb') = 'integer'
     AND json_extract(${expression}, '$.diskMb') >= 0
-    AND (
-      (json_extract(${expression}, '$.version') IN (1, 2)
-        AND json_type(${expression}, '$.maxCoTenants') = 'integer'
-        AND json_extract(${expression}, '$.maxCoTenants') > 0)
-      OR
-      (json_extract(${expression}, '$.version') = 3
-        AND (json_type(${expression}, '$.maxCoTenants') IS NULL
-          OR (json_type(${expression}, '$.maxCoTenants') = 'integer'
-            AND json_extract(${expression}, '$.maxCoTenants') > 0)))
-    )
     AND json_type(${expression}, '$.exclusiveNode') IN ('true', 'false')
     AND json_type(${expression}, '$.source') = 'text'
     AND json_extract(${expression}, '$.source') IN (${RESOURCE_REQUIREMENTS_SOURCE_SQL}))`;

@@ -42,7 +42,6 @@ describe('deserializeResourceRequirements', () => {
       minMemoryGb: 8,
       minDiskGb: 40,
       exclusiveNode: true,
-      maxCoTenants: 2,
     });
     const result = deserializeResourceRequirements(json);
     expect(result).toEqual({
@@ -50,7 +49,6 @@ describe('deserializeResourceRequirements', () => {
       minMemoryGb: '8',
       minDiskGb: '40',
       exclusiveNode: true,
-      maxCoTenants: '2',
     });
     expect(result.storedJsonError).toBeUndefined();
   });
@@ -62,7 +60,6 @@ describe('deserializeResourceRequirements', () => {
     expect(result.minMemoryGb).toBe('');
     expect(result.minDiskGb).toBe('');
     expect(result.exclusiveNode).toBeUndefined();
-    expect(result.maxCoTenants).toBe('');
   });
 
   it('preserves exclusiveNode false vs undefined', () => {
@@ -101,15 +98,15 @@ describe('serializeResourceRequirements', () => {
     expect(parsed.minMemoryGb).toBe(8);
   });
 
-  it('preserves maxCoTenants alongside exclusiveNode=true', () => {
-    const result = serializeResourceRequirements({
-      ...EMPTY_RESOURCE_STATE,
-      exclusiveNode: true,
-      maxCoTenants: '4',
-    });
-    const parsed = JSON.parse(result!);
-    expect(parsed.exclusiveNode).toBe(true);
-    expect(parsed.maxCoTenants).toBe(4);
+  it('drops the retired maxCoTenants field instead of preserving it as opaque data', () => {
+    // Retired fields must not survive a round-trip; unknown fields still do (control below).
+    const state = deserializeResourceRequirements(
+      JSON.stringify({ exclusiveNode: true, maxCoTenants: 4, futureField: 'kept' })
+    );
+    expect(state.exclusiveNode).toBe(true);
+    expect(state._opaqueFields).toEqual({ futureField: 'kept' });
+    const parsed = JSON.parse(serializeResourceRequirements(state)!);
+    expect(parsed).toEqual({ exclusiveNode: true, futureField: 'kept' });
   });
 
   it('includes exclusiveNode false', () => {
@@ -127,7 +124,6 @@ describe('serializeResourceRequirements', () => {
       minMemoryGb: '8',
       minDiskGb: '40',
       exclusiveNode: true,
-      maxCoTenants: '2',
     };
     const serialized = serializeResourceRequirements(original);
     const deserialized = deserializeResourceRequirements(serialized);
@@ -135,7 +131,6 @@ describe('serializeResourceRequirements', () => {
     expect(deserialized.minMemoryGb).toBe('8');
     expect(deserialized.minDiskGb).toBe('40');
     expect(deserialized.exclusiveNode).toBe(true);
-    expect(deserialized.maxCoTenants).toBe('2');
   });
 
   it('throws on NaN input (validation should run first)', () => {
@@ -221,7 +216,6 @@ describe('hasAnyResourceValue', () => {
     expect(hasAnyResourceValue({ ...EMPTY_RESOURCE_STATE, minVcpu: '2' })).toBe(true);
     expect(hasAnyResourceValue({ ...EMPTY_RESOURCE_STATE, minMemoryGb: '4' })).toBe(true);
     expect(hasAnyResourceValue({ ...EMPTY_RESOURCE_STATE, minDiskGb: '40' })).toBe(true);
-    expect(hasAnyResourceValue({ ...EMPTY_RESOURCE_STATE, maxCoTenants: '4' })).toBe(true);
   });
 
   it('returns true for exclusiveNode boolean', () => {
@@ -327,21 +321,6 @@ describe('validateResourceState', () => {
     expect(errors.minMemoryGb).toBeTruthy();
   });
 
-  it('rejects fractional maxCoTenants', () => {
-    const errors = validateResourceState({ ...EMPTY_RESOURCE_STATE, maxCoTenants: '2.5' });
-    expect(errors.maxCoTenants).toBeTruthy();
-  });
-
-  it('rejects zero maxCoTenants', () => {
-    const errors = validateResourceState({ ...EMPTY_RESOURCE_STATE, maxCoTenants: '0' });
-    expect(errors.maxCoTenants).toBeTruthy();
-  });
-
-  it('accepts valid positive integer maxCoTenants', () => {
-    const errors = validateResourceState({ ...EMPTY_RESOURCE_STATE, maxCoTenants: '3' });
-    expect(errors.maxCoTenants).toBeUndefined();
-  });
-
   it('reports storedJsonError as form error', () => {
     const state = { ...EMPTY_RESOURCE_STATE, storedJsonError: 'bad data' };
     const errors = validateResourceState(state);
@@ -359,26 +338,22 @@ describe('validateResourceState', () => {
   });
 });
 
-describe('exclusiveNode + maxCoTenants round-trip', () => {
-  it('preserves both fields through round-trip', () => {
+describe('exclusiveNode round-trip with a legacy maxCoTenants value present', () => {
+  it('keeps exclusiveNode=true and discards the retired cap', () => {
     const json = JSON.stringify({ exclusiveNode: true, maxCoTenants: 3 });
     const deserialized = deserializeResourceRequirements(json);
     expect(deserialized.exclusiveNode).toBe(true);
-    expect(deserialized.maxCoTenants).toBe('3');
+    expect(deserialized.storedFieldErrors).toBeUndefined();
 
-    const serialized = serializeResourceRequirements(deserialized);
-    const parsed = JSON.parse(serialized!);
-    expect(parsed.exclusiveNode).toBe(true);
-    expect(parsed.maxCoTenants).toBe(3);
+    const parsed = JSON.parse(serializeResourceRequirements(deserialized)!);
+    expect(parsed).toEqual({ exclusiveNode: true });
   });
 
-  it('preserves exclusiveNode=false with maxCoTenants', () => {
+  it('keeps exclusiveNode=false and discards the retired cap', () => {
     const json = JSON.stringify({ exclusiveNode: false, maxCoTenants: 5 });
     const deserialized = deserializeResourceRequirements(json);
-    const serialized = serializeResourceRequirements(deserialized);
-    const parsed = JSON.parse(serialized!);
-    expect(parsed.exclusiveNode).toBe(false);
-    expect(parsed.maxCoTenants).toBe(5);
+    const parsed = JSON.parse(serializeResourceRequirements(deserialized)!);
+    expect(parsed).toEqual({ exclusiveNode: false });
   });
 });
 
@@ -543,7 +518,7 @@ describe('storedJsonError clear affordance', () => {
   it('storedJsonError with blank state still shows hasAnything true for clear button', () => {
     const state = { ...EMPTY_RESOURCE_STATE, storedJsonError: 'bad data' };
     const hasValues = !!(state.minVcpu || state.minMemoryGb || state.minDiskGb ||
-      state.exclusiveNode !== undefined || state.maxCoTenants);
+      state.exclusiveNode !== undefined);
     const hasAnything = hasValues || !!state.storedJsonError;
     expect(hasValues).toBe(false);
     expect(hasAnything).toBe(true);

@@ -18,6 +18,7 @@ import {
   reserveWorkspacePlacement,
   type WorkspacePlacementInput,
 } from '../../src/services/workspace-placement';
+import { resolveWorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
 import {
   seedInstallation,
   seedNode,
@@ -26,6 +27,9 @@ import {
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
+
+/** Default admission policy: the placement contract takes a resolved policy, never a count. */
+const ADMISSION_POLICY = resolveWorkspaceAdmissionPolicy({} as never);
 
 const USER_ID = 'user-scheduler-races';
 const INSTALLATION_ID = 'installation-scheduler-races';
@@ -87,7 +91,6 @@ function placement(
       memoryMb: 4_096,
       diskMb: 40_960,
       exclusiveNode: false,
-      maxCoTenants: 4,
       source: 'platform',
       sourceId: 'platform',
       version: 1,
@@ -147,13 +150,12 @@ function taskRunnerInput(taskId: string): StartTaskInput {
       systemPromptAppend: null,
       agentProfileHint: null,
       attachments: null,
-      projectScaling: { maxWorkspacesPerNode: 1 },
+      projectScaling: {},
       resolvedReservation: {
         cpuMillis: 2_000,
         memoryMb: 4_096,
         diskMb: 40_960,
         exclusiveNode: false,
-        maxCoTenants: 4,
         source: 'platform',
         sourceId: 'platform',
         version: 1,
@@ -173,13 +175,13 @@ describe('scheduler lifecycle D1 races', () => {
           reserveWorkspacePlacement(
             env.DATABASE,
             placement(`workspace-scheduler-final-slot-${iteration}-a`, nodeId),
-            1
+            ADMISSION_POLICY
           ),
         () =>
           reserveWorkspacePlacement(
             env.DATABASE,
             placement(`workspace-scheduler-final-slot-${iteration}-b`, nodeId),
-            1
+            ADMISSION_POLICY
           ),
       ];
       if (iteration % 2 === 1) placements.reverse();
@@ -212,7 +214,7 @@ describe('scheduler lifecycle D1 races', () => {
         reserveWorkspacePlacement(
           env.DATABASE,
           placement(`workspace-scheduler-cleanup-placement-${iteration}`, nodeId),
-          1
+          ADMISSION_POLICY
         );
       let cleanupClaimed: boolean;
       let placementReserved: boolean;
@@ -321,7 +323,7 @@ describe('scheduler lifecycle D1 races', () => {
     const placementReserved = await reserveWorkspacePlacement(
       env.DATABASE,
       placement('workspace-scheduler-warm-placement-race', nodeId, claimTime),
-      1
+      ADMISSION_POLICY
     );
 
     expect(placementReserved).toBe(true);

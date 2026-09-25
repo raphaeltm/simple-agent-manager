@@ -11,7 +11,6 @@ import {
   HOST_ORDERING,
   LAB,
   EVENT_DISPLAY_LIMIT,
-  MAX_WORKSPACES_PER_NODE,
   setStockout,
   simulate,
   step,
@@ -335,7 +334,7 @@ class PlacementExplorer extends HTMLElement {
 
     const meta = document.createElement('p');
     meta.className = 'meta';
-    meta.textContent = `node ${node.id} · ${node.offering.vcpu} vCPU · ${(node.offering.memoryMb / 1024).toFixed(0)} GB · ${formatPrice(this.catalog, node.offering.monthlyCents)} · ${usage.coTenants}/${MAX_WORKSPACES_PER_NODE} workspaces`;
+    meta.textContent = `node ${node.id} · ${node.offering.vcpu} vCPU · ${(node.offering.memoryMb / 1024).toFixed(0)} GB · ${formatPrice(this.catalog, node.offering.monthlyCents)} · ${usage.coTenants} workspace${usage.coTenants === 1 ? '' : 's'}`;
 
     li.append(top, meta);
     li.append(

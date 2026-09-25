@@ -436,7 +436,7 @@ func submitTaskWithClient(ctx context.Context, runtime Runtime, parsed parsedArg
 
 func warnDeprecatedVMSize(stderr io.Writer, options TaskSubmitOptions) {
 	if options.VMSize != "" {
-		fmt.Fprintln(stderr, "warning: --vm-size is deprecated; prefer --min-vcpu, --min-memory-gb, --min-disk-gb, --exclusive-node, and --max-co-tenants. Legacy tiers are translated by SAM compatibility policy.")
+		fmt.Fprintln(stderr, "warning: --vm-size is deprecated; prefer --min-vcpu, --min-memory-gb, --min-disk-gb, and --exclusive-node. Legacy tiers are translated by SAM compatibility policy.")
 	}
 }
 
@@ -492,12 +492,6 @@ func parseResourceRequirementFlags(parsed parsedArgs) (*ResourceRequirements, er
 		resource.ExclusiveNode = &value
 		set = true
 	}
-	if value, present, err := parseOptionalPositiveInteger(parsed, "max-co-tenants"); err != nil {
-		return nil, err
-	} else if present {
-		resource.MaxCoTenants = &value
-		set = true
-	}
 
 	if !set {
 		return nil, nil
@@ -533,18 +527,6 @@ func parseOptionalNonNegativeFloat(parsed parsedArgs, name string, unitScale flo
 	}
 	if err := validateRoundedUnitBound(name, value, unitScale); err != nil {
 		return 0, true, err
-	}
-	return value, true, nil
-}
-
-func parseOptionalPositiveInteger(parsed parsedArgs, name string) (float64, bool, error) {
-	raw, present, err := resourceFlagValue(parsed, name)
-	if err != nil || !present {
-		return 0, present, err
-	}
-	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || math.Trunc(value) != value || value > float64(maxSafeInteger) {
-		return 0, true, fmt.Errorf("--%s must be a positive safe integer", name)
 	}
 	return value, true, nil
 }
@@ -705,8 +687,6 @@ Task resource flags:
   --min-memory-gb <number>  Minimum memory in GB
   --min-disk-gb <number>    Minimum disk in GB
   --exclusive-node[=bool]   Request no co-tenants; explicit false is preserved
-  --max-co-tenants <integer>
-                         Compatibility co-tenant safety cap
   --vm-size <small|medium|large>
                             Deprecated legacy tier; prefer resource flags
 `

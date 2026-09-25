@@ -665,7 +665,6 @@ const RESOLVED_RESERVATION_JSON = JSON.stringify({
   memoryMb: 8192,
   diskMb: 81_920,
   exclusiveNode: false,
-  maxCoTenants: 3,
   source: 'project',
   sourceId: 'PRIVATE-IDENTITY',
   credentialId: 'SECRET-MUST-NOT-RENDER',

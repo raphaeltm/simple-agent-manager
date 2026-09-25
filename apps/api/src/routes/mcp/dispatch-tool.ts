@@ -708,7 +708,6 @@ export async function handleDispatchTask(
         agentProfileHint: resolvedProfile?.profileId ?? null,
         projectScaling: {
           taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
-          maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
           nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
           nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
           warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,

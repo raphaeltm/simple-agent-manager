@@ -110,7 +110,6 @@ func TestTasksDispatchSendsModernResourceFlags(t *testing.T) {
 		"--min-memory-gb", "16",
 		"--min-disk-gb=80",
 		"--exclusive-node=false",
-		"--max-co-tenants=3",
 	}, doer, nil)
 
 	code := Run(context.Background(), runtime)
@@ -124,8 +123,7 @@ func TestTasksDispatchSendsModernResourceFlags(t *testing.T) {
 	if resources["minVcpu"] != 4.0 ||
 		resources["minMemoryGb"] != 16.0 ||
 		resources["minDiskGb"] != 80.0 ||
-		resources["exclusiveNode"] != false ||
-		resources["maxCoTenants"] != 3.0 {
+		resources["exclusiveNode"] != false {
 		t.Fatalf("resource requirements = %#v", resources)
 	}
 }
@@ -155,7 +153,6 @@ func TestTasksDispatchResourceFlagsWithHTTPCanary(t *testing.T) {
 		"--min-memory-gb=8",
 		"--min-disk-gb=0",
 		"--exclusive-node",
-		"--max-co-tenants=2",
 	}, server.Client(), map[string]string{
 		"SAM_API_URL":        server.URL,
 		"SAM_SESSION_COOKIE": "cookie=value",
@@ -175,8 +172,7 @@ func TestTasksDispatchResourceFlagsWithHTTPCanary(t *testing.T) {
 	if resources["minVcpu"] != 2.5 ||
 		resources["minMemoryGb"] != 8.0 ||
 		resources["minDiskGb"] != 0.0 ||
-		resources["exclusiveNode"] != true ||
-		resources["maxCoTenants"] != 2.0 {
+		resources["exclusiveNode"] != true {
 		t.Fatalf("resource requirements = %#v", resources)
 	}
 }
@@ -345,9 +341,6 @@ func TestTasksDispatchRejectsMalformedResourceFlags(t *testing.T) {
 		{name: "nan", args: []string{"--min-memory-gb=NaN"}, want: "--min-memory-gb must be a finite positive number"},
 		{name: "infinity", args: []string{"--min-disk-gb=+Inf"}, want: "--min-disk-gb must be a finite non-negative number"},
 		{name: "bool", args: []string{"--exclusive-node=maybe"}, want: "--exclusive-node must be true or false"},
-		{name: "zero co-tenants", args: []string{"--max-co-tenants=0"}, want: "--max-co-tenants must be a positive safe integer"},
-		{name: "fractional co-tenants", args: []string{"--max-co-tenants=1.5"}, want: "--max-co-tenants must be a positive safe integer"},
-		{name: "unsafe co-tenants", args: []string{"--max-co-tenants=9007199254740992"}, want: "--max-co-tenants must be a positive safe integer"},
 	}
 
 	for _, tt := range tests {

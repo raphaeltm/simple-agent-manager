@@ -66,38 +66,38 @@ Pack chooses cx53 first and Hetzner refused 5 cx53 provisions today with
 ## Implementation checklist
 
 ### Shared package
-- [ ] Remove `maxCoTenants` from `ResourceRequirements`, `ResolvedResourceReservation`, `CreateWorkspaceRequest.resourceRequirements`
-- [ ] Remove `maxCoTenants` from `RESOURCE_REQUIREMENT_FIELDS`, validators, defaults, legacy size mapping, resolver output
-- [ ] Remove `maxWorkspacesPerNode` from `Project` / `UpdateProjectRequest`
-- [ ] Remove `DEFAULT_MAX_WORKSPACES_PER_NODE`, `MIN_/MAX_MAX_WORKSPACES_PER_NODE` and their exports
-- [ ] Update shared tests
+- [x] Remove `maxCoTenants` from `ResourceRequirements`, `ResolvedResourceReservation`, `CreateWorkspaceRequest.resourceRequirements`
+- [x] Remove `maxCoTenants` from `RESOURCE_REQUIREMENT_FIELDS`, validators, defaults, legacy size mapping, resolver output
+- [x] Remove `maxWorkspacesPerNode` from `Project` / `UpdateProjectRequest`
+- [x] Remove `DEFAULT_MAX_WORKSPACES_PER_NODE`, `MIN_/MAX_MAX_WORKSPACES_PER_NODE` and their exports
+- [x] Update shared tests
 
 ### API
-- [ ] `env.ts`: drop `MAX_WORKSPACES_PER_NODE`; `wrangler.toml` + `.env.example`: drop the var
-- [ ] `workspace-resource-capacity.ts`: drop `maxWorkspaces`, `minMaxCoTenants`, the maxCoTenants validity branch, and the `maxWorkspacesPerNode` scaling input
-- [ ] `workspace-placement.ts`: drop the maxCoTenants SQL branch and the numeric `reserveWorkspacePlacement` overload
-- [ ] `deployment-node-admission.ts`: drop the maxCoTenants SQL branch
-- [ ] `resource-requirements-input.ts`, `schemas/resource-requirements.ts`: drop parsing/provenance of the field
-- [ ] MCP tool definitions + sam-session dispatch schema: drop the property and the "deprecated compatibility metadata" wording
-- [ ] `openapi/sam-cli.ts`: drop the property; regenerate `openapi/sam-cli.openapi.json`
-- [ ] Remove `projectScaling.maxWorkspacesPerNode` from every payload/contract and the `workspace-steps.ts` log
-- [ ] `schemas/projects.ts`, `project-update.ts`, `mappers.ts`: drop the field; annotate the retained D1 column in `db/schema.ts`
+- [x] `env.ts`: drop `MAX_WORKSPACES_PER_NODE`; `wrangler.toml` + `.env.example`: drop the var
+- [x] `workspace-resource-capacity.ts`: drop `maxWorkspaces`, `minMaxCoTenants`, the maxCoTenants validity branch, and the `maxWorkspacesPerNode` scaling input
+- [x] `workspace-placement.ts`: drop the maxCoTenants SQL branch and the numeric `reserveWorkspacePlacement` overload
+- [x] `deployment-node-admission.ts`: drop the maxCoTenants SQL branch
+- [x] `resource-requirements-input.ts`, `schemas/resource-requirements.ts`: drop parsing/provenance of the field
+- [x] MCP tool definitions + sam-session dispatch schema: drop the property and the "deprecated compatibility metadata" wording
+- [x] `openapi/sam-cli.ts`: drop the property; regenerate `openapi/sam-cli.openapi.json`
+- [x] Remove `projectScaling.maxWorkspacesPerNode` from every payload/contract and the `workspace-steps.ts` log
+- [x] `schemas/projects.ts`, `project-update.ts`, `mappers.ts`: drop the field; annotate the retained D1 column in `db/schema.ts`
 - [ ] Update API tests (unit, workers, simulation) so no test hand-feeds or asserts on the removed fields; keep a discriminating test that a reservation without `maxCoTenants` and a legacy v1/v2 row with it are both admitted purely on resources
 
 ### Web
-- [ ] `HardwareDetails.tsx`: remove the "up to N workspaces per node" segment
-- [ ] `resource-requirements-utils.ts`: remove the field from state, validation and serialization; discard a stored `maxCoTenants` instead of round-tripping it
-- [ ] `ScalingSettings.tsx`: remove the dead `maxWorkspacesPerNode` key
+- [x] `HardwareDetails.tsx`: remove the "up to N workspaces per node" segment
+- [x] `resource-requirements-utils.ts`: remove the field from state, validation and serialization; discard a stored `maxCoTenants` instead of round-tripping it
+- [x] `ScalingSettings.tsx`: remove the dead `maxWorkspacesPerNode` key
 - [ ] Update web unit tests and Playwright fixtures; run the Playwright visual audit for the changed panel (mobile + desktop)
 
 ### CLI
-- [ ] Remove `--max-co-tenants`, `MaxCoTenants`, output segment, help text; update `run_test.go`; `go test -race` + `go vet`
+- [x] Remove `--max-co-tenants`, `MaxCoTenants`, output segment, help text; update `run_test.go`; `go test -race` + `go vet`
 
 ### Marketing site and docs
-- [ ] Placement explorer: remove `MAX_CO_TENANTS` / `MAX_WORKSPACES_PER_NODE` and their refusals; node meta shows the co-tenant count without a cap
-- [ ] Update `placement-catalog.test.ts`, `placement-model.test.ts`
-- [ ] Docs: `guides/compute-pools.md`, `reference/configuration.md`, `reference/api.md`; blog `choosing-a-placement-strategy.md` sentences that call the caps real
-- [ ] Update `tasks/backlog/2026-09-09-scheduler-explorer-slot-count-model.md` so it no longer proposes a co-tenant cap
+- [x] Placement explorer: remove `MAX_CO_TENANTS` / `MAX_WORKSPACES_PER_NODE` and their refusals; node meta shows the co-tenant count without a cap
+- [x] Update `placement-catalog.test.ts`, `placement-model.test.ts`
+- [x] Docs: `guides/compute-pools.md`, `reference/configuration.md`, `reference/api.md`; blog `choosing-a-placement-strategy.md` sentences that call the caps real
+- [x] Update `tasks/backlog/2026-09-09-scheduler-explorer-slot-count-model.md` so it no longer proposes a co-tenant cap
 
 ### Validation
 - [ ] `pnpm typecheck && pnpm lint && pnpm test && pnpm build`, `openapi:check`, `quality:file-sizes`

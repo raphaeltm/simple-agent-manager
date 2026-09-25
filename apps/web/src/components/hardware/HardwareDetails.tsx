@@ -132,13 +132,6 @@ export function requestedResources(
   const policy = resolved ?? requested;
   if (policy?.exclusiveNode === true) parts.push('exclusive node');
   else if (policy?.exclusiveNode === false) parts.push('node sharing allowed');
-  if (
-    typeof policy?.maxCoTenants === 'number' &&
-    Number.isInteger(policy.maxCoTenants) &&
-    policy.maxCoTenants > 0
-  ) {
-    parts.push(`up to ${policy.maxCoTenants} workspaces per node`);
-  }
   return parts.length ? parts.join(' · ') : 'Unknown — no saved resource request';
 }
 

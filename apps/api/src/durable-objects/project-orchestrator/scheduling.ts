@@ -532,7 +532,6 @@ async function autoDispatchSchedulableTasks(
         effort: null,
         projectScaling: {
           taskExecutionTimeoutMs: projectRow.task_execution_timeout_ms ?? null,
-          maxWorkspacesPerNode: projectRow.max_workspaces_per_node ?? null,
           nodeCpuThresholdPercent: projectRow.node_cpu_threshold_percent ?? null,
           nodeMemoryThresholdPercent: projectRow.node_memory_threshold_percent ?? null,
           warmNodeTimeoutMs: projectRow.warm_node_timeout_ms ?? null,
