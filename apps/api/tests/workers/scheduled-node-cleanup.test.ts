@@ -18,12 +18,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
-import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/terminal-cf-container-phase';
 import {
   claimNodeForCleanup,
   emptyResult,
   resolveCleanupConfig,
 } from '../../src/scheduled/node-cleanup/shared';
+import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/terminal-cf-container-phase';
 import { sweepStaleStoppedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import {
@@ -169,7 +169,7 @@ async function getObservabilityEvents(
 
 describe('runNodeCleanupSweep — vertical slice', () => {
   describe('orphaned workspace stopping (Phase 3)', () => {
-    it('destroys failed cf-container task workspaces instead of leaving the container active', async () => {
+    it('destroys cancelled cf-container task workspaces instead of leaving the container active', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-cf-terminal';
       const wsId = 'ws-nc-cf-terminal';
@@ -193,7 +193,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       });
       await seedAgentSession('agent-nc-cf-terminal', wsId, USER_ID, { status: 'running' });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
-        status: 'failed',
+        status: 'cancelled',
         workspaceId: wsId,
         updatedAt: oldDate,
       });
@@ -220,6 +220,68 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       expect(await getAgentSessionStatus('agent-nc-cf-terminal')).toMatchObject({
         status: 'stopped',
         stopped_at: expect.any(String),
+      });
+    });
+
+    it('leaves a failed cf-container task to the sleep lifecycle only while its agent session can be slept', async () => {
+      // Failed-task work preservation (idea 01M1XGHX7NQZQYWQRV5C1PJ60N): the
+      // container is the failed task's unpushed work until its sleep snapshot is
+      // taken. Once no agent session can be slept, the reaper is its only escape.
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const destroyForUser = vi.fn().mockResolvedValue(undefined);
+      for (const [suffix, agentStatus] of [
+        ['resumable', 'running'],
+        ['ended', 'failed'],
+      ] as const) {
+        const nodeId = `node-nc-cf-failed-${suffix}`;
+        const wsId = `ws-nc-cf-failed-${suffix}`;
+        await seedNode(nodeId, USER_ID, {
+          status: 'running',
+          createdAt: oldDate,
+          updatedAt: oldDate,
+        });
+        await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+          .bind(nodeId)
+          .run();
+        await seedWorkspace(wsId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'running',
+          chatSessionId: `session-nc-cf-failed-${suffix}`,
+          createdAt: oldDate,
+        });
+        await seedAgentSession(`agent-nc-cf-failed-${suffix}`, wsId, USER_ID, {
+          status: agentStatus,
+        });
+        await seedTask(`task-nc-cf-failed-${suffix}`, PROJECT_ID, USER_ID, {
+          status: 'failed',
+          workspaceId: wsId,
+          updatedAt: oldDate,
+        });
+      }
+      const testEnv = {
+        ...env,
+        CF_CONTAINER_ENABLED: 'true',
+        VM_AGENT_CONTAINER: {
+          idFromName: (id: string) => id,
+          get: () => ({ destroyForUser }),
+        },
+        ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000',
+      } as unknown as Env;
+      const result = emptyResult();
+
+      await sweepTerminalCfContainers(testEnv, new Date(), resolveCleanupConfig(testEnv), result);
+
+      expect(result.cfContainersDestroyed).toBe(1);
+      expect(destroyForUser).toHaveBeenCalledTimes(1);
+      expect(await getWorkspaceStatus('ws-nc-cf-failed-resumable')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getNodeRuntimeStatus('node-nc-cf-failed-resumable')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getNodeRuntimeStatus('node-nc-cf-failed-ended')).toMatchObject({
+        status: 'deleted',
       });
     });
 
@@ -322,7 +384,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       ).run();
     });
 
-    it('stops an orphaned workspace after a failed task', async () => {
+    it('stops an orphaned workspace after a cancelled task', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-orphan-ws';
       const wsId = 'ws-nc-orphan';
@@ -338,7 +400,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       });
       await seedAgentSession('agent-nc-orphan', wsId, USER_ID, { status: 'running' });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
-        status: 'failed',
+        status: 'cancelled',
         workspaceId: wsId,
       });
 
@@ -363,6 +425,51 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       const events = await getObservabilityEvents('orphaned_workspace');
       expect(events.length).toBeGreaterThanOrEqual(1);
       expect(events[0].message).toContain('Orphaned workspace stopped');
+    });
+
+    it('leaves a failed task workspace to the sleep lifecycle only while its agent session can be slept', async () => {
+      // node_cleanup runs before session_sleep in every tick: without this
+      // ownership predicate it would stop a failed task's workspace before its
+      // preservation snapshot could be taken (idea 01M1XGHX7NQZQYWQRV5C1PJ60N).
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      for (const [suffix, agentStatus] of [
+        ['resumable', 'running'],
+        ['sleeping', 'sleeping'],
+        ['ended', 'failed'],
+      ] as const) {
+        const nodeId = `node-nc-failed-${suffix}`;
+        const wsId = `ws-nc-failed-${suffix}`;
+        await seedNode(nodeId, USER_ID);
+        await seedWorkspace(wsId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'running',
+          chatSessionId: `session-nc-failed-${suffix}`,
+          createdAt: oldDate,
+        });
+        await seedAgentSession(`agent-nc-failed-${suffix}`, wsId, USER_ID, {
+          status: agentStatus,
+        });
+        await seedTask(`task-nc-failed-${suffix}`, PROJECT_ID, USER_ID, {
+          status: 'failed',
+          workspaceId: wsId,
+        });
+      }
+      const testEnv = {
+        ...env,
+        ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000',
+      } as unknown as Env;
+
+      const result = await runNodeCleanupSweep(testEnv);
+
+      expect(result.orphanedWorkspacesFlagged).toBe(1);
+      expect(await getWorkspaceStatus('ws-nc-failed-resumable')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-failed-sleeping')).toMatchObject({
+        status: 'running',
+      });
+      expect(await getWorkspaceStatus('ws-nc-failed-ended')).toMatchObject({ status: 'stopped' });
     });
 
     it('stops orphaned recovery workspace so it no longer blocks node cleanup forever', async () => {

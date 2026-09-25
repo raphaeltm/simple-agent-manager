@@ -4,6 +4,11 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import {
+  preserveFailedTaskWork,
+  surfaceFailedTaskWorkLoss,
+  withholdsFailedTaskTeardown,
+} from './failed-task-preservation';
 import * as projectDataService from './project-data';
 import { queueWorkspaceSessionSleep } from './session-sleep';
 import { deleteSessionSnapshotState } from './session-snapshots';
@@ -50,6 +55,10 @@ export async function cleanupTerminalTaskResourcesOrThrow(
 // authorized project member may mark a shared session terminal. Compute
 // cleanup (cleanupTaskRun) is caller-scoped via options.requiredUserId so
 // only the workspace owner's resources are torn down.
+//
+// A `failed` task without destructive intent is preserved rather than torn down
+// whenever its work can be (`failed-task-preservation.ts`): the session is NOT
+// failed, because snapshot recovery can only wake a `sleeping` session.
 export async function cleanupTerminalTaskResources(
   env: Env,
   taskId: string,
@@ -61,6 +70,7 @@ export async function cleanupTerminalTaskResources(
       id: schema.tasks.id,
       projectId: schema.tasks.projectId,
       workspaceId: schema.tasks.workspaceId,
+      chatSessionId: schema.tasks.chatSessionId,
       errorMessage: schema.tasks.errorMessage,
     })
     .from(schema.tasks)
@@ -108,6 +118,28 @@ export async function cleanupTerminalTaskResources(
       sleepAfterMs: 0,
     });
     return;
+  }
+
+  if (options.status === 'failed' && !options.destructiveSessionEnd) {
+    await options.beforeSideEffect?.();
+    const source =
+      typeof options.logContext?.source === 'string' ? options.logContext.source : null;
+    const preservation = await preserveFailedTaskWork(env, {
+      taskId,
+      projectId: task.projectId,
+      workspaceId: task.workspaceId,
+      chatSessionId: task.chatSessionId ?? workspace?.chatSessionId ?? null,
+      source: source ?? 'task.terminal_cleanup',
+    });
+    if (withholdsFailedTaskTeardown(preservation)) return;
+    await options.beforeSideEffect?.();
+    await surfaceFailedTaskWorkLoss(env, {
+      taskId,
+      projectId: task.projectId,
+      chatSessionId: task.chatSessionId ?? workspace?.chatSessionId ?? null,
+      reason: preservation.gap,
+      source: source ?? 'task.terminal_cleanup',
+    });
   }
 
   if (workspace?.chatSessionId && options.destructiveSessionEnd) {

@@ -226,17 +226,22 @@ async function failExpiredTaskMarker(
       ? 'Agent became unresponsive after SAM check-in'
       : 'Human input request expired after timeout';
 
+  const projectId = hooks.projectId ?? null;
+  const source = `project_data.attention_expiry.${marker.kind}`;
   const transitionOutcome = await transitionTaskToTerminal(env as unknown as WorkerEnv, {
     taskId: marker.taskId,
-    projectId: hooks.projectId ?? null,
+    projectId,
     status: 'failed',
     reason: errorMessage,
-    source: `project_data.attention_expiry.${marker.kind}`,
+    source,
     expectedWorkspaceId: marker.workspaceId,
     expectedChatSessionId: marker.sessionId,
-    stopWorkspace: true,
+    // Work preservation (or, failing that, cleanupTaskRun) owns the runtime.
+    // Pre-marking it `stopped` would skip the real VM stop and make the
+    // workspace unsleepable ("Workspace cannot sleep from status stopped").
+    stopWorkspace: false,
   });
-  if (transitionOutcome !== 'transitioned') {
+  if (transitionOutcome !== 'transitioned' || !projectId) {
     log.warn('attention_marker.task_terminal_transition_skipped', {
       markerId: marker.id,
       sessionId: marker.sessionId,
@@ -247,9 +252,6 @@ async function failExpiredTaskMarker(
     });
     return;
   }
-
-  await failSession(marker.sessionId, errorMessage);
-  hooks.scheduleSummarySync?.();
   activity.recordActivityEventInternal(
     sql,
     'attention.expired',
@@ -261,8 +263,39 @@ async function failExpiredTaskMarker(
     JSON.stringify({ kind: marker.kind, markerId: marker.id })
   );
 
-  if (marker.kind === 'reconciliation_checkin' && marker.workspaceId) {
-    void cleanupUnresponsiveTaskRun(env, marker.workspaceId, marker.taskId);
+  // Most expiries hit a conversation that already slept while it waited: keep it
+  // asleep and wakeable instead of failing the session (idea 01M1XGHX7NQZQYWQRV5C1PJ60N).
+  const workerEnv = env as unknown as WorkerEnv;
+  const preservationService = await import('../../services/failed-task-preservation');
+  const preservation = await preservationService.preserveFailedTaskWork(workerEnv, {
+    taskId: marker.taskId,
+    projectId,
+    workspaceId: marker.workspaceId,
+    chatSessionId: marker.sessionId,
+    source,
+  });
+  if (preservationService.withholdsFailedTaskTeardown(preservation)) {
+    log.info('attention_marker.expired_work_preserved', {
+      markerId: marker.id,
+      sessionId: marker.sessionId,
+      taskId: marker.taskId,
+      kind: marker.kind,
+      outcome: preservation.outcome,
+    });
+    return;
+  }
+
+  await preservationService.surfaceFailedTaskWorkLoss(workerEnv, {
+    taskId: marker.taskId,
+    projectId,
+    chatSessionId: marker.sessionId,
+    reason: preservation.gap,
+    source,
+  });
+  await failSession(marker.sessionId, errorMessage);
+  hooks.scheduleSummarySync?.();
+  if (marker.workspaceId) {
+    void cleanupExpiredTaskRun(env, marker.workspaceId, marker.taskId);
   }
 
   log.info('attention_marker.expired_cleanup', {
@@ -274,11 +307,7 @@ async function failExpiredTaskMarker(
   });
 }
 
-async function cleanupUnresponsiveTaskRun(
-  env: Env,
-  workspaceId: string,
-  taskId: string
-): Promise<void> {
+async function cleanupExpiredTaskRun(env: Env, workspaceId: string, taskId: string): Promise<void> {
   try {
     const workerEnv = env as unknown as import('../../env').Env;
     const { cleanupTaskRun } = await import('../../services/task-runner');
