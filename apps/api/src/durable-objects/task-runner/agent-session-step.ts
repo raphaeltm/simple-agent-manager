@@ -10,6 +10,7 @@ import {
   buildVisibleInitialPrompt,
 } from '../../services/agent-bootstrap-prompt';
 import { getRecoverySourceTaskGuard } from './helpers';
+import { prepareSnapshotRestoreAttempt } from './snapshot-restore-retry';
 import { transitionToInProgress } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -111,6 +112,10 @@ export async function handleAgentSession(
           state.stepResults.mcpToken = previousToken;
           throw error;
         }
+      },
+      runPhase: async (phase, run) => {
+        if (phase === 'restore_acp_session') await prepareSnapshotRestoreAttempt(state, rc);
+        return run();
       },
       beforeExternalMutation: async () => {
         await rc.assertRecoveryAuthority(state);

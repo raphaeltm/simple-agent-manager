@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import { TaskRunner } from '../../../src/durable-objects/task-runner';
 import { handleAgentSession } from '../../../src/durable-objects/task-runner/agent-session-step';
 import { failTask } from '../../../src/durable-objects/task-runner/state-machine';
 import type {
@@ -18,6 +19,15 @@ import {
   SessionRecoveryAuthorityRevokedError,
 } from '../../../src/services/session-recovery-authority';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+
+vi.mock('cloudflare:workers', () => ({
+  DurableObject: class {
+    constructor(
+      public ctx: DurableObjectState,
+      public env: Env
+    ) {}
+  },
+}));
 
 const vm = vi.hoisted(() => ({ create: vi.fn(), restore: vi.fn(), start: vi.fn(), stop: vi.fn() }));
 vi.mock('../../../src/services/node-agent', () => ({
@@ -178,6 +188,8 @@ beforeEach(() => {
     env,
     ctx: {
       storage: {
+        get: async () => structuredClone(storedState),
+        setAlarm: vi.fn(async () => undefined),
         put: async (_key: string, value: TaskRunnerState) => {
           storedState = structuredClone(value);
         },
@@ -205,6 +217,7 @@ beforeEach(() => {
 afterEach(async () => {
   await Promise.allSettled(background);
   sqlite.close();
+  vi.useRealTimers();
 });
 
 describe('recovery step retries retain their claim and token', () => {
@@ -390,5 +403,159 @@ describe('bootstrap retains responsibility until token handoff succeeds', () => 
     expect(issuedToken).toBeTruthy();
     expect(await validateMcpToken(env.KV, issuedToken!)).toBeNull();
     expect(vm.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('TaskRunner snapshot restore retry deadline', () => {
+  const startedAt = Date.parse('2026-09-25T20:00:00.000Z');
+  const operationMs = 15 * 60_000;
+  const requestMs = 5 * 60_000;
+  const runAlarm = () => new TaskRunner(rc.ctx, env).alarm();
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(startedAt);
+    storedState = seed();
+    env.TASK_RUNNER_STEP_MAX_RETRIES = '3';
+  });
+
+  it('keeps an accepted restore live across four 524s and restarts, then commits the same conversation', async () => {
+    let deadline: number | null | undefined;
+    vm.restore.mockImplementation(async () => {
+      deadline ??= storedState.stepResults.snapshotRestoreDeadlineAt;
+      // Read the durable copy at the external boundary, not the mutable runner state.
+      expect(deadline).toBe(startedAt + operationMs + requestMs);
+      expect(storedState.stepResults.snapshotRestoreDeadlineAt).toBe(deadline);
+      vi.setSystemTime(Date.now() + 100_000);
+      throw new Error('VM restore: HTTP 524');
+    });
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await runAlarm();
+      expect(storedState.completed).toBe(false);
+      expect(storedState.retryCount).toBe(attempt + 1);
+      expect(snapshot()).toMatchObject({ recovery_status: 'waking' });
+      const scheduled = vi.mocked(rc.ctx.storage.setAlarm).mock.lastCall?.[0];
+      expect(scheduled).toEqual(expect.any(Number));
+      vi.setSystemTime(scheduled as number);
+      // A deployment changing env cannot renew the already-started operation budget.
+      env.SESSION_SNAPSHOT_OPERATION_TIMEOUT = '1h';
+    }
+    const token = storedState.stepResults.mcpToken!;
+    expect(await validateMcpToken(env.KV, token)).toMatchObject({ taskId: 'recovery' });
+    expect(vm.stop).not.toHaveBeenCalled();
+
+    vi.setSystemTime(startedAt + 600_000);
+    vm.restore.mockResolvedValue({ status: 'restored' });
+    await runAlarm();
+
+    expect(storedState.currentStep).toBe('running');
+    expect(storedState.stepResults.snapshotRestoreDeadlineAt).toBe(deadline);
+    expect(storedState.stepResults.mcpToken).toBe(token);
+    expect(snapshot()).toMatchObject({ recovery_status: 'restored', sleeping_at: null });
+    expect(chat.status).toBe('active');
+    expect(vm.restore).toHaveBeenCalledTimes(5);
+    expect(vm.start).not.toHaveBeenCalled();
+  });
+
+  it('pins the configured operation duration plus one request timeout for final result retrieval', async () => {
+    env.SESSION_SNAPSHOT_OPERATION_TIMEOUT = '12m30s';
+    env.SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS = '45000';
+    vm.restore.mockRejectedValue(new Error('VM restore: HTTP 524'));
+    await runAlarm();
+    expect(storedState.stepResults.snapshotRestoreDeadlineAt).toBe(startedAt + 750_000 + 45_000);
+  });
+
+  it('terminalizes and revokes the token at the original operation-plus-request deadline', async () => {
+    vm.restore.mockRejectedValue(new Error('VM restore: HTTP 524'));
+    await runAlarm();
+    const token = storedState.stepResults.mcpToken!;
+    const deadline = startedAt + operationMs + requestMs;
+    env.SESSION_SNAPSHOT_OPERATION_TIMEOUT = '1h';
+    vi.setSystemTime(deadline - 1);
+    await runAlarm();
+    expect(storedState.completed).toBe(false);
+    vi.setSystemTime(deadline);
+    await runAlarm();
+
+    expect(storedState.completed).toBe(true);
+    expect(snapshot()).toMatchObject({ recovery_status: 'failed' });
+    expect(await validateMcpToken(env.KV, token)).toBeNull();
+    expect(vm.stop).toHaveBeenCalledOnce();
+    expect(vm.restore).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not start another restore when a queued retry alarm runs after the deadline', async () => {
+    vm.restore.mockRejectedValue(new Error('VM restore: HTTP 524'));
+    await runAlarm();
+    const token = storedState.stepResults.mcpToken!;
+    const deadline = storedState.stepResults.snapshotRestoreDeadlineAt!;
+    vi.setSystemTime(deadline - 1);
+    await runAlarm();
+    const scheduled = vi.mocked(rc.ctx.storage.setAlarm).mock.lastCall?.[0] as number;
+    expect(scheduled).toBeGreaterThan(deadline);
+
+    vi.setSystemTime(scheduled);
+    await runAlarm();
+
+    expect(vm.restore).toHaveBeenCalledTimes(2);
+    expect(storedState.completed).toBe(true);
+    expect(snapshot()).toMatchObject({ recovery_status: 'failed' });
+    expect(await validateMcpToken(env.KV, token)).toBeNull();
+    expect(vm.stop).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])(
+    'keeps the count limit before a restore RPC starts (snapshot: %s)',
+    async (snapshotRecovery) => {
+      if (!snapshotRecovery) storedState.config.resumeSnapshotChatSessionId = null;
+      storedState.retryCount = 3;
+      vm.create.mockRejectedValueOnce(new Error('VM create: HTTP 524'));
+      await runAlarm();
+
+      expect(storedState.completed).toBe(true);
+      expect(storedState.stepResults.snapshotRestoreDeadlineAt).toBeUndefined();
+      expect(vm.restore).not.toHaveBeenCalled();
+    }
+  );
+
+  it('revokes guarded recovery immediately when source authority ends inside the deadline', async () => {
+    sqlite.exec(`INSERT INTO tasks (id, project_id, user_id, title, status)
+      VALUES ('source', 'project', 'user', 'Source conversation', 'awaiting_followup');
+      UPDATE tasks SET recovery_source_task_id = 'source' WHERE id = 'recovery'`);
+    storedState.config.recoverySourceTaskId = 'source';
+    vm.restore.mockRejectedValue(new Error('VM restore: HTTP 524'));
+    await runAlarm();
+    const token = storedState.stepResults.mcpToken!;
+    expect(storedState.completed).toBe(false);
+    sqlite.exec("UPDATE tasks SET status = 'cancelled' WHERE id = 'source'");
+
+    await runAlarm();
+
+    expect(storedState.completed).toBe(true);
+    expect(await validateMcpToken(env.KV, token)).toBeNull();
+    expect(vm.restore).toHaveBeenCalledOnce();
+    expect(snapshot()).toMatchObject({ recovery_status: 'failed' });
+  });
+
+  it('does not retry permanent restore errors inside the deadline', async () => {
+    vm.restore.mockRejectedValueOnce(
+      Object.assign(new Error('invalid snapshot'), { permanent: true })
+    );
+    await runAlarm();
+    expect(storedState.completed).toBe(true);
+    expect(snapshot()).toMatchObject({ recovery_status: 'failed' });
+    expect(vm.restore).toHaveBeenCalledOnce();
+  });
+
+  it('cannot call restore unless its immutable deadline was durably persisted', async () => {
+    const persist = rc.ctx.storage.put;
+    rc.ctx.storage.put = (async (key: string, value: TaskRunnerState) => {
+      if (value.stepResults.snapshotRestoreDeadlineAt) throw new Error('Durable write failed');
+      await persist(key, value);
+    }) as typeof rc.ctx.storage.put;
+    await expect(handleAgentSession(storedState, rc)).rejects.toThrow('Durable write failed');
+    expect(vm.restore).not.toHaveBeenCalled();
+    expect(storedState.stepResults.snapshotRestoreDeadlineAt).toBeUndefined();
   });
 });

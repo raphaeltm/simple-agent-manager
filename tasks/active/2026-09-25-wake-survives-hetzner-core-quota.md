@@ -271,11 +271,12 @@ pass can verify the entire preserved-conversation wake before either change ship
 - Removed premature snapshot failure from the retryable agent step; terminal `failTask` remains the authority.
 - MCP token ownership transfers only after the caller persists it successfully. Bootstrap failures
   revoke unowned tokens; TaskRunner retries retain owned tokens and terminal failure revokes them.
-- New real-SQLite regression slice: 7 tests. Before fixes, both wake retries and token handoff fail
-  (3 red); after fixes all 7 pass. Covers user/durable wakes and terminal/no-owner/rejected-owner controls.
-- Local review found further gaps being addressed before staging: provider deletion precedes durable
-  claim cleanup; detached VM restore needs teardown ownership and panic containment.
-- [ ] Complete review findings and discriminating tests.
+- The recovery/token slice now has 8 real-SQLite tests, including rejected-handoff state rollback.
+  Covers user/durable wakes and terminal/no-owner/rejected-owner controls; guard removals fail.
+  The final timeout audit below expands the real TaskRunner/bootstrap slice to 17 tests.
+- Local review gaps are addressed: provider rejection proof precedes deletion; detached restore
+  owns teardown/shutdown and contains panics. The corrections below record the discriminating tests.
+- [x] Complete review findings and discriminating tests (including the bounded restore-retry audit below).
 - [ ] Combined staging: failed task snapshot, fresh VM wake, preserved file and agent answer; cleanup.
 - [ ] Local reviews, CI/CodeRabbit, merge prerequisite then rebase preservation PR, monitor deploys.
 
@@ -295,3 +296,34 @@ pass can verify the entire preserved-conversation wake before either change ship
   regression fails when rollback is removed in an isolated transform.
 - Targeted final regressions: recovery/token 8; rejected-node crash/controls 5; quota actions 13;
   terminal-writer inventory 8. Go restore/lifecycle suite passes with `-race`.
+
+### Final timeout audit and staging checkpoint
+
+The combined candidate passed staging run
+[36176727375](https://github.com/raphaeltm/simple-agent-manager/actions/runs/36176727375).
+Source task `01M3D0XSKXDSC5Q2Y367EAHRV9` created an uncommitted random proof in a fresh `fsn1`
+VM. Its real failure queued snapshot sleep; HOME and WIP were captured without degradation,
+and the source VM was deleted. A separate helper provisioned fresh `hel1` capacity. Recovery
+`01M3D236GQ1R0D1YM4RDRCPYBX` reused that host, committed at 19:55:16.376Z, and the resumed agent
+read the existing file and answered `WAKE_OK` with the identical SHA-256 at 19:55:40.748Z.
+All three test workspaces and both VMs were deleted with termination confirmed; D1 showed zero
+active staging nodes. This proves cross-region reuse, not provisioning initiated by the wake.
+
+A final review found a further deadline mismatch: repeated 100-second proxy failures could exhaust
+ordinary retries before the detached 15-minute restore ended, revoking its token mid-operation.
+The small `snapshot-restore-retry.ts` authority now persists one retry-admission deadline before
+the first restore RPC: configured operation time plus one request window to retrieve its result.
+Retries, restarts, and configuration changes cannot renew it. Late alarms cannot start another RPC;
+an already-admitted request remains bounded by the existing request timeout. Ordinary steps,
+pre-restore bootstrap errors, permanent failures, and source revocation keep their existing rules.
+Go-duration parsing includes the signed-int64 overflow bound rather than JavaScript's larger range.
+
+Local validation: 41/41 focused tests (17 real TaskRunner/bootstrap/SQLite and 24 configuration/
+predicate controls), API typecheck, ESLint, formatting, and context budget passed. Four isolated
+mutations failed as expected: restoring count-only retries, removing the deadline, renewing it on
+retry, and allowing a late RPC. Independent Go/security and Cloudflare/constitution/env reviews
+approved the final code; the public configuration reference is synchronized.
+
+This last guard was added after the successful staging candidate. Final deployment verification
+remains blocked by the user's single-pass constraint until an additional serialized pass is approved.
+No prerequisite PR has been created, no risk label removed, and no merge authorized by this checkpoint.
