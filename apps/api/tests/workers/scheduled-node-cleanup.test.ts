@@ -24,6 +24,7 @@ import {
   emptyResult,
   resolveCleanupConfig,
 } from '../../src/scheduled/node-cleanup/shared';
+import type { UnhealthyNodeBoundaries } from '../../src/scheduled/node-cleanup/unhealthy-nodes';
 import { sweepStaleStoppedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import {
@@ -168,6 +169,51 @@ async function getObservabilityEvents(
 }
 
 describe('runNodeCleanupSweep — vertical slice', () => {
+  it('drains and releases a silent node through the scheduled entry point', async () => {
+    await seedBaseData();
+    const nodeId = 'node-unhealthy-trigger';
+    const workspaceId = 'workspace-unhealthy-trigger';
+    const heartbeatAt = new Date(Date.now() - 31 * 60_000).toISOString();
+    await seedNode(nodeId, USER_ID, {
+      createdAt: heartbeatAt,
+      lastHeartbeatAt: heartbeatAt,
+    });
+    await seedWorkspace(workspaceId, nodeId, USER_ID, {
+      projectId: PROJECT_ID,
+      chatSessionId: 'session-unhealthy-trigger',
+    });
+    await seedAgentSession('agent-unhealthy-trigger', workspaceId, USER_ID);
+    await seedAutoProvisionedTaskForNode('task-unhealthy-trigger', nodeId);
+
+    const order: string[] = [];
+    const boundaries: UnhealthyNodeBoundaries = {
+      notice: vi.fn(async () => {
+        order.push('notice');
+        return 'notice-id';
+      }) as UnhealthyNodeBoundaries['notice'],
+      sleep: vi.fn(async () => {
+        order.push('sleep');
+      }) as UnhealthyNodeBoundaries['sleep'],
+      release: vi.fn(async (_db, workerEnv, _nowIso, node) => {
+        order.push('release');
+        await workerEnv.DATABASE.prepare('DELETE FROM nodes WHERE id = ?').bind(node.id).run();
+        return 'destroyed';
+      }) as UnhealthyNodeBoundaries['release'],
+    };
+
+    const result = await runNodeCleanupSweep(env as Env, boundaries);
+
+    expect(order).toEqual(['notice', 'sleep', 'release']);
+    expect(result.unhealthyReleased).toBe(1);
+    expect(await getNodeStatus(nodeId)).toBeNull();
+    const events = await env.DATABASE.prepare(
+      'SELECT event FROM node_health_events WHERE node_id = ? ORDER BY created_at, rowid'
+    )
+      .bind(nodeId)
+      .all<{ event: string }>();
+    expect(events.results.map((row) => row.event)).toContain('released');
+  });
+
   describe('orphaned workspace stopping (Phase 3)', () => {
     it('destroys failed cf-container task workspaces instead of leaving the container active', async () => {
       await seedBaseData();
@@ -1117,6 +1163,8 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         cfContainersDestroyed: expect.any(Number),
         incompatibleDestroyed: expect.any(Number),
         incompatibleSkipped: expect.any(Number),
+        unhealthyReleased: expect.any(Number),
+        unhealthyHeld: expect.any(Number),
         errors: expect.any(Number),
       });
     });

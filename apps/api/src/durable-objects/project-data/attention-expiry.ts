@@ -6,6 +6,7 @@ import * as activity from './activity';
 import * as attention from './attention';
 import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
 import { activeWorkHardStallMs, reconciliationDeadlineMs } from './reconciliation-thresholds';
+import { freshRuntimeWorkProgressAt } from './runtime-work-progress';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.attention_expiry');
@@ -211,6 +212,40 @@ async function resendNeedsInputPush(env: Env, marker: ExpiredAttentionMarker): P
   }
 }
 
+async function checkinFailureReason(env: Env, workspaceId: string | null): Promise<string> {
+  if (!workspaceId) return 'No response to SAM check-in; workspace identity is unavailable';
+  try {
+    const row = await env.DATABASE.prepare(
+      `SELECT w.node_id AS nodeId, n.last_heartbeat_at AS lastHeartbeatAt,
+              n.heartbeat_stale_after_seconds AS staleAfterSeconds
+       FROM workspaces w LEFT JOIN nodes n ON n.id = w.node_id
+       WHERE w.id = ? LIMIT 1`
+    )
+      .bind(workspaceId)
+      .first<{
+        nodeId: string | null;
+        lastHeartbeatAt: string | null;
+        staleAfterSeconds: number | null;
+      }>();
+    if (!row?.nodeId)
+      return 'SAM check-in expired after the workspace lost its node; agent progress is unknown';
+    const beatAt = row.lastHeartbeatAt ? Date.parse(row.lastHeartbeatAt) : NaN;
+    if (
+      !Number.isFinite(beatAt) ||
+      Date.now() - beatAt > Math.max(1, row.staleAfterSeconds ?? 1) * 1000
+    ) {
+      return `Control plane lost heartbeat from node ${row.nodeId} before SAM check-in expired; agent progress is unknown`;
+    }
+    return 'No agent response to SAM check-in by deadline; node heartbeat remained healthy';
+  } catch (error) {
+    log.warn('attention_marker.checkin_node_liveness_query_failed', {
+      workspaceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 'SAM check-in expired while node heartbeat status could not be verified; agent progress is unknown';
+  }
+}
+
 async function failExpiredTaskMarker(
   sql: SqlStorage,
   env: Env,
@@ -223,7 +258,7 @@ async function failExpiredTaskMarker(
 
   const errorMessage =
     marker.kind === 'reconciliation_checkin'
-      ? 'Agent became unresponsive after SAM check-in'
+      ? await checkinFailureReason(env, marker.workspaceId)
       : 'Human input request expired after timeout';
 
   const transitionOutcome = await transitionTaskToTerminal(env as unknown as WorkerEnv, {
@@ -354,15 +389,17 @@ function activeCheckinEvidence(
   }
 
   if (runtimeWorkState === 'active' || runtimeWorkState === 'settling') {
-    const runtimeWorkEvidenceAt = maxFreshEvidence(
-      marker.createdAt,
-      active.runtime_work_progress_at,
-      active.runtime_work_updated_at
+    const runtimeWorkEvidenceAt = freshRuntimeWorkProgressAt(
+      {
+        runtimeWorkState,
+        runtimeWorkProgressAt: active.runtime_work_progress_at,
+        runtimeWorkUpdatedAt: active.runtime_work_updated_at,
+      },
+      now,
+      hardStallMs,
+      marker.createdAt
     );
-    const runtimeWorkAnchor =
-      toPositiveNumber(active.runtime_work_progress_at) ??
-      toPositiveNumber(active.runtime_work_updated_at) ??
-      runtimeWorkEvidenceAt;
+    const runtimeWorkAnchor = runtimeWorkEvidenceAt;
 
     if (runtimeWorkEvidenceAt !== null && runtimeWorkAnchor !== null) {
       runtimeWorkCeilingAt = runtimeWorkAnchor + hardStallMs;

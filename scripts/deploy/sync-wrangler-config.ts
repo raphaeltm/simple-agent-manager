@@ -407,8 +407,7 @@ function extractStaticBindings(topLevel: WranglerToml): {
     durable_objects: topLevel.durable_objects as DurableObjectsConfig | undefined,
     ai: topLevel.ai as AIBinding | undefined,
     analytics_engine_datasets: topLevel.analytics_engine_datasets as
-      | AnalyticsEngineDatasetBinding[]
-      | undefined,
+      AnalyticsEngineDatasetBinding[] | undefined,
     containers: topLevel.containers as ContainerBinding[] | undefined,
     migrations: topLevel.migrations as MigrationEntry[] | undefined,
     artifacts: topLevel.artifacts as unknown[] | undefined,
@@ -645,11 +644,7 @@ function append(path: string | undefined, content: string): void {
   }
 }
 
-function overrideSummaryTable(
-  heading: string,
-  note: string,
-  rows: readonly string[]
-): string {
+function overrideSummaryTable(heading: string, note: string, rows: readonly string[]): string {
   return [
     `### ${heading}`,
     '',
@@ -834,6 +829,10 @@ function getApiWorkerVars(
       'NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS',
       'NODE_WORKSPACE_IDLE_TIMEOUT_MS',
       'NODE_CLEANUP_FAILURE_BACKOFF_MS',
+      'NODE_UNHEALTHY_DRAIN_AFTER_MS',
+      'NODE_UNHEALTHY_RELEASE_AFTER_MS',
+      'NODE_UNHEALTHY_FLEET_MAX_FRACTION',
+      'NODE_UNHEALTHY_RETRY_MS',
       'NODE_AGENT_REQUEST_TIMEOUT_MS',
       'NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS',
       'WORKSPACE_DELETION_RETRY_BASE_MS',

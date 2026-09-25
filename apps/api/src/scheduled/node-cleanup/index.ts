@@ -31,6 +31,7 @@ import {
   sweepTerminalCfContainers,
 } from './node-phases';
 import { emptyResult, type NodeCleanupResult, resolveCleanupConfig } from './shared';
+import { sweepUnhealthyNodes, type UnhealthyNodeBoundaries } from './unhealthy-nodes';
 import { sweepOrphanedWorkspaces, sweepStaleStoppedWorkspaces } from './workspace-phases';
 
 export type { NodeCleanupResult } from './shared';
@@ -45,7 +46,10 @@ export { resolveCleanupConfig } from './shared';
  * suppress node reaping the way a single failing sweep once suppressed the whole
  * back half of the cron.
  */
-export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> {
+export async function runNodeCleanupSweep(
+  env: Env,
+  unhealthyBoundaries?: UnhealthyNodeBoundaries
+): Promise<NodeCleanupResult> {
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date();
   const config = resolveCleanupConfig(env);
@@ -54,6 +58,10 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
   const phases: Array<[string, () => Promise<void>]> = [
     ['cf_container_terminal', () => sweepTerminalCfContainers(env, now, config, result)],
     ['stale_warm', () => sweepStaleWarmNodes(db, env, now, config, result)],
+    [
+      'unhealthy_nodes',
+      () => sweepUnhealthyNodes(db, env, now, config, result, unhealthyBoundaries),
+    ],
     ['max_lifetime', () => sweepMaxLifetimeNodes(db, env, now, config, result)],
     ['stopped_handoff', () => sweepStoppedHandoffNodes(db, env, now, config, result)],
     ['orphaned_workspaces', () => sweepOrphanedWorkspaces(db, env, now, config, result)],

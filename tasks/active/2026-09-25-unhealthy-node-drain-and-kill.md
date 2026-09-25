@@ -19,21 +19,21 @@ being scheduled on it, and it was never killed.
 Sources: Workers Observability (head sampling 1.0, so absence is evidence), `sam-prod` D1,
 `sam-observability-prod` D1. Query helpers were kept in `.tmp/incident/` (not committed).
 
-| Time (UTC) | Event |
-| --- | --- |
-| 02:02:23 | Node created. Hosted 14 workspaces across 4+ projects over its life. |
+| Time (UTC)        | Event                                                                                                                                                                                                                                                                                                                   |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 02:02:23          | Node created. Hosted 14 workspaces across 4+ projects over its life.                                                                                                                                                                                                                                                    |
 | 08:02:45-08:09:26 | Parent session's sleep snapshot: capture sent `prepare` + one `progress`, then nothing for 6.5 min; the control plane degraded it after its 120 s no-progress window (08:04:47) and the VM's late uploads got 410 (workspace already sleeping). The uploads did not fail; they arrived after the control plane gave up. |
-| 08:22:12 | Cleanup begins for workspace `01M3BD6BAK...`, the last active workspace of project `01KK26ZX...` on this node. The VM still has its runtime in memory until 08:28. |
-| **08:22:33** | `POST /api/projects/01KK26ZX.../node-acp-heartbeat` returns **410** (the same node's heartbeats for the other two projects got 204 in the same second). |
-| 08:22:31-35 | Last message POSTs (all 200 in ~300 ms), last node heartbeat, last node-level ACP heartbeat, last VM error report. None ever resumed. |
-| 08:22-15:05 | Activity callbacks (`runtimeWorkState: active`, tool progress every ~1 min), 241 `/git-token` callbacks (all 200, same transport, workspace tokens), control-plane-to-VM requests (200/202) and agent MCP calls all kept working. |
-| 08:31-15:01 | The control plane's `/health` probe to the VM timed out every time (see open question). |
-| 09:36:27 | Reconciliation **cancelled T1's in-flight prompt** at the 2 h prompt ceiling while T1's tool progress was 6 s old. |
-| 09:37:09 | Check-in sent to T1. 09:37:32 T1 answered through MCP `request_human_input` (exactly what the check-in asks for). 09:38:10 T1 failed "Agent became unresponsive after SAM check-in". |
-| 12:02, 15:03 | Placement correctly refused the node ("node telemetry is stale"); a new cx53 was attempted and hit the core quota. |
-| 15:06:06 | A human pressed Stop on T3 (its check-in had been deferred 5.5 h by active-work evidence). 15:06:15 T3 failed "Agent became unresponsive after SAM check-in". |
-| 15:06:19 | A human deleted the node from the UI (`DELETE /api/nodes/:id`, 200 in 12.7 s, `destroying_terminal reason=explicit_terminal_proof`). No sweep ever acted. |
-| 15:06:39 | T2 failed "Task runtime is no longer live after 240 minutes. Last liveness result: workspace_deleted" (a consequence of the human's node delete). |
+| 08:22:12          | Cleanup begins for workspace `01M3BD6BAK...`, the last active workspace of project `01KK26ZX...` on this node. The VM still has its runtime in memory until 08:28.                                                                                                                                                      |
+| **08:22:33**      | `POST /api/projects/01KK26ZX.../node-acp-heartbeat` returns **410** (the same node's heartbeats for the other two projects got 204 in the same second).                                                                                                                                                                 |
+| 08:22:31-35       | Last message POSTs (all 200 in ~300 ms), last node heartbeat, last node-level ACP heartbeat, last VM error report. None ever resumed.                                                                                                                                                                                   |
+| 08:22-15:05       | Activity callbacks (`runtimeWorkState: active`, tool progress every ~1 min), 241 `/git-token` callbacks (all 200, same transport, workspace tokens), control-plane-to-VM requests (200/202) and agent MCP calls all kept working.                                                                                       |
+| 08:31-15:01       | The control plane's `/health` probe to the VM timed out every time (see open question).                                                                                                                                                                                                                                 |
+| 09:36:27          | Reconciliation **cancelled T1's in-flight prompt** at the 2 h prompt ceiling while T1's tool progress was 6 s old.                                                                                                                                                                                                      |
+| 09:37:09          | Check-in sent to T1. 09:37:32 T1 answered through MCP `request_human_input` (exactly what the check-in asks for). 09:38:10 T1 failed "Agent became unresponsive after SAM check-in".                                                                                                                                    |
+| 12:02, 15:03      | Placement correctly refused the node ("node telemetry is stale"); a new cx53 was attempted and hit the core quota.                                                                                                                                                                                                      |
+| 15:06:06          | A human pressed Stop on T3 (its check-in had been deferred 5.5 h by active-work evidence). 15:06:15 T3 failed "Agent became unresponsive after SAM check-in".                                                                                                                                                           |
+| 15:06:19          | A human deleted the node from the UI (`DELETE /api/nodes/:id`, 200 in 12.7 s, `destroying_terminal reason=explicit_terminal_proof`). No sweep ever acted.                                                                                                                                                               |
+| 15:06:39          | T2 failed "Task runtime is no longer live after 240 minutes. Last liveness result: workspace_deleted" (a consequence of the human's node delete).                                                                                                                                                                       |
 
 Ruled out with evidence: control-plane rejection of writes (message POSTs were 200 until the VM stopped
 sending), root ProjectData overload (same), network/DNS/TLS/token expiry (git-token kept working on
@@ -53,7 +53,7 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
   its outbox. Session activity callbacks and inbound HTTP are not gated, which is exactly the observed
   split. The same latch is tripped by a per-task `postTaskCallback` 401/403/404/410
   (`internal/server/server.go`).
-- The latch shipped 2026-08-26 (`3e74a0851`, "stop zombie callback storms") to stop *deleted nodes*
+- The latch shipped 2026-08-26 (`3e74a0851`, "stop zombie callback storms") to stop _deleted nodes_
   from calling back forever; its tests covered node-kind terminal responses only. On a multi-tenant
   node, "one project/task/workspace ended" became "this node is dead".
 - The VM logged a Warn when it latched, but that Warn could never ship: the error reporter is latched
@@ -75,7 +75,7 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
   ignoring the runtime-work progress the check-in expiry already treats as authoritative
   (`attention-expiry.ts:activeCheckinEvidence`). That is how SAM itself cancelled working agents.
 - A check-in answered through `request_human_input` is not a response: the `needs_input` marker only
-  blocks *new* check-ins.
+  blocks _new_ check-ins.
 - A user Stop ends the active-work evidence that was deferring a pending check-in, so the stale marker
   fires "unresponsive" on what is a normal lifecycle termination (policies a974b04f, 486d1dd1).
 - Tasks stranded by a user deleting their node are failed ~20 s later by the stuck-task sweep with a
@@ -109,6 +109,7 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
 ## Implementation checklist
 
 ### A. Root cause (vm-agent + API)
+
 - [x] vm-agent: reserve the node-wide latch for node identity callbacks via a typed operation; ACP
       heartbeat (per project) and task callback (per task) terminal statuses no longer latch the node
 - [x] vm-agent: tests through the real loops/senders (httptest): a 410 for one project leaves the node
@@ -120,34 +121,38 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
 - [x] API: route tests for the new branch plus controls (active workspace refresh, deleted node 410)
 
 ### B. Node health record (observability)
-- [ ] D1 migration `node_health_events` (append-only, no FK, unique episode key) + Drizzle schema
-- [ ] `services/node-health-events.ts`: record (idempotent per episode) + list-by-node read
-- [ ] Move `deriveHealthStatus` into a service so the UI route and the drain share one authority
+
+- [x] D1 migration `node_health_events` (append-only, no FK, unique episode key) + Drizzle schema
+- [x] `services/node-health.ts`: record (idempotent per episode) + list-by-node read
+- [x] Move `deriveHealthStatus` into a service so the UI route and the drain share one authority
 
 ### C. Bounded drain-and-kill
-- [ ] Pure decision module (heartbeat_lost / drain / release / recovered / held) with env-configurable
+
+- [x] Pure heartbeat-age decision (healthy / waiting / drain / release) with env-configurable
       `DEFAULT_*` thresholds and a fleet guard
-- [ ] Phase `unresponsive_nodes` in node-cleanup (own module, isolated like every phase): record
+- [x] Phase `unhealthy_nodes` in node-cleanup (own module, isolated like every phase): record
       transitions, write `health_status`, request sleep for each active session, post one chat notice
       per session per episode, release via `destroyNodeForCleanup` when nothing is left to preserve or
       the bound elapses, record held/released decisions with one-condition reasons
-- [ ] Stranded-task terminalization service shared by the drain (failed, names the lost node and
+- [x] Stranded-task terminalization service shared by the drain (failed, names the lost node and
       timings) and the owner's node DELETE (cancelled, names the owner deletion); sessions that slept are
       left resumable
-- [ ] Owner `DELETE /api/nodes/:id` records `deleted_by_owner` and terminalizes stranded tasks truthfully
-- [ ] Env vars in `env.ts`, `.env.example`, sync-wrangler-config optional list, deploy workflow mapping,
+- [x] Owner `DELETE /api/nodes/:id` records `deleted_by_owner` and terminalizes stranded tasks truthfully
+- [x] Env vars in `env.ts`, `.env.example`, sync-wrangler-config optional list, deploy workflow mapping,
       env-reference skill
 
 ### D. Truthful check-in verdicts
-- [ ] Shared runtime-work progress ceiling predicate; `resolvePromptAction` observes (does not cancel) a
+
+- [x] Shared runtime-work progress ceiling predicate; `resolvePromptAction` observes (does not cancel) a
       prompt past its ceiling while runtime work is still progressing; the check-in expiry uses the same
       predicate
-- [ ] `request_human_input` answers a pending SAM check-in (resolved inside ProjectData)
-- [ ] User Stop resolves a pending SAM check-in (a human took over; policy a974b04f)
+- [x] `request_human_input` answers a pending SAM check-in (resolved inside ProjectData)
+- [x] User Stop resolves a pending SAM check-in (a human took over; policy a974b04f)
 
 ### E. Docs and rules
-- [ ] Public docs: node lifecycle / health behaviour and new env vars (cite code paths)
-- [ ] Scoped rule 34 (both copies): terminal status scope; per-resource callbacks never stop node-wide
+
+- [x] Public docs: node lifecycle / health behaviour and new env vars (cite code paths)
+- [x] Scoped rule 34 (both copies): terminal status scope; per-resource callbacks never stop node-wide
       delivery
 
 ## Acceptance criteria
@@ -170,6 +175,21 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
       delete are cancelled with a reason naming the deletion; parent-stop semantics unchanged
 - [ ] Staging: a real cx23 node whose vm-agent is stopped over SSH is drained and released within the
       bound, visible in the UI and in D1; everything created is cleaned up
+
+## Validation in progress
+
+- `go test ./internal/server` passes for the preserved vm-agent root-cause fix.
+- API typecheck passes; 89 focused reconciliation, attention, and unhealthy-node unit tests pass.
+- The existing node-cleanup Workers suite passes (22/22); a new test through
+  `runNodeCleanupSweep` verifies notice → sleep request → release and durable event retention.
+- Surgical revert: omitting the exact-heartbeat cleanup claim made
+  `refuses deletion when a heartbeat arrives after selection` fail because it deleted the
+  recovered node. Restored the guard and the test passed.
+- Surgical revert: ignoring runtime-work progress made
+  `keeps a long prompt running while its runtime work is making progress` fail with
+  `cancel_prompt` instead of `observe_prompt`. Restored the guard and the test passed.
+- Remaining gates: full lint/build, specialist review, coordinated real-VM staging,
+  PR/CI/CodeRabbit, merge, production monitoring.
 
 ## Open question
 

@@ -341,6 +341,7 @@ or time range without receiving raw R2 keys.
 
 - Hibernatable WebSockets for zero-idle-cost real-time chat
 - ACP heartbeat-history checks via DO alarms; VM interruption still requires conclusive runtime/workspace evidence
+- A scheduled node-health sweep records append-only heartbeat-loss and cleanup decisions in D1, requests session sleep before releasing an unresponsive managed VM, and retains those events after the node row is deleted. A fleet-wide heartbeat loss holds destructive cleanup for investigation.
 - Session forking with parent lineage tracking
 - Debounced D1 summary sync for dashboard data
 

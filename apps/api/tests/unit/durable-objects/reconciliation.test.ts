@@ -162,8 +162,7 @@ function createMockD1(
           status: args[0] as string,
           error_message: args[2] as string | null,
           started_at: (args[3] === 1 ? (row.started_at ?? args[4]) : (row.started_at ?? null)) as
-            | string
-            | null,
+            string | null,
           completed_at: args[5] as string,
           execution_step: args[1] as string | null,
           terminal_transition_id: args[6] as string,
@@ -755,6 +754,23 @@ describe('Task Reconciliation Module', () => {
         action: 'cancel_prompt',
         promptStartedAt: now - TWO_HOURS - 1000,
       });
+    });
+
+    it('keeps a long prompt running while its runtime work is making progress', async () => {
+      setupTaskSession({ lastActivityAt: now - FIVE_MINUTES - 1000 });
+      setSessionActivity({ promptStartedAt: now - TWO_HOURS - 1000 });
+      db.prepare(
+        `UPDATE session_state SET runtime_work_state = 'active',
+          runtime_work_progress_at = ? WHERE session_id = 'acp-1'`
+      ).run(now - 6000);
+
+      const candidates = await getReconciliationCandidates(sql, {
+        ...envWithRows({ 'task-1': { task_mode: 'task', status: 'in_progress' } }),
+        TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
+        TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
+      } as ProjectDataEnv);
+
+      expect(candidates[0]?.action).toBe('observe_prompt');
     });
 
     // REGRESSION (rule 50): session_state.activity_at has INTEGER affinity but

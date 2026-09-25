@@ -35,8 +35,13 @@ import {
   getNodeSystemInfoFromNode,
   listNodeContainersFromNode,
 } from '../services/node-agent-diagnostics';
+import { recordNodeHealthEvent } from '../services/node-health';
 import { finalizeDeletion as finalizeNodeLifecycleDeletion } from '../services/node-lifecycle';
 import type { DeleteNodeResourcesResult } from '../services/node-resource-deletion';
+import {
+  listStrandedNodeTasks,
+  terminalizeStrandedNodeTasks,
+} from '../services/node-stranded-tasks';
 import {
   createNodeRecord,
   deleteNodeResources,
@@ -218,7 +223,7 @@ nodesRoutes.get('/', async (c) => {
     .where(and(eq(schema.nodes.userId, userId), ne(schema.nodes.status, 'deleted')))
     .orderBy(desc(schema.nodes.createdAt));
 
-  const hydrated = await Promise.all(nodes.map((node) => refreshNodeHealth(db, node)));
+  const hydrated = await Promise.all(nodes.map((node) => refreshNodeHealth(db, node, c.env)));
   const deploymentSummaries = await loadDeploymentEnvironmentSummaries(
     db,
     hydrated
@@ -358,7 +363,7 @@ nodesRoutes.get('/:id', async (c) => {
     throw errors.notFound('Node');
   }
 
-  const refreshed = await refreshNodeHealth(db, node);
+  const refreshed = await refreshNodeHealth(db, node, c.env);
   const deploymentSummaries = await loadDeploymentEnvironmentSummaries(db, [refreshed.id]);
   return c.json(toNodeResponse(refreshed, deploymentSummaries.get(refreshed.id) ?? []));
 });
@@ -413,6 +418,8 @@ nodesRoutes.delete('/:id', async (c) => {
     throw errors.notFound('Node');
   }
 
+  const strandedTasks = await listStrandedNodeTasks(c.env, nodeId);
+
   const cleanup = await deleteNodeResources(nodeId, userId, c.env);
   if ((node.nodeRole ?? 'workspace') === 'deployment' && cleanup.errors.length > 0) {
     throw errors.conflict(
@@ -440,6 +447,23 @@ nodesRoutes.delete('/:id', async (c) => {
   });
 
   await finalizeNodeLifecycleDeletion(c.env, nodeId, userId);
+
+  await recordNodeHealthEvent(c.env, {
+    nodeId,
+    episodeStartedAt: node.lastHeartbeatAt ?? node.createdAt,
+    event: 'deleted_by_owner',
+    reason: 'owner_requested_node_deletion',
+    createdAt: new Date().toISOString(),
+  });
+  const transitionFailures = await terminalizeStrandedNodeTasks(
+    c.env,
+    nodeId,
+    strandedTasks,
+    'owner_deleted'
+  );
+  if (transitionFailures > 0) {
+    log.error('node_delete.stranded_task_cancel_failed', { nodeId, transitionFailures });
+  }
 
   return c.json({ success: true });
 });
