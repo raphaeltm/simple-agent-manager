@@ -21,7 +21,7 @@ The tasks were `01M3BB7KNY7N0480AM6YN0ZSJD`, `01M3BB8BXAHWBYZD94Q5NJD8WN` and
 ## Research findings (re-verified read-only in prod D1 on 2026-09-25, rule 39)
 
 - **Evidence confirmed.** All three tasks carry `error_message = "hetzner API error (403):
-  shared core limit exceeded"`. Their node rows (`01M3BB7W…`, `01M3BB8M…`, `01M3BB9D…`) are
+shared core limit exceeded"`. Their node rows (`01M3BB7W…`, `01M3BB8M…`, `01M3BB9D…`) are
   cx53/fsn1, `provider_instance_id` NULL, and still `destroying` at 07:39Z. Node
   `01M3BB7WG1…` has `explicitVmLocation: true`, requested 400m/820 MB, hosts cx43 hel1
   (rejected: agent version) and cx53 hel1 (rejected: authority), and attempts cx53 then
@@ -104,24 +104,27 @@ The tasks were `01M3BB7KNY7N0480AM6YN0ZSJD`, `01M3BB8BXAHWBYZD94Q5NJD8WN` and
 ## Implementation checklist
 
 ### Split (pure code motion, separate commits)
+
 - [x] Split `node-provisioning-step.ts`. Extract the provider-failure handling and the
       crash-recovery adoption into sibling modules, bringing the step under 500 lines.
 - [x] Split `session-recovery.ts`. Extract recovery placement resolution and recovery-task
       creation into sibling modules, bringing it under 500 lines.
 
 ### Provider classification (packages/providers)
+
 - [x] `classifyHetznerError`:
   - `resource_limit_exceeded` → `quota_exceeded`.
   - Add a 403 limit-message fallback before `auth_error`.
   - Document each arm's recovery action.
 - [x] `classifyHetznerAccountLimit(err)` → `{ resource: 'servers' | 'cores' | 'other',
-      coreClass }` or null, plus `hetznerServerTypeCoreClass(type)`.
+    coreClass }` or null, plus `hetznerServerTypeCoreClass(type)`.
 - [x] Assign the category at construction on `HetznerProvider.createVM`, after the abort
       rethrow. `mapHetznerProviderError` must preserve an already-assigned category and the
       error context.
 - [x] Export the new helpers from `packages/providers/src/index.ts`.
 
 ### Control plane (apps/api)
+
 - [x] `classifyVmProviderCapacityError` delegates to `classifyHetznerAccountLimit` (every
       Hetzner account limit → account capacity). Remove dead `isProviderAccountCapacityError`.
 - [x] Core-quota descent in the provisioning attempt loop:
@@ -149,11 +152,13 @@ The tasks were `01M3BB7KNY7N0480AM6YN0ZSJD`, `01M3BB8BXAHWBYZD94Q5NJD8WN` and
       configurable (`SESSION_RECOVERY_LINEAGE_MAX_DEPTH`, with a default constant).
 
 ### Docs
+
 - [x] Update the compute-pools/placement docs with wake region behaviour and the core-quota
       descent, citing code.
 - [x] Update the env reference for the new variable.
 
 ## Tests (rules 62, 67, 72, 28)
+
 - [x] Provider:
   - `classifyHetznerError` / `classifyHetznerAccountLimit` arms, including an auth-403
     control and a non-Hetzner control.
@@ -215,7 +220,7 @@ The tasks were `01M3BB7KNY7N0480AM6YN0ZSJD`, `01M3BB8BXAHWBYZD94Q5NJD8WN` and
   is now 384 lines.
 - **Phase 5 review fixes (all eight reviewers PASS, no CRITICAL/HIGH):**
   - Discard crash window (cloudflare-specialist MEDIUM, security-auditor LOW):
-    `discardProviderRejectedNode` now forgets the node in DO storage *before* the D1 writes.
+    `discardProviderRejectedNode` now forgets the node in DO storage _before_ the D1 writes.
     The DELETE (now scoped to `user_id`) and the task unlink (now scoped to this node) run as one
     `batch`. A crash between the two used to restart claiming a deleted node, which fails the wake
     as "disappeared". R9 (storage put moved back after the batch) reddened only the new
@@ -244,6 +249,7 @@ The tasks were `01M3BB7KNY7N0480AM6YN0ZSJD`, `01M3BB8BXAHWBYZD94Q5NJD8WN` and
   - New quota rejections no longer create such rows.
 
 ## Acceptance criteria
+
 - [x] A Hetzner core-quota 403 on an offering descends to a permitted offering with fewer
       cores. It never fails the wake permanently while a smaller offering remains.
 - [x] When no permitted offering fits under the quota, the task waits on
@@ -251,11 +257,13 @@ The tasks were `01M3BB7KNY7N0480AM6YN0ZSJD`, `01M3BB8BXAHWBYZD94Q5NJD8WN` and
 - [x] A wake reuses a healthy other-region host with capacity. The original region only
       ranks candidates, unless the root run explicitly asked for that location.
 - [x] Exhausted capacity surfaces a user-legible message, not the raw provider string alone.
-- [ ] Staging (rule 22): a real wake that provisions a VM completes. A sleeping session wakes
-      onto a host in a different region with its files intact. All created
+- [x] Staging (rule 22): a real VM-backed sleeping conversation wakes and answers with its files
+      intact. Without an explicit root region pin, it can reuse a healthy authorized host in another
+      region. Fresh source/target VM provisioning and heartbeat are verified separately; all test
       nodes/workspaces are deleted.
 
 ## References
+
 - Rules: `apps/api/.claude/rules/72`, `67`, `69`; `.claude/rules/62`, `22`, `74`, `18`, `28`
 - Prior incident: `tasks/archive/2026-09-09-hetzner-412-placement-blocks-fallback-chain.md`
 - Idea `01M236QPGGC6B150FG4QHT17MW` (items 2 and the 2026-09-25 recurrence; items 1, 3–8
@@ -277,8 +285,10 @@ pass can verify the entire preserved-conversation wake before either change ship
 - Local review gaps are addressed: provider rejection proof precedes deletion; detached restore
   owns teardown/shutdown and contains panics. The corrections below record the discriminating tests.
 - [x] Complete review findings and discriminating tests (including the bounded restore-retry audit below).
-- [ ] Combined staging: failed task snapshot, fresh VM wake, preserved file and agent answer; cleanup.
-- [ ] Local reviews, CI/CodeRabbit, merge prerequisite then rebase preservation PR, monitor deploys.
+- [x] Combined staging: failed task snapshot, fresh VM-backed recovery, preserved file and agent answer; cleanup.
+- [x] Local specialist reviews completed and implementation findings addressed.
+- Rollout gates remain tracked in `.do-state.md` and the PR: required CI/CodeRabbit, prerequisite
+  merge and production monitoring, then preservation rebase/merge and production monitoring.
 
 ### Continuation review corrections
 
@@ -324,6 +334,48 @@ mutations failed as expected: restoring count-only retries, removing the deadlin
 retry, and allowing a late RPC. Independent Go/security and Cloudflare/constitution/env reviews
 approved the final code; the public configuration reference is synchronized.
 
-This last guard was added after the successful staging candidate. Final deployment verification
-remains blocked by the user's single-pass constraint until an additional serialized pass is approved.
-No prerequisite PR has been created, no risk label removed, and no merge authorized by this checkpoint.
+The user assigned the final serialized staging window. Combined candidate `3e507371c`, including
+prerequisite `1667a131b`, passed deployment36184076940. Final live wake and cleanup evidence follows
+once complete; the initial pass above is not evidence for this later guard.
+
+### Final candidate verification (2026-09-25)
+
+The user assigned a final serialized staging window after the retry-deadline audit. Combined
+candidate `3e507371c`, including prerequisite `1667a131b`, passed
+[Deploy Staging 36184076940](https://github.com/raphaeltm/simple-agent-manager/actions/runs/36184076940).
+No active deployment or staging node existed before dispatch. This pass verifies the final code;
+the earlier pass separately proved source-VM removal and cross-region recovery.
+
+- A fresh `cx23/fsn1` node `01M3D459F4B2092EKSDD8NNS9E` (provider `167462630`) booted
+  about 20:30:57.760Z. Heartbeat arrived at 20:32:28.574Z (about 91 seconds), and agent
+  `3584eb57e` was ready at 20:34:30.317Z. Source workspace `01M3D4FFYK387NFDXRG0290YG4`
+  was accessible and executed agent tools.
+- UI-created task `01M3D452DDMC3G09VCXGJ24ZQ5`, conversation
+  `1887e4f8-1ff7-4aa1-9e5c-27766a8bc899`, wrote an uncommitted random proof file. Its
+  SHA-256 was `645753f9bc986e1ad01630b5e9a8a4fff1ce1581cc4cbf7479d0b4566643bb03`.
+  The random bytes were never printed or supplied in the wake prompt.
+- Real task failure returned HTTP 200 and queued preservation. Snapshot
+  `01M3D4J9XMEJ2QN643QPG2N5R5` captured HOME and WIP, `available` with degradation `none`.
+  The public Sleep action returned 200, sleeping at 20:45:41.489Z with seven-day retention;
+  ProjectData also reported `sleeping`. This pass used explicit Sleep after the failure queued
+  preservation; the earlier pass proved automatic sleep.
+- UI wake returned 202 (delivery `01M3D536D0AA4DY7T4FK123983`). It retried through the
+  existing five-minute workspace deletion fence. Natural deletion was confirmed at
+  20:50:45.572Z; no guard or allocation authority was bypassed.
+- Recovery task `01M3D5D37VB3VJ3SSDZS3BM5P5` created replacement workspace
+  `01M3D5D9X3G12R8EDQQ0J9TEWT` on the same healthy VM. Restore committed at
+  20:53:19.200Z. The source task stayed failed; recovery reached in-progress without error.
+  At 20:54:54.635Z the restored agent answered `WAKE_OK` with the identical hash, after a real
+  `sha256sum` tool call on the existing file, still `?? pr2145-preservation-proof.txt`.
+- Desktop and 375×667 mobile screenshots were inspected: the restored answer and composer were
+  visible with no layout issue. Dashboard/projects/settings were checked in the first pass.
+- Both source/recovery workspace DELETEs returned 200 with confirmed deletion; node DELETE
+  returned 200 after runtime termination. D1 verified zero active staging nodes and no created
+  workspace/node/snapshot rows. Existing TestProject1/profile/shared pool were retained.
+  The staging window was explicitly released to node-health and the coordinator at 20:56Z.
+
+The final live restore completed without deliberately inducing a proxy timeout or provider quota.
+Request-cancellation, retry-deadline/exhaustion, quota descent, and guard controls are proven by
+local integration/race tests and discriminating mutations; do not describe these injected faults
+as occurring during this live pass. Required CI, CodeRabbit, merges, and production monitoring
+remain rollout gates in the PR and `.do-state.md`.
