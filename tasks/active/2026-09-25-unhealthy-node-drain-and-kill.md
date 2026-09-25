@@ -223,10 +223,20 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
   final cleanup; the unhealthy sweep separates one-node decisions from provider release. The
   flagged `NaN` style issue was corrected. The follow-up Sonar pass identified two helper
   signatures over the parameter limit and one teardown helper two complexity points over; these
-  are now split into smaller operations. Focused regressions, typecheck, and lint pass; a final
-  Sonar rerun remains.
-- Draft PR #2147 is open. Remaining gates: coordinated real-VM staging, final CI/CodeRabbit,
-  merge, production monitoring.
+  are now split into smaller operations. Focused regressions, typecheck, lint, and the full API
+  suite (757 files / 10,330 tests) pass at `12bb5c02b`; a final Sonar rerun remains.
+- Staging deploy run `36188818700` succeeded, including smoke tests, pinned to earlier reviewed
+  head `4529b8ba3`. Migration `0172_node_health_events` applied: staging D1 has the empty
+  `node_health_events` table. No VM
+  was provisioned. The coordinator explicitly ruled out a healthy-only smoke and transient API
+  rejection as substitutes for dead-host proof. The disposable host has no supported SSH key or
+  provider poweroff credential available here; the workspace Docker daemon is nested. No
+  node-specific fault has been run, so the real-trigger drain/delete acceptance test is missing.
+  D1 confirmed zero active nodes after deploy. Three nonterminal historical workspaces (created
+  Sep 4/13) predate this test, have no live node, and were left untouched. The reporter workstream
+  and coordinator received explicit staging release; this task owns no staging resource.
+- Draft PR #2147 remains open and **must not merge** until an actual host-fault method is
+  available, the latest head is deployed and validated with a live cx23, and final CI passes.
 
 ## Open question
 
