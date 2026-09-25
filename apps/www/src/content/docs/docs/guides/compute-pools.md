@@ -72,6 +72,14 @@ are not part of the pool, but they narrow what the pool may choose from:
 
 Leave both blank and SAM uses whatever the pool and the resolved credentials allow.
 
+**Waking a sleeping session** keeps the resources the session originally resolved, not its machine
+type or region. The region it slept in is a preference: a running machine there is reused first,
+but a machine with room in any other region the pool allows is reused before a new one is started,
+and the whole pool stays available if one has to be. A snapshot restores in any region. Only a
+conversation whose first run explicitly requested a region (through the API or an agent's
+`dispatch_task`) is woken back into that region. A workspace moved off its machine by eviction is
+placed like new work, with no preference for its old region.
+
 ## Scopes and precedence
 
 SAM considers exactly **one** pool per run. It walks the scopes in order and takes the first one
@@ -258,6 +266,12 @@ work and retry until the overall capacity wait expires, even under **Fail**:
 - **Your whole account is out of capacity** (a Hetzner server-limit error, for example). Trying
   other instance types against an account that has hit its own limit cannot succeed, and just
   multiplies failed provider calls. The fix is your provider account's server limit, not the pool.
+  A **vCPU core limit** (Hetzner's "shared core limit exceeded") is different, because a smaller
+  machine may still fit under it. Under **Fallback chain**, SAM skips every remaining offering
+  that needs at least as many cores of the same kind and carries on down the chain with the ones
+  that need fewer; the work waits only when none of those fits. Under **Fail** or **Queue** there is
+  no chain to descend, so it waits straight away. Shared and dedicated vCPUs have separate limits
+  on Hetzner, so reaching one does not rule out the other.
 - **The pool's [Maximum nodes per user](#maximum-nodes-per-user) is reached** and no running node
   can take the work. The fix is the limit, the requirements, or freeing a node.
 
@@ -456,7 +470,7 @@ remove it so a lower scope applies.
 | The project ignores your personal pool                                 | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                                                                                                               |
 | Everything lands on one cloud although the pool allows several         | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                                                                                                 |
 | Too many, or too few, workspaces share a machine                       | Adjust explicit CPU, memory, and disk requirements, use **Exclusive node** for isolation, or change the pool strategy and maximum-node limit. [Session Resource History](/docs/guides/session-resources/) is the evidence for what the requirements should be.                |
-| Work waits for capacity even though the policy is **Fail**             | Either the provider reported account-wide exhaustion (check your provider account's server limit), or the pool's [Maximum nodes per user](#maximum-nodes-per-user) is reached and no running node has room. Both always wait.                                                 |
+| Work waits for capacity even though the policy is **Fail**             | The provider reported an account limit (server or vCPU core limit, the latter after trying smaller offerings under Fallback chain), or the pool's [Maximum nodes per user](#maximum-nodes-per-user) is reached. Both always wait.                                             |
 
 ## Where to look when you want the details
 

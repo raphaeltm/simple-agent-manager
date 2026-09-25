@@ -309,7 +309,7 @@ async function resolveRecoveryPlacement(
 ): Promise<
   RecoveryPlacementResolution | { error: string; errorKind: 'placement' | 'credentials' }
 > {
-  const input = await buildRecoveryPlacementInput(db, context, taskId, options);
+  const input = await buildRecoveryPlacementInput(db, env, context, taskId, options);
   if ('error' in input) return input;
   const placement = resolveTaskStartPlacement(input);
 

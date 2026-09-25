@@ -96,13 +96,29 @@ export function resolveVmSizeSource(
   return 'platform';
 }
 
+/**
+ * A preferred location, or null when there is none or it does not fit the provider. Unlike an
+ * explicit request nobody asked for it, so an unusable one is dropped rather than rejected.
+ */
+export function resolvePreferredVmLocation(
+  preferredLocation: string | null | undefined,
+  provider: CredentialProvider | null
+): VMLocation | null {
+  if (!preferredLocation) return null;
+  if (provider !== null && !isValidLocationForProvider(provider, preferredLocation)) return null;
+  return preferredLocation as VMLocation;
+}
+
 export function resolveVmLocation(
   explicitLocation: string | null | undefined,
+  preferredLocation: VMLocation | null,
   profile: PlacementProfileDefaults | null,
   project: PlacementProjectDefaults,
   provider: CredentialProvider | null
 ): VMLocation {
+  // A preference outranks the profile/project defaults: it is where this work last ran.
   return ((explicitLocation as VMLocation | null) ??
+    preferredLocation ??
     (profile?.vmLocation as VMLocation | null) ??
     (project.defaultLocation as VMLocation | null) ??
     (provider ? (getDefaultLocationForProvider(provider) as VMLocation | null) : null) ??

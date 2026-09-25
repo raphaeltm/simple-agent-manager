@@ -15,10 +15,12 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { resolveCapacityPoolPlacementSettings } from './capacity-pool-placement-settings';
 import { resolveEffectiveDefaultCapacityPoolSummary } from './default-capacity-pools';
+import { preferCapacityCandidatesInLocation } from './placement-capacity-ranking';
 import {
   normalizeCredentialAttribution,
   resolveCredentialLookup,
   resolveDevcontainerConfigName,
+  resolvePreferredVmLocation,
   resolveProvider,
   resolveTaskMode,
   resolveVmLocation,
@@ -28,7 +30,10 @@ import {
   resolveWorkspaceProfile,
   validateResolvedLocation,
 } from './placement-field-resolution';
-import { PlacementResolutionError } from './placement-resolution-error';
+import {
+  noEligibleCapacityCandidateMessage,
+  PlacementResolutionError,
+} from './placement-resolution-error';
 import {
   buildCapacityPoolSelection,
   capacityPlacementSnapshotForTaskStart,
@@ -193,7 +198,17 @@ export function resolveTaskStartPlacement(input: TaskStartPlacementInput): TaskS
   const profile = input.profile ?? null;
   const explicit = input.explicit ?? {};
   const provider = resolveProvider(explicit.provider, profile, input.project);
-  const vmLocation = resolveVmLocation(explicit.vmLocation, profile, input.project, provider);
+  const preferredVmLocation =
+    explicit.vmLocation == null
+      ? resolvePreferredVmLocation(input.preferredVmLocation, provider)
+      : null;
+  const vmLocation = resolveVmLocation(
+    explicit.vmLocation,
+    preferredVmLocation,
+    profile,
+    input.project,
+    provider
+  );
   const workspaceProfile = resolveWorkspaceProfile(
     explicit.workspaceProfile,
     profile,
@@ -235,6 +250,7 @@ export function resolveTaskStartPlacement(input: TaskStartPlacementInput): TaskS
     provider,
     vmLocation,
     explicitVmLocation: explicit.vmLocation != null,
+    ...(preferredVmLocation ? { preferredVmLocation } : {}),
     workspaceProfile,
     devcontainerConfigName: resolveDevcontainerConfigName(
       workspaceProfile,
@@ -300,7 +316,7 @@ export async function resolveTaskStartCapacityPoolSelection(
     });
     if (!summary) return null;
 
-    return buildCapacityPoolSelection(
+    const selection = buildCapacityPoolSelection(
       summary,
       {
         ...placement,
@@ -310,6 +326,15 @@ export async function resolveTaskStartCapacityPoolSelection(
       resolvedSettings?.placementSettings ?? placement.placementSettings ?? undefined,
       resolveEffectiveNodeHostMemoryReserveMb(options.env ?? {})
     );
+    return selection && placement.preferredVmLocation
+      ? {
+          ...selection,
+          candidates: preferCapacityCandidatesInLocation(
+            selection.candidates,
+            placement.preferredVmLocation
+          ),
+        }
+      : selection;
   } catch (error) {
     if (options.failOpen === false) throw error;
     log.warn('placement_resolver.capacity_pool_unavailable', {
@@ -459,24 +484,4 @@ export async function resolveTaskStartPlacementCredentialAttributionFromPlacemen
       ? resolveCapacityPlacementCredentialAttribution(placement, capacityCandidate)
       : resolvePlacementCredentialAttribution(placement, credential)),
   };
-}
-
-function noEligibleCapacityCandidateMessage(
-  placement: TaskStartPlacement,
-  selection: TaskStartCapacityPoolSelection
-): string {
-  const requirements = [
-    `${Math.ceil(placement.resolvedReservation.cpuMillis / 1000)} vCPU`,
-    `${placement.resolvedReservation.memoryMb} MB memory`,
-    placement.resolvedReservation.diskMb > 0
-      ? `${Math.ceil(placement.resolvedReservation.diskMb / 1024)} GB disk`
-      : null,
-  ].filter(Boolean);
-  const provider = placement.provider ? ` provider ${placement.provider}` : '';
-  const location = placement.explicitVmLocation ? ` location ${placement.vmLocation}` : '';
-  return (
-    `No eligible compute-pool offering is available in the ${selection.scope} default pool` +
-    `${provider}${location} for this task's requirements (${requirements.join(', ')}). ` +
-    'Reconcile the pool or add an active provider-native offering that satisfies the request.'
-  );
 }

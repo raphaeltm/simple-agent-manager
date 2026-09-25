@@ -21,7 +21,10 @@ import type {
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { capacityPlacementSnapshotDbValues } from '../../../src/services/capacity-placement-snapshot';
-import { capacityPlacementSnapshotForCandidate } from '../../../src/services/placement-resolver';
+import {
+  capacityPlacementSnapshotForCandidate,
+  type TaskStartCapacityCandidate,
+} from '../../../src/services/placement-resolver';
 import { reserveWorkspacePlacement } from '../../../src/services/workspace-placement';
 import { resolveWorkspaceAdmissionPolicy } from '../../../src/services/workspace-resource-capacity';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -131,14 +134,24 @@ export function fixture(scope: Scope = 'user', existingDatabase?: Database.Datab
 }
 export type Fixture = ReturnType<typeof fixture>;
 
-export function snapshotFor(start: StartTaskInput): CapacityPlacementSnapshot {
+export function snapshotFor(
+  start: StartTaskInput,
+  candidate?: TaskStartCapacityCandidate
+): CapacityPlacementSnapshot {
   const selection = start.config.capacityPoolSelection;
   expect(selection?.candidates.length).toBeGreaterThan(0);
-  return capacityPlacementSnapshotForCandidate(selection!, selection!.candidates[0]!);
+  return capacityPlacementSnapshotForCandidate(selection!, candidate ?? selection!.candidates[0]!);
 }
 
-export async function seedHost(f: Fixture, start: StartTaskInput, id = 'host', userId = 'user-1') {
-  const snapshot = snapshotFor(start);
+/** Seed a running host on the first candidate, or on `candidate` (in its own location) when given. */
+export async function seedHost(
+  f: Fixture,
+  start: StartTaskInput,
+  id = 'host',
+  userId = 'user-1',
+  candidate?: TaskStartCapacityCandidate
+) {
+  const snapshot = snapshotFor(start, candidate);
   await f.db.insert(schema.nodes).values({
     ...capacityPlacementSnapshotDbValues(snapshot),
     id,
@@ -147,7 +160,7 @@ export async function seedHost(f: Fixture, start: StartTaskInput, id = 'host', u
     status: 'running',
     runtime: 'vm',
     vmSize: 'large',
-    vmLocation: start.config.vmLocation,
+    vmLocation: candidate?.location ?? start.config.vmLocation,
     cloudProvider: start.config.cloudProvider,
     providerInstanceId: `provider-${id}`,
     nodeRole: 'workspace',

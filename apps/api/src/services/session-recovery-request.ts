@@ -10,6 +10,7 @@ import {
 import { eq } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import type {
@@ -23,10 +24,8 @@ import {
   ResourceRequirementsValidationError,
 } from './resource-requirements-input';
 import type { RecoveryContext } from './session-recovery-context';
-import {
-  type SessionRecoveryOptions,
-  sourceTaskExplicitLocationRequirement,
-} from './session-recovery-eviction';
+import type { SessionRecoveryOptions } from './session-recovery-eviction';
+import { resolveRecoveryLocationIntent } from './session-recovery-location';
 import type { Db } from './session-recovery-task-guard';
 
 export type RecoveryPlacementResolution = TaskStartPlacementWithCredential;
@@ -70,6 +69,7 @@ export function snapshotAgentType(snapshot: schema.SessionSnapshot): string | nu
  */
 export async function buildRecoveryPlacementInput(
   db: Db,
+  env: Env,
   context: RecoveryContext,
   taskId: string,
   options: SessionRecoveryOptions = {}
@@ -134,6 +134,9 @@ export async function buildRecoveryPlacementInput(
     parseLegacyVmSize(sourceTask?.requestedVmSize ?? null) ??
     asVmSize(context.workspace.vmSize);
   const persistedVmSizeSource = storedPlan.requestedVmSizeSource ?? 'task';
+  // Human wakes, durable wakes and eviction recovery all come through here, so they share one
+  // rule for the old location (`session-recovery-location.ts`).
+  const locationIntent = await resolveRecoveryLocationIntent(env, context);
 
   return {
     entryPoint: 'session-recovery',
@@ -158,10 +161,11 @@ export async function buildRecoveryPlacementInput(
       vmSize: persistedVmSize,
       vmSizeSource: persistedVmSizeSource,
       provider: null,
-      vmLocation:
-        options.evictionFence && sourceTaskExplicitLocationRequirement(sourceTask) === false
-          ? null
-          : context.workspace.vmLocation,
+      // Pin the old location only when the conversation's first run explicitly asked for it.
+      // Otherwise it is a preference: it still ranks hosts there first, but a capacity-pressured
+      // region can no longer delete every other permitted offering and host from the wake.
+      // Resources stay pinned (the persisted plan above); machine type and region do not.
+      vmLocation: locationIntent === 'required' ? context.workspace.vmLocation : null,
       workspaceProfile: asWorkspaceProfile(context.workspace.workspaceProfile),
       devcontainerConfigName: context.workspace.devcontainerConfigName,
       taskMode: 'conversation',
@@ -173,6 +177,9 @@ export async function buildRecoveryPlacementInput(
       projectId: sourceTask?.credentialAttributionProjectId ?? null,
       source: asCredentialSource(sourceTask?.credentialAttributionSource),
     },
+    // A wake prefers the region it slept in. Eviction recovery does not: an evicted workspace is
+    // relocated through normal placement (policy 95c3329a), so only an explicit pin applies.
+    preferredVmLocation: options.evictionFence ? null : context.workspace.vmLocation,
     credentialProjectPolicy: 'current-project-unless-inherited',
     taskModeDefault: 'workspace-profile',
     // Every persisted layer, at its ORIGINAL precedence — not just `task`, and

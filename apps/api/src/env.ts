@@ -268,6 +268,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES?: string; // Max snapshot control-plane JSON request size (default: 262144)
   SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS?: string; // Max replacement-runtime wake attempts per burst (default: 3)
   SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS?: string; // How long a spent wake-attempt burst stays spent (default: 900000)
+  SESSION_RECOVERY_LINEAGE_MAX_DEPTH?: string; // Wake→wake links followed to the conversation's first run when deciding whether its location is pinned (default: 256)
   SESSION_SLEEP_AFTER_MS?: string; // Idle duration before verified snapshot teardown (default: 900000)
   HARNESS_BACKGROUND_WORK_LEASE_MS?: string; // Fresh normalized harness-work report lease before sleep is allowed (default: 300000)
   HARNESS_BACKGROUND_WORK_MAX_DURATION_MS?: string; // Absolute ceiling, from the last lifecycle progress edge, on harness-work sleep deferral (default: 1800000)
