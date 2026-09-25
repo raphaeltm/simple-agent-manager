@@ -670,7 +670,10 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async reconcileTaskWaits(childTaskId?: string) {
-    return processTaskWaits(
+    // Awaited, not returned: a synchronous throw inside `processTaskWaits` rejects its promise
+    // before a returned promise is adopted, and workerd then reports the rejection as unhandled
+    // even though the alarm section catches it.
+    return await processTaskWaits(
       this.sql,
       this.env,
       {
@@ -2500,7 +2503,11 @@ export class ProjectData extends DurableObject<Env> {
           runStandingWatchAlarm(this.sql, this.env, this.durabilityHooks())
             .then(() => runScheduleAlarm(this.sql, this.env, this.durabilityHooks()))
             .catch((err) => log.error('alarm.scheduled_action_failed', { error: String(err) }))
-            .finally(() => this.recalculateAlarm())
+            .finally(() =>
+              this.recalculateAlarm().catch((err) =>
+                log.error('alarm.scheduled_action_recalculate_failed', { error: String(err) })
+              )
+            )
         );
       });
 

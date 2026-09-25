@@ -50,14 +50,30 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/**
+ * Stores the project id with no automatic alarm left armed, so the test's own `alarm()` calls are
+ * the only ticks, and lets the clock move past the schedule that setup computed. (A section that
+ * starts in the same millisecond as its own due time is deliberately kept due for one more run —
+ * see `ProjectDataAlarmSectionScheduler.observe` — which an assertion must not trip over.)
+ */
+async function prepareManualTicks(
+  instance: ProjectDataTestDouble,
+  state: DurableObjectState,
+  projectId: string
+): Promise<void> {
+  await instance.ensureProjectId(projectId);
+  await state.storage.deleteAlarm();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+}
+
 describe('ProjectData alarm sections', () => {
   it('runs every section on its first tick, then only the sections that are due', async () => {
     const logSpy = vi.spyOn(console, 'log');
     const projectId = `alarm-sections-${crypto.randomUUID()}`;
     const stub = stubFor(projectId);
-    await stub.ensureProjectId(projectId);
 
-    await runInDurableObject(stub, async (instance) => {
+    await runInDurableObject(stub, async (instance, state) => {
+      await prepareManualTicks(instance, state, projectId);
       await instance.alarm();
       await instance.alarm();
     });
@@ -73,7 +89,7 @@ describe('ProjectData alarm sections', () => {
 
     // Storage was just measured, so a follow-up tick in the same instance must not repeat it.
     const last = ticks.at(-1);
-    expect(ticks.length).toBeGreaterThanOrEqual(2);
+    expect(ticks).toHaveLength(2);
     expect(last).toMatchObject({ mode: 'gated', fullRunReason: null, failedSections: [] });
     expect(last?.skippedSections).toContain('storage_safety');
     expect(last?.ranSections).not.toContain('storage_safety');
@@ -185,9 +201,9 @@ describe('ProjectData alarm sections', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const projectId = `alarm-sections-cascade-${crypto.randomUUID()}`;
     const stub = stubFor(projectId);
-    await stub.ensureProjectId(projectId);
 
-    await runInDurableObject(stub, async (instance, state) => {
+    const promptDeliveryScheduled = await runInDurableObject(stub, async (instance, state) => {
+      await prepareManualTicks(instance, state, projectId);
       await instance.alarm();
       const now = Date.now();
       state.storage.sql.exec(
@@ -206,14 +222,24 @@ describe('ProjectData alarm sections', () => {
       await (instance as unknown as { recalculateAlarm(): Promise<void> }).recalculateAlarm();
       await state.storage.deleteAlarm();
       await new Promise((resolve) => setTimeout(resolve, 100));
+      const instanceEnv = (instance as unknown as { env: Env }).env;
+      const scheduled = computeProjectDataAlarmSectionTimes(
+        state.storage.sql,
+        instanceEnv
+      ).prompt_delivery;
       await instance.alarm();
+      return scheduled;
     });
 
-    const last = completions(logSpy, projectId).at(-1);
-    expect(last).toMatchObject({ mode: 'gated', fullRunReason: null });
-    expect([...(last?.ranSections ?? []), ...(last?.failedSections ?? [])]).toContain('task_waits');
-    // Prompt delivery has nothing of its own scheduled; it runs because the wait section did.
-    expect(last?.ranSections).toContain('prompt_delivery');
-    expect(last?.skippedSections).toContain('storage_safety');
+    const waitTick = completions(logSpy, projectId).find(
+      (tick) =>
+        tick.mode === 'gated' &&
+        [...tick.ranSections, ...tick.failedSections].includes('task_waits')
+    );
+    // Prompt delivery had nothing of its own scheduled; it ran because the wait section did.
+    expect(promptDeliveryScheduled).toBeNull();
+    expect(waitTick?.ranSections).toContain('prompt_delivery');
+    // Liveness of the gate itself: a section with nothing scheduled was skipped in that tick.
+    expect(waitTick?.skippedSections).toContain('attention_expiry');
   });
 });
