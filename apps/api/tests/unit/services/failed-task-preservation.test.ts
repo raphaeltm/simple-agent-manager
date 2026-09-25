@@ -726,6 +726,30 @@ describe('preserveFailedTaskWork', () => {
       expect(sleepRow()).toMatchObject({ sleep_status: 'scheduled' });
     });
 
+    it('stops withholding at twice the wait while the turn lookup keeps failing', async () => {
+      // Rule 47: a ProjectData outage must not hold the runtime forever.
+      seedTask('failed', new Date(NOW.getTime() - 17 * HOUR).toISOString());
+      seedSnapshot({
+        status: 'pending',
+        sleeping_at: null,
+        sleep_status: 'scheduled',
+        sleep_after: NOW.toISOString(),
+      });
+      seedRuntime();
+      mocks.getSessionState.mockRejectedValue(new Error('ProjectData unavailable'));
+
+      await expect(releaseStalledFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(true);
+      expect(mocks.persistMessage).toHaveBeenCalledWith(
+        env,
+        'project-1',
+        'chat-1',
+        'system',
+        failedTaskWorkLossMessage('preservation_timed_out'),
+        null,
+        WORK_LOSS_NOTICE_ID
+      );
+    });
+
     it('honours a configured maximum wait', async () => {
       seedTask('failed', new Date(NOW.getTime() - 2 * HOUR).toISOString());
       seedSnapshot({
