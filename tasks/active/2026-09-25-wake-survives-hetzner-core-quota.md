@@ -104,40 +104,40 @@ The tasks were `01M3BB7KNY7N0480AM6YN0ZSJD`, `01M3BB8BXAHWBYZD94Q5NJD8WN` and
 ## Implementation checklist
 
 ### Split (pure code motion, separate commits)
-- [ ] Split `node-provisioning-step.ts`. Extract the provider-failure handling and the
+- [x] Split `node-provisioning-step.ts`. Extract the provider-failure handling and the
       crash-recovery adoption into sibling modules, bringing the step under 500 lines.
-- [ ] Split `session-recovery.ts`. Extract recovery placement resolution and recovery-task
+- [x] Split `session-recovery.ts`. Extract recovery placement resolution and recovery-task
       creation into sibling modules, bringing it under 500 lines.
 
 ### Provider classification (packages/providers)
-- [ ] `classifyHetznerError`:
+- [x] `classifyHetznerError`:
   - `resource_limit_exceeded` → `quota_exceeded`.
   - Add a 403 limit-message fallback before `auth_error`.
   - Document each arm's recovery action.
-- [ ] `classifyHetznerAccountLimit(err)` → `{ resource: 'servers' | 'cores' | 'other',
+- [x] `classifyHetznerAccountLimit(err)` → `{ resource: 'servers' | 'cores' | 'other',
       coreClass }` or null, plus `hetznerServerTypeCoreClass(type)`.
-- [ ] Assign the category at construction on `HetznerProvider.createVM`, after the abort
+- [x] Assign the category at construction on `HetznerProvider.createVM`, after the abort
       rethrow. `mapHetznerProviderError` must preserve an already-assigned category and the
       error context.
-- [ ] Export the new helpers from `packages/providers/src/index.ts`.
+- [x] Export the new helpers from `packages/providers/src/index.ts`.
 
 ### Control plane (apps/api)
-- [ ] `classifyVmProviderCapacityError` delegates to `classifyHetznerAccountLimit` (every
+- [x] `classifyVmProviderCapacityError` delegates to `classifyHetznerAccountLimit` (every
       Hetzner account limit → account capacity). Remove dead `isProviderAccountCapacityError`.
-- [ ] Core-quota descent in the provisioning attempt loop:
+- [x] Core-quota descent in the provisioning attempt loop:
   - A core-limit failure excludes every remaining attempt of the same core class that needs
     at least as many vCPUs, and records why.
   - The chain continues to the next eligible attempt without recording an account cooldown.
   - With no eligible attempt left, take the account-capacity wait (cooldown + park), or fail
     fast with a legible message when admission is unavailable.
-- [ ] Explicitly discard the provider-rejected node row on the core-descent path, as the
+- [x] Explicitly discard the provider-rejected node row on the core-descent path, as the
       account-capacity path already does.
-- [ ] User-legible messages:
+- [x] User-legible messages:
   - Diagnostics reason while waiting.
   - Terminal message when the wait expires.
   - Fail-fast message without admission.
   - Name the limit, what to do, and the provider's own text.
-- [ ] Wake region affinity:
+- [x] Wake region affinity:
   - `resolveTaskStartPlacement` accepts `preferredVmLocation`, which ranks without filtering
     and is ignored when invalid for the provider.
   - Recovery placement pins `vmLocation` only when the recovery chain's root task explicitly
@@ -145,49 +145,86 @@ The tasks were `01M3BB7KNY7N0480AM6YN0ZSJD`, `01M3BB8BXAHWBYZD94Q5NJD8WN` and
   - Otherwise the sleeping workspace's location is only a preference.
   - Applies to human wakes, durable wakes and eviction recovery. Replace
     `sourceTaskExplicitLocationRequirement`.
-- [ ] Chain-root lookup is one bounded, project-scoped recursive query. The depth bound is
+- [x] Chain-root lookup is one bounded, project-scoped recursive query. The depth bound is
       configurable (`SESSION_RECOVERY_LINEAGE_MAX_DEPTH`, with a default constant).
 
 ### Docs
-- [ ] Update the compute-pools/placement docs with wake region behaviour and the core-quota
+- [x] Update the compute-pools/placement docs with wake region behaviour and the core-quota
       descent, citing code.
-- [ ] Update the env reference for the new variable.
+- [x] Update the env reference for the new variable.
 
 ## Tests (rules 62, 67, 72, 28)
-- [ ] Provider:
+- [x] Provider:
   - `classifyHetznerError` / `classifyHetznerAccountLimit` arms, including an auth-403
     control and a non-Hetzner control.
   - `createVM` against a stubbed fetch that mints a fresh Response per call. Assert
     `providerCode`, message and category, exactly one POST (no same-SKU retry), and the
     auth-403 control.
-- [ ] `provisionNode`: the production-shaped quota 403 (built by the real HetznerProvider)
+- [x] `provisionNode`: the production-shaped quota 403 (built by the real HetznerProvider)
       deletes the failed row; an auth 403 keeps the `error` row.
-- [ ] Action layer (real `handleNodeProvisioning`):
+- [x] Action layer (real `handleNodeProvisioning`):
   - cx53 → 403 core → cx43 → 403 core → cx33 succeeds, with no cooldown.
   - Size-major order skips the same-size other-region offering.
   - The smallest offering fails → account wait (real classifier, cooldown written).
   - Server limit → wait with no descent.
   - Auth 403 → fails fast.
   - Wait expiry and no-admission → legible messages.
-- [ ] Wake:
+- [x] Wake:
   - Root not explicit → relaxed plus preferred location.
   - Old-code recovery source with `explicit = 1` but a non-explicit root → relaxed (real SQL).
   - Explicit root → pinned.
   - Unknown root → relaxed.
   - Eviction follows the same rule.
-- [ ] Wake vertical slice: real placement resolution plus real reusable-node selection. An
+- [x] Wake vertical slice: real placement resolution plus real reusable-node selection. An
       other-region host with capacity is reused; the old explicit pin is the control that
       rejects it.
-- [ ] Surgical reverts: each guard reverted once, and the intended tests go red.
+- [x] Surgical reverts: each guard reverted once, and the intended tests go red.
+
+## Implementation notes (2026-09-25)
+
+- **Splits (rule 18).** Three files were split as pure code motion, verified token-identical by
+  script: `node-provisioning-step.ts` (779→439), `session-recovery.ts` (799→462) and
+  `placement-resolver.ts` (719→487).
+  - The session-recovery split had to keep the `createRecoveryTask` tasks-INSERT writer in a
+    module that itself calls `resolveTaskStartPlacement*` and
+    `startTaskRunnerDO`/`ensureTaskRunnerStarted`. The node-pool boundary inventory checks that
+    evidence per module on the AST.
+  - The request-building module is named `session-recovery-request.ts`, not `*-placement.ts`. The
+    boundary gate scopes modules by file-name token, and a `placement` token would have
+    reclassified the persisted-label transport read as placement authority.
+- **Eviction recovery** keeps normal placement per policy 95c3329a: no region preference, and
+  the same root-intent pin rule as wakes. A test encodes this deliberately.
+- **Core-quota descent** only applies within the exhaustion plan's attempts, so only under
+  `fallback-chain`. Under `fail`/`queue` a core quota waits on `provider_account_capacity`
+  directly.
+- **Surgical reverts.** Each guard was reverted alone (exports kept, clean build) and reddened
+  exactly the intended tests; details are in the PR.
+  - R3 no descent: 5 action-layer tests.
+  - R4 no same-class skip: only the skip test.
+  - R5 wake pins region: the incident vertical slice, plus the wake/eviction preference tests.
+  - R6 no region ordering: only "still prefers the slept-in region".
+  - R7 immediate source instead of root: the incident chain test, among others.
+  - R8 and R8b, no project predicate: only the respective cross-project tests; owner controls
+    stay green.
+  - R1 no quota classification: 10 provider tests and 10 API tests; the auth controls stay
+    green.
+  - R2 no category at construction: the production-shaped `provisionNode` row-delete test.
+- **Out of scope, tracked on the idea.** The three incident node rows (`01M3BB7W…`,
+  `01M3BB8M…`, `01M3BB9D…`) stay `destroying`. They have no `provider_instance_id` and no
+  `runtime_termination_confirmed_at`, so strict deletion cannot prove absence, and cleanup
+  retries them hourly.
+  - They don't count toward pool or user node limits (those count only
+    running/creating/recovery).
+  - New quota rejections no longer create such rows.
 
 ## Acceptance criteria
-- [ ] A Hetzner core-quota 403 on an offering descends to a permitted offering with fewer
+- [x] A Hetzner core-quota 403 on an offering descends to a permitted offering with fewer
       cores. It never fails the wake permanently while a smaller offering remains.
-- [ ] When no permitted offering fits under the quota, the task waits on
+- [x] When no permitted offering fits under the quota, the task waits on
       `provider_account_capacity` instead of failing. A genuine auth 403 still fails fast.
-- [ ] A wake reuses a healthy other-region host with capacity. The original region only
+- [x] A wake reuses a healthy other-region host with capacity. The original region only
       ranks candidates, unless the root run explicitly asked for that location.
-- [ ] Exhausted capacity surfaces a user-legible message, not the raw provider string alone.
+- [x] Exhausted capacity surfaces a user-legible message, not the raw provider string alone.
 - [ ] Staging (rule 22): a real wake that provisions a VM completes. A sleeping session wakes
       onto a host in a different region with its files intact. All created
       nodes/workspaces are deleted.
