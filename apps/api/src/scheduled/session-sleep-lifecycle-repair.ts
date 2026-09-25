@@ -28,7 +28,8 @@ export interface SessionSleepLifecycleRepairStats {
 async function projectDataSessionAlreadyClosedForSleep(
   env: Env,
   projectId: string,
-  chatSessionId: string
+  chatSessionId: string,
+  taskStatus: string | null
 ): Promise<boolean> {
   const session = await projectDataService.getSession(env, projectId, chatSessionId).catch((error) => {
     log.warn('session_sleep_lifecycle_repair.project_data_status_failed', {
@@ -39,10 +40,13 @@ async function projectDataSessionAlreadyClosedForSleep(
     return null;
   });
   const status = typeof session?.status === 'string' ? session.status : null;
-  // A failed session is closed too: a terminal reconciler can fail a failed
-  // task's session after its sleep passed the point of no return, and the sleep
+  // A failed task's failed session is closed too: a terminal reconciler can fail
+  // it after its preservation sleep passed the point of no return, and the sleep
   // must still finish its teardown rather than hold the runtime at `stopping`.
-  return status === 'sleeping' || status === 'stopped' || status === 'failed';
+  // Scoped to failed tasks: any other task's failed session keeps its handling.
+  return (
+    status === 'sleeping' || status === 'stopped' || (status === 'failed' && taskStatus === 'failed')
+  );
 }
 
 function repairBatchSize(env: Env): number {
@@ -82,6 +86,7 @@ export async function runSessionSleepLifecycleRepair(
       nodeRole: schema.nodes.nodeRole,
       runtime: schema.sessionSnapshots.runtime,
       taskId: schema.tasks.id,
+      taskStatus: schema.tasks.status,
       warmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
     })
     .from(schema.sessionSnapshots)
@@ -159,7 +164,8 @@ export async function runSessionSleepLifecycleRepair(
         const alreadyClosed = await projectDataSessionAlreadyClosedForSleep(
           env,
           row.projectId,
-          row.chatSessionId
+          row.chatSessionId,
+          row.taskStatus
         );
         if (!alreadyClosed) {
           stats.projectDataErrors++;

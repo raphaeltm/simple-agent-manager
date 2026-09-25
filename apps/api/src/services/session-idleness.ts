@@ -1,8 +1,5 @@
 import { parsePositiveInt } from '../lib/route-helpers';
-import {
-  isSleepPreservedTerminalTaskStatus,
-  SLEEP_PRESERVED_DRAIN_FOLLOWS_ACTIVITY,
-} from './sleep-preserved-task-status';
+import { isSleepPreservedTerminalTaskStatus } from './sleep-preserved-task-status';
 
 export const DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS = 5 * 60 * 1000;
 
@@ -190,17 +187,14 @@ export function classifySessionIdleness(input: {
   const sleepPreservedTerminalTask = isSleepPreservedTerminalTaskStatus(input.taskStatus);
   if (sleepPreservedTerminalTask && activity !== 'idle') {
     // complete_task runs inside the prompt: an hours-old prompting transition
-    // does not mean the response following that tool has already drained. A
-    // failed task drains from the failure alone: a hung prompt keeps re-reporting
-    // `prompting`, which must not hold its preservation snapshot off for hours.
+    // does not mean the response following that tool has already drained. The
+    // drain follows activity for a failed task too: an agent still working after
+    // the failure would otherwise be slept mid-turn, and `sleepWorkspaceSession`
+    // aborts on every activity change, spending the retry budget. A HUNG failed
+    // prompt is bounded elsewhere: the check-in watchdog releases it, and failed
+    // preservation has its own maximum wait (`failed-task-preservation-release.ts`).
     const completedAt = Date.parse(input.taskCompletedAt ?? '');
-    const failureOrCompletionAt = Number.isFinite(completedAt) ? completedAt : 0;
-    const drainFollowsActivity =
-      isSleepPreservedTerminalTaskStatus(input.taskStatus) &&
-      SLEEP_PRESERVED_DRAIN_FOLLOWS_ACTIVITY[input.taskStatus];
-    const drainAnchor = drainFollowsActivity
-      ? Math.max(activityAt ?? 0, failureOrCompletionAt)
-      : failureOrCompletionAt;
+    const drainAnchor = Math.max(activityAt ?? 0, Number.isFinite(completedAt) ? completedAt : 0);
     if (!drainAnchor) {
       return {
         idle: false,

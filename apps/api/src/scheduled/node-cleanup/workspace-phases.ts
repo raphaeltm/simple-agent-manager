@@ -20,7 +20,10 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { stopWorkspaceOnNode } from '../../services/node-agent';
 import { persistError } from '../../services/observability';
-import { sleepLifecycleOwnsTerminalTaskWorkspaceSql } from '../../services/sleep-preserved-task-status';
+import {
+  sessionSleepMaxAttempts,
+  sleepLifecycleOwnsTerminalTaskWorkspaceSql,
+} from '../../services/sleep-preserved-task-status';
 import { loadWorkspaceDeletionIdentity } from '../../services/workspace-deletion';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import type { CleanupConfig, CleanupDb, NodeCleanupResult } from './shared';
@@ -59,7 +62,7 @@ export async function sweepOrphanedWorkspaces(
          SELECT 1 FROM tasks t
          WHERE t.workspace_id = w.id
            AND t.status IN ('completed', 'failed', 'cancelled')
-           AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w')}
+           AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', sessionSleepMaxAttempts(env))}
        )
        AND NOT EXISTS (
          SELECT 1 FROM tasks t

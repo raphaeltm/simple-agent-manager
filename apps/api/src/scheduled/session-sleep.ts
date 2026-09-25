@@ -8,7 +8,7 @@ import { parsePositiveInt } from '../lib/route-helpers';
 import { noteFailedTaskPreservationCapture } from '../services/failed-task-preservation';
 import {
   releaseExhaustedFailedTaskPreservation,
-  releaseUnclaimableFailedTaskPreservation,
+  releaseStalledFailedTaskPreservation,
 } from '../services/failed-task-preservation-release';
 import {
   checkAutomaticSessionSleepEligibility,
@@ -52,8 +52,9 @@ export interface SessionSleepSweepContext {
  * A failed task's sleep is its work preservation (`failed-task-preservation.ts`).
  * After a slept attempt, surface an incomplete snapshot; after a failed or given-up
  * one, tear the runtime down once the sleep has no retry left; after a deferral,
- * tear it down once the claimer can no longer take it (`.claude/rules/47`). Each
- * no-ops for any other task, and never throws into the sweep.
+ * tear it down once the claimer can no longer take it or the failure has waited
+ * too long (`.claude/rules/47`). Each no-ops for any other task, and never throws
+ * into the sweep.
  */
 async function settleFailedTaskPreservation(
   env: Env,
@@ -67,7 +68,7 @@ async function settleFailedTaskPreservation(
       : outcome === 'failed'
         ? releaseExhaustedFailedTaskPreservation(env, { chatSessionId })
         : workspaceId
-          ? releaseUnclaimableFailedTaskPreservation(env, { chatSessionId, workspaceId })
+          ? releaseStalledFailedTaskPreservation(env, { chatSessionId, workspaceId })
           : Promise.resolve(false);
   await settled.catch((error: unknown) => {
     log.warn('session_sleep_sweep.failed_task_preservation_settle_failed', {
@@ -285,7 +286,7 @@ export async function runSessionSleepSweep(
           (candidate.status === 'degraded' || candidate.captureGeneration)
         )
       ) {
-        await db
+        const exhaustion = await db
           .update(schema.sessionSnapshots)
           .set({
             sleepStatus: 'failed',
@@ -295,9 +296,19 @@ export async function runSessionSleepSweep(
               : 'Snapshot has no source workspace',
             updatedAt: new Date().toISOString(),
           })
-          .where(eq(schema.sessionSnapshots.id, candidate.snapshotId));
-        stats.exhausted++;
-        await settleInBackground(candidate, 'failed');
+          .where(
+            and(
+              eq(schema.sessionSnapshots.id, candidate.snapshotId),
+              // Only the row this sweep selected: a sleep episode restarted since
+              // (a new failure resets the budget) must not be exhausted here.
+              eq(schema.sessionSnapshots.sleepAttempts, candidate.sleepAttempts),
+              isNull(schema.sessionSnapshots.sleepingAt)
+            )
+          );
+        if ((exhaustion.meta.changes ?? 0) > 0) {
+          stats.exhausted++;
+          await settleInBackground(candidate, 'failed');
+        }
         continue;
       }
       claimId = crypto.randomUUID();

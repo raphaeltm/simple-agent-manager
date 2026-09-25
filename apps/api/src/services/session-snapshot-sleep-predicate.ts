@@ -5,6 +5,7 @@ import {
   sessionRecoveryDecayCutoffIso,
   sessionRecoveryMaxAttempts,
 } from './session-snapshot-recovery-budget';
+import { sessionSleepMaxAttempts } from './sleep-preserved-task-status';
 
 export const DEFAULT_SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS = 30 * 60 * 1000;
 export const MAX_SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -14,6 +15,7 @@ type SleepPredicateEnv = Pick<
   | 'SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS'
   | 'SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS'
   | 'SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS'
+  | 'SESSION_SLEEP_MAX_ATTEMPTS'
 >;
 
 export interface SleepLifecyclePredicateResult {
@@ -91,15 +93,16 @@ export function sleepLifecyclePredicateBindings(
   env: SleepPredicateEnv,
   now: Date
 ): [string, number, string, string, string, number] {
-  const maxAttempts = sessionRecoveryMaxAttempts(env);
   const inFlightCeiling = new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString();
   return [
     now.toISOString(),
-    maxAttempts,
+    sessionRecoveryMaxAttempts(env),
     sessionRecoveryDecayCutoffIso(env, now.getTime()),
     inFlightCeiling,
     inFlightCeiling,
-    maxAttempts,
+    // A failed sleep is still in flight while the sweep will retry it: the sleep
+    // budget, not the wake budget (`runSessionSleepSweep`, `.claude/rules/58`).
+    sessionSleepMaxAttempts(env),
   ];
 }
 

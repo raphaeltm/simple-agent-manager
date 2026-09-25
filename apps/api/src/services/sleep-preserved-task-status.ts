@@ -1,3 +1,6 @@
+import type { Env } from '../env';
+import { parsePositiveInt } from '../lib/route-helpers';
+import { DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS } from './session-snapshot-artifacts';
 import { TERMINAL_SESSION_SLEEP_STATUS } from './session-snapshot-sleep-failure';
 
 /**
@@ -64,44 +67,44 @@ export function isSleepPreservedTerminalTaskStatus(
   return (SLEEP_PRESERVED_TERMINAL_TASK_STATUSES as readonly string[]).includes(status ?? '');
 }
 
-/**
- * Whether a prompt still reporting activity extends a terminal task's drain
- * before it may sleep (`classifySessionIdleness`). A completed task's final
- * response streams inside the prompt that called `complete_task`, so activity
- * re-reports prove it is still draining. A failed task's run is over, and the VM
- * agent re-reports `prompting` every minute for as long as a hung prompt lasts —
- * up to the multi-hour prompt timeout — so its drain runs from the failure itself.
- */
-export const SLEEP_PRESERVED_DRAIN_FOLLOWS_ACTIVITY: Record<
-  SleepPreservedTerminalTaskStatus,
-  boolean
-> = {
-  completed: true,
-  failed: false,
-};
+/** The sleep sweep's attempt budget, as every consumer of "gave up" must read it. */
+export function sessionSleepMaxAttempts(env: Pick<Env, 'SESSION_SLEEP_MAX_ATTEMPTS'>): number {
+  return parsePositiveInt(env.SESSION_SLEEP_MAX_ATTEMPTS, DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS);
+}
 
 export interface SessionSleepAttemptState {
   sleepingAt: string | null;
   sleepAfter: string | null;
   sleepStatus: string | null;
+  sleepAttempts: number;
   status: string;
   captureGeneration: string | null;
 }
 
 /**
  * The sleep lifecycle has given up on this row: not asleep, no retry scheduled,
- * and either terminally failed or failed with its retry budget spent. Every
- * writer that ends a sleep episode leaves this shape
- * (`failSessionSnapshotSleepBeforeTeardown`, the selection-time exhaustion in
- * `runSessionSleepSweep`, `terminalizeMissingSleepSource`), and the sweep does not
- * select it again — except a repairable capture (degraded, or a capture in
- * progress), which the sweep keeps retrying, so that is excluded here too.
- * {@link exhaustedSessionSleepSql} is the same definition in SQL.
+ * and either terminally failed or failed with its retry budget
+ * (`SESSION_SLEEP_MAX_ATTEMPTS`) spent. It mirrors what the sweep will no longer
+ * select (`runSessionSleepSweep`): a `failed` row with no retry time is still
+ * re-selected while attempts remain — raising the budget re-arms it — and a
+ * repairable capture (degraded, or a capture in progress) is retried past the
+ * budget. Every writer that ends a sleep episode leaves this shape
+ * (`failSessionSnapshotSleepBeforeTeardown`, the selection-time exhaustion,
+ * `terminalizeMissingSleepSource`). {@link exhaustedSessionSleepSql} is the same
+ * definition in SQL.
  */
-export function isSessionSleepExhausted(row: SessionSleepAttemptState): boolean {
+export function isSessionSleepExhausted(
+  row: SessionSleepAttemptState,
+  maxSleepAttempts: number
+): boolean {
   if (row.sleepingAt || row.sleepAfter !== null) return false;
   if (row.sleepStatus === TERMINAL_SESSION_SLEEP_STATUS) return true;
-  return row.sleepStatus === 'failed' && row.status !== 'degraded' && !row.captureGeneration;
+  return (
+    row.sleepStatus === 'failed' &&
+    row.sleepAttempts >= maxSleepAttempts &&
+    row.status !== 'degraded' &&
+    !row.captureGeneration
+  );
 }
 
 function assertSqlAlias(alias: string): string {
@@ -111,8 +114,18 @@ function assertSqlAlias(alias: string): string {
   return alias;
 }
 
+function assertAttemptBudget(maxSleepAttempts: number): number {
+  if (!Number.isInteger(maxSleepAttempts) || maxSleepAttempts < 1) {
+    throw new Error(`Invalid sleep attempt budget: ${maxSleepAttempts}`);
+  }
+  return maxSleepAttempts;
+}
+
 /** {@link isSessionSleepExhausted} for the snapshot row of `chatSessionIdSql`. */
-export function exhaustedSessionSleepSql(chatSessionIdSql: string): string {
+export function exhaustedSessionSleepSql(
+  chatSessionIdSql: string,
+  maxSleepAttempts: number
+): string {
   return `EXISTS (
     SELECT 1 FROM session_snapshots exhausted_sleep
     WHERE exhausted_sleep.chat_session_id = ${chatSessionIdSql}
@@ -122,6 +135,7 @@ export function exhaustedSessionSleepSql(chatSessionIdSql: string): string {
         exhausted_sleep.sleep_status = '${TERMINAL_SESSION_SLEEP_STATUS}'
         OR (
           exhausted_sleep.sleep_status = 'failed'
+          AND exhausted_sleep.sleep_attempts >= ${assertAttemptBudget(maxSleepAttempts)}
           AND exhausted_sleep.status != 'degraded'
           AND exhausted_sleep.capture_generation IS NULL
         )
@@ -136,7 +150,7 @@ export function exhaustedSessionSleepSql(chatSessionIdSql: string): string {
  */
 const SLEEP_LIFECYCLE_OWNERSHIP: Record<
   SleepPreservedTerminalTaskStatus,
-  (workspaceAlias: string) => string | null
+  (workspaceAlias: string, maxSleepAttempts: number) => string | null
 > = {
   // A completed task owns its workspace whenever it has a chat to resume
   // (unchanged pre-existing behaviour).
@@ -148,7 +162,7 @@ const SLEEP_LIFECYCLE_OWNERSHIP: Record<
   // or will no longer claim must stay reachable by the reapers — otherwise it has
   // no escape path at all (`.claude/rules/47`), and the reapers are the durable
   // backstop for an exhaustion release or failure teardown that never ran.
-  failed: (w) => `(
+  failed: (w, maxSleepAttempts) => `(
     ${w}.project_id IS NOT NULL
     AND ${w}.status IN ${sqlList([...SLEEP_CLAIMABLE_WORKSPACE_STATUSES, 'sleeping'])}
     AND EXISTS (
@@ -162,7 +176,7 @@ const SLEEP_LIFECYCLE_OWNERSHIP: Record<
       WHERE resumable_agent.workspace_id = ${w}.id
         AND resumable_agent.status IN ${sqlList(SLEEP_RESUMABLE_AGENT_SESSION_STATUSES)}
     )
-    AND NOT ${exhaustedSessionSleepSql(`${w}.chat_session_id`)}
+    AND NOT ${exhaustedSessionSleepSql(`${w}.chat_session_id`, maxSleepAttempts)}
   )`,
 };
 
@@ -174,12 +188,13 @@ const SLEEP_LIFECYCLE_OWNERSHIP: Record<
  */
 export function sleepLifecycleOwnsTerminalTaskWorkspaceSql(
   taskAlias: string,
-  workspaceAlias: string
+  workspaceAlias: string,
+  maxSleepAttempts: number
 ): string {
   const t = assertSqlAlias(taskAlias);
   const w = assertSqlAlias(workspaceAlias);
   const arms = SLEEP_PRESERVED_TERMINAL_TASK_STATUSES.map((status) => {
-    const condition = SLEEP_LIFECYCLE_OWNERSHIP[status](w);
+    const condition = SLEEP_LIFECYCLE_OWNERSHIP[status](w, maxSleepAttempts);
     return condition ? `(${t}.status = '${status}' AND ${condition})` : `${t}.status = '${status}'`;
   });
   return `(

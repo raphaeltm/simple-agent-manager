@@ -305,6 +305,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SLEEP_MAX_ATTEMPTS?: string; // Max automatic sleep attempts before preserving compute (default: 9)
   SESSION_SLEEP_CLAIM_LEASE_MS?: string; // Reclaim timeout for interrupted automatic sleep claims (default: 600000)
   SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS?: string; // Absolute ceiling for in-flight sleep destroyer deferral (default: 1800000)
+  FAILED_TASK_PRESERVATION_MAX_WAIT_MS?: string; // Longest a failed task's runtime waits for its preservation sleep before release (default: 28800000)
   SESSION_SLEEP_IN_FLIGHT_REPAIR_BATCH_SIZE?: string; // Bounded cron repair for stale post-capture in-flight sleep rows (default: 25)
   TERMINAL_NODE_LIFECYCLE_REPAIR_BATCH_SIZE?: string; // Bounded cron repair for active-looking rows on terminal nodes (default: 25)
   TERMINAL_NODE_LIFECYCLE_REPAIR_WALL_BUDGET_MS?: string; // Wall-clock budget for terminal-node lifecycle repair (default: 10000)
