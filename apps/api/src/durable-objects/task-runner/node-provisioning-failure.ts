@@ -45,6 +45,7 @@ import {
   exhaustionTerminalMessage,
   type ProvisioningExhaustionPlan,
 } from './node-provisioning-exhaustion';
+import { discardProviderRejectedNode } from './node-provisioning-rejected-node';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -287,38 +288,6 @@ export async function handleProvisioningAttemptFailure(
     return 'waiting';
   }
   throw Object.assign(new Error(terminalMessage), { permanent: true });
-}
-
-/**
- * Forget, then delete, the node row a provider rejected before any server existed.
- * `provisionNode` already deletes it when the error proves the rejection; this is the
- * idempotent backstop, guarded on `provider_instance_id IS NULL` so a row that did get
- * a VM identity is never deleted here, and scoped to this task's user.
- *
- * The DO forgets the node BEFORE the D1 writes. An isolate lost in between restarts with
- * no node claimed; `adoptProvisionedNodeAfterCrash` skips the gone or failed row and the
- * chain provisions again. In the other order the restart would claim a node that no
- * longer exists and fail the wake as "disappeared" — a descent passes through here once
- * per rejected offering. The two D1 writes are one batch so they land together.
- */
-async function discardProviderRejectedNode(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext,
-  nodeId: string
-): Promise<void> {
-  state.stepResults.nodeId = null;
-  state.stepResults.autoProvisioned = false;
-  state.stepResults.provisionedVmSize = null;
-  await rc.ctx.storage.put('state', state);
-  await rc.env.DATABASE.batch([
-    rc.env.DATABASE.prepare(
-      `DELETE FROM nodes WHERE id = ? AND user_id = ? AND provider_instance_id IS NULL`
-    ).bind(nodeId, state.userId),
-    rc.env.DATABASE.prepare(
-      `UPDATE tasks SET auto_provisioned_node_id = NULL, updated_at = ?
-        WHERE id = ? AND auto_provisioned_node_id = ?`
-    ).bind(new Date().toISOString(), state.taskId, nodeId),
-  ]);
 }
 
 /** Give every not-yet-tried attempt the new rejection rules out a reason saying why. */

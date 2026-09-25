@@ -416,18 +416,21 @@ describe('Hetzner shared-core quota descends the fallback chain', () => {
     expect(batches[0]?.[1]).toContain('auto_provisioned_node_id = NULL');
   });
 
-  it('an isolate lost mid-discard restarts with no node claimed and keeps descending', async () => {
+  it('an isolate lost mid-discard resumes its proven rejection before descending', async () => {
     const quota = await sharedCoreLimit();
     provisionOutcomes({ cx53: quota });
     const crashed = createContext({ failBatch: true });
 
     await expect(handleNodeProvisioning(createState(), crashed.rc)).rejects.toThrow('isolate lost');
 
-    // DO storage is all a restarted isolate has. It must not claim the rejected node: the row is
-    // gone, and a claimed-but-missing node fails the wake as "disappeared".
+    // Keep the rejection proof until D1 deletion/unlink and DO claim cleanup finish.
+    // A restarted isolate settles this marker before ordinary missing-node validation.
     const persisted = crashed.persisted();
-    expect(persisted?.stepResults.nodeId).toBeNull();
-    expect(persisted?.stepResults.autoProvisioned).toBe(false);
+    expect(persisted?.stepResults).toMatchObject({
+      nodeId: 'node:cx53:fsn1',
+      autoProvisioned: true,
+      providerRejectedNodeId: 'node:cx53:fsn1',
+    });
 
     createNodeRecord.mockClear();
     const restarted = createContext();

@@ -257,6 +257,38 @@ describe('recovery step retries retain their claim and token', () => {
     }
   );
 
+  it('mints a live token on retry after the first token ownership write failed', async () => {
+    const input = seed();
+    const persist = rc.ctx.storage.put;
+    let rejectedToken: string | null = null;
+    rc.ctx.storage.put = (async (key: string, value: TaskRunnerState) => {
+      if (value.stepResults.mcpToken && !rejectedToken) {
+        rejectedToken = value.stepResults.mcpToken;
+        throw new Error('Token ownership write failed');
+      }
+      await persist(key, value);
+    }) as typeof rc.ctx.storage.put;
+
+    await expect(handleAgentSession(input, rc)).rejects.toThrow('Token ownership write failed');
+    expect(rejectedToken).toEqual(expect.any(String));
+    expect(await validateMcpToken(env.KV, rejectedToken!)).toBeNull();
+    expect(vm.create).not.toHaveBeenCalled();
+
+    // The alarm catch persists the SAME mutable state while scheduling its retry.
+    // It must not turn an uncommitted, revoked bootstrap token into durable state.
+    await rc.ctx.storage.put('state', input);
+    const retry = structuredClone(storedState);
+    await handleAgentSession(retry, rc);
+    expect(retry.stepResults.mcpToken).not.toBe(rejectedToken);
+    expect(await validateMcpToken(env.KV, retry.stepResults.mcpToken!)).toMatchObject({
+      taskId: 'recovery',
+    });
+    expect(vm.create.mock.calls[0]?.[8]).toEqual([
+      { name: 'sam-mcp', url: 'https://api.example.test/mcp', token: retry.stepResults.mcpToken },
+    ]);
+    expect(snapshot()).toMatchObject({ recovery_status: 'restored', sleeping_at: null });
+  });
+
   it('rejects the retry if its durable source loses authority between alarms', async () => {
     const input = seed('source');
     vm.restore.mockRejectedValueOnce(new Error('VM restore: HTTP 524'));

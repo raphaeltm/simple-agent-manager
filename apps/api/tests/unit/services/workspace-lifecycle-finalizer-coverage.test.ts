@@ -63,7 +63,7 @@ const SHARED_FINALIZER_ROUTE_SYMBOLS = [
  * decision that future deletion writers must not copy blindly.
  */
 const ALLOWLIST: Record<string, string> = {
-  'durable-objects/task-runner/node-provisioning-failure.ts':
+  'durable-objects/task-runner/node-provisioning-rejected-node.ts':
     'Deletes a freshly-created D1 node row only after the provider rejected its create (capacity or account quota) and only while provider_instance_id IS NULL, before any workspace or agent_session exists.',
   'scheduled/d1-retention.ts':
     'Destroys expired cf-container snapshot runtime state after the ProjectData session is stopped; it does not mark workspace/node rows deleted, and the container DO routes D1 runtime termination through persistRuntimeEnded().',
@@ -82,7 +82,7 @@ const ALLOWLIST: Record<string, string> = {
 // Extraction must not turn provisioning compensation into a blanket exemption
 // for future terminal workspace writes in either module.
 const PROVISIONING_COMPENSATION_KINDS: Record<string, ReadonlySet<string>> = {
-  'durable-objects/task-runner/node-provisioning-failure.ts': new Set([
+  'durable-objects/task-runner/node-provisioning-rejected-node.ts': new Set([
     'workspace_or_node_sql_delete',
   ]),
   'services/node-provisioning.ts': new Set([

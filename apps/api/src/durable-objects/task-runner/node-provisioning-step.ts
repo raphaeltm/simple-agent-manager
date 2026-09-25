@@ -42,6 +42,10 @@ import { buildProvisioningExhaustionPlan } from './node-provisioning-exhaustion'
 import { handleProvisioningAttemptFailure } from './node-provisioning-failure';
 import { enforceComputeQuota, enforceUserNodeLimit } from './node-provisioning-gates';
 import { rankProvisioningCandidates } from './node-provisioning-ranking';
+import {
+  discardProviderRejectedNode,
+  recordProviderRejectedNode,
+} from './node-provisioning-rejected-node';
 import { adoptProvisionedNodeAfterCrash } from './node-provisioning-recovery';
 import { trySelectReusableNodeForProvisioning } from './node-provisioning-reuse';
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
@@ -62,6 +66,9 @@ export async function handleNodeProvisioning(
     throw capacityPoolNoCandidatesError(state.config.capacityPoolSelection);
   }
 
+  if (state.stepResults.providerRejectedNodeId) {
+    await discardProviderRejectedNode(state, rc, state.stepResults.providerRejectedNodeId);
+  }
   await adoptProvisionedNodeAfterCrash(state, rc);
 
   // If we already created the node (retry scenario, or recovery above), check its status
@@ -370,6 +377,7 @@ export async function handleNodeProvisioning(
         },
         {
           rethrowProviderError: true,
+          beforeRejectedNodeDelete: () => recordProviderRejectedNode(state, rc, createdNode.id),
           assertExternalMutationAuthority: async () => {
             await rc.assertRecoveryAuthority(state);
             await assertVmProvisioningLease(
@@ -391,6 +399,9 @@ export async function handleNodeProvisioning(
         state.admissionLeaseToken
       );
     } catch (err) {
+      if (state.stepResults.providerRejectedNodeId) {
+        await discardProviderRejectedNode(state, rc, state.stepResults.providerRejectedNodeId);
+      }
       const outcome = await handleProvisioningAttemptFailure(state, rc, {
         err,
         i,

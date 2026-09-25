@@ -278,3 +278,20 @@ pass can verify the entire preserved-conversation wake before either change ship
 - [ ] Complete review findings and discriminating tests.
 - [ ] Combined staging: failed task snapshot, fresh VM wake, preserved file and agent answer; cleanup.
 - [ ] Local reviews, CI/CodeRabbit, merge prerequisite then rebase preservation PR, monitor deploys.
+
+### Continuation review corrections
+
+- Provider rejection proof is persisted at the first real `provisionNode` deletion boundary.
+  TaskRunner finishes scoped D1 cleanup before clearing the proof, and replays it before claimed-node
+  checks after a restart. An unexplained missing node still fails closed. A failed proof write cannot
+  delete the node. Real Hetzner HTTP → provisioning → SQLite deletion/interruption/restart coverage
+  proves the guard; removing the callback in an isolated transform fails only the incident case.
+- Restore jobs own the workspace lifecycle lock and reject changed/stopped runtimes before effects.
+  Server shutdown closes admission, cancels and joins restores before closing hosts/persistence.
+  Panics are contained with an opaque cached error. Five Go-overlay mutations (panic guard, identity,
+  shutdown join, lifecycle lock, admission) each fail their intended regression, without source edits.
+- Rejected MCP token handoff rolls back mutable TaskRunner state before bootstrap revokes the token.
+  Otherwise an alarm retry could persist/reuse that revoked token. The real step handoff-failure/retry
+  regression fails when rollback is removed in an isolated transform.
+- Targeted final regressions: recovery/token 8; rejected-node crash/controls 5; quota actions 13;
+  terminal-writer inventory 8. Go restore/lifecycle suite passes with `-race`.

@@ -33,6 +33,8 @@ export interface StepResults {
   placementDiagnostics?: PlacementDecisionDiagnostics;
   nodeId: string | null;
   autoProvisioned: boolean;
+  /** Proven pre-identity rejection awaiting crash-safe node/claim cleanup. */
+  providerRejectedNodeId?: string | null;
   /** Exact warm-pool claim owned by this task until workspace activation or release. */
   claimedWarmNodeId?: string | null;
   workspaceId: string | null;

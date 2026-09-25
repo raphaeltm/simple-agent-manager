@@ -102,8 +102,15 @@ export async function handleAgentSession(
         await rc.ctx.storage.put('state', state);
       },
       onMcpToken: async (mcpToken) => {
+        const previousToken = state.stepResults.mcpToken;
         state.stepResults.mcpToken = mcpToken;
-        await rc.ctx.storage.put('state', state);
+        try {
+          await rc.ctx.storage.put('state', state);
+        } catch (error) {
+          // Bootstrap revokes a rejected handoff; retries must not reuse it.
+          state.stepResults.mcpToken = previousToken;
+          throw error;
+        }
       },
       beforeExternalMutation: async () => {
         await rc.assertRecoveryAuthority(state);
