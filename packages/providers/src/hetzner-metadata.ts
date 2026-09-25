@@ -193,6 +193,15 @@ const HETZNER_RESOURCE_LIMIT_STATUS_CODE = 403;
 const ACCOUNT_LIMIT_MESSAGE_PATTERN = /\blimit (?:reached|exceeded)\b/i;
 
 /**
+ * Credential vocabulary that vetoes the message fallback above. A 403 whose text is about the
+ * token or its permissions stays `auth_error` even if it also mentions a limit: a revoked or
+ * read-only token must fail fast and say so, not park the task behind an account-capacity wait
+ * whose message blames the quota. No recorded quota text contains these words.
+ */
+const CREDENTIAL_MESSAGE_PATTERN =
+  /\b(?:permissions?|token|forbidden|unauthori[sz]ed|credentials?)\b/i;
+
+/**
  * Classify a Hetzner API error into a normalized ProviderErrorCategory.
  *
  * Primary signal: structured `error.code` from the JSON response, except for a
@@ -262,7 +271,8 @@ export function classifyHetznerError(
   // read as a credential failure, so the wake failed fast on its first offering (rule 72).
   if (
     statusCode === HETZNER_RESOURCE_LIMIT_STATUS_CODE &&
-    ACCOUNT_LIMIT_MESSAGE_PATTERN.test(message)
+    ACCOUNT_LIMIT_MESSAGE_PATTERN.test(message) &&
+    !CREDENTIAL_MESSAGE_PATTERN.test(message)
   ) {
     return 'quota_exceeded';
   }

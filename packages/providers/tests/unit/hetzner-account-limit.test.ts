@@ -137,6 +137,18 @@ describe('HetznerProvider.createVM on an account quota', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('control: a limit-worded 403 about the token stays an auth error', async () => {
+    const { error, fetchMock } = await captureCreateError(
+      hetznerError(403, undefined, 'token permission limit exceeded')
+    );
+
+    expect(error.message).toBe('hetzner API error (403): token permission limit exceeded');
+    expect(error.providerCode).toBeUndefined();
+    expect(error.category).toBe('auth_error');
+    expect(classifyHetznerAccountLimit(error)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('control: an invalid token stays an auth error', async () => {
     const { error } = await captureCreateError(
       hetznerError(401, 'unauthorized', 'unable to authenticate')
@@ -174,6 +186,15 @@ describe('classifyHetznerError account-quota arms', () => {
     // Structured code outranks the message fallback.
     ['forbidden code with limit text', 403, 'forbidden', 'server limit reached', 'auth_error'],
     ['permission text', 403, undefined, 'insufficient permissions', 'auth_error'],
+    // Credential vocabulary vetoes the message fallback, even beside limit wording.
+    ['limit text about the token', 403, undefined, 'token permission limit exceeded', 'auth_error'],
+    [
+      'limit text about credentials, unrecognized code',
+      403,
+      'some_new_code',
+      'API credentials rate limit reached',
+      'auth_error',
+    ],
     [
       'maintenance',
       403,
