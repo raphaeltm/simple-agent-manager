@@ -257,12 +257,19 @@ function createState(offerings: Offering[] = INCIDENT_CHAIN): TaskRunnerState {
   } as unknown as TaskRunnerState;
 }
 
-function createContext() {
+/**
+ * `failBatch` models the isolate being lost mid-discard: the D1 batch rejects, and only what the
+ * DO had already written to storage survives into the restart (`persisted()`).
+ */
+function createContext(options: { failBatch?: boolean } = {}) {
   const runs: Array<{ sql: string; args: unknown[] }> = [];
+  const batches: string[][] = [];
+  let persisted: TaskRunnerState | null = null;
   const DATABASE = {
     prepare(sql: string) {
       let bound: unknown[] = [];
       return {
+        sql,
         bind(...args: unknown[]) {
           bound = args;
           return this;
@@ -281,17 +288,29 @@ function createContext() {
         },
       };
     },
+    async batch(statements: Array<{ sql: string; run: () => Promise<unknown> }>) {
+      if (options.failBatch) throw new Error('isolate lost');
+      batches.push(statements.map((statement) => statement.sql));
+      return Promise.all(statements.map((statement) => statement.run()));
+    },
   };
   const rc = {
     env: { DATABASE, MAX_NODES_PER_USER: '10', COMPUTE_QUOTA_ENFORCEMENT_ENABLED: 'false' },
-    ctx: { storage: { put: vi.fn().mockResolvedValue(undefined), setAlarm: vi.fn() } },
+    ctx: {
+      storage: {
+        put: vi.fn(async (_key: string, value: TaskRunnerState) => {
+          persisted = structuredClone(value);
+        }),
+        setAlarm: vi.fn(),
+      },
+    },
     assertRecoveryAuthority: vi.fn().mockResolvedValue(undefined),
     advanceToStep: vi.fn().mockResolvedValue(undefined),
     getProvisionPollIntervalMs: () => 1000,
     getProvisionTimeoutMs: () => 600_000,
     updateD1ExecutionStep: vi.fn().mockResolvedValue(undefined),
   } as unknown as TaskRunnerContext;
-  return { rc, runs };
+  return { rc, runs, batches, persisted: () => persisted };
 }
 
 /** Which server types the step actually asked the provider for, in order. */
@@ -380,14 +399,44 @@ describe('Hetzner shared-core quota descends the fallback chain', () => {
   it('discards each quota-rejected node row that never got a server', async () => {
     const quota = await sharedCoreLimit();
     provisionOutcomes({ cx53: quota });
-    const { rc, runs } = createContext();
+    const { rc, runs, batches } = createContext();
 
     await handleNodeProvisioning(createState(), rc);
 
     const deletes = runs.filter((run) => run.sql.startsWith('DELETE FROM nodes'));
-    expect(deletes.map((run) => run.args[0])).toEqual(['node:cx53:fsn1']);
+    // Scoped to the rejected node and this task's user.
+    expect(deletes.map((run) => run.args)).toEqual([['node:cx53:fsn1', 'user-1']]);
     // Guarded: a row that did get a provider identity is never deleted here.
     expect(deletes[0]?.sql).toContain('provider_instance_id IS NULL');
+    const unlinks = runs.filter((run) => run.sql.includes('auto_provisioned_node_id = NULL'));
+    expect(unlinks.map((run) => run.args.slice(1))).toEqual([['task-1', 'node:cx53:fsn1']]);
+    // The row delete and the task unlink land together.
+    expect(batches).toHaveLength(1);
+    expect(batches[0]?.[0]).toContain('DELETE FROM nodes');
+    expect(batches[0]?.[1]).toContain('auto_provisioned_node_id = NULL');
+  });
+
+  it('an isolate lost mid-discard restarts with no node claimed and keeps descending', async () => {
+    const quota = await sharedCoreLimit();
+    provisionOutcomes({ cx53: quota });
+    const crashed = createContext({ failBatch: true });
+
+    await expect(handleNodeProvisioning(createState(), crashed.rc)).rejects.toThrow('isolate lost');
+
+    // DO storage is all a restarted isolate has. It must not claim the rejected node: the row is
+    // gone, and a claimed-but-missing node fails the wake as "disappeared".
+    const persisted = crashed.persisted();
+    expect(persisted?.stepResults.nodeId).toBeNull();
+    expect(persisted?.stepResults.autoProvisioned).toBe(false);
+
+    createNodeRecord.mockClear();
+    const restarted = createContext();
+    if (!persisted) throw new Error('expected persisted state');
+    await handleNodeProvisioning(persisted, restarted.rc);
+
+    // The chain resumes from the top (the rejection list is in-memory) and still lands.
+    expect(attemptedTypes()).toEqual(['cx53', 'cx43']);
+    expect(restarted.rc.advanceToStep).toHaveBeenCalledWith(persisted, 'node_agent_ready');
   });
 
   it('skips same-size offerings in other regions — the quota is account-wide', async () => {
@@ -502,6 +551,61 @@ describe('when no permitted offering fits under the quota', () => {
     // It still descended through every offering before giving up.
     expect(attemptedTypes()).toEqual(['cx53', 'cx43', 'cx33', 'cx23']);
     expect(cooldownWrites(runs)).toHaveLength(0);
+  });
+});
+
+describe('a core quota with nothing smaller to try', () => {
+  it('an offering with no known vCPU count waits instead of guessing what fits', async () => {
+    const quota = await sharedCoreLimit();
+    provisionOutcomes({ cx53: quota });
+    const { rc, runs } = createContext();
+    const state = createState();
+    // An offering whose catalog row never recorded a vCPU count: which smaller offerings the
+    // quota rules out is unknowable, so no descent is attempted.
+    for (const pooled of state.config.capacityPoolSelection?.candidates ?? []) {
+      (pooled as { providerInstanceVcpuCount: number | null }).providerInstanceVcpuCount = null;
+    }
+
+    await expect(handleNodeProvisioning(state, rc)).resolves.toBeUndefined();
+
+    expect(attemptedTypes()).toEqual(['cx53']);
+    expect(cooldownWrites(runs)).toHaveLength(1);
+    expect(waitForVmAdmissionCapacity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ scopeKey: SCOPE.scopeKey }),
+      'provider_account_capacity',
+      expect.any(String),
+      expect.objectContaining({
+        providerMessage: 'hetzner API error (403): shared core limit exceeded',
+      })
+    );
+    expect(attempts(state)[0]?.reason).toBe(
+      'Provider account shared vCPU core limit reached. Provider error: hetzner API error (403): shared core limit exceeded'
+    );
+  });
+
+  it("under the pool's `fail` policy there is no chain, so the task waits on the account", async () => {
+    const quota = await sharedCoreLimit();
+    provisionOutcomes({ cx53: quota });
+    const { rc, runs } = createContext();
+    const state = createState();
+    const selection = state.config.capacityPoolSelection;
+    if (!selection) throw new Error('expected a capacity pool selection');
+    selection.exhaustionPolicy = 'fail';
+
+    await expect(handleNodeProvisioning(state, rc)).resolves.toBeUndefined();
+
+    // `fail` means one offering; a core quota on it is an account wait, never a terminal error.
+    expect(attemptedTypes()).toEqual(['cx53']);
+    expect(cooldownWrites(runs)).toHaveLength(1);
+    expect(waitForVmAdmissionCapacity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'provider_account_capacity',
+      expect.any(String),
+      expect.objectContaining({ providerCode: 'resource_limit_exceeded' })
+    );
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
   });
 });
 
