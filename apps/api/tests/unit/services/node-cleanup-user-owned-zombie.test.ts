@@ -151,10 +151,15 @@ beforeEach(() => {
       id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT, auto_provisioned_node_id TEXT,
       claimed_warm_node_id TEXT, claimed_warm_node_at TEXT, updated_at TEXT
     );
+    -- The sleep columns and agent_sessions are read by the terminal-task
+    -- ownership predicate (sleepLifecycleOwnsTerminalTaskWorkspaceSql).
     CREATE TABLE session_snapshots (
       chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL,
-      degradation TEXT NOT NULL, expires_at TEXT NOT NULL
+      degradation TEXT NOT NULL, expires_at TEXT NOT NULL,
+      sleeping_at TEXT, sleep_status TEXT, sleep_after TEXT, capture_generation TEXT,
+      sleep_attempts INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE agent_sessions (id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT);
   `);
   vi.mocked(deleteNodeResourcesStrict).mockImplementation(async (nodeId: string) => {
     deleteCalls.push(nodeId);

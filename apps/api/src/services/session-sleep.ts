@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -16,6 +16,7 @@ import {
   type SessionIdlenessClassification,
 } from './session-idleness';
 import { waitForFinalSessionSnapshot } from './session-sleep-snapshot-wait';
+import { chatSessionTaskOwnerJoins } from './session-sleep-task-owner';
 import {
   beginSessionSnapshotStopping,
   claimSessionSnapshotSleep,
@@ -30,8 +31,12 @@ import {
   scheduleSessionSnapshotSleep,
   verifySessionSnapshotArtifactsForSleep,
 } from './session-snapshots';
+import { SLEEP_RESUMABLE_AGENT_SESSION_STATUSES } from './sleep-preserved-task-status';
 import { cleanupTaskRun } from './task-runner';
 import { sleepVmAgentContainer } from './vm-agent-container';
+
+// Built per query, not at module load: tests partially mock the schema module.
+const workspaceChatOwner = () => chatSessionTaskOwnerJoins(schema.workspaces.chatSessionId);
 
 export async function finishSleepingWorkspaceComputeCleanup(
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -154,7 +159,7 @@ export async function queueWorkspaceSessionSleep(
     .where(
       and(
         eq(schema.agentSessions.workspaceId, workspace.id),
-        inArray(schema.agentSessions.status, ['running', 'recovery', 'sleeping'])
+        inArray(schema.agentSessions.status, SLEEP_RESUMABLE_AGENT_SESSION_STATUSES)
       )
     )
     .orderBy(desc(schema.agentSessions.createdAt))
@@ -245,20 +250,8 @@ export async function checkAutomaticSessionSleepEligibility(
       taskCompletedAt: sql<string | null>`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
     })
     .from(schema.workspaces)
-    .leftJoin(
-      schema.sessionSummaries,
-      eq(schema.sessionSummaries.id, schema.workspaces.chatSessionId)
-    )
-    .leftJoin(
-      schema.tasks,
-      or(
-        eq(schema.tasks.id, schema.sessionSummaries.taskId),
-        and(
-          isNull(schema.sessionSummaries.taskId),
-          eq(schema.tasks.chatSessionId, schema.workspaces.chatSessionId)
-        )
-      )
-    )
+    .leftJoin(schema.sessionSummaries, workspaceChatOwner().summary)
+    .leftJoin(schema.tasks, workspaceChatOwner().task)
     .where(
       and(eq(schema.workspaces.id, input.workspaceId), eq(schema.workspaces.userId, input.userId))
     )
@@ -272,7 +265,7 @@ export async function checkAutomaticSessionSleepEligibility(
     .where(
       and(
         eq(schema.agentSessions.workspaceId, input.workspaceId),
-        inArray(schema.agentSessions.status, ['running', 'recovery', 'sleeping'])
+        inArray(schema.agentSessions.status, SLEEP_RESUMABLE_AGENT_SESSION_STATUSES)
       )
     )
     .orderBy(desc(schema.agentSessions.createdAt))
@@ -337,20 +330,8 @@ export async function sleepWorkspaceSession(
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .leftJoin(
-      schema.sessionSummaries,
-      eq(schema.sessionSummaries.id, schema.workspaces.chatSessionId)
-    )
-    .leftJoin(
-      schema.tasks,
-      or(
-        eq(schema.tasks.id, schema.sessionSummaries.taskId),
-        and(
-          isNull(schema.sessionSummaries.taskId),
-          eq(schema.tasks.chatSessionId, schema.workspaces.chatSessionId)
-        )
-      )
-    )
+    .leftJoin(schema.sessionSummaries, workspaceChatOwner().summary)
+    .leftJoin(schema.tasks, workspaceChatOwner().task)
     .leftJoin(schema.projects, eq(schema.projects.id, schema.workspaces.projectId))
     .where(
       and(eq(schema.workspaces.id, input.workspaceId), eq(schema.workspaces.userId, input.userId))
@@ -414,7 +395,7 @@ export async function sleepWorkspaceSession(
     .where(
       and(
         eq(schema.agentSessions.workspaceId, workspace.id),
-        inArray(schema.agentSessions.status, ['running', 'recovery', 'sleeping'])
+        inArray(schema.agentSessions.status, SLEEP_RESUMABLE_AGENT_SESSION_STATUSES)
       )
     )
     .orderBy(desc(schema.agentSessions.createdAt))

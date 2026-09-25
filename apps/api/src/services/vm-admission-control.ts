@@ -38,7 +38,7 @@ export {
 } from './vm-admission-control-types';
 export {
   classifyVmProviderCapacityError,
-  isProviderAccountCapacityError,
+  describeProviderAccountLimit,
   recordVmProviderCapacityFailure,
   recordVmProviderCapacitySuccess,
 } from './vm-admission-provider-capacity';

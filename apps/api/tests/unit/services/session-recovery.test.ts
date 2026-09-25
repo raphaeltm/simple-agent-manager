@@ -159,6 +159,7 @@ import {
   ensureSessionRecovery,
   SESSION_RECOVERY_INITIAL_PROMPT,
 } from '../../../src/services/session-recovery';
+import { isTransientSessionRecoveryRefusal } from '../../../src/services/session-recovery-refusals';
 
 const emptyCapacityPlacement = {
   capacityPoolId: null,
@@ -235,13 +236,16 @@ describe('ensureSessionRecovery', () => {
       new WorkspaceDeletionUnconfirmedError('workspace-unconfirmed')
     );
 
-    await expect(
-      ensureSessionRecovery(
-        { DATABASE: databaseMock, BASE_DOMAIN: 'example.test' } as never,
-        'project-1',
-        'chat-1'
-      )
-    ).resolves.toEqual({ status: 'unavailable', reason: 'workspace_deletion_unconfirmed' });
+    const refused = await ensureSessionRecovery(
+      { DATABASE: databaseMock, BASE_DOMAIN: 'example.test' } as never,
+      'project-1',
+      'chat-1'
+    );
+    expect(refused).toEqual({ status: 'unavailable', reason: 'workspace_deletion_unconfirmed' });
+    // Delivery and eviction retry this refusal: its name is their contract.
+    expect(
+      refused.status === 'unavailable' && isTransientSessionRecoveryRefusal(refused.reason)
+    ).toBe(true);
 
     expect(assertReplacementDeletionConfirmedMock).toHaveBeenCalledWith(expect.anything(), {
       sourceTaskId: 'source-task-unconfirmed',
@@ -514,6 +518,7 @@ describe('session recovery consumes the canonical persisted resource plan', () =
       resourceRequirements: Record<string, unknown>;
       resolvedReservationOverride: unknown;
       explicit: { vmSize: string; vmSizeSource: string; vmLocation: string | null };
+      preferredVmLocation?: string | null;
     };
   }
 
@@ -535,13 +540,32 @@ describe('session recovery consumes the canonical persisted resource plan', () =
 
     await wake(evictionOptions);
 
-    expect((await placementInput()).explicit.vmLocation).toBeNull();
+    const input = await placementInput();
+    expect(input.explicit.vmLocation).toBeNull();
+    // Eviction relocates through normal placement (policy 95c3329a): not even a preference.
+    expect(input.preferredVmLocation).toBeNull();
   });
 
+  it('preserves an old location the conversation explicitly asked for, on eviction too', async () => {
+    queueWake({
+      placementExplanationJson: JSON.stringify({ explicitVmLocation: true }),
+      requestedVmSize: 'small',
+      requestedVmSizeSource: 'task',
+    });
+
+    await wake(evictionOptions);
+
+    expect((await placementInput()).explicit.vmLocation).toBe('hel1');
+  });
+
+  // Changed 2026-09-25. Unknown provenance used to pin the old location. `explicitVmLocation` has
+  // only been recorded since 2026-09-20 (#2108), no production root run has ever requested a
+  // location, and pinning on "unknown" is exactly how a wake stranded itself in a region at its
+  // core quota. Absence of evidence of a request is not a request.
   it.each([
-    ['explicit provenance', JSON.stringify({ explicitVmLocation: true })],
     ['legacy unknown provenance', null],
-  ])('preserves an old location when required by %s', async (_label, placementExplanationJson) => {
+    ['an explanation without the field', JSON.stringify({ kind: 'capacity_pool_default' })],
+  ])('treats %s as a preference, not a pin', async (_label, placementExplanationJson) => {
     queueWake({
       placementExplanationJson,
       requestedVmSize: 'small',
@@ -550,7 +574,39 @@ describe('session recovery consumes the canonical persisted resource plan', () =
 
     await wake(evictionOptions);
 
-    expect((await placementInput()).explicit.vmLocation).toBe('hel1');
+    expect((await placementInput()).explicit.vmLocation).toBeNull();
+  });
+
+  describe('human and durable wakes', () => {
+    it('prefer the region the session slept in without requiring it', async () => {
+      queueWake({
+        placementExplanationJson: JSON.stringify({ explicitVmLocation: false }),
+        requestedVmSize: 'small',
+        requestedVmSizeSource: 'task',
+      });
+
+      await wake();
+
+      const input = await placementInput();
+      // Before 2026-09-25 this was 'hel1': the wake pinned its own old region, which dropped every
+      // other permitted offering and host from placement.
+      expect(input.explicit.vmLocation).toBeNull();
+      expect(input.preferredVmLocation).toBe('hel1');
+    });
+
+    it('keep a location the first run explicitly asked for as a hard constraint', async () => {
+      queueWake({
+        placementExplanationJson: JSON.stringify({ explicitVmLocation: true }),
+        requestedVmSize: 'small',
+        requestedVmSizeSource: 'task',
+      });
+
+      await wake();
+
+      const input = await placementInput();
+      expect(input.explicit.vmLocation).toBe('hel1');
+      expect(input.preferredVmLocation).toBe('hel1');
+    });
   });
 
   it('replays every persisted layer at its original precedence, not just the task layer', async () => {
@@ -686,6 +742,29 @@ describe('session recovery consumes the canonical persisted resource plan', () =
       expect(resolveTaskStartPlacement).not.toHaveBeenCalled();
     }
   );
+
+  it('names a placement that fails for now as a refusal its callers retry', async () => {
+    // The producer half of the delivery/eviction retry contract: a rename here
+    // would silently turn a retried refusal into a dropped one.
+    queueWake({ requestedVmSize: 'small', requestedVmSizeSource: 'task' });
+    const { resolveTaskStartPlacement } = await import('../../../src/services/placement-resolver');
+    (resolveTaskStartPlacement as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => {
+        throw new Error('capacity pool summary unavailable');
+      }
+    );
+
+    const result = await wake();
+
+    expect(result).toEqual({
+      status: 'unavailable',
+      reason: 'session_recovery_placement_transient',
+    });
+    expect(
+      result.status === 'unavailable' && isTransientSessionRecoveryRefusal(result.reason)
+    ).toBe(true);
+    expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+  });
 
   it('control: a well-formed plan still wakes normally', async () => {
     // Absence assertions above are also satisfied by wake being broken outright

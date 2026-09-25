@@ -54,6 +54,25 @@ export function rankCapacityCandidatesForRuntime(
   });
 }
 
+/**
+ * Offerings in `location` first, each group keeping the pool's own order.
+ *
+ * This is how a woken session prefers its previous region without requiring it: the TaskRunner
+ * ranks reusable hosts by its first candidate's location (`startTaskRunnerDO` sets
+ * `config.vmLocation` from it), while every other region stays in the list — eligible for host
+ * reuse and for the provisioning fallback chain. Provisioning re-ranks by the pool's own strategy
+ * (`rankCapacityCandidatesForRuntime`); the preference does not override it.
+ */
+export function preferCapacityCandidatesInLocation(
+  candidates: readonly TaskStartCapacityCandidate[],
+  location: string
+): TaskStartCapacityCandidate[] {
+  return [
+    ...candidates.filter((candidate) => candidate.location === location),
+    ...candidates.filter((candidate) => candidate.location !== location),
+  ];
+}
+
 export function compareCapacityCandidates(
   a: TaskStartCapacityCandidate,
   b: TaskStartCapacityCandidate,

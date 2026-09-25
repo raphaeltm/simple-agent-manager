@@ -1,10 +1,14 @@
 import { DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
-import { rankCapacityCandidatesForRuntime } from '../../../src/services/placement-capacity-ranking';
+import {
+  preferCapacityCandidatesInLocation,
+  rankCapacityCandidatesForRuntime,
+} from '../../../src/services/placement-capacity-ranking';
 import type {
   PlacementProfileDefaults,
   PlacementProjectDefaults,
+  TaskStartCapacityCandidate,
   TaskStartCapacityPoolSelection,
 } from '../../../src/services/placement-resolver';
 import {
@@ -604,6 +608,85 @@ describe('placement resolver parity', () => {
         resourceRequirements: {},
       })
     ).toThrow(PlacementResolutionError);
+  });
+});
+
+describe('preferred (not explicit) location', () => {
+  function resolveWith(input: {
+    explicitVmLocation?: string | null;
+    preferredVmLocation?: string | null;
+    provider?: 'hetzner' | 'scaleway';
+  }) {
+    return resolveTaskStartPlacement({
+      entryPoint: 'session-recovery',
+      taskId: 'wake-task',
+      projectId: PROJECT.id,
+      userId: 'wake-user',
+      project: PROJECT,
+      explicit: {
+        provider: input.provider ?? 'hetzner',
+        vmLocation: input.explicitVmLocation ?? null,
+      },
+      preferredVmLocation: input.preferredVmLocation,
+      credentialProjectPolicy: 'current-project',
+      taskModeDefault: 'workspace-profile',
+      resourceRequirements: {},
+    });
+  }
+
+  it('becomes the resolved location without making it explicit', () => {
+    const placement = resolveWith({ preferredVmLocation: 'fsn1' });
+
+    // Outranks the project default (hel1): it is where this work last ran.
+    expect(placement.vmLocation).toBe('fsn1');
+    expect(placement.explicitVmLocation).toBe(false);
+    expect(placement.preferredVmLocation).toBe('fsn1');
+  });
+
+  it('never outranks an explicit location, and is not reported when unused', () => {
+    const placement = resolveWith({ explicitVmLocation: 'nbg1', preferredVmLocation: 'fsn1' });
+
+    expect(placement.vmLocation).toBe('nbg1');
+    expect(placement.explicitVmLocation).toBe(true);
+    expect(placement.preferredVmLocation).toBeUndefined();
+  });
+
+  it('is dropped, not rejected, when it does not fit the provider', () => {
+    // An explicit fr-par-1 on Hetzner throws (see above). Nobody asked for a preference, so a
+    // stale one must never turn into a validation error.
+    const placement = resolveWith({ preferredVmLocation: 'fr-par-1' });
+
+    expect(placement.vmLocation).toBe('hel1');
+    expect(placement.explicitVmLocation).toBe(false);
+    expect(placement.preferredVmLocation).toBeUndefined();
+  });
+
+  it('leaves ordinary starts exactly as before', () => {
+    const placement = resolveWith({});
+
+    expect(placement.vmLocation).toBe('hel1');
+    expect(placement).not.toHaveProperty('preferredVmLocation');
+  });
+});
+
+describe('preferCapacityCandidatesInLocation', () => {
+  it('moves the preferred region first and keeps the pool order within each group', () => {
+    const offerings = ['nbg1:cx23', 'fsn1:cx23', 'hel1:cx23', 'nbg1:cx33', 'hel1:cx33'].map(
+      (id) => {
+        const [location, type] = id.split(':');
+        return { id, location, providerInstanceType: type } as TaskStartCapacityCandidate;
+      }
+    );
+
+    expect(preferCapacityCandidatesInLocation(offerings, 'hel1').map((c) => c.id)).toEqual([
+      'hel1:cx23',
+      'hel1:cx33',
+      'nbg1:cx23',
+      'fsn1:cx23',
+      'nbg1:cx33',
+    ]);
+    // Nothing is dropped, including when the pool has no offering in that region.
+    expect(preferCapacityCandidatesInLocation(offerings, 'ash')).toEqual(offerings);
   });
 });
 
