@@ -203,6 +203,12 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
 - Surgical revert: removing the fleet-loss hold made the beyond-escalation busy-node test fail;
   removing the sleep RPC deadline left the hung-request test blocked until the external five-second
   test timeout. Both guards were restored and the focused suites passed.
+- A timed-out sleep request now aborts its pending service operation. The queue checks cancellation
+  after snapshot setup and checks the expected node before and after that setup, so a deferred
+  completion after release cannot schedule sleep on a replacement node. The deferred-completion
+  test turns red when those post-setup abort checks are removed; the sweep test also rejects a late
+  promise after release without an unhandled rejection. Late chat notices use a stable message ID
+  and target the original chat session, not a workspace mutation.
 - Draft PR #2147 is open. Remaining gates: full API suite rerun, coordinated real-VM staging,
   CI/CodeRabbit, merge, production monitoring.
 

@@ -213,9 +213,14 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
   it('releases when a preservation RPC never answers', async () => {
     seedNode('sleep-rpc-hung', 31);
     env.NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS = '20';
-    boundaries.sleep = vi.fn(() => {
+    let rejectLateSleep: ((error: Error) => void) | undefined;
+    let sleepSignal: AbortSignal | undefined;
+    boundaries.sleep = vi.fn((_env, input) => {
       order.push('sleep');
-      return new Promise<void>(() => {});
+      sleepSignal = input.signal;
+      return new Promise<void>((_resolve, reject) => {
+        rejectLateSleep = reject;
+      });
     }) as UnhealthyNodeBoundaries['sleep'];
 
     await sweep();
@@ -227,6 +232,9 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
     expect((await listNodeHealthEvents(env, 'sleep-rpc-hung')).map((e) => e.event)).toContain(
       'sleep_unavailable'
     );
+    expect(sleepSignal?.aborted).toBe(true);
+    rejectLateSleep?.(new Error('late sleep rejection after node release'));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   });
 
   it('refuses deletion when a heartbeat arrives after selection', async () => {

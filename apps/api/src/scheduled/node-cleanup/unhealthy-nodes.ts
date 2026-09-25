@@ -132,18 +132,22 @@ async function wasRecorded(
   }
 }
 
-async function beforeDeadline<T>(operation: () => Promise<T>, deadlineMs: number): Promise<T> {
+async function beforeDeadline<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  deadlineMs: number
+): Promise<T> {
   const remainingMs = deadlineMs - Date.now();
   if (remainingMs <= 0) throw new Error('node preservation budget exhausted');
+  const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      operation(),
+      operation(controller.signal),
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error('node preservation request timed out')),
-          remainingMs
-        );
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new Error('node preservation request timed out'));
+        }, remainingMs);
       }),
     ]);
   } finally {
@@ -167,7 +171,7 @@ async function preserveWorkspace(
   if (!(await wasRecorded(env, node, 'session_notice', workspace.id))) {
     try {
       await beforeDeadline(
-        () =>
+        (_signal) =>
           boundaries.notice(
             env,
             workspace.project_id,
@@ -197,12 +201,14 @@ async function preserveWorkspace(
     return;
   try {
     await beforeDeadline(
-      () =>
+      (signal) =>
         boundaries.sleep(env, {
           workspaceId: workspace.id,
           userId: workspace.user_id,
           reason: 'node_heartbeat_lost',
           sleepAfterMs: 0,
+          expectedNodeId: node.id,
+          signal,
         }),
       preservationDeadlineMs
     );

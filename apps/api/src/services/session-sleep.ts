@@ -122,8 +122,16 @@ export interface SleepWorkspaceSessionResult {
  */
 export async function queueWorkspaceSessionSleep(
   env: Env,
-  input: { workspaceId: string; userId: string; reason: string; sleepAfterMs?: number }
+  input: {
+    workspaceId: string;
+    userId: string;
+    reason: string;
+    sleepAfterMs?: number;
+    expectedNodeId?: string;
+    signal?: AbortSignal;
+  }
 ): Promise<void> {
+  input.signal?.throwIfAborted();
   const db = drizzle(env.DATABASE, { schema });
   const [workspace] = await db
     .select({
@@ -148,6 +156,10 @@ export async function queueWorkspaceSessionSleep(
   ) {
     throw new Error('Workspace is missing persistent-session ownership metadata');
   }
+  input.signal?.throwIfAborted();
+  if (input.expectedNodeId && workspace.nodeId !== input.expectedNodeId) {
+    throw new Error('Workspace moved from the unhealthy node');
+  }
   const [agentSession] = await db
     .select({ id: schema.agentSessions.id })
     .from(schema.agentSessions)
@@ -161,6 +173,8 @@ export async function queueWorkspaceSessionSleep(
     .limit(1);
   if (!agentSession) throw new Error('Workspace has no resumable agent session');
 
+  input.signal?.throwIfAborted();
+
   await ensureSessionSnapshotForSleep(db, env, {
     workspaceId: workspace.id,
     nodeId: workspace.nodeId,
@@ -170,6 +184,23 @@ export async function queueWorkspaceSessionSleep(
     agentSessionId: agentSession.id,
     runtime: workspace.nodeRuntime,
   });
+  input.signal?.throwIfAborted();
+  if (input.expectedNodeId) {
+    const [current] = await db
+      .select({ nodeId: schema.workspaces.nodeId, chatSessionId: schema.workspaces.chatSessionId })
+      .from(schema.workspaces)
+      .where(
+        and(eq(schema.workspaces.id, workspace.id), eq(schema.workspaces.userId, input.userId))
+      )
+      .limit(1);
+    input.signal?.throwIfAborted();
+    if (
+      current?.nodeId !== input.expectedNodeId ||
+      current.chatSessionId !== workspace.chatSessionId
+    ) {
+      throw new Error('Workspace moved from the unhealthy node');
+    }
+  }
   const sleepAfterMs =
     input.sleepAfterMs ??
     parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
@@ -242,7 +273,9 @@ export async function checkAutomaticSessionSleepEligibility(
       projectId: schema.workspaces.projectId,
       chatSessionId: schema.workspaces.chatSessionId,
       taskStatus: schema.tasks.status,
-      taskCompletedAt: sql<string | null>`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
+      taskCompletedAt: sql<
+        string | null
+      >`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
     })
     .from(schema.workspaces)
     .leftJoin(
@@ -332,7 +365,9 @@ export async function sleepWorkspaceSession(
       nodeRole: schema.nodes.nodeRole,
       taskId: schema.tasks.id,
       taskStatus: schema.tasks.status,
-      taskCompletedAt: sql<string | null>`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
+      taskCompletedAt: sql<
+        string | null
+      >`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
       warmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
     })
     .from(schema.workspaces)
