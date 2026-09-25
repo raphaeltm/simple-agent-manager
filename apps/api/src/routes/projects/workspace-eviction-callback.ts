@@ -16,6 +16,7 @@ import {
   nodeStatusTerminatesCallbacks,
 } from '../../services/node-callback-auth';
 import * as projectDataService from '../../services/project-data';
+import { isTransientSessionRecoveryRefusal } from '../../services/session-recovery-refusals';
 import { finalizeWorkspaceEvictionOnNode } from '../../services/workspace-eviction-lifecycle';
 import { recoverWorkspaceAfterEviction } from '../../services/workspace-eviction-recovery';
 
@@ -52,12 +53,6 @@ type WorkspaceEvictionResource = {
   updatedAt: string;
   evictionGeneration: string | null;
 };
-
-const RETRYABLE_EVICTION_RECOVERY_REASONS = new Set([
-  'workspace_deletion_unconfirmed',
-  'session_recovery_placement_placement',
-  'session_recovery_placement_transient',
-]);
 
 /**
  * VM-agent workspace eviction callback — mounted BEFORE projectsRoutes in
@@ -123,9 +118,7 @@ function workspaceEvictionErrorMessage(reason: WorkspaceEvictionBody['reason']):
 }
 
 function evictionRecoveryReasonIsRetryable(reason: string): boolean {
-  return (
-    RETRYABLE_EVICTION_RECOVERY_REASONS.has(reason) || reason.startsWith('recovery_start_failed:')
-  );
+  return isTransientSessionRecoveryRefusal(reason) || reason.startsWith('recovery_start_failed:');
 }
 
 async function finalizeEvictionLifecycle(env: Env, workspace: WorkspaceEvictionResource) {

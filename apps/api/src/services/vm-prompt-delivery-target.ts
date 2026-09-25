@@ -5,8 +5,9 @@
  */
 import type { PromptDeliveryResult } from '../durable-objects/project-data/prompt-delivery';
 import type { Env } from '../env';
-import { ensureSessionRecovery } from './session-recovery';
+import { ensureSessionRecovery, type SessionRecoveryResult } from './session-recovery';
 import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
+import { isTransientSessionRecoveryRefusal } from './session-recovery-refusals';
 
 export interface VmPromptDeliveryTarget {
   projectId: string;
@@ -32,6 +33,29 @@ export type TargetResolution =
   | { kind: 'retry'; reason: string }
   | { kind: 'failed'; reason: 'terminal_target' | 'dead_target'; error: string }
   | { kind: 'guarded'; result: PromptDeliveryResult };
+
+/**
+ * A wake in progress, or a refusal that clears on its own (a replaced workspace
+ * whose deletion still awaits its proof: typically the first minutes after a
+ * sleep, exactly when a user replies), is retried within the delivery's TTL and
+ * attempt budget. Only a refusal that cannot clear ends the delivery.
+ */
+function recoveryResolution(
+  recovery: SessionRecoveryResult,
+  terminalError: string
+): TargetResolution {
+  if (recovery.status === 'waking') {
+    return { kind: 'retry', reason: `Session is waking (${recovery.taskId})` };
+  }
+  if (isTransientSessionRecoveryRefusal(recovery.reason)) {
+    return { kind: 'retry', reason: `Session cannot wake yet (${recovery.reason})` };
+  }
+  return {
+    kind: 'failed',
+    reason: 'terminal_target',
+    error: `${terminalError} (${recovery.reason})`,
+  };
+}
 
 export async function resolveVmPromptDeliveryTarget(
   env: Env,
@@ -78,14 +102,7 @@ export async function resolveVmPromptDeliveryTarget(
     const guarded = await runSideEffectGuard();
     if (guarded) return { kind: 'guarded', result: guarded };
     const recovery = await ensureSessionRecovery(env, projectId, chatSessionId, sourceTaskGuard);
-    if (recovery.status === 'waking') {
-      return { kind: 'retry', reason: `Session is waking (${recovery.taskId})` };
-    }
-    return {
-      kind: 'failed',
-      reason: 'terminal_target',
-      error: `Target workspace no longer exists (${recovery.reason})`,
-    };
+    return recoveryResolution(recovery, 'Target workspace no longer exists');
   }
   if (
     row.node_runtime !== 'cf-container' &&
@@ -94,14 +111,7 @@ export async function resolveVmPromptDeliveryTarget(
     const guarded = await runSideEffectGuard();
     if (guarded) return { kind: 'guarded', result: guarded };
     const recovery = await ensureSessionRecovery(env, projectId, chatSessionId, sourceTaskGuard);
-    if (recovery.status === 'waking') {
-      return { kind: 'retry', reason: `Session is waking (${recovery.taskId})` };
-    }
-    return {
-      kind: 'failed',
-      reason: 'terminal_target',
-      error: `Target workspace is ${row.workspace_status} (${recovery.reason})`,
-    };
+    return recoveryResolution(recovery, `Target workspace is ${row.workspace_status}`);
   }
   if (['stopping', 'stopped', 'evicted', 'deleted', 'error'].includes(row.workspace_status)) {
     return {
