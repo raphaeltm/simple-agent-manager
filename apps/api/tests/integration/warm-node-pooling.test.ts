@@ -22,7 +22,13 @@ describe('warm node pooling lifecycle integration', () => {
     resolve(process.cwd(), 'src/durable-objects/node-lifecycle.ts'),
     'utf8'
   );
-  const cleanupFile = ['index.ts', 'shared.ts', 'node-phases.ts', 'workspace-phases.ts']
+  const cleanupFile = [
+    'index.ts',
+    'shared.ts',
+    'node-phases.ts',
+    'terminal-cf-container-phase.ts',
+    'workspace-phases.ts',
+  ]
     .map((f) => readFileSync(resolve(process.cwd(), `src/scheduled/node-cleanup/${f}`), 'utf8'))
     .join('\n');
   const serviceFile = readFileSync(
