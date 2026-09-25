@@ -23,11 +23,13 @@ import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 const mocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(),
   failSession: vi.fn(),
+  getSessionState: vi.fn(),
   persistMessage: vi.fn(),
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
   failSession: (...args: unknown[]) => mocks.failSession(...args),
+  getSessionState: (...args: unknown[]) => mocks.getSessionState(...args),
   persistMessage: (...args: unknown[]) => mocks.persistMessage(...args),
 }));
 
@@ -99,6 +101,7 @@ describe('preserveFailedTaskWork', () => {
       sleep_claim_id: null,
       sleep_claimed_at: null,
       capture_generation: null,
+      restored_at: null,
       expires_at: new Date(NOW.getTime() + 24 * 60 * 60 * 1000).toISOString(),
       ...overrides,
     };
@@ -107,10 +110,10 @@ describe('preserveFailedTaskWork', () => {
         `INSERT INTO session_snapshots
            (id, project_id, workspace_id, user_id, chat_session_id, runtime, status, degradation,
             manifest_r2_key, expires_at, sleeping_at, sleep_status, sleep_after, sleep_attempts,
-            sleep_claim_id, sleep_claimed_at, capture_generation, recovery_attempts,
-            created_at, updated_at)
+            sleep_claim_id, sleep_claimed_at, capture_generation, restored_at,
+            recovery_attempts, created_at, updated_at)
          VALUES ('snapshot-1', 'project-1', 'ws-1', 'user-1', 'chat-1', ?, ?, ?,
-                 'manifest.json', ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+                 'manifest.json', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
       )
       .run(
         row.runtime,
@@ -124,6 +127,7 @@ describe('preserveFailedTaskWork', () => {
         row.sleep_claim_id,
         row.sleep_claimed_at,
         row.capture_generation,
+        row.restored_at,
         NOW.toISOString(),
         NOW.toISOString()
       );
@@ -184,6 +188,7 @@ describe('preserveFailedTaskWork', () => {
     vi.clearAllMocks();
     mocks.cleanupTaskRun.mockResolvedValue(undefined);
     mocks.failSession.mockResolvedValue(undefined);
+    mocks.getSessionState.mockResolvedValue(null);
     mocks.persistMessage.mockResolvedValue('notice-1');
     sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
@@ -643,19 +648,33 @@ describe('preserveFailedTaskWork', () => {
       expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
     });
 
-    it('releases a claimable runtime whose preservation has waited too long', async () => {
-      // Rule 47's maximum residence: a turn that never ends, or an activity state
-      // that never resolves, defers forever without spending an attempt.
-      seedTask('failed', new Date(NOW.getTime() - 9 * 60 * 60 * 1000).toISOString());
+    const HOUR = 60 * 60 * 1000;
+
+    function seedLongFailedQueue(overrides: Record<string, string | number | null> = {}) {
+      seedTask('failed', new Date(NOW.getTime() - 9 * HOUR).toISOString());
       seedSnapshot({
         status: 'pending',
         sleeping_at: null,
         sleep_status: 'scheduled',
         sleep_after: NOW.toISOString(),
+        ...overrides,
       });
       seedRuntime();
+    }
+
+    it('releases a single turn that has hung past the maximum wait', async () => {
+      // Rule 47's maximum residence: a turn that never ends defers forever
+      // without spending an attempt.
+      seedLongFailedQueue();
+      mocks.getSessionState.mockResolvedValue({
+        activity: 'prompting',
+        activityAt: NOW.getTime() - 60_000,
+        promptStartedAt: NOW.getTime() - 9 * HOUR,
+      });
 
       await expect(releaseStalledFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(true);
+      // Read the same state the sweep's eligibility check reads.
+      expect(mocks.getSessionState).toHaveBeenCalledWith(env, 'project-1', 'agent-1');
       expect(mocks.persistMessage).toHaveBeenCalledWith(
         env,
         'project-1',
@@ -668,8 +687,47 @@ describe('preserveFailedTaskWork', () => {
       expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env);
     });
 
+    it('releases an activity state that never resolves after the maximum wait', async () => {
+      seedLongFailedQueue();
+
+      await expect(releaseStalledFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(true);
+    });
+
+    it('restarts the wait with every turn the conversation starts', async () => {
+      // A user still working in the failed conversation is not a hung turn.
+      seedLongFailedQueue();
+      mocks.getSessionState.mockResolvedValue({
+        activity: 'prompting',
+        activityAt: NOW.getTime() - 60_000,
+        promptStartedAt: NOW.getTime() - 10 * 60_000,
+      });
+
+      await expect(releaseStalledFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(false);
+      expect(mocks.persistMessage).not.toHaveBeenCalled();
+      expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+    });
+
+    it('measures the wait from an in-place wake, not the original failure', async () => {
+      // An Instant conversation wakes under the same failed task.
+      seedLongFailedQueue({ restored_at: new Date(NOW.getTime() - HOUR).toISOString() });
+
+      await expect(releaseStalledFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(false);
+      expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+      // The cheap anchors decide without a ProjectData call.
+      expect(mocks.getSessionState).not.toHaveBeenCalled();
+    });
+
+    it('withholds the release while the turn lookup fails', async () => {
+      seedLongFailedQueue();
+      mocks.getSessionState.mockRejectedValue(new Error('ProjectData unavailable'));
+
+      await expect(releaseStalledFailedTaskPreservation(env, RELEASE_INPUT)).resolves.toBe(false);
+      expect(mocks.persistMessage).not.toHaveBeenCalled();
+      expect(sleepRow()).toMatchObject({ sleep_status: 'scheduled' });
+    });
+
     it('honours a configured maximum wait', async () => {
-      seedTask('failed', new Date(NOW.getTime() - 2 * 60 * 60 * 1000).toISOString());
+      seedTask('failed', new Date(NOW.getTime() - 2 * HOUR).toISOString());
       seedSnapshot({
         status: 'pending',
         sleeping_at: null,

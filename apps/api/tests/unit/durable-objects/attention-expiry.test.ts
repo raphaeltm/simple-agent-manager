@@ -715,6 +715,18 @@ describe('delivery-aware attention expiry', () => {
 
     it.each([
       ['prompting past the hard ceiling', { activity: 'prompting' }],
+      ['recovering past the hard ceiling', { activity: 'recovering' }],
+      [
+        'settling harness work past the hard ceiling',
+        {
+          activity: 'idle',
+          activityAt: START + 1_000,
+          promptStartedAt: null,
+          runtimeWorkState: 'settling' as const,
+          runtimeWorkUpdatedAt: START + 1_000,
+          runtimeWorkProgressAt: START + 1_000,
+        },
+      ],
       [
         'running harness work past the hard ceiling',
         {
@@ -762,6 +774,28 @@ describe('delivery-aware attention expiry', () => {
         await vi.waitFor(() => expect(cleanupTaskRun).toHaveBeenCalledWith('task-1', env));
       }
     );
+
+    it('preserves a live runtime whose check-in expired before its agent reported again', async () => {
+      // The check-in prompt starts before its marker exists, and the agent's first
+      // re-report can land just after the deadline. A `prompting` label with nothing
+      // reported since the check-in is unproven, not stalled: preserve it, and let
+      // the sweep and the maximum wait bound it.
+      seedLiveVmRuntime();
+      insertActiveAcpState({
+        activity: 'prompting',
+        promptStartedAt: START - 2_000,
+        activityAt: START - 1_000,
+      });
+      checkinMarker();
+
+      await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+      expect(taskRow().status).toBe('failed');
+      expect(snapshotRow()).toMatchObject({ sleep_status: 'scheduled' });
+      expect(persistMessage).not.toHaveBeenCalled();
+      expect(failSession).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
+    });
 
     it('still preserves a live runtime whose check-in expired on an idle agent (control)', async () => {
       seedLiveVmRuntime();
