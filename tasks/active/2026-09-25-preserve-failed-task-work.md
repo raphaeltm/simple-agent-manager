@@ -23,6 +23,7 @@ lost, and the ProjectData chat session becomes `failed`, which can no longer be 
   The remaining failures were either startup failures (Hetzner 403, no capacity, node agent not
   ready, invalid management token, instant clone) or runtimes that were already gone (4 h/8 h
   liveness timeouts after the 7-day sleep expired, dead-runtime reconciliation).
+
 - **8 of the 9 human-input expiries were already asleep** before the task failed. The sleep came
   about a day before the failure, so a snapshot existed and `sleep_status='sleeping'`. The failure
   path then ran `failSession`, which moved ProjectData from `sleeping` to `failed`. The snapshot
@@ -33,7 +34,7 @@ lost, and the ProjectData chat session becomes `failed`, which can no longer be 
   snapshot is still `pending` and was never captured.
 - 56 of 214 snapshots touched in 7 days are `degraded/transcript-only` ("Workspace snapshot made
   no progress for 120000ms"). The brief's example task `01M38BQPCNHPS4ACF3FWX9FEJ8` lost its files
-  at *sleep* time (a transcript-only snapshot, about a day before the failure), not at failure
+  at _sleep_ time (a transcript-only snapshot, about a day before the failure), not at failure
   time. Capture reliability is tracked by idea `01M04SB5QS0ASYKDSZR8FFSY38` and is out of scope
   here. It is the reason a degraded capture must be surfaced to the user.
 
@@ -47,6 +48,7 @@ lost, and the ProjectData chat session becomes `failed`, which can no longer be 
 
   So a preserved failure must not call `failSession`. If it did, the later sleep would dead-end
   at "ProjectData refused the durable sleeping transition".
+
 - The sleep machinery special-cases `completed` only, in three predicates:
   - `classifySessionIdleness` (`services/session-idleness.ts`): drains a stale prompt and reclaims
     immediately once idle.
@@ -57,6 +59,7 @@ lost, and the ProjectData chat session becomes `failed`, which can no longer be 
 
   With no changes, a failed task in `prompting` would never sleep, and every 60 s re-report would
   erase its intent.
+
 - Node-cleanup sweeps destroy failed tasks' runtimes while exempting `completed` tasks that have a
   chat session:
   - Phase 4 `sweepOrphanedWorkspaces` (`scheduled/node-cleanup/workspace-phases.ts`)
@@ -64,6 +67,7 @@ lost, and the ProjectData chat session becomes `failed`, which can no longer be 
 
   `node_cleanup` runs before `session_sleep` in every 5-minute tick (`scheduled/handler.ts`), so
   without an exemption it always wins the race.
+
 - The attention expiry path (`durable-objects/project-data/attention-expiry.ts`) runs
   `transitionTaskToTerminal(stopWorkspace: true)`, which marks the D1 workspace `stopped` without
   a VM stop. The sleep path then refuses the workspace ("Workspace cannot sleep from status
@@ -90,24 +94,37 @@ lost, and the ProjectData chat session becomes `failed`, which can no longer be 
 
 **Preserve.** A live, snapshot-able runtime can hold unpublished work:
 
-| Path | Entry point | Runtime |
-|---|---|---|
-| VM-agent failure callback (`Agent prompt failed`, fatal ACP errors, prompt timeout) | `routes/tasks/callback.ts` → `cleanupTerminalTaskResourcesOrThrow` | VM + cf-container (the standalone agent posts the same callback) |
-| User/API status → `failed` | `routes/tasks/crud.ts POST /:taskId/status` → `cleanupTerminalTaskResourcesOrThrow` | both |
-| Human-input expiry | `attention-expiry.ts failExpiredTaskMarker (needs_input)` | both |
-| SAM check-in expiry | `attention-expiry.ts failExpiredTaskMarker (reconciliation_checkin)` | both |
+| Path                                                                             | Entry point                                                                                                                             | Runtime                                                          |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| VM-agent failure callback (`Agent prompt failed`: provider errors, usage limits) | `routes/tasks/callback.ts` → `cleanupTerminalTaskResourcesOrThrow`                                                                      | VM + cf-container (the standalone agent posts the same callback) |
+| User/API status → `failed`                                                       | `routes/tasks/crud.ts POST /:taskId/status` → `cleanupTerminalTaskResourcesOrThrow`                                                     | both                                                             |
+| Explicit run cleanup of a failed run                                             | `routes/tasks/run.ts POST /:taskId/run/cleanup` → `cleanupRequestedTaskRun` (failed only; completed/cancelled keep the direct teardown) | both                                                             |
+| Human-input expiry                                                               | `attention-expiry.ts failExpiredTaskMarker (needs_input)`                                                                               | both                                                             |
+| SAM check-in expiry                                                              | `attention-expiry.ts failExpiredTaskMarker (reconciliation_checkin)`                                                                    | both                                                             |
 
 **Keep the existing sleep.** The conversation is already asleep or its sleep is in flight: any
 failure path above, when `loadTaskSleepPreservation` reports `preserve`. This is the same
 predicate the resumer reads (rule 58).
 
+**Released with a notice (cannot be preserved by sleep).** A fatal agent error (prompt timeout,
+unrecoverable crash) makes the VM agent report `error` activity, which sets
+`agent_sessions.status = 'error'`, alongside the failure callback. The sleep path needs a
+resumable agent session to hibernate, so whichever lands first, the runtime is torn down and the
+chat says so: at failure time (`no_resumable_agent_session`), or by the sweep's
+`releaseUnclaimableFailedTaskPreservation` when the error lands after the sleep was queued.
+
+**Readers that must agree with preservation (not entry points):** the terminal-session ledger
+reconciler (`terminal-session-reconciliation.ts`) defers while `findRestorableOrInFlightSleepSnapshot`
+sees the queued intent, past the completion-drain window; covered by
+`tests/workers/completion-response-drain.test.ts`.
+
 **Destructive by design (control).** These paths express explicit intent:
 
-| Path | Entry point |
-|---|---|
-| Archive/Stop session | `routes/chat-stop.ts` (`destructiveSessionEnd: true`, even when the task already `failed`) |
-| Delete task | `routes/tasks/crud.ts DELETE` (`cancelled` + `destructiveSessionEnd`) |
-| Parent stop | `routes/mcp/orchestration-comms.ts`, `sam-session/tools/stop-subtask.ts` (`cancelled`, policy `486d1dd1`) |
+| Path                 | Entry point                                                                                               |
+| -------------------- | --------------------------------------------------------------------------------------------------------- |
+| Archive/Stop session | `routes/chat-stop.ts` (`destructiveSessionEnd: true`, even when the task already `failed`)                |
+| Delete task          | `routes/tasks/crud.ts DELETE` (`cancelled` + `destructiveSessionEnd`)                                     |
+| Parent stop          | `routes/mcp/orchestration-comms.ts`, `sam-session/tools/stop-subtask.ts` (`cancelled`, policy `486d1dd1`) |
 
 **Unchanged, with nothing to preserve:**
 
@@ -135,6 +152,7 @@ predicate the resumer reads (rule 58).
      and surfaces a degraded state.
 
    In the first three outcomes the ProjectData session is never failed.
+
 2. `cleanupTerminalTaskResources`: for `failed && !destructiveSessionEnd`, consult the decision
    first. Only `not_preservable` reaches `failSession` + `cleanupTaskRun`, and it first persists a
    system message stating that the work could not be preserved.
@@ -167,7 +185,36 @@ predicate the resumer reads (rule 58).
 - [x] Docs: update public docs that describe failed-task cleanup/sleep behavior (`architecture/overview.md`, `guides/chat-features.md`, `reference/configuration.md` `SESSION_SLEEP_AFTER_MS`).
 - [x] Cost note (rule 76): `pnpm quality:cloudflare-cost` baseline + incremental R2 estimate in PR.
 - [x] Follow-up ideas: UI `wakeAttemptFailed` proxy (01M3BVZYGE7AAKQZDYCM7PXJ7N); kill-switch preservation (01M3BVZR6AZ0S4F5Q2JRKSEX09); late execution-step callback clears a failed task's error (01M3BVZH8GCR2KXH19KFPX5D86); completed-task exhausted sleep (01M3BW047BN1SPA3YBQ68SV4T8); transcript-only evidence appended to `01M04SB5QS0ASYKDSZR8FFSY38`.
+- [x] Review round 1 fixes (see the table above): one authority for the claimer's preconditions and the chat→task join; fresh sleep episode on failure with a verified intent; reaper ownership mirrors the claimer and releases exhausted sleeps; sweep releases unclaimable and budget-spent preservations; failed tasks drain from the failure; repair accepts a `failed` session; deterministic notice ids; incomplete-snapshot note on the already-asleep path with Instant wording; explicit run cleanup through preservation; step reports keep a failed task's error; docs.
+- [x] Review round 1 tests, each proven discriminating by a surgical revert: unit preservation (43), authority TS/SQL agreement + ownership matrix (28), idleness drain rules, repair, route wiring (run/cleanup, status, Archive of a failed task, step report), integration (stale budget, error race, selection-time exhaustion via `waitUntil`, hung prompt + completed control, both runtimes), workers reapers (backstop at both phases), workers reconciler deferral, workers real-alarm self-RPC notice.
 - [ ] Staging: a real failed task on a VM with an uncommitted file ends sleeping with a snapshot; wake restores the file; clean up.
+
+## Review round 1 (2026-09-25): findings and dispositions
+
+Seven local reviewers ran. Every finding below is fixed in the branch unless marked otherwise.
+
+| Reviewer                                      | Finding                                                                                                                                                                                 | Disposition                                                                                                                                    |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| lifecycle (adversarial)                       | HIGH F1: a fatal agent error racing the failure callback left a queued sleep the sweep deferred forever; the reaper then stopped the VM with no notice, and the session stayed `active` | Fixed: `releaseUnclaimableFailedTaskPreservation` (sweep deferral branch) + reaper predicate mirrors the claimer                               |
+| lifecycle                                     | F2: a hung prompt re-reports `prompting` every minute, so the drain anchored on activity never ended                                                                                    | Fixed: failed tasks drain from the failure (`SLEEP_PRESERVED_DRAIN_FOLLOWS_ACTIVITY`)                                                          |
+| lifecycle                                     | F3: degraded / mid-capture rows retry past the budget forever                                                                                                                           | Fixed: a failed task's release fires once `sleep_attempts >= SESSION_SLEEP_MAX_ATTEMPTS`                                                       |
+| lifecycle, test-engineer                      | F4 / HIGH: `sleep_queued` was reported without checking an intent was written; a budget spent by an earlier sleep ended preservation with zero attempts                                 | Fixed: failure starts a fresh episode (`resetAttempts`), and `scheduleSessionSnapshotSleep` now reports whether it wrote                       |
+| lifecycle                                     | F5: a terminal reconciler could fail a preserved session, then the sleep jammed at `stopping`                                                                                           | Fixed: the lifecycle repair also finishes teardown for a `failed` ProjectData session                                                          |
+| lifecycle                                     | F6: an incomplete snapshot was not noted on the already-asleep path (8 of 9 production cases)                                                                                           | Fixed: noted at failure time                                                                                                                   |
+| lifecycle                                     | F7: expired degraded sleeping snapshots are never purged (pre-existing; 174 in production)                                                                                              | Deferred: evidence appended to existing idea `01M05HTJHCWXCG5YZJ6TB3Y2AG`; widening a destructive purge deserves its own change                |
+| lifecycle                                     | F8: an incomplete Instant snapshot can never be restored, yet the note said "when it wakes"                                                                                             | Fixed: Instant wording                                                                                                                         |
+| lifecycle                                     | F9: a transient queue error tears down instead of relying on the reconciler                                                                                                             | Kept deliberately: teardown is bounded and visible; withholding would have no bound for a persistent error                                     |
+| lifecycle                                     | F10: terminalized missing-source rows skipped the release; notices could repeat                                                                                                         | Fixed: settle after `terminalizeMissingSleepSource`; per-task deterministic notice ids                                                         |
+| lifecycle                                     | F11: a late step report clears a failed task's error (idea `01M3BVZH8GCR2KXH19KFPX5D86`)                                                                                                | Fixed: the step-only callback keeps a failed task's `error_message`                                                                            |
+| task-completion-validator                     | HIGH: `POST /:taskId/run/cleanup` bypassed preservation                                                                                                                                 | Fixed: `cleanupRequestedTaskRun`                                                                                                               |
+| task-completion-validator                     | MEDIUM: terminal-session reconciler vs a queued intent untested                                                                                                                         | Fixed: workers test                                                                                                                            |
+| cloudflare-specialist                         | HIGH: floating teardown promise in the DO alarm, and the lost durable `stopped` backstop                                                                                                | `waitUntil` premise refuted by Cloudflare docs ("`waitUntil` has no effect in Durable Objects"); backstop fixed by the reaper ownership mirror |
+| cloudflare-specialist                         | MEDIUM: self-RPC notice untested at runtime fidelity                                                                                                                                    | Fixed: `tests/workers/attention-expiry-failed-task-preservation.test.ts`                                                                       |
+| cloudflare-specialist                         | LOW: one extra read per claimed sleep                                                                                                                                                   | Accepted: bounded by the batch size, off the critical path                                                                                     |
+| architecture-reviewer                         | HIGH: a fourth copy of the chat→task ownership join                                                                                                                                     | Fixed: `session-sleep-task-owner.ts`, used by all four sites                                                                                   |
+| architecture-reviewer, constitution-validator | Duplicated status lists; ownership SQL not derived from the authority                                                                                                                   | Fixed: shared claimer constants; `Record<status, rule>` ownership                                                                              |
+| doc-sync-validator                            | `overview.md` Notification DO paragraph and `notifications.md` still said the check-in watchdog was destructive                                                                         | Fixed                                                                                                                                          |
+| test-engineer                                 | `terminal_failed`, selection-time exhaustion, Archive of a failed task, status route, both runtimes, check-in + already-asleep                                                          | Fixed: tests added                                                                                                                             |
 
 ## Acceptance criteria
 
@@ -175,7 +222,10 @@ predicate the resumer reads (rule 58).
 - A failure on an already-sleeping conversation leaves it `sleeping` and wakeable.
 - When preservation is impossible or exhausted, the workspace is still torn down (bounded) and the chat shows a clear system message that work was not preserved. A degraded capture is surfaced as well.
 - Archive, Delete, and parent-stop paths still tear down immediately. Parent-stopped tasks stay `cancelled`.
-- Failed-task snapshots use the standard 7-day retention; no new retention path.
+- Failed-task snapshots use the standard 7-day retention; no new retention path. (The
+  pre-existing purge gap for degraded snapshots is tracked in idea `01M05HTJHCWXCG5YZJ6TB3Y2AG`.)
+- A failed task whose runtime can no longer be slept (fatal agent error, stopped workspace,
+  exhausted retries) is torn down with a chat notice and a failed session — never left `active`.
 
 ## References
 
@@ -185,9 +235,9 @@ predicate the resumer reads (rule 58).
 
 ## Implementation notes
 
-- Cancelling a failed agent's prompt was rejected: the VM agent answers a cancel with `awaiting_followup`, and that callback clears `tasks.error_message`. Filed as bug idea 01M3BVZH8GCR2KXH19KFPX5D86. Hung prompts instead drain for `SESSION_SLEEP_AFTER_MS` after the failure (classifier), then snapshot. A still-working prompt keeps fencing the claim and exhausts into the teardown fallback, so it is bounded.
+- Cancelling a failed agent's prompt was rejected: the VM agent answers a cancel with `awaiting_followup`. A hung prompt instead drains for `SESSION_SLEEP_AFTER_MS` from the failure itself — the VM agent's minute-by-minute `prompting` re-report must not extend it — then the sleep is attempted; if hibernation keeps failing, the retry budget bounds it and the release tears down with a notice. The error-clearing callback itself is now fixed in this branch (review F11).
+- Known limitation: a fatal agent error (prompt timeout, unrecoverable crash) ends the agent session, and the sleep path needs a live one to snapshot, so that work cannot be preserved; the chat says so. Preserving files without a live agent session would need VM-agent support for a file-only snapshot.
 - The ProjectData DO path (attention expiry) loads the preservation module by dynamic import, matching the file's existing pattern. It surfaces through `projectDataService.persistMessage`, a self-RPC; `reconcileTaskWaits` already does the same from this alarm.
 - `node-phases.ts` (623 lines) was split first: Phase 0 moved to `terminal-cf-container-phase.ts` as a pure move, in commit 1fe9d7cf8.
 - Local results: API unit+integration 10,305/10,305 passing; API lint and typecheck clean.
 - Cost (rule 76): R2 storage is 50 GB, steady, projected at $0.60/month over the allowance. Average snapshot size is 33.8 MB (7-day production manifests; max 231.5 MB, cap 256 MiB). Expect about 5 newly preserved failed tasks a week at 7-day retention: roughly 0.17 GB steady state (about 1.3 GB worst case), under $0.05/month.
-
