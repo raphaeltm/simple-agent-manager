@@ -209,6 +209,32 @@ The tasks were `01M3BB7KNY7N0480AM6YN0ZSJD`, `01M3BB8BXAHWBYZD94Q5NJD8WN` and
   - R1 no quota classification: 10 provider tests and 10 API tests; the auth controls stay
     green.
   - R2 no category at construction: the production-shaped `provisionNode` row-delete test.
+- **Rule 18, providers.** `hetzner.ts` hit 809 lines (`quality:file-sizes` fails above 800).
+  Volume operations moved to `hetzner-volumes.ts`, and `createVM`'s capacity-retry loop and
+  placement fallback to `hetzner-server-create.ts`, both verbatim (script-verified). `hetzner.ts`
+  is now 384 lines.
+- **Phase 5 review fixes (all eight reviewers PASS, no CRITICAL/HIGH):**
+  - Discard crash window (cloudflare-specialist MEDIUM, security-auditor LOW):
+    `discardProviderRejectedNode` now forgets the node in DO storage *before* the D1 writes.
+    The DELETE (now scoped to `user_id`) and the task unlink (now scoped to this node) run as one
+    `batch`. A crash between the two used to restart claiming a deleted node, which fails the wake
+    as "disappeared". R9 (storage put moved back after the batch) reddened only the new
+    crash-restart test.
+  - Message fallback masking a credential failure (security-auditor MEDIUM): a 403 that mentions
+    a limit but talks about the token, permissions or credentials stays `auth_error`. R10 (veto
+    removed) reddened exactly the three new veto tests.
+  - Coverage (test-engineer): an offering with no known vCPU count waits instead of guessing
+    what fits; a core quota under `fail` waits on the account.
+  - Docs: the new env var added to the `env-reference` skill (plus its undocumented sibling
+    `SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS`); `packages/providers/AGENTS.md` key files; rule
+    58's stale `loadRecoveryContext` path; rule 72's narrative now points at
+    `node-provisioning-failure.ts`; cross-reference comments tie the session-recovery split to
+    the node-pool boundary gate.
+  - Accepted as-is: `coreQuotaRejections` is in-memory, so a DO restart mid-descent re-asks for
+    the largest offering once (efficiency only). The platform-credential message names SAM's
+    shared account (intended). No deploy wiring for the new var (matches its siblings).
+  - Follow-up idea (architecture MEDIUM): read Hetzner's structured `details.limits[].name` and
+    the server type's `cpu_type` instead of message/prefix heuristics.
 - **Out of scope, tracked on the idea.** The three incident node rows (`01M3BB7W…`,
   `01M3BB8M…`, `01M3BB9D…`) stay `destroying`. They have no `provider_instance_id` and no
   `runtime_termination_confirmed_at`, so strict deletion cannot prove absence, and cleanup

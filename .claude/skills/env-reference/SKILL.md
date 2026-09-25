@@ -97,6 +97,8 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES` — Maximum snapshot coordination JSON body (default: `262144`)
 - `SESSION_SNAPSHOT_R2_PREFIX` — Private R2 object prefix for session snapshots (default: `session-snapshots`)
 - `SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS` — Maximum replacement-VM wake attempts before the sleeping session becomes unavailable (default: `3`)
+- `SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS` — How long a spent wake-attempt burst stays spent (default: `900000`)
+- `SESSION_RECOVERY_LINEAGE_MAX_DEPTH` — Wake→wake links followed back to the conversation's first run when deciding whether a wake must stay in its original location (default: `256`)
 - `SESSION_SLEEP_AFTER_MS` — Runtime-neutral idle time before automatic VM-session sleep (default: `900000`)
 - `SESSION_SLEEP_SWEEP_BATCH_SIZE` — Maximum due VM sleeps atomically claimed by one scheduled sweep (default: `10`)
 - `SESSION_SLEEP_RETRY_DELAY_MS` — Delay after a fail-closed automatic sleep attempt (default: `300000`)
