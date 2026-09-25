@@ -175,6 +175,44 @@ describe('failed-task work preservation vertical slice', () => {
   const EXHAUSTION_WRITE =
     /^update "session_snapshots" set "sleep_status" = \?, "sleep_after" = \?, "sleep_error"/i;
 
+  /** Run the sweep as the scheduled handler does, then drain its background work. */
+  async function sweepAndSettle(now: Date) {
+    const background: Promise<unknown>[] = [];
+    const sweep = await runSessionSleepSweep(env, now, {
+      waitUntil: (promise) => background.push(promise),
+    });
+    await Promise.all(background);
+    return { sweep, background };
+  }
+
+  function expectWorkLossNotice(reason: Parameters<typeof failedTaskWorkLossMessage>[0]) {
+    expect(mocks.persistMessage).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'chat-1',
+      'system',
+      failedTaskWorkLossMessage(reason),
+      null,
+      WORK_LOSS_NOTICE_ID
+    );
+  }
+
+  /** An Instant task that failed 9h before START, slept, then woke in place at `wokeAt`. */
+  async function wakeOldInstantFailure(wokeAt: Date) {
+    seedFailedTask('cf-container', 'failed', new Date(START.getTime() - 9 * HOUR).toISOString());
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
+    expect(await runSessionSleepSweep(env, START)).toMatchObject({ slept: 1 });
+    mocks.persistMessage.mockClear();
+    mocks.cleanupTaskRun.mockClear();
+    vi.setSystemTime(wokeAt);
+    await markSessionSnapshotAwakeInPlace(env, 'chat-1', 'task-1', 'workspace-1');
+    // What the resumed container and ProjectData's wakeSession record.
+    sqlite.prepare(`UPDATE nodes SET status = 'running' WHERE id = 'node-1'`).run();
+    sqlite.prepare(`UPDATE workspaces SET status = 'running' WHERE id = 'workspace-1'`).run();
+    sqlite.prepare(`UPDATE agent_sessions SET status = 'running' WHERE id = 'agent-1'`).run();
+    projectDataStatus = 'active';
+  }
+
   function statusOf(table: 'workspaces' | 'agent_sessions' | 'nodes', id: string) {
     return (
       sqlite.prepare(`SELECT status FROM ${table} WHERE id = ?`).get(id) as { status: string }
@@ -471,15 +509,7 @@ describe('failed-task work preservation vertical slice', () => {
       expect(second).toMatchObject({ claimed: 1, failed: 1 });
       // The release ends the episode, so no later sweep retries it.
       expect(snapshotRow()).toMatchObject({ sleep_status: 'terminal_failed', sleep_after: null });
-      expect(mocks.persistMessage).toHaveBeenCalledWith(
-        env,
-        'project-1',
-        'chat-1',
-        'system',
-        failedTaskWorkLossMessage('snapshot_retry_exhausted'),
-        null,
-        WORK_LOSS_NOTICE_ID
-      );
+      expectWorkLossNotice('snapshot_retry_exhausted');
       expect(mocks.failSession).toHaveBeenCalledWith(
         env,
         'project-1',
@@ -538,24 +568,11 @@ describe('failed-task work preservation vertical slice', () => {
     sqlite.prepare(`UPDATE agent_sessions SET status = 'error' WHERE id = 'agent-1'`).run();
     projectDataStatus = 'failed';
     mocks.getSessionState.mockResolvedValue(null);
-    const background: Promise<unknown>[] = [];
-
-    const sweep = await runSessionSleepSweep(env, START, {
-      waitUntil: (promise) => background.push(promise),
-    });
-    await Promise.all(background);
+    const { sweep } = await sweepAndSettle(START);
 
     expect(sweep).toMatchObject({ claimed: 0, deferred: 1 });
     expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
-    expect(mocks.persistMessage).toHaveBeenCalledWith(
-      env,
-      'project-1',
-      'chat-1',
-      'system',
-      failedTaskWorkLossMessage('no_resumable_agent_session'),
-      null,
-      WORK_LOSS_NOTICE_ID
-    );
+    expectWorkLossNotice('no_resumable_agent_session');
     expect(order.slice(-3)).toEqual(['system-notice', 'project-data-fail', 'task-cleanup']);
     expect(snapshotRow()).toMatchObject({ sleep_status: 'terminal_failed', sleep_after: null });
 
@@ -577,25 +594,12 @@ describe('failed-task work preservation vertical slice', () => {
          WHERE chat_session_id = 'chat-1'`
       )
       .run(new Date(START.getTime() - 24 * 60 * 60 * 1000).toISOString());
-    const background: Promise<unknown>[] = [];
-
-    const sweep = await runSessionSleepSweep(env, START, {
-      waitUntil: (promise) => background.push(promise),
-    });
+    const { sweep, background } = await sweepAndSettle(START);
 
     expect(sweep).toMatchObject({ claimed: 0, exhausted: 1 });
     // The teardown is handed to waitUntil, not awaited inside the sweep.
     expect(background).toHaveLength(1);
-    await Promise.all(background);
-    expect(mocks.persistMessage).toHaveBeenCalledWith(
-      env,
-      'project-1',
-      'chat-1',
-      'system',
-      failedTaskWorkLossMessage('snapshot_retry_exhausted'),
-      null,
-      WORK_LOSS_NOTICE_ID
-    );
+    expectWorkLossNotice('snapshot_retry_exhausted');
     expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env);
     expect(snapshotRow()).toMatchObject({ sleep_status: 'terminal_failed' });
   });
@@ -624,12 +628,7 @@ describe('failed-task work preservation vertical slice', () => {
         )
         .run(START.toISOString());
     });
-    const background: Promise<unknown>[] = [];
-
-    const sweep = await runSessionSleepSweep(env, START, {
-      waitUntil: (promise) => background.push(promise),
-    });
-    await Promise.all(background);
+    const { sweep, background } = await sweepAndSettle(START);
 
     expect(interleave.fired).toBe(true);
     expect(sweep).toMatchObject({ exhausted: 0 });
@@ -664,12 +663,7 @@ describe('failed-task work preservation vertical slice', () => {
         )
         .run(START.toISOString());
     });
-    const background: Promise<unknown>[] = [];
-
-    const sweep = await runSessionSleepSweep(env, START, {
-      waitUntil: (promise) => background.push(promise),
-    });
-    await Promise.all(background);
+    const { sweep } = await sweepAndSettle(START);
 
     expect(interleave.fired).toBe(true);
     expect(sweep).toMatchObject({ exhausted: 0 });
@@ -694,29 +688,12 @@ describe('failed-task work preservation vertical slice', () => {
     // (`commitContainerWake`), and the sweep re-queues its sleep straight away.
     // Measured from the failure, the maximum wait would tear the woken
     // conversation down.
-    seedFailedTask('cf-container', 'failed', new Date(START.getTime() - 9 * HOUR).toISOString());
-    await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
-    expect(await runSessionSleepSweep(env, START)).toMatchObject({ slept: 1 });
-    mocks.persistMessage.mockClear();
-    mocks.cleanupTaskRun.mockClear();
-
     const wokeAt = new Date(START.getTime() + HOUR);
-    vi.setSystemTime(wokeAt);
-    await markSessionSnapshotAwakeInPlace(env, 'chat-1', 'task-1', 'workspace-1');
-    // What the resumed container and ProjectData's wakeSession record.
-    sqlite.prepare(`UPDATE nodes SET status = 'running' WHERE id = 'node-1'`).run();
-    sqlite.prepare(`UPDATE workspaces SET status = 'running' WHERE id = 'workspace-1'`).run();
-    sqlite.prepare(`UPDATE agent_sessions SET status = 'running' WHERE id = 'agent-1'`).run();
-    projectDataStatus = 'active';
+    await wakeOldInstantFailure(wokeAt);
     mocks.getSessionState.mockResolvedValue(state(wokeAt.getTime()));
     const later = new Date(wokeAt.getTime() + 5 * 60_000);
     vi.setSystemTime(later);
-    const background: Promise<unknown>[] = [];
-
-    const sweep = await runSessionSleepSweep(env, later, {
-      waitUntil: (promise) => background.push(promise),
-    });
-    await Promise.all(background);
+    const { sweep } = await sweepAndSettle(later);
 
     expect(sweep).toMatchObject({ reconciled: 1, claimed: 0, deferred: 1 });
     expect(mocks.persistMessage).not.toHaveBeenCalled();
@@ -729,19 +706,8 @@ describe('failed-task work preservation vertical slice', () => {
     // Every delivery attempt to an Instant session re-runs the in-place wake writer
     // (`commitContainerWake`), even while its agent is busy. Only the real wake may
     // date the episode, or a hung turn that keeps receiving messages never ends.
-    seedFailedTask('cf-container', 'failed', new Date(START.getTime() - 9 * HOUR).toISOString());
-    await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
-    expect(await runSessionSleepSweep(env, START)).toMatchObject({ slept: 1 });
-    mocks.persistMessage.mockClear();
-    mocks.cleanupTaskRun.mockClear();
-
     const wokeAt = new Date(START.getTime() + HOUR);
-    vi.setSystemTime(wokeAt);
-    await markSessionSnapshotAwakeInPlace(env, 'chat-1', 'task-1', 'workspace-1');
-    sqlite.prepare(`UPDATE nodes SET status = 'running' WHERE id = 'node-1'`).run();
-    sqlite.prepare(`UPDATE workspaces SET status = 'running' WHERE id = 'workspace-1'`).run();
-    sqlite.prepare(`UPDATE agent_sessions SET status = 'running' WHERE id = 'agent-1'`).run();
-    projectDataStatus = 'active';
+    await wakeOldInstantFailure(wokeAt);
 
     // The follow-up's turn hangs, re-reporting every minute; a queued message is
     // retried against the busy container just before the sweep runs.
@@ -754,23 +720,10 @@ describe('failed-task work preservation vertical slice', () => {
     vi.setSystemTime(new Date(later.getTime() - 60_000));
     await markSessionSnapshotAwakeInPlace(env, 'chat-1', 'task-1', 'workspace-1');
     vi.setSystemTime(later);
-    const background: Promise<unknown>[] = [];
-
-    const sweep = await runSessionSleepSweep(env, later, {
-      waitUntil: (promise) => background.push(promise),
-    });
-    await Promise.all(background);
+    const { sweep } = await sweepAndSettle(later);
 
     expect(sweep).toMatchObject({ claimed: 0, deferred: 1 });
-    expect(mocks.persistMessage).toHaveBeenCalledWith(
-      env,
-      'project-1',
-      'chat-1',
-      'system',
-      failedTaskWorkLossMessage('preservation_timed_out'),
-      null,
-      WORK_LOSS_NOTICE_ID
-    );
+    expectWorkLossNotice('preservation_timed_out');
     expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env);
   });
 
@@ -784,12 +737,7 @@ describe('failed-task work preservation vertical slice', () => {
       promptStartedAt: START.getTime() - 10 * 60_000,
     });
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
-    const background: Promise<unknown>[] = [];
-
-    const sweep = await runSessionSleepSweep(env, START, {
-      waitUntil: (promise) => background.push(promise),
-    });
-    await Promise.all(background);
+    const { sweep } = await sweepAndSettle(START);
 
     expect(sweep).toMatchObject({ claimed: 0, deferred: 1 });
     expect(mocks.persistMessage).not.toHaveBeenCalled();
@@ -816,23 +764,10 @@ describe('failed-task work preservation vertical slice', () => {
         },
       } as unknown as D1Database,
     } as Env;
-    const background: Promise<unknown>[] = [];
-
-    const sweep = await runSessionSleepSweep(env, START, {
-      waitUntil: (promise) => background.push(promise),
-    });
-    await Promise.all(background);
+    const { sweep } = await sweepAndSettle(START);
 
     expect(sweep).toMatchObject({ claimed: 0, failed: 1 });
-    expect(mocks.persistMessage).toHaveBeenCalledWith(
-      env,
-      'project-1',
-      'chat-1',
-      'system',
-      failedTaskWorkLossMessage('preservation_timed_out'),
-      null,
-      WORK_LOSS_NOTICE_ID
-    );
+    expectWorkLossNotice('preservation_timed_out');
     expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env);
     expect(snapshotRow()).toMatchObject({ sleep_status: 'terminal_failed' });
   });
@@ -888,23 +823,10 @@ describe('failed-task work preservation vertical slice', () => {
       promptStartedAt: START.getTime() - 2 * HOUR,
     });
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
-    const background: Promise<unknown>[] = [];
-
-    const sweep = await runSessionSleepSweep(env, START, {
-      waitUntil: (promise) => background.push(promise),
-    });
-    await Promise.all(background);
+    const { sweep } = await sweepAndSettle(START);
 
     expect(sweep).toMatchObject({ claimed: 0, deferred: 1 });
-    expect(mocks.persistMessage).toHaveBeenCalledWith(
-      env,
-      'project-1',
-      'chat-1',
-      'system',
-      failedTaskWorkLossMessage('preservation_timed_out'),
-      null,
-      WORK_LOSS_NOTICE_ID
-    );
+    expectWorkLossNotice('preservation_timed_out');
     expect(order.slice(-3)).toEqual(['system-notice', 'project-data-fail', 'task-cleanup']);
     expect(snapshotRow()).toMatchObject({ sleep_status: 'terminal_failed', sleep_after: null });
     const next = await runSessionSleepSweep(env, new Date(START.getTime() + 10 * 60_000));
