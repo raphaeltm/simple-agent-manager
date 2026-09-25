@@ -21,7 +21,10 @@ import {
   failedTaskNoticeId,
   failedTaskWorkLossMessage,
 } from '../../src/services/failed-task-preservation';
-import { claimSessionSnapshotRecovery } from '../../src/services/session-snapshots';
+import {
+  claimSessionSnapshotRecovery,
+  markSessionSnapshotAwakeInPlace,
+} from '../../src/services/session-snapshots';
 import { cleanupTerminalTaskResources } from '../../src/services/task-terminal-cleanup';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
@@ -84,6 +87,7 @@ const HOME_SHA256 = 'cd'.repeat(32);
 const WIP_SHA256 = 'ef'.repeat(32);
 const SNAPSHOT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const WORK_LOSS_NOTICE_ID = failedTaskNoticeId('work-loss', 'task-1', 'chat-1');
+const HOUR = 60 * 60 * 1000;
 
 function checksumBytes(hex: string): ArrayBuffer {
   return Uint8Array.from(Buffer.from(hex, 'hex')).buffer;
@@ -146,6 +150,29 @@ describe('failed-task work preservation vertical slice', () => {
       )
       .get() as Record<string, unknown> | undefined;
   }
+
+  /** Run `concurrent` (once) just before the next statement matching `pattern` is prepared. */
+  function interleaveBefore(pattern: RegExp, concurrent: () => void) {
+    const base = env.DATABASE;
+    const state = { fired: false };
+    env = {
+      ...env,
+      DATABASE: {
+        ...base,
+        prepare: (query: string) => {
+          if (!state.fired && pattern.test(query)) {
+            state.fired = true;
+            concurrent();
+          }
+          return base.prepare(query);
+        },
+      } as unknown as D1Database,
+    } as Env;
+    return state;
+  }
+
+  const EXHAUSTION_WRITE =
+    /^update "session_snapshots" set "sleep_status" = \?, "sleep_after" = \?, "sleep_error"/i;
 
   function statusOf(table: 'workspaces' | 'agent_sessions' | 'nodes', id: string) {
     return (
@@ -544,28 +571,154 @@ describe('failed-task work preservation vertical slice', () => {
          WHERE chat_session_id = 'chat-1'`
       )
       .run(new Date(START.getTime() - 24 * 60 * 60 * 1000).toISOString());
+    const interleave = interleaveBefore(EXHAUSTION_WRITE, () => {
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots
+           SET sleep_status = 'scheduled', sleep_after = ?, sleep_attempts = 0,
+               sleep_claim_id = NULL, sleep_claimed_at = NULL
+           WHERE chat_session_id = 'chat-1'`
+        )
+        .run(START.toISOString());
+    });
+    const background: Promise<unknown>[] = [];
+
+    const sweep = await runSessionSleepSweep(env, START, {
+      waitUntil: (promise) => background.push(promise),
+    });
+    await Promise.all(background);
+
+    expect(interleave.fired).toBe(true);
+    expect(sweep).toMatchObject({ exhausted: 0 });
+    expect(background).toHaveLength(0);
+    expect(mocks.persistMessage).not.toHaveBeenCalled();
+    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+    expect(snapshotRow()).toMatchObject({
+      sleep_status: 'scheduled',
+      sleep_after: START.toISOString(),
+    });
+  });
+
+  it('does not exhaust a stale claim whose owner moved it on after selection', async () => {
+    // The sweep re-selects a stale `preparing` claim at the attempt limit; before
+    // its exhaustion write lands, the slow owner passes its point of no return.
+    // Overwriting `stopping` with `failed` would strand a stopped runtime.
+    seedFailedTask('vm');
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots
+         SET sleep_status = 'preparing', sleep_attempts = 2, sleep_claim_id = 'slow-claim',
+             sleep_claimed_at = ?
+         WHERE chat_session_id = 'chat-1'`
+      )
+      .run(new Date(START.getTime() - 24 * HOUR).toISOString());
+    const interleave = interleaveBefore(EXHAUSTION_WRITE, () => {
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots SET sleep_status = 'stopping', sleep_stopping_since = ?
+           WHERE chat_session_id = 'chat-1'`
+        )
+        .run(START.toISOString());
+    });
+    const background: Promise<unknown>[] = [];
+
+    const sweep = await runSessionSleepSweep(env, START, {
+      waitUntil: (promise) => background.push(promise),
+    });
+    await Promise.all(background);
+
+    expect(interleave.fired).toBe(true);
+    expect(sweep).toMatchObject({ exhausted: 0 });
+    expect(mocks.persistMessage).not.toHaveBeenCalled();
+    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+    expect(snapshotRow()).toMatchObject({ sleep_status: 'stopping' });
+  });
+
+  it.each([
+    // The woken agent has not reported yet: only the wake itself dates the episode.
+    ['before its agent has reported', () => null],
+    [
+      'while its agent works on the follow-up',
+      (wokeAt: number) => ({
+        activity: 'prompting',
+        activityAt: wokeAt + 60_000,
+        promptStartedAt: wokeAt,
+      }),
+    ],
+  ])('keeps a woken Instant conversation %s, however old the failure', async (_label, state) => {
+    // An Instant conversation wakes in place under the same failed task
+    // (`commitContainerWake`), and the sweep re-queues its sleep straight away.
+    // Measured from the failure, the maximum wait would tear the woken
+    // conversation down.
+    seedFailedTask('cf-container', 'failed', new Date(START.getTime() - 9 * HOUR).toISOString());
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
+    expect(await runSessionSleepSweep(env, START)).toMatchObject({ slept: 1 });
+    mocks.persistMessage.mockClear();
+    mocks.cleanupTaskRun.mockClear();
+
+    const wokeAt = new Date(START.getTime() + HOUR);
+    vi.setSystemTime(wokeAt);
+    await markSessionSnapshotAwakeInPlace(env, 'chat-1', 'task-1', 'workspace-1');
+    // What the resumed container and ProjectData's wakeSession record.
+    sqlite.prepare(`UPDATE nodes SET status = 'running' WHERE id = 'node-1'`).run();
+    sqlite.prepare(`UPDATE workspaces SET status = 'running' WHERE id = 'workspace-1'`).run();
+    sqlite.prepare(`UPDATE agent_sessions SET status = 'running' WHERE id = 'agent-1'`).run();
+    projectDataStatus = 'active';
+    mocks.getSessionState.mockResolvedValue(state(wokeAt.getTime()));
+    const later = new Date(wokeAt.getTime() + 5 * 60_000);
+    vi.setSystemTime(later);
+    const background: Promise<unknown>[] = [];
+
+    const sweep = await runSessionSleepSweep(env, later, {
+      waitUntil: (promise) => background.push(promise),
+    });
+    await Promise.all(background);
+
+    expect(sweep).toMatchObject({ reconciled: 1, claimed: 0, deferred: 1 });
+    expect(mocks.persistMessage).not.toHaveBeenCalled();
+    expect(mocks.failSession).not.toHaveBeenCalled();
+    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+    expect(snapshotRow()).toMatchObject({ sleep_status: 'scheduled', sleeping_at: null });
+  });
+
+  it('restarts the maximum wait for each turn on a live failed conversation', async () => {
+    // Never slept: the user kept the failed conversation busy for hours. Each new
+    // turn is fresh work, not a hung one.
+    seedFailedTask('vm', 'failed', new Date(START.getTime() - 9 * HOUR).toISOString());
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'prompting',
+      activityAt: START.getTime() - 30_000,
+      promptStartedAt: START.getTime() - 10 * 60_000,
+    });
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
+    const background: Promise<unknown>[] = [];
+
+    const sweep = await runSessionSleepSweep(env, START, {
+      waitUntil: (promise) => background.push(promise),
+    });
+    await Promise.all(background);
+
+    expect(sweep).toMatchObject({ claimed: 0, deferred: 1 });
+    expect(mocks.persistMessage).not.toHaveBeenCalled();
+    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+    expect(snapshotRow()).toMatchObject({ sleep_status: 'scheduled' });
+  });
+
+  it('still reaches the maximum wait when the sweep keeps failing to check eligibility', async () => {
+    // Rule 47: a candidate that throws every sweep is deferred without spending an
+    // attempt, so the catch branch needs the same escape as any other deferral.
+    env.FAILED_TASK_PRESERVATION_MAX_WAIT_MS = String(HOUR);
+    seedFailedTask('vm', 'failed', new Date(START.getTime() - 61 * 60_000).toISOString());
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
     const base = env.DATABASE;
-    let armed = true;
     env = {
       ...env,
       DATABASE: {
         ...base,
         prepare: (query: string) => {
-          if (
-            armed &&
-            /^update "session_snapshots" set "sleep_status" = \?, "sleep_after" = \?, "sleep_error"/i.test(
-              query
-            )
-          ) {
-            armed = false;
-            sqlite
-              .prepare(
-                `UPDATE session_snapshots
-                 SET sleep_status = 'scheduled', sleep_after = ?, sleep_attempts = 0,
-                     sleep_claim_id = NULL, sleep_claimed_at = NULL
-                 WHERE chat_session_id = 'chat-1'`
-              )
-              .run(START.toISOString());
+          if (/from "workspaces" left join "session_summaries"/i.test(query)) {
+            throw new Error('D1_ERROR: overloaded');
           }
           return base.prepare(query);
         },
@@ -578,15 +731,18 @@ describe('failed-task work preservation vertical slice', () => {
     });
     await Promise.all(background);
 
-    expect(armed).toBe(false);
-    expect(sweep).toMatchObject({ exhausted: 0 });
-    expect(background).toHaveLength(0);
-    expect(mocks.persistMessage).not.toHaveBeenCalled();
-    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
-    expect(snapshotRow()).toMatchObject({
-      sleep_status: 'scheduled',
-      sleep_after: START.toISOString(),
-    });
+    expect(sweep).toMatchObject({ claimed: 0, failed: 1 });
+    expect(mocks.persistMessage).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'chat-1',
+      'system',
+      failedTaskWorkLossMessage('preservation_timed_out'),
+      null,
+      WORK_LOSS_NOTICE_ID
+    );
+    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env);
+    expect(snapshotRow()).toMatchObject({ sleep_status: 'terminal_failed' });
   });
 
   it('defers a failed task whose agent is still working, without spending its attempts', async () => {
@@ -633,9 +789,11 @@ describe('failed-task work preservation vertical slice', () => {
     // the maximum wait bounds it. Driven through the real sweep's deferral branch.
     env.FAILED_TASK_PRESERVATION_MAX_WAIT_MS = String(60 * 60_000);
     seedFailedTask('vm', 'failed', new Date(START.getTime() - 61 * 60_000).toISOString());
+    // One turn, hung since before the failure, re-reporting every minute.
     mocks.getSessionState.mockResolvedValue({
       activity: 'prompting',
       activityAt: START.getTime() - 60_000,
+      promptStartedAt: START.getTime() - 2 * HOUR,
     });
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
     const background: Promise<unknown>[] = [];
