@@ -6,7 +6,10 @@ import { runMigrations } from '../../../src/durable-objects/migrations';
 import { createAttentionMarker } from '../../../src/durable-objects/project-data/attention';
 import { processExpiredAttentionMarkers } from '../../../src/durable-objects/project-data/attention-expiry';
 import type { Env } from '../../../src/durable-objects/project-data/types';
-import { failedTaskWorkLossMessage } from '../../../src/services/failed-task-preservation';
+import {
+  failedTaskIncompleteSnapshotMessage,
+  failedTaskWorkLossMessage,
+} from '../../../src/services/failed-task-preservation';
 import { persistMessage } from '../../../src/services/project-data';
 import { cleanupTaskRun } from '../../../src/services/task-runner';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -576,7 +579,7 @@ describe('delivery-aware attention expiry', () => {
         .run(agentSessionStatus, new Date(START - 60_000).toISOString());
     }
 
-    function seedSleepingSnapshot() {
+    function seedSleepingSnapshot(capture = { status: 'available', degradation: 'none' }) {
       const sleptAt = new Date(START - 24 * 60 * 60 * 1000).toISOString();
       d1Db
         .prepare(
@@ -585,15 +588,22 @@ describe('delivery-aware attention expiry', () => {
               status, degradation, manifest_r2_key, expires_at, sleeping_at, sleep_status,
               recovery_attempts, sleep_attempts, created_at, updated_at)
            VALUES ('snapshot-1', ?, 'workspace-1', 'user-1', 'session-1', 'agent-1', 'vm',
-              'available', 'none', 'snapshots/manifest.json', ?, ?, 'sleeping', 0, 0, ?, ?)`
+              ?, ?, 'snapshots/manifest.json', ?, ?, 'sleeping', 0, 0, ?, ?)`
         )
         .run(
           PROJECT_ID,
+          capture.status,
+          capture.degradation,
           new Date(START + 6 * 24 * 60 * 60 * 1000).toISOString(),
           sleptAt,
           sleptAt,
           sleptAt
         );
+    }
+
+    function sleepAlreadyHappened() {
+      d1Db.prepare(`UPDATE workspaces SET status = 'deleted' WHERE id = 'workspace-1'`).run();
+      sql.exec(`UPDATE chat_sessions SET status = 'sleeping' WHERE id = 'session-1'`);
     }
 
     function snapshotRow() {
@@ -620,8 +630,7 @@ describe('delivery-aware attention expiry', () => {
       // The production shape: the session slept while it waited, a day before the
       // marker expired. Failing it would flip ProjectData sleeping -> failed, which
       // snapshot recovery refuses to wake.
-      d1Db.prepare(`UPDATE workspaces SET status = 'deleted' WHERE id = 'workspace-1'`).run();
-      sql.exec(`UPDATE chat_sessions SET status = 'sleeping' WHERE id = 'session-1'`);
+      sleepAlreadyHappened();
       seedSleepingSnapshot();
       hasConfirmedPushDelivery.mockResolvedValue(true);
       createNeedsInput({ expiresAt: START, nextEscalationAt: null });
@@ -639,6 +648,47 @@ describe('delivery-aware attention expiry', () => {
       expect(persistMessage).not.toHaveBeenCalled();
       expect(cleanupTaskRun).not.toHaveBeenCalled();
       expect(snapshotRow()).toMatchObject({ status: 'available', sleep_status: 'sleeping' });
+    });
+
+    it('keeps an already-sleeping conversation asleep when a SAM check-in expires', async () => {
+      sleepAlreadyHappened();
+      seedSleepingSnapshot();
+      checkinMarker();
+
+      await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+      expect(taskRow()).toMatchObject({
+        status: 'failed',
+        error_message: 'Agent became unresponsive after SAM check-in',
+      });
+      expect(failSession).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
+      expect(snapshotRow()).toMatchObject({ status: 'available', sleep_status: 'sleeping' });
+    });
+
+    it('says so when the conversation had already slept with an incomplete snapshot', async () => {
+      // The brief's own example: the conversation slept transcript-only a day
+      // before its human-input request expired. It stays asleep and wakeable, and
+      // the chat says the workspace files may be missing.
+      sleepAlreadyHappened();
+      seedSleepingSnapshot({ status: 'degraded', degradation: 'transcript-only' });
+      hasConfirmedPushDelivery.mockResolvedValue(true);
+      createNeedsInput({ expiresAt: START, nextEscalationAt: null });
+
+      await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+      expect(taskRow().status).toBe('failed');
+      expect(persistMessage).toHaveBeenCalledWith(
+        env,
+        PROJECT_ID,
+        'session-1',
+        'system',
+        failedTaskIncompleteSnapshotMessage('transcript-only', 'vm'),
+        null,
+        'failed-task-snapshot-incomplete-task-1'
+      );
+      expect(failSession).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
     });
 
     it('queues a snapshot-backed sleep instead of tearing down a live runtime', async () => {
@@ -675,7 +725,8 @@ describe('delivery-aware attention expiry', () => {
         'session-1',
         'system',
         failedTaskWorkLossMessage('no_resumable_agent_session'),
-        null
+        null,
+        'failed-task-work-loss-task-1'
       );
       expect(failSession).toHaveBeenCalledOnce();
       expect(vi.mocked(persistMessage).mock.invocationCallOrder[0]).toBeLessThan(
