@@ -92,74 +92,74 @@ exceeded its CPU time limit and was reset."}` — the daily blog agent's project
 
 ### A. Bounded root search (primary fix; idea 01M27M86R544BQX86VZANZGSQ2 §3 / task scope 4)
 
-- [ ] Extract search from `messages.ts` (719 lines) into `message-search.ts`; keep re-exports.
-- [ ] FTS half: candidate window = newest `ftsCandidateLimit` matches (floor rowid via capped
+- [x] Extract search from `messages.ts` (719 lines) into `message-search.ts`; keep re-exports.
+- [x] FTS half: candidate window = newest `ftsCandidateLimit` matches (floor rowid via capped
       `ORDER BY rowid DESC LIMIT`), bm25 only for rowid >= floor; session-scoped search narrows the
       window to the session's grouped rowid span; deterministic tie-break.
-- [ ] LIKE half: project-wide newest `keywordScanRowLimit` rows by rowid; session-scoped newest rows
+- [x] LIKE half: project-wide newest `keywordScanRowLimit` rows by rowid; session-scoped newest rows
       of that session by `(session_id, created_at)`; existing unindexed-tail predicate unchanged.
-- [ ] Coverage result `{ftsCandidateLimit, ftsCandidatesTruncated, keywordScanRowLimit,
+- [x] Coverage result `{ftsCandidateLimit, ftsCandidatesTruncated, keywordScanRowLimit,
 keywordScanTruncated}`; env `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` (default 2000) and
       `PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT` (default 50000) with `DEFAULT_*` constants.
-- [ ] ProjectData RPC `searchMessagesWithCoverage`; `searchMessages` stays array-returning and bounded;
+- [x] ProjectData RPC `searchMessagesWithCoverage`; `searchMessages` stays array-returning and bounded;
       `archiveSourceSearchMessages` bounded with env bounds.
-- [ ] Service `searchMessagesWithArchiveMetadata` returns `rootSearchCoverage`; MCP `search_messages`
+- [x] Service `searchMessagesWithArchiveMetadata` returns `rootSearchCoverage`; MCP `search_messages`
       response + tool description disclose it (rule 65); SAM `search_task_messages` tool too if it
       renders archive metadata.
-- [ ] Tests (workers runtime, real DO SQLite): results identical to old behavior under the bounds;
+- [x] Tests (workers runtime, real DO SQLite): results identical to old behavior under the bounds;
       window excludes rows beyond the bound and reports truncation; session-scoped bound; LIKE plan
       is a rowid range (EXPLAIN QUERY PLAN); disclosure reaches the MCP response.
 
 ### B. Alarm per-section measurement (task scope 1)
 
-- [ ] Section runner: per-section `status` (ran/skipped_not_due/failed), `durationMs`, `rowsRead`,
+- [x] Section runner: per-section `status` (ran/skipped_not_due/failed), `durationMs`, `rowsRead`,
       `rowsWritten`; one `project_data.alarm.completed` log with projectId, totalDurationMs,
       mode (full/gated), ran/skipped/failed section names, slowest section; warn log per slow section
       (`PROJECT_DATA_ALARM_SLOW_SECTION_MS`, default 1000).
-- [ ] Row metering wrapper for `this.sql` (exec + databaseSize only), counting only while a section
+- [x] Row metering wrapper for `this.sql` (exec + databaseSize only), counting only while a section
       meter is active.
 
 ### C. Run only due alarm sections (task scope 2)
 
-- [ ] `computeProjectDataAlarmSections()` returns per-section times (single source for scheduling and
+- [x] `computeProjectDataAlarmSections()` returns per-section times (single source for scheduling and
       gating); `computeProjectDataAlarmTime` = min over them (unchanged behavior).
-- [ ] In-memory per-section pending due map, min-accumulated on every `recalculateAlarm`, overwritten
+- [x] In-memory per-section pending due map, min-accumulated on every `recalculateAlarm`, overwritten
       for sections that ran; alarm time = min(fresh, pending).
-- [ ] Full run when: fresh instance (no prior full run), full-run floor elapsed
+- [x] Full run when: fresh instance (no prior full run), full-run floor elapsed
       (`PROJECT_DATA_ALARM_FULL_RUN_INTERVAL_MS`, default 15 min), gating disabled
       (`PROJECT_DATA_ALARM_SECTION_GATING_ENABLED`, default true), or section computation failed.
-- [ ] Due tolerance `PROJECT_DATA_ALARM_DUE_TOLERANCE_MS` (default 2000).
-- [ ] Cascade: `task_waits` / `project_event_wake_materialization` running forces `prompt_delivery`
+- [x] Due tolerance `PROJECT_DATA_ALARM_DUE_TOLERANCE_MS` (default 2000).
+- [x] Cascade: `task_waits` / `project_event_wake_materialization` running forces `prompt_delivery`
       in the same tick (preserves "dispatch a newly enqueued parent wake in this alarm turn").
-- [ ] Storage safety still runs first among due sections and stays isolated (firebreak semantics).
-- [ ] Tests: two-tick gating (not-due skipped, due runs), clamped-overdue section still runs on time
+- [x] Storage safety still runs first among due sections and stays isolated (firebreak semantics).
+- [x] Tests: two-tick gating (not-due skipped, due runs), clamped-overdue section still runs on time
       (no starvation under repeated recalcs), fresh-instance full run, floor full run, kill switch,
       isolation (throwing section does not stop later ones; failed ≠ skipped in log), cascade.
 
 ### D. CPU-reset / connection-lost classification (task scope 3; idea 01M1XKK208SJV9VJA4BXP2KBHT)
 
-- [ ] `isDurableObjectCpuLimitResetError`, `isDurableObjectConnectionLostError` exact predicates;
+- [x] `isDurableObjectCpuLimitResetError`, `isDurableObjectConnectionLostError` exact predicates;
       `isTransientDurableObjectError` unchanged (rule 67).
-- [ ] `callProjectDataWithRetry` takes an explicit idempotency declaration; CPU-reset and
+- [x] `callProjectDataWithRetry` takes an explicit idempotency declaration; CPU-reset and
       connection-lost are retried ONLY for idempotent reads (allowlist); mutations unchanged.
-- [ ] Stable sanitized error code for exhausted CPU-limit resets in `normalizeProjectDataRpcError`.
-- [ ] Retry telemetry: `project_data.do_rpc_retry_succeeded` / `..._exhausted`.
-- [ ] Tests: first-attempt CPU reset then success for a read; bounded exhaustion; mutation not retried
+- [x] Stable sanitized error code for exhausted CPU-limit resets in `normalizeProjectDataRpcError`.
+- [x] Retry telemetry: `project_data.do_rpc_retry_succeeded` / `..._exhausted`.
+- [x] Tests: first-attempt CPU reset then success for a read; bounded exhaustion; mutation not retried
       (no duplicate); shared predicate not widened (no-widening test).
 
 ### E. Activity callback amplification (task scope 5, API side)
 
-- [ ] Activity coalescing fallback (lookup, persist, flush) also engages on CPU-limit reset and
+- [x] Activity coalescing fallback (lookup, persist, flush) also engages on CPU-limit reset and
       `Network connection lost.` via a composed predicate.
-- [ ] Coalesced flush retries back off exponentially (bounded by the pending TTL) instead of every
+- [x] Coalesced flush retries back off exponentially (bounded by the pending TTL) instead of every
       coalesce window.
-- [ ] Tests: 204 + coalesced (no VM retry) on connection-lost; flush retry count bounded under a
+- [x] Tests: 204 + coalesced (no VM retry) on connection-lost; flush retry count bounded under a
       persistent outage; terminal/non-intermediate reports still surface errors.
 
 ### F. Follow-ups / docs
 
-- [ ] File idea: immortal workspace idle-timeout candidate (finding 5).
-- [ ] Docs: env vars in `apps/api/.env.example`, env-reference skill, configuration reference;
+- [x] File idea: immortal workspace idle-timeout candidate (finding 5) — idea `01M3BWCDAH45GQ9FQ728QPA2D8`.
+- [x] Docs: env vars in `apps/api/.env.example`, env-reference skill, configuration reference;
       MCP tool description; architecture docs if they describe search/alarm behavior.
 - [ ] Update ideas 01M27M86R544BQX86VZANZGSQ2, 01M1XKK208SJV9VJA4BXP2KBHT, 01M1BKG7BE6HD81QC1Y0HBQVSJ
       with measurements + PR link.

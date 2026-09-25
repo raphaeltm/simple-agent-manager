@@ -1,6 +1,6 @@
 /**
  * Message storage, retrieval, batch persistence, and sequencing. Search lives in
- * `message-search.ts` and is re-exported here for existing importers.
+ * `message-search.ts`; its DO-facing entry points are re-exported here.
  */
 import { log } from '../../lib/logger';
 import {
@@ -27,17 +27,11 @@ import { boundToolMetadataForStorage } from './tool-metadata-storage';
 import type { Env } from './types';
 import { generateId } from './types';
 
-export type {
-  MessageSearchBounds,
-  MessageSearchCoverage,
-  MessageSearchWithCoverage,
-  SearchResult,
-} from './message-search';
+export type { MessageSearchBounds, MessageSearchWithCoverage } from './message-search';
 export {
   buildFtsQuery,
   extractSnippet,
   resolveMessageSearchBounds,
-  searchMessages,
   searchMessagesWithCoverage,
 } from './message-search';
 export {

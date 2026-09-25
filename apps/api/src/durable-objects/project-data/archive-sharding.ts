@@ -3778,16 +3778,6 @@ export function archiveSourceSearchMessagesWithCoverage(
   return messages.searchMessagesWithCoverage(sql, query, input.sessionId, roles, limit, bounds);
 }
 
-export function archiveSourceSearchMessages(
-  sql: SqlStorage,
-  input: ProjectDataArchiveExactReadInput,
-  query: string,
-  roles: string[] | null,
-  limit: number,
-  bounds: messages.MessageSearchBounds
-): messages.SearchResult[] {
-  return archiveSourceSearchMessagesWithCoverage(sql, input, query, roles, limit, bounds).results;
-}
 
 export async function archiveTargetReadMessages(
   sql: SqlStorage,

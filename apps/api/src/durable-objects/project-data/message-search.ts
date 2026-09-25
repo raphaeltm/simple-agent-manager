@@ -139,17 +139,6 @@ export function searchMessagesWithCoverage(
   };
 }
 
-export function searchMessages(
-  sql: SqlStorage,
-  query: string,
-  sessionId: string | null,
-  roles: string[] | null,
-  limit: number,
-  bounds: MessageSearchBounds
-): SearchResult[] {
-  return searchMessagesWithCoverage(sql, query, sessionId, roles, limit, bounds).results;
-}
-
 interface BoundedSearchResults {
   results: SearchResult[];
   truncated: boolean;

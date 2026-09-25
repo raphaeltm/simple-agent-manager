@@ -970,22 +970,6 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  archiveSourceSearchMessages(
-    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
-    query: string,
-    roles: string[] | null = null,
-    limit: number = 10
-  ) {
-    return archiveSharding.archiveSourceSearchMessages(
-      this.sql,
-      input,
-      query,
-      roles,
-      limit,
-      messages.resolveMessageSearchBounds(this.env)
-    );
-  }
-
   archiveSourceSearchMessagesWithCoverage(
     input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
     query: string,
@@ -1182,23 +1166,7 @@ export class ProjectData extends DurableObject<Env> {
     return messages.getMessageCount(this.sql, sessionId, roles);
   }
 
-  searchMessages(
-    query: string,
-    sessionId: string | null = null,
-    roles: string[] | null = null,
-    limit: number = 10
-  ) {
-    return messages.searchMessages(
-      this.sql,
-      query,
-      sessionId,
-      roles,
-      limit,
-      messages.resolveMessageSearchBounds(this.env)
-    );
-  }
-
-  /** `searchMessages` plus what the bounded windows skipped, for callers that must disclose it. */
+  /** Bounded message search plus what its windows skipped, so callers can disclose it. */
   searchMessagesWithCoverage(
     query: string,
     sessionId: string | null = null,

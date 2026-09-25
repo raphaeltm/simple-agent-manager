@@ -347,10 +347,6 @@ const mockDoStub = {
       coverage: mockRootSearchCoverage,
     })
   ),
-  archiveSourceSearchMessages: vi.fn(
-    (owner: { sessionId: string }, query: string, roles: string[] | null, limit: number) =>
-      mockDoStub.searchMessages(query, owner.sessionId, roles, limit)
-  ),
   archiveSourceSearchMessagesWithCoverage: vi.fn(
     (owner: { sessionId: string }, query: string, roles: string[] | null, limit: number) => ({
       results: mockDoStub.searchMessages(query, owner.sessionId, roles, limit),

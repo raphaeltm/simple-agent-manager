@@ -2,8 +2,8 @@ import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
 import type { MessageSearchCoverage } from '../../../src/durable-objects/project-data/message-search';
+import type { Env } from '../../../src/env';
 import {
   describeRootSearchCoverage,
   searchMessagesWithArchiveMetadata,
