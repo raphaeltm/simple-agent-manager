@@ -100,6 +100,13 @@ exceeded its CPU time limit and was reset."}` — the daily blog agent's project
     SQL-aged state into the past. Under gating those ticks skip sections that are not due, so four
     tests failed and several absence-style tests passed vacuously; see checklist G.
 
+13. **Durable Object eviction resets in-isolate memory (found on staging, 2026-09-25 11:00Z):** after the
+    first deploy every `project_data.alarm.completed` on staging read `mode: full, fullRunReason:
+first_tick`, including a project's next tick one minute later — idle ProjectData objects are
+    evicted between minute-spaced alarms, so the scheduler's in-memory state reset every tick and
+    gating never engaged (no regression: tick cadence was unchanged at one per minute per project).
+    Fixed by persisting the scheduler memory in `do_meta` (checklist G).
+
 ## Implementation Checklist
 
 ### A. Bounded root search (primary fix; idea 01M27M86R544BQX86VZANZGSQ2 §3 / task scope 4)
@@ -197,6 +204,8 @@ keywordScanTruncated}`; env `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` (default 2
       before adoption, which workerd reported as unhandled (full workers run exited 1 with every test
       green); now awaited. The scheduled-actions background recalculation logs its own failure.
       Alarm-section tests arm no automatic alarm and let the clock move before manual ticks.
+- [x] Scheduler memory persisted in `do_meta` (`serialize` / `restore`, write-on-change, never
+      throws) so gating survives eviction; eviction tested with `ctx.abort()` plus a no-memory control.
 - [x] Deferred (MEDIUM, pre-existing pattern): error text logged as plain strings bypasses the
       logger's Error redaction → `tasks/backlog/2026-09-25-structured-log-error-text-redaction.md`.
 
@@ -206,18 +215,20 @@ keywordScanTruncated}`; env `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` (default 2
 - [x] Docs: env vars in `apps/api/.env.example`, env-reference skill, configuration reference;
       MCP tool description; architecture docs if they describe search/alarm behavior.
 - [ ] Update ideas 01M27M86R544BQX86VZANZGSQ2, 01M1XKK208SJV9VJA4BXP2KBHT, 01M1BKG7BE6HD81QC1Y0HBQVSJ
-      with measurements + PR link.
+      with measurements + PR link (after merge + production deploy).
 
 ## Acceptance Criteria
 
-- [ ] A project-wide root search against a large dataset examines at most the configured windows
+- [x] A project-wide root search against a large dataset examines at most the configured windows
       (verified by plan + bounded-row tests) and discloses truncation in the MCP response.
-- [ ] Alarm completion log names ran/skipped/failed sections with duration and rows read/written.
-- [ ] Alarm runs only due sections (plus cascades/floor); no section starves (clamp test).
-- [ ] CPU-limit reset retried only for idempotent reads, with a stable error code on exhaustion.
-- [ ] Activity callbacks answer 204 + coalesce on connection-lost / CPU reset; flush retries bounded.
-- [ ] Staging: search, alarm logs, and activity path exercised; production: alarm logs visible, next
-      15:05Z blog window shows no overload errors (or the measured cause is documented in the idea).
+- [x] Alarm completion log names ran/skipped/failed sections with duration and rows read/written.
+- [x] Alarm runs only due sections (plus cascades/floor); no section starves (clamp test).
+- [x] CPU-limit reset retried only for idempotent reads, with a stable error code on exhaustion.
+- [x] Activity callbacks answer 204 + coalesce on connection-lost / CPU reset; flush retries bounded.
+- [x] Staging: search (agent MCP calls, project-wide + session-scoped), alarm logs (gated ticks after
+      the persistence fix; storage safety 119 → 18 runs per comparable window), activity path exercised.
+- [ ] Production: alarm logs visible, next 15:05Z blog window shows no overload errors (or the measured
+      cause is documented in the idea) — verified after merge; results recorded in the ideas.
 
 ## References
 

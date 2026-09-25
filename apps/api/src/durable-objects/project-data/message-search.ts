@@ -8,7 +8,7 @@
  * seven killed at the limit after ~65 s of wall time, during which every chat, activity and
  * heartbeat request queued behind them. The keyword fallback was a full scan of `chat_messages`
  * (`SCAN m`: 7.4 M rows, 3.2 GB of content) and the full-text half computed bm25 for every match.
- * See `tasks/active/2026-09-25-projectdata-root-overload.md`.
+ * See `tasks/archive/2026-09-25-projectdata-root-overload.md`.
  *
  * Both halves now examine a bounded window:
  * - Full-text: bm25 ranks only the newest `ftsCandidateLimit` matching grouped rows, scored in the

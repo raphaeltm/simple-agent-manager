@@ -13,7 +13,7 @@ tenant.
 ## Context
 
 Raised as a MEDIUM by the security review of the ProjectData overload fix
-(`tasks/active/2026-09-25-projectdata-root-overload.md`, branch `sam/find-fix-makes-sam-pxsnvt`):
+(`tasks/archive/2026-09-25-projectdata-root-overload.md`, branch `sam/find-fix-makes-sam-pxsnvt`):
 the new `project_data.alarm.<section>_failed` / `completed` logs
 (`apps/api/src/durable-objects/project-data/alarm-sections.ts`) and the retry logs
 (`apps/api/src/services/project-data-rpc-retry.ts`) continue the existing pattern. The stable
