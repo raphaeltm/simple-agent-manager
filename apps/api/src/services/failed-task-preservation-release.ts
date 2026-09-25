@@ -197,7 +197,8 @@ async function currentTurnStartedAt(
  * under the same failed task), or the start of the agent's current turn. A user
  * who keeps the conversation busy restarts it with every turn; only one turn that
  * never ends, or a state that never resolves, runs it out (`.claude/rules/74`).
- * A failed turn lookup withholds the teardown until the next sweep.
+ * The turn start is the VM's own clock, so skew shifts the bound by that much;
+ * clamping it to `now` would make a future-dated turn look new at every sweep.
  */
 async function preservationWaitedTooLong(
   env: Env,
@@ -214,7 +215,9 @@ async function preservationWaitedTooLong(
   // already say the wait is over.
   if (now.getTime() - episodeStartedAt <= maxWaitMs) return false;
   const turnStartedAt = await currentTurnStartedAt(env, owner.projectId, workspaceId);
-  if (turnStartedAt === undefined) return false;
+  // A failed lookup withholds the teardown, but not forever: past twice the wait,
+  // a ProjectData outage no longer holds the runtime (`.claude/rules/47`).
+  if (turnStartedAt === undefined) return now.getTime() - episodeStartedAt > 2 * maxWaitMs;
   return now.getTime() - Math.max(episodeStartedAt, turnStartedAt ?? 0) > maxWaitMs;
 }
 

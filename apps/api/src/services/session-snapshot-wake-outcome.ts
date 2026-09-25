@@ -4,7 +4,7 @@
  * `session-snapshot-recovery-lifecycle.ts`, which keeps the recovery claim
  * (`.claude/rules/18-file-size-limits.md`).
  */
-import { and, eq, exists, inArray, notInArray, or } from 'drizzle-orm';
+import { and, eq, exists, inArray, notInArray, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { alias } from 'drizzle-orm/sqlite-core';
 
@@ -130,7 +130,12 @@ export async function markSessionSnapshotAwakeInPlace(
       sleepStoppingSince: null,
       recoveryAttempts: 0,
       recoveryFailedAt: null,
-      restoredAt: now,
+      // Only an asleep -> awake transition is a restore. The delivery adapter calls
+      // this on every attempt to an Instant session (`commitContainerWake`), awake
+      // or not, and `restored_at` dates a failed task's preservation episode
+      // (`failed-task-preservation-release.ts`). SQLite evaluates SET expressions
+      // against the row as it was before this update.
+      restoredAt: sql`CASE WHEN ${schema.sessionSnapshots.sleepingAt} IS NOT NULL THEN ${now} ELSE ${schema.sessionSnapshots.restoredAt} END`,
       updatedAt: now,
     })
     .where(
