@@ -199,7 +199,7 @@ sees the queued intent, past the completion-drain window; covered by
 - [x] Review round 4 tests, each proven discriminating: writer test (a second delivery attempt to an awake session keeps `restored_at`), integration reproduction (a hung turn on a woken Instant conversation with a later delivery attempt is released at the maximum wait), lookup ceiling (both sides).
 - [x] Staging: a real failed task on a VM with an uncommitted file ends sleeping with a complete snapshot holding the file (see the staging section).
 - [x] Staging findings fixed in this branch: a reply sent in the first minutes after a sleep was dropped (delivery now retries transient wake refusals, with the review's corrections); the Instant container's own idle sleep skipped the incomplete-snapshot note (the note now runs where every sleep finalizes).
-- [ ] Staging wake of the preserved VM conversation: completion run is implementing the prerequisite wake fixes and verifying the complete flow. Keep `needs-human-review` until the preserved agent answers and the final deployed code passes all merge gates.
+- [x] Staging wake of the preserved VM conversation: final candidate passed real restored-file/agent-answer verification and complete cleanup; evidence below. Keep `needs-human-review` until the verified prerequisite lands and this PR is rebased; then confirm normal CI/review gates before merge.
 
 ## Review round 1 (2026-09-25): findings and dispositions
 
@@ -366,8 +366,49 @@ There were no active staging nodes or deployment runs before starting.
 - Desktop/mobile Playwright showed the active restored conversation. Dashboard, projects, and
   settings loaded with no page errors. The existing onboarding overlay did not prevent provisioning.
 
-A final timeout audit found another prerequisite gap: repeated proxy timeouts can exhaust generic
-step retries before the detached restore deadline. Terminal failure then revokes the replacement's
-MCP token while restore is still running. The original snapshot remains safe, but slow wakes can
-still fail. A scoped persisted restore deadline and discriminating tests are being implemented;
-this newly identified guard is not in the staging candidate above. Do not merge unverified code.
+The final timeout audit found and fixed a prerequisite retry-deadline gap in `1667a131b`.
+The immutable retry-admission deadline preserves the restore token through its configured operation
+window and one request grace period. It cannot renew on retry/restart, and late alarms cannot issue
+another RPC. The reviewed final combined candidate passed the verification below.
+
+### Final candidate verification (2026-09-25)
+
+The user assigned a final serialized staging window after the retry-deadline audit. Combined
+candidate `3e507371c`, including prerequisite `1667a131b`, passed
+[Deploy Staging 36184076940](https://github.com/raphaeltm/simple-agent-manager/actions/runs/36184076940).
+No active deployment or staging node existed before dispatch. This pass verifies the final code;
+the earlier pass separately proved source-VM removal and cross-region recovery.
+
+- A fresh `cx23/fsn1` node `01M3D459F4B2092EKSDD8NNS9E` (provider `167462630`) booted
+  about 20:30:57.760Z. Heartbeat arrived at 20:32:28.574Z (about 91 seconds), and agent
+  `3584eb57e` was ready at 20:34:30.317Z. Source workspace `01M3D4FFYK387NFDXRG0290YG4`
+  was accessible and executed agent tools.
+- UI-created task `01M3D452DDMC3G09VCXGJ24ZQ5`, conversation
+  `1887e4f8-1ff7-4aa1-9e5c-27766a8bc899`, wrote an uncommitted random proof file. Its
+  SHA-256 was `645753f9bc986e1ad01630b5e9a8a4fff1ce1581cc4cbf7479d0b4566643bb03`.
+  The random bytes were never printed or supplied in the wake prompt.
+- Real task failure returned HTTP 200 and queued preservation. Snapshot
+  `01M3D4J9XMEJ2QN643QPG2N5R5` captured HOME and WIP, `available` with degradation `none`.
+  The public Sleep action returned 200, sleeping at 20:45:41.489Z with seven-day retention;
+  ProjectData also reported `sleeping`. This pass used explicit Sleep after the failure queued
+  preservation; the earlier pass proved automatic sleep.
+- UI wake returned 202 (delivery `01M3D536D0AA4DY7T4FK123983`). It retried through the
+  existing five-minute workspace deletion fence. Natural deletion was confirmed at
+  20:50:45.572Z; no guard or allocation authority was bypassed.
+- Recovery task `01M3D5D37VB3VJ3SSDZS3BM5P5` created replacement workspace
+  `01M3D5D9X3G12R8EDQQ0J9TEWT` on the same healthy VM. Restore committed at
+  20:53:19.200Z. The source task stayed failed; recovery reached in-progress without error.
+  At 20:54:54.635Z the restored agent answered `WAKE_OK` with the identical hash, after a real
+  `sha256sum` tool call on the existing file, still `?? pr2145-preservation-proof.txt`.
+- Desktop and 375×667 mobile screenshots were inspected: the restored answer and composer were
+  visible with no layout issue. Dashboard/projects/settings were checked in the first pass.
+- Both source/recovery workspace DELETEs returned 200 with confirmed deletion; node DELETE
+  returned 200 after runtime termination. D1 verified zero active staging nodes and no created
+  workspace/node/snapshot rows. Existing TestProject1/profile/shared pool were retained.
+  The staging window was explicitly released to node-health and the coordinator at 20:56Z.
+
+The final live restore completed without deliberately inducing a proxy timeout or provider quota.
+Request-cancellation, retry-deadline/exhaustion, quota descent, and guard controls are proven by
+local integration/race tests and discriminating mutations; do not describe these injected faults
+as occurring during this live pass. Required CI, CodeRabbit, merges, and production monitoring
+remain rollout gates in the PR and `.do-state.md`.

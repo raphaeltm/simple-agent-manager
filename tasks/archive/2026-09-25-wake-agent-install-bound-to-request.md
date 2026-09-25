@@ -22,7 +22,24 @@ other causes), plausibly because production devcontainers already carry the agen
 
 ## Acceptance Criteria
 
-- [ ] The wake's agent install runs on a job-owned context, or the request returns once the VM
+- [x] The wake's agent install runs on a job-owned context, or the request returns once the VM
       accepts the work and the step polls for readiness, so no install is bounded by a proxy timeout.
-- [ ] A wake onto a devcontainer whose agent install takes longer than 100 s succeeds.
-- [ ] A test proves a cancelled triggering request no longer kills the install.
+- [x] A wake onto a devcontainer whose agent install takes longer than 100 s succeeds.
+- [x] A test proves a cancelled triggering request no longer kills the install.
+
+## Resolution (2026-09-25)
+
+Resolved by the reviewed wake prerequisite (`1667a131b`, with earlier restore/retry/lifecycle fixes).
+Recovery stays retryable until terminal failure; accepted VM restores own a bounded operation
+context, are joined by retries, and have workspace/shutdown ownership. A persisted API deadline
+keeps generic step retry exhaustion from revoking an active restore's token.
+
+The real TaskRunner/bootstrap/SQLite slice passes 17 tests, with 24 deadline/configuration controls.
+Go request-cancellation and lifecycle tests pass under `-race`; guard-removal mutations fail as
+intended. The cancellation test holds accepted work beyond the request lifetime and then proves a
+retry joins its successful result; it uses a short deterministic clock rather than sleeping 100 s.
+Final staging deployment36184076940 restored the actual failed VM conversation and its uncommitted
+file; the agent read it and answered with the matching hash. This live pass did not deliberately
+induce a 524 or make install last over100 s. All created workspaces/nodes were deleted.
+Full evidence: `tasks/archive/2026-09-25-wake-survives-hetzner-core-quota.md` and
+`tasks/archive/2026-09-25-preserve-failed-task-work.md`.
