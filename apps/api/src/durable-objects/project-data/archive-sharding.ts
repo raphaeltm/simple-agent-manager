@@ -3766,15 +3766,27 @@ export async function archiveSourceReadArchivedToolPayloads(
   return toolPayloadArchive.listArchivedToolPayloads(sql, env, projectId, input);
 }
 
+export function archiveSourceSearchMessagesWithCoverage(
+  sql: SqlStorage,
+  input: ProjectDataArchiveExactReadInput,
+  query: string,
+  roles: string[] | null,
+  limit: number,
+  bounds: messages.MessageSearchBounds
+): messages.MessageSearchWithCoverage {
+  assertSourceExactReadAvailable(sql, input, 'search read');
+  return messages.searchMessagesWithCoverage(sql, query, input.sessionId, roles, limit, bounds);
+}
+
 export function archiveSourceSearchMessages(
   sql: SqlStorage,
   input: ProjectDataArchiveExactReadInput,
   query: string,
   roles: string[] | null,
-  limit: number
-) {
-  assertSourceExactReadAvailable(sql, input, 'search read');
-  return messages.searchMessages(sql, query, input.sessionId, roles, limit);
+  limit: number,
+  bounds: messages.MessageSearchBounds
+): messages.SearchResult[] {
+  return archiveSourceSearchMessagesWithCoverage(sql, input, query, roles, limit, bounds).results;
 }
 
 export async function archiveTargetReadMessages(

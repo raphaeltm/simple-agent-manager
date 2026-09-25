@@ -281,6 +281,8 @@ export async function handleSearchMessages(
             count: search.results.length,
             query,
             archiveSearch: search.archiveSearch,
+            rootSearch: search.rootSearch,
+            coverageNotes: projectDataService.describeRootSearchCoverage(search.rootSearch),
           },
           null,
           2

@@ -56,8 +56,10 @@ vi.mock('../../../src/services/project-data', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
   getMessages: (...args: unknown[]) => mockGetMessages(...args),
   searchMessages: (...args: unknown[]) => mockSearchMessages(...args),
+  describeRootSearchCoverage: (coverage: unknown) => (coverage ? ['coverage note'] : []),
   searchMessagesWithArchiveMetadata: async (...args: unknown[]) => ({
     results: await mockSearchMessages(...args),
+    rootSearch: null,
     archiveSearch: {
       partial: false,
       reason: null,
@@ -314,10 +316,15 @@ describe('search_task_messages', () => {
       results: unknown[];
       count: number;
       query: string;
+      rootSearch: unknown;
+      coverageNotes: string[];
     };
     expect(result.count).toBe(1);
     expect(result.query).toBe('test query');
     expect(result.results).toHaveLength(1);
+    // Root coverage is always surfaced, even when nothing was truncated.
+    expect(result).toHaveProperty('rootSearch', null);
+    expect(result.coverageNotes).toEqual([]);
   });
 
   it('resolves taskId to sessionId before searching', async () => {

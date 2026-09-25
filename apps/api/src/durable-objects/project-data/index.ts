@@ -29,7 +29,18 @@ import { isSessionRecoverySourceTaskGuardValid } from '../../services/session-re
 import { runMigrations } from '../migrations';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
-import { computeProjectDataAlarmTime } from './alarm-schedule';
+import {
+  computeProjectDataAlarmSectionTimes,
+  earliestAlarmTime,
+  type ProjectDataAlarmSection,
+} from './alarm-schedule';
+import {
+  createRowMeteredSqlStorage,
+  ProjectDataAlarmSectionScheduler,
+  ProjectDataAlarmTick,
+  resolveProjectDataAlarmGatingConfig,
+  type SqlRowMeter,
+} from './alarm-sections';
 import * as archiveSharding from './archive-sharding';
 import * as attention from './attention';
 import * as attentionExpiry from './attention-expiry';
@@ -115,6 +126,10 @@ export type { Env } from './types';
 
 export class ProjectData extends DurableObject<Env> {
   private sql: SqlStorage;
+  /** Attributes SQLite rows to the alarm section that read/wrote them (`alarm-sections.ts`). */
+  private readonly sqlRowMeter: SqlRowMeter;
+  /** Which alarm sections are due; in-isolate memory, so a fresh instance runs every section. */
+  private readonly alarmSections = new ProjectDataAlarmSectionScheduler();
   private summarySyncTimer: ReturnType<typeof setTimeout> | null = null;
   /** Serializes summary syncs — see `runSummarySyncLocked` (rule 45). */
   private summarySyncLock: Promise<unknown> = Promise.resolve();
@@ -126,7 +141,9 @@ export class ProjectData extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.sql = ctx.storage.sql;
+    const metered = createRowMeteredSqlStorage(ctx.storage.sql);
+    this.sql = metered.sql;
+    this.sqlRowMeter = metered.meter;
     ctx.blockConcurrencyWhile(async () => {
       this.ctx.storage.transactionSync(() => {
         runMigrations(this.sql);
@@ -959,7 +976,30 @@ export class ProjectData extends DurableObject<Env> {
     roles: string[] | null = null,
     limit: number = 10
   ) {
-    return archiveSharding.archiveSourceSearchMessages(this.sql, input, query, roles, limit);
+    return archiveSharding.archiveSourceSearchMessages(
+      this.sql,
+      input,
+      query,
+      roles,
+      limit,
+      messages.resolveMessageSearchBounds(this.env)
+    );
+  }
+
+  archiveSourceSearchMessagesWithCoverage(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    query: string,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
+    return archiveSharding.archiveSourceSearchMessagesWithCoverage(
+      this.sql,
+      input,
+      query,
+      roles,
+      limit,
+      messages.resolveMessageSearchBounds(this.env)
+    );
   }
 
   archiveTargetPrepare(
@@ -1148,7 +1188,31 @@ export class ProjectData extends DurableObject<Env> {
     roles: string[] | null = null,
     limit: number = 10
   ) {
-    return messages.searchMessages(this.sql, query, sessionId, roles, limit);
+    return messages.searchMessages(
+      this.sql,
+      query,
+      sessionId,
+      roles,
+      limit,
+      messages.resolveMessageSearchBounds(this.env)
+    );
+  }
+
+  /** `searchMessages` plus what the bounded windows skipped, for callers that must disclose it. */
+  searchMessagesWithCoverage(
+    query: string,
+    sessionId: string | null = null,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
+    return messages.searchMessagesWithCoverage(
+      this.sql,
+      query,
+      sessionId,
+      roles,
+      limit,
+      messages.resolveMessageSearchBounds(this.env)
+    );
   }
 
   listCommentThreads(input: comments.ListCommentThreadsInput): comments.ListCommentThreadsResult {
@@ -2340,68 +2404,69 @@ export class ProjectData extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'ProjectData')) return;
+    const gating = resolveProjectDataAlarmGatingConfig(this.env);
+    let scheduleRefreshed = true;
     try {
-      const timedOut = await checkRuntimeHeartbeatTimeouts(
-        this.sql,
-        this.env,
-        this.transitionAcpSession.bind(this),
-        this.getProjectId()
-      );
-
-      await stopTimedOutConversationWorkspaces(this.env, timedOut);
+      // Fold in state changed since the last recalculation (min only; nothing is consumed yet).
+      this.alarmSections.observe(computeProjectDataAlarmSectionTimes(this.sql, this.env));
+    } catch (err) {
+      scheduleRefreshed = false;
+      log.error('alarm.schedule_refresh_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    const tick = new ProjectDataAlarmTick(
+      this.alarmSections.planTick(
+        gating,
+        Date.now(),
+        scheduleRefreshed ? null : 'schedule_unavailable'
+      ),
+      gating,
+      this.sqlRowMeter,
+      this.alarmSections
+    );
+    try {
+      await tick.run('runtime_heartbeat_timeouts', async () => {
+        const timedOut = await checkRuntimeHeartbeatTimeouts(
+          this.sql,
+          this.env,
+          this.transitionAcpSession.bind(this),
+          this.getProjectId()
+        );
+        await stopTimedOutConversationWorkspaces(this.env, timedOut);
+      });
 
       // Storage safety is the DO quota firebreak. Run it before the heavier
       // lifecycle maintenance sections so a large project can still reclaim bytes
       // even when idle/reconciliation work has accumulated.
-      try {
-        await this.runStorageSafetyAlarmLocked();
-      } catch (err) {
-        log.error('alarm.storage_safety_failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+      await tick.run('storage_safety', () => this.runStorageSafetyAlarmLocked());
 
-      await idleCleanup.checkWorkspaceIdleTimeouts(
-        this.sql,
-        this.env,
-        this.getProjectId(),
-        (workspaceId, projectId) =>
-          idleCleanup.deleteWorkspaceInD1(this.env.DATABASE, workspaceId, projectId),
-        (type, payload, sid) => this.broadcastEvent(type, payload, sid),
-        () => this.scheduleSummarySync()
+      await tick.run('workspace_idle_timeouts', () =>
+        idleCleanup.checkWorkspaceIdleTimeouts(
+          this.sql,
+          this.env,
+          this.getProjectId(),
+          (workspaceId, projectId) =>
+            idleCleanup.deleteWorkspaceInD1(this.env.DATABASE, workspaceId, projectId),
+          (type, payload, sid) => this.broadcastEvent(type, payload, sid),
+          () => this.scheduleSummarySync()
+        )
       );
-      await idleCleanup.processExpiredCleanups(
-        this.sql,
-        this.env,
-        this.getProjectId(),
-        async (workspaceId, projectId) => {
-          await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, workspaceId, projectId);
-          // Schedule automatic deletion after TTL (best-effort)
-          try {
-            const workerEnv = this.env as unknown as import('../../env').Env;
-            const wsRow = await workerEnv.DATABASE.prepare(
-              'SELECT node_id, user_id FROM workspaces WHERE id = ? AND project_id = ?'
-            )
-              .bind(workspaceId, projectId)
-              .first<{ node_id: string | null; user_id: string }>();
-            if (wsRow?.node_id) {
-              const doId = workerEnv.NODE_LIFECYCLE.idFromName(wsRow.node_id);
-              const stub = workerEnv.NODE_LIFECYCLE.get(doId);
-              await (
-                stub as unknown as import('../node-lifecycle').NodeLifecycle
-              ).scheduleWorkspaceDeletion(wsRow.node_id, workspaceId, wsRow.user_id);
-            }
-          } catch {
-            // Best-effort — cron safety-net will catch it
-          }
-        },
-        (type, payload, sid) => this.broadcastEvent(type, payload, sid),
-        () => this.scheduleSummarySync()
+      await tick.run('expired_idle_cleanups', () =>
+        idleCleanup.processExpiredCleanups(
+          this.sql,
+          this.env,
+          this.getProjectId(),
+          (workspaceId, projectId) =>
+            this.stopIdleWorkspaceAndScheduleDeletion(workspaceId, projectId),
+          (type, payload, sid) => this.broadcastEvent(type, payload, sid),
+          () => this.scheduleSummarySync()
+        )
       );
 
       // Task-mode reconciliation: check-in on idle task agents
-      try {
-        await reconciliation.processReconciliationCandidates(
+      await tick.run('task_reconciliation', () =>
+        reconciliation.processReconciliationCandidates(
           this.sql,
           this.env,
           (type, payload, sid) => this.broadcastEvent(type, payload, sid),
@@ -2410,89 +2475,116 @@ export class ProjectData extends DurableObject<Env> {
             projectId: this.getProjectId(),
             scheduleSummarySync: () => this.scheduleSummarySync(),
           }
-        );
-      } catch (err) {
-        log.error('alarm.reconciliation_failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+        )
+      );
 
-      await attentionExpiry.processExpiredAttentionMarkers(
-        this.sql,
-        this.env,
-        async (sessionId, errorMessage) => {
-          await this.failSession(sessionId, errorMessage);
-        },
-        {
-          projectId: this.getProjectId(),
-          scheduleSummarySync: () => this.scheduleSummarySync(),
-        }
+      await tick.run('attention_expiry', () =>
+        attentionExpiry.processExpiredAttentionMarkers(
+          this.sql,
+          this.env,
+          async (sessionId, errorMessage) => {
+            await this.failSession(sessionId, errorMessage);
+          },
+          {
+            projectId: this.getProjectId(),
+            scheduleSummarySync: () => this.scheduleSummarySync(),
+          }
+        )
       );
 
       // Session state staleness is reconciled only against the authoritative
       // SessionHost inventory. Local SQL mirrors and VM heartbeats cannot prove a
       // turn ended.
-      const staleThresholdMs = sessionState.parseActivityStaleThreshold(
-        this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS
-      );
-      // Network I/O stays OFF the alarm's critical path — rule 47.
-      this.ctx.waitUntil(
-        sessionActivityReconciliation
-          .probeStaleSessionActivity(this.sql, this.env, this.sessionActivityHooks(), {
-            thresholdMs: staleThresholdMs,
-            projectId: this.getProjectId(),
-          })
-          .catch((err) => {
-            log.error('alarm.session_activity_probe_failed', {
-              error: err instanceof Error ? err.message : String(err),
-            });
-          })
-      );
+      await tick.run('session_activity_probe', () => {
+        const staleThresholdMs = sessionState.parseActivityStaleThreshold(
+          this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS
+        );
+        // Network I/O stays OFF the alarm's critical path — rule 47.
+        this.ctx.waitUntil(
+          sessionActivityReconciliation
+            .probeStaleSessionActivity(this.sql, this.env, this.sessionActivityHooks(), {
+              thresholdMs: staleThresholdMs,
+              projectId: this.getProjectId(),
+            })
+            .catch((err) => {
+              log.error('alarm.session_activity_probe_failed', {
+                error: err instanceof Error ? err.message : String(err),
+              });
+            })
+        );
+      });
 
       // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
-      const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
-      const maxAttempts = parseInt(this.env.MAILBOX_REDELIVERY_MAX_ATTEMPTS ?? '5', 10);
-      mailbox.runDeliverySweep(this.sql, ackTimeoutMs, maxAttempts);
+      await tick.run('mailbox_delivery_sweep', () => {
+        const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
+        const maxAttempts = parseInt(this.env.MAILBOX_REDELIVERY_MAX_ATTEMPTS ?? '5', 10);
+        mailbox.runDeliverySweep(this.sql, ackTimeoutMs, maxAttempts);
+      });
 
-      try {
-        await this.runProjectEventWakeMaterializationAlarm();
-      } catch (err) {
-        log.error('alarm.project_event_wake_materialization_failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-        this.recordProjectEventSchedulerFailure('materialization', err);
-      }
-
-      this.ctx.waitUntil(
-        runStandingWatchAlarm(this.sql, this.env, this.durabilityHooks())
-          .then(() => runScheduleAlarm(this.sql, this.env, this.durabilityHooks()))
-          .catch((err) => log.error('alarm.scheduled_action_failed', { error: String(err) }))
-          .finally(() => this.recalculateAlarm())
+      await tick.run(
+        'project_event_wake_materialization',
+        () => this.runProjectEventWakeMaterializationAlarm(),
+        (err) => this.recordProjectEventSchedulerFailure('materialization', err)
       );
 
+      await tick.run('scheduled_actions', () => {
+        this.ctx.waitUntil(
+          runStandingWatchAlarm(this.sql, this.env, this.durabilityHooks())
+            .then(() => runScheduleAlarm(this.sql, this.env, this.durabilityHooks()))
+            .catch((err) => log.error('alarm.scheduled_action_failed', { error: String(err) }))
+            .finally(() => this.recalculateAlarm())
+        );
+      });
+
       // Resolve due waits before claiming prompt deliveries so a newly enqueued
-      // parent wake can be dispatched in this same alarm turn.
-      try {
-        await this.reconcileTaskWaits();
-      } catch (err) {
-        log.error('alarm.task_wait_reconciliation_failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+      // parent wake can be dispatched in this same alarm turn (a same-tick cascade in
+      // `alarm-sections.ts` forces prompt delivery to run whenever this does).
+      await tick.run('task_waits', () => this.reconcileTaskWaits());
 
       // Claims persist before bounded adapter I/O continues through waitUntil.
-      durability.processPromptDeliveryAlarm(this.sql, this.env, this.durabilityHooks());
+      await tick.run('prompt_delivery', () =>
+        durability.processPromptDeliveryAlarm(this.sql, this.env, this.durabilityHooks())
+      );
 
+      await tick.run(
+        'project_event_retention',
+        () => this.runProjectEventRetentionAlarm(),
+        (err) => this.recordProjectEventSchedulerFailure('retention', err)
+      );
+    } finally {
       try {
-        this.runProjectEventRetentionAlarm();
+        tick.complete(this.getProjectId());
       } catch (err) {
-        log.error('alarm.project_event_retention_failed', {
+        log.error('alarm.completion_log_failed', {
           error: err instanceof Error ? err.message : String(err),
         });
-        this.recordProjectEventSchedulerFailure('retention', err);
       }
-    } finally {
-      await this.recalculateAlarm();
+      await this.recalculateAlarm(tick.consumedSections());
+    }
+  }
+
+  /** Stop an idle-expired workspace, then schedule its deletion after the TTL (best-effort). */
+  private async stopIdleWorkspaceAndScheduleDeletion(
+    workspaceId: string,
+    projectId: string
+  ): Promise<void> {
+    await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, workspaceId, projectId);
+    try {
+      const workerEnv = this.env as unknown as import('../../env').Env;
+      const wsRow = await workerEnv.DATABASE.prepare(
+        'SELECT node_id, user_id FROM workspaces WHERE id = ? AND project_id = ?'
+      )
+        .bind(workspaceId, projectId)
+        .first<{ node_id: string | null; user_id: string }>();
+      if (wsRow?.node_id) {
+        const doId = workerEnv.NODE_LIFECYCLE.idFromName(wsRow.node_id);
+        const stub = workerEnv.NODE_LIFECYCLE.get(doId);
+        await (
+          stub as unknown as import('../node-lifecycle').NodeLifecycle
+        ).scheduleWorkspaceDeletion(wsRow.node_id, workspaceId, wsRow.user_id);
+      }
+    } catch {
+      // Best-effort — cron safety-net will catch it
     }
   }
 
@@ -3001,8 +3093,17 @@ export class ProjectData extends DurableObject<Env> {
     };
   }
 
-  private async recalculateAlarm(): Promise<void> {
-    const alarmTime = computeProjectDataAlarmTime(this.sql, this.env);
+  /**
+   * `consumed` lists alarm sections that just ran, so their remembered due time is replaced rather
+   * than kept; every other caller only ever moves a section's remembered due time earlier.
+   */
+  private async recalculateAlarm(consumed?: ReadonlySet<ProjectDataAlarmSection>): Promise<void> {
+    const times = computeProjectDataAlarmSectionTimes(this.sql, this.env);
+    this.alarmSections.observe(times, consumed);
+    // The scheduler's memory already holds every fresh time (min-folded) plus the retry floor of
+    // any section that just threw; reading fresh times directly would bypass that floor and
+    // re-arm a failing overdue section at `now` on every tick.
+    const alarmTime = earliestAlarmTime([this.alarmSections.nextDueAt()]);
     if (alarmTime !== null) await this.ctx.storage.setAlarm(alarmTime);
     else await this.ctx.storage.deleteAlarm();
   }

@@ -82,6 +82,7 @@ import {
   CommentValidationError,
 } from '../durable-objects/project-data/comment-contracts';
 import type { ProjectDataGroupedFtsCleanupResult } from '../durable-objects/project-data/grouped-fts-cleanup';
+import type { MessageSearchCoverage } from '../durable-objects/project-data/message-search';
 import {
   ProjectEventAckPolicyError,
   ProjectEventAckStateError,
@@ -1052,9 +1053,38 @@ export type ProjectDataArchiveSearchMetadata = {
   archiveOwnerLimit: number;
 };
 
+/**
+ * What the root object's bounded search windows skipped (`message-search.ts`). `null` when the root
+ * was not queried because the session lives on an archive shard.
+ */
+export type ProjectDataRootSearchCoverage = MessageSearchCoverage;
+
+/**
+ * Plain-language disclosure of a truncated root search, for consumers (agents) that cannot notice
+ * results they were never shown. Empty when nothing was skipped.
+ */
+export function describeRootSearchCoverage(
+  coverage: ProjectDataRootSearchCoverage | null
+): string[] {
+  if (!coverage) return [];
+  const notes: string[] = [];
+  if (coverage.ftsCandidatesTruncated) {
+    notes.push(
+      `Full-text ranking considered only the newest ${coverage.ftsCandidateLimit} matching messages; older matches exist but were not ranked. Add more specific words or narrow with sessionId to reach them.`
+    );
+  }
+  if (coverage.keywordScanTruncated) {
+    notes.push(
+      `The keyword fallback for not-yet-indexed text scanned only the newest ${coverage.keywordScanRowLimit} raw messages; older unindexed text was not searched.`
+    );
+  }
+  return notes;
+}
+
 export type ProjectDataSearchMessagesWithArchiveMetadataResult = {
   results: ProjectDataMessageSearchResult[];
   archiveSearch: ProjectDataArchiveSearchMetadata;
+  rootSearch: ProjectDataRootSearchCoverage | null;
 };
 
 type ProjectDataArchiveSearchOwnerRow = {
@@ -1156,13 +1186,22 @@ export async function searchMessagesWithArchiveMetadata(
     const owner = await resolveExactReadOwnerIfArchiveEnabled(env, projectId, sessionId);
     const ownerStub = await getStubForOwner(env, projectId, owner.ownerName);
     let results: ProjectDataMessageSearchResult[];
+    let rootSearch: ProjectDataRootSearchCoverage | null = null;
     if (owner.kind === 'root') {
-      results = await ownerStub.archiveSourceSearchMessages(owner, query, roles, limit);
+      const search = await ownerStub.archiveSourceSearchMessagesWithCoverage(
+        owner,
+        query,
+        roles,
+        limit
+      );
+      results = search.results;
+      rootSearch = search.coverage;
     } else {
       results = await ownerStub.archiveTargetSearchMessages(owner, query, roles, limit);
     }
     return {
       results,
+      rootSearch,
       archiveSearch: {
         partial: false,
         reason: 'session_scoped_exact_read',
@@ -1176,12 +1215,8 @@ export async function searchMessagesWithArchiveMetadata(
     };
   }
   const stub = await getStub(env, projectId);
-  const rootResults = (await stub.searchMessages(
-    query,
-    sessionId,
-    roles,
-    limit
-  )) as ProjectDataMessageSearchResult[];
+  const rootSearch = await stub.searchMessagesWithCoverage(query, sessionId, roles, limit);
+  const rootResults: ProjectDataMessageSearchResult[] = rootSearch.results;
   const archiveOwnerLimit = resolveProjectWideArchiveSearchMaxOwners(env);
   let archiveOwners: ProjectDataArchiveSearchOwnerRow[] = [];
   let archiveOwnersAvailable = 0;
@@ -1227,6 +1262,7 @@ export async function searchMessagesWithArchiveMetadata(
 
   return {
     results: sortAndLimitSearchResults([...rootResults, ...archiveResults], limit),
+    rootSearch: rootSearch.coverage,
     archiveSearch: {
       partial: reason !== null,
       reason,

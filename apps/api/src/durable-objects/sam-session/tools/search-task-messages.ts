@@ -136,5 +136,7 @@ export async function searchTaskMessages(
     query: input.query.trim(),
     projectId: project.id,
     archiveSearch: search.archiveSearch,
+    rootSearch: search.rootSearch,
+    coverageNotes: projectDataService.describeRootSearchCoverage(search.rootSearch),
   };
 }
