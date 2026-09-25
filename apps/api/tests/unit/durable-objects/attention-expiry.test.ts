@@ -6,12 +6,17 @@ import { runMigrations } from '../../../src/durable-objects/migrations';
 import { createAttentionMarker } from '../../../src/durable-objects/project-data/attention';
 import { processExpiredAttentionMarkers } from '../../../src/durable-objects/project-data/attention-expiry';
 import type { Env } from '../../../src/durable-objects/project-data/types';
+import { failedTaskWorkLossMessage } from '../../../src/services/failed-task-preservation';
+import { persistMessage } from '../../../src/services/project-data';
 import { cleanupTaskRun } from '../../../src/services/task-runner';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 vi.mock('../../../src/services/task-runner', () => ({ cleanupTaskRun: vi.fn() }));
-vi.mock('../../../src/services/project-data', () => ({ reconcileTaskWaits: vi.fn() }));
+vi.mock('../../../src/services/project-data', () => ({
+  reconcileTaskWaits: vi.fn(),
+  persistMessage: vi.fn().mockResolvedValue('notice-1'),
+}));
 vi.mock('../../../src/services/vm-admission-control', () => ({
   cancelVmTaskAdmission: vi.fn().mockResolvedValue(undefined),
 }));
@@ -43,7 +48,15 @@ describe('delivery-aware attention expiry', () => {
       schema.taskStatusEvents,
       schema.workspaces,
       schema.projectEventSourceOutbox,
+      // Failed-task preservation reads the runtime and the chat's sleep state.
+      schema.nodes,
+      schema.agentSessions,
+      schema.sessionSnapshots,
+      schema.sessionSummaries,
     ]);
+    d1Db.exec(
+      'CREATE UNIQUE INDEX idx_session_snapshots_chat_session_id ON session_snapshots(chat_session_id)'
+    );
     sql.exec(
       `INSERT INTO chat_sessions
          (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
@@ -229,11 +242,14 @@ describe('delivery-aware attention expiry', () => {
       error_message: 'Human input request expired after timeout',
       execution_step: null,
     });
-    expect(workspaceStatus()).toBe('stopped');
+    // This fixture has no node row, so the work cannot be preserved: teardown is
+    // delegated to cleanupTaskRun (the real VM stop), not a D1-only `stopped` mark.
+    expect(workspaceStatus()).toBe('running');
     expect(failSession).toHaveBeenCalledWith(
       'session-1',
       'Human input request expired after timeout'
     );
+    await vi.waitFor(() => expect(cleanupTaskRun).toHaveBeenCalledWith('task-1', env));
     expect(sql.exec('SELECT resolved_reason FROM session_attention_markers').toArray()).toEqual([
       { resolved_reason: 'hard_max_expired' },
     ]);
@@ -246,8 +262,9 @@ describe('delivery-aware attention expiry', () => {
     await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
 
     expect(taskRow().status).toBe('failed');
-    expect(workspaceStatus()).toBe('stopped');
+    expect(workspaceStatus()).toBe('running');
     expect(failSession).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(cleanupTaskRun).toHaveBeenCalledWith('task-1', env));
   });
 
   it('renews an expired reconciliation_checkin while current-generation prompting is active', async () => {
@@ -517,7 +534,7 @@ describe('delivery-aware attention expiry', () => {
         reason: 'Agent became unresponsive after SAM check-in',
       },
     ]);
-    expect(workspaceStatus()).toBe('stopped');
+    expect(workspaceStatus()).toBe('running');
     expect(failSession).toHaveBeenCalledTimes(1);
     expect(scheduleSummarySync).toHaveBeenCalledTimes(1);
     expect(notificationGet).not.toHaveBeenCalled();
@@ -540,5 +557,145 @@ describe('delivery-aware attention expiry', () => {
         task_id: 'task-1',
       },
     ]);
+  });
+
+  describe('failed-task work preservation (idea 01M1XGHX7NQZQYWQRV5C1PJ60N)', () => {
+    function seedLiveVmRuntime(agentSessionStatus = 'running') {
+      d1Db
+        .prepare(
+          `INSERT INTO nodes (id, user_id, status, node_role, runtime)
+           VALUES ('node-1', 'user-1', 'running', 'workspace', 'vm')`
+        )
+        .run();
+      d1Db.prepare(`UPDATE workspaces SET node_id = 'node-1' WHERE id = 'workspace-1'`).run();
+      d1Db
+        .prepare(
+          `INSERT INTO agent_sessions (id, workspace_id, status, agent_type, created_at)
+           VALUES ('agent-1', 'workspace-1', ?, 'claude-code', ?)`
+        )
+        .run(agentSessionStatus, new Date(START - 60_000).toISOString());
+    }
+
+    function seedSleepingSnapshot() {
+      const sleptAt = new Date(START - 24 * 60 * 60 * 1000).toISOString();
+      d1Db
+        .prepare(
+          `INSERT INTO session_snapshots
+             (id, project_id, workspace_id, user_id, chat_session_id, agent_session_id, runtime,
+              status, degradation, manifest_r2_key, expires_at, sleeping_at, sleep_status,
+              recovery_attempts, sleep_attempts, created_at, updated_at)
+           VALUES ('snapshot-1', ?, 'workspace-1', 'user-1', 'session-1', 'agent-1', 'vm',
+              'available', 'none', 'snapshots/manifest.json', ?, ?, 'sleeping', 0, 0, ?, ?)`
+        )
+        .run(
+          PROJECT_ID,
+          new Date(START + 6 * 24 * 60 * 60 * 1000).toISOString(),
+          sleptAt,
+          sleptAt,
+          sleptAt
+        );
+    }
+
+    function snapshotRow() {
+      return d1Db
+        .prepare(
+          `SELECT status, sleep_status, sleep_after FROM session_snapshots
+           WHERE chat_session_id = 'session-1'`
+        )
+        .get();
+    }
+
+    function checkinMarker() {
+      createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        workspaceId: 'workspace-1',
+        kind: 'reconciliation_checkin',
+        source: 'sam_orchestrator',
+        expiresAt: START,
+      });
+    }
+
+    it('keeps an already-sleeping conversation asleep and wakeable when human input expires', async () => {
+      // The production shape: the session slept while it waited, a day before the
+      // marker expired. Failing it would flip ProjectData sleeping -> failed, which
+      // snapshot recovery refuses to wake.
+      d1Db.prepare(`UPDATE workspaces SET status = 'deleted' WHERE id = 'workspace-1'`).run();
+      sql.exec(`UPDATE chat_sessions SET status = 'sleeping' WHERE id = 'session-1'`);
+      seedSleepingSnapshot();
+      hasConfirmedPushDelivery.mockResolvedValue(true);
+      createNeedsInput({ expiresAt: START, nextEscalationAt: null });
+
+      await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+      expect(taskRow()).toMatchObject({
+        status: 'failed',
+        error_message: 'Human input request expired after timeout',
+      });
+      expect(sql.exec('SELECT resolved_reason FROM session_attention_markers').toArray()).toEqual([
+        { resolved_reason: 'expired' },
+      ]);
+      expect(failSession).not.toHaveBeenCalled();
+      expect(persistMessage).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
+      expect(snapshotRow()).toMatchObject({ status: 'available', sleep_status: 'sleeping' });
+    });
+
+    it('queues a snapshot-backed sleep instead of tearing down a live runtime', async () => {
+      seedLiveVmRuntime();
+      checkinMarker();
+
+      await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+      expect(taskRow()).toMatchObject({
+        status: 'failed',
+        error_message: 'Agent became unresponsive after SAM check-in',
+      });
+      expect(snapshotRow()).toMatchObject({
+        status: 'pending',
+        sleep_status: 'scheduled',
+        sleep_after: new Date(START).toISOString(),
+      });
+      expect(workspaceStatus()).toBe('running');
+      expect(failSession).not.toHaveBeenCalled();
+      expect(persistMessage).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
+    });
+
+    it('says the work was not preserved before failing the session and tearing down', async () => {
+      seedLiveVmRuntime('failed');
+      checkinMarker();
+
+      await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+      expect(taskRow().status).toBe('failed');
+      expect(persistMessage).toHaveBeenCalledWith(
+        env,
+        PROJECT_ID,
+        'session-1',
+        'system',
+        failedTaskWorkLossMessage('no_resumable_agent_session'),
+        null
+      );
+      expect(failSession).toHaveBeenCalledOnce();
+      expect(vi.mocked(persistMessage).mock.invocationCallOrder[0]).toBeLessThan(
+        failSession.mock.invocationCallOrder[0] ?? 0
+      );
+      await vi.waitFor(() => expect(cleanupTaskRun).toHaveBeenCalledWith('task-1', env));
+      expect(snapshotRow()).toBeUndefined();
+    });
+
+    it('withholds teardown when the preservation lookup fails', async () => {
+      seedLiveVmRuntime();
+      d1Db.exec('DROP TABLE nodes');
+      checkinMarker();
+
+      await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+      expect(taskRow().status).toBe('failed');
+      expect(failSession).not.toHaveBeenCalled();
+      expect(persistMessage).not.toHaveBeenCalled();
+      expect(cleanupTaskRun).not.toHaveBeenCalled();
+    });
   });
 });

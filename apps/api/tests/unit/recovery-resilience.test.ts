@@ -316,10 +316,14 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
     // used to count only 'running', so a node holding a 'creating' workspace could
     // be destroyed by phase 1 while phases 2/3 correctly skipped it.
     expect(nodeCleanupSource).toContain("w.status IN ('running', 'creating', 'recovery')");
-    // Failed/cancelled work is terminal. Completed conversations remain
-    // persistent unless the workspace has no chat to resume.
-    expect(nodeCleanupSource).toContain("t.status IN ('failed', 'cancelled')");
-    expect(nodeCleanupSource).toContain("(t.status = 'completed' AND w.chat_session_id IS NULL)");
+    // Terminal work is reaped unless the session-sleep lifecycle owns the
+    // workspace; the behavioural proof against real SQL lives in
+    // tests/workers/scheduled-node-cleanup.test.ts.
+    expect(nodeCleanupSource).toContain("t.status IN ('completed', 'failed', 'cancelled')");
+    expect(nodeCleanupSource).toContain(
+      "AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w')}"
+    );
+    expect(nodeCleanupSource).not.toContain("t.status IN ('failed', 'cancelled')");
     // Must NOT have any active task still referencing it
     expect(nodeCleanupSource).toContain('NOT EXISTS');
     expect(nodeCleanupSource).toContain("t.status IN ('queued', 'delegated', 'in_progress')");

@@ -1,4 +1,5 @@
 import { parsePositiveInt } from '../lib/route-helpers';
+import { isSleepPreservedTerminalTaskStatus } from './sleep-preserved-task-status';
 
 export const DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS = 5 * 60 * 1000;
 
@@ -178,12 +179,17 @@ export function classifySessionIdleness(input: {
       ? input.state.activityAt
       : null;
 
-  // Terminal tasks can retain a stale `prompting` transition forever. Treat
-  // that state as idle only after the normal idle interval has elapsed, so a
-  // final response is preserved but old terminal sessions cannot strand compute.
-  if (input.taskStatus === 'completed' && activity !== 'idle') {
+  // Terminal tasks whose conversation is kept by sleep (completed, and failed —
+  // see `SLEEP_PRESERVED_TERMINAL_TASK_STATUSES`) can retain a stale `prompting`
+  // transition forever. Treat that state as idle only after the normal idle
+  // interval has elapsed, so a final response is preserved but old terminal
+  // sessions cannot strand compute. For a failed task this is also what lets a
+  // hung prompt (e.g. an expired SAM check-in) reach its preservation snapshot.
+  const sleepPreservedTerminalTask = isSleepPreservedTerminalTaskStatus(input.taskStatus);
+  if (sleepPreservedTerminalTask && activity !== 'idle') {
     // complete_task runs inside the prompt: an hours-old prompting transition
-    // does not mean the response following that tool has already drained.
+    // does not mean the response following that tool has already drained. A
+    // failure is anchored the same way, on the moment the task went terminal.
     const completedAt = Date.parse(input.taskCompletedAt ?? '');
     const drainAnchor = Math.max(activityAt ?? 0, Number.isFinite(completedAt) ? completedAt : 0);
     if (!drainAnchor) {
@@ -223,8 +229,10 @@ export function classifySessionIdleness(input: {
 
   // The prompt turn has ended and no runtime work holds a lease. That is the
   // whole safety question, so a teardown gate or an explicit user-initiated
-  // sleep stops here. A terminal task is also always immediately reclaimable.
-  if (input.policy === 'prompt-turn-ended' || input.taskStatus === 'completed') {
+  // sleep stops here. A sleep-preserved terminal task is also always
+  // immediately reclaimable. `cancelled` is not: its runtime is torn down
+  // directly by the terminal cleanup, never slept.
+  if (input.policy === 'prompt-turn-ended' || sleepPreservedTerminalTask) {
     return {
       idle: true,
       conclusive: true,

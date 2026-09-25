@@ -20,6 +20,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { stopWorkspaceOnNode } from '../../services/node-agent';
 import { persistError } from '../../services/observability';
+import { sleepLifecycleOwnsTerminalTaskWorkspaceSql } from '../../services/sleep-preserved-task-status';
 import { loadWorkspaceDeletionIdentity } from '../../services/workspace-deletion';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import type { CleanupConfig, CleanupDb, NodeCleanupResult } from './shared';
@@ -34,6 +35,12 @@ function deletionRetryBaseMs(env: Env): number {
  *
  * Only workspaces that were EVER associated with a task are considered. User-created
  * workspaces (never referenced by any task) are intentionally long-lived.
+ *
+ * A terminal task whose workspace the session-sleep lifecycle owns
+ * (`sleepLifecycleOwnsTerminalTaskWorkspaceSql`) is NOT an orphan: the sleep
+ * sweep snapshots it, then stops it. This sweep runs before `session_sleep` in
+ * every tick, so reaping it here would destroy a failed task's unpushed work
+ * before its preservation snapshot could be taken.
  */
 export async function sweepOrphanedWorkspaces(
   db: CleanupDb,
@@ -51,10 +58,8 @@ export async function sweepOrphanedWorkspaces(
        AND EXISTS (
          SELECT 1 FROM tasks t
          WHERE t.workspace_id = w.id
-           AND (
-             t.status IN ('failed', 'cancelled')
-             OR (t.status = 'completed' AND w.chat_session_id IS NULL)
-           )
+           AND t.status IN ('completed', 'failed', 'cancelled')
+           AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w')}
        )
        AND NOT EXISTS (
          SELECT 1 FROM tasks t

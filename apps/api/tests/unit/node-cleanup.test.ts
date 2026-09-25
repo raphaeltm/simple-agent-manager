@@ -9,8 +9,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
-import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/terminal-cf-container-phase';
 import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
+import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/terminal-cf-container-phase';
+import { sleepLifecycleOwnsTerminalTaskWorkspaceSql } from '../../src/services/sleep-preserved-task-status';
 
 // Mock strict external teardown. Scheduled cleanup must fail closed when the
 // provider/container boundary cannot confirm deletion.
@@ -337,10 +338,15 @@ describe('runNodeCleanupSweep', () => {
       const result = await runNodeCleanupSweep(env);
 
       expect(result.lifetimeDestroyed).toBe(1);
-      expect(deleteNodeResourcesStrict).toHaveBeenCalledWith('node-stopped-handoff', 'user-1', env, {
-        providerRequestContext: { signal: expect.any(AbortSignal) },
-        requestDeadlineMs: expect.any(Number),
-      });
+      expect(deleteNodeResourcesStrict).toHaveBeenCalledWith(
+        'node-stopped-handoff',
+        'user-1',
+        env,
+        {
+          providerRequestContext: { signal: expect.any(AbortSignal) },
+          requestDeadlineMs: expect.any(Number),
+        }
+      );
     });
 
     it('does not destroy stopped handoff nodes with active workspaces', async () => {
@@ -471,8 +477,11 @@ describe('runNodeCleanupSweep', () => {
       };
       expect(cfStatement.bind.mock.calls[0]?.[2]).toBe(3);
       const terminalQuery = String(prepare.mock.calls[cfQueryIndex]?.[0]);
-      expect(terminalQuery).toContain("t.status IN ('failed', 'cancelled')");
-      expect(terminalQuery).toContain("t.status = 'completed' AND w.chat_session_id IS NULL");
+      // Behaviour against real SQL: tests/workers/scheduled-node-cleanup.test.ts.
+      expect(terminalQuery).toContain("t.status IN ('completed', 'failed', 'cancelled')");
+      expect(terminalQuery).toContain(
+        `AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w')}`
+      );
     });
   });
 });

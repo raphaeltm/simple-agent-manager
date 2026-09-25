@@ -6,6 +6,10 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import {
+  noteFailedTaskPreservationCapture,
+  releaseExhaustedFailedTaskPreservation,
+} from '../services/failed-task-preservation';
+import {
   checkAutomaticSessionSleepEligibility,
   queueWorkspaceSessionSleep,
   sleepWorkspaceSession,
@@ -146,6 +150,30 @@ async function reconcileUnscheduledSessionSleeps(
   return reconciled;
 }
 
+/**
+ * A failed task's sleep is its work preservation (`failed-task-preservation.ts`).
+ * After a slept attempt, surface an incomplete snapshot; after a failed one, tear
+ * the runtime down once the persisted row has no retry left (`.claude/rules/47`).
+ * Both helpers no-op for any other task, and never throw into the sweep.
+ */
+async function settleFailedTaskPreservation(
+  env: Env,
+  chatSessionId: string,
+  outcome: 'slept' | 'failed'
+): Promise<void> {
+  const settle =
+    outcome === 'slept'
+      ? noteFailedTaskPreservationCapture
+      : releaseExhaustedFailedTaskPreservation;
+  await settle(env, { chatSessionId }).catch((error: unknown) => {
+    log.warn('session_sleep_sweep.failed_task_preservation_settle_failed', {
+      chatSessionId,
+      outcome,
+      error: sessionLifecycleError(env, error),
+    });
+  });
+}
+
 async function sleepClaimedSession(
   env: Env,
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -166,6 +194,7 @@ async function sleepClaimedSession(
       reason: 'Idle timeout elapsed',
       sleepClaimId: claimId,
     });
+    await settleFailedTaskPreservation(env, candidate.chatSessionId, 'slept');
     return { status: 'slept', exhausted: false };
   } catch (error) {
     const attempts = candidate.sleepAttempts + 1;
@@ -193,6 +222,7 @@ async function sleepClaimedSession(
       exhausted,
       error: lifecycleError,
     });
+    await settleFailedTaskPreservation(env, candidate.chatSessionId, 'failed');
     return { status: 'failed', exhausted };
   }
 }
@@ -349,6 +379,9 @@ export async function runSessionSleepSweep(
           })
           .where(eq(schema.sessionSnapshots.id, candidate.snapshotId));
         stats.exhausted++;
+        const release = settleFailedTaskPreservation(env, candidate.chatSessionId, 'failed');
+        if (context) context.waitUntil(release);
+        else await release;
         continue;
       }
       claimId = crypto.randomUUID();
