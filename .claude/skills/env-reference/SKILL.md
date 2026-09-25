@@ -100,7 +100,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS` — How long a spent wake-attempt burst stays spent (default: `900000`)
 - `SESSION_RECOVERY_LINEAGE_MAX_DEPTH` — Wake→wake links followed back to the conversation's first run when deciding whether a wake must stay in its original location (default: `256`)
 - `SESSION_SLEEP_AFTER_MS` — Runtime-neutral idle time before automatic VM-session sleep; completed and failed tasks queue sleep immediately and drain for this long past the agent's last turn report (default: `900000`)
-- `FAILED_TASK_PRESERVATION_MAX_WAIT_MS` — Longest a failed task's runtime waits, from the failure, for its work-preservation sleep before the sweep tears it down with a chat notice (default: `28800000`)
+- `FAILED_TASK_PRESERVATION_MAX_WAIT_MS` — Longest a failed task's runtime waits for its work-preservation sleep, from the latest of the failure, an in-place wake and the agent's current turn start, before the sweep tears it down with a chat notice (default: `28800000`)
 - `SESSION_SLEEP_SWEEP_BATCH_SIZE` — Maximum due VM sleeps atomically claimed by one scheduled sweep (default: `10`)
 - `SESSION_SLEEP_RETRY_DELAY_MS` — Delay after a fail-closed automatic sleep attempt (default: `300000`)
 - `SESSION_SLEEP_MAX_ATTEMPTS` — Maximum automatic sleep attempts; exhaustion preserves compute and records the error, except a failed task's preservation, which then tears the runtime down and says so (default: `9`)

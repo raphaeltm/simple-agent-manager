@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, lt, lte, or } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -24,6 +24,7 @@ import {
   failSessionSnapshotSleepBeforeTeardown,
   sessionLifecycleError,
 } from '../services/session-snapshots';
+import { sessionSleepMaxAttempts } from '../services/sleep-preserved-task-status';
 import { reconcileUnscheduledSessionSleeps } from './session-sleep-intent-reconciliation';
 import { terminalizeMissingSleepSource } from './session-sleep-terminal';
 
@@ -147,10 +148,8 @@ export async function runSessionSleepSweep(
     env.SESSION_SLEEP_SWEEP_BATCH_SIZE,
     DEFAULT_SESSION_SLEEP_SWEEP_BATCH_SIZE
   );
-  const maxAttempts = parsePositiveInt(
-    env.SESSION_SLEEP_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS
-  );
+  // The same resolver the reapers' "gave up" predicate reads, so the two agree.
+  const maxAttempts = sessionSleepMaxAttempts(env);
   const wallBudgetMs = parsePositiveInt(
     env.SESSION_SLEEP_SWEEP_WALL_BUDGET_MS,
     DEFAULT_SESSION_SLEEP_SWEEP_WALL_BUDGET_MS
@@ -300,8 +299,11 @@ export async function runSessionSleepSweep(
             and(
               eq(schema.sessionSnapshots.id, candidate.snapshotId),
               // Only the row this sweep selected: a sleep episode restarted since
-              // (a new failure resets the budget) must not be exhausted here.
+              // (a new failure resets the budget), or a stale claim whose owner has
+              // since moved it on (`preparing` -> `stopping`), is left alone.
               eq(schema.sessionSnapshots.sleepAttempts, candidate.sleepAttempts),
+              sql`${schema.sessionSnapshots.sleepStatus} IS ${candidate.sleepStatus}`,
+              sql`${schema.sessionSnapshots.sleepClaimId} IS ${candidate.sleepClaimId}`,
               isNull(schema.sessionSnapshots.sleepingAt)
             )
           );
@@ -377,6 +379,11 @@ export async function runSessionSleepSweep(
         chatSessionId: candidate.chatSessionId,
         error: lifecycleError,
       });
+      // Deferred without spending an attempt, like any deferral: a candidate that
+      // throws every sweep must still reach the failed-task escapes.
+      if (candidate.sleepStatus !== 'stopping') {
+        await settleInBackground(candidate, 'deferred');
+      }
       continue;
     }
 
