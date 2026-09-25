@@ -415,8 +415,10 @@ export async function scheduleSessionSnapshotSleep(
     allowIncomplete?: boolean;
     resetAttempts?: boolean;
     runtime?: string;
+    expectedWorkspaceId?: string;
+    expectedNodeId?: string;
   } = {}
-): Promise<void> {
+): Promise<boolean> {
   const sleepAfterMs =
     options.sleepAfterMs === undefined
       ? options.runtime === 'cf-container'
@@ -431,7 +433,7 @@ export async function scheduleSessionSnapshotSleep(
         eq(schema.sessionSnapshots.degradation, 'none')
       );
   const resetAttempts = options.resetAttempts ?? !options.allowIncomplete;
-  await db
+  const scheduled = await db
     .update(schema.sessionSnapshots)
     .set({
       sleepStatus: 'scheduled',
@@ -458,9 +460,25 @@ export async function scheduleSessionSnapshotSleep(
         or(
           isNull(schema.sessionSnapshots.sleepStatus),
           inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed'])
-        )
+        ),
+        options.expectedWorkspaceId && options.expectedNodeId
+          ? and(
+              eq(schema.sessionSnapshots.workspaceId, options.expectedWorkspaceId),
+              eq(schema.sessionSnapshots.nodeId, options.expectedNodeId),
+              sql`EXISTS (
+                SELECT 1 FROM workspaces w
+                WHERE w.id = ${options.expectedWorkspaceId}
+                  AND w.node_id = ${options.expectedNodeId}
+                  AND w.chat_session_id = ${schema.sessionSnapshots.chatSessionId}
+                  AND w.user_id = ${schema.sessionSnapshots.userId}
+                  AND w.status IN ('running', 'creating', 'recovery')
+              )`
+            )
+          : undefined
       )
-    );
+    )
+    .run();
+  return (scheduled.meta.changes ?? 0) > 0;
 }
 
 export { cancelScheduledSessionSleep } from './session-snapshot-sleep-cancel';

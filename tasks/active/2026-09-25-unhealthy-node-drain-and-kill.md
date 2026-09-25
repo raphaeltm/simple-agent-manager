@@ -209,6 +209,15 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
   test turns red when those post-setup abort checks are removed; the sweep test also rejects a late
   promise after release without an unhandled rejection. Late chat notices use a stable message ID
   and target the original chat session, not a workspace mutation.
+- The snapshot placeholder's actual D1 INSERT/UPSERT now fences old workspace/node ownership and
+  refuses to repoint a snapshot already held by a replacement workspace. The final sleep-intent
+  UPDATE has a separate atomic ownership guard. Real SQLite tests compare the stored snapshot after
+  simulated recovery and node detachment, and verify both guarded success and guarded refusal.
+  Removing the conflict owner predicate repointed the recovered row; removing the final UPDATE's
+  workspace EXISTS predicate scheduled sleep on a moved workspace. Both surgical reversions failed
+  their tests, then were restored.
+- Split the oversized `session-sleep.ts` into queue, eligibility, execution, and cleanup modules;
+  its public export path stays stable. All resulting source modules are below the 500-line ceiling.
 - Draft PR #2147 is open. Remaining gates: full API suite rerun, coordinated real-VM staging,
   CI/CodeRabbit, merge, production monitoring.
 
