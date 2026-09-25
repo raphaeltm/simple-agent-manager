@@ -159,6 +159,7 @@ import {
   ensureSessionRecovery,
   SESSION_RECOVERY_INITIAL_PROMPT,
 } from '../../../src/services/session-recovery';
+import { isTransientSessionRecoveryRefusal } from '../../../src/services/session-recovery-refusals';
 
 const emptyCapacityPlacement = {
   capacityPoolId: null,
@@ -235,13 +236,16 @@ describe('ensureSessionRecovery', () => {
       new WorkspaceDeletionUnconfirmedError('workspace-unconfirmed')
     );
 
-    await expect(
-      ensureSessionRecovery(
-        { DATABASE: databaseMock, BASE_DOMAIN: 'example.test' } as never,
-        'project-1',
-        'chat-1'
-      )
-    ).resolves.toEqual({ status: 'unavailable', reason: 'workspace_deletion_unconfirmed' });
+    const refused = await ensureSessionRecovery(
+      { DATABASE: databaseMock, BASE_DOMAIN: 'example.test' } as never,
+      'project-1',
+      'chat-1'
+    );
+    expect(refused).toEqual({ status: 'unavailable', reason: 'workspace_deletion_unconfirmed' });
+    // Delivery and eviction retry this refusal: its name is their contract.
+    expect(
+      refused.status === 'unavailable' && isTransientSessionRecoveryRefusal(refused.reason)
+    ).toBe(true);
 
     expect(assertReplacementDeletionConfirmedMock).toHaveBeenCalledWith(expect.anything(), {
       sourceTaskId: 'source-task-unconfirmed',
@@ -738,6 +742,29 @@ describe('session recovery consumes the canonical persisted resource plan', () =
       expect(resolveTaskStartPlacement).not.toHaveBeenCalled();
     }
   );
+
+  it('names a placement that fails for now as a refusal its callers retry', async () => {
+    // The producer half of the delivery/eviction retry contract: a rename here
+    // would silently turn a retried refusal into a dropped one.
+    queueWake({ requestedVmSize: 'small', requestedVmSizeSource: 'task' });
+    const { resolveTaskStartPlacement } = await import('../../../src/services/placement-resolver');
+    (resolveTaskStartPlacement as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => {
+        throw new Error('capacity pool summary unavailable');
+      }
+    );
+
+    const result = await wake();
+
+    expect(result).toEqual({
+      status: 'unavailable',
+      reason: 'session_recovery_placement_transient',
+    });
+    expect(
+      result.status === 'unavailable' && isTransientSessionRecoveryRefusal(result.reason)
+    ).toBe(true);
+    expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+  });
 
   it('control: a well-formed plan still wakes normally', async () => {
     // Absence assertions above are also satisfied by wake being broken outright

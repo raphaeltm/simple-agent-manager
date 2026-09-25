@@ -35,10 +35,10 @@ export type TargetResolution =
   | { kind: 'guarded'; result: PromptDeliveryResult };
 
 /**
- * A wake in progress, or a refusal that clears on its own (a replaced workspace
- * whose deletion still awaits its proof: typically the first minutes after a
- * sleep, exactly when a user replies), is retried within the delivery's TTL and
- * attempt budget. Only a refusal that cannot clear ends the delivery.
+ * A wake in progress, or a refusal that usually clears on its own (a replaced
+ * workspace whose deletion still awaits its proof: typically the first minutes
+ * after a sleep, exactly when a user replies), is retried until the delivery's
+ * TTL; a retry does not spend a delivery attempt. Other refusals end it now.
  */
 function recoveryResolution(
   recovery: SessionRecoveryResult,
