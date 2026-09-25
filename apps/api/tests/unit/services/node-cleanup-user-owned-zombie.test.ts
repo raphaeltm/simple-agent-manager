@@ -155,6 +155,9 @@ beforeEach(() => {
       chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL,
       degradation TEXT NOT NULL, expires_at TEXT NOT NULL
     );
+    -- Read by the terminal-task ownership predicate
+    -- (sleepLifecycleOwnsTerminalTaskWorkspaceSql).
+    CREATE TABLE agent_sessions (id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT);
   `);
   vi.mocked(deleteNodeResourcesStrict).mockImplementation(async (nodeId: string) => {
     deleteCalls.push(nodeId);
