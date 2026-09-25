@@ -10,13 +10,11 @@ import {
 import { eq } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
-import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
-import {
-  resolveTaskStartPlacement,
-  resolveTaskStartPlacementCredentialAttributionFromPlacement,
-  type TaskStartPlacementWithCredential,
+import type {
+  TaskStartPlacementInput,
+  TaskStartPlacementWithCredential,
 } from './placement-resolver';
 import {
   parseLegacyVmSize,
@@ -65,15 +63,17 @@ export function snapshotAgentType(snapshot: schema.SessionSnapshot): string | nu
     return null;
   }
 }
-export async function resolveRecoveryPlacement(
+/**
+ * The placement request a wake makes. It only builds the request; the canonical
+ * resolvers (`resolveTaskStartPlacement` and credential attribution) run in
+ * `session-recovery.ts`, next to the recovery-task writer they vouch for.
+ */
+export async function buildRecoveryPlacementInput(
   db: Db,
-  env: Env,
   context: RecoveryContext,
   taskId: string,
   options: SessionRecoveryOptions = {}
-): Promise<
-  RecoveryPlacementResolution | { error: string; errorKind: 'placement' | 'credentials' }
-> {
+): Promise<TaskStartPlacementInput | { error: string; errorKind: 'placement' }> {
   const profile = context.workspace.agentProfileHint
     ? await db
         .select()
@@ -135,7 +135,7 @@ export async function resolveRecoveryPlacement(
     asVmSize(context.workspace.vmSize);
   const persistedVmSizeSource = storedPlan.requestedVmSizeSource ?? 'task';
 
-  const placement = resolveTaskStartPlacement({
+  return {
     entryPoint: 'session-recovery',
     taskId,
     projectId: context.project.id,
@@ -182,11 +182,5 @@ export async function resolveRecoveryPlacement(
     // keeps a wake byte-identical to the run it resumes; recomputing could
     // silently re-size the workspace under a changed default.
     resolvedReservationOverride: storedPlan.resolvedReservation,
-  });
-
-  return resolveTaskStartPlacementCredentialAttributionFromPlacement(db, placement, {
-    credentialsRequiredMessage:
-      'Cloud provider credentials required. Connect an account in Settings or enable a platform credential.',
-    env,
-  });
+  };
 }
