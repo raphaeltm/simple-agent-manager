@@ -24,6 +24,7 @@ describe('warm node pooling lifecycle integration', () => {
   );
   const cleanupFile = [
     'index.ts',
+    'config.ts',
     'shared.ts',
     'node-phases.ts',
     'terminal-cf-container-phase.ts',

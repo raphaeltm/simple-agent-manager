@@ -24,6 +24,7 @@ import {
   resolveCleanupConfig,
 } from '../../src/scheduled/node-cleanup/shared';
 import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/terminal-cf-container-phase';
+import type { UnhealthyNodeBoundaries } from '../../src/scheduled/node-cleanup/unhealthy-nodes';
 import { sweepStaleStoppedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import {
@@ -202,6 +203,127 @@ async function getObservabilityEvents(
 }
 
 describe('runNodeCleanupSweep — vertical slice', () => {
+  it('drains and releases a silent node through the scheduled entry point', async () => {
+    await seedBaseData();
+    const nodeId = 'node-unhealthy-trigger';
+    const workspaces = [
+      {
+        workspaceId: 'workspace-unhealthy-trigger-a',
+        chatSessionId: 'session-unhealthy-trigger-a',
+        agentSessionId: 'agent-unhealthy-trigger-a',
+      },
+      {
+        workspaceId: 'workspace-unhealthy-trigger-b',
+        chatSessionId: 'session-unhealthy-trigger-b',
+        agentSessionId: 'agent-unhealthy-trigger-b',
+      },
+    ];
+    const heartbeatAt = new Date(Date.now() - 31 * 60_000).toISOString();
+    await seedNode(nodeId, USER_ID, {
+      createdAt: heartbeatAt,
+      lastHeartbeatAt: heartbeatAt,
+    });
+    for (const workspace of workspaces) {
+      await seedWorkspace(workspace.workspaceId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        chatSessionId: workspace.chatSessionId,
+      });
+      await seedAgentSession(workspace.agentSessionId, workspace.workspaceId, USER_ID);
+    }
+    await seedAutoProvisionedTaskForNode('task-unhealthy-trigger', nodeId);
+
+    const order: string[] = [];
+    const notice = vi.fn<UnhealthyNodeBoundaries['notice']>(async () => {
+      order.push('notice');
+      return 'notice-id';
+    });
+    const sleep = vi.fn<UnhealthyNodeBoundaries['sleep']>(async () => {
+      order.push('sleep');
+    });
+    const release = vi.fn<UnhealthyNodeBoundaries['release']>(
+      async (_db, workerEnv, nowIso, node, options) => {
+        order.push('release');
+        const claimed = await claimNodeForCleanup(workerEnv, node, nowIso, {
+          allowActiveWorkspaces: options.allowActiveWorkspaces,
+          allowManagedRunningProvenance: options.allowManagedRunningProvenance,
+          expectedLastHeartbeatAt: options.expectedLastHeartbeatAt,
+          requireWorkspaceIdle: options.requireWorkspaceIdle,
+        });
+        if (!claimed) return 'skipped';
+        await workerEnv.DATABASE.prepare('DELETE FROM nodes WHERE id = ?').bind(node.id).run();
+        return 'destroyed';
+      }
+    );
+    const boundaries: UnhealthyNodeBoundaries = {
+      notice: notice as UnhealthyNodeBoundaries['notice'],
+      sleep: sleep as UnhealthyNodeBoundaries['sleep'],
+      release: release as UnhealthyNodeBoundaries['release'],
+    };
+
+    const result = await runNodeCleanupSweep(env as Env, boundaries);
+
+    expect(order).toEqual(['notice', 'sleep', 'notice', 'sleep', 'release']);
+    expect(
+      notice.mock.calls.map((call) => ({
+        projectId: call[1],
+        chatSessionId: call[2],
+        role: call[3],
+        content: call[4],
+        metadata: call[5],
+        messageId: call[6],
+      }))
+    ).toEqual(
+      expect.arrayContaining(
+        workspaces.map((workspace) => ({
+          projectId: PROJECT_ID,
+          chatSessionId: workspace.chatSessionId,
+          role: 'system',
+          content: expect.stringContaining(`SAM lost contact with node ${nodeId}`),
+          metadata: { source: 'node_health', kind: 'heartbeat_lost' },
+          messageId: `node-health:${nodeId}:${workspace.workspaceId}:${Date.parse(heartbeatAt)}`,
+        }))
+      )
+    );
+    expect(sleep.mock.calls.map((call) => call[1])).toEqual(
+      expect.arrayContaining(
+        workspaces.map((workspace) =>
+          expect.objectContaining({
+            workspaceId: workspace.workspaceId,
+            userId: USER_ID,
+            reason: 'node_heartbeat_lost',
+            sleepAfterMs: 0,
+            expectedNodeId: nodeId,
+            signal: expect.any(AbortSignal),
+          })
+        )
+      )
+    );
+    expect(release).toHaveBeenCalledOnce();
+    expect(release.mock.calls[0]?.[3]).toMatchObject({
+      id: nodeId,
+      user_id: USER_ID,
+      last_heartbeat_at: heartbeatAt,
+    });
+    expect(release.mock.calls[0]?.[4]).toMatchObject({
+      allowActiveWorkspaces: true,
+      allowManagedRunningProvenance: true,
+      expectedLastHeartbeatAt: heartbeatAt,
+      requireWorkspaceIdle: false,
+      context: {
+        episodeStartedAt: heartbeatAt,
+        reason: 'heartbeat_loss_exceeded_release_window',
+      },
+    });
+    expect(result.unhealthyReleased).toBe(1);
+    expect(await getNodeStatus(nodeId)).toBeNull();
+    const events = await env.DATABASE.prepare(
+      'SELECT event FROM node_health_events WHERE node_id = ? ORDER BY created_at, rowid'
+    )
+      .bind(nodeId)
+      .all<{ event: string }>();
+    expect(events.results.map((row) => row.event)).toContain('released');
+  });
+
   describe('orphaned workspace stopping (Phase 3)', () => {
     it('destroys cancelled cf-container task workspaces instead of leaving the container active', async () => {
       await seedBaseData();
@@ -1386,6 +1508,8 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         cfContainersDestroyed: expect.any(Number),
         incompatibleDestroyed: expect.any(Number),
         incompatibleSkipped: expect.any(Number),
+        unhealthyReleased: expect.any(Number),
+        unhealthyHeld: expect.any(Number),
         errors: expect.any(Number),
       });
     });

@@ -354,12 +354,13 @@ describe('delivery-aware attention expiry', () => {
 
     expect(taskRow()).toMatchObject({
       status: 'failed',
-      error_message: 'Agent became unresponsive after SAM check-in',
+      error_message:
+        'SAM check-in expired after the workspace lost its node; agent progress is unknown',
       execution_step: null,
     });
     expect(failSession).toHaveBeenCalledWith(
       'session-1',
-      'Agent became unresponsive after SAM check-in'
+      'SAM check-in expired after the workspace lost its node; agent progress is unknown'
     );
     await vi.waitFor(() => expect(cleanupTaskRun).toHaveBeenCalledWith('task-1', env));
   });
@@ -385,12 +386,13 @@ describe('delivery-aware attention expiry', () => {
 
     expect(taskRow()).toMatchObject({
       status: 'failed',
-      error_message: 'Agent became unresponsive after SAM check-in',
+      error_message:
+        'SAM check-in expired after the workspace lost its node; agent progress is unknown',
       execution_step: null,
     });
     expect(failSession).toHaveBeenCalledWith(
       'session-1',
-      'Agent became unresponsive after SAM check-in'
+      'SAM check-in expired after the workspace lost its node; agent progress is unknown'
     );
   });
 
@@ -451,7 +453,8 @@ describe('delivery-aware attention expiry', () => {
 
     expect(taskRow()).toMatchObject({
       status: 'failed',
-      error_message: 'Agent became unresponsive after SAM check-in',
+      error_message:
+        'SAM check-in expired after the workspace lost its node; agent progress is unknown',
       execution_step: null,
     });
     expect(failSession).toHaveBeenCalledTimes(1);
@@ -473,7 +476,7 @@ describe('delivery-aware attention expiry', () => {
     expect(taskRow().status).toBe('failed');
     expect(failSession).toHaveBeenCalledWith(
       'session-1',
-      'Agent became unresponsive after SAM check-in'
+      'SAM check-in expired after the workspace lost its node; agent progress is unknown'
     );
   });
 
@@ -504,7 +507,7 @@ describe('delivery-aware attention expiry', () => {
     expect(taskRow().status).toBe('failed');
     expect(failSession).toHaveBeenCalledWith(
       'session-1',
-      'Agent became unresponsive after SAM check-in'
+      'SAM check-in expired after the workspace lost its node; agent progress is unknown'
     );
   });
 
@@ -524,7 +527,8 @@ describe('delivery-aware attention expiry', () => {
     const task = taskRow();
     expect(task).toMatchObject({
       status: 'failed',
-      error_message: 'Agent became unresponsive after SAM check-in',
+      error_message:
+        'SAM check-in expired after the workspace lost its node; agent progress is unknown',
       execution_step: null,
     });
     expect(task.started_at).toBe(new Date(START).toISOString());
@@ -535,7 +539,7 @@ describe('delivery-aware attention expiry', () => {
         to_status: 'failed',
         actor_type: 'system',
         actor_id: null,
-        reason: 'Agent became unresponsive after SAM check-in',
+        reason: 'SAM check-in expired after the workspace lost its node; agent progress is unknown',
       },
     ]);
     expect(workspaceStatus()).toBe('running');
@@ -563,14 +567,41 @@ describe('delivery-aware attention expiry', () => {
     ]);
   });
 
+  it('names the lost node heartbeat rather than diagnosing agent silence', async () => {
+    d1Db
+      .prepare(
+        `INSERT INTO nodes (id, user_id, name, status, vm_size, vm_location,
+         health_status, heartbeat_stale_after_seconds, last_heartbeat_at)
+       VALUES ('node-1', 'user-1', 'Node', 'running', 'small', 'nbg1',
+         'unhealthy', 180, ?)`
+      )
+      .run(new Date(START - 10 * 60_000).toISOString());
+    d1Db.prepare(`UPDATE workspaces SET node_id = 'node-1' WHERE id = 'workspace-1'`).run();
+    createAttentionMarker(sql, {
+      sessionId: 'session-1',
+      taskId: 'task-1',
+      workspaceId: 'workspace-1',
+      kind: 'reconciliation_checkin',
+      source: 'sam_orchestrator',
+      expiresAt: START,
+    });
+
+    await processExpiredAttentionMarkers(sql, env, failSession, processingHooks());
+
+    expect(taskRow().error_message).toContain('Control plane lost heartbeat from node node-1');
+    expect(taskRow().error_message).toContain('agent progress is unknown');
+  });
+
   describe('failed-task work preservation (idea 01M1XGHX7NQZQYWQRV5C1PJ60N)', () => {
     function seedLiveVmRuntime(agentSessionStatus = 'running') {
       d1Db
         .prepare(
-          `INSERT INTO nodes (id, user_id, status, node_role, runtime)
-           VALUES ('node-1', 'user-1', 'running', 'workspace', 'vm')`
+          `INSERT INTO nodes
+             (id, user_id, status, node_role, runtime, last_heartbeat_at,
+              heartbeat_stale_after_seconds)
+           VALUES ('node-1', 'user-1', 'running', 'workspace', 'vm', ?, 180)`
         )
-        .run();
+        .run(new Date(START).toISOString());
       d1Db.prepare(`UPDATE workspaces SET node_id = 'node-1' WHERE id = 'workspace-1'`).run();
       d1Db
         .prepare(
@@ -660,7 +691,7 @@ describe('delivery-aware attention expiry', () => {
 
       expect(taskRow()).toMatchObject({
         status: 'failed',
-        error_message: 'Agent became unresponsive after SAM check-in',
+        error_message: 'SAM check-in expired after the workspace lost its node; agent progress is unknown',
       });
       expect(failSession).not.toHaveBeenCalled();
       expect(cleanupTaskRun).not.toHaveBeenCalled();
@@ -700,7 +731,7 @@ describe('delivery-aware attention expiry', () => {
 
       expect(taskRow()).toMatchObject({
         status: 'failed',
-        error_message: 'Agent became unresponsive after SAM check-in',
+        error_message: 'No agent response to SAM check-in by deadline; node heartbeat remained healthy',
       });
       expect(snapshotRow()).toMatchObject({
         status: 'pending',
@@ -758,7 +789,7 @@ describe('delivery-aware attention expiry', () => {
 
         expect(taskRow()).toMatchObject({
           status: 'failed',
-          error_message: 'Agent became unresponsive after SAM check-in',
+          error_message: 'No agent response to SAM check-in by deadline; node heartbeat remained healthy',
         });
         expect(snapshotRow()).toBeUndefined();
         expect(persistMessage).toHaveBeenCalledWith(

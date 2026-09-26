@@ -429,6 +429,9 @@ export class ProjectData extends DurableObject<Env> {
   async stopSession(sessionId: string, options: { deferAlarm?: boolean } = {}): Promise<boolean> {
     const result = sessions.stopSession(this.sql, sessionId);
     if (result) {
+      attention.resolveAttentionMarkersByKind(
+        this.sql, sessionId, 'reconciliation_checkin', null, 'human', 'session_stopped'
+      );
       activity.recordActivityEventInternal(
         this.sql,
         'session.stopped',
@@ -1894,6 +1897,12 @@ export class ProjectData extends DurableObject<Env> {
   async createAttentionMarker(
     opts: attention.CreateAttentionMarkerOpts
   ): Promise<{ id: string; createdAt: number; expiresAt: number | null }> {
+    if (opts.kind === 'needs_input' && opts.source === 'request_human_input') {
+      attention.resolveAttentionMarkersByKind(
+        this.sql, opts.sessionId, 'reconciliation_checkin', null,
+        'agent', 'human_input_requested'
+      );
+    }
     const result = attention.createAttentionMarker(this.sql, opts);
     await this.recalculateAlarm();
     this.broadcastEvent(

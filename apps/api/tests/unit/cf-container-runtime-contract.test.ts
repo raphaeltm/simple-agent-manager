@@ -79,7 +79,7 @@ describe('cf-container runtime spike contracts', () => {
     const libraryTools = read('routes/mcp/library-tools.ts');
     const projectFiles = read('routes/projects/files.ts');
     const localForward = read('routes/workspaces/local-forward.ts');
-    const nodesRoute = read('routes/nodes.ts');
+    const nodesRoute = read('routes/nodes/diagnostics.ts');
 
     expect(nodeAgent).toContain("node?.runtime !== 'cf-container'");
     expect(nodeAgent).toContain('getVmAgentContainerConfig(env)');
@@ -102,7 +102,7 @@ describe('cf-container runtime spike contracts', () => {
       "import { fetchNodeAgent, getNodeAgentRequestTimeoutMs } from '../../services/node-agent'"
     );
     expect(localForward).toContain('fetchNodeAgent(');
-    expect(nodesRoute).toMatch(/fetchNodeAgent\(\s*nodeId,\s*c\.env,\s*vmUrl\.toString\(\)/);
+    expect(nodesRoute).toMatch(/fetchNodeAgent\(\s*nodeId,\s*c\.env,\s*vmUrl\.toString\(\),/);
   });
 
   it('launches instant chat sessions through the authenticated start route and raw Container substrate', () => {

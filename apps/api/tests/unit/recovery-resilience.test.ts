@@ -19,6 +19,7 @@ const stuckTasksSource = readFileSync(
 const nodeCleanupSource = [
   'index.ts',
   'shared.ts',
+  'result.ts',
   'node-phases.ts',
   'terminal-cf-container-phase.ts',
   'workspace-phases.ts',

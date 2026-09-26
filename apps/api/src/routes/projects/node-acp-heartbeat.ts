@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
 
@@ -41,6 +41,24 @@ type TerminalCallbackResource =
   | { kind: 'node'; status: string }
   | { kind: 'workspace'; workspaceId: string; status: string };
 
+/**
+ * What a node-level ACP heartbeat is allowed to do. `nothing_to_refresh` is not
+ * terminal: it describes one project on a live node, and a 410 there is read by
+ * deployed agents as "this node is gone" (see the vm-agent's
+ * `callback_terminal.go`), which silenced a fourteen-workspace node on
+ * 2026-09-25.
+ */
+type AcpHeartbeatVerdict =
+  | { outcome: 'refresh' }
+  | { outcome: 'nothing_to_refresh'; stoppingWorkspaceId: string | null }
+  | { outcome: 'gone'; resource: TerminalCallbackResource };
+
+const REFRESH: AcpHeartbeatVerdict = { outcome: 'refresh' };
+
+function gone(resource: TerminalCallbackResource): AcpHeartbeatVerdict {
+  return { outcome: 'gone', resource };
+}
+
 function rejectInvalidScope(scope: CallbackTokenPayload['scope']): never {
   log.warn('acp_heartbeat.invalid_token_scope', {
     scope,
@@ -58,24 +76,15 @@ async function loadNodeStatus(db: AppDb, nodeId: string): Promise<string | null>
   return nodeRow?.status ?? null;
 }
 
-function inactiveWorkspaceResource(
-  workspaceId: string,
-  status: string
-): TerminalCallbackResource | null {
-  return ACP_HEARTBEAT_WORKSPACE_ACTIVE_STATUSES.has(status)
-    ? null
-    : { kind: 'workspace', workspaceId, status };
-}
-
 async function authorizeNodeScopedHeartbeat(
   db: AppDb,
   payload: CallbackTokenPayload,
   projectId: string,
   requestedNodeId: string
-): Promise<TerminalCallbackResource | null> {
+): Promise<AcpHeartbeatVerdict> {
   const nodeStatus = await loadNodeStatus(db, requestedNodeId);
   if (!nodeStatus || nodeStatusTerminatesCallbacks(nodeStatus)) {
-    return { kind: 'node', status: nodeStatus ?? 'missing' };
+    return gone({ kind: 'node', status: nodeStatus ?? 'missing' });
   }
 
   const projectWorkspaceFilter = and(
@@ -83,10 +92,7 @@ async function authorizeNodeScopedHeartbeat(
     eq(schema.workspaces.projectId, projectId)
   );
   const activeProjectWorkspace = await db
-    .select({
-      id: schema.workspaces.id,
-      status: schema.workspaces.status,
-    })
+    .select({ id: schema.workspaces.id })
     .from(schema.workspaces)
     .where(
       and(
@@ -98,16 +104,16 @@ async function authorizeNodeScopedHeartbeat(
     .get();
 
   if (activeProjectWorkspace) {
-    return null;
+    return REFRESH;
   }
 
+  // Prefer a stopping workspace: it is the one whose runtime may still be
+  // calling back, which is the evidence the deletion signal records.
   const projectWorkspace = await db
-    .select({
-      id: schema.workspaces.id,
-      status: schema.workspaces.status,
-    })
+    .select({ id: schema.workspaces.id, status: schema.workspaces.status })
     .from(schema.workspaces)
     .where(projectWorkspaceFilter)
+    .orderBy(sql`CASE ${schema.workspaces.status} WHEN 'stopping' THEN 0 ELSE 1 END`)
     .limit(1)
     .get();
 
@@ -122,7 +128,10 @@ async function authorizeNodeScopedHeartbeat(
     throw errors.forbidden('Callback token not authorized for this project');
   }
 
-  return inactiveWorkspaceResource(projectWorkspace.id, projectWorkspace.status);
+  return {
+    outcome: 'nothing_to_refresh',
+    stoppingWorkspaceId: projectWorkspace.status === 'stopping' ? projectWorkspace.id : null,
+  };
 }
 
 async function authorizeWorkspaceScopedHeartbeat(
@@ -130,7 +139,7 @@ async function authorizeWorkspaceScopedHeartbeat(
   payload: CallbackTokenPayload,
   projectId: string,
   requestedNodeId: string
-): Promise<TerminalCallbackResource | null> {
+): Promise<AcpHeartbeatVerdict> {
   const workspaceRow = await db
     .select({
       nodeId: schema.workspaces.nodeId,
@@ -142,7 +151,7 @@ async function authorizeWorkspaceScopedHeartbeat(
     .get();
 
   if (!workspaceRow) {
-    return { kind: 'workspace', workspaceId: payload.workspace, status: 'missing' };
+    return gone({ kind: 'workspace', workspaceId: payload.workspace, status: 'missing' });
   }
 
   const authorized =
@@ -158,7 +167,11 @@ async function authorizeWorkspaceScopedHeartbeat(
     throw errors.forbidden('Callback token not authorized for this node');
   }
 
-  return inactiveWorkspaceResource(payload.workspace, workspaceRow.status);
+  // A workspace-scoped token's identity is the workspace itself, so its end is
+  // the end of what this credential may heartbeat for.
+  return ACP_HEARTBEAT_WORKSPACE_ACTIVE_STATUSES.has(workspaceRow.status)
+    ? REFRESH
+    : gone({ kind: 'workspace', workspaceId: payload.workspace, status: workspaceRow.status });
 }
 
 async function authorizeAcpHeartbeat(
@@ -166,7 +179,7 @@ async function authorizeAcpHeartbeat(
   payload: CallbackTokenPayload,
   projectId: string,
   requestedNodeId: string
-): Promise<TerminalCallbackResource | null> {
+): Promise<AcpHeartbeatVerdict> {
   if (payload.scope === 'node') {
     if (!callbackTokenMatchesNode(payload, requestedNodeId)) {
       log.warn('acp_heartbeat.callback_token_not_bound_to_node', {
@@ -240,6 +253,29 @@ async function terminalResourceResponse(
   return c.json(terminalResourcePayload(resource), 410);
 }
 
+/** A live node's project has no active workspace left: nothing to refresh. */
+async function nothingToRefreshResponse(
+  c: Context<{ Bindings: Env }>,
+  projectId: string,
+  requestedNodeId: string,
+  stoppingWorkspaceId: string | null
+) {
+  if (stoppingWorkspaceId) {
+    await signalWorkspaceDeletionUnconfirmedCallback(
+      c.env,
+      stoppingWorkspaceId,
+      'node_acp_heartbeat'
+    );
+  }
+  log.info('acp_heartbeat.no_active_workspace', {
+    projectId,
+    nodeId: requestedNodeId,
+    stoppingWorkspaceId,
+    action: 'nothing_to_refresh',
+  });
+  return c.body(null, 204);
+}
+
 nodeAcpHeartbeatRoute.post(
   '/:id/node-acp-heartbeat',
   jsonValidator(AcpSessionHeartbeatSchema),
@@ -259,9 +295,17 @@ nodeAcpHeartbeatRoute.post(
     // body.nodeId (single indexed PK lookup, hit only during the brief pre-refresh window). Without
     // this, a holder of any valid callback token could keep ANOTHER tenant's sessions alive by
     // supplying a guessed nodeId. See .claude/rules/28 and security-critique #1.
-    const authTerminalResource = await authorizeAcpHeartbeat(db, payload, projectId, body.nodeId);
-    if (authTerminalResource) {
-      return await terminalResourceResponse(c, projectId, body.nodeId, authTerminalResource);
+    const verdict = await authorizeAcpHeartbeat(db, payload, projectId, body.nodeId);
+    if (verdict.outcome === 'gone') {
+      return await terminalResourceResponse(c, projectId, body.nodeId, verdict.resource);
+    }
+    if (verdict.outcome === 'nothing_to_refresh') {
+      return await nothingToRefreshResponse(
+        c,
+        projectId,
+        body.nodeId,
+        verdict.stoppingWorkspaceId
+      );
     }
 
     const activeNodeStatus = await loadNodeStatus(db, body.nodeId);

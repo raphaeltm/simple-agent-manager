@@ -430,6 +430,8 @@ export async function scheduleSessionSnapshotSleep(
     allowIncomplete?: boolean;
     resetAttempts?: boolean;
     runtime?: string;
+    expectedWorkspaceId?: string;
+    expectedNodeId?: string;
   } = {}
 ): Promise<boolean> {
   const sleepAfterMs =
@@ -446,7 +448,7 @@ export async function scheduleSessionSnapshotSleep(
         eq(schema.sessionSnapshots.degradation, 'none')
       );
   const resetAttempts = options.resetAttempts ?? !options.allowIncomplete;
-  const result = await db
+  const scheduled = await db
     .update(schema.sessionSnapshots)
     .set({
       sleepStatus: 'scheduled',
@@ -473,11 +475,25 @@ export async function scheduleSessionSnapshotSleep(
         or(
           isNull(schema.sessionSnapshots.sleepStatus),
           inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed'])
-        )
+        ),
+        options.expectedWorkspaceId && options.expectedNodeId
+          ? and(
+              eq(schema.sessionSnapshots.workspaceId, options.expectedWorkspaceId),
+              eq(schema.sessionSnapshots.nodeId, options.expectedNodeId),
+              sql`EXISTS (
+                SELECT 1 FROM workspaces w
+                WHERE w.id = ${options.expectedWorkspaceId}
+                  AND w.node_id = ${options.expectedNodeId}
+                  AND w.chat_session_id = ${schema.sessionSnapshots.chatSessionId}
+                  AND w.user_id = ${schema.sessionSnapshots.userId}
+                  AND w.status IN ('running', 'creating', 'recovery')
+              )`
+            )
+          : undefined
       )
-    );
-  // True when this call left the row holding a scheduled intent.
-  return (result.meta.changes ?? 0) > 0;
+    )
+    .run();
+  return (scheduled.meta.changes ?? 0) > 0;
 }
 
 export { cancelScheduledSessionSleep } from './session-snapshot-sleep-cancel';

@@ -65,7 +65,18 @@ vi.mock('../../../src/services/telemetry', () => ({
   recordNodeRoutingMetric: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/services/node-stranded-tasks', () => ({
+  listStrandedNodeTasks: vi.fn(async () => []),
+  terminalizeStrandedNodeTasks: vi.fn(async () => 0),
+}));
+
+vi.mock('../../../src/services/node-health', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/node-health')>()),
+  recordNodeHealthEvent: vi.fn(async () => undefined),
+}));
+
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
 }));
 

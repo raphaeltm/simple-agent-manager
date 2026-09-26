@@ -1602,13 +1602,14 @@ func (s *Server) postTaskCallback(callbackURL, taskID, token string, body map[st
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		slog.Info("Task callback sent", "taskId", taskID, "body", string(payload))
 	} else if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
-		slog.Warn("Task callback: terminal status",
+		// The task is gone, reassigned, or its workspace ended. That is final
+		// for this task only; the node's other tasks keep reporting.
+		slog.Warn("Task callback: terminal status for this task",
 			"statusCode", resp.StatusCode,
 			"taskId", taskID,
 			"callbackURL", callbackURL,
 			"responseBody", responseBody,
 		)
-		s.markControlPlaneCallbacksTerminal("task_callback", resp.StatusCode, responseBody)
 	} else {
 		slog.Error("Task callback: unexpected status",
 			"statusCode", resp.StatusCode,

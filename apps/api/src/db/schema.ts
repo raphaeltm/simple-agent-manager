@@ -1278,6 +1278,27 @@ export const reservedTaskSessionRevocations = sqliteTable(
 // =============================================================================
 // Nodes
 // =============================================================================
+export const nodeHealthEvents = sqliteTable(
+  'node_health_events',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id').notNull(),
+    episodeStartedAt: text('episode_started_at').notNull(),
+    event: text('event').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    episodeEventIdx: uniqueIndex('idx_node_health_events_episode_event').on(
+      table.nodeId,
+      table.episodeStartedAt,
+      table.event,
+      table.reason
+    ),
+    nodeCreatedIdx: index('idx_node_health_events_node_created').on(table.nodeId, table.createdAt),
+  })
+);
+
 export const nodes = sqliteTable(
   'nodes',
   {

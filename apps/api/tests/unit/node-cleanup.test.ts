@@ -34,7 +34,8 @@ vi.mock('../../src/services/node-agent', () => ({
 }));
 
 // Mock project-data service
-vi.mock('../../src/services/project-data', () => ({
+vi.mock('../../src/services/project-data', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/project-data')>()),
   stopSession: vi.fn().mockResolvedValue(undefined),
   cleanupWorkspaceActivity: vi.fn().mockResolvedValue(undefined),
 }));
@@ -45,7 +46,8 @@ vi.mock('../../src/services/observability', () => ({
 }));
 
 // Mock logger
-vi.mock('../../src/lib/logger', () => ({
+vi.mock('../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
@@ -436,6 +438,8 @@ describe('runNodeCleanupSweep', () => {
         orphanedNodesSkipped: 0,
         stoppedWorkspacesQueued: 0,
         stoppedWorkspacesDeleted: 0,
+        unhealthyHeld: 0,
+        unhealthyReleased: 0,
         cfContainersDestroyed: 0,
         incompatibleDestroyed: 0,
         incompatibleSkipped: 0,

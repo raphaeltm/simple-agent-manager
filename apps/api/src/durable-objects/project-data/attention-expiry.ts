@@ -5,6 +5,7 @@ import type { NotificationService } from '../notification';
 import * as activity from './activity';
 import * as attention from './attention';
 import { assessCheckinActivity, loadLatestActiveAcpActivity } from './checkin-activity';
+import { checkinFailureReason } from './checkin-failure-reason';
 import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
 import { activeWorkHardStallMs, reconciliationDeadlineMs } from './reconciliation-thresholds';
 import type { Env } from './types';
@@ -224,7 +225,7 @@ async function failExpiredTaskMarker(
 
   const errorMessage =
     marker.kind === 'reconciliation_checkin'
-      ? 'Agent became unresponsive after SAM check-in'
+      ? await checkinFailureReason(env, marker.workspaceId)
       : 'Human input request expired after timeout';
 
   const projectId = hooks.projectId ?? null;

@@ -96,7 +96,7 @@ async function seedCheckIn(agentSessionStatus: string) {
     // Do not arm an already-due automatic alarm while the fixture is being built.
     expiresAt: null,
   });
-  return { stub, projectId, chatSessionId, taskId, workspaceId, markerId: marker.id };
+  return { stub, projectId, chatSessionId, taskId, workspaceId, nodeId, markerId: marker.id };
 }
 
 /**
@@ -155,7 +155,8 @@ async function systemMessages(stub: DurableObjectStub<ProjectData>, chatSessionI
 describe('attention expiry from a real ProjectData alarm', () => {
   it('says the work was not preserved, through its own RPC, before failing the session', async () => {
     // The agent session already ended, so there is nothing to snapshot.
-    const { stub, chatSessionId, taskId, workspaceId, markerId } = await seedCheckIn('failed');
+    const { stub, chatSessionId, taskId, workspaceId, nodeId, markerId } =
+      await seedCheckIn('failed');
 
     await expireCheckIn(stub, markerId);
 
@@ -163,7 +164,7 @@ describe('attention expiry from a real ProjectData alarm', () => {
       async () =>
         expect(await taskRow(taskId)).toEqual({
           status: 'failed',
-          error_message: 'Agent became unresponsive after SAM check-in',
+          error_message: `Control plane lost heartbeat from node ${nodeId} before SAM check-in expired; agent progress is unknown`,
         }),
       DECISION_TIMEOUT
     );
