@@ -52,13 +52,14 @@ export function messageBoundsClause(bounds: MessageBounds): SqlClause {
 /**
  * The timestamp and row ID at the edge of an archive chunk facing each bound:
  * its first row for `before`, its last for `after`. `row_ids_json` lists the
- * chunk's rows in transcript order.
+ * chunk's rows in transcript order. The last index is clamped because `$[-1]`
+ * is a path error rather than a missing element.
  */
 const CHUNK_EDGE = {
   before: { createdAt: 'first_created_at', id: `json_extract(row_ids_json, '$[0]')` },
   after: {
     createdAt: 'last_created_at',
-    id: `json_extract(row_ids_json, '$[' || (json_array_length(row_ids_json) - 1) || ']')`,
+    id: `json_extract(row_ids_json, '$[' || max(json_array_length(row_ids_json) - 1, 0) || ']')`,
   },
 } as const;
 
