@@ -33,8 +33,21 @@ Started by Sol task `01M3CW7G3XNQTFTY3ST0RTG8MB` (stopped at its usage limit bef
 - [x] Removed the upload path, its migration, admin quarantine routes, env vars and docs; reverted `.codex/config.toml` auto-save artifacts.
 - [x] Tests enter through real triggers (HTTP routes via `SELF`, archive sweep, `Enqueue` + flush against a fake control plane enforcing the Worker's checks in the Worker's order, with its default limits); each guard was reverted once and the intended tests went red. Legacy numeric cursors are covered for archived sessions too, and archived reads count their R2 chunk fetches.
 - [x] Docs: API and env references.
-- [x] Backlog: `2026-09-25-reporter-session-switch-unsent-rows.md` (pre-existing relink cleanup, with reproduction), `2026-09-26-chat-recent-window-merge-can-leave-gap.md` (pre-existing poll/catch-up window gap), `2026-09-26-split-use-session-lifecycle.md` (hook still over the file-size ceiling).
-- [ ] Full checks, specialist review, staging VM validation, PR, CodeRabbit, merge, production monitoring.
+- [x] Backlog: `2026-09-25-reporter-session-switch-unsent-rows.md` (pre-existing relink cleanup, with reproduction), `2026-09-26-chat-recent-window-merge-can-leave-gap.md` (pre-existing poll/catch-up window gap), `2026-09-26-split-use-session-lifecycle.md` (hook still over the file-size ceiling), `2026-09-26-chat-reopen-within-stale-time-misses-messages.md` (pre-existing, found on staging: a chat reopened inside the cache's 15 s stale time never refreshes).
+- [x] Full checks at 59caab665: `pnpm check:fast`, `typecheck`, `test` (21/21), `build`, `go test -race ./...` (25 packages), API worker suite (92 files at 5c88a0353; archive and pagination files after the final fixes).
+- [x] Specialist review: task-completion PASS; architecture, constitution, Go, Cloudflare, test and performance reviewers ADDRESSED (details in the PR).
+- [x] Staging VM validation (deploy run 36227162250). Evidence is below.
+- [ ] PR, CodeRabbit, merge, production deploy monitoring.
+
+## Staging evidence (2026-09-26)
+
+- **Node:** fresh node `01M3EB40…` created 07:50:48Z, first heartbeat 07:53:22Z. It reports `agent_version` `2c586a621`, this branch's last `packages/vm-agent` commit. The workspace subdomain serves valid TLS, and the agent answers 401 without credentials.
+- **ASCII tool output:** 3,000 lines of Bash output were persisted as a 102,400-byte tool message ending with the truncation marker.
+- **Paging:** forward and backward paging at page sizes 2, 3 and 7 returned the exact transcript.
+- **Composer send:** a follow-up sent through the composer (the Send button) was delivered, and its reply rendered.
+- **Multi-byte tool output:** a one-byte prefix plus four-byte characters puts main's byte cut inside a character. It was persisted as 102,397 bytes: valid UTF-8 with no U+FFFD, ending on a whole character, then the marker.
+- **Reopen after the stale time:** a chat reopened 20 s after a reply landed while it was closed made one request, `after=[createdAt,sequence,id]` taken from the persisted cache, and rendered the reply. There were no console errors on desktop or mobile.
+- **Cleanup:** the workspace and node were deleted, the test env var removed, and staging is back to zero live nodes.
 
 ## Acceptance
 
