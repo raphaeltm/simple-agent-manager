@@ -2,12 +2,14 @@
  * Message storage, retrieval, batch persistence, and sequencing. Search lives in
  * `message-search.ts`; its DO-facing entry points are re-exported here.
  */
+import type { MessageCursor } from '@simple-agent-manager/shared';
+
 import { log } from '../../lib/logger';
 import {
   PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES,
   type ProjectDataArchiveSourceIntentState,
 } from '../../project-data-archive/contract';
-import { type MessageCursor, messageCursorPredicate } from './message-cursor';
+import { messageBoundsClause } from './message-cursor';
 import {
   insertNewMessage,
   nextSequence,
@@ -72,11 +74,7 @@ function parseArchiveSourceIntentState(value: unknown): ProjectDataArchiveSource
     : null;
 }
 
-export function assertTranscriptWriteAllowed(
-  sql: SqlStorage,
-  sessionId: string,
-  operation: string
-): void {
+function assertTranscriptWriteAllowed(sql: SqlStorage, sessionId: string, operation: string): void {
   let row: Record<string, unknown> | undefined;
   try {
     row = sql
@@ -142,7 +140,6 @@ export function persistMessageBatch(
     timestamp: string;
     sequence?: number;
     origin?: string | null;
-    preserveToolMetadata?: boolean;
   }>
 ): {
   persisted: number;
@@ -246,12 +243,7 @@ export function persistMessageBatch(
 
     const createdAt = new Date(msg.timestamp).getTime() || now;
     const sequence = msg.sequence ?? nextSeq++;
-    // The upload protocol already enforces a bounded logical size and verifies
-    // every byte before this single canonical insert. Trimming here would turn
-    // an acknowledged upload into silent transcript loss.
-    const boundedToolMetadata = msg.preserveToolMetadata
-      ? { value: msg.toolMetadata, truncated: false, originalBytes: 0, storedBytes: 0 }
-      : boundToolMetadataForStorage(msg.toolMetadata, env);
+    const boundedToolMetadata = boundToolMetadataForStorage(msg.toolMetadata, env);
     if (boundedToolMetadata.truncated) {
       log.warn('messages.batch_tool_metadata_truncated_for_storage', {
         sessionId,
@@ -370,17 +362,9 @@ export function getMessages(
     'SELECT id, session_id, role, content, tool_metadata, created_at, sequence, origin FROM chat_messages WHERE session_id = ?';
   const params: (string | number)[] = [sessionId];
 
-  if (before !== null) {
-    const predicate = messageCursorPredicate('before', before);
-    query += ` AND ${predicate.sql}`;
-    params.push(...predicate.values);
-  }
-
-  if (after !== null) {
-    const predicate = messageCursorPredicate('after', after);
-    query += ` AND ${predicate.sql}`;
-    params.push(...predicate.values);
-  }
+  const bounds = messageBoundsClause({ before, after });
+  query += bounds.sql;
+  params.push(...bounds.values);
 
   if (roles && roles.length > 0) {
     const placeholders = roles.map(() => '?').join(', ');
@@ -397,10 +381,7 @@ export function getMessages(
 }
 
 function parseListedMessage(
-  row: Record<string, unknown>,
-  sessionId: string,
-  compact: boolean,
-  compactOptions?: CompactMessageOptions
+  row: Record<string, unknown>, sessionId: string, compact: boolean, compactOptions?: CompactMessageOptions
 ): Record<string, unknown> | null {
   try {
     return compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row);
@@ -417,12 +398,8 @@ function parseListedMessage(
 }
 
 export function formatMessageRows(
-  rows: Record<string, unknown>[],
-  sessionId: string,
-  limit: number,
-  compact: boolean,
-  order: 'asc' | 'desc',
-  compactOptions?: CompactMessageOptions
+  rows: Record<string, unknown>[], sessionId: string, limit: number,
+  compact: boolean, order: 'asc' | 'desc', compactOptions?: CompactMessageOptions
 ): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let hasMore = rows.length > limit;
   const candidateRows = hasMore ? rows.slice(0, limit) : rows;
@@ -437,9 +414,6 @@ export function formatMessageRows(
   for (const [i, row] of candidateRows.entries()) {
     cumulativeBytes += estimateRowBytes(row);
     if (cumulativeBytes > RPC_SIZE_BUDGET_BYTES) {
-      if (i === 0) {
-        throw new Error(`Message ${String(row.id)} exceeds the message page RPC budget`);
-      }
       safeCount = i; // exclude this row and everything after
       hasMore = true;
       log.warn('messages.rpc_size_guard_truncated', {

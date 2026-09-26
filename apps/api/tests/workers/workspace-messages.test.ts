@@ -11,7 +11,6 @@ import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { signCallbackToken } from '../../src/services/jwt';
-import * as projectDataService from '../../src/services/project-data';
 
 // Unique IDs per test to avoid cross-test contamination (isolatedStorage is off)
 const TEST_PREFIX = `msg-test-${Date.now()}`;
@@ -39,21 +38,6 @@ async function postMessages(
     },
     body: JSON.stringify({ messages }),
   });
-}
-
-async function postUpload(body: Record<string, unknown>, token: string): Promise<Response> {
-  const serialized = JSON.stringify(body);
-  expect(new TextEncoder().encode(serialized).byteLength).toBeLessThanOrEqual(262144);
-  return SELF.fetch(`https://api.test.example.com/api/workspaces/${WORKSPACE_ID}/messages/upload`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: serialized,
-  });
-}
-
-async function sha256(value: string): Promise<string> {
-  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function countPlatformErrorsForWorkspace(workspaceId: string): Promise<number> {
@@ -319,84 +303,6 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
       const msg = makeMessage({ toolMetadata: null });
       const response = await postMessages(WORKSPACE_ID, [msg], validToken);
       expect(response.status).toBe(200);
-    });
-  });
-
-  it('rejects an inline metadata value the preserving reporter must upload', async () => {
-    const body = JSON.stringify({
-      messages: [
-        makeMessage({
-          messageId: `${TEST_PREFIX}-metadata-inline-reject`,
-          toolMetadata: JSON.stringify({ output: '🚀'.repeat(40_000) }),
-        }),
-      ],
-    });
-    expect(new TextEncoder().encode(body).byteLength).toBeLessThan(262144);
-    const response = await SELF.fetch(
-      `https://api.test.example.com/api/workspaces/${WORKSPACE_ID}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${validToken}`,
-          'Content-Type': 'application/json',
-          'X-SAM-Message-Preservation': 'required',
-        },
-        body,
-      }
-    );
-    expect(response.status).toBe(400);
-    expect(await response.text()).toContain('tool metadata exceeds');
-  });
-
-  it('assembles oversized callback parts into one original read-path message', async () => {
-    const messageId = `${TEST_PREFIX}-upload-original`;
-    const content = 'é🌊'.repeat(30_000);
-    const toolMetadata = JSON.stringify({ output: '🚀'.repeat(40_000) });
-    const parts = {
-      content: content.match(/.{1,12000}/gu)!,
-      toolMetadata: toolMetadata.match(/.{1,12000}/gu)!,
-    };
-    const identity = { sessionId: SESSION_ID, messageId };
-    for (const [field, values] of Object.entries(parts)) {
-      for (const [part, data] of values.entries()) {
-        const response = await postUpload(
-          { action: 'part', ...identity, field, part, data },
-          validToken
-        );
-        expect(response.status).toBe(200);
-      }
-    }
-    const manifest = {
-      action: 'commit',
-      ...identity,
-      role: 'assistant',
-      timestamp: '2026-09-25T00:00:00Z',
-      origin: null,
-      sequence: 900_000,
-      contentParts: parts.content.length,
-      metadataParts: parts.toolMetadata.length,
-      contentSha256: await sha256(content),
-      metadataSha256: await sha256(toolMetadata),
-    };
-    expect((await postUpload(manifest, validToken)).status).toBe(200);
-    expect((await postUpload(manifest, validToken)).status).toBe(200);
-
-    const page = await projectDataService.getMessages(
-      env as any,
-      PROJECT_ID,
-      SESSION_ID,
-      1000,
-      null,
-      null,
-      undefined,
-      false
-    );
-    const originals = page.messages.filter((message) => message.id === messageId);
-    expect(originals).toHaveLength(1);
-    expect(originals[0]).toMatchObject({
-      role: 'assistant',
-      content,
-      toolMetadata: JSON.parse(toolMetadata),
     });
   });
 

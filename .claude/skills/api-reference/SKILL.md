@@ -54,9 +54,9 @@ user-invocable: false
 ## Chat Sessions (Project Scoped)
 
 - `GET /api/projects/:projectId/sessions` — List chat sessions for a project
-- `GET /api/projects/:projectId/sessions/:sessionId` — Get chat session detail with recent messages; message `before`/`after` use the same cursor forms as the list route below
+- `GET /api/projects/:projectId/sessions/:sessionId` — Get chat session detail with recent messages
 - `GET /api/projects/:projectId/sessions/:sessionId/state` — Get lightweight ACP activity state for a chat session
-- `GET /api/projects/:projectId/sessions/:sessionId/messages` — List persisted session messages (supports `roles`, `before`, `after`, `limit`, `compact`, `order=asc|desc`). `before` and `after` accept legacy exclusive millisecond timestamps or an exact JSON array cursor `[createdAt,sequence,id]`; use the array formed from the page edge to resume across tied timestamps. An `after`-only request defaults to ascending order so finite pages can be drained without skipping unseen rows.
+- `GET /api/projects/:projectId/sessions/:sessionId/messages` — List persisted session messages (supports `roles`, `before`, `limit`, `compact`, `order=asc|desc`)
 - `GET /api/projects/:projectId/sessions/:sessionId/messages/:messageId/tool-content` — Lazy-load stored tool content for compact messages, falling back to the private R2 archive when inline payloads have been stripped
 - `GET /api/projects/:projectId/sessions/:sessionId/comments` — List message-anchored comment threads (supports `messageId`, `status=open|sent|resolved`, `afterSequence`, `limit`)
 - `POST /api/projects/:projectId/sessions/:sessionId/comments` — Create a message-anchored comment thread (`{ messageId, body, quote?, clientMutationId? }`)
@@ -122,8 +122,6 @@ Project event pull loop: create a subscription with the narrowest useful filter,
 - `GET /api/admin/project-events/:projectId/inspector` — Superadmin-only read view for one project's ProjectData event subscriptions, recent normalized events, matches, delivery batches, attempts, and storage accounting. The response is bounded by `limit` and intentionally omits raw payload references, event metadata, idempotency keys, and raw model/event content beyond normalized untrusted display summaries.
 - `GET /api/admin/project-data/storage` — List latest per-project ProjectData storage telemetry from D1 (`projectId`, `status`, `limit` filters), including growth forecast, cleanup health, reclaimable bytes, category breakdown JSON, and last alert reason
 - `GET /api/admin/project-data/storage/history` — List append-only ProjectData storage telemetry history from D1 (`projectId`, `status`, `cleanupHealth`, `limit` filters) for growth and cleanup-health trends
-- `GET /api/admin/project-data/storage/message-upload-quarantine/:projectId` — Superadmin-only bounded inventory of incomplete VM transcript uploads in the root project object, including pending/abandoned status and staged byte counts (`limit` up to `MAX_MESSAGE_UPLOAD_INVENTORY_LIMIT`, `after` JSON tuple returned as `nextCursor`)
-- `GET /api/admin/project-data/storage/message-upload-quarantine/:projectId/:sessionId/:messageId` — Superadmin-only exact readback of staged upload parts with per-part SHA-256 hashes; these bytes are not committed transcript messages
 - `GET /api/admin/project-data/storage/:projectId/archive-sharding/state` — D1-only archive-sharding rollout summary for one project, optionally scoped by `sessionId`, including complete journal/session-location state counts, project circuit breaker state, bounded recent migrations/session locations, `recentMigrationsHasMore`/`locationsHasMore`, and bounded row-fault warnings for malformed read rows
 - `GET /api/admin/project-data/storage/archive-sharding/problem-migrations` — Bounded D1 list of failed, poisoned, or frozen archive-sharding migrations, optionally filtered by `projectId` and `sessionId`; malformed read rows are skipped and returned as bounded warnings; rows that need a human (`failed`, `poisoned`, operator-frozen) sort before self-healing `precopy_refused` rows. A `frozen` row with `error_code = precopy_refused` is a session the root object refused before any copy (its `error_message` carries the invariant, e.g. `active_session_state: ...`); its location is already back at `root`, it needs no abandon, and the unscoped sweep skips it for `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS`
 - `POST /api/admin/project-data/storage/:projectId/archive-sharding/canary` — Superadmin-only scoped manual archive-sharding dry-run/canary. Defaults to `{ dryRun: true }`; dry-runs do not require `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED=true` or `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED=true` and select only the requested project plus optional `sessionId`. Non-dry runs require `reason` and fail closed unless exact archive routing is active. The unscoped scheduled sweep has its own fail-closed `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` gate.
@@ -140,8 +138,6 @@ Project event pull loop: create a subscription with the narrowest useful filter,
 - `POST /api/admin/project-data/storage/:projectId/emergency-purge` — Run a bounded ProjectData emergency purge of oldest `activity_events` and `acp_session_events` rows only
 
 ## Agent Sessions
-
-VM transcript callbacks use `POST /api/workspaces/:id/messages` for bounded ordinary batches. `POST /api/workspaces/:id/messages/upload` accepts callback-authenticated `part` requests followed by a `commit` manifest for one oversized logical message. Parts remain private until ProjectData verifies both field hashes and commits the original message ID, role, content, metadata, timestamp, origin, and sequence. Identical retries are acknowledged; conflicting uploads fail.
 
 - `GET /api/workspaces/:id/agent-sessions` — List workspace agent sessions
 - `POST /api/workspaces/:id/agent-sessions` — Create agent session (optional `worktreePath` binds session to a worktree)

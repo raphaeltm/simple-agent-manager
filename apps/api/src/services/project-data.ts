@@ -39,6 +39,7 @@ import type {
   MessageCommentMutationResponse,
   MessageCommentReplyMutationResponse,
   MessageCommentThread,
+  MessageCursor,
   ProjectEventAdmissionResult,
   ProjectEventChannelHistory,
   ProjectEventChannelHistoryInput,
@@ -834,60 +835,6 @@ export async function persistMessageBatch(
   );
 }
 
-export async function storeMessageUploadPart(
-  env: Env,
-  projectId: string,
-  input: import('../durable-objects/project-data/message-upload').MessageUploadPart
-): Promise<void> {
-  await assertExactWriteAllowedIfArchiveEnabled(
-    env,
-    projectId,
-    input.sessionId,
-    'storeMessageUploadPart'
-  );
-  return callProjectDataNoRetry(env, projectId, 'storeMessageUploadPart', (stub) =>
-    stub.storeMessageUploadPart(input)
-  );
-}
-
-export async function listMessageUploadQuarantine(
-  env: Env,
-  projectId: string,
-  limit: number,
-  after: import('../durable-objects/project-data/message-upload').MessageUploadInventoryCursor | null
-) {
-  return callProjectDataNoRetry(env, projectId, 'listMessageUploadQuarantine', (stub) =>
-    stub.listMessageUploadQuarantine(limit, after)
-  );
-}
-
-export async function readMessageUploadQuarantine(
-  env: Env,
-  projectId: string,
-  sessionId: string,
-  messageId: string
-) {
-  return callProjectDataNoRetry(env, projectId, 'readMessageUploadQuarantine', (stub) =>
-    stub.readMessageUploadQuarantine(sessionId, messageId)
-  );
-}
-
-export async function commitMessageUpload(
-  env: Env,
-  projectId: string,
-  input: import('../durable-objects/project-data/message-upload').MessageUploadCommit
-): Promise<{ persisted: number; duplicates: number; limitReached: boolean }> {
-  await assertExactWriteAllowedIfArchiveEnabled(
-    env,
-    projectId,
-    input.sessionId,
-    'commitMessageUpload'
-  );
-  return callProjectDataNoRetry(env, projectId, 'commitMessageUpload', (stub) =>
-    stub.commitMessageUpload(input)
-  );
-}
-
 export async function listSessions(
   env: Env,
   projectId: string,
@@ -959,8 +906,8 @@ export async function getMessages(
   projectId: string,
   sessionId: string,
   limit: number = 100,
-  before: import('../durable-objects/project-data/message-cursor').MessageCursor | null = null,
-  after: import('../durable-objects/project-data/message-cursor').MessageCursor | null = null,
+  before: MessageCursor | null = null,
+  after: MessageCursor | null = null,
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc'

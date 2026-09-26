@@ -99,7 +99,6 @@ type Msg = {
   content: string;
   toolMetadata: null;
   createdAt: number;
-  sequence: number;
 };
 
 function msg(id: string, createdAt: number): Msg {
@@ -110,7 +109,6 @@ function msg(id: string, createdAt: number): Msg {
     content: `m-${id}`,
     toolMetadata: null,
     createdAt,
-    sequence: createdAt,
   };
 }
 
@@ -248,32 +246,8 @@ describe('useSessionLifecycle loading semantics', () => {
     );
     expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
       signal: expect.any(AbortSignal),
-      after: '[1000,1000,"cached"]',
+      after: 1000,
     });
-  });
-
-  it('drains successive delta pages before advancing the cached transcript', async () => {
-    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
-    queryClient.setQueryData(queryKey, detail([msg('cached', 1000)], true));
-    mocks.getChatSession
-      .mockResolvedValueOnce(detail([msg('first', 2000)], true))
-      .mockResolvedValueOnce(detail([msg('second', 3000)], false));
-
-    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
-      wrapper,
-    });
-    await waitFor(() =>
-      expect(result.current.messages.map((message) => message.id)).toEqual([
-        'cached',
-        'first',
-        'second',
-      ])
-    );
-    expect(mocks.getChatSession).toHaveBeenNthCalledWith(2, 'proj-1', 'sess-1', {
-      signal: expect.any(AbortSignal),
-      after: '[2000,2000,"first"]',
-    });
-    expect(result.current.hasMore).toBe(true);
   });
 
   describe('fallback poll visibility gating', () => {

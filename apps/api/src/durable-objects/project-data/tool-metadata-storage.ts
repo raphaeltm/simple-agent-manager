@@ -27,7 +27,7 @@ export function resolveCompactMessageOptions(env: Env): CompactMessageOptions {
   };
 }
 
-export function resolveToolMetadataMaxBytes(env: Env): number {
+function resolveToolMetadataMaxBytes(env: Env): number {
   const parsed = Number.parseInt(env.PROJECT_DATA_TOOL_METADATA_MAX_BYTES || '', 10);
   return Number.isFinite(parsed) && parsed > 0
     ? parsed

@@ -2,7 +2,6 @@ import {
   DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
   DEFAULT_CHAT_SESSION_MESSAGE_MAX,
-  DEFAULT_CHAT_TIMELINE_MAX_PAGES,
 } from '@simple-agent-manager/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -27,8 +26,8 @@ import {
   resetIdleTimer,
   sendFollowUpPrompt,
 } from '../../lib/api';
-import { messagePageCursor } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
+import { oldestPersistedCursor, refreshCachedTranscript } from '../../lib/message-paging';
 import { chatQueryKeys, chatSessionMessagesQueryOptions } from '../../lib/query-options';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { FilePanelState } from './session-lifecycle-helpers';
@@ -81,34 +80,12 @@ export function useSessionLifecycle(
     enabled: Boolean(queryScope && projectId && sessionId),
     queryFn: async ({ signal }) => {
       const cached = queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey);
-      const latestCached = cached?.messages.at(-1);
-      if (cached && latestCached) {
-        let after = messagePageCursor(latestCached);
-        let delta = await getChatSession(projectId, sessionId, { signal, after });
-        const newMessages = [...delta.messages];
-        for (let page = 1; delta.hasMore; page++) {
-          if (page >= DEFAULT_CHAT_TIMELINE_MAX_PAGES || delta.messages.length === 0) {
-            throw new Error('Message delta could not be drained');
-          }
-          const lastDeltaMessage = delta.messages.at(-1);
-          if (!lastDeltaMessage) throw new Error('Message delta could not be drained');
-          const nextAfter = messagePageCursor(lastDeltaMessage);
-          if (nextAfter === after) throw new Error('Message delta cursor did not advance');
-          after = nextAfter;
-          delta = await getChatSession(projectId, sessionId, { signal, after });
-          newMessages.push(...delta.messages);
-        }
-        return {
-          ...delta,
-          messages: mergeMessages(cached.messages, newMessages, 'append'),
-          hasMore: cached.hasMore,
-        };
-      }
-
-      return getChatSession(projectId, sessionId, {
-        signal,
-        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
-      });
+      const refreshed =
+        cached && (await refreshCachedTranscript(projectId, sessionId, cached, signal));
+      return (
+        refreshed ||
+        getChatSession(projectId, sessionId, { signal, limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX })
+      );
     },
   });
 
@@ -643,14 +620,12 @@ export function useSessionLifecycle(
   // Load more (pagination)
   const loadMore = async () => {
     if (!hasMore || loadingMore) return;
-    const firstMessage = messages[0];
-    if (!firstMessage) return;
+    const before = oldestPersistedCursor(messages);
+    if (!before) return;
 
     setLoadingMore(true);
     try {
-      const data = await getChatSession(projectId, sessionId, {
-        before: messagePageCursor(firstMessage),
-      });
+      const data = await getChatSession(projectId, sessionId, { before });
       setMessages((prev) => {
         const merged = mergeMessages(prev, data.messages, 'prepend');
         // Virtuoso's anchor moves by RENDERED ROWS, not messages: a page of tool
@@ -682,16 +657,14 @@ export function useSessionLifecycle(
 
       setLoadingMore(true);
       try {
-        let before: string | undefined = messagesRef.current[0]
-          ? messagePageCursor(messagesRef.current[0])
-          : undefined;
+        let before = oldestPersistedCursor(messagesRef.current);
         const accumulated: ChatMessageResponse[] = [];
         // Safety bound: never loop unbounded even if the server misreports hasMore.
         const maxPages =
           Number.parseInt(import.meta.env.VITE_CHAT_LOAD_UNTIL_MAX_PAGES || '', 10) ||
           DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES;
         let pages = 0;
-        while (more && oldest > targetTimestamp && pages++ < maxPages) {
+        while (more && before && oldest > targetTimestamp && pages++ < maxPages) {
           const data = await getChatSession(projectId, sessionId, {
             before,
             limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
@@ -704,7 +677,7 @@ export function useSessionLifecycle(
           const firstMessage = data.messages[0];
           if (!firstMessage) break; // Unreachable — the length check above guarantees this.
           oldest = firstMessage.createdAt;
-          before = messagePageCursor(firstMessage);
+          before = oldestPersistedCursor(data.messages);
           more = data.hasMore;
         }
         if (accumulated.length > 0) {

@@ -1,40 +1,80 @@
-/** Numeric cursors remain timestamp-exclusive for existing API callers. */
-export type MessageCursor = number | { createdAt: number; sequence: number; id: string };
+import {
+  compareMessagePositions,
+  type MessageCursor,
+  type MessagePosition,
+} from '@simple-agent-manager/shared';
 
-export function messageCursorPredicate(
-  column: 'before' | 'after',
-  cursor: MessageCursor
-): { sql: string; values: Array<number | string> } {
-  const operator = column === 'before' ? '<' : '>';
-  if (typeof cursor === 'number') {
-    return { sql: `created_at ${operator} ?`, values: [cursor] };
+/**
+ * The exclusive `before`/`after` bounds of one transcript page.
+ *
+ * An exact position bounds the full `(created_at, sequence, id)` key — the
+ * order every transcript read sorts by — so a page that ends inside a group of
+ * tied timestamps resumes exactly where it stopped. A legacy numeric cursor
+ * keeps its original meaning and bounds `created_at` alone.
+ *
+ * The three functions below express the same bounds for `chat_messages` SQL,
+ * for archive chunk selection, and for rows decoded from an archive chunk.
+ */
+export type MessageBounds = {
+  before: MessageCursor | null;
+  after: MessageCursor | null;
+};
+
+type SqlClause = { sql: string; values: Array<number | string> };
+
+const DIRECTIONS = [
+  { bound: 'before', operator: '<', sign: -1 },
+  { bound: 'after', operator: '>', sign: 1 },
+] as const;
+
+/** ` AND ...` predicates keeping `chat_messages` rows strictly inside the bounds. */
+export function messageBoundsClause(bounds: MessageBounds): SqlClause {
+  const clause: SqlClause = { sql: '', values: [] };
+  for (const { bound, operator } of DIRECTIONS) {
+    const cursor = bounds[bound];
+    if (cursor === null) continue;
+    if (typeof cursor === 'number') {
+      clause.sql += ` AND created_at ${operator} ?`;
+      clause.values.push(cursor);
+    } else {
+      clause.sql += ` AND (created_at, sequence, id) ${operator} (?, ?, ?)`;
+      clause.values.push(cursor.createdAt, cursor.sequence, cursor.id);
+    }
   }
-  return {
-    sql: `(created_at ${operator} ? OR (created_at = ? AND sequence ${operator} ?) OR (created_at = ? AND sequence = ? AND id ${operator} ?))`,
-    values: [
-      cursor.createdAt,
-      cursor.createdAt,
-      cursor.sequence,
-      cursor.createdAt,
-      cursor.sequence,
-      cursor.id,
-    ],
-  };
+  return clause;
 }
 
-export function messageIsWithinCursor(
-  row: Record<string, unknown>,
-  column: 'before' | 'after',
-  cursor: MessageCursor
-): boolean {
-  const timestamp = Number(row.created_at);
-  if (typeof cursor === 'number')
-    return column === 'before' ? timestamp < cursor : timestamp > cursor;
-  const sequence = Number(row.sequence);
-  const id = String(row.id);
-  let comparison = 0;
-  if (timestamp !== cursor.createdAt) comparison = timestamp < cursor.createdAt ? -1 : 1;
-  else if (sequence !== cursor.sequence) comparison = sequence < cursor.sequence ? -1 : 1;
-  else if (id !== cursor.id) comparison = id < cursor.id ? -1 : 1;
-  return column === 'before' ? comparison < 0 : comparison > 0;
+/**
+ * ` AND ...` predicates keeping archive chunks that can hold a row inside the
+ * bounds. Rows tied with an exact position's timestamp may fall on either side
+ * of it, so that edge is inclusive; a legacy timestamp excludes its ties.
+ */
+export function chunkBoundsClause(bounds: MessageBounds): SqlClause {
+  const clause: SqlClause = { sql: '', values: [] };
+  for (const { bound, operator } of DIRECTIONS) {
+    const cursor = bounds[bound];
+    if (cursor === null) continue;
+    const column = bound === 'before' ? 'first_created_at' : 'last_created_at';
+    const inclusive = typeof cursor === 'number' ? '' : '=';
+    clause.sql += ` AND ${column} ${operator}${inclusive} ?`;
+    clause.values.push(typeof cursor === 'number' ? cursor : cursor.createdAt);
+  }
+  return clause;
+}
+
+/** Whether a decoded archive row lies strictly inside the bounds. */
+export function rowWithinBounds(row: Record<string, unknown>, bounds: MessageBounds): boolean {
+  return DIRECTIONS.every(({ bound, sign }) => {
+    const cursor = bounds[bound];
+    if (cursor === null) return true;
+    const comparison =
+      typeof cursor === 'number'
+        ? Math.sign(Number(row.created_at) - cursor)
+        : compareMessagePositions(rowPosition(row), cursor);
+    return comparison === sign;
+  });
+}
+
+export function rowPosition(row: Record<string, unknown>): MessagePosition {
+  return { createdAt: Number(row.created_at), sequence: Number(row.sequence), id: String(row.id) };
 }

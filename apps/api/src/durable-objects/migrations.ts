@@ -2373,21 +2373,6 @@ export const MIGRATIONS: Migration[] = [
         USING fts5(content, content='project_data_archive_search_documents', content_rowid='rowid')`);
     },
   },
-  {
-    name: '059-message-upload-parts',
-    run: (sql) => {
-      sql.exec(`CREATE TABLE message_upload_parts (
-        session_id TEXT NOT NULL,
-        message_id TEXT NOT NULL,
-        field TEXT NOT NULL,
-        part INTEGER NOT NULL,
-        data TEXT NOT NULL,
-        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-        abandoned_at INTEGER,
-        PRIMARY KEY (session_id, message_id, field, part)
-      )`);
-    },
-  },
 ];
 
 /**

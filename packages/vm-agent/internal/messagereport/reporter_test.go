@@ -165,6 +165,33 @@ func waitForOutboxCount(t *testing.T, db *sql.DB, want int, context string) {
 	assertOutboxCount(t, db, want, context)
 }
 
+func storedContentAfterOversizedEnqueue(t *testing.T, limit int, messageID string) string {
+	t.Helper()
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	cfg.MaxMessageContentBytes = limit
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	defer r.Shutdown()
+
+	if err := r.Enqueue(Message{
+		MessageID: messageID,
+		Role:      "assistant",
+		Content:   strings.Repeat("x", 128),
+		Timestamp: "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	var stored string
+	if err := db.QueryRow("SELECT content FROM message_outbox WHERE message_id = ?", messageID).Scan(&stored); err != nil {
+		t.Fatalf("select content: %v", err)
+	}
+	return stored
+}
+
 func recordingBatchSizeHandler(t *testing.T, mu *sync.Mutex, batchSizes *[]int) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -329,27 +356,6 @@ func TestFlush_SuccessfulPOST(t *testing.T) {
 	if count != 0 {
 		t.Fatalf("expected outbox empty after flush, got %d", count)
 	}
-}
-
-func TestFlush_NoContentDoesNotAcknowledgePersistence(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer ts.Close()
-	db := openTestDB(t)
-	cfg := testConfig(ts.URL, "ws-1")
-	cfg.RetryMaxElapsed = time.Millisecond
-	r, err := New(db, cfg)
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	r.SetToken("test-token")
-	if err := r.Enqueue(Message{MessageID: "not-acknowledged", Role: "assistant", Content: "keep", Timestamp: "2024-01-01T00:00:00Z"}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	time.Sleep(100 * time.Millisecond)
-	r.Shutdown()
-	assertOutboxCount(t, db, 1, "terminal 204 must retain original row")
 }
 
 func TestFlush_TransientError_Retries(t *testing.T) {
@@ -784,14 +790,7 @@ func TestBatchMaxBytes_RespectedInFlush(t *testing.T) {
 	db := openTestDB(t)
 	cfg := testConfig(ts.URL, "ws-1")
 	cfg.BatchMaxSize = 100 // high limit
-	singleBytes, err := marshaledBatchSize([]outboxRow{{
-		id: 1, messageID: "m0", sessionID: cfg.SessionID, role: "user",
-		content: "this is a thirty char message!", createdAt: "2024-01-01T00:00:00Z",
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.BatchMaxBytes = singleBytes + 1
+	cfg.BatchMaxBytes = 50 // very small byte limit
 	r, err := New(db, cfg)
 	if err != nil {
 		t.Fatalf("new: %v", err)
@@ -799,7 +798,8 @@ func TestBatchMaxBytes_RespectedInFlush(t *testing.T) {
 	r.SetToken("test-token")
 
 	// BatchMaxBytes is measured against the full JSON request body. With a
-	// The serialized limit fits one row, but adding a second exceeds it.
+	// 50-byte limit even one message exceeds the budget, so each row should
+	// be sent alone and the next row must not be added to that oversized batch.
 	for i := 0; i < 5; i++ {
 		_ = r.Enqueue(Message{
 			MessageID: fmt.Sprintf("m%d", i),
@@ -842,8 +842,8 @@ func TestReadBatch_IncludesToolMetadataInJSONByteBudget(t *testing.T) {
 	defer r.Shutdown()
 
 	rows := []outboxRow{
-		{id: 1, messageID: "m1", sessionID: "sess-1", role: "tool", content: "a", toolMetadata: sql.NullString{String: strings.Repeat("m", 80), Valid: true}, createdAt: "2024-01-01T00:00:00Z"},
-		{id: 2, messageID: "m2", sessionID: "sess-1", role: "tool", content: "b", toolMetadata: sql.NullString{String: strings.Repeat("m", 80), Valid: true}, createdAt: "2024-01-01T00:00:01Z"},
+		{id: 1, messageID: "m1", sessionID: "s1", role: "tool", content: "a", toolMetadata: sql.NullString{String: strings.Repeat("m", 80), Valid: true}, createdAt: "2024-01-01T00:00:00Z"},
+		{id: 2, messageID: "m2", sessionID: "s1", role: "tool", content: "b", toolMetadata: sql.NullString{String: strings.Repeat("m", 80), Valid: true}, createdAt: "2024-01-01T00:00:01Z"},
 	}
 	size, err := marshaledBatchSize(rows[:1])
 	if err != nil {
@@ -961,10 +961,10 @@ func TestFlush_SizeFallback409DisablesReporter(t *testing.T) {
 	enqueueAssistantPair(t, r)
 	r.flush()
 
-	assertOutboxCount(t, db, 2, "outbox retained after fallback session limit")
+	assertOutboxCount(t, db, 0, "outbox after fallback session limit")
 
-	if err := r.Enqueue(Message{MessageID: "m2", Role: "assistant", Content: "rejected", Timestamp: "2024-01-01T00:00:02Z"}); err == nil {
-		t.Fatal("expected explicit enqueue error after session limit")
+	if err := r.Enqueue(Message{MessageID: "m2", Role: "assistant", Content: "dropped", Timestamp: "2024-01-01T00:00:02Z"}); err != nil {
+		t.Fatalf("enqueue after limit: %v", err)
 	}
 	time.Sleep(150 * time.Millisecond)
 	r.Shutdown()
@@ -1065,6 +1065,105 @@ func TestShutdown_CancelsSizeFallbackRequest(t *testing.T) {
 	}
 }
 
+func TestEnqueue_TruncationIncludesMarkerWithinConfiguredLimit(t *testing.T) {
+	const maxMessageBytes = 32
+	stored := storedContentAfterOversizedEnqueue(t, maxMessageBytes, "oversized")
+	if len(stored) > maxMessageBytes {
+		t.Fatalf("stored content length = %d, want <= %d", len(stored), maxMessageBytes)
+	}
+	if !strings.HasSuffix(stored, truncationMarker) {
+		t.Fatalf("stored content should include truncation marker, got %q", stored)
+	}
+}
+
+func TestEnqueue_TruncationHonorsTinyConfiguredLimit(t *testing.T) {
+	const maxMessageBytes = 4
+	stored := storedContentAfterOversizedEnqueue(t, maxMessageBytes, "tiny-limit")
+	if len(stored) != maxMessageBytes {
+		t.Fatalf("stored content length = %d, want %d", len(stored), maxMessageBytes)
+	}
+	if stored != truncationMarker[:maxMessageBytes] {
+		t.Fatalf("stored content = %q, want truncated marker prefix", stored)
+	}
+}
+
+func TestFlush_IndividualThreshold400PersistsOmittedMarker(t *testing.T) {
+	var received []struct {
+		MessageID    string `json:"messageId"`
+		Role         string `json:"role"`
+		Content      string `json:"content"`
+		ToolMetadata string `json:"toolMetadata"`
+		Timestamp    string `json:"timestamp"`
+	}
+	var mu sync.Mutex
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload struct {
+			Messages []struct {
+				MessageID    string `json:"messageId"`
+				Role         string `json:"role"`
+				Content      string `json:"content"`
+				ToolMetadata string `json:"toolMetadata"`
+				Timestamp    string `json:"timestamp"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		msg := payload.Messages[0]
+		if msg.Content != omittedMessageMarker {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"BAD_REQUEST","message":"Individual message content exceeds 102400 byte limit"}`))
+			return
+		}
+		mu.Lock()
+		received = append(received, payload.Messages...)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"persisted": 1, "duplicates": 0})
+	}))
+	defer ts.Close()
+
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	cfg.MaxMessageContentBytes = 1024
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
+
+	if err := r.Enqueue(Message{
+		MessageID:    "oversized-tool",
+		Role:         "assistant",
+		Content:      strings.Repeat("x", 10),
+		ToolMetadata: strings.Repeat("m", 2048),
+		Timestamp:    "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	r.Shutdown()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) != 1 {
+		t.Fatalf("expected one omitted marker delivery, got %d", len(received))
+	}
+	msg := received[0]
+	if msg.MessageID != "oversized-tool" || msg.Role != "assistant" || msg.Timestamp != "2024-01-01T00:00:00Z" {
+		t.Fatalf("marker did not preserve identity fields: %+v", msg)
+	}
+	if msg.Content != omittedMessageMarker {
+		t.Fatalf("content = %q, want omitted marker", msg.Content)
+	}
+	if msg.ToolMetadata != "" {
+		t.Fatalf("expected oversized tool metadata omitted, got %q", msg.ToolMetadata)
+	}
+}
+
 func TestFlush_SessionLimit409DisablesReporterUntilSessionSwitch(t *testing.T) {
 	var requests int32
 	var receivedMu sync.Mutex
@@ -1098,16 +1197,16 @@ func TestFlush_SessionLimit409DisablesReporterUntilSessionSwitch(t *testing.T) {
 		t.Fatalf("enqueue m1: %v", err)
 	}
 	waitForCondition(t, 2*time.Second, func() bool { return atomic.LoadInt32(&requests) == 1 })
-	waitForOutboxCount(t, db, 1, "outbox retained after session limit")
+	waitForOutboxCount(t, db, 0, "outbox after session limit")
 
-	if err := r.Enqueue(Message{MessageID: "m2", Role: "assistant", Content: "rejected", Timestamp: "2024-01-01T00:00:01Z"}); err == nil {
-		t.Fatal("expected explicit enqueue error after limit")
+	if err := r.Enqueue(Message{MessageID: "m2", Role: "assistant", Content: "dropped", Timestamp: "2024-01-01T00:00:01Z"}); err != nil {
+		t.Fatalf("enqueue m2 after limit: %v", err)
 	}
 	time.Sleep(150 * time.Millisecond)
 	if got := atomic.LoadInt32(&requests); got != 1 {
 		t.Fatalf("expected no retry or new request after limit, got %d requests", got)
 	}
-	assertOutboxCount(t, db, 1, "outbox after rejected post-limit enqueue")
+	assertOutboxCount(t, db, 0, "outbox after dropped post-limit enqueue")
 
 	r.SetSessionID("sess-2")
 	if err := r.Enqueue(Message{MessageID: "m3", Role: "assistant", Content: "new session", Timestamp: "2024-01-01T00:00:02Z"}); err != nil {
@@ -1792,6 +1891,42 @@ func TestReadBatch_OrdersByID(t *testing.T) {
 			t.Fatalf("outbox IDs not monotonic: batch[%d].id=%d <= batch[%d].id=%d",
 				i, batch[i].id, i-1, batch[i-1].id)
 		}
+	}
+}
+
+func TestEnqueue_TruncatesOversizedContent(t *testing.T) {
+	db := openTestDB(t)
+	cfg := testConfig("http://localhost", "ws-1")
+	cfg.MaxMessageContentBytes = 1024
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer r.Shutdown()
+
+	oversized := strings.Repeat("x", cfg.MaxMessageContentBytes+1000)
+	msg := Message{
+		MessageID: "msg-oversized",
+		Role:      "assistant",
+		Content:   oversized,
+	}
+	if err := r.Enqueue(msg); err != nil {
+		t.Fatalf("Enqueue failed: %v", err)
+	}
+
+	// Read back from outbox and verify truncation.
+	var content string
+	err = db.QueryRow("SELECT content FROM message_outbox WHERE message_id = ?", "msg-oversized").Scan(&content)
+	if err != nil {
+		t.Fatalf("query outbox: %v", err)
+	}
+
+	if !strings.HasSuffix(content, truncationMarker) {
+		t.Fatalf("expected content to end with truncation marker, got last 30 chars: %q", content[len(content)-30:])
+	}
+
+	if len(content) != cfg.MaxMessageContentBytes {
+		t.Fatalf("truncated content length = %d, want %d", len(content), cfg.MaxMessageContentBytes)
 	}
 }
 

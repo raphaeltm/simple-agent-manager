@@ -87,20 +87,11 @@ function toolMessage(id: string, title: string, createdAt: number, status = 'com
     content: '(tool call)',
     toolMetadata: { toolCallId: `tc-${id}`, title, kind: 'execute', status, contentSize: 64 },
     createdAt,
-    sequence: createdAt,
   };
 }
 
 function textMessage(id: string, role: 'user' | 'assistant', content: string, createdAt: number) {
-  return {
-    id,
-    sessionId: SESSION_ID,
-    role,
-    content,
-    toolMetadata: null,
-    createdAt,
-    sequence: createdAt,
-  };
+  return { id, sessionId: SESSION_ID, role, content, toolMetadata: null, createdAt };
 }
 
 function renderView(ui: ReactElement) {

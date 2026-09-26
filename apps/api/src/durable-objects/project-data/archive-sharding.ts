@@ -1,4 +1,6 @@
 // FILE SIZE EXCEPTION: ProjectData terminal archive migration state machine — keeping source intent, target copy/seal, canonical hash, exact-read guards, and final source-delete invariants in one module avoids cross-file transaction coupling during Fable review. See .claude/rules/18-file-size-limits.md
+import type { MessageCursor } from '@simple-agent-manager/shared';
+
 import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import {
@@ -823,13 +825,6 @@ function assertEligibleTerminalSource(
       'ProjectData archive refuses sessions while retryable tool-payload cleanup is unresolved'
     );
   }
-  // A terminal callback can interrupt a multipart upload. Preserve its bytes in
-  // the root object for inspection without holding archival eligibility forever.
-  sql.exec(
-    'UPDATE message_upload_parts SET abandoned_at = ? WHERE session_id = ? AND abandoned_at IS NULL',
-    now,
-    sessionId
-  );
 }
 
 /**
@@ -3668,8 +3663,8 @@ export function archiveSourceReadMessages(
   env: Env,
   input: ProjectDataArchiveExactReadInput,
   limit: number,
-  before: import('./message-cursor').MessageCursor | null,
-  after: import('./message-cursor').MessageCursor | null,
+  before: MessageCursor | null,
+  after: MessageCursor | null,
   roles: string[] | undefined,
   compact: boolean,
   order: 'asc' | 'desc'

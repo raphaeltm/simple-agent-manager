@@ -1,9 +1,5 @@
 import { Hono } from 'hono';
 
-import {
-  type MessageUploadInventoryCursor,
-  resolveMessageUploadInventoryLimit,
-} from '../../durable-objects/project-data/message-upload';
 import { resolveStorageSafetyConfig } from '../../durable-objects/project-data/storage-safety';
 import { ProjectDataManualToolPayloadCleanupStateError } from '../../durable-objects/project-data/tool-payload-cleanup-types';
 import type { Env } from '../../env';
@@ -28,10 +24,8 @@ import {
   ProjectDataStorageReliefMeasureSchema,
 } from '../../schemas';
 import {
-  listMessageUploadQuarantine,
   measureProjectDataStorage,
   measureProjectDataStorageRelief,
-  readMessageUploadQuarantine,
   runProjectDataGroupedFtsCleanup,
   runProjectDataManualToolPayloadCleanup,
   runProjectDataStorageEmergencyPurge,
@@ -60,53 +54,6 @@ const DEFAULT_STORAGE_TELEMETRY_LIST_LIMIT = 50;
 const DEFAULT_STORAGE_TELEMETRY_LIST_MAX = 200;
 
 export const adminProjectDataStorageRoutes = new Hono<{ Bindings: Env }>();
-
-// Parent admin router requires approved superadmin authentication.
-adminProjectDataStorageRoutes.get('/message-upload-quarantine/:projectId', async (c) => {
-  c.header('Cache-Control', 'no-store');
-  const maxLimit = resolveMessageUploadInventoryLimit(c.env);
-  const limit = Number.parseInt(c.req.query('limit') ?? String(Math.min(50, maxLimit)), 10);
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > maxLimit) {
-    throw errors.badRequest(`limit must be between 1 and ${maxLimit}`);
-  }
-  let after: MessageUploadInventoryCursor | null = null;
-  const cursor = c.req.query('after');
-  if (cursor) {
-    try {
-      const value: unknown = JSON.parse(cursor);
-      if (
-        typeof value !== 'object' ||
-        value === null ||
-        !('createdAt' in value) ||
-        !Number.isSafeInteger(value.createdAt) ||
-        !('sessionId' in value) ||
-        typeof value.sessionId !== 'string' ||
-        !('messageId' in value) ||
-        typeof value.messageId !== 'string'
-      )
-        throw new Error('Invalid cursor');
-      after = value as MessageUploadInventoryCursor;
-    } catch {
-      throw errors.badRequest('Invalid message upload inventory cursor');
-    }
-  }
-  return c.json(await listMessageUploadQuarantine(c.env, c.req.param('projectId'), limit, after));
-});
-
-adminProjectDataStorageRoutes.get(
-  '/message-upload-quarantine/:projectId/:sessionId/:messageId',
-  async (c) => {
-    c.header('Cache-Control', 'no-store');
-    const record = await readMessageUploadQuarantine(
-      c.env,
-      c.req.param('projectId'),
-      c.req.param('sessionId'),
-      c.req.param('messageId')
-    );
-    if (!record) throw errors.notFound('Message upload quarantine record');
-    return c.json(record);
-  }
-);
 
 adminProjectDataStorageRoutes.route(
   '/archive-sharding/circuit-breakers',

@@ -16,6 +16,7 @@ import {
   MAILBOX_DEFAULTS,
   type MessageCommentThread,
   type MessageCommentThreadEventReason,
+  type MessageCursor,
   type SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
@@ -58,7 +59,6 @@ import * as libraryFileComments from './library-file-comments';
 import * as mailbox from './mailbox';
 import * as materialization from './materialization';
 import * as messagePersistence from './message-persistence';
-import * as messageUpload from './message-upload';
 import * as messages from './messages';
 import * as missionState from './missions';
 import * as policies from './policies';
@@ -441,10 +441,10 @@ export class ProjectData extends DurableObject<Env> {
       );
       try {
         materialization.materializeSession(
-          this.sql,
-          sessionId,
-          materialization.resolveMaterializationPassConfig(this.env)
-        );
+      this.sql,
+      sessionId,
+      materialization.resolveMaterializationPassConfig(this.env)
+    );
       } catch (e) {
         log.error('materialize_session_on_stop_failed', { sessionId, error: String(e) });
       }
@@ -477,10 +477,10 @@ export class ProjectData extends DurableObject<Env> {
       // for its new tail each time, not for its whole history.
       try {
         materialization.materializeSession(
-          this.sql,
-          sessionId,
-          materialization.resolveMaterializationPassConfig(this.env)
-        );
+      this.sql,
+      sessionId,
+      materialization.resolveMaterializationPassConfig(this.env)
+    );
       } catch (e) {
         log.error('materialize_session_on_sleep_failed', { sessionId, error: String(e) });
       }
@@ -563,10 +563,10 @@ export class ProjectData extends DurableObject<Env> {
       );
       try {
         materialization.materializeSession(
-          this.sql,
-          sessionId,
-          materialization.resolveMaterializationPassConfig(this.env)
-        );
+      this.sql,
+      sessionId,
+      materialization.resolveMaterializationPassConfig(this.env)
+    );
       } catch (e) {
         log.error('materialize_session_on_fail_failed', { sessionId, error: String(e) });
       }
@@ -660,64 +660,6 @@ export class ProjectData extends DurableObject<Env> {
         batchMessages
       )
     );
-  }
-
-  async storeMessageUploadPart(input: messageUpload.MessageUploadPart): Promise<void> {
-    return this.withArchiveTranscriptLock(() => {
-      messages.assertTranscriptWriteAllowed(this.sql, input.sessionId, 'storeMessageUploadPart');
-      messageUpload.storeMessageUploadPart(this.sql, this.env, input);
-    });
-  }
-
-  /** Operator readback of exact partial bytes; this is not a transcript read. */
-  async readMessageUploadQuarantine(sessionId: string, messageId: string) {
-    return messageUpload.readMessageUploadQuarantine(this.sql, sessionId, messageId);
-  }
-
-  listMessageUploadQuarantine(
-    limit: number,
-    after: messageUpload.MessageUploadInventoryCursor | null
-  ) {
-    return messageUpload.listMessageUploadQuarantine(this.sql, this.env, limit, after);
-  }
-
-  async commitMessageUpload(
-    input: messageUpload.MessageUploadCommit
-  ): Promise<messagePersistence.MessageBatchPersistenceResult> {
-    return this.withArchiveTranscriptLock(async () => {
-      messages.assertTranscriptWriteAllowed(this.sql, input.sessionId, 'commitMessageUpload');
-      const assembled = await messageUpload.assembleMessageUpload(this.sql, this.env, input);
-      if (!assembled) {
-        messageUpload.clearMessageUpload(this.sql, input);
-        return {
-          persisted: 0,
-          duplicates: 1,
-          limitReached: false,
-          maxMessages: 0,
-          remainingCapacity: 0,
-        };
-      }
-      const result = await messagePersistence.persistMessageBatchWithSideEffects(
-        this.sql,
-        this.env,
-        this.messagePersistenceHooks(),
-        input.sessionId,
-        [
-          {
-            messageId: input.messageId,
-            role: input.role,
-            content: assembled.content,
-            toolMetadata: assembled.toolMetadata,
-            timestamp: input.timestamp,
-            origin: input.origin,
-            sequence: input.sequence,
-            preserveToolMetadata: true,
-          },
-        ]
-      );
-      if (!result.limitReached) messageUpload.clearMessageUpload(this.sql, input);
-      return result;
-    });
   }
 
   async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {
@@ -872,8 +814,8 @@ export class ProjectData extends DurableObject<Env> {
   async getMessages(
     sessionId: string,
     limit: number = 1000,
-    before: import('./message-cursor').MessageCursor | null = null,
-    after: import('./message-cursor').MessageCursor | null = null,
+    before: MessageCursor | null = null,
+    after: MessageCursor | null = null,
     roles?: string[],
     compact: boolean = false,
     order: 'asc' | 'desc' = 'desc'
@@ -1013,8 +955,8 @@ export class ProjectData extends DurableObject<Env> {
   archiveSourceGetMessages(
     input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
     limit: number = 1000,
-    before: import('./message-cursor').MessageCursor | null = null,
-    after: import('./message-cursor').MessageCursor | null = null,
+    before: MessageCursor | null = null,
+    after: MessageCursor | null = null,
     roles?: string[],
     compact: boolean = false,
     order: 'asc' | 'desc' = 'desc'
@@ -1082,9 +1024,9 @@ export class ProjectData extends DurableObject<Env> {
   archiveTargetPrepare(
     input: archiveSharding.ArchiveTargetPrepareInput
   ): Promise<archiveSharding.ArchiveTargetPrepareResult> {
-    return this.withArchiveTranscriptLock(async () =>
-      this.ctx.storage.transactionSync(() => archiveSharding.prepareArchiveTarget(this.sql, input))
-    );
+    return this.withArchiveTranscriptLock(async () => this.ctx.storage.transactionSync(() =>
+      archiveSharding.prepareArchiveTarget(this.sql, input)
+    ));
   }
 
   async archiveTargetCommitChunk(
@@ -1105,31 +1047,21 @@ export class ProjectData extends DurableObject<Env> {
   async archiveTargetSeal(
     input: archiveSharding.ArchiveTargetSealInput
   ): Promise<archiveSharding.ArchiveTargetSealResult> {
-    return this.withArchiveTranscriptLock(() =>
-      measureArchiveSql(this.sql, input.sessionId, 'target_seal', (sql) =>
-        archiveSharding.sealArchiveTarget(
-          sql,
-          {
-            ...input,
-            hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
-          },
-          this.env
-        )
-      )
-    );
+    return this.withArchiveTranscriptLock(() => measureArchiveSql(this.sql, input.sessionId, 'target_seal', sql => archiveSharding.sealArchiveTarget(sql, {
+      ...input,
+      hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+    }, this.env)));
   }
 
   archiveTargetAbandonSession(
     input: archiveSharding.ArchiveTargetAbandonInput
   ): Promise<archiveSharding.ArchiveTargetAbandonResult> {
-    return this.withArchiveTranscriptLock(async () =>
-      this.ctx.storage.transactionSync(() =>
-        archiveSharding.abandonArchiveTargetSession(this.sql, {
-          ...input,
-          hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
-        })
-      )
-    );
+    return this.withArchiveTranscriptLock(async () => this.ctx.storage.transactionSync(() =>
+      archiveSharding.abandonArchiveTargetSession(this.sql, {
+        ...input,
+        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+      })
+    ));
   }
 
   archiveTargetInspectSession(
@@ -1141,9 +1073,7 @@ export class ProjectData extends DurableObject<Env> {
   async archiveTargetExportChunk(
     input: archiveSharding.ArchiveTargetExportChunkInput
   ): Promise<import('../../project-data-archive/contract').ProjectDataArchiveChunk> {
-    return this.withArchiveTranscriptLock(() =>
-      archiveSharding.exportArchiveTargetChunk(this.sql, input, this.env)
-    );
+    return this.withArchiveTranscriptLock(() => archiveSharding.exportArchiveTargetChunk(this.sql, input, this.env));
   }
 
   archiveTargetMarkRehomeExported(input: {
@@ -1154,30 +1084,26 @@ export class ProjectData extends DurableObject<Env> {
     targetGeneration: number;
     now: number;
   }): Promise<boolean> {
-    return this.withArchiveTranscriptLock(async () =>
-      this.ctx.storage.transactionSync(() =>
-        archiveSharding.markArchiveTargetRehomeExported(this.sql, input)
-      )
-    );
+    return this.withArchiveTranscriptLock(async () => this.ctx.storage.transactionSync(() =>
+      archiveSharding.markArchiveTargetRehomeExported(this.sql, input)
+    ));
   }
 
   archiveTargetGetMessages(
     input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
     limit: number = 1000,
-    before: import('./message-cursor').MessageCursor | null = null,
-    after: import('./message-cursor').MessageCursor | null = null,
+    before: MessageCursor | null = null,
+    after: MessageCursor | null = null,
     roles?: string[],
     compact: boolean = false,
     order: 'asc' | 'desc' = 'desc'
   ) {
-    return archiveSharding.archiveTargetReadMessages(this.sql, this.env, input, {
-      limit,
-      before,
-      after,
-      roles,
-      compact,
-      order,
-    });
+    return archiveSharding.archiveTargetReadMessages(
+      this.sql,
+      this.env,
+      input,
+      { limit, before, after, roles, compact, order }
+    );
   }
 
   async archiveTargetGetMessageToolContent(input: {
@@ -2204,9 +2130,11 @@ export class ProjectData extends DurableObject<Env> {
     const chatSessionId = sessionState.resolveActivityChatSessionId(this.sql, sessionId);
     // The TURN ended; the session lives on and may receive another prompt, so it
     // still wants an idle timer.
-    await sessionActivityReconciliation.publishTurnEnd(this.sessionActivityHooks(), chatSessionId, {
-      kind: 'idle',
-    });
+    await sessionActivityReconciliation.publishTurnEnd(
+      this.sessionActivityHooks(),
+      chatSessionId,
+      { kind: 'idle' }
+    );
     return true;
   }
 

@@ -106,14 +106,6 @@ export interface ChatMessageResponse {
   origin?: 'user' | 'system' | null;
 }
 
-/** Exact cursor for message pagination; numeric timestamps remain accepted by the API. */
-export function messagePageCursor(message: ChatMessageResponse): string {
-  if (!Number.isSafeInteger(message.sequence)) {
-    throw new Error('Message sequence is required for lossless pagination');
-  }
-  return JSON.stringify([message.createdAt, message.sequence, message.id]);
-}
-
 /** Persisted session state snapshot from the DO (for catch-up on page load). */
 export interface SessionStateSnapshot {
   activity: 'idle' | 'prompting' | 'recovering' | 'error' | 'stopped';
@@ -341,20 +333,16 @@ export async function getAllChats(
 // Per-Project Chat Session Detail
 // =============================================================================
 
+/** `before`/`after` are exact cursors from `lib/message-paging` (the rows at a page's edge). */
 export async function getChatSession(
   projectId: string,
   sessionId: string,
-  params: {
-    limit?: number;
-    before?: number | string;
-    after?: number | string;
-    signal?: AbortSignal;
-  } = {}
+  params: { limit?: number; before?: string; after?: string; signal?: AbortSignal } = {}
 ): Promise<ChatSessionDetailResponse> {
   const searchParams = new URLSearchParams();
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
-  if (params.before !== undefined) searchParams.set('before', String(params.before));
-  if (params.after !== undefined) searchParams.set('after', String(params.after));
+  if (params.before !== undefined) searchParams.set('before', params.before);
+  if (params.after !== undefined) searchParams.set('after', params.after);
 
   const qs = searchParams.toString();
   const endpoint = qs
@@ -383,8 +371,8 @@ export async function listChatMessages(
   sessionId: string,
   params: {
     limit?: number;
-    before?: number | string;
-    after?: number | string;
+    before?: string;
+    after?: string;
     roles?: string[];
     compact?: boolean;
     order?: 'asc' | 'desc';
@@ -393,8 +381,8 @@ export async function listChatMessages(
 ): Promise<ChatMessagesListResponse> {
   const searchParams = new URLSearchParams();
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
-  if (params.before !== undefined) searchParams.set('before', String(params.before));
-  if (params.after !== undefined) searchParams.set('after', String(params.after));
+  if (params.before !== undefined) searchParams.set('before', params.before);
+  if (params.after !== undefined) searchParams.set('after', params.after);
   if (params.roles && params.roles.length > 0) searchParams.set('roles', params.roles.join(','));
   if (params.compact !== undefined) searchParams.set('compact', String(params.compact));
   if (params.order !== undefined) searchParams.set('order', params.order);

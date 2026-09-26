@@ -295,7 +295,7 @@ function makeMessage(
     content,
     toolMetadata: null,
     createdAt: Date.now(),
-    sequence: Date.now(),
+    sequence: null,
   };
 }
 
@@ -2683,7 +2683,7 @@ describe('ProjectMessageView — timeline jump-to-message', () => {
       content,
       toolMetadata: null,
       createdAt,
-      sequence: createdAt,
+      sequence: null,
     };
   }
   function makeAgentMessage(id: string, sessionId: string, content: string, createdAt: number) {
@@ -2694,7 +2694,7 @@ describe('ProjectMessageView — timeline jump-to-message', () => {
       content,
       toolMetadata: null,
       createdAt,
-      sequence: createdAt,
+      sequence: null,
     };
   }
 
@@ -2806,19 +2806,11 @@ describe('ProjectMessageView — prepend anchors on rendered rows, not messages'
       content: '(tool call)',
       toolMetadata: { toolCallId: `tc-${id}`, title, kind: 'execute', status: 'completed' },
       createdAt,
-      sequence: createdAt,
+      sequence: null,
     };
   }
   function textRow(id: string, role: 'user' | 'assistant', content: string, createdAt: number) {
-    return {
-      id,
-      sessionId: 'session-prepend',
-      role,
-      content,
-      toolMetadata: null,
-      createdAt,
-      sequence: createdAt,
-    };
+    return { id, sessionId: 'session-prepend', role, content, toolMetadata: null, createdAt };
   }
 
   beforeEach(() => {
@@ -2947,7 +2939,7 @@ describe('ProjectMessageView — tool call activity groups', () => {
         ...metadata,
       },
       createdAt,
-      sequence: createdAt,
+      sequence: null,
     };
   }
 
@@ -2977,7 +2969,7 @@ describe('ProjectMessageView — tool call activity groups', () => {
         ],
       },
       createdAt,
-      sequence: createdAt,
+      sequence: null,
     };
   }
 

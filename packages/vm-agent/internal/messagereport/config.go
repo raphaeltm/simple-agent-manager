@@ -30,12 +30,6 @@ type Config struct {
 	// oversized single message does not make the batch permanently fail.
 	MaxMessageContentBytes int
 
-	// MaxMessageUploadBytes bounds one logical message assembled by the API.
-	MaxMessageUploadBytes int
-
-	// MaxMessageUploadParts bounds the number of parts in each uploaded field.
-	MaxMessageUploadParts int
-
 	// OutboxMaxSize is the maximum number of messages retained in the SQLite
 	// outbox. When exceeded, Enqueue returns an error.
 	OutboxMaxSize int
@@ -80,8 +74,6 @@ func DefaultConfig() Config {
 		BatchMaxSize:           50,
 		BatchMaxBytes:          256 * 1024, // API MAX_MESSAGES_PAYLOAD_BYTES default
 		MaxMessageContentBytes: 100 * 1024, // API MESSAGE_SIZE_THRESHOLD default
-		MaxMessageUploadBytes:  8 * 1024 * 1024,
-		MaxMessageUploadParts:  256,
 		OutboxMaxSize:          10000,
 		RetryInitial:           1 * time.Second,
 		RetryMax:               30 * time.Second,
@@ -100,8 +92,6 @@ func LoadConfigFromEnv() Config {
 	cfg.BatchMaxSize = envInt("MSG_BATCH_MAX_SIZE", cfg.BatchMaxSize)
 	cfg.BatchMaxBytes = envInt("MSG_BATCH_MAX_BYTES", cfg.BatchMaxBytes)
 	cfg.MaxMessageContentBytes = envInt("MSG_MAX_MESSAGE_CONTENT_BYTES", cfg.MaxMessageContentBytes)
-	cfg.MaxMessageUploadBytes = envInt("MSG_MAX_MESSAGE_UPLOAD_BYTES", cfg.MaxMessageUploadBytes)
-	cfg.MaxMessageUploadParts = envInt("MSG_MAX_MESSAGE_UPLOAD_PARTS", cfg.MaxMessageUploadParts)
 	cfg.OutboxMaxSize = envInt("MSG_OUTBOX_MAX_SIZE", cfg.OutboxMaxSize)
 	cfg.RetryInitial = envDuration("MSG_RETRY_INITIAL", cfg.RetryInitial)
 	cfg.RetryMax = envDuration("MSG_RETRY_MAX", cfg.RetryMax)

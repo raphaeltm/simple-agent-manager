@@ -39,7 +39,6 @@ function makeMessage(id: string, createdAt: number): ChatMessageResponse {
     content: `Message ${id}`,
     toolMetadata: null,
     createdAt,
-    sequence: createdAt,
   };
 }
 
@@ -57,11 +56,7 @@ function makeEvent(id: string, eventType: string, createdAt: number): ActivityEv
   };
 }
 
-function makeNotification(
-  id: string,
-  createdAt: number,
-  overrides: Partial<NotificationResponse> = {}
-): NotificationResponse {
+function makeNotification(id: string, createdAt: number, overrides: Partial<NotificationResponse> = {}): NotificationResponse {
   return {
     id,
     projectId: 'proj-1',
@@ -85,11 +80,7 @@ describe('useSessionTimeline', () => {
     vi.clearAllMocks();
     mockListActivityEvents.mockResolvedValue({ events: [], hasMore: false });
     mockListChatMessages.mockResolvedValue({ messages: [], hasMore: false });
-    mockListNotifications.mockResolvedValue({
-      notifications: [],
-      unreadCount: 0,
-      nextCursor: null,
-    });
+    mockListNotifications.mockResolvedValue({ notifications: [], unreadCount: 0, nextCursor: null });
   });
 
   it('does not fetch events when disabled', () => {
@@ -163,9 +154,7 @@ describe('useSessionTimeline', () => {
     });
 
     await vi.waitFor(() => {
-      expect(result.current.entries.some((entry) => entry.id === 'msg-server-old-user-turn')).toBe(
-        true
-      );
+      expect(result.current.entries.some((entry) => entry.id === 'msg-server-old-user-turn')).toBe(true);
     });
   });
 
@@ -191,7 +180,7 @@ describe('useSessionTimeline', () => {
     });
 
     expect(mockListChatMessages).toHaveBeenNthCalledWith(2, 'proj-1', 'sess-1', {
-      before: '[2000,2000,"newer"]',
+      before: 2000,
       roles: ['user'],
       compact: true,
     });
