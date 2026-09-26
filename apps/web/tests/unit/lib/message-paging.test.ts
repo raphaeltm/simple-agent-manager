@@ -7,12 +7,19 @@ const mocks = vi.hoisted(() => ({ getChatSession: vi.fn() }));
 
 vi.mock('../../../src/lib/api', () => ({ getChatSession: mocks.getChatSession }));
 
-const { newestPersistedCursor, oldestPersistedCursor, refreshCachedTranscript } = await import(
-  '../../../src/lib/message-paging'
-);
+const { fetchHistoryUntil, newestPersistedCursor, oldestPersistedCursor, refreshCachedTranscript } =
+  await import('../../../src/lib/message-paging');
 
 function persisted(id: string, createdAt: number, sequence = createdAt): ChatMessageResponse {
-  return { id, sessionId: 's-1', role: 'assistant', content: id, toolMetadata: null, createdAt, sequence };
+  return {
+    id,
+    sessionId: 's-1',
+    role: 'assistant',
+    content: id,
+    toolMetadata: null,
+    createdAt,
+    sequence,
+  };
 }
 
 function optimistic(id: string, createdAt: number): ChatMessageResponse {
@@ -75,5 +82,37 @@ describe('refreshCachedTranscript', () => {
       `Message refresh for session s-1 stopped after ${DEFAULT_CHAT_DELTA_MAX_PAGES} pages`
     );
     expect(mocks.getChatSession).toHaveBeenCalledTimes(DEFAULT_CHAT_DELTA_MAX_PAGES);
+  });
+});
+
+describe('fetchHistoryUntil', () => {
+  beforeEach(() => mocks.getChatSession.mockReset());
+
+  it('pages back from the oldest persisted row until it reaches the target time', async () => {
+    mocks.getChatSession
+      .mockResolvedValueOnce(page([persisted('p3', 300, 3), persisted('p4', 400, 4)], true))
+      .mockResolvedValueOnce(page([persisted('p1', 100, 1), persisted('p2', 200, 2)], true));
+
+    const history = await fetchHistoryUntil(
+      'p-1',
+      's-1',
+      [optimistic('optimistic-first', 450), persisted('p5', 500, 5)],
+      150
+    );
+
+    expect(history.messages.map((message) => message.id)).toEqual(['p1', 'p2', 'p3', 'p4']);
+    expect(history.hasMore).toBe(true);
+    expect(mocks.getChatSession.mock.calls.map(([, , params]) => params.before)).toEqual([
+      '[500,5,"p5"]',
+      '[300,3,"p3"]',
+    ]);
+  });
+
+  it('reports the end of history when a page comes back empty', async () => {
+    mocks.getChatSession.mockResolvedValueOnce(page([], true));
+
+    const history = await fetchHistoryUntil('p-1', 's-1', [persisted('p5', 500, 5)], 0);
+
+    expect(history).toEqual({ messages: [], hasMore: false });
   });
 });

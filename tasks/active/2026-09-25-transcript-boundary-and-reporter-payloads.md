@@ -22,13 +22,14 @@ Started by Sol task `01M3CW7G3XNQTFTY3ST0RTG8MB` (stopped at its usage limit bef
 - [x] Shared cursor contract: `packages/shared/src/message-cursor.ts` (`MessagePosition`, `formatMessageCursor`, Valibot-validated `parseMessageCursor`, `compareMessagePositions`).
 - [x] DO bounds in one module (`project-data/message-cursor.ts`): `chat_messages` SQL, archive-chunk selection (inclusive for exact positions), in-memory rows; `getMessages` orders by `(created_at, sequence, id)`; `compactExportCandidates` reuses it.
 - [x] Routes accept exact or legacy cursors, reject malformed ones (previously `NaN` passed), and read `after`-only pages forward; query parsing split into `routes/chat-message-query.ts`.
-- [x] Web `lib/message-paging.ts`: cursors only from server-persisted rows; `refreshCachedTranscript` drains forward and fails visibly instead of returning a partial range (`DEFAULT_CHAT_DELTA_MAX_PAGES`, `VITE_CHAT_DELTA_MAX_PAGES`); load-more, load-until, timeline and workspace chat use exact cursors.
+- [x] Web `lib/message-paging.ts`: cursors only from server-persisted rows; `refreshCachedTranscript` drains forward and throws instead of returning a partial range (`DEFAULT_CHAT_DELTA_MAX_PAGES`, `VITE_CHAT_DELTA_MAX_PAGES`); `fetchHistoryUntil` holds the load-until loop; load-more, timeline and workspace chat use exact cursors; `merge-messages.ts` sorts persisted rows with the shared `compareMessagePositions`.
+- [x] Storage-safety minimal tool metadata keeps `toolName` (typed tool cards key on it), matching the transport summary.
 - [x] Reporter `transport_fit.go`: every message shaped at enqueue to fit one request — rune-safe truncation with marker, tool-metadata identity summary with `contentTruncated`/`transportTruncated`/`originalSizeBytes`, content shortened only as needed.
 - [x] Reporter batches are one session per request; `204` is an explicit declined discard that keeps the reporter running; the mismatch fallback's omitted form keeps a truncation record instead of dropping metadata.
 - [x] Removed the upload path, its migration, admin quarantine routes, env vars and docs; reverted `.codex/config.toml` auto-save artifacts.
 - [x] Tests enter through real triggers (HTTP routes via `SELF`, archive sweep, `Enqueue` + flush against a fake control plane enforcing the Worker's rules); each guard was reverted once and the intended tests went red.
 - [x] Docs: API and env references.
-- [x] Backlog: `2026-09-25-reporter-session-switch-unsent-rows.md` (pre-existing relink cleanup, with reproduction), `2026-09-26-chat-recent-window-merge-can-leave-gap.md` (pre-existing poll/catch-up window gap).
+- [x] Backlog: `2026-09-25-reporter-session-switch-unsent-rows.md` (pre-existing relink cleanup, with reproduction), `2026-09-26-chat-recent-window-merge-can-leave-gap.md` (pre-existing poll/catch-up window gap), `2026-09-26-split-use-session-lifecycle.md` (hook still over the file-size ceiling).
 - [ ] Full checks, specialist review, staging VM validation, PR, CodeRabbit, merge, production monitoring.
 
 ## Acceptance

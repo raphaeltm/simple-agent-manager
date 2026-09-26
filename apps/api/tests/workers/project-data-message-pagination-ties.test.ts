@@ -126,7 +126,11 @@ async function getPage(path: string, query: Record<string, string>): Promise<Pag
 
 function edgePosition(message: PageMessage | Record<string, unknown> | undefined): MessagePosition {
   if (!message) throw new Error('Page ended without a message to resume from');
-  return { createdAt: Number(message.createdAt), sequence: Number(message.sequence), id: String(message.id) };
+  return {
+    createdAt: Number(message.createdAt),
+    sequence: Number(message.sequence),
+    id: String(message.id),
+  };
 }
 
 /** Reads forward page by page, resuming after the last row of each page. */

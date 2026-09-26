@@ -1467,6 +1467,9 @@ Project event MCP tools use the ProjectData event limits above: `PROJECT_EVENT_L
 | `VITE_ANALYTICS_FLUSH_THRESHOLD`            | `10`               | Client event count that triggers an immediate analytics flush            |
 | `VITE_ANALYTICS_FLUSH_INTERVAL_MS`          | `5000`             | Client analytics background flush interval in milliseconds               |
 | `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES`      | `100`              | Max paginated diagnosis-event pages loaded per browser request           |
+| `VITE_CHAT_DELTA_MAX_PAGES`                 | `50`               | Max newer-message pages one chat refresh drains before failing visibly   |
+| `VITE_CHAT_TIMELINE_MAX_PAGES`              | `200`              | Max pages fetched per loop when the chat timeline drawer opens           |
+| `VITE_CHAT_LOAD_UNTIL_MAX_PAGES`            | `400`              | Max older-message pages chased while resolving a timeline jump           |
 | `VITE_PROJECT_LIST_LIMIT`                   | `50`               | Projects loaded into each shared list-cache entry                        |
 | `VITE_PROJECT_POLL_INTERVAL_MS`             | `30000`            | Project-list page refresh cadence in milliseconds; `0` disables          |
 | `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS`     | `60000`            | App-shell project-list refresh cadence in milliseconds; `0` disables     |

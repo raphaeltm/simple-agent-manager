@@ -75,6 +75,6 @@ export function rowWithinBounds(row: Record<string, unknown>, bounds: MessageBou
   });
 }
 
-export function rowPosition(row: Record<string, unknown>): MessagePosition {
+function rowPosition(row: Record<string, unknown>): MessagePosition {
   return { createdAt: Number(row.created_at), sequence: Number(row.sequence), id: String(row.id) };
 }

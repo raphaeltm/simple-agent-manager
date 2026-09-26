@@ -8,14 +8,22 @@
  * `createdAt`; they never bound a page, or the server would skip whatever it
  * persisted "before" that local time.
  */
-import { DEFAULT_CHAT_DELTA_MAX_PAGES, formatMessageCursor } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CHAT_DELTA_MAX_PAGES,
+  DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES,
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+  formatMessageCursor,
+} from '@simple-agent-manager/shared';
 
 import { type ChatMessageResponse, type ChatSessionDetailResponse, getChatSession } from './api';
-import { mergeMessages } from './merge-messages';
+import { isPersistedMessage, mergeMessages } from './merge-messages';
 
 const CHAT_DELTA_MAX_PAGES =
   Number.parseInt(import.meta.env.VITE_CHAT_DELTA_MAX_PAGES || '', 10) ||
   DEFAULT_CHAT_DELTA_MAX_PAGES;
+const CHAT_LOAD_UNTIL_MAX_PAGES =
+  Number.parseInt(import.meta.env.VITE_CHAT_LOAD_UNTIL_MAX_PAGES || '', 10) ||
+  DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES;
 
 /** Cursor for the newest persisted message in `messages`, if one is loaded. */
 export function newestPersistedCursor(
@@ -40,9 +48,8 @@ export function oldestPersistedCursor(
   return undefined;
 }
 
-function persistedCursor({ createdAt, sequence, id }: ChatMessageResponse): string | undefined {
-  if (typeof sequence !== 'number' || !Number.isSafeInteger(sequence)) return undefined;
-  return formatMessageCursor({ createdAt, sequence, id });
+function persistedCursor(message: ChatMessageResponse): string | undefined {
+  return isPersistedMessage(message) ? formatMessageCursor(message) : undefined;
 }
 
 /**
@@ -78,4 +85,39 @@ export async function refreshCachedTranscript(
     // The refresh read forward to the newest row; `hasMore` still describes older history.
     hasMore: cached.hasMore,
   };
+}
+
+/**
+ * Older history, read newest-first from the oldest persisted row in `loaded`,
+ * until a page reaches back to `untilCreatedAt` or history runs out. Returns
+ * the rows in transcript order and whether older history remains. Bounded so a
+ * server that never clears `hasMore` cannot spin the client.
+ */
+export async function fetchHistoryUntil(
+  projectId: string,
+  sessionId: string,
+  loaded: readonly ChatMessageResponse[],
+  untilCreatedAt: number
+): Promise<{ messages: ChatMessageResponse[]; hasMore: boolean }> {
+  const older: ChatMessageResponse[] = [];
+  let before = oldestPersistedCursor(loaded);
+  let oldest = loaded[0]?.createdAt ?? Infinity;
+  let hasMore = true;
+  for (
+    let pages = 0;
+    hasMore && before && oldest > untilCreatedAt && pages < CHAT_LOAD_UNTIL_MAX_PAGES;
+    pages++
+  ) {
+    const page = await getChatSession(projectId, sessionId, {
+      before,
+      limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+    });
+    const first = page.messages[0];
+    if (!first) return { messages: older, hasMore: false };
+    older.unshift(...page.messages);
+    oldest = first.createdAt;
+    before = oldestPersistedCursor(page.messages);
+    hasMore = page.hasMore;
+  }
+  return { messages: older, hasMore };
 }

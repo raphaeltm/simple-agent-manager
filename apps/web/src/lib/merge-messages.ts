@@ -7,21 +7,27 @@
  *
  * @see docs/notes/2026-03-17-chat-message-duplication-report.md
  */
+import { compareMessagePositions } from '@simple-agent-manager/shared';
+
 import type { ChatMessageResponse } from './api';
 
 export type MergeStrategy = 'replace' | 'append' | 'prepend';
 
+/** A message the server has persisted; only those carry a sequence. */
+export function isPersistedMessage(
+  message: ChatMessageResponse
+): message is ChatMessageResponse & { sequence: number } {
+  return Number.isSafeInteger(message.sequence);
+}
+
 /**
- * Compare function for sorting messages by createdAt, then by id for stability.
- * When sequence is available, use it as a secondary sort before id.
+ * Transcript order. Persisted messages follow the server's total order —
+ * createdAt, then sequence, then id. An optimistic row has no sequence yet, so
+ * it sorts by createdAt and then id.
  */
 function compareMessages(a: ChatMessageResponse, b: ChatMessageResponse): number {
+  if (isPersistedMessage(a) && isPersistedMessage(b)) return compareMessagePositions(a, b);
   if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
-  // Use sequence as secondary sort when both messages have it
-  const aSeq = a.sequence ?? null;
-  const bSeq = b.sequence ?? null;
-  if (aSeq !== null && bSeq !== null && aSeq !== bSeq) return aSeq - bSeq;
-  // Final tiebreaker: lexicographic ID comparison for deterministic order
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 

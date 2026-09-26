@@ -7,8 +7,11 @@ import (
 	"unicode/utf8"
 )
 
-// apiLimits are the control plane's shipped defaults.
-var apiLimits = transportLimits{contentBytes: 100 * 1024, requestBytes: 256 * 1024}
+// apiLimits are the reporter's shipped limits, which match the control plane's.
+var apiLimits = transportLimits{
+	contentBytes: DefaultConfig().MaxMessageContentBytes,
+	requestBytes: DefaultConfig().BatchMaxBytes,
+}
 
 func toolMessage(content, toolMetadata string) Message {
 	return Message{
