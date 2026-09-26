@@ -16,6 +16,8 @@ Started by Sol task `01M3CW7G3XNQTFTY3ST0RTG8MB` (stopped at its usage limit bef
 - Sol's multipart upload path could not ship: it committed up to 8 MiB into one Durable Object SQLite row (platform max 2 MB, so large messages failed and retried forever, blocking the session), bypassed the `#1875` storage firebreak's 128 KiB tool-metadata cap in a root object near 10 GB, retried `204` and permanent `4xx` forever, and stranded other-session rows. It was replaced, not repaired.
 - The Worker enforces `MESSAGE_SIZE_THRESHOLD` on UTF-16 length and `MAX_MESSAGES_PAYLOAD_BYTES` on the body; the agent's byte limits are always at least as strict, so no API change is needed for the reporter.
 - Reporters are per workspace and outlive a chat session (`getOrCreateReporter`, `SetSessionID`); a terminal flag disables one for its lifetime, so `204` must not be terminal.
+- The Worker answers `400` for a whole batch when one row is invalid (`validateMessageEntry`), and `400 Session mismatch` when the workspace is linked to another session (`rejectMessageSessionMismatch`); main discarded the whole batch on any `400`, and retried forever when even a row's omitted form was too large.
+- Sol's DO migration `059-message-upload-parts` ran on staging. DO migrations may never drop tables (`check-do-migration-safety`), so staging objects keep an unused table; the name is retired in a comment at the end of the migration list.
 
 ## Checklist
 
@@ -25,9 +27,11 @@ Started by Sol task `01M3CW7G3XNQTFTY3ST0RTG8MB` (stopped at its usage limit bef
 - [x] Web `lib/message-paging.ts`: cursors only from server-persisted rows; `refreshCachedTranscript` drains forward and throws instead of returning a partial range (`DEFAULT_CHAT_DELTA_MAX_PAGES`, `VITE_CHAT_DELTA_MAX_PAGES`); `fetchHistoryUntil` holds the load-until loop; load-more, timeline and workspace chat use exact cursors; `merge-messages.ts` sorts persisted rows with the shared `compareMessagePositions`.
 - [x] Storage-safety minimal tool metadata keeps `toolName` (typed tool cards key on it), matching the transport summary.
 - [x] Reporter `transport_fit.go`: every message shaped at enqueue to fit one request — rune-safe truncation with marker, tool-metadata identity summary with `contentTruncated`/`transportTruncated`/`originalSizeBytes`, content shortened only as needed.
-- [x] Reporter batches are one session per request; `204` is an explicit declined discard that keeps the reporter running; the mismatch fallback's omitted form keeps a truncation record instead of dropping metadata.
+- [x] Reporter batches are one session per request. A rejected multi-row batch is retried row by row, so only a refused row is lost; `204` and a session mismatch settle every queued row of that session in one step and keep the reporter running; a row refused even in its omitted form (which keeps a truncation record, not bare metadata loss) is dropped instead of blocking the outbox.
+- [x] Archive chunk selection skips a chunk whose edge row is the page cursor, so aligned pages and chunks (500 and 500 by default) and a refresh of an archived session read no chunk they would discard.
+- [x] The web append merge indexes user messages, so reconciling a drained refresh of tens of thousands of rows is linear rather than quadratic.
 - [x] Removed the upload path, its migration, admin quarantine routes, env vars and docs; reverted `.codex/config.toml` auto-save artifacts.
-- [x] Tests enter through real triggers (HTTP routes via `SELF`, archive sweep, `Enqueue` + flush against a fake control plane enforcing the Worker's rules); each guard was reverted once and the intended tests went red.
+- [x] Tests enter through real triggers (HTTP routes via `SELF`, archive sweep, `Enqueue` + flush against a fake control plane enforcing the Worker's checks in the Worker's order, with its default limits); each guard was reverted once and the intended tests went red. Legacy numeric cursors are covered for archived sessions too, and archived reads count their R2 chunk fetches.
 - [x] Docs: API and env references.
 - [x] Backlog: `2026-09-25-reporter-session-switch-unsent-rows.md` (pre-existing relink cleanup, with reproduction), `2026-09-26-chat-recent-window-merge-can-leave-gap.md` (pre-existing poll/catch-up window gap), `2026-09-26-split-use-session-lifecycle.md` (hook still over the file-size ceiling).
 - [ ] Full checks, specialist review, staging VM validation, PR, CodeRabbit, merge, production monitoring.
@@ -38,4 +42,5 @@ Started by Sol task `01M3CW7G3XNQTFTY3ST0RTG8MB` (stopped at its usage limit bef
 - The web refresh never anchors on an optimistic row and never merges a partial forward range.
 - No message is rejected for size after it is queued; any reduction is explicit in the persisted message (marker or flags with original size), and tool cards keep their identity.
 - A leftover earlier-session row never causes the current session's messages to be discarded.
+- A row the control plane refuses never takes its batch-mates with it, and never blocks the outbox.
 - `204` is not counted as delivery and does not stop the reporter.

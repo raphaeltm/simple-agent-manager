@@ -39,44 +39,38 @@ function isOptimistic(msg: ChatMessageResponse): boolean {
 }
 
 /**
- * Try to find an optimistic message in the map that matches a server-confirmed
- * message by role and content. Returns the optimistic ID if found, null otherwise.
+ * User-message lookups for one append merge, so reconciling an incoming message
+ * costs O(1) rather than a scan of every loaded message — a refresh after a
+ * long absence can append tens of thousands of rows at once.
  */
-function findMatchingOptimistic(
-  map: Map<string, ChatMessageResponse>,
-  confirmed: ChatMessageResponse
-): string | null {
-  if (confirmed.role !== 'user') return null;
-  for (const [id, existing] of map) {
-    if (
-      isOptimistic(existing) &&
-      existing.role === confirmed.role &&
-      existing.content === confirmed.content
-    ) {
-      return id;
+function indexUserMessages(messages: Iterable<ChatMessageResponse>) {
+  const optimisticIdsByContent = new Map<string, string[]>();
+  const confirmedContents = new Set<string>();
+  const add = (message: ChatMessageResponse): void => {
+    if (message.role !== 'user') return;
+    if (!isOptimistic(message)) {
+      confirmedContents.add(message.content);
+      return;
     }
-  }
-  return null;
-}
-
-/**
- * Check if a confirmed user message with the same content already exists in
- * the map. This catches dual-delivery duplication: the DO WebSocket persists
- * the user message (message.send → message.new broadcast), then the VM agent
- * batch-persists the same content with a different ID (ExtractMessages
- * generates a new UUID → messages.batch broadcast).
- */
-function hasConfirmedDuplicate(
-  map: Map<string, ChatMessageResponse>,
-  msg: ChatMessageResponse
-): boolean {
-  if (msg.role !== 'user') return false;
-  for (const existing of map.values()) {
-    if (!isOptimistic(existing) && existing.role === 'user' && existing.content === msg.content) {
-      return true;
-    }
-  }
-  return false;
+    const ids = optimisticIdsByContent.get(message.content);
+    if (ids) ids.push(message.id);
+    else optimisticIdsByContent.set(message.content, [message.id]);
+  };
+  for (const message of messages) add(message);
+  return {
+    add,
+    /** Claims the oldest optimistic row with this user message's content, if any. */
+    claimOptimistic: (message: ChatMessageResponse): string | undefined =>
+      message.role === 'user' ? optimisticIdsByContent.get(message.content)?.shift() : undefined,
+    /**
+     * Whether a confirmed user message with the same content is already loaded.
+     * This catches dual delivery: the DO WebSocket persists the user message
+     * (message.send → message.new), then the VM agent batch-persists the same
+     * content under a new ID (ExtractMessages → messages.batch).
+     */
+    duplicatesConfirmed: (message: ChatMessageResponse): boolean =>
+      message.role === 'user' && confirmedContents.has(message.content),
+  };
 }
 
 /**
@@ -182,27 +176,20 @@ function mergeAppend(
   for (const msg of prev) {
     map.set(msg.id, msg);
   }
+  const userMessages = indexUserMessages(map.values());
 
   // Add incoming, skipping duplicates and reconciling optimistic messages
   for (const msg of incoming) {
     if (map.has(msg.id)) continue;
 
-    // Check if this server-confirmed message replaces an optimistic one
-    const optimisticId = findMatchingOptimistic(map, msg);
-    if (optimisticId) {
-      map.delete(optimisticId);
-      map.set(msg.id, msg);
-      continue;
-    }
-
-    // Skip confirmed user messages that duplicate existing confirmed messages
-    // by content. Catches dual-delivery: DO WebSocket (message.send) persists
-    // the user message, then VM agent batch also persists it with a different ID.
-    if (hasConfirmedDuplicate(map, msg)) {
-      continue;
-    }
+    // A server-confirmed message replaces the optimistic row it stands in for;
+    // otherwise a confirmed user message already loaded under another ID wins.
+    const optimisticId = userMessages.claimOptimistic(msg);
+    if (optimisticId) map.delete(optimisticId);
+    else if (userMessages.duplicatesConfirmed(msg)) continue;
 
     map.set(msg.id, msg);
+    userMessages.add(msg);
   }
 
   return Array.from(map.values()).sort(compareMessages);

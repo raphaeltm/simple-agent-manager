@@ -10,9 +10,13 @@
  * pages through. Archived sessions are read through the service, which routes
  * to the archive shard only while archive sharding is enabled.
  */
-import { formatMessageCursor, type MessagePosition } from '@simple-agent-manager/shared';
+import {
+  formatMessageCursor,
+  type MessageCursor,
+  type MessagePosition,
+} from '@simple-agent-manager/shared';
 import { env, SELF } from 'cloudflare:test';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { runProjectDataArchiveSharding } from '../../src/scheduled/project-data-archive-sharding';
@@ -185,6 +189,37 @@ async function drainArchived(archivedSessionId: string, direction: 'forward' | '
   throw new Error(`Archived ${direction} paging did not terminate`);
 }
 
+/** Reads the archived rows inside one bound, in a single page. */
+async function readArchivedWithin(
+  archivedSessionId: string,
+  bound: { before: MessageCursor } | { after: MessageCursor }
+): Promise<string[]> {
+  const after = 'after' in bound ? bound.after : null;
+  const page = await projectDataService.getMessages(
+    testEnv,
+    ARCHIVED_PROJECT_ID,
+    archivedSessionId,
+    ARCHIVED_SEED.length,
+    'before' in bound ? bound.before : null,
+    after,
+    undefined,
+    false,
+    after === null ? 'desc' : 'asc'
+  );
+  expect(page.hasMore).toBe(false);
+  return page.messages.map((message) => String(message.id));
+}
+
+function archivedIdsWhere(predicate: (row: SeedRow) => boolean): string[] {
+  return ARCHIVED_SEED.filter(predicate).map((row) => row.id);
+}
+
+function archivedPosition(index: number): MessagePosition {
+  const row = ARCHIVED_SEED[index];
+  if (!row) throw new Error(`No archived row ${index}`);
+  return { createdAt: row.at, sequence: row.sequence, id: row.id };
+}
+
 describe('message pagination across tied timestamps', () => {
   it('returns every message exactly once reading forward through the message list', async () => {
     expect(await drainForward('/messages')).toEqual(TRANSCRIPT);
@@ -214,7 +249,7 @@ describe('message pagination across tied timestamps', () => {
     expect(page.messages.map((message) => message.id)).toEqual(TRANSCRIPT.slice(5));
   });
 
-  it('reads an archived transcript whose page and chunk edges split tie groups', async () => {
+  it('pages an archived transcript whose page and chunk edges split tie groups', async () => {
     const source = projectDataStub(ARCHIVED_PROJECT_ID);
     await source.ensureProjectId(ARCHIVED_PROJECT_ID);
     const archivedSessionId = await source.createSession(null, 'Archived ties');
@@ -233,6 +268,35 @@ describe('message pagination across tied timestamps', () => {
 
       expect(await drainArchived(archivedSessionId, 'forward')).toEqual(ARCHIVED_TRANSCRIPT);
       expect(await drainArchived(archivedSessionId, 'backward')).toEqual(ARCHIVED_TRANSCRIPT);
+
+      // Legacy timestamp cursors still exclude every row at their timestamp, here
+      // the T0+1s group split across chunks 0-1 and the T0+2s group across 1-2.
+      const T0_1 = T0 + 1_000;
+      const T0_2 = T0 + 2_000;
+      expect(await readArchivedWithin(archivedSessionId, { after: T0_1 })).toEqual(
+        archivedIdsWhere((row) => row.at > T0_1)
+      );
+      expect(await readArchivedWithin(archivedSessionId, { before: T0_2 })).toEqual(
+        archivedIdsWhere((row) => row.at < T0_2)
+      );
+
+      // Resuming from a chunk's own edge row reads only the chunks past it, though
+      // its tie group continues into the next chunk: rows 3 and 16 end chunk 0 and
+      // start chunk 4, so each read needs four of the five chunks.
+      const chunkReads = vi.spyOn(testEnv.PROJECT_DATA_ARCHIVE_R2!, 'get');
+      try {
+        expect(await readArchivedWithin(archivedSessionId, { after: archivedPosition(3) })).toEqual(
+          ARCHIVED_TRANSCRIPT.slice(4)
+        );
+        expect(chunkReads).toHaveBeenCalledTimes(4);
+        chunkReads.mockClear();
+        expect(
+          await readArchivedWithin(archivedSessionId, { before: archivedPosition(16) })
+        ).toEqual(ARCHIVED_TRANSCRIPT.slice(0, 16));
+        expect(chunkReads).toHaveBeenCalledTimes(4);
+      } finally {
+        chunkReads.mockRestore();
+      }
     });
   });
 });

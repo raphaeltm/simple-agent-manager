@@ -14,6 +14,11 @@ import {
  *
  * The three functions below express the same bounds for `chat_messages` SQL,
  * for archive chunk selection, and for rows decoded from an archive chunk.
+ *
+ * Exact bounds depend on `chat_messages.sequence` being non-NULL, as
+ * `readTokensAfter` in materialization.ts does: a row value compared into a NULL
+ * is NULL, which excludes the row. DO migration 007 backfilled every existing row
+ * and every insert assigns one.
  */
 export type MessageBounds = {
   before: MessageCursor | null;
@@ -45,19 +50,38 @@ export function messageBoundsClause(bounds: MessageBounds): SqlClause {
 }
 
 /**
+ * The timestamp and row ID at the edge of an archive chunk facing each bound:
+ * its first row for `before`, its last for `after`. `row_ids_json` lists the
+ * chunk's rows in transcript order.
+ */
+const CHUNK_EDGE = {
+  before: { createdAt: 'first_created_at', id: `json_extract(row_ids_json, '$[0]')` },
+  after: {
+    createdAt: 'last_created_at',
+    id: `json_extract(row_ids_json, '$[' || (json_array_length(row_ids_json) - 1) || ']')`,
+  },
+} as const;
+
+/**
  * ` AND ...` predicates keeping archive chunks that can hold a row inside the
- * bounds. Rows tied with an exact position's timestamp may fall on either side
- * of it, so that edge is inclusive; a legacy timestamp excludes its ties.
+ * bounds. A legacy timestamp excludes its ties. Rows tied with an exact
+ * position's timestamp may fall on either side of it, so a chunk whose edge
+ * shares that timestamp is kept — unless its edge row is the cursor itself, as
+ * it is whenever pages and chunks share a size.
  */
 export function chunkBoundsClause(bounds: MessageBounds): SqlClause {
   const clause: SqlClause = { sql: '', values: [] };
   for (const { bound, operator } of DIRECTIONS) {
     const cursor = bounds[bound];
     if (cursor === null) continue;
-    const column = bound === 'before' ? 'first_created_at' : 'last_created_at';
-    const inclusive = typeof cursor === 'number' ? '' : '=';
-    clause.sql += ` AND ${column} ${operator}${inclusive} ?`;
-    clause.values.push(typeof cursor === 'number' ? cursor : cursor.createdAt);
+    const edge = CHUNK_EDGE[bound];
+    if (typeof cursor === 'number') {
+      clause.sql += ` AND ${edge.createdAt} ${operator} ?`;
+      clause.values.push(cursor);
+    } else {
+      clause.sql += ` AND (${edge.createdAt} ${operator} ? OR (${edge.createdAt} = ? AND ${edge.id} != ?))`;
+      clause.values.push(cursor.createdAt, cursor.createdAt, cursor.id);
+    }
   }
   return clause;
 }

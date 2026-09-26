@@ -241,6 +241,8 @@ export function persistMessageBatch(
       break;
     }
 
+    // Rows without a usable timestamp share `now`; reads page on (created_at, sequence, id),
+    // so ties are safe (see message-cursor.ts).
     const createdAt = new Date(msg.timestamp).getTime() || now;
     const sequence = msg.sequence ?? nextSeq++;
     const boundedToolMetadata = boundToolMetadataForStorage(msg.toolMetadata, env);
