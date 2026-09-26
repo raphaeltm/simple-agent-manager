@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import {
+  listStrandedNodeTasks,
+  terminalizeStrandedNodeTasks,
+} from '../../../src/services/node-stranded-tasks';
 import { reconcileTaskWaits } from '../../../src/services/project-data';
 import { transitionTaskToTerminal } from '../../../src/services/task-terminal-transition';
 import { cancelVmTaskAdmission } from '../../../src/services/vm-admission-control';
@@ -145,21 +149,36 @@ describe('transitionTaskToTerminal', () => {
   it('records an unstarted launch failure once while preserving its failure phase', async () => {
     sqlite.prepare("UPDATE tasks SET status = 'queued' WHERE id = 'task-1'").run();
     const options = {
-      taskId: 'task-1', projectId: PROJECT_ID, status: 'failed' as const,
-      reason: 'Instant acceptance failed', source: 'test.instant_launch',
-      executionStep: 'launch_failed', fillMissingStartedAt: false, stopWorkspace: false,
+      taskId: 'task-1',
+      projectId: PROJECT_ID,
+      status: 'failed' as const,
+      reason: 'Instant acceptance failed',
+      source: 'test.instant_launch',
+      executionStep: 'launch_failed',
+      fillMissingStartedAt: false,
+      stopWorkspace: false,
     };
     expect(await transitionTaskToTerminal(env, options)).toBe('transitioned');
     expect(await transitionTaskToTerminal(env, options)).toBe('already_terminal');
     expect(taskRow()).toMatchObject({
-      status: 'failed', execution_step: 'launch_failed', started_at: null,
-      error_message: options.reason, completed_at: NOW.toISOString(),
+      status: 'failed',
+      execution_step: 'launch_failed',
+      started_at: null,
+      error_message: options.reason,
+      completed_at: NOW.toISOString(),
     });
-    expect(statusEvents()).toEqual([{
-      from_status: 'queued', to_status: 'failed', actor_type: 'system', actor_id: null,
-      reason: options.reason,
-    }]);
-    expect(sqlite.prepare("SELECT status FROM workspaces WHERE id = 'workspace-1'").get()).toEqual({status: 'running'});
+    expect(statusEvents()).toEqual([
+      {
+        from_status: 'queued',
+        to_status: 'failed',
+        actor_type: 'system',
+        actor_id: null,
+        reason: options.reason,
+      },
+    ]);
+    expect(sqlite.prepare("SELECT status FROM workspaces WHERE id = 'workspace-1'").get()).toEqual({
+      status: 'running',
+    });
   });
 
   it('records the full terminal contract once and remains idempotent on retry', async () => {
@@ -410,6 +429,73 @@ describe('transitionTaskToTerminal', () => {
         reason: 'Task stuck in queued state',
       },
     ]);
+  });
+
+  it('fails a heartbeat-stranded task truthfully without pre-stopping its workspace', async () => {
+    const stranded = await listStrandedNodeTasks(env, 'node-1');
+
+    expect(stranded).toEqual([
+      { taskId: 'task-1', projectId: PROJECT_ID, workspaceId: 'workspace-1' },
+    ]);
+    await expect(
+      terminalizeStrandedNodeTasks(env, 'node-1', stranded, 'heartbeat_lost')
+    ).resolves.toBe(0);
+
+    const reason =
+      'Control plane lost heartbeat from node node-1; SAM released the node after the configured recovery window. Agent progress after the last persisted callback is unknown.';
+    expect(taskRow()).toMatchObject({ status: 'failed', error_message: reason });
+    expect(statusEvents()).toEqual([
+      {
+        from_status: 'in_progress',
+        to_status: 'failed',
+        actor_type: 'system',
+        actor_id: null,
+        reason,
+      },
+    ]);
+    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()).toEqual({
+      status: 'running',
+    });
+  });
+
+  it('cancels an owner-deleted node task as a normal lifecycle outcome', async () => {
+    const stranded = await listStrandedNodeTasks(env, 'node-1');
+
+    await expect(
+      terminalizeStrandedNodeTasks(env, 'node-1', stranded, 'owner_deleted')
+    ).resolves.toBe(0);
+
+    const reason = 'Workspace node node-1 was deleted by its owner';
+    expect(taskRow()).toMatchObject({ status: 'cancelled', error_message: null });
+    expect(statusEvents()).toEqual([
+      {
+        from_status: 'in_progress',
+        to_status: 'cancelled',
+        actor_type: 'system',
+        actor_id: null,
+        reason,
+      },
+    ]);
+    expect(sqlite.prepare(`SELECT status FROM workspaces WHERE id = 'workspace-1'`).get()).toEqual({
+      status: 'running',
+    });
+  });
+
+  it('does not terminalize work whose session already slept for recovery', async () => {
+    sqlite.prepare(`UPDATE workspaces SET status = 'sleeping' WHERE id = 'workspace-1'`).run();
+
+    const stranded = await listStrandedNodeTasks(env, 'node-1');
+
+    expect(stranded).toEqual([]);
+    await expect(
+      terminalizeStrandedNodeTasks(env, 'node-1', stranded, 'heartbeat_lost')
+    ).resolves.toBe(0);
+    expect(taskRow()).toMatchObject({
+      status: 'in_progress',
+      error_message: null,
+      completed_at: null,
+    });
+    expect(statusEvents()).toEqual([]);
   });
 
   it('preserves an active predecessor when its session-recovery successor has not accepted the wake', async () => {

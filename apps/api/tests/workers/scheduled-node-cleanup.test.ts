@@ -228,8 +228,15 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       sleep: vi.fn(async () => {
         order.push('sleep');
       }) as UnhealthyNodeBoundaries['sleep'],
-      release: vi.fn(async (_db, workerEnv, _nowIso, node) => {
+      release: vi.fn(async (_db, workerEnv, nowIso, node, options) => {
         order.push('release');
+        const claimed = await claimNodeForCleanup(workerEnv, node, nowIso, {
+          allowActiveWorkspaces: options.allowActiveWorkspaces,
+          allowManagedRunningProvenance: options.allowManagedRunningProvenance,
+          expectedLastHeartbeatAt: options.expectedLastHeartbeatAt,
+          requireWorkspaceIdle: options.requireWorkspaceIdle,
+        });
+        if (!claimed) return 'skipped';
         await workerEnv.DATABASE.prepare('DELETE FROM nodes WHERE id = ?').bind(node.id).run();
         return 'destroyed';
       }) as UnhealthyNodeBoundaries['release'],

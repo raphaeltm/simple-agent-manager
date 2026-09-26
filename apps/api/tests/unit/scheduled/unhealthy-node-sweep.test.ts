@@ -129,6 +129,35 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
     expect(await listNodeHealthEvents(env, 'healthy-node')).toEqual([]);
   });
 
+  it('selects only managed workspace VMs from a mixed silent-node fleet', async () => {
+    seedNode('eligible-managed-vm', 31);
+    seedNode('excluded-deployment', 31);
+    seedNode('excluded-user-owned', 31);
+    seedNode('excluded-cf-container', 31);
+    sqlite
+      .prepare(`UPDATE nodes SET node_role = 'deployment' WHERE id = 'excluded-deployment'`)
+      .run();
+    sqlite
+      .prepare(`UPDATE nodes SET node_class = 'user-owned' WHERE id = 'excluded-user-owned'`)
+      .run();
+    sqlite
+      .prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = 'excluded-cf-container'`)
+      .run();
+
+    await sweep();
+
+    expect(order).toEqual(['notice', 'sleep', 'release']);
+    expect(
+      sqlite.prepare(`SELECT id FROM nodes WHERE id = 'eligible-managed-vm'`).get()
+    ).toBeUndefined();
+    for (const nodeId of ['excluded-deployment', 'excluded-user-owned', 'excluded-cf-container']) {
+      expect(sqlite.prepare('SELECT id FROM nodes WHERE id = ?').get(nodeId)).toEqual({
+        id: nodeId,
+      });
+      expect(await listNodeHealthEvents(env, nodeId)).toEqual([]);
+    }
+  });
+
   it('retries preservation without repeating a delivered notice or sleep intent', async () => {
     seedNode('draining-node', 12);
     await sweep();

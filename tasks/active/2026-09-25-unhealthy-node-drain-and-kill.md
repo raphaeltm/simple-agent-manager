@@ -94,7 +94,7 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
   delete). Signal = the node's own heartbeat age; condition = SAM has lost the node. Divergence case
   (heartbeat dead while agents work) is exactly this incident; after fix 1 it has no known cause, and
   the drain preserves idle sessions before release either way.
-- A fleet guard refuses to drain when more than a configurable fraction of running nodes are silent at
+- A fleet guard refuses to drain when at or above a configurable fraction of running nodes are silent at
   once (that pattern may be a control-plane heartbeat-intake failure, not N dead nodes). It records
   a bounded escalation event rather than treating elapsed time as proof that busy nodes died.
 - Node health transitions go to a new append-only D1 table `node_health_events` (no FK, survives node
