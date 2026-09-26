@@ -71,20 +71,20 @@ candidate query already uses.
 
 ## Implementation Checklist
 
-- [ ] `packages/shared/src/constants/defaults.ts`: `DEFAULT_DASHBOARD_ACTIVE_TASK_LIMIT` 100 → 6 (display cap);
+- [x] `packages/shared/src/constants/defaults.ts`: `DEFAULT_DASHBOARD_ACTIVE_TASK_LIMIT` 100 → 6 (display cap);
       add `DEFAULT_DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT = 100`; export it from `constants/index.ts`
-- [ ] `apps/api/src/env.ts`: add `DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT`
-- [ ] `apps/api/src/routes/dashboard.ts`: read candidates with the candidate limit (clamped to
+- [x] `apps/api/src/env.ts`: add `DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT`
+- [x] `apps/api/src/routes/dashboard.ts`: read candidates with the candidate limit (clamped to
       `D1_MAX_BOUND_PARAMETERS`), rank every enriched candidate by most recent activity (newest message, else
       `startedAt ?? createdAt`; ties break on id), then return the first `DASHBOARD_ACTIVE_TASK_LIMIT`
-- [ ] `packages/shared/src/types/task.ts`: document the response contract (most recent first, capped)
-- [ ] Docs: `.claude/skills/env-reference/SKILL.md`, `apps/api/.env.example`
-- [ ] Tests (`apps/api/tests/unit/routes/dashboard.test.ts`): display cap default + env override, candidate
+- [x] `packages/shared/src/types/task.ts`: document the response contract (most recent first, capped)
+- [x] Docs: `.claude/skills/env-reference/SKILL.md`, `apps/api/.env.example`
+- [x] Tests (`apps/api/tests/unit/routes/dashboard.test.ts`): display cap default + env override, candidate
       limit default + env override + clamp, "just-submitted task ranks by submit time", deterministic ties
-- [ ] Real-SQL vertical slice (`apps/api/tests/unit/routes/dashboard-active-tasks-real-sql.test.ts`): real
+- [x] Real-SQL vertical slice (`apps/api/tests/unit/routes/dashboard-active-tasks-real-sql.test.ts`): real
       `listAgentActivityTasks` over in-memory SQLite + mocked DO; more than six active tasks whose start order
       differs from their recency order; assert exactly the six most recently active come back, newest first
-- [ ] Prove the vertical slice discriminating: applying the cap in the D1 read (naive fix) must turn it red
+- [x] Prove the vertical slice discriminating: applying the cap in the D1 read (naive fix) must turn it red
 
 ## Acceptance Criteria
 
@@ -104,3 +104,17 @@ candidate query already uses.
 - `apps/api/.claude/rules/67-shared-predicates-that-trigger-actions.md`
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`, `.claude/rules/28-credential-resolution-fallback-tests.md`
 - Original feature: `tasks/archive/2026-03-03-dashboard-active-tasks-grid.md` ("ordered by most recent message")
+
+## Implementation Notes
+
+### Discrimination proof (surgical reverts of `apps/api/src/routes/dashboard.ts`, 26 tests)
+
+| Revert | Tests that went red |
+| --- | --- |
+| A: cap the D1 read at the display limit (the naive fix) | real-SQL "returns the six most recently active tasks, not the six most recently started"; unit: empty-array candidate limit, "caps the response … without shrinking the candidate read", candidate env override, bind-ceiling clamp |
+| B: old comparator (messages always first) | all 3 real-SQL tests; unit: "ranks a task without messages by when it was submitted", "ranks a started task … by when it started", id tie-break |
+| C: ignore `startedAt` | unit: "ranks a started task without messages by when it started" |
+| D: drop the id tie-break | unit: "breaks activity ties on task id …" |
+| E: drop the bind-ceiling clamp | unit: "clamps the candidate read to the SQL bind ceiling …" |
+
+Source restored after each run (`git status` clean).
