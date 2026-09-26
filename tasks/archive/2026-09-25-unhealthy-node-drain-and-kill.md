@@ -158,26 +158,65 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
 
 ## Acceptance criteria
 
-- [ ] A per-project or per-task terminal callback status never silences node heartbeats, other projects,
+- [x] A per-project or per-task terminal callback status never silences node heartbeats, other projects,
       error reports or message persistence (Go tests through the real senders, proven discriminating)
-- [ ] A live node's project with no active workspace gets 204 from the node-level ACP heartbeat
-- [ ] A node silent past the drain threshold gets its active sessions asked to sleep and one notice each,
+- [x] A live node's project with no active workspace gets 204 from the node-level ACP heartbeat
+- [x] A node silent past the drain threshold gets its active sessions asked to sleep and one notice each,
       and is released (strict provider deletion) within the configured bound; transitions are recorded
       in `node_health_events` and survive node deletion
-- [ ] Controls: a healthy node is untouched; a node that recovers inside the window is not released and
+- [x] Controls: a healthy node is untouched; a node that recovers inside the window is not released and
       records recovery; a node whose sessions all sleep is released without waiting for the deadline;
       a fleet-wide heartbeat loss is held, not drained; user-owned, deployment and cf-container nodes are
       never candidates
-- [ ] A prompt past the 2 h ceiling with fresh runtime-work progress is observed, not cancelled; a
+- [x] A prompt past the 2 h ceiling with fresh runtime-work progress is observed, not cancelled; a
       stalled one is still cancelled (control)
-- [ ] `request_human_input` after a check-in resolves it; the user Stop resolves it; a genuinely silent
+- [x] `request_human_input` after a check-in resolves it; the user Stop resolves it; a genuinely silent
       agent still fails the check-in (control)
-- [ ] Tasks stranded by the drain fail with a reason naming the lost node; tasks stranded by the owner's
+- [x] Tasks stranded by the drain fail with a reason naming the lost node; tasks stranded by the owner's
       delete are cancelled with a reason naming the deletion; parent-stop semantics unchanged
-- [ ] Staging: a real cx23 node whose vm-agent is stopped over SSH is drained and released within the
+- [x] Staging: a real cx23 node whose vm-agent is stopped through an authenticated live-host terminal is drained and released within the
       bound, visible in the UI and in D1; everything created is cleaned up
 
-## Validation in progress
+## Final validation
+
+- Final candidate `9dda390b3c1361b721869b8184d442ea93c0bf02` passed exact-head CI after the
+  merge from `main`: lint, typecheck, build, full tests, Durable Object Workers, workspace quality,
+  VM-agent unit/integration/E2E, SonarCloud, secret scan, and specialist-evidence gates are green.
+  CodeRabbit reported success with `Review skipped: automatic reviews are disabled`; no repeat review
+  trigger was sent.
+- Final completion validation initially found that the cron-entry test proved call ordering but not
+  boundary payloads. The test now seeds two running workspaces with distinct chat and agent sessions,
+  asserts both notice/sleep sequences, and verifies the exact project, session, workspace, user,
+  node-heartbeat, idempotency, and cleanup-claim arguments sent to every mocked boundary. The focused
+  Workers suite passes 27/27, so wrong-resource or first-session-only implementations fail the test.
+- Live staging fault validation used secondary-user project `01KRXWNWXCR9ZQCV5VY4VBHBRP`, which has
+  no personal cloud credential. Effective platform Hetzner credentials provisioned cx23 VM `167526216`
+  as managed node `01M3EX8VA2JBC3KQDBMA36V324` with
+  `credential_attribution_source='platform'`, workspace `01M3EXGWAPJBRR1Z2X2SW1M18C`, and task
+  `01M3EX8KEJFT3S1Z7J34R4F7FS`. From the authenticated terminal in that privileged live workspace, the
+  test installed a one-shot systemd override that prevents `vm-agent.service` from restarting and
+  forced a host reboot. The terminal disconnected and the heartbeat remained fixed at
+  `2026-09-26T13:19:27.271Z`.
+- With staging-only drain/release thresholds of 60/180 seconds, the `13:25` node-cleanup cron recorded
+  append-only `unhealthy/node_heartbeat_missing`,
+  `draining/heartbeat_loss_exceeded_drain_window`, and
+  `released/heartbeat_loss_exceeded_release_window` events for that heartbeat episode. The node became
+  `deleted`; strict provider termination was confirmed at `2026-09-26T13:25:37.643Z`; the workspace
+  became `deleted` with proof `node_runtime_terminated`; and the events remained queryable after node
+  deletion. An authenticated Playwright check of `https://app.sammy.party/nodes` showed **No nodes
+  yet**, while the deleted node's former detail URL showed **Node not found**; the screenshot is kept
+  in the gitignored validation artifacts. Staging D1 then reported zero active nodes and zero active
+  node-backed workspaces. The
+  temporary threshold variables were deleted, and deployment run `36245173375` restored current
+  `main` and the default thresholds. Its deploy and smoke jobs passed before staging was released.
+- The host reboot made this fixture's ACP session terminal before the unhealthy-node cron ran, so its
+  task was already `failed` through the `task_acp_session_terminal` path, and its workspace was
+  `stopped`. D1 stored the exact reason: "Task runtime is conclusively gone after reconciliation grace
+  (task_acp_session_terminal)." The reaper correctly preserved that pre-existing #2145 terminal
+  outcome. This live run therefore proves heartbeat cessation, persisted health transitions, bounded
+  strict release, UI removal, and cleanup. Notice/sleep ordering and the separate stranded-task
+  lost-node reason are proven by the real SQLite and Workers-runtime tests, including controls for an
+  active workspace, a slept workspace, owner deletion, and recovery.
 
 - Current `main` (`853b637e8`, including merged #2145) was merged into the PR on 2026-09-26.
   Conflict resolution keeps #2145's failed-task preservation and terminal cleanup authority while
@@ -236,18 +275,10 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
   split and repeated sleep compute cleanup. Those now share one download handler and one sleep
   cleanup path. Focused sleep regressions (77), typecheck, and lint pass; full API and Sonar
   reruns remain for this final deduplication.
-- Staging deploy run `36188818700` succeeded, including smoke tests, pinned to earlier reviewed
-  head `4529b8ba3`. Migration `0172_node_health_events` applied: staging D1 has the empty
-  `node_health_events` table. No VM
-  was provisioned. The coordinator explicitly ruled out a healthy-only smoke and transient API
-  rejection as substitutes for dead-host proof. The disposable host has no supported SSH key or
-  provider poweroff credential available here; the workspace Docker daemon is nested. No
-  node-specific fault has been run, so the real-trigger drain/delete acceptance test is missing.
-  D1 confirmed zero active nodes after deploy. Three nonterminal historical workspaces (created
-  Sep 4/13) predate this test, have no live node, and were left untouched. The reporter workstream
-  and coordinator received explicit staging release; this task owns no staging resource.
-- Draft PR #2147 remains open and **must not merge** until an actual host-fault method is
-  available, the latest head is deployed and validated with a live cx23, and final CI passes.
+- Earlier staging deploy `36188818700` established the migration and empty health-event table but did
+  not run a node fault. The final candidate validation above supersedes that incomplete attempt.
+  Three historical nonterminal workspace rows created on Sep 4/13 have no live node and were left
+  untouched.
 
 ## Open question
 
