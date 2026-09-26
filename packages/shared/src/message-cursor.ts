@@ -7,6 +7,7 @@
  * where inside a group of tied rows a page ended, and the rest of that group
  * is skipped. A {@link MessagePosition} names the exact row instead.
  */
+import * as v from 'valibot';
 
 /** Exact place of one persisted message in its session's total order. */
 export interface MessagePosition {
@@ -20,6 +21,12 @@ export interface MessagePosition {
  * timestamp that excludes every row sharing it.
  */
 export type MessageCursor = MessagePosition | number;
+
+const EncodedPositionSchema = v.strictTuple([
+  v.pipe(v.number(), v.safeInteger()),
+  v.pipe(v.number(), v.safeInteger()),
+  v.pipe(v.string(), v.nonEmpty()),
+]);
 
 /** Orders two positions in the transcript total order (negative when `a` comes first). */
 export function compareMessagePositions(a: MessagePosition, b: MessagePosition): number {
@@ -51,13 +58,8 @@ export function parseMessageCursor(raw: string): MessageCursor | null {
   } catch {
     return null;
   }
-  if (!Array.isArray(decoded) || decoded.length !== 3) return null;
-  const [createdAt, sequence, id] = decoded as unknown[];
-  if (!isSafeInteger(createdAt) || !isSafeInteger(sequence)) return null;
-  if (typeof id !== 'string' || id === '') return null;
+  const encoded = v.safeParse(EncodedPositionSchema, decoded);
+  if (!encoded.success) return null;
+  const [createdAt, sequence, id] = encoded.output;
   return { createdAt, sequence, id };
-}
-
-function isSafeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value);
 }

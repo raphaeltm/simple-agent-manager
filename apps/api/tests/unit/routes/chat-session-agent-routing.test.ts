@@ -353,7 +353,8 @@ describe('chatRoutes agent session routing', () => {
       null,
       null,
       undefined,
-      true
+      true,
+      'desc'
     );
   });
 
@@ -384,7 +385,8 @@ describe('chatRoutes agent session routing', () => {
       null,
       null,
       undefined,
-      true
+      true,
+      'desc'
     );
   });
 
@@ -412,7 +414,8 @@ describe('chatRoutes agent session routing', () => {
       null,
       null,
       undefined,
-      true
+      true,
+      'desc'
     );
   });
 
@@ -436,7 +439,8 @@ describe('chatRoutes agent session routing', () => {
       null,
       null,
       undefined,
-      true
+      true,
+      'desc'
     );
   });
 
@@ -714,5 +718,95 @@ describe('chatRoutes message list', () => {
 
     expect(response.status).toBe(400);
     expect(mocks.getMessages).not.toHaveBeenCalled();
+  });
+
+  describe('exact message cursors', () => {
+    const position = { createdAt: 1_700_000_000_000, sequence: 7, id: 'msg-tied' };
+    const encoded = encodeURIComponent(JSON.stringify([1_700_000_000_000, 7, 'msg-tied']));
+
+    it('drains a session-detail delta forward from the exact position', async () => {
+      mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+      const response = await app.request(
+        `/api/projects/proj-1/sessions/chat-1?after=${encoded}`,
+        { method: 'GET' },
+        { DATABASE: {} as D1Database, CHAT_SESSION_DELTA_MESSAGE_LIMIT: '250' } as Env
+      );
+
+      expect(response.status).toBe(200);
+      expect(mocks.getMessages).toHaveBeenCalledWith(
+        expect.anything(),
+        'proj-1',
+        'chat-1',
+        250,
+        null,
+        position,
+        undefined,
+        true,
+        'asc'
+      );
+    });
+
+    it('reads older history newest-first from an exact before position', async () => {
+      mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+      const response = await app.request(
+        `/api/projects/proj-1/sessions/chat-1?before=${encoded}`,
+        { method: 'GET' },
+        { DATABASE: {} as D1Database, CHAT_SESSION_MESSAGE_LIMIT: '500' } as Env
+      );
+
+      expect(response.status).toBe(200);
+      expect(mocks.getMessages).toHaveBeenCalledWith(
+        expect.anything(),
+        'proj-1',
+        'chat-1',
+        500,
+        position,
+        null,
+        undefined,
+        true,
+        'desc'
+      );
+    });
+
+    it('defaults an after-only message list to ascending unless an order is given', async () => {
+      const env = { DATABASE: {} } as Env;
+      await app.request(`/api/projects/proj-1/sessions/chat-1/messages?after=${encoded}`, {}, env);
+      await app.request(
+        `/api/projects/proj-1/sessions/chat-1/messages?after=${encoded}&order=desc`,
+        {},
+        env
+      );
+
+      expect(mocks.getMessages.mock.calls.map((call) => [call[5], call[8]])).toEqual([
+        [position, 'asc'],
+        [position, 'desc'],
+      ]);
+    });
+
+    it('keeps accepting a legacy timestamp cursor', async () => {
+      const response = await app.request(
+        '/api/projects/proj-1/sessions/chat-1/messages?before=1700000000000',
+        { method: 'GET' },
+        { DATABASE: {} } as Env
+      );
+
+      expect(response.status).toBe(200);
+      expect(mocks.getMessages.mock.calls[0]?.[4]).toBe(1_700_000_000_000);
+    });
+
+    it('rejects a malformed session-detail cursor instead of reading from NaN', async () => {
+      mocks.listAcpSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+      const response = await app.request(
+        `/api/projects/proj-1/sessions/chat-1?after=${encodeURIComponent('[1,2]')}`,
+        { method: 'GET' },
+        { DATABASE: {} as D1Database } as Env
+      );
+
+      expect(response.status).toBe(400);
+      expect(mocks.getMessages).not.toHaveBeenCalled();
+    });
   });
 });
