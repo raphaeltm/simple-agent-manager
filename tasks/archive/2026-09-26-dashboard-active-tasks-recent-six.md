@@ -52,6 +52,14 @@ dormant sessions — invisible on the dashboard exactly when the user expects to
 must rank by when it started (or was submitted), i.e. the same `COALESCE(started_at, created_at)` key the
 candidate query already uses.
 
+### Third ranking defect: a task with several sessions used its oldest
+
+`getSessionsByTaskIds` returns sessions `ORDER BY updated_at DESC`, but the route's `sessionMap.set` let each
+later (older) row overwrite the first, so a task linked to several `chat_sessions` rows was ranked by — and
+linked to — its OLDEST session. `chat_sessions.task_id` is not unique; production has 9 such tasks (none active
+today). Found independently by the author and the cloudflare-specialist review. Fix: keep the first session per
+task, the same convention `project-orchestrator/stall-detection.ts:resolveActiveSessionIdsForTaskIds` uses.
+
 ### Other constraints checked
 
 - **Config overrides (rule 70)**: no `DASHBOARD_*` variable in the GitHub `production` (43 vars) or `staging`
@@ -85,17 +93,20 @@ candidate query already uses.
       `listAgentActivityTasks` over in-memory SQLite + mocked DO; more than six active tasks whose start order
       differs from their recency order; assert exactly the six most recently active come back, newest first
 - [x] Prove the vertical slice discriminating: applying the cap in the D1 read (naive fix) must turn it red
+- [x] Keep the most recently updated session per task (first in the DO's `updated_at DESC` order) + test
+- [x] Review follow-ups (test-engineer): failed project lookup × rank + cap with more than six candidates;
+      unparseable timestamp ranks last without failing the request
 
 ## Acceptance Criteria
 
-- [ ] `GET /api/dashboard/active-tasks` returns at most 6 tasks by default (`DASHBOARD_ACTIVE_TASK_LIMIT`)
-- [ ] The returned tasks are the most recently active of ALL candidates, newest first — not the most recently
+- [x] `GET /api/dashboard/active-tasks` returns at most 6 tasks by default (`DASHBOARD_ACTIVE_TASK_LIMIT`)
+- [x] The returned tasks are the most recently active of ALL candidates, newest first — not the most recently
       started
-- [ ] A just-submitted task with no messages yet ranks by its submit/start time, not below every dormant session
-- [ ] Both limits are env-configurable with `DEFAULT_*` constants; the candidate limit never exceeds the
+- [x] A just-submitted task with no messages yet ranks by its submit/start time, not below every dormant session
+- [x] Both limits are env-configurable with `DEFAULT_*` constants; the candidate limit never exceeds the
       platform bind ceiling
-- [ ] Other consumers of `listAgentActivityTasks` are unaffected
-- [ ] CI green; merged; production deploy succeeded
+- [x] Other consumers of `listAgentActivityTasks` are unaffected
+- [ ] CI green; merged; production deploy succeeded (verified after merge — see the PR)
 
 ## References
 
@@ -107,14 +118,24 @@ candidate query already uses.
 
 ## Implementation Notes
 
-### Discrimination proof (surgical reverts of `apps/api/src/routes/dashboard.ts`, 26 tests)
+### Discrimination proof (surgical reverts of `apps/api/src/routes/dashboard.ts`, 29 tests)
 
 | Revert | Tests that went red |
 | --- | --- |
 | A: cap the D1 read at the display limit (the naive fix) | real-SQL "returns the six most recently active tasks, not the six most recently started"; unit: empty-array candidate limit, "caps the response … without shrinking the candidate read", candidate env override, bind-ceiling clamp |
-| B: old comparator (messages always first) | all 3 real-SQL tests; unit: "ranks a task without messages by when it was submitted", "ranks a started task … by when it started", id tie-break |
-| C: ignore `startedAt` | unit: "ranks a started task without messages by when it started" |
+| B: old comparator (messages always first) | all 3 real-SQL tests; unit: failed-lookup × cap, "ranks a task without messages by when it was submitted", "… by when it started", id tie-break, unparseable timestamp |
+| C: ignore `startedAt` | unit: failed-lookup × cap, "ranks a started task without messages by when it started" |
 | D: drop the id tie-break | unit: "breaks activity ties on task id …" |
 | E: drop the bind-ceiling clamp | unit: "clamps the candidate read to the SQL bind ceiling …" |
+| F: let a later (older) session overwrite the first | unit: "ranks and links a task by its most recently updated session when it has several" |
+| G: drop the unparseable-timestamp guard | unit: "ranks a task with an unparseable timestamp last instead of failing the request" |
 
-Source restored after each run (`git status` clean).
+Source restored after each run. The test-engineer reviewer independently re-ran reverts A–E with identical results.
+
+### Review outcomes (Phase 5, local subagents)
+
+- task-completion-validator: PASS (LOW: tick verified criteria — done; LOW: 100-candidate ceiling — documented)
+- cloudflare-specialist: PASS (LOW: multi-session overwrite — fixed; INFO: disclosure/I-O shape unchanged)
+- test-engineer: PASS (MEDIUM: failed lookup × cap test — added; LOW: unparseable timestamp test — added)
+- constitution-validator: PASS · env-validator: PASS (LOW pre-existing: no GitHub-Environment override path for
+  any `DASHBOARD_*` var) · doc-sync-validator: PASS

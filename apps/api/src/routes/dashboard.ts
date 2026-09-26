@@ -99,9 +99,11 @@ dashboardRoutes.get('/active-tasks', async (c) => {
     Array.from(tasksByProject.entries()).map(async ([projectId, tasks]) => {
       const taskIds = tasks.map((t) => t.id);
       const sessions = await projectDataService.getSessionsByTaskIds(c.env, projectId, taskIds);
+      // Sessions arrive most recently updated first, so a task's first session is
+      // the one it is on now; a later, older one must not overwrite it.
       for (const session of sessions) {
         const taskId = session.taskId as string;
-        if (taskId) {
+        if (taskId && !sessionMap.has(taskId)) {
           sessionMap.set(taskId, {
             sessionId: session.id as string,
             lastMessageAt: (session.lastMessageAt as number) ?? null,
