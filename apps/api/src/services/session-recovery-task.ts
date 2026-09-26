@@ -23,7 +23,7 @@ import type { SessionRecoverySourceTaskGuard } from './session-snapshots';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 
 export const SESSION_RECOVERY_INITIAL_PROMPT =
-  'Resume this sleeping conversation from the persisted transcript. Do not repeat prior work; wait for and answer the latest queued follow-up message.';
+  'Resume this sleeping conversation from the persisted transcript. Use get_session_messages for this chat session before relying on memory. Do not repeat prior work; wait for and answer the latest queued follow-up message.';
 
 export async function abandonRecoveryHandoff(
   database: D1Database,

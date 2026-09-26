@@ -11,7 +11,10 @@ import {
   type SessionRecoverySourceTaskGuard,
 } from '../../services/session-recovery-authority';
 import { recordDurableExecutionMetric } from '../../services/telemetry';
-import type { VmPromptDeliveryAdapter, VmPromptDeliveryTarget } from '../../services/vm-prompt-delivery-adapter';
+import type {
+  VmPromptDeliveryAdapter,
+  VmPromptDeliveryTarget,
+} from '../../services/vm-prompt-delivery-adapter';
 import * as activity from './activity';
 import type { DurableExecutionConfig } from './durable-execution-config';
 import { invalidScheduledDeliveryTarget } from './project-event-schedules-delivery';
@@ -25,9 +28,13 @@ import {
   type PromptDeliveryClaim,
   type PromptDeliveryResult,
 } from './prompt-delivery';
-import { stopBusyTurnForUrgentDelivery, type UrgentBusyTurnStopOutcome } from './prompt-delivery-interrupt';
+import {
+  stopBusyTurnForUrgentDelivery,
+  type UrgentBusyTurnStopOutcome,
+} from './prompt-delivery-interrupt';
 import * as sessionState from './session-state';
 import type { Env } from './types';
+import { raiseSessionWakeFailure } from './wake-failure';
 
 const log = createModuleLogger('project_data.prompt_delivery_runner');
 const MAX_TASK_ID_LENGTH = 128;
@@ -40,6 +47,8 @@ export interface PromptDeliveryRunnerHooks {
   armIdleCleanup: (chatSessionId: string) => void;
   /** Release durable messages queued behind the (now ended) turn. */
   nudgeDeliveries: (chatSessionId: string) => number;
+  /** Refresh D1 session summaries after marker/message changes. */
+  scheduleSummarySync: () => void;
 }
 
 function parentWakeChildTaskIds(claim: PromptDeliveryClaim): string[] | null {
@@ -401,6 +410,20 @@ export async function runPromptDeliveryClaim(
       result.promptEpoch,
       result.promptEpoch
     );
+  }
+  if (applied && result.kind === 'failed' && result.reason === 'wake_refused') {
+    raiseSessionWakeFailure(
+      sql,
+      {
+        sessionId: claim.message.targetSessionId,
+        taskId: claim.message.sourceTaskId,
+        deliveryId: claim.message.id,
+        reason: result.reason,
+        detail: result.error,
+      },
+      hooks.broadcastEvent
+    );
+    hooks.scheduleSummarySync();
   }
 
   const metric =

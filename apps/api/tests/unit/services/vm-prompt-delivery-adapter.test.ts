@@ -327,7 +327,7 @@ describe('VM prompt delivery adapter', () => {
     async (_label, row) => {
       for (const reason of [
         'workspace_deletion_unconfirmed',
-        'session_recovery_placement_placement',
+        'session_recovery_placement_lookup_failed',
         'session_recovery_placement_transient',
       ]) {
         mocks.ensureSessionRecovery.mockResolvedValueOnce({ status: 'unavailable', reason });
@@ -353,8 +353,8 @@ describe('VM prompt delivery adapter', () => {
 
       await expect(adapter.submit(input(false))).resolves.toMatchObject({
         kind: 'failed',
-        reason: 'terminal_target',
-        error: `Target workspace is sleeping (${reason})`,
+        reason: 'wake_refused',
+        error: expect.stringContaining(reason),
       });
     }
   );

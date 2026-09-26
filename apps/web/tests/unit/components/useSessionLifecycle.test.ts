@@ -443,9 +443,13 @@ describe('useSessionLifecycle loading semantics', () => {
       ...sleeping,
       session: {
         ...sleeping.session,
-        task: {
-          id: 'recovery-task-1',
-          status: 'failed' as const,
+        attention: {
+          markerId: 'marker-1',
+          kind: 'wake_failed',
+          createdAt: Date.now(),
+          expiresAt: null,
+          reason: 'wake_refused',
+          options: [],
         },
       },
     };

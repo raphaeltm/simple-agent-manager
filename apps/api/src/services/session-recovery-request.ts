@@ -73,7 +73,7 @@ export async function buildRecoveryPlacementInput(
   context: RecoveryContext,
   taskId: string,
   options: SessionRecoveryOptions = {}
-): Promise<TaskStartPlacementInput | { error: string; errorKind: 'placement' }> {
+): Promise<TaskStartPlacementInput | { error: string; reason: 'stored_resource_plan_invalid' }> {
   const profile = context.workspace.agentProfileHint
     ? await db
         .select()
@@ -121,7 +121,7 @@ export async function buildRecoveryPlacementInput(
       });
       return {
         error: `Stored resource requirements for this session are invalid: ${error.message}`,
-        errorKind: 'placement',
+        reason: 'stored_resource_plan_invalid',
       };
     }
     throw error;

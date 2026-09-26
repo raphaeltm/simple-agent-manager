@@ -7,7 +7,7 @@ import type { PromptDeliveryResult } from '../durable-objects/project-data/promp
 import type { Env } from '../env';
 import { ensureSessionRecovery, type SessionRecoveryResult } from './session-recovery';
 import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
-import { isTransientSessionRecoveryRefusal } from './session-recovery-refusals';
+import { classifySessionRecoveryRefusal } from './session-recovery-refusals';
 
 export interface VmPromptDeliveryTarget {
   projectId: string;
@@ -31,7 +31,7 @@ export interface VmPromptDeliverySourceTaskGuard {
 export type TargetResolution =
   | { kind: 'ready'; target: VmPromptDeliveryTarget }
   | { kind: 'retry'; reason: string }
-  | { kind: 'failed'; reason: 'terminal_target' | 'dead_target'; error: string }
+  | { kind: 'failed'; reason: 'terminal_target' | 'dead_target' | 'wake_refused'; error: string }
   | { kind: 'guarded'; result: PromptDeliveryResult };
 
 /**
@@ -47,13 +47,21 @@ function recoveryResolution(
   if (recovery.status === 'waking') {
     return { kind: 'retry', reason: `Session is waking (${recovery.taskId})` };
   }
-  if (isTransientSessionRecoveryRefusal(recovery.reason)) {
+  const refusal = classifySessionRecoveryRefusal(recovery.reason);
+  if (refusal.action === 'retry') {
     return { kind: 'retry', reason: `Session cannot wake yet (${recovery.reason})` };
+  }
+  if (refusal.action === 'drop') {
+    return {
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: `${terminalError} (${recovery.reason})`,
+    };
   }
   return {
     kind: 'failed',
-    reason: 'terminal_target',
-    error: `${terminalError} (${recovery.reason})`,
+    reason: 'wake_refused',
+    error: `${refusal.description} (${recovery.reason})`,
   };
 }
 

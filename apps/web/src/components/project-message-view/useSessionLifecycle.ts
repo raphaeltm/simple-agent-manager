@@ -460,7 +460,8 @@ export function useSessionLifecycle(
         const wakeAttemptFailed =
           sleepingWakePendingRef.current &&
           data.session.status === 'sleeping' &&
-          ['failed', 'cancelled'].includes(data.session.task?.status ?? '');
+          (['failed', 'cancelled'].includes(data.session.task?.status ?? '') ||
+            data.session.attention?.kind === 'wake_failed');
         if (wakeAttemptFailed) {
           sleepingWakePendingRef.current = false;
         }
