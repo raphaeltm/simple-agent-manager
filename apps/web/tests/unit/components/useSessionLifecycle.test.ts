@@ -99,8 +99,10 @@ type Msg = {
   content: string;
   toolMetadata: null;
   createdAt: number;
+  sequence?: number;
 };
 
+/** A server-persisted row; the server always assigns a sequence. */
 function msg(id: string, createdAt: number): Msg {
   return {
     id,
@@ -109,7 +111,13 @@ function msg(id: string, createdAt: number): Msg {
     content: `m-${id}`,
     toolMetadata: null,
     createdAt,
+    sequence: createdAt,
   };
+}
+
+/** A row the client appended before the server echoed it: no sequence, client-clock time. */
+function optimisticMsg(id: string, createdAt: number): Msg {
+  return { ...msg(id, createdAt), sequence: undefined };
 }
 
 function sessionResponse(status: string) {
@@ -246,8 +254,51 @@ describe('useSessionLifecycle loading semantics', () => {
     );
     expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
       signal: expect.any(AbortSignal),
-      after: 1000,
+      after: '[1000,1000,"cached"]',
     });
+  });
+
+  it('anchors the refresh on the newest persisted row, never on a trailing optimistic one', async () => {
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+    // The optimistic row carries the client's clock, which runs ahead of the server's.
+    queryClient.setQueryData(
+      queryKey,
+      detail([msg('cached', 1000), optimisticMsg('optimistic-sent', 9000)], false)
+    );
+    mocks.getChatSession.mockResolvedValue(detail([msg('persisted-before-clock', 2000)], false));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toContain('persisted-before-clock')
+    );
+    expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      after: '[1000,1000,"cached"]',
+    });
+  });
+
+  it('drains every newer page before merging, keeping hasMore for older history', async () => {
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+    queryClient.setQueryData(queryKey, detail([msg('cached', 1000)], true));
+    mocks.getChatSession
+      .mockResolvedValueOnce(detail([msg('first', 2000)], true))
+      .mockResolvedValueOnce(detail([msg('second', 3000)], false));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['cached', 'first', 'second'])
+    );
+    expect(mocks.getChatSession).toHaveBeenNthCalledWith(2, 'proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      after: '[2000,2000,"first"]',
+    });
+    expect(result.current.hasMore).toBe(true);
   });
 
   describe('fallback poll visibility gating', () => {

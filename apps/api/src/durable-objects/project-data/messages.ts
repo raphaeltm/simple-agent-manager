@@ -2,11 +2,14 @@
  * Message storage, retrieval, batch persistence, and sequencing. Search lives in
  * `message-search.ts`; its DO-facing entry points are re-exported here.
  */
+import type { MessageCursor } from '@simple-agent-manager/shared';
+
 import { log } from '../../lib/logger';
 import {
   PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES,
   type ProjectDataArchiveSourceIntentState,
 } from '../../project-data-archive/contract';
+import { messageBoundsClause } from './message-cursor';
 import {
   insertNewMessage,
   nextSequence,
@@ -238,6 +241,8 @@ export function persistMessageBatch(
       break;
     }
 
+    // Rows without a usable timestamp share `now`; reads page on (created_at, sequence, id),
+    // so ties are safe (see message-cursor.ts).
     const createdAt = new Date(msg.timestamp).getTime() || now;
     const sequence = msg.sequence ?? nextSeq++;
     const boundedToolMetadata = boundToolMetadataForStorage(msg.toolMetadata, env);
@@ -348,8 +353,8 @@ export function getMessages(
   sql: SqlStorage,
   sessionId: string,
   limit: number = 1000,
-  before: number | null = null,
-  after: number | null = null,
+  before: MessageCursor | null = null,
+  after: MessageCursor | null = null,
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc',
@@ -359,15 +364,9 @@ export function getMessages(
     'SELECT id, session_id, role, content, tool_metadata, created_at, sequence, origin FROM chat_messages WHERE session_id = ?';
   const params: (string | number)[] = [sessionId];
 
-  if (before !== null) {
-    query += ' AND created_at < ?';
-    params.push(before);
-  }
-
-  if (after !== null) {
-    query += ' AND created_at > ?';
-    params.push(after);
-  }
+  const bounds = messageBoundsClause({ before, after });
+  query += bounds.sql;
+  params.push(...bounds.values);
 
   if (roles && roles.length > 0) {
     const placeholders = roles.map(() => '?').join(', ');
@@ -376,7 +375,7 @@ export function getMessages(
   }
 
   const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
-  query += ` ORDER BY created_at ${orderDirection}, sequence ${orderDirection} LIMIT ?`;
+  query += ` ORDER BY created_at ${orderDirection}, sequence ${orderDirection}, id ${orderDirection} LIMIT ?`;
   params.push(limit + 1);
 
   const rows = sql.exec(query, ...params).toArray();

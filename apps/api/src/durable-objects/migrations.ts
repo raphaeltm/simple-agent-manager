@@ -2373,6 +2373,9 @@ export const MIGRATIONS: Migration[] = [
         USING fts5(content, content='project_data_archive_search_documents', content_rowid='rowid')`);
     },
   },
+  // Retired before release: `059-message-upload-parts` ran on staging only. Objects
+  // that ran it keep an unused `message_upload_parts` table, since DO migrations
+  // never drop tables, so neither that migration name nor that table name may be reused.
 ];
 
 /**

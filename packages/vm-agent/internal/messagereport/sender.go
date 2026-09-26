@@ -26,22 +26,21 @@ type apiMessage struct {
 	Origin       string `json:"origin,omitempty"`
 }
 
+func (m Message) toAPIMessage(sequence int64) apiMessage {
+	return apiMessage{
+		MessageID:    m.MessageID,
+		SessionID:    m.SessionID,
+		Role:         m.Role,
+		Content:      m.Content,
+		ToolMetadata: m.ToolMetadata,
+		Timestamp:    m.Timestamp,
+		Sequence:     sequence,
+		Origin:       m.Origin,
+	}
+}
+
 func rowToAPIMessage(row outboxRow) apiMessage {
-	m := apiMessage{
-		MessageID: row.messageID,
-		SessionID: row.sessionID,
-		Role:      row.role,
-		Content:   row.content,
-		Timestamp: row.createdAt,
-		Sequence:  row.id, // outbox AUTOINCREMENT id is monotonic
-	}
-	if row.toolMetadata.Valid {
-		m.ToolMetadata = row.toolMetadata.String
-	}
-	if row.origin.Valid {
-		m.Origin = row.origin.String
-	}
-	return m
+	return row.message().toAPIMessage(row.id) // outbox AUTOINCREMENT id is monotonic
 }
 
 func buildBatchPayload(messages []apiMessage) ([]byte, error) {
@@ -131,31 +130,79 @@ func (r *Reporter) sendBatchWithRetry(batch []outboxRow, url, token, wsID string
 }
 
 func (r *Reporter) handleBatchResponse(batch []outboxRow, url, token, wsID string, statusCode int, responseBody string, postErr error) (bool, error) {
-	if postErr == nil && statusCode >= 200 && statusCode < 300 {
+	if closed, ok := sessionClosure(statusCode, responseBody, postErr); ok {
+		r.discardUndeliverableSession(batch, wsID, closed.reason)
 		return true, nil
 	}
-	if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
-		return true, r.sendSizeFallback(url, token, batch)
+	if postErr == nil && statusCode >= 200 && statusCode < 300 {
+		return true, nil
 	}
 	if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
 		r.markMessageLimitReached(batch, responseBody)
 		return true, nil
 	}
+	// A rejected batch may hold one oversized or invalid row. Sending each row
+	// on its own loses only that row, never its batch-mates.
+	if statusCode == http.StatusBadRequest && (len(batch) > 1 || isPayloadSizeError(responseBody)) {
+		return true, r.sendRowsIndividually(url, token, wsID, batch)
+	}
 	if isTerminalBatchResponse(statusCode) {
 		r.markTerminalPersistenceFailure(batch, statusCode, responseBody)
 		return true, nil
 	}
-	if isPermanentBatchError(statusCode) {
-		slog.Warn("messagereport: permanent error, discarding batch",
-			"statusCode", statusCode,
-			"count", len(batch),
-			"workspaceId", wsID,
-			"responseBody", responseBody,
-		)
-		r.deleteBatch(batch)
+	if statusCode == http.StatusBadRequest {
+		r.discardRejectedRow(batch[0], rowRejectedError{statusCode: statusCode, responseBody: responseBody})
 		return true, nil
 	}
 	return false, nil
+}
+
+// sessionClosure recognizes a response saying the batch's chat session will
+// never accept messages from this workspace: 204 when the workspace or session
+// stopped accepting writes, or a session mismatch when the workspace is now
+// linked to another session.
+func sessionClosure(statusCode int, responseBody string, postErr error) (sessionClosedError, bool) {
+	switch {
+	case postErr == nil && statusCode == http.StatusNoContent:
+		return sessionClosedError{reason: "workspace or session no longer accepts messages"}, true
+	case statusCode == http.StatusBadRequest && isSessionMismatchError(responseBody):
+		return sessionClosedError{reason: "workspace is linked to another session"}, true
+	}
+	return sessionClosedError{}, false
+}
+
+// discardUndeliverableSession drops every queued row of the batch's session
+// once the control plane has said it will never accept them from this
+// workspace, instead of sending each only to be refused again. That is not a
+// delivery, and not a reason to stop the reporter either — a reused workspace
+// may already be linked to a new session.
+func (r *Reporter) discardUndeliverableSession(batch []outboxRow, wsID, reason string) {
+	sessionID := batch[0].sessionID
+	discarded, err := r.clearOutboxForSession(sessionID)
+	if err != nil {
+		slog.Error("messagereport: failed to discard the queued rows of an undeliverable session",
+			"workspaceId", wsID, "sessionId", sessionID, "reason", reason, "error", err)
+		return
+	}
+	slog.Warn("messagereport: control plane will not accept this session's messages, discarded its queued rows",
+		"workspaceId", wsID,
+		"sessionId", sessionID,
+		"reason", reason,
+		"firstMessageId", batch[0].messageID,
+		"discarded", discarded,
+	)
+}
+
+// discardRejectedRow drops one row the control plane refuses in every form.
+func (r *Reporter) discardRejectedRow(row outboxRow, rejection rowRejectedError) {
+	slog.Warn("messagereport: control plane rejected a message, discarding it",
+		"messageId", row.messageID,
+		"sessionId", row.sessionID,
+		"role", row.role,
+		"statusCode", rejection.statusCode,
+		"responseBody", rejection.responseBody,
+	)
+	r.deleteBatch([]outboxRow{row})
 }
 
 func isTerminalBatchResponse(statusCode int) bool {
@@ -163,10 +210,6 @@ func isTerminalBatchResponse(statusCode int) bool {
 		statusCode == http.StatusForbidden ||
 		statusCode == http.StatusNotFound ||
 		statusCode == http.StatusGone
-}
-
-func isPermanentBatchError(statusCode int) bool {
-	return statusCode == http.StatusBadRequest
 }
 
 func (r *Reporter) waitForRetry(delay time.Duration, statusCode int, err error) error {
@@ -224,6 +267,10 @@ func isSessionMessageLimitError(responseBody string) bool {
 	return strings.Contains(responseBody, "SESSION_MESSAGE_LIMIT_EXCEEDED")
 }
 
+func isSessionMismatchError(responseBody string) bool {
+	return strings.Contains(responseBody, "Session mismatch")
+}
+
 type sessionMessageLimitError struct {
 	responseBody string
 }
@@ -232,13 +279,25 @@ func (e sessionMessageLimitError) Error() string {
 	return "session message limit reached"
 }
 
-type fallbackPermanentError struct {
+// rowRejectedError is the control plane refusing one row in every form it was
+// sent; only that row is lost.
+type rowRejectedError struct {
 	statusCode   int
 	responseBody string
 }
 
-func (e fallbackPermanentError) Error() string {
-	return fmt.Sprintf("fallback permanent error status=%d body=%s", e.statusCode, e.responseBody)
+func (e rowRejectedError) Error() string {
+	return fmt.Sprintf("row rejected status=%d body=%s", e.statusCode, e.responseBody)
+}
+
+// sessionClosedError is the control plane refusing every message of the row's
+// session; see sessionClosure.
+type sessionClosedError struct {
+	reason string
+}
+
+func (e sessionClosedError) Error() string {
+	return "session closed: " + e.reason
 }
 
 type terminalPersistenceError struct {
@@ -250,44 +309,50 @@ func (e terminalPersistenceError) Error() string {
 	return fmt.Sprintf("terminal persistence error status=%d body=%s", e.statusCode, e.responseBody)
 }
 
-func (r *Reporter) sendSizeFallback(url, token string, batch []outboxRow) error {
+// sendRowsIndividually settles a rejected batch row by row. A row the control
+// plane refuses is dropped on its own; a verdict about the whole session or
+// workspace settles every row at once.
+func (r *Reporter) sendRowsIndividually(url, token, wsID string, batch []outboxRow) error {
 	ctx, cancel := r.contextUntilStop()
 	defer cancel()
 
 	for _, row := range batch {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("shutdown during fallback: %w", err)
+			return fmt.Errorf("shutdown while sending rows individually: %w", err)
 		}
 
-		if err := r.sendSingleWithSizeFallback(ctx, url, token, row); err != nil {
-			if limitErr, ok := err.(sessionMessageLimitError); ok {
-				r.markMessageLimitReached(batch, limitErr.responseBody)
-				return nil
-			}
-			if permanentErr, ok := err.(fallbackPermanentError); ok {
-				slog.Warn("messagereport: fallback permanent error, discarding batch",
-					"statusCode", permanentErr.statusCode,
-					"count", len(batch),
-					"messageId", row.messageID,
-					"responseBody", permanentErr.responseBody,
-				)
-				return nil
-			}
-			if terminalErr, ok := err.(terminalPersistenceError); ok {
-				r.markTerminalPersistenceFailure(batch, terminalErr.statusCode, terminalErr.responseBody)
-				return nil
-			}
+		err := r.sendRow(ctx, url, token, row)
+		switch verdict := err.(type) {
+		case nil:
+		case rowRejectedError:
+			r.discardRejectedRow(row, verdict)
+		case sessionClosedError:
+			r.discardUndeliverableSession(batch, wsID, verdict.reason)
+			return nil
+		case sessionMessageLimitError:
+			r.markMessageLimitReached(batch, verdict.responseBody)
+			return nil
+		case terminalPersistenceError:
+			r.markTerminalPersistenceFailure(batch, verdict.statusCode, verdict.responseBody)
+			return nil
+		default:
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *Reporter) sendSingleWithSizeFallback(ctx context.Context, url, token string, row outboxRow) error {
-	candidates := r.sizeFallbackCandidates(row)
+// sendRow sends one row on its own and, if the control plane still rejects it
+// as too large, sends its omitted form instead.
+func (r *Reporter) sendRow(ctx context.Context, url, token string, row outboxRow) error {
+	candidates := []apiMessage{
+		rowToAPIMessage(row),
+		omittedForTransport(row.message()).toAPIMessage(row.id),
+	}
+	var tooLarge rowRejectedError
 	for i, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("shutdown during fallback: %w", err)
+			return fmt.Errorf("shutdown while sending a row: %w", err)
 		}
 
 		statusCode, responseBody, postErr, err := r.postFallbackCandidate(ctx, url, token, candidate)
@@ -295,12 +360,13 @@ func (r *Reporter) sendSingleWithSizeFallback(ctx context.Context, url, token st
 			return err
 		}
 		tryNext, resultErr := fallbackCandidateResult(row, i, statusCode, responseBody, postErr)
-		if tryNext {
-			continue
+		if !tryNext {
+			return resultErr
 		}
-		return resultErr
+		tooLarge = rowRejectedError{statusCode: statusCode, responseBody: responseBody}
 	}
-	return fmt.Errorf("fallback candidates exhausted for message %s", row.messageID)
+	// Even the omitted form is too large for the control plane: nothing smaller exists.
+	return tooLarge
 }
 
 func (r *Reporter) postFallbackCandidate(ctx context.Context, url, token string, candidate apiMessage) (int, string, error, error) {
@@ -313,6 +379,9 @@ func (r *Reporter) postFallbackCandidate(ctx context.Context, url, token string,
 }
 
 func fallbackCandidateResult(row outboxRow, candidateIndex int, statusCode int, responseBody string, postErr error) (tryNext bool, err error) {
+	if closed, ok := sessionClosure(statusCode, responseBody, postErr); ok {
+		return false, closed
+	}
 	if postErr == nil && statusCode >= 200 && statusCode < 300 {
 		logFallbackSuccess(row, candidateIndex)
 		return false, nil
@@ -326,20 +395,19 @@ func fallbackCandidateResult(row outboxRow, candidateIndex int, statusCode int, 
 	if isTerminalBatchResponse(statusCode) {
 		return false, terminalPersistenceError{statusCode: statusCode, responseBody: responseBody}
 	}
-	if isPermanentBatchError(statusCode) {
-		return false, fallbackPermanentError{statusCode: statusCode, responseBody: responseBody}
+	if statusCode == http.StatusBadRequest {
+		return false, rowRejectedError{statusCode: statusCode, responseBody: responseBody}
 	}
-	return false, fmt.Errorf("fallback transient error status=%d err=%v body=%s", statusCode, postErr, responseBody)
+	return false, fmt.Errorf("transient error sending a row status=%d err=%v body=%s", statusCode, postErr, responseBody)
 }
 
 func logFallbackSuccess(row outboxRow, candidateIndex int) {
 	if candidateIndex == 0 {
 		return
 	}
-	slog.Warn("messagereport: delivered oversized message fallback",
+	slog.Warn("messagereport: control plane limits are below the reporter's; delivered omitted marker",
 		"messageId", row.messageID,
 		"role", row.role,
-		"fallbackIndex", candidateIndex,
 	)
 }
 
@@ -348,33 +416,6 @@ func (r *Reporter) contextUntilStop() (context.Context, context.CancelFunc) {
 		return context.WithCancel(context.Background())
 	}
 	return context.WithCancel(r.stopCtx)
-}
-
-func (r *Reporter) sizeFallbackCandidates(row outboxRow) []apiMessage {
-	trimmed := rowToAPIMessage(row)
-	trimmed.Content = truncateContentToLimit(trimmed.Content, r.cfg.MaxMessageContentBytes)
-
-	withoutMetadata := trimmed
-	withoutMetadata.ToolMetadata = ""
-
-	omitted := withoutMetadata
-	omitted.Content = omittedMessageMarker
-
-	return []apiMessage{trimmed, withoutMetadata, omitted}
-}
-
-func truncateContentToLimit(content string, maxBytes int) string {
-	if maxBytes <= 0 {
-		return ""
-	}
-	if maxBytes <= len(truncationMarker) {
-		return truncationMarker[:maxBytes]
-	}
-	if len(content) <= maxBytes {
-		return content
-	}
-	keep := maxBytes - len(truncationMarker)
-	return content[:keep] + truncationMarker
 }
 
 func (r *Reporter) doPost(url, token string, body []byte) (int, string, error) {

@@ -42,3 +42,6 @@ export * from './runtime-validation';
 
 // Resource requirements validation
 export * from './resource-requirements';
+
+// Chat message pagination cursors (web client ↔ API contract)
+export * from './message-cursor';
