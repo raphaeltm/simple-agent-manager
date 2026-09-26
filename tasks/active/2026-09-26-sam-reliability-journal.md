@@ -15,10 +15,10 @@ Publish a daily journal entry that explains the technically meaningful work merg
 
 ## Implementation checklist
 
-- [ ] Write a blog post in `apps/www/src/content/blog/` with valid frontmatter and a descriptive slug.
-- [ ] Explain the recovery flow using simple language while naming the relevant technologies where it helps.
-- [ ] Include a Mermaid diagram only if it clarifies the recovery sequence.
-- [ ] Verify the post against the changed source and archived task records.
+- [x] Write a blog post in `apps/www/src/content/blog/` with valid frontmatter and a descriptive slug.
+- [x] Explain the recovery flow using simple language while naming the relevant technologies where it helps.
+- [x] Include a Mermaid diagram for the failure-preservation sequence.
+- [x] Verify the post against the changed source and archived task records.
 - [ ] Run the narrow marketing-site build and inspect the generated page.
 
 ## Acceptance criteria
