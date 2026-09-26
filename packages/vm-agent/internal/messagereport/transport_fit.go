@@ -37,8 +37,19 @@ type transportLimits struct {
 	requestBytes int // largest request body accepted (API MAX_MESSAGES_PAYLOAD_BYTES)
 }
 
+// transportLimits are the reporter's configured limits, which mirror the
+// control plane's.
+func (r *Reporter) transportLimits() transportLimits {
+	return transportLimits{
+		contentBytes: r.cfg.MaxMessageContentBytes,
+		requestBytes: r.cfg.BatchMaxBytes,
+	}
+}
+
 // toolMetadataSummary is what remains of tool metadata too large to send: the
 // fields a tool card is keyed on, and a record of what was removed.
+// OriginalSizeBytes is the size of the metadata the summary replaced; for a row
+// reduced again when sent (omittedForTransport), that is its queued summary.
 type toolMetadataSummary struct {
 	ToolCallID         string `json:"toolCallId,omitempty"`
 	Title              string `json:"title,omitempty"`
@@ -158,6 +169,7 @@ func encodeSummary(summary toolMetadataSummary) string {
 // ID becomes the message's sequence once it is stored, so it is sized at its
 // widest.
 func requestBytes(msg Message) int {
+	// A message of strings and ints always marshals.
 	body, _ := buildBatchPayload([]apiMessage{msg.toAPIMessage(math.MaxInt64)})
 	return len(body)
 }
