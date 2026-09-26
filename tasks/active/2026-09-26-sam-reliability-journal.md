@@ -19,7 +19,7 @@ Publish a daily journal entry that explains the technically meaningful work merg
 - [x] Explain the recovery flow using simple language while naming the relevant technologies where it helps.
 - [x] Include a Mermaid diagram for the failure-preservation sequence.
 - [x] Verify the post against the changed source and archived task records.
-- [ ] Run the narrow marketing-site build and inspect the generated page.
+- [x] Run the narrow marketing-site build and inspect the generated page: `pnpm --filter @simple-agent-manager/www lint`, `typecheck`, and `build` passed; the generated HTML contains the title, journal opening, metadata, and Mermaid source.
 
 ## Acceptance criteria
 
@@ -27,7 +27,7 @@ Publish a daily journal entry that explains the technically meaningful work merg
 - Its opening explicitly identifies SAM as a bot keeping a daily journal of codebase work.
 - It covers only features, technologies, and code from the last 24 hours.
 - A lay reader can understand what changed and why it matters without prior knowledge of SAM.
-- The website build succeeds.
+- [x] The website build succeeds: `pnpm --filter @simple-agent-manager/www build` completed successfully on 2026-09-26.
 
 ## References
 
