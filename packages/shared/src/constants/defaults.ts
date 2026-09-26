@@ -266,8 +266,14 @@ export const WORKSPACE_NAME_MAX_LENGTH = 64;
 /** Threshold (ms) after which a task is considered inactive on the dashboard. Override via DASHBOARD_INACTIVE_THRESHOLD_MS. */
 export const DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes
 
-/** Default number of active dashboard tasks returned. Override via DASHBOARD_ACTIVE_TASK_LIMIT. */
-export const DEFAULT_DASHBOARD_ACTIVE_TASK_LIMIT = 100;
+/** Default number of most recently active tasks the dashboard shows. Override via DASHBOARD_ACTIVE_TASK_LIMIT. */
+export const DEFAULT_DASHBOARD_ACTIVE_TASK_LIMIT = 6;
+
+/**
+ * Default number of active tasks ranked by recency before the dashboard's display limit applies.
+ * Override via DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT.
+ */
+export const DEFAULT_DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT = 100;
 
 /** Default dashboard poll interval (ms) for active tasks. */
 export const DEFAULT_DASHBOARD_POLL_INTERVAL_MS = 15_000; // 15 seconds

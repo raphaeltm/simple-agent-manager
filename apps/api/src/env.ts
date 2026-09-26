@@ -463,6 +463,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ACCOUNT_MAP_MAX_SESSIONS_PER_PROJECT?: string;
   ACCOUNT_MAP_CACHE_TTL_SECONDS?: string;
   // Dashboard configuration
+  DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT?: string;
   DASHBOARD_ACTIVE_TASK_LIMIT?: string;
   DASHBOARD_INACTIVE_THRESHOLD_MS?: string;
   // Boot log configuration
