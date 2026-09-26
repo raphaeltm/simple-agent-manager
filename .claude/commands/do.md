@@ -274,11 +274,19 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
 
 3. **If CI fails:** inspect logs, fix issues, commit, push, repeat.
 
-4. **Once CI is fully green and every non-CodeRabbit gate is satisfied**, request CodeRabbit review by applying the opt-in label:
+4. **Once CI is fully green and every non-CodeRabbit gate is satisfied**, request CodeRabbit review through the repository's trusted GitHub Actions path, not by posting `@coderabbitai review` yourself. Apply the opt-in label first:
 
    ```
    gh pr edit <pr-number> --add-label coderabbit-review
    ```
+
+   If the label-triggered run needs an explicit retry for the current ready state, dispatch the same workflow from `main`:
+
+   ```
+   gh workflow run coderabbit-bot-review.yml --ref main -f pr_number=<pr-number>
+   ```
+
+   Agents MUST NOT post `@coderabbitai review` directly with their own GitHub App token; CodeRabbit ignores bot-authored review commands. The workflow is the human-identity bridge.
 
 5. **Complete the iterative CodeRabbit review loop before merge.** The PR is NOT good to go until the agent and CodeRabbit are in agreement:
    - Read every CodeRabbit review comment, thread, and summary.
