@@ -7,7 +7,7 @@
  * alarm-driven telemetry writes.
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { runProjectDataGroupedFtsCleanup } from '../../src/durable-objects/project-data/grouped-fts-cleanup';
 import {
@@ -56,6 +56,32 @@ async function withProjectDataStorageEnv<T>(
       else mutableEnv[key] = value;
     }
   }
+}
+
+async function runProjectDataAlarmWithTimerDeliveryPaused<T extends Record<string, unknown>>(
+  stub: DurableObjectStub<ProjectDataTestDouble>,
+  readAfterAlarm: (
+    instance: ProjectDataTestDouble,
+    state: DurableObjectState
+  ) => T | Promise<T>
+): Promise<T & { scheduledAlarm: number | null }> {
+  return runInDurableObject(stub, async (instance, state) => {
+    await state.storage.deleteAlarm();
+    const scheduledAlarms: number[] = [];
+    const setAlarm = vi.spyOn(state.storage, 'setAlarm').mockImplementation(async (scheduledTime) => {
+      scheduledAlarms.push(scheduledTime instanceof Date ? scheduledTime.getTime() : scheduledTime);
+    });
+    try {
+      await instance.alarm();
+      return {
+        ...(await readAfterAlarm(instance, state)),
+        scheduledAlarm: scheduledAlarms.at(-1) ?? null,
+      };
+    } finally {
+      setAlarm.mockRestore();
+      await state.storage.deleteAlarm();
+    }
+  });
 }
 
 /**
@@ -1657,9 +1683,7 @@ describe('ProjectData storage safety firebreak', () => {
         PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS: '60000',
       },
       async () => {
-        await runInDurableObject(stub, async (instance) => instance.alarm());
-
-        const after = await runInDurableObject(stub, async (_instance, state) => {
+        const after = await runProjectDataAlarmWithTimerDeliveryPaused(stub, async (_instance, state) => {
           const sql = state.storage.sql;
           const activityRows = sql
             .exec(
@@ -1687,8 +1711,7 @@ describe('ProjectData storage safety firebreak', () => {
             .toArray()[0] as {
             count: number;
           };
-          const alarm = await state.storage.getAlarm();
-          return { activityRows, acpRows, messageCount, alarm };
+          return { activityRows, acpRows, messageCount };
         });
 
         const activityIds = new Set(after.activityRows.map((row) => row.id));
@@ -1700,7 +1723,8 @@ describe('ProjectData storage safety firebreak', () => {
         expect(seeded.terminalAcpEventIds.filter((id) => acpEventIds.has(id))).toHaveLength(1);
         expect(seeded.activeAcpEventIds.every((id) => acpEventIds.has(id))).toBe(true);
         expect(after.messageCount.count).toBe(3);
-        expect(after.alarm).toBeTypeOf('number');
+        expect(after.scheduledAlarm).toBeTypeOf('number');
+        expect(after.scheduledAlarm as number).toBeGreaterThan(Date.now());
       }
     );
   });
