@@ -708,7 +708,8 @@ Generated deployments validate and pass these values through cloud-init to newly
 
 ### Message Reporting
 
-- `MSG_MAX_MESSAGE_CONTENT_BYTES` — Max single persisted message content before truncation (default: 102400)
+- `MSG_MAX_MESSAGE_CONTENT_BYTES` — Max content bytes of one message; longer content keeps its longest rune-aligned prefix plus a `[truncated]` marker (default: 102400, matches the API's `MESSAGE_SIZE_THRESHOLD`)
+- `MSG_BATCH_MAX_BYTES` — Max serialized request body per batch (default: 262144, matches the API's `MAX_MESSAGES_PAYLOAD_BYTES`). Every message is shaped at enqueue to fit one request on its own: tool metadata that cannot fit is replaced by an identity summary flagged `contentTruncated`/`transportTruncated` with `originalSizeBytes`. Keep both values at or below the API's limits.
 
 ### ACP (Agent Communication Protocol)
 

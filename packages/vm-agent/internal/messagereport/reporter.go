@@ -13,11 +13,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// truncationMarker is appended to content that was truncated.
-const truncationMarker = "\n\n[truncated]"
-
-const omittedMessageMarker = "[message omitted: exceeded message transport limit]"
-
 // Message is the unit of work enqueued into the outbox.
 type Message struct {
 	MessageID    string `json:"messageId"`
@@ -279,17 +274,18 @@ func (r *Reporter) Enqueue(msg Message) error {
 		return fmt.Errorf("messagereport: cannot enqueue message without session ID")
 	}
 
-	// Truncate oversized content to match the API's individual-message limit.
-	// sendBatch still has a size fallback for JSON overhead and tool metadata.
-	maxBytes := r.cfg.MaxMessageContentBytes
-	if len(msg.Content) > maxBytes {
-		slog.Warn("messagereport: truncating oversized message content",
+	msg.SessionID = sessionID
+	queued := fitForTransport(msg, r.transportLimits())
+	if queued != msg {
+		slog.Warn("messagereport: reduced oversized message to fit transport limits",
 			"messageId", msg.MessageID,
-			"originalBytes", len(msg.Content),
-			"maxBytes", maxBytes,
+			"role", msg.Role,
 			"workspaceId", workspaceID,
+			"contentBytes", len(msg.Content),
+			"queuedContentBytes", len(queued.Content),
+			"toolMetadataBytes", len(msg.ToolMetadata),
+			"queuedToolMetadataBytes", len(queued.ToolMetadata),
 		)
-		msg.Content = truncateContentToLimit(msg.Content, maxBytes)
 	}
 
 	// INSERT OR IGNORE for crash-recovery dedup on message_id UNIQUE constraint.
@@ -297,7 +293,8 @@ func (r *Reporter) Enqueue(msg Message) error {
 		`INSERT OR IGNORE INTO message_outbox
 			(message_id, session_id, role, content, tool_metadata, created_at, origin)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		msg.MessageID, sessionID, msg.Role, msg.Content, msg.ToolMetadata, msg.Timestamp, msg.Origin,
+		queued.MessageID, queued.SessionID, queued.Role, queued.Content, queued.ToolMetadata,
+		queued.Timestamp, queued.Origin,
 	)
 	if err != nil {
 		return fmt.Errorf("messagereport: insert outbox: %w", err)
@@ -382,6 +379,25 @@ type outboxRow struct {
 	origin       sql.NullString
 }
 
+func (row outboxRow) message() Message {
+	return Message{
+		MessageID:    row.messageID,
+		SessionID:    row.sessionID,
+		Role:         row.role,
+		Content:      row.content,
+		ToolMetadata: row.toolMetadata.String,
+		Timestamp:    row.createdAt,
+		Origin:       row.origin.String,
+	}
+}
+
+func (r *Reporter) transportLimits() transportLimits {
+	return transportLimits{
+		contentBytes: r.cfg.MaxMessageContentBytes,
+		requestBytes: r.cfg.BatchMaxBytes,
+	}
+}
+
 func (r *Reporter) readBatch() ([]outboxRow, error) {
 	rows, err := r.db.Query(
 		`SELECT id, message_id, session_id, role, content, tool_metadata, created_at, origin
@@ -401,13 +417,20 @@ func (r *Reporter) readBatch() ([]outboxRow, error) {
 		if err := rows.Scan(&row.id, &row.messageID, &row.sessionID, &row.role, &row.content, &row.toolMetadata, &row.createdAt, &row.origin); err != nil {
 			return nil, err
 		}
+		// The control plane accepts one session per request, so a batch is a
+		// run of consecutive rows from the oldest row's session. Rows left over
+		// from an earlier session go on their own and cannot sink a batch of
+		// the current session's messages.
+		if len(batch) > 0 && row.sessionID != batch[0].sessionID {
+			break
+		}
 		candidate := append(append([]outboxRow(nil), batch...), row)
 		payloadBytes, err := marshaledBatchSize(candidate)
 		if err != nil {
 			return nil, err
 		}
-		// Respect marshaled payload limit, but always include at least one
-		// message so an oversized row can progress to fallback handling.
+		// Respect the marshaled payload limit. Enqueue sized every row to fit
+		// on its own, so the first row is always taken.
 		if len(batch) > 0 && payloadBytes > r.cfg.BatchMaxBytes {
 			break
 		}

@@ -26,22 +26,21 @@ type apiMessage struct {
 	Origin       string `json:"origin,omitempty"`
 }
 
+func (m Message) toAPIMessage(sequence int64) apiMessage {
+	return apiMessage{
+		MessageID:    m.MessageID,
+		SessionID:    m.SessionID,
+		Role:         m.Role,
+		Content:      m.Content,
+		ToolMetadata: m.ToolMetadata,
+		Timestamp:    m.Timestamp,
+		Sequence:     sequence,
+		Origin:       m.Origin,
+	}
+}
+
 func rowToAPIMessage(row outboxRow) apiMessage {
-	m := apiMessage{
-		MessageID: row.messageID,
-		SessionID: row.sessionID,
-		Role:      row.role,
-		Content:   row.content,
-		Timestamp: row.createdAt,
-		Sequence:  row.id, // outbox AUTOINCREMENT id is monotonic
-	}
-	if row.toolMetadata.Valid {
-		m.ToolMetadata = row.toolMetadata.String
-	}
-	if row.origin.Valid {
-		m.Origin = row.origin.String
-	}
-	return m
+	return row.message().toAPIMessage(row.id) // outbox AUTOINCREMENT id is monotonic
 }
 
 func buildBatchPayload(messages []apiMessage) ([]byte, error) {
@@ -131,11 +130,15 @@ func (r *Reporter) sendBatchWithRetry(batch []outboxRow, url, token, wsID string
 }
 
 func (r *Reporter) handleBatchResponse(batch []outboxRow, url, token, wsID string, statusCode int, responseBody string, postErr error) (bool, error) {
+	if postErr == nil && statusCode == http.StatusNoContent {
+		r.discardDeclinedBatch(batch, wsID)
+		return true, nil
+	}
 	if postErr == nil && statusCode >= 200 && statusCode < 300 {
 		return true, nil
 	}
 	if statusCode == http.StatusBadRequest && isPayloadSizeError(responseBody) {
-		return true, r.sendSizeFallback(url, token, batch)
+		return true, r.sendSizeFallback(url, token, wsID, batch)
 	}
 	if statusCode == http.StatusConflict && isSessionMessageLimitError(responseBody) {
 		r.markMessageLimitReached(batch, responseBody)
@@ -156,6 +159,20 @@ func (r *Reporter) handleBatchResponse(batch []outboxRow, url, token, wsID strin
 		return true, nil
 	}
 	return false, nil
+}
+
+// discardDeclinedBatch drops a batch the control plane answered with 204: the
+// workspace or its chat session no longer accepts messages, so the rows can
+// never be persisted. That is not a delivery, and not a reason to stop the
+// reporter either — a reused workspace may already be linked to a new session.
+func (r *Reporter) discardDeclinedBatch(batch []outboxRow, wsID string) {
+	slog.Warn("messagereport: control plane declined batch for an inactive workspace or session, discarding",
+		"count", len(batch),
+		"workspaceId", wsID,
+		"sessionId", batch[0].sessionID,
+		"firstMessageId", batch[0].messageID,
+	)
+	r.deleteBatch(batch)
 }
 
 func isTerminalBatchResponse(statusCode int) bool {
@@ -241,6 +258,13 @@ func (e fallbackPermanentError) Error() string {
 	return fmt.Sprintf("fallback permanent error status=%d body=%s", e.statusCode, e.responseBody)
 }
 
+// declinedError reports a 204 from the control plane during the size fallback.
+type declinedError struct{}
+
+func (declinedError) Error() string {
+	return "control plane declined messages for an inactive workspace or session"
+}
+
 type terminalPersistenceError struct {
 	statusCode   int
 	responseBody string
@@ -250,7 +274,7 @@ func (e terminalPersistenceError) Error() string {
 	return fmt.Sprintf("terminal persistence error status=%d body=%s", e.statusCode, e.responseBody)
 }
 
-func (r *Reporter) sendSizeFallback(url, token string, batch []outboxRow) error {
+func (r *Reporter) sendSizeFallback(url, token, wsID string, batch []outboxRow) error {
 	ctx, cancel := r.contextUntilStop()
 	defer cancel()
 
@@ -277,14 +301,23 @@ func (r *Reporter) sendSizeFallback(url, token string, batch []outboxRow) error 
 				r.markTerminalPersistenceFailure(batch, terminalErr.statusCode, terminalErr.responseBody)
 				return nil
 			}
+			if _, ok := err.(declinedError); ok {
+				r.discardDeclinedBatch(batch, wsID)
+				return nil
+			}
 			return err
 		}
 	}
 	return nil
 }
 
+// sendSingleWithSizeFallback sends one row on its own and, if the control plane
+// still rejects it as too large, sends its omitted form instead.
 func (r *Reporter) sendSingleWithSizeFallback(ctx context.Context, url, token string, row outboxRow) error {
-	candidates := r.sizeFallbackCandidates(row)
+	candidates := []apiMessage{
+		rowToAPIMessage(row),
+		omittedForTransport(row.message()).toAPIMessage(row.id),
+	}
 	for i, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("shutdown during fallback: %w", err)
@@ -313,6 +346,9 @@ func (r *Reporter) postFallbackCandidate(ctx context.Context, url, token string,
 }
 
 func fallbackCandidateResult(row outboxRow, candidateIndex int, statusCode int, responseBody string, postErr error) (tryNext bool, err error) {
+	if postErr == nil && statusCode == http.StatusNoContent {
+		return false, declinedError{}
+	}
 	if postErr == nil && statusCode >= 200 && statusCode < 300 {
 		logFallbackSuccess(row, candidateIndex)
 		return false, nil
@@ -336,10 +372,9 @@ func logFallbackSuccess(row outboxRow, candidateIndex int) {
 	if candidateIndex == 0 {
 		return
 	}
-	slog.Warn("messagereport: delivered oversized message fallback",
+	slog.Warn("messagereport: control plane limits are below the reporter's; delivered omitted marker",
 		"messageId", row.messageID,
 		"role", row.role,
-		"fallbackIndex", candidateIndex,
 	)
 }
 
@@ -348,33 +383,6 @@ func (r *Reporter) contextUntilStop() (context.Context, context.CancelFunc) {
 		return context.WithCancel(context.Background())
 	}
 	return context.WithCancel(r.stopCtx)
-}
-
-func (r *Reporter) sizeFallbackCandidates(row outboxRow) []apiMessage {
-	trimmed := rowToAPIMessage(row)
-	trimmed.Content = truncateContentToLimit(trimmed.Content, r.cfg.MaxMessageContentBytes)
-
-	withoutMetadata := trimmed
-	withoutMetadata.ToolMetadata = ""
-
-	omitted := withoutMetadata
-	omitted.Content = omittedMessageMarker
-
-	return []apiMessage{trimmed, withoutMetadata, omitted}
-}
-
-func truncateContentToLimit(content string, maxBytes int) string {
-	if maxBytes <= 0 {
-		return ""
-	}
-	if maxBytes <= len(truncationMarker) {
-		return truncationMarker[:maxBytes]
-	}
-	if len(content) <= maxBytes {
-		return content
-	}
-	keep := maxBytes - len(truncationMarker)
-	return content[:keep] + truncationMarker
 }
 
 func (r *Reporter) doPost(url, token string, body []byte) (int, string, error) {
