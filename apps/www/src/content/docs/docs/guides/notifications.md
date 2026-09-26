@@ -51,10 +51,14 @@ agent supplies choices, the notification also renders touch-sized answer buttons
 one records the exact answer and forwards it to the agent.
 
 SAM sends bounded reminders during the initial response window. At the original deadline,
-work is failed and its workspace is stopped only when push delivery was confirmed. If no
-out-of-band channel confirmed delivery, SAM extends the request instead. A hard maximum
-residence time still guarantees eventual termination. The separate agent-liveness
-reconciliation watchdog retains its existing destructive deadline.
+the task is failed only when push delivery was confirmed. If no out-of-band channel
+confirmed delivery, SAM extends the request instead. A hard maximum residence time still
+guarantees eventual termination. The separate agent-liveness reconciliation watchdog keeps
+its fixed deadline. Either way, a failed task's workspace is snapshotted and its
+conversation put to sleep rather than deleted, so your reply wakes it with its files
+restored (see [Sleeping and recovering sessions](/docs/guides/chat-features/#sleeping-and-recovering-sessions)).
+The exception is an agent still stuck mid-turn when the watchdog expires: its workspace is
+released, and the chat says the work was not saved.
 
 ### Progress Updates
 

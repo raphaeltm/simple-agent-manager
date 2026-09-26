@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, lt, lte, or } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -6,8 +6,11 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import {
+  releaseExhaustedFailedTaskPreservation,
+  releaseStalledFailedTaskPreservation,
+} from '../services/failed-task-preservation-release';
+import {
   checkAutomaticSessionSleepEligibility,
-  queueWorkspaceSessionSleep,
   sleepWorkspaceSession,
 } from '../services/session-sleep';
 import {
@@ -20,6 +23,8 @@ import {
   failSessionSnapshotSleepBeforeTeardown,
   sessionLifecycleError,
 } from '../services/session-snapshots';
+import { sessionSleepMaxAttempts } from '../services/sleep-preserved-task-status';
+import { reconcileUnscheduledSessionSleeps } from './session-sleep-intent-reconciliation';
 import { terminalizeMissingSleepSource } from './session-sleep-terminal';
 
 export const DEFAULT_SESSION_SLEEP_SWEEP_BATCH_SIZE = 10;
@@ -43,107 +48,34 @@ export interface SessionSleepSweepContext {
   waitUntil(promise: Promise<unknown>): void;
 }
 
-async function reconcileUnscheduledSessionSleeps(
+/**
+ * A failed task's sleep is its work preservation (`failed-task-preservation.ts`).
+ * After a failed or given-up attempt, tear the runtime down once the sleep has no
+ * retry left; after a deferral, tear it down once the claimer can no longer take
+ * it or the episode has waited too long (`.claude/rules/47`). An incomplete
+ * capture is surfaced where every sleep finalizes
+ * (`finalizeSessionSnapshotSleeping`). Each no-ops for any other task, and never
+ * throws into the sweep.
+ */
+async function settleFailedTaskPreservation(
   env: Env,
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  batchSize: number,
-  now: Date
-): Promise<number> {
-  // Bounded D1-only discovery. Each successful candidate receives a persisted
-  // sleep deadline and leaves this selector; queueWorkspaceSessionSleep does no
-  // VM-agent I/O. Runtime activity is checked later, immediately before claim.
-  const candidates = await db
-    .selectDistinct({
-      workspaceId: schema.workspaces.id,
-      userId: schema.workspaces.userId,
-      chatSessionId: schema.workspaces.chatSessionId,
-      nodeId: schema.workspaces.nodeId,
-      runtime: schema.nodes.runtime,
-    })
-    .from(schema.workspaces)
-    .innerJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .innerJoin(
-      schema.agentSessions,
-      and(
-        eq(schema.agentSessions.workspaceId, schema.workspaces.id),
-        inArray(schema.agentSessions.status, ['running', 'recovery', 'sleeping'])
-      )
-    )
-    .leftJoin(
-      schema.sessionSnapshots,
-      eq(schema.sessionSnapshots.chatSessionId, schema.workspaces.chatSessionId)
-    )
-    .where(
-      and(
-        inArray(schema.workspaces.status, ['running', 'recovery']),
-        eq(schema.nodes.nodeRole, 'workspace'),
-        inArray(schema.nodes.runtime, ['vm', 'cf-container']),
-        isNotNull(schema.workspaces.projectId),
-        isNotNull(schema.workspaces.chatSessionId),
-        isNull(schema.sessionSnapshots.sleepingAt),
-        isNull(schema.sessionSnapshots.sleepStatus)
-      )
-    )
-    .orderBy(schema.workspaces.updatedAt, schema.workspaces.id)
-    .limit(batchSize);
-
-  let reconciled = 0;
-  for (const candidate of candidates) {
-    try {
-      await queueWorkspaceSessionSleep(env, {
-        workspaceId: candidate.workspaceId,
-        userId: candidate.userId,
-        reason: 'Scheduled sleep-intent reconciliation',
-        // Eligibility derives the authoritative ProjectData idle deadline and
-        // defers active/recent sessions. Queue immediately so an already-idle
-        // workspace does not pay a second full idle interval after discovery.
-        sleepAfterMs: 0,
-      });
-      reconciled++;
-      log.info('session_sleep_sweep.reconciled_missing_intent', {
-        source: 'scheduled_sleep_intent_reconciliation',
-        workspaceId: candidate.workspaceId,
-        chatSessionId: candidate.chatSessionId,
-        nodeId: candidate.nodeId,
-        runtime: candidate.runtime,
-        userId: candidate.userId,
-      });
-    } catch (error) {
-      const retryDelayMs = parsePositiveInt(
-        env.SESSION_SLEEP_RETRY_DELAY_MS,
-        DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS
-      );
-      const retryAt = new Date(now.getTime() + retryDelayMs).toISOString();
-      if (candidate.chatSessionId) {
-        await db
-          .update(schema.sessionSnapshots)
-          .set({
-            sleepStatus: 'scheduled',
-            sleepAfter: retryAt,
-            sleepError: sessionLifecycleError(env, error),
-            sleepClaimId: null,
-            sleepClaimedAt: null,
-            sleepStoppingSince: null,
-            updatedAt: now.toISOString(),
-          })
-          .where(
-            and(
-              eq(schema.sessionSnapshots.chatSessionId, candidate.chatSessionId),
-              isNull(schema.sessionSnapshots.sleepStatus),
-              isNull(schema.sessionSnapshots.sleepingAt)
-            )
-          )
-          .catch(() => undefined);
-      }
-      // Candidate isolation is mandatory: one malformed or concurrently removed
-      // workspace cannot suppress reconciliation for the rest of the bounded page.
-      log.warn('session_sleep_sweep.reconcile_failed', {
-        workspaceId: candidate.workspaceId,
-        error: sessionLifecycleError(env, error),
-      });
-    }
-  }
-  return reconciled;
+  candidate: { chatSessionId: string; workspaceId: string | null },
+  outcome: 'failed' | 'deferred'
+): Promise<void> {
+  const { chatSessionId, workspaceId } = candidate;
+  const settled =
+    outcome === 'failed'
+      ? releaseExhaustedFailedTaskPreservation(env, { chatSessionId })
+      : workspaceId
+        ? releaseStalledFailedTaskPreservation(env, { chatSessionId, workspaceId })
+        : Promise.resolve(false);
+  await settled.catch((error: unknown) => {
+    log.warn('session_sleep_sweep.failed_task_preservation_settle_failed', {
+      chatSessionId,
+      outcome,
+      error: sessionLifecycleError(env, error),
+    });
+  });
 }
 
 async function sleepClaimedSession(
@@ -193,6 +125,7 @@ async function sleepClaimedSession(
       exhausted,
       error: lifecycleError,
     });
+    await settleFailedTaskPreservation(env, candidate, 'failed');
     return { status: 'failed', exhausted };
   }
 }
@@ -212,10 +145,8 @@ export async function runSessionSleepSweep(
     env.SESSION_SLEEP_SWEEP_BATCH_SIZE,
     DEFAULT_SESSION_SLEEP_SWEEP_BATCH_SIZE
   );
-  const maxAttempts = parsePositiveInt(
-    env.SESSION_SLEEP_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS
-  );
+  // The same resolver the reapers' "gave up" predicate reads, so the two agree.
+  const maxAttempts = sessionSleepMaxAttempts(env);
   const wallBudgetMs = parsePositiveInt(
     env.SESSION_SLEEP_SWEEP_WALL_BUDGET_MS,
     DEFAULT_SESSION_SLEEP_SWEEP_WALL_BUDGET_MS
@@ -317,6 +248,17 @@ export async function runSessionSleepSweep(
     .limit(batchSize);
   stats.selected = candidates.length;
 
+  // Releases do network I/O (chat notice, teardown): keep them off the sweep's
+  // critical path whenever the caller can hold the work open.
+  const settleInBackground = async (
+    candidate: (typeof candidates)[number],
+    outcome: 'failed' | 'deferred'
+  ): Promise<void> => {
+    const settled = settleFailedTaskPreservation(env, candidate, outcome);
+    if (context) context.waitUntil(settled);
+    else await settled;
+  };
+
   for (const candidate of candidates) {
     if (Date.now() - startedAt >= wallBudgetMs) {
       stats.budgetExhausted = true;
@@ -325,7 +267,10 @@ export async function runSessionSleepSweep(
     let claimId: string;
     try {
       if (!candidate.workspaceId) {
-        if (await terminalizeMissingSleepSource(db, candidate, now)) stats.exhausted++;
+        if (await terminalizeMissingSleepSource(db, candidate, now)) {
+          stats.exhausted++;
+          await settleInBackground(candidate, 'failed');
+        }
         continue;
       }
       if (
@@ -337,7 +282,7 @@ export async function runSessionSleepSweep(
           (candidate.status === 'degraded' || candidate.captureGeneration)
         )
       ) {
-        await db
+        const exhaustion = await db
           .update(schema.sessionSnapshots)
           .set({
             sleepStatus: 'failed',
@@ -347,8 +292,22 @@ export async function runSessionSleepSweep(
               : 'Snapshot has no source workspace',
             updatedAt: new Date().toISOString(),
           })
-          .where(eq(schema.sessionSnapshots.id, candidate.snapshotId));
-        stats.exhausted++;
+          .where(
+            and(
+              eq(schema.sessionSnapshots.id, candidate.snapshotId),
+              // Only the row this sweep selected: a sleep episode restarted since
+              // (a new failure resets the budget), or a stale claim whose owner has
+              // since moved it on (`preparing` -> `stopping`), is left alone. A
+              // re-claim always spends an attempt, so the attempts cover it.
+              eq(schema.sessionSnapshots.sleepAttempts, candidate.sleepAttempts),
+              sql`${schema.sessionSnapshots.sleepStatus} IS ${candidate.sleepStatus}`,
+              isNull(schema.sessionSnapshots.sleepingAt)
+            )
+          );
+        if ((exhaustion.meta.changes ?? 0) > 0) {
+          stats.exhausted++;
+          await settleInBackground(candidate, 'failed');
+        }
         continue;
       }
       claimId = crypto.randomUUID();
@@ -361,9 +320,13 @@ export async function runSessionSleepSweep(
         });
         if (!eligibility.eligible) {
           if (eligibility.reason === 'workspace_metadata_missing') {
-            if (await terminalizeMissingSleepSource(db, candidate, now)) stats.exhausted++;
+            if (await terminalizeMissingSleepSource(db, candidate, now)) {
+              stats.exhausted++;
+              await settleInBackground(candidate, 'failed');
+            }
           } else {
             stats.deferred++;
+            await settleInBackground(candidate, 'deferred');
           }
           continue;
         }
@@ -413,6 +376,11 @@ export async function runSessionSleepSweep(
         chatSessionId: candidate.chatSessionId,
         error: lifecycleError,
       });
+      // Deferred without spending an attempt, like any deferral: a candidate that
+      // throws every sweep must still reach the failed-task escapes.
+      if (candidate.sleepStatus !== 'stopping') {
+        await settleInBackground(candidate, 'deferred');
+      }
       continue;
     }
 

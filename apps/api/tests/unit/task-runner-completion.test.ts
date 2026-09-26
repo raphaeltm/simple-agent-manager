@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   stopSession: vi.fn(),
   failSession: vi.fn(),
   queueWorkspaceSessionSleep: vi.fn(),
+  preserveFailedTaskWork: vi.fn(),
+  surfaceFailedTaskWorkLoss: vi.fn(),
   log: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -41,6 +43,16 @@ vi.mock('../../src/services/session-sleep', () => ({
 
 vi.mock('../../src/lib/logger', () => ({
   log: mocks.log,
+  createModuleLogger: () => mocks.log,
+}));
+
+// The preservation decision has its own real-SQL suites
+// (tests/unit/services/failed-task-preservation.test.ts, the vertical slice in
+// tests/integration/failed-task-preservation.test.ts); here it is a collaborator.
+vi.mock('../../src/services/failed-task-preservation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/failed-task-preservation')>()),
+  preserveFailedTaskWork: (...args: unknown[]) => mocks.preserveFailedTaskWork(...args),
+  surfaceFailedTaskWorkLoss: (...args: unknown[]) => mocks.surfaceFailedTaskWorkLoss(...args),
 }));
 
 function buildDb(selectRows: unknown[][]) {
@@ -107,7 +119,11 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
     expect(order).toEqual(['queueWorkspaceSessionSleep']);
   });
 
-  it('fails the chat session for failed tasks and propagates error message', async () => {
+  it('fails the chat session for unpreservable failed tasks and propagates error message', async () => {
+    mocks.preserveFailedTaskWork.mockResolvedValue({
+      outcome: 'not_preservable',
+      gap: 'workspace_not_live',
+    });
     const db = buildDb([
       [
         {

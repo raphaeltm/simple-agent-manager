@@ -232,4 +232,62 @@ describe('classifySessionIdleness', () => {
       reason: 'idle',
     });
   });
+
+  describe('failed tasks are kept by sleep, like completed ones', () => {
+    it('sleeps a failed task immediately once its prompt turn has ended', () => {
+      // The sleep is the failed task's work-preservation snapshot
+      // (failed-task-preservation.ts); it must not wait out the idle interval.
+      expect(
+        classify({
+          taskStatus: 'failed',
+          state: { activity: 'idle', activityAt: NOW.getTime() - 1_000 },
+        })
+      ).toMatchObject({ idle: true, conclusive: true, reason: 'idle' });
+    });
+
+    it.each(['completed', 'failed'] as const)(
+      'keeps a %s task draining while its agent still reports a turn',
+      (taskStatus) => {
+        // The drain follows activity for BOTH statuses: a failed agent still working
+        // after the failure must not be slept mid-turn, because
+        // `sleepWorkspaceSession` aborts on every activity change and would spend the
+        // failed task's retry budget. A HUNG failed prompt is bounded elsewhere (the
+        // check-in watchdog and the preservation maximum wait).
+        const working = { activity: 'prompting', activityAt: NOW.getTime() - 60_000 };
+        const longAgo = new Date(NOW.getTime() - IDLE_AFTER_MS - 1).toISOString();
+
+        expect(classify({ taskStatus, taskCompletedAt: longAgo, state: working })).toMatchObject({
+          idle: false,
+          conclusive: true,
+          reason: 'prompt_turn_active',
+          retryAt: new Date(NOW.getTime() - 60_000 + IDLE_AFTER_MS),
+        });
+        expect(
+          classify({
+            taskStatus,
+            taskCompletedAt: longAgo,
+            state: { activity: 'prompting', activityAt: OLD_IDLE_ACTIVITY_AT },
+          })
+        ).toMatchObject({ idle: true, conclusive: true, reason: 'completed_prompt_stale' });
+      }
+    );
+
+    it('does not widen to cancelled tasks, whose runtime is torn down directly', () => {
+      // Control (rule 67): cancelled is not sleep-preserved. An idle one still
+      // waits out the automatic interval; a prompting one is never released.
+      expect(
+        classify({
+          taskStatus: 'cancelled',
+          state: { activity: 'idle', activityAt: NOW.getTime() - 1_000 },
+        })
+      ).toMatchObject({ idle: false, reason: 'idle_interval_pending' });
+      expect(
+        classify({
+          taskStatus: 'cancelled',
+          taskCompletedAt: new Date(NOW.getTime() - 60 * 60 * 1000).toISOString(),
+          state: { activity: 'prompting', activityAt: OLD_IDLE_ACTIVITY_AT },
+        })
+      ).toMatchObject({ idle: false, reason: 'prompt_turn_active' });
+    });
+  });
 });
