@@ -434,18 +434,12 @@ function normalizeResolvedReservation(
   if (!source) {
     throw new ResourceRequirementsValidationError(`${fieldName}.source is invalid`);
   }
-  const maxCoTenants =
-    value.maxCoTenants === undefined
-      ? undefined
-      : numberField(value.maxCoTenants, `${fieldName}.maxCoTenants`);
-
   const reservation: ResolvedResourceReservation = {
     version: numberField(value.version, `${fieldName}.version`),
     cpuMillis: numberField(value.cpuMillis, `${fieldName}.cpuMillis`),
     memoryMb: numberField(value.memoryMb, `${fieldName}.memoryMb`),
     diskMb: numberField(value.diskMb, `${fieldName}.diskMb`),
     exclusiveNode: booleanField(value.exclusiveNode, `${fieldName}.exclusiveNode`),
-    ...(maxCoTenants === undefined ? {} : { maxCoTenants }),
     source,
     sourceId: stringOrUndefined(value.sourceId) ?? '',
     fieldProvenance: normalizeReservationFieldProvenance(value.fieldProvenance, fieldName),
@@ -569,8 +563,6 @@ function layersFromReservationProvenance(
       nextLayer.minMemoryGb = fieldProvenance.value as number;
     } else if (field === 'minDiskGb') {
       nextLayer.minDiskGb = fieldProvenance.value as number;
-    } else if (field === 'maxCoTenants') {
-      nextLayer.maxCoTenants = fieldProvenance.value as number;
     }
     layers[layer] = normalizeResourceRequirementsInput(nextLayer, `${layer}.resourceRequirements`);
   }

@@ -114,7 +114,6 @@ describe('project GitHub repository authorization routes', () => {
       maxDispatchDepth: null,
       maxSubTasksPerTask: null,
       warmNodeTimeoutMs: null,
-      maxWorkspacesPerNode: null,
       nodeCpuThresholdPercent: null,
       nodeMemoryThresholdPercent: null,
       createdAt: '2026-06-06T00:00:00.000Z',

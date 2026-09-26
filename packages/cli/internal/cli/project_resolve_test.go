@@ -120,10 +120,10 @@ func TestIsULID(t *testing.T) {
 	}{
 		{"01ABCDEFGHIJKLMNOPQRSTUVWX", true},
 		{"01234567890123456789012345", true},
-		{"01abc", false},                         // lowercase
-		{"01ABCDEFGHIJKLMNOPQRSTUV", false},      // too short
-		{"01ABCDEFGHIJKLMNOPQRSTUVWXY", false},   // too long
-		{"01ABCDEFGHIJKLMNOPQRSTUVW!", false},     // invalid char
+		{"01abc", false},                       // lowercase
+		{"01ABCDEFGHIJKLMNOPQRSTUV", false},    // too short
+		{"01ABCDEFGHIJKLMNOPQRSTUVWXY", false}, // too long
+		{"01ABCDEFGHIJKLMNOPQRSTUVW!", false},  // invalid char
 	}
 	for _, tt := range tests {
 		if got := isULID(tt.input); got != tt.want {
@@ -139,11 +139,11 @@ func TestIsULIDPrefix(t *testing.T) {
 	}{
 		{"01ABC", true},
 		{"01ABCDEF", true},
-		{"01AB", false},    // too short (< 5)
-		{"hello", false},   // lowercase
-		{"01ab!", false},   // invalid char
-		{"MYAPP", false},   // uppercase name, but starts with letter not digit
-		{"DEMO1", false},   // starts with letter
+		{"01AB", false},                       // too short (< 5)
+		{"hello", false},                      // lowercase
+		{"01ab!", false},                      // invalid char
+		{"MYAPP", false},                      // uppercase name, but starts with letter not digit
+		{"DEMO1", false},                      // starts with letter
 		{"01ABCDEFGHIJKLMNOPQRSTUVWX", false}, // full ULID length (26 chars)
 	}
 	for _, tt := range tests {

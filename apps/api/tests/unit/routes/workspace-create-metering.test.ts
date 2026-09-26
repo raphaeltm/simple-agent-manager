@@ -243,7 +243,7 @@ async function createMeteringFixture(options: {
         name: 'Metered fresh workspace',
         projectId: 'project-1',
         vmLocation: 'fsn1',
-        ...(options.multiWorkspace ? { resourceRequirements: { minVcpu: 0.25, minMemoryGb: 0.5, minDiskGb: 0, maxCoTenants: 3 } } : {}),
+        ...(options.multiWorkspace ? { resourceRequirements: { minVcpu: 0.25, minMemoryGb: 0.5, minDiskGb: 0 } } : {}),
       }),
     },
     f.env,
@@ -417,7 +417,7 @@ describe('fresh workspace metering through registered HTTP and real SQL', () => 
     const responses = await Promise.all(['Second workspace', 'Third workspace'].map(name => f.app.request('/', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name,
         projectId: 'project-1', nodeId: node.id,
-        resourceRequirements: { minVcpu: 0.25, minMemoryGb: 0.5, minDiskGb: 0, maxCoTenants: 3 } }),
+        resourceRequirements: { minVcpu: 0.25, minMemoryGb: 0.5, minDiskGb: 0 } }),
     }, f.f.env, f.executionContext)));
     for (const response of responses) expect(response.status, await response.clone().text()).toBe(201);
     expect(f.durable.instances.size).toBe(3);

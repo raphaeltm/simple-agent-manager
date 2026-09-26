@@ -1459,12 +1459,6 @@
           "exclusiveNode": {
             "type": "boolean",
             "description": "Whether the workload requests exclusive use of its node."
-          },
-          "maxCoTenants": {
-            "type": "integer",
-            "description": "Compatibility safety metadata preserved for older callers; must be a positive safe integer.",
-            "minimum": 1,
-            "maximum": 9007199254740991
           }
         },
         "required": [],

@@ -34,7 +34,6 @@ function makeProject(overrides: Record<string, unknown> = {}) {
     maxDispatchDepth: null,
     maxSubTasksPerTask: null,
     warmNodeTimeoutMs: null,
-    maxWorkspacesPerNode: null,
     nodeCpuThresholdPercent: null,
     nodeMemoryThresholdPercent: null,
     createdAt: '2026-01-01T00:00:00Z',

@@ -7,17 +7,15 @@ import {
   defaultSeedFleet,
   HOST_MEMORY_RESERVE_MB,
   LAB,
-  MAX_CO_TENANTS,
-  MAX_WORKSPACES_PER_NODE,
+  type LabNode,
   rankOfferings,
   setStockout,
   simulate,
   step,
   STRATEGIES,
+  type Strategy,
   submit,
   usageOf,
-  type LabNode,
-  type Strategy,
   type WorkloadShape,
 } from '../src/components/placement/model';
 
@@ -65,13 +63,10 @@ describe('admission gate', () => {
     expect(admissionRefusal(lab, nodeOf('cx23'), 'chat')).toBeNull();
   });
 
-  it('enforces a density cap before any resource dimension is exhausted', () => {
-    // Two real ceilings exist: the node-wide `MAX_WORKSPACES_PER_NODE` (3) and the per-request
-    // `MAX_CO_TENANTS` (4). At the defaults the node-wide one is stricter, so it is the one that
-    // binds — a model that only knew about the co-tenant cap would admit a fourth workload a
-    // default deployment refuses.
-    expect(MAX_WORKSPACES_PER_NODE).toBeLessThan(MAX_CO_TENANTS);
-
+  it('packs a host until a resource budget is exhausted — there is no count-based cap', () => {
+    // SAM removed the per-node workspace-count and co-tenant caps: a host is full only when CPU,
+    // memory, or disk is full. On an 8 vCPU / 16 GB cx43 a 0.5 vCPU / 1 GB chat workload fits
+    // many times over, so the old caps (3 and 4) must not be what stops admission.
     const lab = createLab(hetzner, EU);
     const node = nodeOf('cx43');
     lab.nodes.push(node);
@@ -84,19 +79,27 @@ describe('admission gate', () => {
       }
     };
 
-    fill(MAX_WORKSPACES_PER_NODE - 1);
-    // Owner control: below the cap the same host still accepts work, so the refusal below is the
-    // cap talking and not a broken fixture.
+    fill(4);
+    // Discriminating control: with more co-tenants than either retired cap allowed, the host still
+    // admits work because every resource dimension has room.
+    expect(usageOf(lab, node.id).coTenants).toBe(4);
     expect(admissionRefusal(lab, node, 'chat')).toBeNull();
 
-    fill(1);
+    let admitted = 4;
+    while (admissionRefusal(lab, node, 'chat') === null && admitted < LAB.maxWorkloads) {
+      fill(1);
+      admitted += 1;
+    }
     const usage = usageOf(lab, node.id);
-    expect(usage.coTenants).toBe(MAX_WORKSPACES_PER_NODE);
-    // 3 chat workloads is 1.5 vCPU / 3 GB on an 8 vCPU / 16 GB host — no resource dimension is
-    // anywhere near exhausted, so only a density cap can be refusing.
-    expect(usage.memoryMb).toBeLessThan(node.offering.memoryMb - HOST_MEMORY_RESERVE_MB);
-    expect(usage.cpuMillis).toBeLessThan(node.offering.vcpu * 1000);
-    expect(admissionRefusal(lab, node, 'chat')).toContain('node workspace cap');
+    const refusal = admissionRefusal(lab, node, 'chat');
+    expect(refusal).not.toBeNull();
+    expect(refusal).toMatch(/vCPU|memory|disk/);
+    // The refusal names an exhausted budget, and that budget really is exhausted.
+    const cpuFull = usage.cpuMillis + 500 > node.offering.vcpu * 1000;
+    const memoryFull = usage.memoryMb + 1024 > node.offering.memoryMb - HOST_MEMORY_RESERVE_MB;
+    const diskFull = usage.diskMb + 4 * 1024 > node.offering.diskMb;
+    expect(cpuFull || memoryFull || diskFull).toBe(true);
+    expect(usage.coTenants).toBeGreaterThan(4);
   });
 });
 

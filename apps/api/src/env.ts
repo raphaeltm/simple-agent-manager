@@ -341,7 +341,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   IDENTITY_TOKEN_CACHE_MIN_TTL_SECONDS?: string;
   // Hierarchy limits
   MAX_NODES_PER_USER?: string;
-  MAX_WORKSPACES_PER_NODE?: string;
   CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE?: string; // Optional max user/project scopes reconciled by one unscoped capacity-pool backfill call
   CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE?: string; // Optional candidate rows published per source per pass before the durable cursor resumes the rest
   CAPACITY_POOL_CATALOG_CACHE_TTL_MS?: string; // Optional per-isolate credential-scoped provider catalog cache TTL

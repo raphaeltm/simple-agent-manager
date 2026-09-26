@@ -26,7 +26,8 @@ second one is the strategy's business.
 
 **Admission** decides whether a host *may* take a workload. That is
 `evaluateWorkspaceReservationCapacity` (`apps/api/src/services/workspace-resource-capacity.ts`),
-which is the only gate for CPU, memory and disk budgets, exclusivity, and the two density caps.
+which is the only gate for CPU, memory and disk budgets and exclusivity. There is no
+count-based density cap: a host is full when one of its resource budgets is full.
 
 **Ranking** then orders the hosts admission already accepted. That is `placement-strategy.ts`,
 whose header says it plainly: it "does not re-implement any hard constraint", so "a ranking change
@@ -175,11 +176,11 @@ that fired earlier.
 
 It is a teaching model, not production scheduling code.
 
-Real: the 512 MB host reserve, both density caps — the node-wide `MAX_WORKSPACES_PER_NODE` (3) and
-the per-request `maxCoTenants` (4), of which the stricter one binds — the four ordering keys, the
-offering ordering, the exhaustion policies, and the machine names, sizes and prices. Those are
-snapshotted from the provider catalogs in `packages/providers`, and the reserve and both caps are
-pinned to their real sources, by tests that fail if any of it drifts.
+Real: the 512 MB host reserve, the four ordering keys, the offering ordering, the exhaustion
+policies, and the machine names, sizes and prices. Those are snapshotted from the provider
+catalogs in `packages/providers`, and the reserve is pinned to its real source, by tests that fail
+if any of it drifts. Earlier versions of this explorer also modelled two count-based density caps;
+SAM removed those caps, so a host now fills only when a resource budget does.
 
 **Illustrative values, not SAM defaults:** boot, run, warm and wait durations are compressed into
 countable steps so you can see the consequences; real ones are wall-clock and configurable. One

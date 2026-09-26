@@ -113,7 +113,6 @@ export interface TaskRunConfig {
   /** Per-project scaling overrides. Null values mean "use platform default". */
   projectScaling?: {
     taskExecutionTimeoutMs?: number | null;
-    maxWorkspacesPerNode?: number | null;
     nodeCpuThresholdPercent?: number | null;
     nodeMemoryThresholdPercent?: number | null;
     nodeCpuShareBudgetPercent?: number | null;

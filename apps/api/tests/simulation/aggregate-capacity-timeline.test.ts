@@ -15,7 +15,6 @@ const HALF_NODE: ResolvedResourceReservation = {
   memoryMb: 3_840,
   diskMb: 40_960,
   exclusiveNode: false,
-  maxCoTenants: 4,
   source: 'platform',
   sourceId: 'platform',
   version: 1,
@@ -35,7 +34,6 @@ const FULL_NODE: ResolvedResourceReservation = {
   cpuMillis: 4_000,
   memoryMb: 7_680,
   diskMb: 81_920,
-  maxCoTenants: 1,
 };
 
 function exactSnapshot(world: AggregateCapacityTimeline, taskId: string): string | null {
@@ -84,7 +82,6 @@ describe('aggregate capacity deterministic virtual timeline', () => {
       cpuMillis: 400,
       memoryMb: 800,
       diskMb: 2_048,
-      maxCoTenants: 2,
     };
     for (let index = 0; index < 40; index += 1) {
       world.submit(`small-${index}`, small, { preferredNodeId: 'node-large-pack' });
@@ -203,7 +200,7 @@ describe('aggregate capacity deterministic virtual timeline', () => {
 
     const world = new AggregateCapacityTimeline();
     world.addNode('node-exclusive', LARGE_NODE);
-    const exclusive = { ...HALF_NODE, exclusiveNode: true, maxCoTenants: 1 };
+    const exclusive = { ...HALF_NODE, exclusiveNode: true };
     world.submit('exclusive', exclusive, { preferredNodeId: 'node-exclusive' });
     world.runUntilIdle();
     world.submit('co-tenant', HALF_NODE, { preferredNodeId: 'node-exclusive' });

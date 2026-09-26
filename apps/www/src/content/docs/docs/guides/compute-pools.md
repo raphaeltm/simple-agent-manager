@@ -294,7 +294,6 @@ _needs_. SAM resolves them, then keeps only the offerings and nodes that satisfy
 | **Memory (GB)**    | Minimum RAM                                                                                               | 4                |
 | **Disk (GB)**      | Minimum disk                                                                                              | 40               |
 | **Exclusive node** | The work must have the machine to itself                                                                  | Off              |
-| `maxCoTenants`     | Deprecated compatibility metadata. Accepted for old clients and audit records, but does not cap placement | 4                |
 
 Every field is optional. Leave a field blank and it **inherits** — it is resolved from the next
 level down, field by field. Setting vCPU without setting memory is fine and normal.
@@ -328,9 +327,10 @@ Older projects may still carry a legacy `small` / `medium` / `large` default. It
 SAM translates it into compatibility workload requirements — but it is shown as _Legacy_ in the
 resource editor with a link to clear it. Prefer explicit vCPU/memory/disk values: a legacy size is
 a label, not a statement about provider hardware. With the current compatibility adapter, `small`
-means a roughly third-node workload slice (625 mCPU, 1152 MiB memory, 13 GiB disk, up to 3
-co-tenants), while `medium` and `large` are two-per-node slices sized to stay off the class below
-them after the default 512 MiB host memory reserve.
+means a roughly third-node workload slice (625 mCPU, 1152 MiB memory, 13 GiB disk), while
+`medium` and `large` are half-node slices sized to stay off the class below them after the default
+512 MiB host memory reserve. How many such slices share a machine is decided purely by the
+machine's remaining CPU, memory, and disk.
 :::
 
 ## How a machine actually gets chosen

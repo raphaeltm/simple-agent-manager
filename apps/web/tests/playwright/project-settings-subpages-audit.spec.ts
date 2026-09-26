@@ -75,7 +75,6 @@ const project = {
   maxDispatchDepth: null,
   maxSubTasksPerTask: null,
   warmNodeTimeoutMs: null,
-  maxWorkspacesPerNode: null,
   nodeCpuThresholdPercent: null,
   nodeMemoryThresholdPercent: null,
   createdAt: '2026-07-06T00:00:00.000Z',

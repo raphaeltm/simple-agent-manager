@@ -33,10 +33,6 @@ export const MAX_MAX_SUB_TASKS_PER_TASK = 20;
 export const MIN_WARM_NODE_TIMEOUT_MS = 30 * 1000; // 30 seconds — prevents instant-destroy race
 export const MAX_WARM_NODE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-/** Compatibility bounds for the deprecated max-workspaces setting. */
-export const MIN_MAX_WORKSPACES_PER_NODE = 1;
-export const MAX_MAX_WORKSPACES_PER_NODE = 10;
-
 /** Default CPU threshold (%). Override per-project or via TASK_RUN_NODE_CPU_THRESHOLD_PERCENT env var. */
 /**
  * Live CPU is a SATURATION ceiling, not a "this node is busy" mark.

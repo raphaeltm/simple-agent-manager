@@ -14,7 +14,6 @@ describe('normalizeResourceRequirements', () => {
   it('copies only supported own fields', () => {
     const value = Object.create({
       minVcpu: 99,
-      maxCoTenants: 99,
     }) as Record<string, unknown>;
     value.minMemoryGb = 8;
     value.minDiskGb = 0;
@@ -28,22 +27,33 @@ describe('normalizeResourceRequirements', () => {
     });
   });
 
-  it('preserves explicit false, disk zero, and positive safe tenant counts', () => {
+  it('preserves explicit false and disk zero', () => {
     expect(
       normalizeResourceRequirements({
         minVcpu: 0.001,
         minMemoryGb: 0.001,
         minDiskGb: 0,
         exclusiveNode: false,
-        maxCoTenants: 1,
       })
     ).toEqual({
       minVcpu: 0.001,
       minMemoryGb: 0.001,
       minDiskGb: 0,
       exclusiveNode: false,
-      maxCoTenants: 1,
     });
+  });
+
+  it('ignores the retired maxCoTenants field on stored rows', () => {
+    // Older profiles/triggers/tasks may still persist the count cap. It is neither validated
+    // nor carried forward: placement is decided by resources and exclusiveNode only.
+    expect(normalizeResourceRequirements({ minVcpu: 2, maxCoTenants: 2 })).toEqual({ minVcpu: 2 });
+    expect(normalizeResourceRequirements({ maxCoTenants: 0 })).toEqual({});
+    expect(
+      normalizeResourceRequirements(
+        { minVcpu: 2, minMemoryGb: 4, minDiskGb: 40, exclusiveNode: false, maxCoTenants: 4 },
+        { requireAllFields: true }
+      )
+    ).toEqual({ minVcpu: 2, minMemoryGb: 4, minDiskGb: 40, exclusiveNode: false });
   });
 
   it('requires every supported field when requireAllFields is true', () => {
@@ -57,7 +67,6 @@ describe('normalizeResourceRequirements', () => {
           minMemoryGb: 4,
           minDiskGb: 40,
           exclusiveNode: false,
-          maxCoTenants: 4,
         },
         { requireAllFields: true }
       )
@@ -66,7 +75,6 @@ describe('normalizeResourceRequirements', () => {
       minMemoryGb: 4,
       minDiskGb: 40,
       exclusiveNode: false,
-      maxCoTenants: 4,
     });
   });
 
@@ -90,12 +98,6 @@ describe('normalizeResourceRequirements', () => {
     );
     expect(() => normalizeResourceRequirements({ minDiskGb: Number.POSITIVE_INFINITY })).toThrow(
       'resourceRequirements.minDiskGb must be a finite number'
-    );
-    expect(() => normalizeResourceRequirements({ maxCoTenants: 0 })).toThrow(
-      'resourceRequirements.maxCoTenants must be a positive safe integer'
-    );
-    expect(() => normalizeResourceRequirements({ maxCoTenants: 1.5 })).toThrow(
-      'resourceRequirements.maxCoTenants must be a positive safe integer'
     );
     expect(() => normalizeResourceRequirements({ exclusiveNode: 'false' })).toThrow(
       'resourceRequirements.exclusiveNode must be a boolean'

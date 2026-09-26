@@ -187,7 +187,6 @@ export async function startRecoveryTask(
     agentProfileHint: task.agentProfileHint,
     projectScaling: {
       taskExecutionTimeoutMs: context.project.taskExecutionTimeoutMs,
-      maxWorkspacesPerNode: context.project.maxWorkspacesPerNode,
       nodeCpuThresholdPercent: context.project.nodeCpuThresholdPercent,
       nodeMemoryThresholdPercent: context.project.nodeMemoryThresholdPercent,
       warmNodeTimeoutMs: context.project.warmNodeTimeoutMs,

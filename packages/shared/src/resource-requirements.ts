@@ -9,7 +9,6 @@ export const RESOURCE_REQUIREMENT_FIELDS = [
   'minMemoryGb',
   'minDiskGb',
   'exclusiveNode',
-  'maxCoTenants',
 ] as const satisfies readonly ResourceRequirementField[];
 
 export type ReservationUnitResourceField = Extract<
@@ -98,11 +97,6 @@ function normalizeResourceRequirementField(
     throw new Error(`resourceRequirements.${field} must be a finite number`);
   }
 
-  if (field === 'maxCoTenants') {
-    if (Number.isSafeInteger(value) && value > 0) return value;
-    throw new Error('resourceRequirements.maxCoTenants must be a positive safe integer');
-  }
-
   if (field === 'minVcpu' || field === 'minMemoryGb') {
     if (value <= 0) {
       throw new Error(`resourceRequirements.${field} must be a finite positive number`);
@@ -127,7 +121,6 @@ function setResourceRequirementField(
     case 'minVcpu':
     case 'minMemoryGb':
     case 'minDiskGb':
-    case 'maxCoTenants':
       if (typeof value !== 'number') {
         throw new Error(`resourceRequirements.${field} must be a number`);
       }
