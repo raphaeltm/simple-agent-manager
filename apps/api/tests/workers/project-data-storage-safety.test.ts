@@ -1649,6 +1649,7 @@ describe('ProjectData storage safety firebreak', () => {
     );
     await withProjectDataStorageEnv(
       {
+        ...EVERY_TICK_RUNS_STORAGE_SAFETY,
         PROJECT_DATA_STORAGE_LIMIT_BYTES: String(Math.ceil(currentSize / 0.85)),
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
         PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'true',
