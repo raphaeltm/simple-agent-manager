@@ -23,11 +23,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { PROVIDER_CATALOG, type ProviderId, type Tier } from '../src/components/placement/catalog';
-import {
-  HOST_MEMORY_RESERVE_MB,
-  MAX_CO_TENANTS,
-  MAX_WORKSPACES_PER_NODE,
-} from '../src/components/placement/types';
+import { HOST_MEMORY_RESERVE_MB } from '../src/components/placement/types';
 
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 const PROVIDERS_SRC = join(REPO_ROOT, 'packages', 'providers', 'src');
@@ -179,13 +175,13 @@ describe('placement catalog snapshot matches packages/providers', () => {
 });
 
 /**
- * The explorer states these three as REAL SAM defaults rather than illustrative values — the
+ * The explorer states this as a REAL SAM default rather than an illustrative value — the
  * widget's model-note and the blog post both say so in as many words. A claim made that
  * confidently deserves at least the same drift protection as the machine catalog above. Same
  * text-extraction technique, for the same reason: `apps/www` must not take a build dependency on
  * `apps/api` or `packages/shared`.
  */
-describe('real SAM defaults mirrored by the explorer', () => {
+describe('real SAM default mirrored by the explorer', () => {
   function readNumericConst(relativePath: string, symbol: string): number {
     const source = readFileSync(join(REPO_ROOT, relativePath), 'utf8');
     const match = new RegExp(`export const ${symbol}\\s*(?::\\s*\\w+\\s*)?=\\s*([\\d_]+)`).exec(source);
@@ -205,30 +201,4 @@ describe('real SAM defaults mirrored by the explorer', () => {
     expect(HOST_MEMORY_RESERVE_MB).toBe(upstream);
   });
 
-  it('MAX_WORKSPACES_PER_NODE matches DEFAULT_MAX_WORKSPACES_PER_NODE', () => {
-    const upstream = readNumericConst(
-      'packages/shared/src/constants/task-execution.ts',
-      'DEFAULT_MAX_WORKSPACES_PER_NODE'
-    );
-    expect(upstream).toBeGreaterThan(0);
-    expect(MAX_WORKSPACES_PER_NODE).toBe(upstream);
-  });
-
-  it('MAX_CO_TENANTS matches PLATFORM_RESOURCE_DEFAULTS.maxCoTenants', () => {
-    const source = readFileSync(
-      join(REPO_ROOT, 'packages', 'shared', 'src', 'constants', 'resource-defaults.ts'),
-      'utf8'
-    );
-    const block = /export const PLATFORM_RESOURCE_DEFAULTS[^{]*\{([\s\S]*?)\}/.exec(source);
-    expect(block, 'PLATFORM_RESOURCE_DEFAULTS not found').not.toBeNull();
-    const match = /maxCoTenants:\s*(\d+)/.exec(block?.[1] ?? '');
-    expect(match, 'maxCoTenants not found in PLATFORM_RESOURCE_DEFAULTS').not.toBeNull();
-    const upstream = Number(match?.[1]);
-    expect(upstream).toBeGreaterThan(0);
-    expect(MAX_CO_TENANTS).toBe(upstream);
-  });
-
-  it('the node-wide cap is the stricter of the two, which is why the model enforces it first', () => {
-    expect(MAX_WORKSPACES_PER_NODE).toBeLessThan(MAX_CO_TENANTS);
-  });
 });

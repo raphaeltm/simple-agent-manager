@@ -3,15 +3,14 @@ import { DEFAULT_REGION_COUNT, formatPrice, PROVIDER_CATALOG } from './catalog';
 import type { ExhaustionPolicy, Lab, LabNode, Strategy, WorkloadShape } from './model';
 import {
   COMPARE_COLUMN_COUNT,
+  cpuBudgetMillis,
   createLab,
   DEFAULT_STRATEGY,
-  cpuBudgetMillis,
   defaultSeedFleet,
+  EVENT_DISPLAY_LIMIT,
   generateBatch,
   HOST_ORDERING,
   LAB,
-  EVENT_DISPLAY_LIMIT,
-  MAX_WORKSPACES_PER_NODE,
   setStockout,
   simulate,
   step,
@@ -335,7 +334,7 @@ class PlacementExplorer extends HTMLElement {
 
     const meta = document.createElement('p');
     meta.className = 'meta';
-    meta.textContent = `node ${node.id} · ${node.offering.vcpu} vCPU · ${(node.offering.memoryMb / 1024).toFixed(0)} GB · ${formatPrice(this.catalog, node.offering.monthlyCents)} · ${usage.coTenants}/${MAX_WORKSPACES_PER_NODE} workspaces`;
+    meta.textContent = `node ${node.id} · ${node.offering.vcpu} vCPU · ${(node.offering.memoryMb / 1024).toFixed(0)} GB · ${formatPrice(this.catalog, node.offering.monthlyCents)} · ${usage.coTenants} workspace${usage.coTenants === 1 ? '' : 's'}`;
 
     li.append(top, meta);
     li.append(
@@ -484,4 +483,4 @@ if (!customElements.get('placement-explorer')) {
   customElements.define('placement-explorer', PlacementExplorer);
 }
 
-export { PLAY_MS, LAB };
+export { LAB,PLAY_MS };

@@ -35,7 +35,6 @@ export const PLATFORM_RESOURCE_DEFAULTS: Required<ResourceRequirements> = {
   minMemoryGb: 4,
   minDiskGb: 40,
   exclusiveNode: false,
-  maxCoTenants: 4,
 };
 
 /**
@@ -54,21 +53,18 @@ export const DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS: Record<
     minMemoryGb: 1.125,
     minDiskGb: 13,
     exclusiveNode: false,
-    maxCoTenants: 3,
   },
   medium: {
     minVcpu: 2,
     minMemoryGb: 3.625,
     minDiskGb: 40,
     exclusiveNode: false,
-    maxCoTenants: 2,
   },
   large: {
     minVcpu: 4,
     minMemoryGb: 7.625,
     minDiskGb: 80,
     exclusiveNode: false,
-    maxCoTenants: 2,
   },
 };
 
@@ -307,8 +303,6 @@ export function resolveResourceReservation(
     memoryMb,
     diskMb,
     exclusiveNode: resolved['exclusiveNode'] as boolean,
-    // Retained as compatibility/audit metadata. Placement intentionally ignores it.
-    maxCoTenants: resolved['maxCoTenants'] as number,
     source: winningSource,
     sourceId: winningSourceId,
     version: RESOURCE_RESERVATION_VERSION,

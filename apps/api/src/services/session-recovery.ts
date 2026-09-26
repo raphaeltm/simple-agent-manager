@@ -1,19 +1,9 @@
-import {
-  type AgentProfileRuntime,
-  type CredentialSource,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  VALID_WORKSPACE_PROFILES,
-  type VMSize,
-  type WorkspaceProfile,
-} from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { expectJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
@@ -23,28 +13,26 @@ import {
 import {
   resolveTaskStartPlacement,
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
-  type TaskStartPlacementWithCredential,
 } from './placement-resolver';
 import {
   assertReplacementDeletionConfirmed,
   WorkspaceDeletionUnconfirmedError,
 } from './replacement-deletion-fence';
-import {
-  parseLegacyVmSize,
-  type PersistedTaskResourcePlanReadResult,
-  readPersistedTaskResourcePlan,
-  ResourceRequirementsValidationError,
-} from './resource-requirements-input';
-import {
-  failAndRestoreSessionRecoveryHandoff,
-  isSessionRecoverySourceTaskGuardValid,
-} from './session-recovery-authority';
+import { failAndRestoreSessionRecoveryHandoff } from './session-recovery-authority';
 import { loadRecoveryContext, type RecoveryContext } from './session-recovery-context';
 import {
   evictionRecoveryFenceMatches,
   type SessionRecoveryOptions,
-  sourceTaskExplicitLocationRequirement,
 } from './session-recovery-eviction';
+import {
+  buildRecoveryPlacementInput,
+  type RecoveryPlacementResolution,
+} from './session-recovery-request';
+import {
+  abandonRecoveryHandoff,
+  SESSION_RECOVERY_INITIAL_PROMPT,
+  startRecoveryTask,
+} from './session-recovery-task';
 import { type Db, SourceTaskNotWakeableError } from './session-recovery-task-guard';
 import {
   claimSessionSnapshotRecovery,
@@ -52,49 +40,17 @@ import {
   sessionLifecycleError,
   type SessionRecoverySourceTaskGuard,
 } from './session-snapshots';
-import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
+import { ensureTaskRunnerStarted } from './task-runner-do';
+
+export { SESSION_RECOVERY_INITIAL_PROMPT } from './session-recovery-task';
 
 export type SessionRecoveryResult =
   { status: 'waking'; taskId: string } | { status: 'unavailable'; reason: string };
 
-type RecoveryPlacementResolution = TaskStartPlacementWithCredential;
-
-export const SESSION_RECOVERY_INITIAL_PROMPT =
-  'Resume this sleeping conversation from the persisted transcript. Do not repeat prior work; wait for and answer the latest queued follow-up message.';
-
-function asVmSize(value: string | null | undefined): VMSize {
-  return value === 'small' || value === 'medium' || value === 'large' ? value : DEFAULT_VM_SIZE;
-}
-
-function asWorkspaceProfile(value: string | null | undefined): WorkspaceProfile {
-  return (VALID_WORKSPACE_PROFILES as readonly string[]).includes(value ?? '')
-    ? (value as WorkspaceProfile)
-    : DEFAULT_WORKSPACE_PROFILE;
-}
-
-function asCredentialSource(value: string | null | undefined): CredentialSource {
-  return value === 'project' || value === 'platform' || value === 'self-hosted' ? value : 'user';
-}
-
-function asAgentProfileRuntime(value: string | null | undefined): AgentProfileRuntime | null {
-  return value === 'vm' || value === 'cf-container' ? value : null;
-}
-
-function snapshotAgentType(snapshot: schema.SessionSnapshot): string | null {
-  if (!snapshot.manifestJson) return null;
-  try {
-    const manifest = expectJsonRecord(
-      JSON.parse(snapshot.manifestJson),
-      'session_recovery.snapshot_manifest'
-    );
-    return typeof manifest.agentType === 'string' && manifest.agentType.trim()
-      ? manifest.agentType.trim()
-      : null;
-  } catch {
-    return null;
-  }
-}
-
+// The node-pool boundary inventory (`scripts/quality/node-pool-boundary/inventory-data.ts`)
+// requires the module that holds this tasks-INSERT writer to also call
+// `resolveTaskStartPlacement*` and `ensureTaskRunnerStarted`. Keep the writer beside
+// `resolveRecoveryPlacement` and `ensureSessionRecovery` when splitting this file.
 async function createRecoveryTask(
   database: D1Database,
   db: Db,
@@ -348,189 +304,6 @@ async function createRecoveryTask(
   return created;
 }
 
-async function abandonRecoveryHandoff(
-  database: D1Database,
-  context: RecoveryContext,
-  task: schema.Task,
-  chatSessionId: string,
-  reason: string
-): Promise<void> {
-  if (!task.recoverySourceTaskId) return;
-  const now = new Date().toISOString();
-  const sourceTaskId = task.recoverySourceTaskId;
-  const results = await database.batch([
-    database
-      .prepare(
-        `UPDATE tasks
-            SET status = 'cancelled', execution_step = NULL, chat_session_id = NULL,
-                error_message = ?, completed_at = ?, updated_at = ?
-          WHERE id = ?
-            AND recovery_source_task_id = ?
-            AND status NOT IN ('completed', 'failed', 'cancelled')`
-      )
-      .bind(reason.slice(0, 2048), now, now, task.id, sourceTaskId),
-    database
-      .prepare(
-        `UPDATE tasks
-            SET chat_session_id = ?,
-                superseded_by_task_id = NULL,
-                updated_at = ?
-          WHERE id = ?
-            AND project_id = ?
-            AND chat_session_id IS NULL
-            AND NOT EXISTS (
-              SELECT 1 FROM tasks owner WHERE owner.chat_session_id = ?
-            )`
-      )
-      .bind(chatSessionId, now, sourceTaskId, context.project.id, chatSessionId),
-    database
-      .prepare(
-        `UPDATE workspaces
-            SET chat_session_id = ?, updated_at = ?
-          WHERE id = ?
-            AND chat_session_id IS NULL
-            AND NOT EXISTS (
-              SELECT 1 FROM workspaces owner WHERE owner.chat_session_id = ?
-            )`
-      )
-      .bind(chatSessionId, now, context.workspace.id, chatSessionId),
-    database
-      .prepare(
-        `INSERT INTO task_status_events
-           (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
-         SELECT ?, task.id, 'queued', 'cancelled', 'system', NULL, ?, ?
-           FROM tasks task
-          WHERE task.id = ? AND task.status = 'cancelled'`
-      )
-      .bind(ulid(), reason.slice(0, 2048), now, task.id),
-  ]);
-  if ((results[0]?.meta.changes ?? 0) > 0) {
-    log.info('session_recovery.handoff_abandoned', {
-      projectId: context.project.id,
-      chatSessionId,
-      taskId: task.id,
-      sourceTaskId,
-    });
-  }
-}
-
-async function startRecoveryTask(
-  env: Env,
-  context: RecoveryContext,
-  task: schema.Task,
-  chatSessionId: string,
-  placementResolution: RecoveryPlacementResolution,
-  sourceTaskGuard?: SessionRecoverySourceTaskGuard,
-  options: SessionRecoveryOptions = {}
-): Promise<void> {
-  const db = drizzle(env.DATABASE, { schema });
-  if (['completed', 'failed', 'cancelled'].includes(task.status)) {
-    throw new Error(`Recovery task is already ${task.status}`);
-  }
-  if (
-    sourceTaskGuard &&
-    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
-  ) {
-    throw new SourceTaskNotWakeableError();
-  }
-  if (task.status === 'in_progress') return;
-  const alreadyStarted = await ensureTaskRunnerStarted(env, task.id);
-  if (
-    sourceTaskGuard &&
-    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
-  ) {
-    throw new SourceTaskNotWakeableError();
-  }
-  if (alreadyStarted) return;
-
-  const profile = task.agentProfileHint
-    ? await db
-        .select()
-        .from(schema.agentProfiles)
-        .where(eq(schema.agentProfiles.id, task.agentProfileHint))
-        .get()
-    : null;
-
-  if (
-    sourceTaskGuard &&
-    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
-  ) {
-    throw new SourceTaskNotWakeableError();
-  }
-
-  if (options.evictionFence && !(await evictionRecoveryFenceMatches(env, options.evictionFence))) {
-    throw Object.assign(new Error('Eviction generation changed before TaskRunner start'), {
-      permanent: true,
-    });
-  }
-
-  await startTaskRunnerDO(env, {
-    taskId: task.id,
-    projectId: context.project.id,
-    userId: context.snapshot.userId,
-    vmSize: asVmSize(context.workspace.vmSize),
-    vmLocation: placementResolution.placement.vmLocation,
-    branch: context.workspace.branch || context.project.defaultBranch,
-    defaultBranch: context.project.defaultBranch,
-    preferredNodeId: null,
-    excludedNodeId: options.excludedNodeId ?? null,
-    userName: context.user.name,
-    userEmail: context.user.email,
-    githubId: context.user.githubId,
-    taskTitle: task.title,
-    taskDescription: task.description ?? SESSION_RECOVERY_INITIAL_PROMPT,
-    repository: context.project.repository,
-    installationId: context.project.installationId,
-    outputBranch: task.outputBranch,
-    projectDefaultVmSize: context.project.defaultVmSize as VMSize | null,
-    chatSessionId,
-    agentType:
-      snapshotAgentType(context.snapshot) ??
-      profile?.agentType ??
-      context.project.defaultAgentType ??
-      null,
-    workspaceProfile: asWorkspaceProfile(context.workspace.workspaceProfile),
-    devcontainerConfigName: context.workspace.devcontainerConfigName,
-    cloudProvider: placementResolution.placement.provider ?? placementResolution.effectiveProvider,
-    explicitVmLocation: placementResolution.placement.explicitVmLocation === true,
-    credentialAttributionUserId: placementResolution.credentialAttributionUserId,
-    credentialAttributionProjectId: placementResolution.credentialAttributionProjectId,
-    credentialAttributionSource: placementResolution.credentialAttributionSource,
-    taskMode: 'conversation',
-    model: profile?.model ?? null,
-    effort:
-      profile?.effort === 'low' ||
-      profile?.effort === 'medium' ||
-      profile?.effort === 'high' ||
-      profile?.effort === 'auto'
-        ? profile.effort
-        : null,
-    permissionMode: profile?.permissionMode ?? null,
-    systemPromptAppend: profile?.systemPromptAppend ?? null,
-    agentProfileHint: task.agentProfileHint,
-    projectScaling: {
-      taskExecutionTimeoutMs: context.project.taskExecutionTimeoutMs,
-      maxWorkspacesPerNode: context.project.maxWorkspacesPerNode,
-      nodeCpuThresholdPercent: context.project.nodeCpuThresholdPercent,
-      nodeMemoryThresholdPercent: context.project.nodeMemoryThresholdPercent,
-      warmNodeTimeoutMs: context.project.warmNodeTimeoutMs,
-    },
-    resolvedReservation: placementResolution.placement.resolvedReservation,
-    capacityPoolSelection: placementResolution.capacityPoolSelection,
-    vmSizeSource: placementResolution.placement.vmSizeSource,
-    resumeSnapshotChatSessionId: chatSessionId,
-    evictionFence: options.evictionFence ?? null,
-    // Unguarded human wakes intentionally do not carry recoverySourceTaskId:
-    // that field grants the live-parent revocable-authority contract. Keep the
-    // predecessor deletion lineage separately so every TaskRunner boundary can
-    // still revalidate that the old runtime is gone before allocating a node.
-    recoverySourceTaskId: sourceTaskGuard?.taskId ?? null,
-    retrySourceTaskId: task.recoverySourceTaskId ?? null,
-    projectEventWakeGuard: sourceTaskGuard?.projectEventWake ?? null,
-    recoveryRequiredProjectMemberId: sourceTaskGuard?.requiredProjectMemberId ?? null,
-  });
-}
-
 async function resolveRecoveryPlacement(
   db: Db,
   env: Env,
@@ -540,115 +313,9 @@ async function resolveRecoveryPlacement(
 ): Promise<
   RecoveryPlacementResolution | { error: string; errorKind: 'placement' | 'credentials' }
 > {
-  const profile = context.workspace.agentProfileHint
-    ? await db
-        .select()
-        .from(schema.agentProfiles)
-        .where(eq(schema.agentProfiles.id, context.workspace.agentProfileHint))
-        .get()
-    : null;
-  const sourceTask = context.sourceTask;
-
-  // Wake reuses the ORIGINAL run's canonical resource plan, read through the
-  // one shared reader. It used to `JSON.parse(sourceTask.resourceRequirementsJson)`
-  // into the `task` layer alone, which silently dropped every inherited layer
-  // (trigger / skill / agent-profile / project / user), ignored the persisted
-  // `resolvedReservation`, discarded the compatibility provenance recorded when
-  // a legacy size was translated, and threw an unhandled SyntaxError on a
-  // malformed stored value. Recomputing the layers from TODAY's project and
-  // profile defaults would also let a default changed since the session went to
-  // sleep silently re-size the woken workspace.
-  let storedPlan: PersistedTaskResourcePlanReadResult;
-  try {
-    storedPlan = readPersistedTaskResourcePlan({
-      taskId: sourceTask?.id ?? taskId,
-      triggerId: sourceTask?.triggerId ?? null,
-      skillId: sourceTask?.skillId ?? null,
-      agentProfileId: sourceTask?.agentProfileHint ?? context.workspace.agentProfileHint ?? null,
-      projectId: context.project.id,
-      userId: context.snapshot.userId,
-      resourceRequirementPlanJson: sourceTask?.resourceRequirementPlanJson ?? null,
-      resourceRequirementsJson: sourceTask?.resourceRequirementsJson ?? null,
-      resourceRequirementsSource: sourceTask?.resourceRequirementsSource ?? null,
-      resolvedReservationJson: sourceTask?.resolvedReservationJson ?? null,
-      requestedVmSize: sourceTask?.requestedVmSize ?? null,
-      requestedVmSizeSource: sourceTask?.requestedVmSizeSource ?? null,
-    });
-  } catch (error) {
-    // A malformed stored intent must fail visibly. Silently falling back to
-    // "no requirements" would wake the session onto whatever the current
-    // defaults happen to be, which is a scope change the user never asked for.
-    if (error instanceof ResourceRequirementsValidationError) {
-      log.warn('session_recovery.stored_resource_plan_invalid', {
-        projectId: context.project.id,
-        taskId,
-        sourceTaskId: sourceTask?.id ?? null,
-        reason: error.message,
-      });
-      return {
-        error: `Stored resource requirements for this session are invalid: ${error.message}`,
-        errorKind: 'placement',
-      };
-    }
-    throw error;
-  }
-
-  // The size the ORIGINAL run resolved to, not whatever the current project
-  // default resolves to now. `workspace.vmSize` is the size actually running.
-  const persistedVmSize =
-    storedPlan.requestedVmSize ??
-    parseLegacyVmSize(sourceTask?.requestedVmSize ?? null) ??
-    asVmSize(context.workspace.vmSize);
-  const persistedVmSizeSource = storedPlan.requestedVmSizeSource ?? 'task';
-
-  const placement = resolveTaskStartPlacement({
-    entryPoint: 'session-recovery',
-    taskId,
-    projectId: context.project.id,
-    userId: context.snapshot.userId,
-    project: context.project,
-    profile: profile
-      ? {
-          profileId: profile.id,
-          agentType: profile.agentType,
-          vmSizeOverride: profile.vmSizeOverride,
-          provider: profile.provider,
-          vmLocation: profile.vmLocation,
-          workspaceProfile: profile.workspaceProfile,
-          runtime: asAgentProfileRuntime(profile.runtime),
-          devcontainerConfigName: profile.devcontainerConfigName,
-          taskMode: profile.taskMode,
-        }
-      : null,
-    explicit: {
-      vmSize: persistedVmSize,
-      vmSizeSource: persistedVmSizeSource,
-      provider: null,
-      vmLocation:
-        options.evictionFence && sourceTaskExplicitLocationRequirement(sourceTask) === false
-          ? null
-          : context.workspace.vmLocation,
-      workspaceProfile: asWorkspaceProfile(context.workspace.workspaceProfile),
-      devcontainerConfigName: context.workspace.devcontainerConfigName,
-      taskMode: 'conversation',
-      agentType: snapshotAgentType(context.snapshot),
-      runtime: 'vm',
-    },
-    inheritedCredentialAttribution: {
-      userId: sourceTask?.credentialAttributionUserId ?? context.snapshot.userId,
-      projectId: sourceTask?.credentialAttributionProjectId ?? null,
-      source: asCredentialSource(sourceTask?.credentialAttributionSource),
-    },
-    credentialProjectPolicy: 'current-project-unless-inherited',
-    taskModeDefault: 'workspace-profile',
-    // Every persisted layer, at its ORIGINAL precedence — not just `task`, and
-    // not re-derived from today's project/profile rows.
-    resourceRequirements: storedPlan.layers,
-    // The reservation the original run actually allocated against. Reusing it
-    // keeps a wake byte-identical to the run it resumes; recomputing could
-    // silently re-size the workspace under a changed default.
-    resolvedReservationOverride: storedPlan.resolvedReservation,
-  });
+  const input = await buildRecoveryPlacementInput(db, env, context, taskId, options);
+  if ('error' in input) return input;
+  const placement = resolveTaskStartPlacement(input);
 
   return resolveTaskStartPlacementCredentialAttributionFromPlacement(db, placement, {
     credentialsRequiredMessage:

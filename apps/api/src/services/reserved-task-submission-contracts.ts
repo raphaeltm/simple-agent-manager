@@ -226,7 +226,6 @@ export interface TaskRunnerStartSnapshot {
   resourceRequirements?: ResourceRequirements;
   projectScaling: {
     taskExecutionTimeoutMs: number | null;
-    maxWorkspacesPerNode: number | null;
     nodeCpuThresholdPercent: number | null;
     nodeMemoryThresholdPercent: number | null;
     warmNodeTimeoutMs: number | null;

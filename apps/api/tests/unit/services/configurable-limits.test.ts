@@ -8,7 +8,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { DEFAULT_MAX_WORKSPACES_PER_NODE } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_RATE_LIMITS } from '../../../src/middleware/rate-limit';
@@ -505,8 +504,8 @@ describe('Env interface — new configurable limit env vars', () => {
     expect(indexSource).toContain('MAX_AGENT_SESSION_LABEL_LENGTH');
   });
 
-  it('declares MAX_WORKSPACES_PER_NODE in Env', () => {
-    expect(indexSource).toContain('MAX_WORKSPACES_PER_NODE');
+  it('no longer declares the retired MAX_WORKSPACES_PER_NODE in Env', () => {
+    expect(indexSource).not.toContain('MAX_WORKSPACES_PER_NODE');
   });
 });
 
@@ -538,21 +537,18 @@ describe('workspace create — count limit removed', () => {
 });
 
 // =============================================================================
-// Source contract: task-runner DO retains legacy limit configuration as metadata
+// Shared admission policy: node pressure thresholds only, no workspace count
 // =============================================================================
 
-describe('task-runner legacy workspace count configuration', () => {
-  // The per-node cap and node pressure thresholds moved out of the TaskRunner DO
-  // into the shared admission policy, so both advisory selection and the final
-  // admission SQL read one configuration. These assertions exercise that resolver
-  // rather than grepping the DO's source.
-  it('reads MAX_WORKSPACES_PER_NODE from env with the shared default', () => {
-    expect(resolveWorkspaceAdmissionPolicy({} as never).maxWorkspaces).toBe(
-      DEFAULT_MAX_WORKSPACES_PER_NODE
-    );
+describe('task-runner admission policy configuration', () => {
+  // Node pressure thresholds moved out of the TaskRunner DO into the shared
+  // admission policy, so both advisory selection and the final admission SQL read
+  // one configuration. The per-node workspace-count cap was retired outright.
+  it('resolves no workspace-count field, even when a legacy env override is present', () => {
+    expect(resolveWorkspaceAdmissionPolicy({} as never)).not.toHaveProperty('maxWorkspaces');
     expect(
-      resolveWorkspaceAdmissionPolicy({ MAX_WORKSPACES_PER_NODE: '9' } as never).maxWorkspaces
-    ).toBe(9);
+      resolveWorkspaceAdmissionPolicy({ MAX_WORKSPACES_PER_NODE: '1' } as never)
+    ).not.toHaveProperty('maxWorkspaces');
   });
 
   it('still reads CPU and memory thresholds from env', () => {
@@ -564,8 +560,8 @@ describe('task-runner legacy workspace count configuration', () => {
     expect(policy.memoryThresholdPercent).toBe(62);
   });
 
-  it('does not enforce the legacy workspace count limit when explicit resources fit', () => {
-    const policy = resolveWorkspaceAdmissionPolicy({ MAX_WORKSPACES_PER_NODE: '1' } as never);
+  it('admits a second workspace when explicit resources fit — no count limit exists', () => {
+    const policy = resolveWorkspaceAdmissionPolicy({} as never);
     const node = {
       id: 'node-1',
       nodeClass: 'managed',
@@ -582,7 +578,6 @@ describe('task-runner legacy workspace count configuration', () => {
       memoryMb: 1024,
       diskMb: 1024,
       exclusiveNode: false,
-      maxCoTenants: 4,
       source: 'platform' as const,
       sourceId: 'platform',
       version: 1,
@@ -591,7 +586,6 @@ describe('task-runner legacy workspace count configuration', () => {
       activeCount: 1,
       invalidCount: 0,
       exclusiveCount: 0,
-      minMaxCoTenants: null,
       cpuMillis: 0,
       memoryMb: 0,
       diskMb: 0,

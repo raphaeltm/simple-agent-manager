@@ -531,7 +531,6 @@ export async function prepareNewSubmission(
     resourceRequirements: firstResourceRequirementLayer(resourceRequirementLayers) ?? undefined,
     projectScaling: {
       taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
-      maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
       nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
       nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
       warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,

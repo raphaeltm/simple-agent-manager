@@ -54,7 +54,6 @@ function fixture() {
         memoryMb: 4096,
         diskMb: 40960,
         exclusiveNode: false,
-        maxCoTenants: 4,
       },
     },
   });

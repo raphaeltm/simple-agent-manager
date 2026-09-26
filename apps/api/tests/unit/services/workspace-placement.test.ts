@@ -244,7 +244,6 @@ function reservation(
     memoryMb: 1024,
     diskMb: 1024,
     exclusiveNode: false,
-    maxCoTenants: 4,
     source: 'platform',
     sourceId: 'platform',
     version: 1,
@@ -265,16 +264,13 @@ function reservationV2(
 function reservationV3(
   overrides: Partial<ResolvedResourceReservation> = {}
 ): ResolvedResourceReservation {
-  const current = reservation({ version: 3, ...overrides });
-  delete current.maxCoTenants;
-  return current;
+  return reservation({ version: 3, ...overrides });
 }
 
 function admissionPolicy(
   overrides: Partial<WorkspaceAdmissionPolicy> = {}
 ): WorkspaceAdmissionPolicy {
   return {
-    maxWorkspaces: 4,
     cpuShareBudgetPercent: 100,
     hostMemoryReserveMb: 0,
     diskPressureThresholdPercent: 90,
@@ -337,7 +333,7 @@ describe('reserveWorkspacePlacement', () => {
     const snapshot = capacitySnapshot();
     seedNode();
 
-    await expect(reserveWorkspacePlacement(database, reserveInput(snapshot), 5)).resolves.toBe(
+    await expect(reserveWorkspacePlacement(database, reserveInput(snapshot), admissionPolicy())).resolves.toBe(
       true
     );
   });
@@ -347,7 +343,7 @@ describe('reserveWorkspacePlacement', () => {
     const snapshot = capacitySnapshot();
     seedNode();
 
-    await expect(reserveWorkspacePlacement(database, reserveInput(snapshot), 5)).resolves.toBe(
+    await expect(reserveWorkspacePlacement(database, reserveInput(snapshot), admissionPolicy())).resolves.toBe(
       true
     );
 
@@ -448,7 +444,7 @@ describe('reserveWorkspacePlacement', () => {
     });
 
     await expect(
-      reserveWorkspacePlacement(database, reserveInput(capacitySnapshot()), 5)
+      reserveWorkspacePlacement(database, reserveInput(capacitySnapshot()), admissionPolicy())
     ).resolves.toBe(false);
     expect(countWorkspace()).toBe(0);
   });
@@ -579,7 +575,10 @@ describe('reserveWorkspacePlacement', () => {
     });
     seedActiveWorkspace(
       'workspace-legacy-max-a',
-      JSON.stringify(reservation({ cpuMillis: 400, memoryMb: 800, diskMb: 2048, maxCoTenants: 2 }))
+      JSON.stringify({
+        ...reservation({ cpuMillis: 400, memoryMb: 800, diskMb: 2048 }),
+        maxCoTenants: 2,
+      })
     );
     seedActiveWorkspace(
       'workspace-legacy-max-b',
@@ -594,7 +593,7 @@ describe('reserveWorkspacePlacement', () => {
           id: 'workspace-v3-no-max-co-tenants',
           resolvedReservation: reservationV3({ cpuMillis: 400, memoryMb: 800, diskMb: 2048 }),
         },
-        admissionPolicy({ maxWorkspaces: 2, memoryThresholdPercent: 1 })
+        admissionPolicy({ memoryThresholdPercent: 1 })
       )
     ).resolves.toBe(true);
   });
@@ -953,7 +952,7 @@ describe('attachPrecreatedWorkspacePlacement', () => {
       attachPrecreatedWorkspacePlacement(
         database,
         { ...reserveInput(snapshot), id: 'workspace-attach' },
-        admissionPolicy({ maxWorkspaces: 1 })
+        admissionPolicy()
       )
     ).resolves.toBe(true);
 
@@ -1013,7 +1012,7 @@ describe('reserveEvictedWorkspaceRestart', () => {
         reserveEvictedWorkspaceRestart(
           database,
           { ...input, resolvedReservation: lastSlotReservation },
-          admissionPolicy({ maxWorkspaces: 1 })
+          admissionPolicy()
         )
       )
     );

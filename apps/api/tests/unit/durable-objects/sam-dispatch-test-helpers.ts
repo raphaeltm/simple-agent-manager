@@ -66,7 +66,6 @@ export const dispatchProject = {
   defaultLocation: null,
   agentDefaults: null,
   taskExecutionTimeoutMs: null,
-  maxWorkspacesPerNode: null,
   nodeCpuThresholdPercent: null,
   nodeMemoryThresholdPercent: null,
   warmNodeTimeoutMs: null,

@@ -95,6 +95,10 @@ function createDbMock() {
         run: () => Promise.resolve({ success: true }),
       };
     },
+    // D1 runs a batch as one transaction; this mock only needs each statement to run.
+    batch(statements: Array<{ run: () => Promise<unknown> }>) {
+      return Promise.all(statements.map((statement) => statement.run()));
+    },
   };
 }
 

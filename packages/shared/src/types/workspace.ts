@@ -338,7 +338,6 @@ export interface CreateWorkspaceRequest {
     minMemoryGb?: number;
     minDiskGb?: number;
     exclusiveNode?: boolean;
-    maxCoTenants?: number;
   };
   /** Devcontainer config name (subdirectory under .devcontainer/). null/undefined = auto-discover default. */
   devcontainerConfigName?: string | null;

@@ -183,7 +183,6 @@ export function toProjectResponse(project: schema.Project): Project {
     maxDispatchDepth: project.maxDispatchDepth ?? null,
     maxSubTasksPerTask: project.maxSubTasksPerTask ?? null,
     warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
-    maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
     nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
     nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
     maxTriggers: project.maxTriggers ?? null,

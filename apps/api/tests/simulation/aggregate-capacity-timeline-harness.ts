@@ -104,13 +104,9 @@ export class AggregateCapacityTimeline {
 
   constructor(
     readonly policy: AggregateCapacityTimelinePolicy = CURRENT_AGGREGATE_CAPACITY_POLICY,
-    readonly maxWorkspaces = 10,
     readonly heartbeatStaleMs = 30_000
   ) {
-    this.admissionPolicy = resolveWorkspaceAdmissionPolicy(
-      {},
-      { maxWorkspacesPerNode: maxWorkspaces }
-    );
+    this.admissionPolicy = resolveWorkspaceAdmissionPolicy({});
   }
 
   addNode(

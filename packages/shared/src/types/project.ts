@@ -61,7 +61,6 @@ export interface Project {
   maxDispatchDepth?: number | null;
   maxSubTasksPerTask?: number | null;
   warmNodeTimeoutMs?: number | null;
-  maxWorkspacesPerNode?: number | null;
   nodeCpuThresholdPercent?: number | null;
   nodeMemoryThresholdPercent?: number | null;
   /** Per-project max triggers override. null = use platform default (MAX_TRIGGERS_PER_PROJECT). */
@@ -146,7 +145,6 @@ export interface UpdateProjectRequest {
   maxDispatchDepth?: number | null;
   maxSubTasksPerTask?: number | null;
   warmNodeTimeoutMs?: number | null;
-  maxWorkspacesPerNode?: number | null;
   nodeCpuThresholdPercent?: number | null;
   nodeMemoryThresholdPercent?: number | null;
   /** Per-project max triggers override. null = reset to platform default. */

@@ -423,6 +423,11 @@ export const projects = sqliteTable(
     maxDispatchDepth: integer('max_dispatch_depth'),
     maxSubTasksPerTask: integer('max_sub_tasks_per_task'),
     warmNodeTimeoutMs: integer('warm_node_timeout_ms'),
+    /**
+     * Retired 2026-09-25. The per-node workspace-count cap no longer exists; placement is decided
+     * by CPU/memory/disk reservations and exclusiveNode. The column stays for audit history only
+     * (never read, never written, not exposed by the API).
+     */
     maxWorkspacesPerNode: integer('max_workspaces_per_node'),
     nodeCpuThresholdPercent: integer('node_cpu_threshold_percent'),
     nodeMemoryThresholdPercent: integer('node_memory_threshold_percent'),
