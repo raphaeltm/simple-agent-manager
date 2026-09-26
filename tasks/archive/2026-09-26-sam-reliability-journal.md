@@ -29,6 +29,12 @@ Publish a daily journal entry that explains the technically meaningful work merg
 - A lay reader can understand what changed and why it matters without prior knowledge of SAM.
 - [x] The website build succeeds: `pnpm --filter @simple-agent-manager/www build` completed successfully on 2026-09-26.
 
+## Final validation
+
+- Marketing-site lint, template typecheck, and build passed. The generated static HTML was inspected for the post title, journal opening, frontmatter-derived metadata, and Mermaid source.
+- `task-completion-validator` passed after confirming every research finding, checklist item, and acceptance criterion against `main...HEAD`.
+- `doc-sync-validator` passed: frontmatter, technical claims, Mermaid flow, and the GitHub source link match the implementation and site conventions.
+
 ## References
 
 - `apps/www/src/content/CLAUDE.md`
