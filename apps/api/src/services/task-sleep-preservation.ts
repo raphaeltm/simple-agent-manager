@@ -77,13 +77,30 @@ export interface TaskSleepPreservation {
   sleepStatus: string | null;
   /** `session_snapshots.expires_at` of the preserving row, for logs only. */
   expiresAt: string | null;
+  /** Human-resumable conversation fallback after the runtime snapshot TTL expires. */
+  conversationFallback: boolean;
 }
 
-const NOT_RUN: TaskSleepPreservation = { outcome: 'not_run', sleepStatus: null, expiresAt: null };
-const NONE: TaskSleepPreservation = { outcome: 'none', sleepStatus: null, expiresAt: null };
+const NOT_RUN: TaskSleepPreservation = {
+  outcome: 'not_run',
+  sleepStatus: null,
+  expiresAt: null,
+  conversationFallback: false,
+};
+const NONE: TaskSleepPreservation = {
+  outcome: 'none',
+  sleepStatus: null,
+  expiresAt: null,
+  conversationFallback: false,
+};
 
 function preserved(row: SleepLifecyclePredicateResult): TaskSleepPreservation {
-  return { outcome: 'preserve', sleepStatus: row.sleep_status, expiresAt: row.expires_at };
+  return {
+    outcome: 'preserve',
+    sleepStatus: row.sleep_status,
+    expiresAt: row.expires_at,
+    conversationFallback: false,
+  };
 }
 
 /** True when the verdict must be withheld — both `preserve` and `unknown`. */
@@ -97,6 +114,13 @@ type SleepPreservationEnv = Pick<
   | 'SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS'
   | 'SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS'
 >;
+
+interface HumanResumableConversationTask {
+  id: string;
+  projectId: string;
+  chatSessionId: string | null;
+  taskMode?: string | null;
+}
 
 /**
  * Read the chat session's sleep state for one task about to receive a terminal
@@ -114,7 +138,7 @@ type SleepPreservationEnv = Pick<
 export async function loadTaskSleepPreservation(
   db: D1Database,
   env: SleepPreservationEnv,
-  task: { id: string; projectId: string; chatSessionId: string | null },
+  task: HumanResumableConversationTask,
   now?: Date
 ): Promise<TaskSleepPreservation> {
   // A task with no chat session has no sleep record to protect, and skipping the
@@ -128,7 +152,16 @@ export async function loadTaskSleepPreservation(
       chatSessionId: task.chatSessionId,
       now,
     });
-    return row ? preserved(row) : NONE;
+    if (row) return preserved(row);
+    if (await isHumanResumableConversationTask(db, task)) {
+      return {
+        outcome: 'preserve',
+        sleepStatus: null,
+        expiresAt: null,
+        conversationFallback: true,
+      };
+    }
+    return NONE;
   } catch (err) {
     log.warn('lookup_failed', {
       taskId: task.id,
@@ -137,8 +170,42 @@ export async function loadTaskSleepPreservation(
       action: 'withheld_terminal_verdict',
       error: err instanceof Error ? err.message : String(err),
     });
-    return { outcome: 'unknown', sleepStatus: null, expiresAt: null };
+    return { outcome: 'unknown', sleepStatus: null, expiresAt: null, conversationFallback: false };
   }
+}
+
+async function isHumanResumableConversationTask(
+  db: D1Database,
+  task: HumanResumableConversationTask
+): Promise<boolean> {
+  if (task.taskMode !== 'conversation' || !task.chatSessionId) return false;
+  const row = await db
+    .prepare(
+      `SELECT 1
+         FROM tasks task
+         INNER JOIN session_snapshots snapshot
+            ON snapshot.project_id = task.project_id
+           AND snapshot.chat_session_id = task.chat_session_id
+        WHERE task.id = ?
+          AND task.project_id = ?
+          AND task.task_mode = 'conversation'
+          AND task.chat_session_id = ?
+          AND task.status = 'in_progress'
+          AND snapshot.sleeping_at IS NOT NULL
+          AND snapshot.sleep_status = 'sleeping'
+          AND (
+            (snapshot.status = 'available' AND snapshot.degradation = 'none')
+            OR (
+              snapshot.status = 'degraded'
+              AND snapshot.degradation IS NOT NULL
+              AND snapshot.degradation != 'none'
+            )
+          )
+        LIMIT 1`
+    )
+    .bind(task.id, task.projectId, task.chatSessionId)
+    .first<{ 1: number }>();
+  return Boolean(row);
 }
 
 /**
@@ -161,6 +228,7 @@ export async function withholdTerminalVerdictForSleepingSession(
     chatSessionId: string | null;
     workspaceId: string | null;
     executionStep: string | null;
+    taskMode?: string | null;
   },
   context: { source: string; withheldReason: string }
 ): Promise<boolean> {
@@ -174,6 +242,7 @@ export async function withholdTerminalVerdictForSleepingSession(
     executionStep: task.executionStep,
     sleepStatus: preservation.sleepStatus,
     expiresAt: preservation.expiresAt,
+    conversationFallback: preservation.conversationFallback,
     outcome: preservation.outcome,
     source: context.source,
     withheldReason: context.withheldReason,
