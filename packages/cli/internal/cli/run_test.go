@@ -20,6 +20,34 @@ func TestRunPrintsHelp(t *testing.T) {
 	if !strings.Contains(stdout.String(), "SAM CLI") || !strings.Contains(stdout.String(), "sam projects") {
 		t.Fatalf("help output missing expected text: %s", stdout.String())
 	}
+	// Resource flags are still documented; the retired per-node count cap is not.
+	if !strings.Contains(stdout.String(), "--min-vcpu") {
+		t.Fatalf("help output missing resource flags: %s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "max-co-tenants") {
+		t.Fatalf("help output still advertises the removed --max-co-tenants flag: %s", stdout.String())
+	}
+}
+
+func TestSummarizeResourceJSON(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"all fields", `{"minVcpu":2,"minMemoryGb":3.5,"minDiskGb":20,"exclusiveNode":false}`, "2 vCPU, 3.50 GB memory, 20 GB disk, exclusive=false"},
+		{"exclusive only", `{"exclusiveNode":true}`, "exclusive=true"},
+		{"legacy row ignores the retired cap", `{"minVcpu":2,"maxCoTenants":3}`, "2 vCPU"},
+		{"legacy cap alone is not a workload", `{"maxCoTenants":3}`, "unknown workload (compatibility metadata)"},
+		{"malformed", `{`, "unknown workload (malformed compatibility metadata)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := summarizeResourceJSON(tc.raw); got != tc.want {
+				t.Fatalf("summarizeResourceJSON(%s) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
 }
 
 func TestAuthLoginReadsCookieFromStdin(t *testing.T) {
