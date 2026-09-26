@@ -245,18 +245,26 @@ export async function sweepMaxLifetimeNodes(
   }
 }
 
-/**
- * Phase 3 — nodes the NodeLifecycle DO alarm stopped but never destroyed.
- *
- * The DO cannot destroy cloud infrastructure (credentials are encrypted in D1 and
- * need worker context), so it hands off by writing `status='stopped'`.
- */
-export async function sweepStoppedHandoffNodes(
+type HandoffCleanupStatus = 'stopped' | 'destroying';
+
+interface HandoffCleanupOptions {
+  status: HandoffCleanupStatus;
+  skippedActiveLogEvent: string;
+  logEvent: string;
+  failureLogEvent: string;
+  successMessage: string;
+  failureMessagePrefix: string;
+  recoveryType: string;
+  failureRecoveryType: string;
+}
+
+async function sweepManagedHandoffNodes(
   db: CleanupDb,
   env: Env,
   now: Date,
   config: CleanupConfig,
-  result: NodeCleanupResult
+  result: NodeCleanupResult,
+  options: HandoffCleanupOptions
 ): Promise<void> {
   const sweepDeadlineMs = Date.now() + config.stoppedHandoffSweepBudgetMs;
   const workspaceIdleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
@@ -266,7 +274,7 @@ export async function sweepStoppedHandoffNodes(
             ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
      FROM nodes n
      LEFT JOIN workspaces w ON w.node_id = n.id
-     WHERE n.status = 'stopped'
+     WHERE n.status = ?
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
        AND ${cleanupNodeProvenanceSql('n')}
@@ -277,7 +285,13 @@ export async function sweepStoppedHandoffNodes(
      ORDER BY last_activity ASC
      LIMIT ?`
   )
-    .bind(now.toISOString(), workspaceIdleThreshold, workspaceIdleThreshold, config.nodeSweepLimit)
+    .bind(
+      options.status,
+      now.toISOString(),
+      workspaceIdleThreshold,
+      workspaceIdleThreshold,
+      config.nodeSweepLimit
+    )
     .all<{
       id: string;
       user_id: string;
@@ -290,7 +304,7 @@ export async function sweepStoppedHandoffNodes(
   for (const node of candidates.results) {
     if (Date.now() >= sweepDeadlineMs) break;
     if (node.active_ws_count > 0) {
-      log.warn('node_cleanup.stopped_handoff_skipped_active_workspaces', {
+      log.warn(options.skippedActiveLogEvent, {
         nodeId: node.id,
         userId: node.user_id,
         activeWorkspaces: node.active_ws_count,
@@ -301,16 +315,16 @@ export async function sweepStoppedHandoffNodes(
     }
 
     const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
-      logEvent: 'node_cleanup.destroying_stopped_handoff',
+      logEvent: options.logEvent,
       requestDeadlineMs: Math.min(
         sweepDeadlineMs,
         Date.now() + config.stoppedHandoffRequestTimeoutMs
       ),
-      failureLogEvent: 'node_cleanup.stopped_handoff_destroy_failed',
-      successMessage: 'Destroyed stopped managed node left by NodeLifecycle alarm',
-      failureMessagePrefix: 'Failed to destroy stopped handoff node',
-      recoveryType: 'stopped_node_handoff_cleanup',
-      failureRecoveryType: 'stopped_node_handoff_cleanup_failure',
+      failureLogEvent: options.failureLogEvent,
+      successMessage: options.successMessage,
+      failureMessagePrefix: options.failureMessagePrefix,
+      recoveryType: options.recoveryType,
+      failureRecoveryType: options.failureRecoveryType,
       failureBackoffMs: config.failureBackoffMs,
       workspaceIdleThresholdIso: workspaceIdleThreshold,
       context: {
@@ -331,6 +345,31 @@ export async function sweepStoppedHandoffNodes(
 }
 
 /**
+ * Phase 3 — nodes the NodeLifecycle DO alarm stopped but never destroyed.
+ *
+ * The DO cannot destroy cloud infrastructure (credentials are encrypted in D1 and
+ * need worker context), so it hands off by writing `status='stopped'`.
+ */
+export async function sweepStoppedHandoffNodes(
+  db: CleanupDb,
+  env: Env,
+  now: Date,
+  config: CleanupConfig,
+  result: NodeCleanupResult
+): Promise<void> {
+  await sweepManagedHandoffNodes(db, env, now, config, result, {
+    status: 'stopped',
+    skippedActiveLogEvent: 'node_cleanup.stopped_handoff_skipped_active_workspaces',
+    logEvent: 'node_cleanup.destroying_stopped_handoff',
+    failureLogEvent: 'node_cleanup.stopped_handoff_destroy_failed',
+    successMessage: 'Destroyed stopped managed node left by NodeLifecycle alarm',
+    failureMessagePrefix: 'Failed to destroy stopped handoff node',
+    recoveryType: 'stopped_node_handoff_cleanup',
+    failureRecoveryType: 'stopped_node_handoff_cleanup_failure',
+  });
+}
+
+/**
  * Phase 3b — stale nodes already claimed for destruction.
  *
  * A provider allocation can fail after SAM has claimed the node as `destroying`
@@ -345,76 +384,16 @@ export async function sweepDestroyingHandoffNodes(
   config: CleanupConfig,
   result: NodeCleanupResult
 ): Promise<void> {
-  const sweepDeadlineMs = Date.now() + config.stoppedHandoffSweepBudgetMs;
-  const workspaceIdleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
-  const candidates = await env.DATABASE.prepare(
-    `SELECT n.id, n.user_id, n.status, n.created_at,
-            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
-            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
-     FROM nodes n
-     LEFT JOIN workspaces w ON w.node_id = n.id
-     WHERE n.status = 'destroying'
-       AND n.node_role = 'workspace'
-       AND n.node_class != 'user-owned'
-       AND ${cleanupNodeProvenanceSql('n')}
-       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
-       ${boundedWarmPlacementClaimGuardSql('n.id')}
-     GROUP BY n.id, n.user_id, n.status, n.created_at
-     HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
-     ORDER BY last_activity ASC
-     LIMIT ?`
-  )
-    .bind(now.toISOString(), workspaceIdleThreshold, workspaceIdleThreshold, config.nodeSweepLimit)
-    .all<{
-      id: string;
-      user_id: string;
-      status: string;
-      created_at: string;
-      active_ws_count: number;
-      last_activity: string;
-    }>();
-
-  for (const node of candidates.results) {
-    if (Date.now() >= sweepDeadlineMs) break;
-    if (node.active_ws_count > 0) {
-      log.warn('node_cleanup.destroying_handoff_skipped_active_workspaces', {
-        nodeId: node.id,
-        userId: node.user_id,
-        activeWorkspaces: node.active_ws_count,
-        lastWorkspaceActivity: node.last_activity,
-      });
-      result.lifetimeSkipped++;
-      continue;
-    }
-
-    const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
-      logEvent: 'node_cleanup.destroying_stale_handoff',
-      requestDeadlineMs: Math.min(
-        sweepDeadlineMs,
-        Date.now() + config.stoppedHandoffRequestTimeoutMs
-      ),
-      failureLogEvent: 'node_cleanup.destroying_handoff_destroy_failed',
-      successMessage: 'Destroyed managed node left in destroying handoff',
-      failureMessagePrefix: 'Failed to destroy stale destroying handoff node',
-      recoveryType: 'destroying_node_handoff_cleanup',
-      failureRecoveryType: 'destroying_node_handoff_cleanup_failure',
-      failureBackoffMs: config.failureBackoffMs,
-      workspaceIdleThresholdIso: workspaceIdleThreshold,
-      context: {
-        createdAt: node.created_at,
-        lastWorkspaceActivity: node.last_activity,
-        workspaceIdleTimeoutMs: config.workspaceIdleTimeoutMs,
-      },
-    });
-
-    if (destroyed === 'destroyed') {
-      result.lifetimeDestroyed++;
-    } else if (destroyed === 'skipped') {
-      result.lifetimeSkipped++;
-    } else {
-      result.errors++;
-    }
-  }
+  await sweepManagedHandoffNodes(db, env, now, config, result, {
+    status: 'destroying',
+    skippedActiveLogEvent: 'node_cleanup.destroying_handoff_skipped_active_workspaces',
+    logEvent: 'node_cleanup.destroying_stale_handoff',
+    failureLogEvent: 'node_cleanup.destroying_handoff_destroy_failed',
+    successMessage: 'Destroyed managed node left in destroying handoff',
+    failureMessagePrefix: 'Failed to destroy stale destroying handoff node',
+    recoveryType: 'destroying_node_handoff_cleanup',
+    failureRecoveryType: 'destroying_node_handoff_cleanup_failure',
+  });
 }
 
 /**
