@@ -331,6 +331,93 @@ export async function sweepStoppedHandoffNodes(
 }
 
 /**
+ * Phase 3b — stale nodes already claimed for destruction.
+ *
+ * A provider allocation can fail after SAM has claimed the node as `destroying`
+ * but before any provider instance ID is written. In that state there is no
+ * provider-side VM to delete, and the hourly sweep must be able to write the
+ * same terminal runtime proof the rest of cleanup requires.
+ */
+export async function sweepDestroyingHandoffNodes(
+  db: CleanupDb,
+  env: Env,
+  now: Date,
+  config: CleanupConfig,
+  result: NodeCleanupResult
+): Promise<void> {
+  const sweepDeadlineMs = Date.now() + config.stoppedHandoffSweepBudgetMs;
+  const workspaceIdleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
+  const candidates = await env.DATABASE.prepare(
+    `SELECT n.id, n.user_id, n.status, n.created_at,
+            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
+            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
+     FROM nodes n
+     LEFT JOIN workspaces w ON w.node_id = n.id
+     WHERE n.status = 'destroying'
+       AND n.node_role = 'workspace'
+       AND n.node_class != 'user-owned'
+       AND ${cleanupNodeProvenanceSql('n')}
+       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
+       ${boundedWarmPlacementClaimGuardSql('n.id')}
+     GROUP BY n.id, n.user_id, n.status, n.created_at
+     HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
+     ORDER BY last_activity ASC
+     LIMIT ?`
+  )
+    .bind(now.toISOString(), workspaceIdleThreshold, workspaceIdleThreshold, config.nodeSweepLimit)
+    .all<{
+      id: string;
+      user_id: string;
+      status: string;
+      created_at: string;
+      active_ws_count: number;
+      last_activity: string;
+    }>();
+
+  for (const node of candidates.results) {
+    if (Date.now() >= sweepDeadlineMs) break;
+    if (node.active_ws_count > 0) {
+      log.warn('node_cleanup.destroying_handoff_skipped_active_workspaces', {
+        nodeId: node.id,
+        userId: node.user_id,
+        activeWorkspaces: node.active_ws_count,
+        lastWorkspaceActivity: node.last_activity,
+      });
+      result.lifetimeSkipped++;
+      continue;
+    }
+
+    const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
+      logEvent: 'node_cleanup.destroying_stale_handoff',
+      requestDeadlineMs: Math.min(
+        sweepDeadlineMs,
+        Date.now() + config.stoppedHandoffRequestTimeoutMs
+      ),
+      failureLogEvent: 'node_cleanup.destroying_handoff_destroy_failed',
+      successMessage: 'Destroyed managed node left in destroying handoff',
+      failureMessagePrefix: 'Failed to destroy stale destroying handoff node',
+      recoveryType: 'destroying_node_handoff_cleanup',
+      failureRecoveryType: 'destroying_node_handoff_cleanup_failure',
+      failureBackoffMs: config.failureBackoffMs,
+      workspaceIdleThresholdIso: workspaceIdleThreshold,
+      context: {
+        createdAt: node.created_at,
+        lastWorkspaceActivity: node.last_activity,
+        workspaceIdleTimeoutMs: config.workspaceIdleTimeoutMs,
+      },
+    });
+
+    if (destroyed === 'destroyed') {
+      result.lifetimeDestroyed++;
+    } else if (destroyed === 'skipped') {
+      result.lifetimeSkipped++;
+    } else {
+      result.errors++;
+    }
+  }
+}
+
+/**
  * Phase 4 — incompatible managed VM nodes after a vm-agent rollout.
  *
  * Busy legacy nodes are drained by exclusion from all placement paths, but are

@@ -47,8 +47,7 @@ vi.mock('drizzle-orm/d1', () => ({
             run: execute,
             then: <TResult1 = { meta: { changes: number } }, TResult2 = never>(
               onfulfilled?:
-                | ((value: { meta: { changes: number } }) => TResult1 | PromiseLike<TResult1>)
-                | null,
+                ((value: { meta: { changes: number } }) => TResult1 | PromiseLike<TResult1>) | null,
               onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
             ) => execute().then(onfulfilled, onrejected),
           };
@@ -188,15 +187,26 @@ describe('node resource deletion services', () => {
       name: 'pool node',
       status: 'running',
       nodeClass: 'managed',
+      nodeRole: 'workspace',
       runtime: 'vm',
+      workloadRole: 'workspace',
       runtimeIncarnationId: 'runtime-incarnation-pool-1',
       providerInstanceId: 'vm-pool-1',
       cloudProvider: 'hetzner',
+      providerInstanceType: 'cx53',
+      providerInstanceVcpuCount: 16,
+      providerInstanceMemoryMb: 32768,
       backendDnsRecordId: null,
       credentialAttributionUserId: 'pool-owner-1',
       credentialAttributionSource: 'project',
       credentialAttributionProjectId: 'project-1',
       capacityPoolId: 'pool-project-1',
+      capacityPoolScope: 'project',
+      capacityPoolProjectId: 'project-1',
+      capacityPoolRevision: 1,
+      capacitySourceId: 'source-project-1',
+      capacitySourceGeneration: 1,
+      capacityPoolCandidateId: 'candidate-project-1',
       placementCredentialSource: 'project',
       placementCredentialReference: 'credentials:project-cloud-1',
       placementCredentialVersion: 1787875200000,
@@ -529,8 +539,9 @@ describe('node resource deletion services', () => {
         status: 'destroying',
         providerInstanceId: null,
         runtimeIncarnationId: 'runtime-incarnation-without-provider-id',
-        runtimeTerminationConfirmedAt: '2026-09-19T17:00:00.000Z',
+        runtimeTerminationConfirmedAt: null,
         cloudProvider: 'hetzner',
+        backendDnsRecordId: 'dns-placeholder',
       })
     );
 
@@ -543,6 +554,8 @@ describe('node resource deletion services', () => {
 
     expect(createProviderForUser).not.toHaveBeenCalled();
     expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(deleteDNSRecord).toHaveBeenCalledWith('dns-placeholder', ENV);
+    expect(updateCalls).toContainEqual({ runtimeTerminationConfirmedAt: expect.any(String) });
     expect(updateCalls).toContainEqual(
       expect.objectContaining({ runtimeDeletionProof: 'node_runtime_terminated' })
     );
@@ -725,11 +738,7 @@ describe('node resource deletion services', () => {
       { placementCredentialVersion: null, placementCredentialFingerprint: null },
       'placementCredentialFingerprint and placementCredentialVersion',
     ],
-    [
-      'full proof but no cloud provider',
-      { cloudProvider: null },
-      'cloudProvider',
-    ],
+    ['full proof but no cloud provider', { cloudProvider: null }, 'cloudProvider'],
   ])('fails closed for a node with %s', async (_label, overrides, expectedMissing) => {
     nodeRows.push(managedPoolNode({ id: 'gated-node', status: 'destroying', ...overrides }));
 
@@ -751,7 +760,6 @@ describe('node resource deletion services', () => {
     expect(deleteDNSRecord).not.toHaveBeenCalled();
     expect(updateCalls).toEqual([]);
   });
-
 
   // THE PRODUCTION INCIDENT (node 01M1RKXS5YT0AEAD84872MNN2E). A node provisioned before
   // migration 0142 carries source + reference + version but never a fingerprint. Requiring a
@@ -785,9 +793,9 @@ describe('node resource deletion services', () => {
         credentialFingerprint: null,
       })
     );
-    expect(
-      updateCalls.some((call) => typeof call.runtimeTerminationConfirmedAt === 'string')
-    ).toBe(true);
+    expect(updateCalls.some((call) => typeof call.runtimeTerminationConfirmedAt === 'string')).toBe(
+      true
+    );
   });
 
   it('still refuses a version-only binding whose credential row has since rotated', async () => {
@@ -809,9 +817,9 @@ describe('node resource deletion services', () => {
     );
 
     expect(providerDeleteVM).not.toHaveBeenCalled();
-    expect(
-      updateCalls.some((call) => typeof call.runtimeTerminationConfirmedAt === 'string')
-    ).toBe(false);
+    expect(updateCalls.some((call) => typeof call.runtimeTerminationConfirmedAt === 'string')).toBe(
+      false
+    );
   });
 
   it('does not use a rotated current account even when its instance ID collides', async () => {
