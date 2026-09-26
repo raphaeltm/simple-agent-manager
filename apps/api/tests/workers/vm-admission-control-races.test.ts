@@ -166,7 +166,6 @@ function reservation(
     memoryMb: 1024,
     diskMb: 1024,
     exclusiveNode: false,
-    maxCoTenants: 4,
     source: 'platform',
     sourceId: 'platform',
     version: 1,
@@ -178,7 +177,6 @@ function admissionPolicy(
   overrides: Partial<WorkspaceAdmissionPolicy> = {}
 ): WorkspaceAdmissionPolicy {
   return {
-    maxWorkspaces: 4,
     cpuShareBudgetPercent: 100,
     hostMemoryReserveMb: 0,
     diskPressureThresholdPercent: 90,
@@ -252,7 +250,7 @@ function taskState(
       systemPromptAppend: null,
       agentProfileHint: null,
       attachments: null,
-      projectScaling: overrides.projectScaling ?? { maxWorkspacesPerNode: 2 },
+      projectScaling: overrides.projectScaling ?? {},
       resourceRequirements: null,
       resolvedReservation: overrides.resolvedReservation ?? null,
       capacityPoolSelection: overrides.capacityPoolSelection ?? null,
@@ -574,7 +572,6 @@ function selectorContext(): TaskRunnerContext {
   return {
     env: {
       DATABASE: env.DATABASE,
-      MAX_WORKSPACES_PER_NODE: '2',
       TASK_RUN_NODE_CPU_THRESHOLD_PERCENT: '90',
       TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT: '90',
       VM_AGENT_REQUIRED_VERSION: 'current-sha',
@@ -713,7 +710,7 @@ describe('VM admission control D1 races', () => {
       await findNodeWithCapacity(
         taskState(userId, 'small', {
           resolvedReservation: requests[0]!.reservation,
-          projectScaling: { maxWorkspacesPerNode: 4 },
+          projectScaling: {},
         }),
         selectorContext()
       )
@@ -732,7 +729,7 @@ describe('VM admission control D1 races', () => {
     for (const [index, request] of requests.entries()) {
       const state = taskState(userId, request.vmSize, {
         resolvedReservation: request.reservation,
-        projectScaling: { maxWorkspacesPerNode: 4 },
+        projectScaling: {},
       });
       const selected = await findNodeWithCapacity(state, selectorContext());
       expect(selected?.nodeId).toBe(nodeId);
@@ -910,7 +907,7 @@ describe('VM admission control D1 races', () => {
     // exercised by the dedicated host-reserve test, and applying it here would
     // make an 8 GB medium node refuse its second 4 GB workspace for an unrelated
     // reason.
-    const packingPolicy = admissionPolicy({ maxWorkspaces: 2 });
+    const packingPolicy = admissionPolicy();
     const firstPlacement = await reserveWorkspacePlacement(
       env.DATABASE,
       placement('workspace-vm-admission-medium-first', mediumNode),
@@ -954,7 +951,6 @@ describe('VM admission control D1 races', () => {
         projectId,
         installationId,
         projectScaling: {
-          maxWorkspacesPerNode: 2,
           nodeCpuThresholdPercent: 70,
           nodeMemoryThresholdPercent: 90,
         },
@@ -1092,7 +1088,7 @@ describe('VM admission control D1 races', () => {
           }),
           capacityPlacementSnapshot: snapshot,
         },
-        2
+        admissionPolicy()
       )
     ).resolves.toBe(true);
 
@@ -1130,7 +1126,7 @@ describe('VM admission control D1 races', () => {
           ...placement(workspaceId, nodeId, { vmSize: 'large', projectId: POOL_PROJECT_ID }),
           capacityPlacementSnapshot: snapshot,
         },
-        2
+        admissionPolicy()
       )
     ).resolves.toBe(true);
 
@@ -1215,7 +1211,7 @@ describe('VM admission control D1 races', () => {
           }),
           capacityPlacementSnapshot: sourceLessUserSnapshot,
         },
-        2
+        admissionPolicy()
       )
     ).resolves.toBe(false);
 
@@ -1228,7 +1224,7 @@ describe('VM admission control D1 races', () => {
           }),
           capacityPlacementSnapshot: sourceLessProjectSnapshot,
         },
-        2
+        admissionPolicy()
       )
     ).resolves.toBe(false);
 
@@ -1275,7 +1271,7 @@ describe('VM admission control D1 races', () => {
           }),
           capacityPlacementSnapshot: otherSnapshot,
         },
-        2
+        admissionPolicy()
       )
     ).resolves.toBe(false);
   });
@@ -1298,7 +1294,7 @@ describe('VM admission control D1 races', () => {
         placement('workspace-vm-admission-project-pool-no-snapshot', nodeId, {
           vmSize: 'large',
         }),
-        2
+        admissionPolicy()
       )
     ).resolves.toBe(false);
   });
@@ -1349,25 +1345,32 @@ describe('VM admission control D1 races', () => {
           installationId: otherInstallationId,
           repository: otherRepository,
         }),
-        2
+        admissionPolicy()
       )
     ).resolves.toBe(false);
   });
 
-  it('atomically grants only one final reservation for the last workspace slot', async () => {
+  it('atomically grants only one final reservation when two requests race for the last CPU budget', async () => {
     const nodeId = 'node-vm-admission-last-slot';
     await makeReadyNode(nodeId, USER_ID, 'medium');
+    // Scarcity comes from the resource budget, never from a workspace count: a medium node has
+    // 4 vCPU, so two concurrent 4-vCPU reservations can only ever admit one of them.
+    const wholeNodeCpu = reservation({ cpuMillis: 4000 });
 
     const outcomes = await Promise.all([
       reserveWorkspacePlacement(
         env.DATABASE,
-        placement('workspace-vm-admission-last-slot-a', nodeId),
-        1
+        placement('workspace-vm-admission-last-slot-a', nodeId, {
+          resolvedReservation: wholeNodeCpu,
+        }),
+        admissionPolicy()
       ),
       reserveWorkspacePlacement(
         env.DATABASE,
-        placement('workspace-vm-admission-last-slot-b', nodeId),
-        1
+        placement('workspace-vm-admission-last-slot-b', nodeId, {
+          resolvedReservation: wholeNodeCpu,
+        }),
+        admissionPolicy()
       ),
     ]);
 
@@ -1576,7 +1579,7 @@ describe('VM admission control D1 races', () => {
         reserveWorkspacePlacement(
           env.DATABASE,
           placement(`workspace-vm-admission-veto-${testCase.name}`, testCase.nodeId),
-          2
+          admissionPolicy()
         )
       ).resolves.toBe(false);
     }
@@ -1584,7 +1587,7 @@ describe('VM admission control D1 races', () => {
 
   it('counts creating and recovery reservations but releases stopped and deleted capacity', async () => {
     const fullReservation = reservation({ cpuMillis: 2000, memoryMb: 4096, diskMb: 40960 });
-    const policy = admissionPolicy({ maxWorkspaces: 3 });
+    const policy = admissionPolicy();
     const creatingNode = 'node-vm-admission-capacity-creating';
     const recoveryNode = 'node-vm-admission-capacity-recovery';
     const stoppedNode = 'node-vm-admission-capacity-stopped';

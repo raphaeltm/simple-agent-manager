@@ -113,10 +113,10 @@ describe('node-cleanup cron sweep — node_role filtering', () => {
 describe('task-runner node-steps — node_role filtering', () => {
   it('node quota count query excludes deployment nodes', async () => {
     const fs = await import('fs');
-    // The provisioning step (and this query with it) moved out of node-steps.ts
-    // when that file was split for rule 18.
+    // The provisioning step moved out of node-steps.ts, and this query moved on
+    // into the step's pre-allocation gates, as those files were split for rule 18.
     const source = fs.readFileSync(
-      path.join(SRC_DIR, 'durable-objects/task-runner/node-provisioning-step.ts'),
+      path.join(SRC_DIR, 'durable-objects/task-runner/node-provisioning-gates.ts'),
       'utf-8'
     );
 

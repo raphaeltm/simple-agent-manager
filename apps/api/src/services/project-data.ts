@@ -39,6 +39,7 @@ import type {
   MessageCommentMutationResponse,
   MessageCommentReplyMutationResponse,
   MessageCommentThread,
+  MessageCursor,
   ProjectEventAdmissionResult,
   ProjectEventChannelHistory,
   ProjectEventChannelHistoryInput,
@@ -905,8 +906,8 @@ export async function getMessages(
   projectId: string,
   sessionId: string,
   limit: number = 100,
-  before: number | null = null,
-  after: number | null = null,
+  before: MessageCursor | null = null,
+  after: MessageCursor | null = null,
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc'

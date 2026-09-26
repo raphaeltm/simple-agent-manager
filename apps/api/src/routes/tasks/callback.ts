@@ -105,7 +105,10 @@ taskCallbackRoute.post(
       const now = new Date().toISOString();
       const stepUpdate: Partial<schema.NewTask> = {
         executionStep: body.executionStep,
-        errorMessage: body.errorMessage?.trim() || null,
+        // A step report is progress, not an outcome: it must not erase why a
+        // task failed (a preserved failed task's agent can keep reporting steps).
+        errorMessage:
+          task.status === 'failed' ? task.errorMessage : body.errorMessage?.trim() || null,
         updatedAt: now,
       };
 

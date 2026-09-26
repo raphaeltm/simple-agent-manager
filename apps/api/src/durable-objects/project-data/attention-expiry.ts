@@ -5,9 +5,9 @@ import type { NotificationService } from '../notification';
 import * as activity from './activity';
 import * as attention from './attention';
 import { checkinFailureReason } from './checkin-failure-reason';
+import { assessCheckinActivity, loadLatestActiveAcpActivity } from './checkin-activity';
 import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
 import { activeWorkHardStallMs, reconciliationDeadlineMs } from './reconciliation-thresholds';
-import { freshRuntimeWorkProgressAt } from './runtime-work-progress';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.attention_expiry');
@@ -228,17 +228,22 @@ async function failExpiredTaskMarker(
       ? await checkinFailureReason(env, marker.workspaceId)
       : 'Human input request expired after timeout';
 
+  const projectId = hooks.projectId ?? null;
+  const source = `project_data.attention_expiry.${marker.kind}`;
   const transitionOutcome = await transitionTaskToTerminal(env as unknown as WorkerEnv, {
     taskId: marker.taskId,
-    projectId: hooks.projectId ?? null,
+    projectId,
     status: 'failed',
     reason: errorMessage,
-    source: `project_data.attention_expiry.${marker.kind}`,
+    source,
     expectedWorkspaceId: marker.workspaceId,
     expectedChatSessionId: marker.sessionId,
-    stopWorkspace: true,
+    // Work preservation (or, failing that, cleanupTaskRun) owns the runtime.
+    // Pre-marking it `stopped` would skip the real VM stop and make the
+    // workspace unsleepable ("Workspace cannot sleep from status stopped").
+    stopWorkspace: false,
   });
-  if (transitionOutcome !== 'transitioned') {
+  if (transitionOutcome !== 'transitioned' || !projectId) {
     log.warn('attention_marker.task_terminal_transition_skipped', {
       markerId: marker.id,
       sessionId: marker.sessionId,
@@ -249,9 +254,6 @@ async function failExpiredTaskMarker(
     });
     return;
   }
-
-  await failSession(marker.sessionId, errorMessage);
-  hooks.scheduleSummarySync?.();
   activity.recordActivityEventInternal(
     sql,
     'attention.expired',
@@ -263,8 +265,55 @@ async function failExpiredTaskMarker(
     JSON.stringify({ kind: marker.kind, markerId: marker.id })
   );
 
-  if (marker.kind === 'reconciliation_checkin' && marker.workspaceId) {
-    void cleanupUnresponsiveTaskRun(env, marker.workspaceId, marker.taskId);
+  // Most expiries hit a conversation that already slept while it waited: keep it
+  // asleep and wakeable instead of failing the session (idea 01M1XGHX7NQZQYWQRV5C1PJ60N).
+  // A check-in whose agent reported work since it was asked, and kept that turn
+  // open past the hard ceiling, is the watchdog's verdict that the turn will not
+  // end: a sleep would wait on it, and every capture would race its re-reports.
+  // That runtime is released now. A turn that reported nothing since the check-in
+  // is unproven, not stalled, and is preserved like any other failure.
+  const workerEnv = env as unknown as WorkerEnv;
+  const preservationService = await import('../../services/failed-task-preservation');
+  const unresponsiveMidTurn =
+    marker.kind === 'reconciliation_checkin' &&
+    assessCheckinActivity(env, marker, loadLatestActiveAcpActivity(sql, marker), Date.now())
+      .stalledPastCeiling;
+  const preservation = unresponsiveMidTurn
+    ? ({ outcome: 'not_preservable', gap: 'agent_unresponsive' } as const)
+    : await preservationService.preserveFailedTaskWork(workerEnv, {
+        taskId: marker.taskId,
+        projectId,
+        workspaceId: marker.workspaceId,
+        chatSessionId: marker.sessionId,
+        source,
+      });
+  if (preservationService.withholdsFailedTaskTeardown(preservation)) {
+    log.info('attention_marker.expired_work_preserved', {
+      markerId: marker.id,
+      sessionId: marker.sessionId,
+      taskId: marker.taskId,
+      kind: marker.kind,
+      outcome: preservation.outcome,
+    });
+    return;
+  }
+
+  await preservationService.surfaceFailedTaskWorkLoss(workerEnv, {
+    taskId: marker.taskId,
+    projectId,
+    chatSessionId: marker.sessionId,
+    reason: preservation.gap,
+    source,
+  });
+  await failSession(marker.sessionId, errorMessage);
+  hooks.scheduleSummarySync?.();
+  // Off the alarm's critical path (`.claude/rules/47`). The object stays alive
+  // while this I/O is pending (`ctx.waitUntil` has no effect in a Durable Object),
+  // and should it never finish, the node-cleanup reapers still take the runtime:
+  // `sleepLifecycleOwnsTerminalTaskWorkspaceSql` releases every failed workspace
+  // the sleep lifecycle neither holds nor can claim.
+  if (marker.workspaceId) {
+    void cleanupExpiredTaskRun(env, marker.workspaceId, marker.taskId);
   }
 
   log.info('attention_marker.expired_cleanup', {
@@ -276,11 +325,7 @@ async function failExpiredTaskMarker(
   });
 }
 
-async function cleanupUnresponsiveTaskRun(
-  env: Env,
-  workspaceId: string,
-  taskId: string
-): Promise<void> {
+async function cleanupExpiredTaskRun(env: Env, workspaceId: string, taskId: string): Promise<void> {
   try {
     const workerEnv = env as unknown as import('../../env').Env;
     const { cleanupTaskRun } = await import('../../services/task-runner');
@@ -294,135 +339,19 @@ async function cleanupUnresponsiveTaskRun(
   }
 }
 
-function toFreshNumber(value: unknown, floor: number): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value >= floor ? value : null;
-}
-
-function toPositiveNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
-}
-
-function maxFreshEvidence(floor: number, ...values: unknown[]): number | null {
-  const freshValues = values
-    .map((value) => toFreshNumber(value, floor))
-    .filter((value): value is number => value !== null);
-  return freshValues.length > 0 ? Math.max(...freshValues) : null;
-}
-
-interface ActiveCheckinEvidence {
-  evidenceAt: number;
-  extendedExpiry: number;
-  evidenceKinds: string[];
-  promptCeilingAt: number | null;
-  runtimeWorkCeilingAt: number | null;
-}
-
-function activeCheckinEvidence(
-  env: Env,
-  marker: ExpiredAttentionMarker,
-  active: Record<string, unknown>,
-  now: number
-): ActiveCheckinEvidence | null {
-  const hardStallMs = activeWorkHardStallMs(env);
-  const deadlineMs = reconciliationDeadlineMs(env);
-  const activityName = typeof active.activity === 'string' ? active.activity : null;
-  const runtimeWorkState =
-    typeof active.runtime_work_state === 'string' ? active.runtime_work_state : null;
-  const evidenceKinds: string[] = [];
-  const ceilings: number[] = [];
-  let evidenceAt = 0;
-  let promptCeilingAt: number | null = null;
-  let runtimeWorkCeilingAt: number | null = null;
-
-  if (activityName === 'prompting' || activityName === 'recovering') {
-    const activityEvidenceAt = maxFreshEvidence(
-      marker.createdAt,
-      active.prompt_started_at,
-      active.activity_at
-    );
-    const promptAnchor =
-      toPositiveNumber(active.prompt_started_at) ??
-      toPositiveNumber(active.activity_at) ??
-      activityEvidenceAt;
-
-    if (activityEvidenceAt !== null && promptAnchor !== null) {
-      promptCeilingAt = promptAnchor + hardStallMs;
-      if (promptCeilingAt > now) {
-        evidenceAt = Math.max(evidenceAt, activityEvidenceAt);
-        ceilings.push(promptCeilingAt);
-        evidenceKinds.push('prompt_activity');
-      }
-    }
-  }
-
-  if (runtimeWorkState === 'active' || runtimeWorkState === 'settling') {
-    const runtimeWorkEvidenceAt = freshRuntimeWorkProgressAt(
-      {
-        runtimeWorkState,
-        runtimeWorkProgressAt: active.runtime_work_progress_at,
-        runtimeWorkUpdatedAt: active.runtime_work_updated_at,
-      },
-      now,
-      hardStallMs,
-      marker.createdAt
-    );
-    const runtimeWorkAnchor = runtimeWorkEvidenceAt;
-
-    if (runtimeWorkEvidenceAt !== null && runtimeWorkAnchor !== null) {
-      runtimeWorkCeilingAt = runtimeWorkAnchor + hardStallMs;
-      if (runtimeWorkCeilingAt > now) {
-        evidenceAt = Math.max(evidenceAt, runtimeWorkEvidenceAt);
-        ceilings.push(runtimeWorkCeilingAt);
-        evidenceKinds.push('runtime_work');
-      }
-    }
-  }
-
-  if (evidenceAt <= 0 || ceilings.length === 0) return null;
-  return {
-    evidenceAt,
-    extendedExpiry: Math.min(now + deadlineMs, ...ceilings),
-    evidenceKinds,
-    promptCeilingAt,
-    runtimeWorkCeilingAt,
-  };
-}
-
 function deferActiveReconciliationCheckin(
   sql: SqlStorage,
   env: Env,
   marker: ExpiredAttentionMarker
 ): boolean {
-  const activeRows = sql
-    .exec(
-      `SELECT acp.id AS acp_session_id,
-              acp.status AS acp_status,
-              ss.activity AS activity,
-              ss.activity_at AS activity_at,
-              ss.prompt_started_at AS prompt_started_at,
-              ss.runtime_work_state AS runtime_work_state,
-              ss.runtime_work_updated_at AS runtime_work_updated_at,
-              ss.runtime_work_progress_at AS runtime_work_progress_at
-       FROM acp_sessions acp
-       LEFT JOIN session_state ss ON ss.session_id = acp.id
-       WHERE acp.chat_session_id = ?
-         AND acp.status IN ('assigned', 'running')
-         AND (? IS NULL OR acp.workspace_id = ?)
-       ORDER BY COALESCE(acp.started_at, acp.assigned_at, acp.updated_at, acp.created_at) DESC
-       LIMIT 1`,
-      marker.sessionId,
-      marker.workspaceId,
-      marker.workspaceId
-    )
-    .toArray();
-  const active = activeRows[0];
+  const active = loadLatestActiveAcpActivity(sql, marker);
   if (!active) return false;
 
   const activityName = typeof active.activity === 'string' ? active.activity : null;
   const runtimeWorkState =
     typeof active.runtime_work_state === 'string' ? active.runtime_work_state : null;
   const now = Date.now();
-  const evidence = activeCheckinEvidence(env, marker, active, now);
+  const evidence = assessCheckinActivity(env, marker, active, now).deferral;
   if (!evidence) return false;
 
   attention.extendAttentionExpiry(sql, marker.id, evidence.extendedExpiry);

@@ -96,6 +96,18 @@ export const DEFAULT_CHAT_SESSION_MESSAGE_MAX = 50000;
  */
 export const DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT = 5000;
 
+/**
+ * Safety bound on how many forward pages one chat delta may read.
+ *
+ * A delta drains every message newer than the cached transcript, page by page,
+ * so a tab that fell far behind catches up without a gap. At the default delta
+ * page size this covers more messages than a session can hold; the bound exists
+ * only so a server that never clears `hasMore` cannot spin the client.
+ *
+ * Override at build time via VITE_CHAT_DELTA_MAX_PAGES.
+ */
+export const DEFAULT_CHAT_DELTA_MAX_PAGES = 50;
+
 // =============================================================================
 // Message-anchored comments
 // =============================================================================

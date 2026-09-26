@@ -179,6 +179,12 @@ the same transport), disk (heartbeat disk % was normal and git kept committing).
 
 ## Validation in progress
 
+- Current `main` (`853b637e8`, including merged #2145) was merged into the PR on 2026-09-26.
+  Conflict resolution keeps #2145's failed-task preservation and terminal cleanup authority while
+  retaining this PR's unhealthy-node owner/snapshot fences and truthful node-heartbeat verdicts.
+  The focused overlap suite passes: 197 API tests, 29 Workers-runtime tests, API typecheck, and
+  `go test -race ./internal/server` on Go 1.26.6.
+
 - `go test ./internal/server` passes for the preserved vm-agent root-cause fix.
 - API typecheck passes; 89 focused reconciliation, attention, and unhealthy-node unit tests pass.
 - The existing node-cleanup Workers suite passes (22/22); a new test through

@@ -27,6 +27,7 @@ describe('warm node pooling lifecycle integration', () => {
     'config.ts',
     'shared.ts',
     'node-phases.ts',
+    'terminal-cf-container-phase.ts',
     'workspace-phases.ts',
   ]
     .map((f) => readFileSync(resolve(process.cwd(), `src/scheduled/node-cleanup/${f}`), 'utf8'))

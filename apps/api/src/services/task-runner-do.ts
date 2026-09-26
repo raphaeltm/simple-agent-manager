@@ -172,7 +172,6 @@ export async function startTaskRunnerDO(
     /** Per-project scaling overrides. */
     projectScaling?: {
       taskExecutionTimeoutMs?: number | null;
-      maxWorkspacesPerNode?: number | null;
       nodeCpuThresholdPercent?: number | null;
       nodeMemoryThresholdPercent?: number | null;
       nodeCpuShareBudgetPercent?: number | null;

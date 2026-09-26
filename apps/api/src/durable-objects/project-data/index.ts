@@ -16,6 +16,7 @@ import {
   MAILBOX_DEFAULTS,
   type MessageCommentThread,
   type MessageCommentThreadEventReason,
+  type MessageCursor,
   type SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
@@ -816,8 +817,8 @@ export class ProjectData extends DurableObject<Env> {
   async getMessages(
     sessionId: string,
     limit: number = 1000,
-    before: number | null = null,
-    after: number | null = null,
+    before: MessageCursor | null = null,
+    after: MessageCursor | null = null,
     roles?: string[],
     compact: boolean = false,
     order: 'asc' | 'desc' = 'desc'
@@ -957,8 +958,8 @@ export class ProjectData extends DurableObject<Env> {
   archiveSourceGetMessages(
     input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
     limit: number = 1000,
-    before: number | null = null,
-    after: number | null = null,
+    before: MessageCursor | null = null,
+    after: MessageCursor | null = null,
     roles?: string[],
     compact: boolean = false,
     order: 'asc' | 'desc' = 'desc'
@@ -1094,8 +1095,8 @@ export class ProjectData extends DurableObject<Env> {
   archiveTargetGetMessages(
     input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
     limit: number = 1000,
-    before: number | null = null,
-    after: number | null = null,
+    before: MessageCursor | null = null,
+    after: MessageCursor | null = null,
     roles?: string[],
     compact: boolean = false,
     order: 'asc' | 'desc' = 'desc'

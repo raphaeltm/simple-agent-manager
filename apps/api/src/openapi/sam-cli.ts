@@ -546,13 +546,6 @@ export const samCliOpenApiDocument: OpenApiDocument = {
             minimum: 0,
           },
           exclusiveNode: booleanSchema('Whether the workload requests exclusive use of its node.'),
-          maxCoTenants: {
-            ...integerSchema(
-              'Compatibility safety metadata preserved for older callers; must be a positive safe integer.'
-            ),
-            minimum: 1,
-            maximum: Number.MAX_SAFE_INTEGER,
-          },
         },
         [],
         true

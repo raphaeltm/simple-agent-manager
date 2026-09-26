@@ -10,8 +10,6 @@ import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
 import {
   DEFAULT_CHAT_COMPACT_MODE,
   DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
-  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
-  DEFAULT_CHAT_SESSION_MESSAGE_MAX,
   isTaskExecutionStep,
   isTaskMode,
 } from '@simple-agent-manager/shared';
@@ -21,7 +19,6 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
 import { requireRouteParam } from '../lib/route-helpers';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
@@ -46,6 +43,13 @@ import { registerChatCommentDirectiveRoute } from './chat-comment-directives';
 import { chatCommentRoutes } from './chat-comments';
 import { chatForkRoutes } from './chat-fork';
 import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
+import {
+  getCompactMode,
+  getMessageCursor,
+  getMessageOrder,
+  getRequestedRoles,
+  getSessionMessageLimit,
+} from './chat-message-query';
 import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
 import { registerChatPromptRoute } from './chat-prompt-route';
 import { getChatSessionRouteContext } from './chat-route-context';
@@ -57,78 +61,6 @@ import { registerChatStopRoute } from './chat-stop';
 const chatRoutes = new Hono<{ Bindings: Env }>();
 
 chatRoutes.use('/*', requireAuth(), requireApproved());
-
-/**
- * Resolve the effective message limit for a chat session REST response.
- *
- * Two distinct knobs (see `.claude/rules/03-constitution.md` Principle XI):
- * - `CHAT_SESSION_MESSAGE_LIMIT` — the page size used when no explicit limit is
- *   requested (the 3s poll and load-more pagination). Kept small so polling does
- *   not re-fetch the whole conversation every cycle.
- * - `CHAT_SESSION_MESSAGE_MAX` — the ceiling any request is clamped to. The
- *   client's initial load explicitly requests this so the full conversation
- *   arrives in one request. The 30 MiB RPC size guard in `getMessages()` is the
- *   ultimate cap; oversized sessions keep `hasMore=true` and paginate.
- */
-function getSessionMessageLimit(env: Env, requestedLimit?: string): number {
-  const configuredDefault = Number.parseInt(env.CHAT_SESSION_MESSAGE_LIMIT || '', 10);
-  const defaultLimit =
-    Number.isFinite(configuredDefault) && configuredDefault > 0
-      ? configuredDefault
-      : DEFAULT_CHAT_SESSION_MESSAGE_LIMIT;
-  const configuredMax = Number.parseInt(env.CHAT_SESSION_MESSAGE_MAX || '', 10);
-  const maxLimit =
-    Number.isFinite(configuredMax) && configuredMax > 0
-      ? configuredMax
-      : DEFAULT_CHAT_SESSION_MESSAGE_MAX;
-  // Guard against misconfiguration where the default page size exceeds the max.
-  // We promote the ceiling to the page size so the default page always fits, but
-  // this silently overrides an operator's intended (smaller) ceiling — warn so it
-  // is visible in `wrangler tail`.
-  if (maxLimit < defaultLimit) {
-    log.warn('chat.session_message_limit_misconfigured', {
-      defaultLimit,
-      maxLimit,
-      effectiveMax: defaultLimit,
-    });
-  }
-  const effectiveMax = Math.max(defaultLimit, maxLimit);
-  const parsedLimit = Number.parseInt(requestedLimit || '', 10);
-  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : defaultLimit;
-  return Math.min(limit, effectiveMax);
-}
-
-function getBeforeCursor(rawBefore?: string): number | null {
-  if (!rawBefore) return null;
-  const before = Number.parseInt(rawBefore, 10);
-  if (!Number.isFinite(before)) {
-    throw errors.badRequest('before must be a valid timestamp');
-  }
-  return before;
-}
-
-function getRequestedRoles(rawRoles?: string): string[] | undefined {
-  const roles = rawRoles
-    ?.split(',')
-    .map((role) => role.trim())
-    .filter(Boolean);
-  return roles && roles.length > 0 ? roles : undefined;
-}
-
-function getCompactMode(rawCompact: string | undefined, defaultValue: boolean): boolean {
-  if (!rawCompact) return defaultValue;
-  const compact = rawCompact.trim().toLowerCase();
-  if (compact === 'true' || compact === '1') return true;
-  if (compact === 'false' || compact === '0') return false;
-  throw errors.badRequest('compact must be true or false');
-}
-
-function getMessageOrder(rawOrder?: string): 'asc' | 'desc' {
-  if (!rawOrder) return 'desc';
-  const order = rawOrder.trim().toLowerCase();
-  if (order === 'asc' || order === 'desc') return order;
-  throw errors.badRequest('order must be asc or desc');
-}
 
 registerChatSessionListRoute(chatRoutes);
 
@@ -235,10 +167,8 @@ chatRoutes.get('/:sessionId', async (c) => {
   }
 
   const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
-  const beforeParam = c.req.query('before');
-  const before = beforeParam ? Number.parseInt(beforeParam, 10) : null;
-  const afterParam = c.req.query('after');
-  const after = afterParam ? Number.parseInt(afterParam, 10) : null;
+  const before = getMessageCursor('before', c.req.query('before'));
+  const after = getMessageCursor('after', c.req.query('after'));
   const configuredDeltaLimit = Number.parseInt(c.env.CHAT_SESSION_DELTA_MESSAGE_LIMIT || '', 10);
   const deltaLimit =
     Number.isFinite(configuredDeltaLimit) && configuredDeltaLimit > 0
@@ -259,7 +189,8 @@ chatRoutes.get('/:sessionId', async (c) => {
       before,
       after,
       undefined,
-      compact
+      compact,
+      getMessageOrder(undefined, { before, after })
     );
   } catch (err) {
     return recordChatSessionLoadFailure(c, {
@@ -370,10 +301,10 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
   }
 
   const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
-  const before = getBeforeCursor(c.req.query('before'));
-  const after = getBeforeCursor(c.req.query('after'));
+  const before = getMessageCursor('before', c.req.query('before'));
+  const after = getMessageCursor('after', c.req.query('after'));
   const roles = getRequestedRoles(c.req.query('roles') ?? c.req.query('role'));
-  const order = getMessageOrder(c.req.query('order'));
+  const order = getMessageOrder(c.req.query('order'), { before, after });
 
   const compactDefault = (c.env.CHAT_COMPACT_MODE_DEFAULT ?? '').toLowerCase();
   const defaultCompact = compactDefault === 'false' ? false : DEFAULT_CHAT_COMPACT_MODE;

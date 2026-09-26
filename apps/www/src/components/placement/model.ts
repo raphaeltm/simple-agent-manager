@@ -5,7 +5,7 @@
  *
  *   1. ADMISSION decides whether a host *may* take a workload. In SAM that is
  *      `evaluateWorkspaceReservationCapacity` (apps/api/src/services/workspace-resource-capacity.ts),
- *      the single gate for CPU/memory/disk budgets and the co-tenant cap.
+ *      the single gate for CPU/memory/disk budgets and exclusivity.
  *   2. RANKING only orders hosts admission already accepted. In SAM that is
  *      `placement-strategy.ts`, whose header states plainly that it "does not re-implement any
  *      hard constraint" and that a ranking change "can never widen admission".
@@ -18,11 +18,11 @@
  *
  * ILLUSTRATIVE VALUES, NOT SAM DEFAULTS: boot/run/warm/deadline step counts compress
  * asynchronous work into countable steps so the consequences are visible. `HOST_MEMORY_RESERVE_MB`
- * and `MAX_CO_TENANTS` are the real defaults and are marked as such.
+ * is the real default and is marked as such.
  */
 import type { ProviderCatalog } from './catalog';
-import { admissionRefusal, rankHosts, rankOfferings, usageOf } from './ranking';
 import type { RankedCandidate } from './ranking';
+import { admissionRefusal, rankHosts, rankOfferings, usageOf } from './ranking';
 import type {
   CreateLabOptions,
   ExhaustionPolicy,
@@ -43,7 +43,7 @@ import {
 } from './types';
 
 // Re-exported so every consumer keeps importing the model from one place.
-export * from './types';
+export type { RankedCandidate } from './ranking';
 export {
   admissionRefusal,
   cpuBudgetMillis,
@@ -54,7 +54,7 @@ export {
   usableMemoryMb,
   usageOf,
 } from './ranking';
-export type { RankedCandidate } from './ranking';
+export * from './types';
 
 // ---------------------------------------------------------------------------
 // Lifecycle

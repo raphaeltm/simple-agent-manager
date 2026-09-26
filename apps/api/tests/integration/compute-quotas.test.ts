@@ -39,8 +39,13 @@ describe('compute quota pipeline', () => {
     resolve(process.cwd(), 'src/services/placement-resolver.ts'),
     'utf8'
   );
+  // Per-field resolvers (credential lookup policy included) split out of placement-resolver.ts.
+  const placementFieldResolution = readFileSync(
+    resolve(process.cwd(), 'src/services/placement-field-resolution.ts'),
+    'utf8'
+  );
   const nodeStepsFile = readFileSync(
-    resolve(process.cwd(), 'src/durable-objects/task-runner/node-provisioning-step.ts'),
+    resolve(process.cwd(), 'src/durable-objects/task-runner/node-provisioning-gates.ts'),
     'utf8'
   );
   const nodesRoute = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
@@ -285,7 +290,7 @@ describe('compute quota pipeline', () => {
       expect(placementResolver).toContain('credentialLookup.userId');
       expect(placementResolver).toContain('credentialLookup.provider');
       expect(placementResolver).toContain('credentialLookup.projectId');
-      expect(placementResolver).toContain("'current-project-unless-inherited'");
+      expect(placementFieldResolution).toContain("'current-project-unless-inherited'");
     });
 
     it('enforces quota only when credential source is platform', () => {

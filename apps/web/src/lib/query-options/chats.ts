@@ -13,6 +13,7 @@ import {
   listChatSessions,
   type SessionSummaryItem,
 } from '../api';
+import { oldestPersistedCursor } from '../message-paging';
 
 /**
  * Cross-project chat session summaries, served by a single D1 query each.
@@ -114,7 +115,7 @@ export async function fetchTimelineUserMessages(
   maxPages: number
 ): Promise<ChatMessageResponse[]> {
   const messagePages: ChatMessageResponse[][] = [];
-  let before: number | undefined;
+  let before: string | undefined;
   let pages = 0;
 
   while (pages++ < maxPages) {
@@ -127,7 +128,7 @@ export async function fetchTimelineUserMessages(
     if (result.messages.length === 0) break;
 
     messagePages.unshift(result.messages);
-    const nextBefore = result.messages[0]?.createdAt;
+    const nextBefore = oldestPersistedCursor(result.messages);
     if (nextBefore === undefined || nextBefore === before) break;
     before = nextBefore;
 

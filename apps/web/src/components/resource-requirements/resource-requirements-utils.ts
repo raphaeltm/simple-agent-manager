@@ -8,7 +8,6 @@ export interface ResourceRequirementsFormState {
   minMemoryGb: string;
   minDiskGb: string;
   exclusiveNode: boolean | undefined;
-  maxCoTenants: string;
   /** Set when stored JSON could not be parsed or validated; prevents accidental overwrite on save. */
   storedJsonError?: string;
   /** Per-field stored errors — only cleared when that specific field is edited. */
@@ -24,18 +23,16 @@ export const EMPTY_RESOURCE_STATE: ResourceRequirementsFormState = {
   minMemoryGb: '',
   minDiskGb: '',
   exclusiveNode: undefined,
-  maxCoTenants: '',
 };
 
 export interface ResourceValidationErrors {
   minVcpu?: string;
   minMemoryGb?: string;
   minDiskGb?: string;
-  maxCoTenants?: string;
   form?: string;
 }
 
-const NUMERIC_FIELDS = ['minVcpu', 'minMemoryGb', 'minDiskGb', 'maxCoTenants'] as const;
+const NUMERIC_FIELDS = ['minVcpu', 'minMemoryGb', 'minDiskGb'] as const;
 
 function cleanFieldError(msg: string): string {
   return msg.replace(/^resourceRequirements\./, '');
@@ -109,7 +106,14 @@ export function clearStoredFieldError(
 }
 
 
-const KNOWN_FIELDS = new Set(['minVcpu', 'minMemoryGb', 'minDiskGb', 'exclusiveNode', 'maxCoTenants']);
+const KNOWN_FIELDS = new Set(['minVcpu', 'minMemoryGb', 'minDiskGb', 'exclusiveNode']);
+/**
+ * Fields SAM used to accept and has since retired. They are dropped on read instead of being
+ * preserved as opaque fields, so a stale stored value is not written back on the next save.
+ * `maxCoTenants` was a per-node co-tenant count cap; placement is decided by CPU/memory/disk
+ * reservations and `exclusiveNode` only.
+ */
+const RETIRED_FIELDS = new Set(['maxCoTenants']);
 
 export function deserializeResourceRequirements(
   json: string | null | undefined
@@ -127,6 +131,7 @@ export function deserializeResourceRequirements(
 
   const opaqueFields: Record<string, unknown> = {};
   for (const key of Object.keys(req)) {
+    if (RETIRED_FIELDS.has(key)) continue;
     if (!KNOWN_FIELDS.has(key)) opaqueFields[key] = req[key];
   }
 
@@ -138,7 +143,6 @@ export function deserializeResourceRequirements(
     minMemoryGb: '',
     minDiskGb: '',
     exclusiveNode: undefined,
-    maxCoTenants: '',
   };
 
   for (const field of NUMERIC_FIELDS) {
@@ -202,7 +206,6 @@ function buildRawRequirements(state: ResourceRequirementsFormState): Record<stri
   if (state.minMemoryGb !== '') raw.minMemoryGb = Number(state.minMemoryGb);
   if (state.minDiskGb !== '') raw.minDiskGb = Number(state.minDiskGb);
   if (state.exclusiveNode !== undefined) raw.exclusiveNode = state.exclusiveNode;
-  if (state.maxCoTenants !== '') raw.maxCoTenants = Number(state.maxCoTenants);
   return raw;
 }
 
@@ -212,7 +215,6 @@ export function hasAnyResourceValue(state: ResourceRequirementsFormState): boole
     state.minMemoryGb ||
     state.minDiskGb ||
     state.exclusiveNode !== undefined ||
-    state.maxCoTenants ||
     (state._opaqueFields && Object.keys(state._opaqueFields).length > 0) ||
     (state._rawInvalidFields && Object.keys(state._rawInvalidFields).length > 0)
   );

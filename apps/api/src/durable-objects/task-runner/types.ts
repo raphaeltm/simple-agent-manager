@@ -33,12 +33,16 @@ export interface StepResults {
   placementDiagnostics?: PlacementDecisionDiagnostics;
   nodeId: string | null;
   autoProvisioned: boolean;
+  /** Proven pre-identity rejection awaiting crash-safe node/claim cleanup. */
+  providerRejectedNodeId?: string | null;
   /** Exact warm-pool claim owned by this task until workspace activation or release. */
   claimedWarmNodeId?: string | null;
   workspaceId: string | null;
   chatSessionId: string | null;
   agentSessionId: string | null;
   agentStarted: boolean;
+  /** First restore RPC operation deadline plus one request window to retrieve its result. */
+  snapshotRestoreDeadlineAt?: number | null;
   /** Opaque MCP token for agent platform awareness (stored in KV) */
   mcpToken: string | null;
   /** VM size actually provisioned for an auto-provisioned node. May be smaller
@@ -109,7 +113,6 @@ export interface TaskRunConfig {
   /** Per-project scaling overrides. Null values mean "use platform default". */
   projectScaling?: {
     taskExecutionTimeoutMs?: number | null;
-    maxWorkspacesPerNode?: number | null;
     nodeCpuThresholdPercent?: number | null;
     nodeMemoryThresholdPercent?: number | null;
     nodeCpuShareBudgetPercent?: number | null;

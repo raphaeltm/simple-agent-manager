@@ -118,9 +118,6 @@ func summarizeResourceJSON(raw string) string {
 	if exclusive, ok := value["exclusiveNode"].(bool); ok {
 		parts = append(parts, fmt.Sprintf("exclusive=%t", exclusive))
 	}
-	if text := numberField(value, "maxCoTenants"); text != "" {
-		parts = append(parts, "max co-tenants "+text)
-	}
 	if len(parts) == 0 {
 		return "unknown workload (compatibility metadata)"
 	}

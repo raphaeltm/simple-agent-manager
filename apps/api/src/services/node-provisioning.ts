@@ -109,6 +109,8 @@ export interface ProvisionNodeOptions {
    * Legacy callers omit this and retain the original swallow-and-record behavior.
    */
   rethrowProviderError?: boolean;
+  /** Persist caller recovery intent before removing a proven pre-identity rejection. */
+  beforeRejectedNodeDelete?: () => Promise<void>;
   /** Durable direct allocation owner: retries reconcile this nonce, never repeat an uncertain POST. */
   durableAllocation?: DurableNodeAllocation;
   /** Explicit lifecycle cancellation for provider work; detached HTTP callers omit this. */
@@ -682,6 +684,7 @@ export async function provisionNode(
     // allocation before returning a VM identity; there is no runtime to tear down.
     if (options?.rethrowProviderError) {
       if (isCapacityFailure || providerAllocationRejected) {
+        await options.beforeRejectedNodeDelete?.();
         await db
           .delete(schema.nodes)
           .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))

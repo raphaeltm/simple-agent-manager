@@ -4,6 +4,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { DEFAULT_CF_CONTAINER_SLEEP_AFTER } from '../durable-objects/vm-agent-container';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import {
   DEFAULT_SESSION_SLEEP_AFTER_MS,
@@ -395,7 +396,7 @@ export async function finalizeSessionSnapshotSleeping(
   now = new Date(),
   options: { sleepWarning?: string | null } = {}
 ): Promise<boolean> {
-  return markSessionSnapshotSleepingWithConfig(
+  const finalized = await markSessionSnapshotSleepingWithConfig(
     db,
     env,
     chatSessionId,
@@ -403,6 +404,20 @@ export async function finalizeSessionSnapshotSleeping(
     claimId,
     options.sleepWarning
   );
+  if (finalized) {
+    // Every sleep finalizes here — the sleep sweep and an Instant container's own
+    // idle sleep alike — so a failed task's incomplete capture is surfaced
+    // whichever path slept it (`.claude/rules/61`). Best effort: never undoes the
+    // sleep. Loaded lazily: that module queues sleeps through this one.
+    const { noteFailedTaskPreservationCapture } = await import('./failed-task-preservation');
+    await noteFailedTaskPreservationCapture(env, { chatSessionId }).catch((err: unknown) => {
+      log.warn('session_sleep.failed_task_capture_note_failed', {
+        chatSessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+  return finalized;
 }
 
 export async function scheduleSessionSnapshotSleep(

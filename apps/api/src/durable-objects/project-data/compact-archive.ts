@@ -1,3 +1,5 @@
+import type { MessageCursor, MessagePosition } from '@simple-agent-manager/shared';
+
 import {
   COMPACT_ARCHIVE_FORMAT,
   compactArchiveTimeout,
@@ -11,6 +13,7 @@ import {
   type ProjectDataArchiveRow,
 } from '../../project-data-archive/contract';
 import { canonicalRowsSha256, createCanonicalRowsHasher } from '../../project-data-archive/hashing';
+import { chunkBoundsClause, type MessageBounds, rowWithinBounds } from './message-cursor';
 import { estimateRowBytes, RPC_SIZE_BUDGET_BYTES } from './messages';
 import type { Env } from './types';
 
@@ -114,8 +117,7 @@ function reference(row: Record<string, unknown>): CompactChunkRef {
 }
 
 type CompactRawFilter = {
-  before?: number | null;
-  after?: number | null;
+  bounds?: MessageBounds;
   roles?: string[];
   messageId?: string;
   order?: 'asc' | 'desc';
@@ -132,13 +134,10 @@ function compactChunkQuery(sessionId: string, cursor: number | null, filter: Com
     query += descending ? ' AND ordinal < ?' : ' AND ordinal > ?';
     params.push(cursor);
   }
-  if (filter.before != null) {
-    query += ' AND first_created_at < ?';
-    params.push(filter.before);
-  }
-  if (filter.after != null) {
-    query += ' AND last_created_at > ?';
-    params.push(filter.after);
+  if (filter.bounds) {
+    const bounds = chunkBoundsClause(filter.bounds);
+    query += bounds.sql;
+    params.push(...bounds.values);
   }
   if (filter.roles?.length) {
     query += ` AND EXISTS (SELECT 1 FROM json_each(role_counts_json) WHERE key IN (${filter.roles.map(() => '?').join(',')}))`;
@@ -221,19 +220,15 @@ export async function compactRawDigest(
 
 export type CompactRawPageOptions = {
   limit: number;
-  before: number | null;
-  after: number | null;
+  before: MessageCursor | null;
+  after: MessageCursor | null;
   roles?: string[];
   order: 'asc' | 'desc';
 };
 
 function matchesRawPage(row: ProjectDataArchiveRow, options: CompactRawPageOptions): boolean {
-  const timestamp = Number(row.created_at);
-  return !(
-    (options.before !== null && timestamp >= options.before) ||
-    (options.after !== null && timestamp <= options.after) ||
-    (options.roles?.length && !options.roles.includes(String(row.role)))
-  );
+  if (options.roles?.length && !options.roles.includes(String(row.role))) return false;
+  return rowWithinBounds(row, options);
 }
 
 export async function compactRawPage(
@@ -246,8 +241,7 @@ export async function compactRawPage(
   const result: ProjectDataArchiveRow[] = [];
   let bytes = 0;
   for await (const chunk of compactRawChunks(sql, env, sessionId, {
-    before,
-    after,
+    bounds: { before, after },
     roles,
     order,
   })) {
@@ -268,22 +262,14 @@ export async function compactExportCandidates(
   env: Env,
   sessionId: string,
   limit: number,
-  cursor: { createdAt: number; sequence: number; id: string } | null
+  cursor: MessagePosition | null
 ): Promise<{ rows: ProjectDataArchiveRow[]; hasMore: boolean }> {
   const rows: ProjectDataArchiveRow[] = [];
   let bytes = 0;
-  for await (const chunk of compactRawChunks(sql, env, sessionId, {
-    after: cursor ? cursor.createdAt - 1 : null,
-  })) {
+  const bounds: MessageBounds = { before: null, after: cursor };
+  for await (const chunk of compactRawChunks(sql, env, sessionId, { bounds })) {
     for (const row of chunk.rows) {
-      if (
-        cursor &&
-        (Number(row.created_at) < cursor.createdAt ||
-          (Number(row.created_at) === cursor.createdAt &&
-            (Number(row.sequence) < cursor.sequence ||
-              (Number(row.sequence) === cursor.sequence && String(row.id) <= cursor.id))))
-      )
-        continue;
+      if (!rowWithinBounds(row, bounds)) continue;
       rows.push(row);
       bytes += estimateRowBytes(row);
       if (rows.length >= limit || bytes > RPC_SIZE_BUDGET_BYTES) return { rows, hasMore: true };

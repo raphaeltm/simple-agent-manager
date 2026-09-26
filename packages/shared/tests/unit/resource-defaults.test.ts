@@ -18,12 +18,28 @@ describe('resolveResourceReservation', () => {
       memoryMb: PLATFORM_RESOURCE_DEFAULTS.minMemoryGb * 1024,
       diskMb: PLATFORM_RESOURCE_DEFAULTS.minDiskGb * 1024,
       exclusiveNode: false,
-      maxCoTenants: 4,
       source: 'platform',
       sourceId: 'platform',
       version: RESOURCE_RESERVATION_VERSION,
     });
     expect(result.fieldProvenance?.minVcpu?.source).toBe('platform');
+    // The retired per-node co-tenant cap is never resolved or emitted.
+    expect(result).not.toHaveProperty('maxCoTenants');
+    expect(result.fieldProvenance).not.toHaveProperty('maxCoTenants');
+  });
+
+  it('ignores a legacy maxCoTenants value supplied by any layer', () => {
+    const result = resolveResourceReservation(
+      {
+        task: { minVcpu: 1, maxCoTenants: 2 } as ResourceRequirements,
+        project: { maxCoTenants: 4 } as ResourceRequirements,
+      },
+      { taskId: 'task-1', projectId: 'proj-1' }
+    );
+    expect(result.cpuMillis).toBe(1000);
+    expect(result).not.toHaveProperty('maxCoTenants');
+    expect(result.fieldProvenance).not.toHaveProperty('maxCoTenants');
+    expect(result.source).toBe('task');
   });
 
   it('resolves task-level requirements as highest priority', () => {
@@ -59,7 +75,6 @@ describe('resolveResourceReservation', () => {
     expect(result.memoryMb).toBe(8 * 1024); // from agent-profile
     expect(result.diskMb).toBe(100 * 1024); // from agent-profile
     expect(result.exclusiveNode).toBe(true); // from project
-    expect(result.maxCoTenants).toBe(4); // platform default (no layer set it)
     expect(result.source).toBe('task'); // first layer to contribute
   });
 
@@ -92,12 +107,11 @@ describe('resolveResourceReservation', () => {
 
   it('uses user layer when only user provides requirements', () => {
     const result = resolveResourceReservation(
-      { user: { exclusiveNode: true, maxCoTenants: 1 } },
+      { user: { exclusiveNode: true } },
       { userId: 'u-42' }
     );
 
     expect(result.exclusiveNode).toBe(true);
-    expect(result.maxCoTenants).toBe(1);
     expect(result.source).toBe('user');
     expect(result.sourceId).toBe('u-42');
   });
@@ -150,13 +164,13 @@ describe('resolveResourceReservation', () => {
     expect(result.sourceId).toBe('proj-1');
   });
 
-  it('rejects invalid zero tenant limits instead of silently accepting them', () => {
+  it('rejects invalid zero vCPU instead of silently accepting it', () => {
     expect(() =>
       resolveResourceReservation({
-        task: { maxCoTenants: 0 },
-        project: { maxCoTenants: 4 },
+        task: { minVcpu: 0 },
+        project: { minVcpu: 4 },
       })
-    ).toThrow('resourceRequirements.maxCoTenants must be a positive safe integer');
+    ).toThrow('resourceRequirements.minVcpu must be a finite positive number');
   });
 
   it('requires complete platform defaults', () => {
@@ -169,11 +183,10 @@ describe('resolveResourceReservation', () => {
             minVcpu: 2,
             minMemoryGb: 4,
             minDiskGb: 40,
-            exclusiveNode: false,
           } as Required<ResourceRequirements>,
         }
       )
-    ).toThrow('resourceRequirements.maxCoTenants is required');
+    ).toThrow('resourceRequirements.exclusiveNode is required');
   });
 
   it('maps legacy sizes to distinct workload slices with per-field provenance', () => {
@@ -195,20 +208,20 @@ describe('resolveResourceReservation', () => {
 
   it('maps legacy sizes through adapter v2 to exact workload reservation units', () => {
     const cases = [
-      ['small', 625, 1152, 13_312, 3],
-      ['medium', 2_000, 3_712, 40_960, 2],
-      ['large', 4_000, 7_808, 81_920, 2],
+      ['small', 625, 1152, 13_312],
+      ['medium', 2_000, 3_712, 40_960],
+      ['large', 4_000, 7_808, 81_920],
     ] as const;
 
-    for (const [legacySize, cpuMillis, memoryMb, diskMb, maxCoTenants] of cases) {
+    for (const [legacySize, cpuMillis, memoryMb, diskMb] of cases) {
       const result = resolveResourceReservation({}, {}, { legacyVmSizes: { task: legacySize } });
       expect(result).toMatchObject({
         cpuMillis,
         memoryMb,
         diskMb,
         exclusiveNode: false,
-        maxCoTenants,
       });
+      expect(result).not.toHaveProperty('maxCoTenants');
       expect(result.fieldProvenance?.minVcpu?.compatibility).toMatchObject({
         adapter: 'legacy-vm-size-workload',
         version: LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
@@ -286,7 +299,7 @@ describe('resolveResourceReservation', () => {
         task: { exclusiveNode: false },
         trigger: { minDiskGb: 33 },
         skill: { minMemoryGb: 9 },
-        agentProfile: { maxCoTenants: 2 },
+        agentProfile: { minDiskGb: 44 },
         project: { minVcpu: 1 },
         user: { minMemoryGb: 2 },
       },
@@ -315,7 +328,6 @@ describe('resolveResourceReservation', () => {
       memoryMb: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minMemoryGb * 1024,
       diskMb: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minDiskGb * 1024,
       exclusiveNode: false,
-      maxCoTenants: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.maxCoTenants,
       source: 'task',
       sourceId: 'task-id',
     });
@@ -323,7 +335,6 @@ describe('resolveResourceReservation', () => {
     expect(result.fieldProvenance?.minMemoryGb?.source).toBe('task');
     expect(result.fieldProvenance?.minDiskGb?.source).toBe('task');
     expect(result.fieldProvenance?.exclusiveNode?.source).toBe('task');
-    expect(result.fieldProvenance?.maxCoTenants?.source).toBe('task');
   });
 
   it('fills missing fields from the same layer legacy VM size before lower modern layers', () => {
@@ -351,7 +362,6 @@ describe('resolveResourceReservation', () => {
       memoryMb: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.large.minMemoryGb * 1024,
       diskMb: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.large.minDiskGb * 1024,
       exclusiveNode: false,
-      maxCoTenants: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.large.maxCoTenants,
       source: 'skill',
       sourceId: 'skill-id',
     });
@@ -378,13 +388,12 @@ describe('resolveResourceReservation', () => {
 
   it('emits bounded integer reservation units with conservative rounding', () => {
     const result = resolveResourceReservation({
-      task: { minVcpu: 0.0001, minMemoryGb: 0.1, minDiskGb: 0, maxCoTenants: 1 },
+      task: { minVcpu: 0.0001, minMemoryGb: 0.1, minDiskGb: 0 },
     });
 
     expect(result.cpuMillis).toBe(1);
     expect(result.memoryMb).toBe(103);
     expect(result.diskMb).toBe(0);
-    expect(result.maxCoTenants).toBe(1);
   });
 
   it('rejects reservation values that cannot be represented as safe integer units', () => {
@@ -417,7 +426,7 @@ describe('resolveResourceReservation', () => {
         skill: { minVcpu: 6 },
         agentProfile: { minMemoryGb: 10 },
         project: { exclusiveNode: true },
-        user: { maxCoTenants: 2 },
+        user: { minDiskGb: 500 },
       },
       {
         taskId: 'task-1',
@@ -433,13 +442,12 @@ describe('resolveResourceReservation', () => {
       memoryMb: 10 * 1024,
       diskMb: 120 * 1024,
       exclusiveNode: true,
-      maxCoTenants: 2,
       source: 'task',
     });
     expect(result.fieldProvenance?.minVcpu?.source).toBe('skill');
     expect(result.fieldProvenance?.minMemoryGb?.source).toBe('agent-profile');
     expect(result.fieldProvenance?.exclusiveNode?.source).toBe('project');
-    expect(result.fieldProvenance?.maxCoTenants?.source).toBe('user');
+    expect(result.fieldProvenance?.minDiskGb?.source).toBe('task');
   });
 
   it('produces output safe for JSON.stringify (no undefined values)', () => {
@@ -452,7 +460,6 @@ describe('resolveResourceReservation', () => {
     expect(parsed.memoryMb).toBe(result.memoryMb);
     expect(parsed.diskMb).toBe(result.diskMb);
     expect(parsed.exclusiveNode).toBe(result.exclusiveNode);
-    expect(parsed.maxCoTenants).toBe(result.maxCoTenants);
     expect(parsed.source).toBe(result.source);
     expect(parsed.sourceId).toBe(result.sourceId);
     expect(parsed.version).toBe(result.version);
@@ -467,7 +474,6 @@ describe('selectVmSizeForRequirements', () => {
       minMemoryGb: 4,
       minDiskGb: 40,
       exclusiveNode: false,
-      maxCoTenants: 4,
     });
     expect(size).toBe('small');
   });
@@ -478,7 +484,6 @@ describe('selectVmSizeForRequirements', () => {
       minMemoryGb: 8,
       minDiskGb: 80,
       exclusiveNode: false,
-      maxCoTenants: 4,
     });
     expect(size).toBe('medium');
   });
@@ -489,7 +494,6 @@ describe('selectVmSizeForRequirements', () => {
       minMemoryGb: 16,
       minDiskGb: 160,
       exclusiveNode: false,
-      maxCoTenants: 4,
     });
     expect(size).toBe('large');
   });
@@ -500,7 +504,6 @@ describe('selectVmSizeForRequirements', () => {
       minMemoryGb: 256,
       minDiskGb: 2000,
       exclusiveNode: false,
-      maxCoTenants: 1,
     });
     expect(size).toBe('large');
   });
@@ -513,7 +516,6 @@ describe('selectVmSizeForRequirements', () => {
         minMemoryGb: 10,
         minDiskGb: 100,
         exclusiveNode: false,
-        maxCoTenants: 4,
       },
       'scaleway'
     );
@@ -529,7 +531,6 @@ describe('selectVmSizeForRequirements', () => {
         minMemoryGb: 4,
         minDiskGb: 40,
         exclusiveNode: false,
-        maxCoTenants: 4,
       },
       'gcp'
     );
@@ -543,7 +544,6 @@ describe('selectVmSizeForRequirements', () => {
         minMemoryGb: 4,
         minDiskGb: 40,
         exclusiveNode: false,
-        maxCoTenants: 4,
       },
       'unknown-provider'
     );
@@ -557,7 +557,6 @@ describe('selectVmSizeForRequirements', () => {
       minMemoryGb: 2,
       minDiskGb: 60,
       exclusiveNode: false,
-      maxCoTenants: 4,
     });
     expect(size).toBe('medium'); // hetzner small has 40GB, medium has 80GB
   });

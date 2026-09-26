@@ -141,8 +141,12 @@ describe('VM prompt delivery adapter', () => {
     mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
     let transportStarted!: () => void;
     let releaseTransport!: () => void;
-    const started = new Promise<void>((resolve) => { transportStarted = resolve; });
-    const barrier = new Promise<void>((resolve) => { releaseTransport = resolve; });
+    const started = new Promise<void>((resolve) => {
+      transportStarted = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      releaseTransport = resolve;
+    });
     const injected = vi.fn();
     mocks.sendPromptToAgentOnNode.mockImplementationOnce(async (...args: unknown[]) => {
       transportStarted();
@@ -154,10 +158,16 @@ describe('VM prompt delivery adapter', () => {
     });
     let authorized = true;
     const adapterInput = input(false);
-    adapterInput.beforeSideEffect = async () => authorized ? null : ({
-      kind: 'failed', reason: 'terminal_target', error: 'Source membership revoked',
-      runtimeIdentity: 'vm-01', capabilities: null,
-    });
+    adapterInput.beforeSideEffect = async () =>
+      authorized
+        ? null
+        : {
+            kind: 'failed',
+            reason: 'terminal_target',
+            error: 'Source membership revoked',
+            runtimeIdentity: 'vm-01',
+            capabilities: null,
+          };
     const pending = new DefaultVmPromptDeliveryAdapter(envWithTarget()).submit(adapterInput);
     await started;
     authorized = false;
@@ -187,18 +197,23 @@ describe('VM prompt delivery adapter', () => {
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
-  it.each(['replaced', 'storage_failure'])('never sends when the submission checkpoint is %s', async (failure) => {
-    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
-    const beforeSubmit = vi.fn(() => {
-      if (failure === 'storage_failure') throw new Error('SQLite temporarily unavailable');
-      return false;
-    });
-    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
-    await expect(adapter.submit({ ...input(false), beforeSubmit }))
-      .resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
-    expect(beforeSubmit).toHaveBeenCalledWith(protocolFixture.capabilities);
-    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
-  });
+  it.each(['replaced', 'storage_failure'])(
+    'never sends when the submission checkpoint is %s',
+    async (failure) => {
+      mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+      const beforeSubmit = vi.fn(() => {
+        if (failure === 'storage_failure') throw new Error('SQLite temporarily unavailable');
+        return false;
+      });
+      const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+      await expect(adapter.submit({ ...input(false), beforeSubmit })).resolves.toMatchObject({
+        kind: 'retry',
+        reason: 'not_ready',
+      });
+      expect(beforeSubmit).toHaveBeenCalledWith(protocolFixture.capabilities);
+      expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    }
+  );
 
   it('uses a probe-resolved target without reinterpreting a suspect D1 health mirror', async () => {
     const adapterEnv = envWithTarget({
@@ -300,6 +315,49 @@ describe('VM prompt delivery adapter', () => {
     );
     expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
   });
+
+  // A user who replies right after a session slept meets a replaced workspace
+  // whose deletion still awaits its proof. That refusal clears on its own, so the
+  // delivery must wait for it rather than drop the reply (`.claude/rules/72`).
+  it.each([
+    ['a sleeping workspace', { ...targetRow, workspace_status: 'sleeping' }],
+    ['a deleted workspace row', null],
+  ])(
+    'retries delivery to %s while recovery refuses for a reason that clears on its own',
+    async (_label, row) => {
+      for (const reason of [
+        'workspace_deletion_unconfirmed',
+        'session_recovery_placement_placement',
+        'session_recovery_placement_transient',
+      ]) {
+        mocks.ensureSessionRecovery.mockResolvedValueOnce({ status: 'unavailable', reason });
+        const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget(row));
+
+        await expect(adapter.submit(input(false))).resolves.toMatchObject({
+          kind: 'retry',
+          reason: 'not_ready',
+          error: `Session cannot wake yet (${reason})`,
+        });
+      }
+      expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['sleeping_snapshot_missing', 'source_task_not_wakeable', 'recovery_start_failed:boom'])(
+    'ends delivery when recovery refuses for good (%s)',
+    async (reason) => {
+      mocks.ensureSessionRecovery.mockResolvedValue({ status: 'unavailable', reason });
+      const adapter = new DefaultVmPromptDeliveryAdapter(
+        envWithTarget({ ...targetRow, workspace_status: 'sleeping' })
+      );
+
+      await expect(adapter.submit(input(false))).resolves.toMatchObject({
+        kind: 'failed',
+        reason: 'terminal_target',
+        error: `Target workspace is sleeping (${reason})`,
+      });
+    }
+  );
 
   it('revalidates a guarded parent before creating sleeping-session recovery', async () => {
     const adapter = new DefaultVmPromptDeliveryAdapter(
@@ -545,7 +603,12 @@ describe('VM prompt delivery adapter', () => {
       expect.anything(),
       'user-1',
       'delivery-1',
-      { requestTimeoutMs: 1_234, protocolVersion: 1, deliveryId: 'delivery-1', beforeExternalMutation: expect.any(Function) }
+      {
+        requestTimeoutMs: 1_234,
+        protocolVersion: 1,
+        deliveryId: 'delivery-1',
+        beforeExternalMutation: expect.any(Function),
+      }
     );
   });
 

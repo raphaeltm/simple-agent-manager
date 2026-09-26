@@ -26,6 +26,7 @@
  * almost nothing, which would shrink every R2 chunk and understate both the compression cost
  * and the bytes moved — the opposite of what a capacity fixture should do.
  */
+import type { MessagePosition } from '@simple-agent-manager/shared';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
@@ -95,6 +96,15 @@ function variedBody(seed: number, approxBytes: number): string {
 }
 
 /**
+ * Three consecutive rows share each timestamp, as a VM-agent batch landing on one millisecond
+ * does. Neither the 2000-row read page nor the 500-row archive chunk is a multiple of three, so
+ * both boundaries fall inside tie groups.
+ */
+function tiedTimestamp(index: number): string {
+  return new Date(3_000_000 + Math.floor(index / 3) * 1_000).toISOString();
+}
+
+/**
  * Production-shaped rows: a short user turn, then a run of two long assistant turns (so
  * grouping has consecutive same-role rows to merge), with a tool call carrying real JSON
  * every `TOOL_EVERY` rows. Assistant bodies are ~2 KB, which is the order of magnitude the
@@ -114,7 +124,7 @@ function messagesFor(prefix: string, count: number): SeededMessage[] {
           title: `Read file ${index}`,
           content: [{ type: 'text', text: `${prefix} tool result ${index} ${variedBody(index * 7 + 1, 400)}` }],
         }),
-        timestamp: new Date(3_000_000 + index * 1_000).toISOString(),
+        timestamp: tiedTimestamp(index),
         sequence: index + 1,
       };
     }
@@ -125,7 +135,7 @@ function messagesFor(prefix: string, count: number): SeededMessage[] {
         ? `${prefix} user turn ${index}`
         : `${prefix} assistant turn ${index} ${variedBody(index, 2_048)}`,
       toolMetadata: null,
-      timestamp: new Date(3_000_000 + index * 1_000).toISOString(),
+      timestamp: tiedTimestamp(index),
       sequence: index + 1,
     };
   });
@@ -213,33 +223,42 @@ async function databaseSizeBytes(ownerName: string): Promise<number> {
  * `messages.rpc_size_guard_truncated` silently trims the page (observed at 12,035 of 20,000
  * rows / 31.4 MB). That guard is the documented behaviour of `.claude/rules/50`, not an
  * archive defect — but a test that asked for everything at once would have mistaken it for
- * data loss. `after` is a real cursor (keyed on `createdAt`), so unlike an offset it can
- * resume the trimmed tail.
+ * data loss. `after` and `before` are exact `(createdAt, sequence, id)` positions, so unlike an
+ * offset they resume the trimmed tail, even from inside a group of tied timestamps.
  */
 const TRANSCRIPT_PAGE_LIMIT = 2_000;
 
-async function readArchivedTranscript(projectId: string, sessionId: string, expected: number) {
+function pagePosition(row: Record<string, unknown> | undefined): MessagePosition {
+  if (!row) throw new Error('A non-empty page has an edge row');
+  return { createdAt: Number(row.createdAt), sequence: Number(row.sequence), id: String(row.id) };
+}
+
+async function readArchivedTranscript(
+  projectId: string,
+  sessionId: string,
+  expected: number,
+  direction: 'forward' | 'backward' = 'forward'
+) {
   const rows: Record<string, unknown>[] = [];
-  let after: number | null = null;
+  let cursor: MessagePosition | null = null;
   // Bounded so a cursor that stops advancing fails the test instead of hanging the suite.
   for (let page = 0; page <= Math.ceil(expected / TRANSCRIPT_PAGE_LIMIT) + 1; page += 1) {
+    const forward = direction === 'forward';
     const result = await projectDataService.getMessages(
       testEnv,
       projectId,
       sessionId,
       TRANSCRIPT_PAGE_LIMIT,
-      null,
-      after,
+      forward ? null : cursor,
+      forward ? cursor : null,
       undefined,
       false,
-      'asc'
+      forward ? 'asc' : 'desc'
     );
-    if (result.messages.length === 0) return rows;
-    rows.push(...result.messages);
-    const last = result.messages.at(-1);
-    const next = Number(last?.createdAt);
-    if (!Number.isFinite(next) || next === after) return rows;
-    after = next;
+    if (forward) rows.push(...result.messages);
+    else rows.unshift(...result.messages);
+    if (!result.hasMore) return rows;
+    cursor = pagePosition(forward ? result.messages.at(-1) : result.messages[0]);
   }
   throw new Error(`transcript paging did not terminate for ${sessionId}`);
 }
@@ -251,15 +270,8 @@ async function readArchivedTranscript(projectId: string, sessionId: string, expe
  * content and tool payloads. A hash-only or count-only check passes for an archive that
  * dropped the middle of a session or reordered it; this does not.
  *
- * SCOPE, because this is the strongest claim in the file and it is narrower than it looks:
- * it holds for transcripts whose rows have DISTINCT `created_at`, which is all this fixture
- * can produce (`messagesFor` spaces timestamps 1000 ms apart). Both read paths filter the
- * `after` cursor on `created_at` alone — `matchesRawPage` in `compact-archive.ts` and the
- * `AND created_at > ?` in `messages.ts` — so rows SHARING a `created_at` across a page
- * boundary are dropped from every later page. That is a pre-existing read-pagination defect,
- * not something this change introduces, and it is tracked in
- * `tasks/backlog/2026-09-20-message-pagination-drops-tied-timestamps.md`. Do not read a green
- * run here as proof that tied timestamps survive; no fixture here can falsify that.
+ * The fixture ties three rows to each timestamp (`tiedTimestamp`), so page and chunk
+ * boundaries fall inside tie groups; the transcript is read both forward and backward.
  */
 async function expectTranscriptPreserved(
   projectId: string,
@@ -272,6 +284,8 @@ async function expectTranscriptPreserved(
   expect(read.map((row) => String(row.id))).toEqual(seeded.map((message) => message.messageId));
   expect(read.map((row) => String(row.role))).toEqual(seeded.map((message) => message.role));
   expect(read.map((row) => String(row.content))).toEqual(seeded.map((message) => message.content));
+  const backward = await readArchivedTranscript(projectId, sessionId, seeded.length, 'backward');
+  expect(backward.map((row) => String(row.id))).toEqual(seeded.map((message) => message.messageId));
 
   // Tool payloads travel with the transcript rather than being dropped on the way to R2.
   //

@@ -107,6 +107,13 @@ export interface TaskStartPlacementInput {
   project: PlacementProjectDefaults;
   profile?: PlacementProfileDefaults | null;
   explicit?: PlacementExplicitOverrides;
+  /**
+   * A location to prefer without requiring it — a woken session's previous region. When no
+   * explicit location is given it becomes the resolved `vmLocation`, which ranks reusable hosts
+   * there first, but it never sets `explicitVmLocation`: offerings and hosts elsewhere stay
+   * eligible. Ignored when it is not valid for the resolved provider.
+   */
+  preferredVmLocation?: string | null;
   inheritedCredentialAttribution?: PlacementCredentialAttributionInput | null;
   credentialProjectPolicy: PlacementCredentialProjectPolicy;
   taskModeDefault: PlacementTaskModeDefault;
@@ -145,6 +152,11 @@ export interface TaskStartPlacement {
   provider: CredentialProvider | null;
   vmLocation: VMLocation;
   explicitVmLocation?: boolean;
+  /**
+   * Set only when a caller's preferred location (not an explicit one) decided `vmLocation`.
+   * Capacity-pool candidates in it are ordered first; none are dropped.
+   */
+  preferredVmLocation?: VMLocation;
   workspaceProfile: WorkspaceProfile;
   devcontainerConfigName: string | null;
   taskMode: TaskMode;

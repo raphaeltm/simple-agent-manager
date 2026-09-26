@@ -28,10 +28,10 @@ import {
   sweepMaxLifetimeNodes,
   sweepStaleWarmNodes,
   sweepStoppedHandoffNodes,
-  sweepTerminalCfContainers,
 } from './node-phases';
 import { emptyResult, type NodeCleanupResult, resolveCleanupConfig } from './shared';
 import { sweepUnhealthyNodes, type UnhealthyNodeBoundaries } from './unhealthy-nodes';
+import { sweepTerminalCfContainers } from './terminal-cf-container-phase';
 import { sweepOrphanedWorkspaces, sweepStaleStoppedWorkspaces } from './workspace-phases';
 
 export type { NodeCleanupResult } from './shared';

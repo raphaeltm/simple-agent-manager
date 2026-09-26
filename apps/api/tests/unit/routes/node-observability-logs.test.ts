@@ -49,7 +49,7 @@ vi.mock('../../../src/services/jwt', () => ({
 }));
 
 vi.mock('../../../src/services/limits', () => ({
-  getRuntimeLimits: vi.fn(() => ({ maxNodes: 10, maxWorkspacesPerNode: 5, canCreateNode: true })),
+  getRuntimeLimits: vi.fn(() => ({ maxNodes: 10, canCreateNode: true })),
 }));
 
 vi.mock('../../../src/services/telemetry', () => ({

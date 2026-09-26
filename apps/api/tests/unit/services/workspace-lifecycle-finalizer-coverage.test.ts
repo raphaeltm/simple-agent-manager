@@ -27,7 +27,10 @@ interface TerminalWriterEvidence {
 const TERMINAL_WRITER_PATTERNS: Array<{ kind: string; pattern: RegExp }> = [
   { kind: 'workspace_or_node_deleted_object_write', pattern: /status\s*:\s*['"]deleted['"]/g },
   // SQLite SET targets are unqualified; n.status is a predicate read, not a state write.
-  { kind: 'workspace_or_node_deleted_sql_write', pattern: /(?<!\.)\bstatus\s*=\s*['"]deleted['"]/g },
+  {
+    kind: 'workspace_or_node_deleted_sql_write',
+    pattern: /(?<!\.)\bstatus\s*=\s*['"]deleted['"]/g,
+  },
   { kind: 'workspace_or_node_drizzle_delete', pattern: /delete\(schema\.(workspaces|nodes)\)/g },
   { kind: 'workspace_or_node_sql_delete', pattern: /DELETE\s+FROM\s+(workspaces|nodes)/gi },
   { kind: 'cf_container_teardown', pattern: /destroyVmAgentContainer\s*\(/g },
@@ -60,8 +63,8 @@ const SHARED_FINALIZER_ROUTE_SYMBOLS = [
  * decision that future deletion writers must not copy blindly.
  */
 const ALLOWLIST: Record<string, string> = {
-  'durable-objects/task-runner/node-provisioning-step.ts':
-    'Deletes a freshly-created D1 node row only after provider capacity failure, before any workspace or agent_session exists.',
+  'durable-objects/task-runner/node-provisioning-rejected-node.ts':
+    'Deletes a freshly-created D1 node row only after the provider rejected its create (capacity or account quota) and only while provider_instance_id IS NULL, before any workspace or agent_session exists.',
   'scheduled/d1-retention.ts':
     'Destroys expired cf-container snapshot runtime state after the ProjectData session is stopped; it does not mark workspace/node rows deleted, and the container DO routes D1 runtime termination through persistRuntimeEnded().',
   'services/deployment-provisioning.ts':
@@ -79,7 +82,7 @@ const ALLOWLIST: Record<string, string> = {
 // Extraction must not turn provisioning compensation into a blanket exemption
 // for future terminal workspace writes in either module.
 const PROVISIONING_COMPENSATION_KINDS: Record<string, ReadonlySet<string>> = {
-  'durable-objects/task-runner/node-provisioning-step.ts': new Set([
+  'durable-objects/task-runner/node-provisioning-rejected-node.ts': new Set([
     'workspace_or_node_sql_delete',
   ]),
   'services/node-provisioning.ts': new Set([
@@ -91,16 +94,19 @@ const PROVISIONING_COMPENSATION_KINDS: Record<string, ReadonlySet<string>> = {
 function isAllowlistedWriter(relative: string, evidence: TerminalWriterEvidence[]): boolean {
   if (!(relative in ALLOWLIST)) return false;
   const allowedKinds = PROVISIONING_COMPENSATION_KINDS[relative];
-  return !allowedKinds || evidence.every((item) => {
-    if (!allowedKinds.has(item.kind)) return false;
-    if (item.kind === 'workspace_or_node_sql_delete') {
-      return /^DELETE\s+FROM\s+nodes$/i.test(item.matchedText);
-    }
-    if (item.kind === 'workspace_or_node_drizzle_delete') {
-      return item.matchedText === 'delete(schema.nodes)';
-    }
-    return true;
-  });
+  return (
+    !allowedKinds ||
+    evidence.every((item) => {
+      if (!allowedKinds.has(item.kind)) return false;
+      if (item.kind === 'workspace_or_node_sql_delete') {
+        return /^DELETE\s+FROM\s+nodes$/i.test(item.matchedText);
+      }
+      if (item.kind === 'workspace_or_node_drizzle_delete') {
+        return item.matchedText === 'delete(schema.nodes)';
+      }
+      return true;
+    })
+  );
 }
 
 function relativeToSrc(file: string): string {
@@ -194,7 +200,12 @@ describe('workspace/node terminal writers route through shared lifecycle finaliz
       { kind: 'workspace_or_node_deleted_sql_write', matchedText: "status='deleted'" },
     ]);
     expect(routesThroughSharedFinalizer(actualWriter)).toBe(false);
-    expect(isAllowlistedWriter('services/direct-workspace-creation.ts', findTerminalWriterEvidence(actualWriter))).toBe(false);
+    expect(
+      isAllowlistedWriter(
+        'services/direct-workspace-creation.ts',
+        findTerminalWriterEvidence(actualWriter)
+      )
+    ).toBe(false);
   });
 
   it('accepts a synthetic writer routed through the shared finalizer', () => {

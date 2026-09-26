@@ -1159,8 +1159,8 @@ func TestFlush_IndividualThreshold400PersistsOmittedMarker(t *testing.T) {
 	if msg.Content != omittedMessageMarker {
 		t.Fatalf("content = %q, want omitted marker", msg.Content)
 	}
-	if msg.ToolMetadata != "" {
-		t.Fatalf("expected oversized tool metadata omitted, got %q", msg.ToolMetadata)
+	if msg.ToolMetadata != truncationRecord(2048) {
+		t.Fatalf("tool metadata = %q, want the record of its removal", msg.ToolMetadata)
 	}
 }
 

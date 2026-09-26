@@ -21,7 +21,7 @@ import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 const bindings = env as unknown as Env;
 const completedAt = '2026-08-30T00:05:00.000Z';
 
-async function setup() {
+async function setup(taskStatus: 'completed' | 'failed' | 'cancelled' = 'completed') {
   const id = `drain-${crypto.randomUUID()}`;
   await seedUser(id);
   await seedInstallation(id, id, { installationIdValue: id });
@@ -29,7 +29,7 @@ async function setup() {
   await seedWorkspace(id, null, id, { projectId: id, status: 'running' });
   const sessionId = await projectData.createSession(bindings, id, id, 'Final response', id, id);
   await seedTask(id, id, id, {
-    status: 'completed',
+    status: taskStatus,
     chatSessionId: sessionId,
     workspaceId: id,
     startedAt: '2026-08-29T20:00:00.000Z',
@@ -239,5 +239,63 @@ describe('completion response survives terminal ledger cleanup', () => {
       sleep_status: 'stopping',
       sleep_claim_id: 'teardown',
     });
+  });
+});
+
+describe('failed-task preservation intent survives like a completion intent', () => {
+  const workingReport = (id: string, sessionId: string) => ({
+    env: bindings,
+    projectId: id,
+    sessionId: id,
+    chatSessionId: sessionId,
+    body: { activity: 'prompting' as const, nodeId: id },
+  });
+
+  it.each(['scheduled', 'preparing'])(
+    'keeps a failed task %s preservation intent across a working callback',
+    async (status) => {
+      // The intent is the failed task's work-preservation snapshot. If a re-report
+      // erased it, the terminal reconcilers could fail the session before it slept.
+      const { id, sessionId } = await setup('failed');
+      await seedIntent(id, sessionId, status);
+      await cancelSleepForActiveActivity(workingReport(id, sessionId));
+      expect(await intent(id)).toMatchObject({
+        sleep_status: 'scheduled',
+        sleep_after: completedAt,
+        sleep_claim_id: null,
+      });
+    }
+  );
+
+  it('lets a working callback erase a cancelled task sleep intent', async () => {
+    // Control: cancelled tasks are not sleep-preserved, so the re-report still
+    // clears the intent exactly as it does for a live task.
+    const { id, sessionId } = await setup('cancelled');
+    await seedIntent(id, sessionId);
+    await cancelSleepForActiveActivity(workingReport(id, sessionId));
+    expect(await intent(id)).toMatchObject({ sleep_status: null, sleep_after: null });
+  });
+
+  it('defers a failed session while its preservation sleep is queued, past the drain window', async () => {
+    // The shape `preserveFailedTaskWork` leaves: a scheduled intent written at the
+    // failure. After the 15-minute drain the terminal reconciler must still see
+    // the in-flight sleep and leave the session for it; the in-flight bound is
+    // its escape once the sleep can no longer be happening.
+    const { id, sessionId } = await setup('failed');
+    await seedIntent(id, sessionId, 'scheduled');
+
+    await runTerminalSessionLedgerReconciliation(bindings, new Date('2026-08-30T00:25:00.000Z'));
+    await assertOpen(id, sessionId);
+
+    await runTerminalSessionLedgerReconciliation(bindings, new Date('2026-08-30T02:00:00.000Z'));
+    expect((await projectData.getSession(bindings, id, sessionId))?.status).toBe('failed');
+  });
+
+  it('protects a recent failure from terminal-session reconciliation, then fails it', async () => {
+    const { id, sessionId } = await setup('failed');
+    await runTerminalSessionLedgerReconciliation(bindings, new Date('2026-08-30T00:06:00.000Z'));
+    await assertOpen(id, sessionId);
+    await runTerminalSessionLedgerReconciliation(bindings, new Date('2026-08-30T02:00:00.000Z'));
+    expect((await projectData.getSession(bindings, id, sessionId))?.status).toBe('failed');
   });
 });

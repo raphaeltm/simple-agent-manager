@@ -2,10 +2,6 @@
 // Task Run Defaults (Autonomous Execution)
 // =============================================================================
 
-/** Additional hard workspace-count ceiling after reservation capacity checks.
- * Override via MAX_WORKSPACES_PER_NODE env var. */
-export const DEFAULT_MAX_WORKSPACES_PER_NODE = 3;
-
 /** Default CPU usage threshold (%) above which a node is considered full. Override via TASK_RUN_NODE_CPU_THRESHOLD_PERCENT env var. */
 export const DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT = 50;
 

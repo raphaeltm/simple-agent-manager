@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/config"
@@ -20,7 +21,7 @@ import (
 func newRestoreRetryTestServer(t *testing.T) (*Server, *sessionSnapshotHandlerInput) {
 	t.Helper()
 	s, _ := newMcpTestServer(t)
-	s.workspaces["ws"] = &WorkspaceRuntime{ID: "ws", ProjectID: "project", CallbackToken: "original"}
+	s.workspaces["ws"] = &WorkspaceRuntime{ID: "ws", ProjectID: "project", Status: "running", CallbackToken: "original"}
 	if _, _, err := s.agentSessions.CreateRouted("ws", "session", "Original", "", "project", "chat"); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +36,7 @@ func TestSessionRestoreConcurrentRetriesDoNotOverwriteLaterEdits(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "user-work")
 	started, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int32
-	restore := func() map[string]interface{} {
+	restore := func(context.Context) map[string]interface{} {
 		calls.Add(1)
 		tabs, err := s.store.ListTabs("ws")
 		if err != nil || len(tabs) != 1 || tabs[0].ID != "session" {
@@ -87,7 +88,7 @@ func TestSessionRestoreWaitCanCancelWithoutReplaying(t *testing.T) {
 	started, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(finished)
-		_, err := s.runSessionRestore(context.Background(), input, func() map[string]interface{} {
+		_, err := s.runSessionRestore(context.Background(), input, func(context.Context) map[string]interface{} {
 			close(started)
 			<-release
 			return map[string]interface{}{"status": "degraded"}
@@ -99,7 +100,7 @@ func TestSessionRestoreWaitCanCancelWithoutReplaying(t *testing.T) {
 	<-started
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := s.runSessionRestore(ctx, input, func() map[string]interface{} {
+	_, err := s.runSessionRestore(ctx, input, func(context.Context) map[string]interface{} {
 		t.Error("canceled retry executed restore")
 		return nil
 	})
@@ -108,7 +109,7 @@ func TestSessionRestoreWaitCanCancelWithoutReplaying(t *testing.T) {
 	}
 	close(release)
 	<-finished
-	result, err := s.runSessionRestore(context.Background(), input, func() map[string]interface{} {
+	result, err := s.runSessionRestore(context.Background(), input, func(context.Context) map[string]interface{} {
 		t.Error("degraded restore was replayed")
 		return nil
 	})
@@ -122,7 +123,7 @@ func TestSessionRestoreRejectsRoutingAndAgentMismatch(t *testing.T) {
 		t.Run(mismatch, func(t *testing.T) {
 			s, input := newRestoreRetryTestServer(t)
 			if mismatch == "agent" {
-				if _, err := s.runSessionRestore(context.Background(), input, func() map[string]interface{} { return nil }); err != nil {
+				if _, err := s.runSessionRestore(context.Background(), input, func(context.Context) map[string]interface{} { return nil }); err != nil {
 					t.Fatal(err)
 				}
 				input.agentType = "codex"
@@ -142,7 +143,7 @@ func TestSessionRestoreRejectsRoutingAndAgentMismatch(t *testing.T) {
 			}
 			before := s.callbackTokenForWorkspace("ws")
 			input.workspaceCallbackToken = "must-not-apply"
-			_, err := s.runSessionRestore(context.Background(), input, func() map[string]interface{} {
+			_, err := s.runSessionRestore(context.Background(), input, func(context.Context) map[string]interface{} {
 				t.Error("conflicting restore reached effects")
 				return nil
 			})
@@ -163,7 +164,7 @@ func TestSessionRestorePersistenceFailurePreventsEffects(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 2 {
-				_, err := s.runSessionRestore(context.Background(), input, func() map[string]interface{} {
+				_, err := s.runSessionRestore(context.Background(), input, func(context.Context) map[string]interface{} {
 					t.Error("restore ran without persistence")
 					return nil
 				})
@@ -208,7 +209,7 @@ func TestSessionRestoreRefusesAlreadyUsedWorkspace(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			_, err := s.runSessionRestore(context.Background(), input, func() map[string]interface{} {
+			_, err := s.runSessionRestore(context.Background(), input, func(context.Context) map[string]interface{} {
 				t.Error("restore reached filesystem effects on a used workspace")
 				return nil
 			})
@@ -222,7 +223,7 @@ func TestSessionRestoreRefusesAlreadyUsedWorkspace(t *testing.T) {
 func TestSessionRestoreReservationBlocksOrdinaryHostsAndSurvivesHostCleanup(t *testing.T) {
 	s, input := newRestoreRetryTestServer(t)
 	session, _ := s.agentSessions.Get("ws", "session")
-	_, err := s.runSessionRestore(context.Background(), input, func() map[string]interface{} {
+	_, err := s.runSessionRestore(context.Background(), input, func(context.Context) map[string]interface{} {
 		if host := s.getOrCreateSessionHost("ws:session", "ws", "session", session, input.runtime, ""); host != nil {
 			t.Error("ordinary start was admitted while restore owned the files")
 		}
@@ -252,7 +253,7 @@ func TestSessionRestoreReservationBlocksOrdinaryHostsAndSurvivesHostCleanup(t *t
 	}
 	t.Cleanup(host.Stop)
 	// Later activity must not stop a completed retry from returning cached proof.
-	result, err := s.runSessionRestore(context.Background(), input, func() map[string]interface{} {
+	result, err := s.runSessionRestore(context.Background(), input, func(context.Context) map[string]interface{} {
 		t.Error("completed restore replayed after host started")
 		return nil
 	})
@@ -275,7 +276,7 @@ func TestStandaloneRestorePersistsFenceAcrossRestart(t *testing.T) {
 	if err := s.initializeStandaloneRestoreSession("ws", "session", "chat", "cf-container"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.runSessionRestore(context.Background(), input, func() map[string]interface{} { return map[string]interface{}{"status": "restored"} }); err != nil {
+	if _, err := s.runSessionRestore(context.Background(), input, func(context.Context) map[string]interface{} { return map[string]interface{}{"status": "restored"} }); err != nil {
 		t.Fatal(err)
 	}
 	// A new process retains SQLite, but no in-memory routing or attempt proof.
@@ -324,16 +325,39 @@ func TestStandaloneRestoreRequiresFreshConfiguredIdentity(t *testing.T) {
 	}
 }
 
-// Exercise the real authenticated handler, control-plane fetch, durable fence,
-// and fallback response, including the CF wake path without a create request.
-func TestStandaloneRestoreHandlerRetriesFetchSnapshotOnce(t *testing.T) {
+// newStandaloneRestoreHandlerServer prepares a fresh standalone workspace whose
+// snapshot restore calls back to the given control plane, and returns a request
+// builder for the real authenticated restore handler.
+func newStandaloneRestoreHandlerServer(t *testing.T, controlPlane http.HandlerFunc) (*Server, func(context.Context) *http.Request) {
+	t.Helper()
 	s, _ := newRestoreRetryTestServer(t)
 	configureFreshStandaloneRestore(s)
 	validator, key := newWorkspaceCreateJWTValidator(t, "node-test")
 	s.jwtValidator = validator
 	token := signWorkspaceCreateNodeToken(t, key, "node-test", "ws")
+	cp := httptest.NewServer(controlPlane)
+	t.Cleanup(func() {
+		// A restore still blocked in the fake control plane would otherwise
+		// hold Close open forever; dropping the connections releases it.
+		cp.CloseClientConnections()
+		cp.Close()
+	})
+	s.config.ControlPlaneURL = cp.URL
+	return s, func(ctx context.Context) *http.Request {
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/workspaces/ws/agent-sessions/session/restore", strings.NewReader(`{"chatSessionId":"chat","runtime":"cf-container","agentType":"claude-code","workspaceCallbackToken":"fresh"}`))
+		req.SetPathValue("workspaceId", "ws")
+		req.SetPathValue("sessionId", "session")
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-SAM-Workspace-Id", "ws")
+		return req
+	}
+}
+
+// Exercise the real authenticated handler, control-plane fetch, durable fence,
+// and fallback response, including the CF wake path without a create request.
+func TestStandaloneRestoreHandlerRetriesFetchSnapshotOnce(t *testing.T) {
 	var fetches atomic.Int32
-	cp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s, restoreRequest := newStandaloneRestoreHandlerServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer fresh" {
 			t.Error("restore callback used wrong token")
 		}
@@ -344,22 +368,105 @@ func TestStandaloneRestoreHandlerRetriesFetchSnapshotOnce(t *testing.T) {
 		} else {
 			_, _ = w.Write([]byte(`{}`))
 		}
-	}))
-	defer cp.Close()
-	s.config.ControlPlaneURL = cp.URL
+	})
 	for range 3 {
-		req := httptest.NewRequest(http.MethodPost, "/workspaces/ws/agent-sessions/session/restore", strings.NewReader(`{"chatSessionId":"chat","runtime":"cf-container","agentType":"claude-code","workspaceCallbackToken":"fresh"}`))
-		req.SetPathValue("workspaceId", "ws")
-		req.SetPathValue("sessionId", "session")
-		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("X-SAM-Workspace-Id", "ws")
 		rec := httptest.NewRecorder()
-		s.handleRestoreAgentSession(rec, req)
+		s.handleRestoreAgentSession(rec, restoreRequest(context.Background()))
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "transcript-replay") {
 			t.Fatalf("restore response = %d %s", rec.Code, rec.Body.String())
 		}
 	}
 	if fetches.Load() != 1 {
 		t.Fatalf("snapshot fetches = %d, want 1", fetches.Load())
+	}
+}
+
+// The staging incident behind this test: a wake's restore installed the agent
+// inside the restore request, the Cloudflare proxy answered 524 at 100 s, the
+// cancelled request killed the install, and the attempt was cached "degraded"
+// for a complete snapshot. The request going away must not reach the restore.
+func TestRestoreHandlerKeepsRestoringAfterItsRequestIsCancelled(t *testing.T) {
+	fetchStarted, releaseFetch := make(chan struct{}), make(chan struct{})
+	var fetches atomic.Int32
+	var fetchCancelled atomic.Bool
+	s, restoreRequest := newStandaloneRestoreHandlerServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodGet {
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		if fetches.Add(1) == 1 {
+			close(fetchStarted)
+		}
+		select {
+		case <-releaseFetch:
+		case <-r.Context().Done():
+			fetchCancelled.Store(true)
+			return
+		}
+		_, _ = w.Write([]byte(`{"available":false,"reason":"No saved snapshot"}`))
+	})
+
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	handlerReturned := make(chan struct{})
+	go func() {
+		defer close(handlerReturned)
+		s.handleRestoreAgentSession(httptest.NewRecorder(), restoreRequest(requestCtx))
+	}()
+	<-fetchStarted
+	cancelRequest()
+	select {
+	case <-handlerReturned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler kept waiting on the restore after its request was cancelled")
+	}
+
+	close(releaseFetch)
+	rec := httptest.NewRecorder()
+	s.handleRestoreAgentSession(rec, restoreRequest(context.Background()))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "transcript-replay") {
+		t.Fatalf("retry after cancelled request = %d %s, want the completed restore", rec.Code, rec.Body.String())
+	}
+	if fetchCancelled.Load() {
+		t.Fatal("cancelling the request cancelled the restore's own control-plane fetch")
+	}
+	if fetches.Load() != 1 {
+		t.Fatalf("snapshot fetches = %d, want 1: the retry must join the running restore", fetches.Load())
+	}
+}
+
+// Outliving its request must not make a restore immortal: the attempt ends at
+// the snapshot operation deadline and its waiters get a result.
+func TestRestoreAttemptEndsAtTheSnapshotOperationDeadline(t *testing.T) {
+	fetchCancelled := make(chan struct{})
+	s, restoreRequest := newStandaloneRestoreHandlerServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodGet {
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		<-r.Context().Done()
+		close(fetchCancelled)
+	})
+	s.config.SessionSnapshotOperationTimeout = 50 * time.Millisecond
+
+	responses := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		s.handleRestoreAgentSession(rec, restoreRequest(context.Background()))
+		responses <- rec
+	}()
+	select {
+	case rec := <-responses:
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), context.DeadlineExceeded.Error()) {
+			t.Fatalf("restore past its deadline = %d %s, want an explicit deadline failure", rec.Code, rec.Body.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the restore attempt outlived the snapshot operation deadline")
+	}
+	select {
+	case <-fetchCancelled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the restore's fetch outlived the snapshot operation deadline")
 	}
 }
