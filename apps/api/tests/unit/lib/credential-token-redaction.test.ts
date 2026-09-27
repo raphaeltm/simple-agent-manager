@@ -14,6 +14,16 @@ describe('redactCredentialTokens', () => {
     'replaces the whole %s token, leaving no fragment behind',
     (_name, token) => {
       expect(redactCredentialTokens(`before ${token} after`, R)).toBe(`before ${R} after`);
+      // Nothing before or after it: the lookbehind must hold at the very start of the string.
+      expect(redactCredentialTokens(token, R)).toBe(R);
+    }
+  );
+
+  it.each(['sk-', 'ghp_', 'github_pat_', 'sam_pat_', 'sam_wh_'])(
+    'redacts %s from an eight-character body, not seven',
+    (prefix) => {
+      expect(redactCredentialTokens(`${prefix}1234567`, R)).toBe(`${prefix}1234567`);
+      expect(redactCredentialTokens(`${prefix}12345678`, R)).toBe(R);
     }
   );
 
@@ -45,9 +55,10 @@ describe('redactCredentialTokens', () => {
     expect(redactCredentialTokens(text, R)).toBe(`${R} ${R}\n${R},${R}`);
   });
 
-  it('matches the upper-case forms the VM agent redactor also matches', () => {
+  it('matches upper-case forms, as the VM agent redactor does', () => {
     expect(redactCredentialTokens('SK-ABCDEFGHIJKLMNOP1234', R)).toBe(R);
     expect(redactCredentialTokens('GHP_ABCDEFGHIJKLMNOP1234', R)).toBe(R);
+    expect(redactCredentialTokens('SAM_PAT_ABCDEFGHIJKLMNOP1234', R)).toBe(R);
   });
 
   it.each([
