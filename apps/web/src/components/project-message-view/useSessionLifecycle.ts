@@ -1,15 +1,8 @@
-import {
-  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
-  DEFAULT_CHAT_SESSION_MESSAGE_MAX,
-} from '@simple-agent-manager/shared';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { WakeProgressUpdate } from '../../hooks/useChatWebSocket';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
-import { useQueryScope } from '../../hooks/useQueryScope';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
-import { useDocumentVisible } from '../../hooks/useVisibilityAwarePoll';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type {
   ChatMessageResponse,
@@ -19,43 +12,27 @@ import type {
   SessionStateSnapshot,
 } from '../../lib/api';
 import {
-  getChatSession,
   getTerminalToken,
   getTranscribeApiUrl,
   resetIdleTimer,
   sendFollowUpPrompt,
 } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
-import {
-  fetchHistoryUntil,
-  mergeRecentWindowOrRefresh,
-  oldestPersistedCursor,
-  refreshCachedTranscript,
-} from '../../lib/message-paging';
-import { chatQueryKeys, chatSessionMessagesQueryOptions } from '../../lib/query-options';
+import { mergeRecentWindowOrRefresh } from '../../lib/message-paging';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { FilePanelState } from './session-lifecycle-helpers';
-import {
-  getPlanFingerprint,
-  mergeSessionDetailMessages,
-  parsePlanContent,
-} from './session-lifecycle-helpers';
-import { countDisplayRows } from './tool-call-groups';
+import { parsePlanContent } from './session-lifecycle-helpers';
 import type { AgentActivityState } from './types';
-import {
-  CHAT_FALLBACK_POLL_MS,
-  deriveSessionState,
-  IDLE_TIMEOUT_MS,
-  isWorkingActivity,
-  VIRTUAL_START,
-} from './types';
+import { deriveSessionState, IDLE_TIMEOUT_MS, isWorkingActivity } from './types';
 import { useActivityVerifyTimer } from './useActivityVerifyTimer';
 import { useCancelAgentPrompt } from './useCancelAgentPrompt';
 import { useCompletionDockWorking } from './useCompletionDockWorking';
 import { useConnectionRecovery } from './useConnectionRecovery';
+import { useFallbackSessionPoll } from './useFallbackSessionPoll';
 import { useSessionFileUpload } from './useSessionFileUpload';
 import { useSessionInfrastructure } from './useSessionInfrastructure';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
+import { useSessionTranscript } from './useSessionTranscript';
 import { useWakeProgress } from './useWakeProgress';
 
 export function useSessionLifecycle(
@@ -65,66 +42,22 @@ export function useSessionLifecycle(
   _onSessionMutated?: () => void,
   onCommentEvent?: (event: MessageCommentRealtimeEvent) => void
 ): UseSessionLifecycleResult {
-  const queryScope = useQueryScope();
-  const queryClient = useQueryClient();
-  const sessionMessagesQueryKey = useMemo(
-    () => chatQueryKeys.sessionMessages(queryScope, projectId, sessionId),
-    [projectId, queryScope, sessionId]
-  );
   const [session, setSession] = useState<ChatSessionResponse | null>(null);
   const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(null);
-  const [messages, setMessages] = useState<ChatMessageResponse[]>([]);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const sessionQuery = useQuery({
-    ...chatSessionMessagesQueryOptions(queryScope, projectId, sessionId),
-    enabled: Boolean(queryScope && projectId && sessionId),
-    refetchOnMount: 'always',
-    queryFn: async ({ signal }) => {
-      const cached = queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey);
-      const refreshed =
-        cached && (await refreshCachedTranscript(projectId, sessionId, cached, signal));
-      if (refreshed) {
-        const latest =
-          queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey) ?? cached;
-        return {
-          ...refreshed,
-          messages: mergeMessages(latest.messages, refreshed.messages, 'append'),
-          hasMore: latest.hasMore,
-        };
-      }
-      return getChatSession(projectId, sessionId, {
-        signal,
-        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
-      });
-    },
-  });
-
-  // Refs mirror the latest messages/hasMore so imperative loaders (loadUntil)
-  // can read current state without stale closures.
-  const messagesRef = useRef<ChatMessageResponse[]>([]);
-  const hasMoreRef = useRef(false);
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-  useEffect(() => {
-    hasMoreRef.current = hasMore;
-  }, [hasMore]);
-
-  const updateCachedMessages = useCallback(
-    (incoming: ChatMessageResponse[], strategy: 'replace' | 'append' | 'prepend') => {
-      if (!queryScope) return;
-      // TODO: Add size-based cache eviction — no cap for now, optimize later
-      queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
-        sessionMessagesQueryKey,
-        (old) => mergeSessionDetailMessages(old, incoming, strategy)
-      );
-    },
-    [queryClient, queryScope, sessionMessagesQueryKey]
-  );
+  const transcript = useSessionTranscript(projectId, sessionId);
+  const {
+    queryClient,
+    queryKey: sessionMessagesQueryKey,
+    query: sessionQuery,
+    messages,
+    setMessages,
+    messagesRef,
+    hasMore,
+    setHasMore,
+    hasMoreRef,
+    updateCachedMessages,
+  } = transcript;
 
   const appendOptimisticMessage = useCallback(
     (message: ChatMessageResponse) => {
@@ -199,7 +132,6 @@ export function useSessionLifecycle(
   }, []);
   const handleOpenFileBrowser = useCallback(() => setFilePanel({ mode: 'browse', path: '.' }), []);
   const handleOpenGitChanges = useCallback(() => setFilePanel({ mode: 'git-status' }), []);
-  const [firstItemIndex, setFirstItemIndex] = useState(VIRTUAL_START);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const sessionState = session ? deriveSessionState(session) : 'terminated';
   const transcribeApiUrl = getTranscribeApiUrl();
@@ -364,27 +296,19 @@ export function useSessionLifecycle(
     setSession,
   });
 
-  // Reset virtual scroll and idle timer on session change; cleanup on unmount
+  // Reset the scroll button and idle timer on session change; cleanup on unmount.
+  // (The transcript resets its own virtual-scroll anchor.)
   useEffect(() => {
     sleepingWakePendingRef.current = false;
     stopVerifyDecayTimer();
-    setFirstItemIndex(VIRTUAL_START);
     setShowScrollButton(false);
   }, [sessionId, stopVerifyDecayTimer]);
 
+  // The transcript mirrors the query's messages; this mirrors its session and state.
   useEffect(() => {
-    setLoading(sessionQuery.isPending && sessionQuery.data === undefined);
-    if (sessionQuery.error && sessionQuery.data === undefined) {
-      setError(
-        sessionQuery.error instanceof Error ? sessionQuery.error.message : 'Failed to load session'
-      );
-    }
     if (!sessionQuery.data) return;
 
-    setError(null);
     setSession(sessionQuery.data.session);
-    setMessages(sessionQuery.data.messages);
-    setHasMore(sessionQuery.data.hasMore);
     setTaskEmbed(sessionQuery.data.session.task ?? null);
     const serverStillHasStaleSleepingState =
       sleepingWakePendingRef.current &&
@@ -436,131 +360,19 @@ export function useSessionLifecycle(
     workspace?.status
   );
 
-  // Degraded fallback while the DO WebSocket is unavailable. Connected active
-  // sessions rely on WebSocket events and reconnect catch-up instead of polling
-  // the full session detail endpoint.
-  const documentVisible = useDocumentVisible();
-  // Tracks the hidden→visible edge so the effect below can tell a visibility
-  // return (which must catch up immediately) apart from its other re-run causes.
-  // Updated inside the effect, never during render.
-  const wasVisibleRef = useRef(documentVisible);
-
-  useEffect(() => {
-    const becameVisible = documentVisible && !wasVisibleRef.current;
-    wasVisibleRef.current = documentVisible;
-
-    if (!session || !['active', 'sleeping'].includes(session.status)) return;
-    if (session.status === 'active' && connectionState === 'connected') return;
-    // Same reasoning as the WebSocket gate above, applied to the tab: nobody is
-    // reading this session while it is hidden, and this poll fetches the full
-    // session detail (heavier than the session list).
-    if (!documentVisible) return;
-
-    const abortController = new AbortController();
-    let lastPollFingerprint = '';
-    let pollInFlight = false;
-    const pollActiveSession = async () => {
-      if (pollInFlight) return;
-      pollInFlight = true;
-      try {
-        // Poll only the most-recent window — mergeReplace preserves the fully
-        // loaded history, so polling must NOT re-fetch the whole conversation.
-        const data: ChatSessionDetailResponse = await getChatSession(projectId, sessionId, {
-          signal: abortController.signal,
-          limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
-        });
-        if (data.session.id !== sessionId) return;
-        const newLastId = data.messages[data.messages.length - 1]?.id ?? '';
-        const taskStatus = data.session.task?.status ?? '';
-        const agentSessId = data.session.agentSessionId ?? '';
-        const planFingerprint = getPlanFingerprint(data.state);
-        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${taskStatus}:${agentSessId}:${planFingerprint}`;
-        if (fingerprint !== lastPollFingerprint) {
-          lastPollFingerprint = fingerprint;
-          setSession(data.session);
-          const current =
-            queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey) ??
-            ({
-              ...data,
-              messages: messagesRef.current,
-              hasMore: hasMoreRef.current,
-            } as ChatSessionDetailResponse);
-          const merged = await mergeRecentWindowOrRefresh(
-            projectId,
-            sessionId,
-            current,
-            data,
-            abortController.signal
-          );
-          setMessages(merged.messages);
-          setHasMore(merged.hasMore);
-          queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
-            sessionMessagesQueryKey,
-            (old) => ({
-              ...(old ?? merged),
-              ...merged,
-            })
-          );
-          if (data.session.task) setTaskEmbed(data.session.task);
-        }
-        const wakeAttemptFailed =
-          sleepingWakePendingRef.current &&
-          data.session.status === 'sleeping' &&
-          (['failed', 'cancelled'].includes(data.session.task?.status ?? '') ||
-            data.session.attention?.kind === 'wake_failed');
-        if (wakeAttemptFailed) {
-          sleepingWakePendingRef.current = false;
-        }
-        const serverStillHasStaleSleepingState =
-          sleepingWakePendingRef.current &&
-          data.session.status === 'sleeping' &&
-          !isWorkingActivity(data.state?.activity);
-        if (serverStillHasStaleSleepingState) {
-          // Durable prompt acceptance precedes replacement-runtime provisioning.
-          // During that window the sleeping session's last persisted activity is
-          // still idle; do not let fallback polling erase the user's wake feedback.
-          hydratePlan(data.state);
-          // Wake progress must survive this branch — see the matching comment on
-          // the mount-hydrate path. This is the poll that carries phase updates
-          // for a user-triggered wake, which is the common trigger.
-          hydrateWakeProgress(data.state);
-        } else {
-          if (data.session.status !== 'sleeping' || isWorkingActivity(data.state?.activity)) {
-            sleepingWakePendingRef.current = false;
-          }
-          hydrateState(data.state);
-        }
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-      } finally {
-        pollInFlight = false;
-      }
-    };
-    // Catch up immediately when the tab regains visibility — the poll was
-    // suspended while hidden, so waiting a full interval would show a stale
-    // conversation at exactly the moment the user looks at it. Scoped to the
-    // visibility edge: this effect's other re-run causes (session status,
-    // connection state) keep their pre-existing interval-only behaviour.
-    if (becameVisible) void pollActiveSession();
-
-    const pollInterval = setInterval(() => {
-      void pollActiveSession();
-    }, CHAT_FALLBACK_POLL_MS);
-
-    return () => {
-      clearInterval(pollInterval);
-      abortController.abort();
-    };
-  }, [
-    session?.status,
+  useFallbackSessionPoll({
     projectId,
     sessionId,
-    hydrateState,
+    session,
     connectionState,
-    documentVisible,
-    queryClient,
-    sessionMessagesQueryKey,
-  ]);
+    transcript,
+    sleepingWakePendingRef,
+    setSession,
+    setTaskEmbed,
+    hydrateState,
+    hydratePlan,
+    hydrateWakeProgress,
+  });
 
   // ── Send follow-up via REST API ──
   const handleSendFollowUp = async () => {
@@ -667,77 +479,13 @@ export function useSessionLifecycle(
     onCancelled,
   });
 
-  // Load more (pagination)
-  const loadMore = async () => {
-    if (!hasMore || loadingMore) return;
-    const before = oldestPersistedCursor(messages);
-    if (!before) return;
-
-    setLoadingMore(true);
-    try {
-      const data = await getChatSession(projectId, sessionId, { before });
-      setMessages((prev) => {
-        const merged = mergeMessages(prev, data.messages, 'prepend');
-        // Virtuoso's anchor moves by RENDERED ROWS, not messages: a page of tool
-        // calls folds into one group row, and a page whose trailing call merges
-        // into the existing first group adds none. See `countDisplayRows`. The
-        // guard covers the boundary-dedup case where `prepend` can drop a row.
-        const displayRowsAdded = countDisplayRows(merged) - countDisplayRows(prev);
-        if (displayRowsAdded > 0) {
-          setFirstItemIndex((fi) => fi - displayRowsAdded);
-        }
-        return merged;
-      });
-      updateCachedMessages(data.messages, 'prepend');
-      setHasMore(data.hasMore);
-    } finally {
-      setLoadingMore(false);
-    }
-  };
-
-  // Load older pages until a target timestamp is covered (or no more history).
-  // Used by timeline jump-to-message for the rare oversized/guard-trimmed session
-  // where the target predates the loaded window, so a jump never dead-clicks.
-  const loadUntil = useCallback(
-    async (targetTimestamp: number) => {
-      const oldest = messagesRef.current[0]?.createdAt ?? Infinity;
-      if (oldest <= targetTimestamp || !hasMoreRef.current) return;
-
-      setLoadingMore(true);
-      try {
-        const history = await fetchHistoryUntil(
-          projectId,
-          sessionId,
-          messagesRef.current,
-          targetTimestamp
-        );
-        if (history.messages.length > 0) {
-          setMessages((prev) => {
-            const merged = mergeMessages(prev, history.messages, 'prepend');
-            // Same rendered-row accounting as `loadMore` above.
-            const displayRowsAdded = countDisplayRows(merged) - countDisplayRows(prev);
-            if (displayRowsAdded > 0) {
-              setFirstItemIndex((fi) => fi - displayRowsAdded);
-            }
-            return merged;
-          });
-          updateCachedMessages(history.messages, 'prepend');
-        }
-        setHasMore(history.hasMore);
-      } finally {
-        setLoadingMore(false);
-      }
-    },
-    [projectId, sessionId, updateCachedMessages]
-  );
-
   return {
     session,
     messages,
     hasMore,
-    loading,
-    error,
-    setError,
+    loading: transcript.loading,
+    error: transcript.error,
+    setError: transcript.setError,
     sessionState,
     taskEmbed,
     workspace,
@@ -764,7 +512,7 @@ export function useSessionLifecycle(
     dismissStaleNotice,
     currentPlan,
     promptStartedAt,
-    firstItemIndex,
+    firstItemIndex: transcript.firstItemIndex,
     showScrollButton,
     setShowScrollButton,
     idleCountdownMs: recovery.idleCountdownMs,
@@ -778,9 +526,9 @@ export function useSessionLifecycle(
     cancelError,
     handleSendFollowUp,
     handleUploadFiles,
-    loadMore,
-    loadUntil,
-    loadingMore,
+    loadMore: transcript.loadMore,
+    loadUntil: transcript.loadUntil,
+    loadingMore: transcript.loadingMore,
     transcribeApiUrl,
     wsRef,
   };
