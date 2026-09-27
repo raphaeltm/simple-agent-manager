@@ -121,7 +121,15 @@ Agent-controlled content reaches the browser on three paths with gaps:
 - [x] Known mXSS payload shapes produce no executable HTML or event handlers (jsdom sanitizer corpus + real Chromium lab and Playwright)
 - [x] `/preview` carries `frame-ancestors <app origin>`; the PDF CSP has no `'unsafe-inline'` script; non-PDF bytes never get the PDF CSP; a genuine PDF still previews (Workers-runtime suite + Playwright PDF viewer)
 - [x] `/download` of `text/html; charset=utf-8` (and xml/js variants) serves `application/octet-stream`; `attachment` + `nosniff` unconditional (Workers-runtime suite)
-- [ ] Staging: library markdown Mermaid, chat Mermaid, and PDF preview render on app.sammy.party; new headers on the live response; no console errors
+- [x] Staging: library markdown Mermaid, chat Mermaid, and PDF preview render on app.sammy.party; new headers on the live response; no console errors. Verified 2026-09-27 on deploy run 36355591960 (sha a99efd75b) with real uploads, a real Instant chat and real agent replies, at 1280x800 and 375x667.
+  - PDF `/preview`: `default-src 'self'; script-src 'none'; style-src 'unsafe-inline'; object-src 'self'; frame-ancestors https://app.sammy.party`, no `X-Frame-Options`, `nosniff`. The modal renders the PDF in Chromium's viewer; before this branch it showed "This page has been blocked by Chromium". HTML bytes named `.pdf` get a 400.
+  - `/download` of HTML stored as `text/html; charset=utf-8` returns `application/octet-stream` with `attachment`.
+  - Library markdown: 10 of 10 diagrams (the attack corpus plus timeline, mindmap and a wrapped label) render with every label, and the output is inert (no `foreignObject`, HTML, handlers or external references; nothing executed). The wrapped label reads as words.
+  - Chat: the user's diagram, and the diagram the Claude Code agent wrote in its reply, both render inert with every label.
+  - Workspace raw proxy: the agent-written `.html` and `.svg` return `attachment` with the inert CSP and `nosniff`. The SVG still draws in the chat file panel.
+  - Repository raw: `/repo/raw` carries the inert CSP.
+  - Network and console: zero requests to the attacker host and zero console errors. Dashboard, projects, project settings, settings, library and chat load clean.
+  - Cleanup: uploads deleted; both staging sessions stopped, with their workspaces and cf-container nodes `stopped`. Stopping returned a pre-existing 500 ("Managed node teardown remains unconfirmed", 8 occurrences since 2026-09-11, noted on idea 01M211FBNN6J77DMT9KY076VEX).
 
 ## References
 
