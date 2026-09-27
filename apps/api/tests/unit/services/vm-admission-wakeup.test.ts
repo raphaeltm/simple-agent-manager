@@ -1,8 +1,15 @@
 import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { Hono } from 'hono';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../../src/services/node-callback-auth', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/services/node-callback-auth')>();
+  return { ...actual, verifyNodeCallbackAuth: vi.fn().mockResolvedValue(undefined) };
+});
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { nodeLifecycleRoutes } from '../../../src/routes/node-lifecycle';
 import { wakeVmAdmissionWaiters } from '../../../src/services/vm-admission-wakeup';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -16,23 +23,39 @@ let env: Env;
 function insertAdmission(
   taskId: string,
   options: {
+    projectId?: string;
     userId?: string;
     state?: 'queued' | 'waiting';
     enqueuedAt?: string;
   } = {}
 ): void {
-  const { userId = 'user-1', state = 'waiting', enqueuedAt = '2026-09-11T15:00:00.000Z' } = options;
+  const {
+    projectId = 'project-1',
+    userId = 'user-1',
+    state = 'waiting',
+    enqueuedAt = '2026-09-11T15:00:00.000Z',
+  } = options;
+  const scopeKey = `user:${userId}:workspace-vm:hetzner:platform:hetzner`;
   sqlite
     .prepare(
       `INSERT INTO vm_task_admissions (
          task_id, project_id, user_id, provider, credential_domain_key,
          provider_domain_key, scope_key, requested_vm_size, requested_vm_location,
          state, reason, next_retry_at, enqueued_at, updated_at
-       ) VALUES (?, 'project-1', ?, 'hetzner', 'platform:hetzner',
+       ) VALUES (?, ?, ?, 'hetzner', 'platform:hetzner',
          ?, ?, 'small', 'fsn1', ?, 'compatible_node_building_workspace',
          '2026-09-11T15:00:00.000Z', ?, ?)`
     )
-    .run(taskId, userId, PROVIDER_DOMAIN_KEY, SCOPE_KEY, state, enqueuedAt, now());
+    .run(taskId, projectId, userId, PROVIDER_DOMAIN_KEY, scopeKey, state, enqueuedAt, now());
+}
+
+function insertTask(taskId: string, userId: string, projectId: string): void {
+  sqlite
+    .prepare(
+      `INSERT INTO tasks (id, project_id, user_id, title, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'queued', ?, ?)`
+    )
+    .run(taskId, projectId, userId, `Queued task ${taskId}`, now(), now());
 }
 
 function now(): string {
@@ -41,7 +64,13 @@ function now(): string {
 
 beforeEach(() => {
   sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.tasks, schema.vmTaskAdmissions, schema.vmProvisioningLeases]);
+  createSchemaTables(sqlite, [
+    schema.tasks,
+    schema.vmTaskAdmissions,
+    schema.vmProvisioningLeases,
+    schema.nodes,
+    schema.workspaces,
+  ]);
   nudges = [];
   env = {
     DATABASE: createSqliteD1(sqlite),
@@ -109,30 +138,50 @@ describe('wakeVmAdmissionWaiters', () => {
     expect(orphanLease).toBeUndefined();
   });
 
-  it('wakes queued tasks for one user without waking another user', async () => {
-    sqlite
-      .prepare(`INSERT INTO tasks (id, user_id) VALUES (?, ?), (?, ?), (?, ?)`)
-      .run('task-user-1-first', 'user-1', 'task-user-1-second', 'user-1', 'task-user-2', 'user-2');
+  it("wakes one user's queued tasks from the node-ready route without waking another user", async () => {
+    insertTask('task-user-1-first', 'user-1', 'project-user-1');
+    insertTask('task-user-1-second', 'user-1', 'project-user-1');
+    insertTask('task-user-2', 'user-2', 'project-user-2');
     insertAdmission('task-user-1-second', {
       enqueuedAt: '2026-09-11T15:02:00.000Z',
+      projectId: 'project-user-1',
       state: 'queued',
     });
     insertAdmission('task-user-2', {
       enqueuedAt: '2026-09-11T14:59:00.000Z',
+      projectId: 'project-user-2',
       state: 'queued',
       userId: 'user-2',
     });
     insertAdmission('task-user-1-first', {
       enqueuedAt: '2026-09-11T15:01:00.000Z',
+      projectId: 'project-user-1',
       state: 'queued',
     });
+    sqlite
+      .prepare(
+        `INSERT INTO nodes (
+           id, user_id, name, status, vm_size, vm_location, health_status, created_at, updated_at
+         ) VALUES ('node-user-1', 'user-1', 'User 1 node', 'provisioning', 'small', 'fsn1',
+           'unhealthy', ?, ?)`
+      )
+      .run(now(), now());
 
-    const nudged = await wakeVmAdmissionWaiters(env, {
-      userId: 'user-1',
-      reason: 'node_ready',
-    });
+    const pending: Promise<unknown>[] = [];
+    const app = new Hono();
+    app.route('/api/nodes', nodeLifecycleRoutes);
+    const response = await app.request(
+      '/api/nodes/node-user-1/ready',
+      { method: 'POST', headers: { Authorization: 'Bearer node-token' } },
+      env,
+      {
+        waitUntil: (promise: Promise<unknown>) => pending.push(promise),
+        passThroughOnException: () => undefined,
+      }
+    );
+    await Promise.all(pending);
 
-    expect(nudged).toBe(2);
+    expect(response.status).toBe(200);
     expect(nudges).toEqual([
       { taskId: 'task-user-1-first', reason: 'node_ready' },
       { taskId: 'task-user-1-second', reason: 'node_ready' },

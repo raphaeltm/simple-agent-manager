@@ -31,20 +31,20 @@ becomes ready or warm.
   join tables, so their columns are not ambiguous. Qualifying them is not
   required to fix a joined-query ambiguity.
 - The existing real-SQLite test only enters through `scopeKey`; it never drives
-  the production `userId` wake branch. Extend it with multiple users and assert
-  both the intended wake and the foreign-user exclusion.
+  the production `userId` wake branch. The regression now enters through
+  `POST /api/nodes/:id/ready`, drains its `waitUntil` work, and verifies the
+  intended wake plus the foreign-user exclusion.
 
 ## Implementation checklist
 
 - [x] Qualify every `vm_task_admissions` column in the joined wake-up query.
-- [x] Add a real SQLite regression test that invokes `wakeVmAdmissionWaiters`
-      through the user-scoped entry point with same-user and foreign-user queued
-      tasks.
+- [x] Add a real SQLite regression test that invokes the node-ready route with
+      same-user and foreign-user queued tasks, then drains its async wake work.
 - [x] Assert the eligible same-user tasks are nudged in queue order and the
       foreign-user task is not nudged.
 - [x] Temporarily restore the bare `user_id`, run the focused test, and record
       the expected ambiguous-column failure before restoring the fix.
-- [ ] Run focused and repository quality checks.
+- [x] Run focused and repository quality checks.
 - [ ] Complete specialist review, staging D1 verification, CI, CodeRabbit (if it
       appears), merge, and production deploy monitoring.
 
@@ -64,10 +64,11 @@ becomes ready or warm.
 
 On 2026-09-27, the fixed focused suite passed with 2/2 tests. I then changed
 only `vm_task_admissions.user_id = ?` back to `user_id = ?` and reran the same
-suite. Exactly the new multi-user test failed with
-`SqliteError: ambiguous column name: user_id`; the existing scope-key test
-continued to pass (1 passed, 1 failed). Restoring the qualification returned
-the suite to green.
+suite. The route emitted `node_ready.vm_admission_wakeup_failed` with
+`ambiguous column name: user_id`; exactly the new route-level test failed
+because no tasks were nudged, while the existing scope-key test continued to
+pass (1 passed, 1 failed). Restoring the qualification returned the suite to
+green.
 
 ## References
 
