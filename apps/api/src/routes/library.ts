@@ -37,6 +37,12 @@ import {
   getPreviewUrlTtlSeconds,
   mintPreviewPath,
 } from '../services/interactive-preview';
+import {
+  contentDispositionFilename,
+  downloadContentType,
+  isInlinePreviewable,
+  previewHeaders,
+} from '../services/library-serving-policy';
 
 const libraryRoutes = new Hono<{ Bindings: Env }>();
 
@@ -291,27 +297,12 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
     }),
   ]).finally(() => clearTimeout(timeoutHandle));
 
-  // Sanitize filename for Content-Disposition (strip non-printable + header-unsafe chars)
-  const safeFilename = file.filename.replace(/[^\x20-\x7E]|["\\;]/g, '_');
-
-  // Force safe Content-Type for MIME types that can execute scripts in browsers
-  const DANGEROUS_MIMES = [
-    'text/html',
-    'application/javascript',
-    'application/xhtml+xml',
-    'image/svg+xml',
-    'text/xml',
-  ];
-  const contentType = DANGEROUS_MIMES.includes(file.mimeType.toLowerCase())
-    ? 'application/octet-stream'
-    : file.mimeType;
-
   return new Response(data, {
     status: 200,
     headers: {
-      'Content-Type': contentType,
+      'Content-Type': downloadContentType(file.mimeType),
       'Content-Length': String(data.byteLength),
-      'Content-Disposition': `attachment; filename="${safeFilename}"`,
+      'Content-Disposition': `attachment; filename="${contentDispositionFilename(file.filename)}"`,
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
     },
@@ -361,19 +352,6 @@ libraryRoutes.post(
 // GET /:fileId/preview — decrypt + serve inline for previewable types
 // ---------------------------------------------------------------------------
 
-/** MIME types safe to render inline in a browser (images, PDF, markdown, inert HTML text).
- *  Keep in sync with PREVIEWABLE_IMAGE_MIMES + PREVIEWABLE_MIMES in apps/web/src/lib/file-utils.ts */
-const PREVIEWABLE_MIMES = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-  'image/avif',
-  'application/pdf',
-  'text/markdown',
-  'text/html',
-]);
-
 libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c) => {
   const auth = getAuth(c);
   const userId = auth.user.id;
@@ -388,11 +366,11 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
   // derived on a minimal image without /etc/mime.types), recover the effective
   // type from the filename extension. Safety is preserved: text/html is always
   // served as inert text/plain with a strict CSP below, and image/svg+xml is not
-  // in PREVIEWABLE_MIMES (rejected here) — so no extension-sniffed HTML/SVG is
+  // inline-previewable (rejected here) — so no extension-sniffed HTML/SVG is
   // ever served in a way the browser would execute.
   const { file } = await getFile(db, projectId, fileId);
   const effectiveMime = resolveEffectiveMimeType(file.mimeType, file.filename);
-  if (!PREVIEWABLE_MIMES.has(effectiveMime)) {
+  if (!isInlinePreviewable(effectiveMime)) {
     throw errors.badRequest('File type is not supported for inline preview');
   }
 
@@ -415,27 +393,16 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
     }),
   ]).finally(() => clearTimeout(timeoutHandle));
 
-  const safeFilename = file.filename.replace(/[^\x20-\x7E]|["\\;]/g, '_');
-
-  const responseContentType =
-    effectiveMime === 'text/html' ? 'text/plain; charset=utf-8' : effectiveMime;
-  const csp =
-    effectiveMime === 'application/pdf'
-      ? "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'self'"
-      : effectiveMime === 'text/html'
-        ? "default-src 'none'"
-        : "default-src 'none'; style-src 'unsafe-inline'";
-
+  const { contentType, contentSecurityPolicy } = previewHeaders(effectiveMime);
   return new Response(data, {
     status: 200,
     headers: {
-      'Content-Type': responseContentType,
+      'Content-Type': contentType,
       'Content-Length': String(data.byteLength),
-      'Content-Disposition': `inline; filename="${safeFilename}"`,
+      'Content-Disposition': `inline; filename="${contentDispositionFilename(file.filename)}"`,
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
-      // PDF viewers need script-src for browser-native rendering; images get strict CSP
-      'Content-Security-Policy': csp,
+      'Content-Security-Policy': contentSecurityPolicy,
     },
   });
 });
