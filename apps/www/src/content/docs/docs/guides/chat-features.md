@@ -286,6 +286,14 @@ When you open a new chat, SAM offers a few repo-aware **starter prompts** (for e
 
 To send on a desktop keyboard, press **Cmd+Enter** on Mac or **Ctrl+Enter** on Windows/Linux — plain **Enter** inserts a new line so you can write multi-line prompts. The composer shows the correct shortcut for your platform as a hint. On mobile, tap the send button; **Enter** always inserts a new line.
 
+## Switching Between Chats
+
+A chat you opened in the last 24 hours opens at once from a cache in your browser, then refreshes in the background. A thin bar at the top of the page shows while the refresh runs, and messages that arrived while you were away appear when it finishes. A chat that is not cached shows a loading indicator until its newest messages arrive. The previous chat never stays on screen while the next one loads.
+
+Each chat opens on its newest messages. Scroll to the top, or select **Load earlier messages**, to load older history. Jumping to a timeline entry or a comment loads the history it needs first.
+
+An unsent message in the composer stays with its chat when you switch to another chat and back, until you leave the project chat or reload the page. The cache belongs to your account, is only read after the sign-in check completes, and is deleted when you sign out. Its lifetime and size are configurable; see [query cache persistence](/docs/reference/configuration/#query-cache-persistence).
+
 ## Session Filters (Shared Projects)
 
 In a project shared with teammates, everyone's chat sessions appear in the same session list. A filter near the session search lets you switch between **my sessions** and **all sessions** so you can focus on your own work or see everything happening in the project.

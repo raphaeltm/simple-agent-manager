@@ -277,9 +277,9 @@ describe('mergeMessages', () => {
     });
 
     it('preserves a fully-loaded conversation when the poll returns only a small recent window', () => {
-      // Chat now loads the FULL conversation up front (large window), while the
-      // 3s poll fetches only a small recent window. mergeReplace must NOT discard
-      // the loaded history — otherwise the full load is clobbered every poll.
+      // Scroll-up paging can load far more history than the 3s poll's small
+      // recent window. mergeReplace must NOT discard the loaded history —
+      // otherwise every poll would clobber the pages the reader already loaded.
       const fullyLoaded = Array.from({ length: 12 }, (_, i) =>
         msg({ id: `m-${i + 1}`, createdAt: i + 1 }),
       );

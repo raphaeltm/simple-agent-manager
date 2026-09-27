@@ -10,9 +10,9 @@ it was a session I just visited ... it's waiting for the revalidation instead of
 
 Reproduced in a real browser (idea `01M0CSA14BAQH5ATEX04N8C4MA`, 2026-09-27 later section):
 
-| Step | Message pane 400 ms after the click |
-| --- | --- |
-| First visit to B (uncached) | **A's title and messages** while B does a full fetch |
+| Step                            | Message pane 400 ms after the click                                  |
+| ------------------------------- | -------------------------------------------------------------------- |
+| First visit to B (uncached)     | **A's title and messages** while B does a full fetch                 |
 | A again, after 6 min unobserved | **B's title and messages** while A does a full fetch (cache evicted) |
 
 Three causes, all code-verified:
@@ -47,6 +47,7 @@ Build on PR #2159 (`2967a6cfa`, reopen-within-staleTime reconciliation). Do not 
 ## Research findings
 
 ### API (no server change needed)
+
 - `GET /api/projects/:projectId/sessions/:sessionId` (`apps/api/src/routes/chat.ts:149`) already
   serves newest-first pages: no cursor → `ORDER BY created_at DESC ... LIMIT n+1`, reversed to
   transcript order, `hasMore` = older rows exist (`durable-objects/project-data/messages.ts:352`,
@@ -58,6 +59,7 @@ Build on PR #2159 (`2967a6cfa`, reopen-within-staleTime reconciliation). Do not 
   `apps/api/.env.example`, env-reference skill).
 
 ### Persistence and auth gating (keep as is)
+
 - `AuthProvider` renders nothing until the identity namespace resolves, then a spinner while the
   IndexedDB restore runs (`AuthProvider.tsx:208-221`); `ProtectedRoute` spins while the session is
   pending. The restore only starts after the session check because the record is keyed by user id.
@@ -72,6 +74,7 @@ Build on PR #2159 (`2967a6cfa`, reopen-within-staleTime reconciliation). Do not 
   "modest, bounded" storage).
 
 ### Previous decisions this builds on or revises
+
 - 2026-07-03 (`tasks/archive/2026-07-03-chat-full-load-timeline-jump.md`): the chat loaded the full
   conversation so the timeline jump index was complete. The jump keeps working without it: jumps
   already page back through `loadUntil`/`fetchHistoryUntil` when the target is not loaded.
@@ -82,6 +85,7 @@ Build on PR #2159 (`2967a6cfa`, reopen-within-staleTime reconciliation). Do not 
   reintroduced key lives INSIDE `ProjectMessageView`, so every caller gets per-session isolation.
 
 ### Newest-first consequences (every consumer of "the transcript is fully loaded")
+
 - Timeline jump: already server-backed (`useSessionTimeline` fetches user messages itself) and pages
   back through `loadUntil(timestamp)`. OK.
 - Comment jumps pass the COMMENT's time (`SessionCommentsDrawer.tsx:142`, `ProjectComments.tsx:59`)
@@ -93,6 +97,7 @@ Build on PR #2159 (`2967a6cfa`, reopen-within-staleTime reconciliation). Do not 
 - `FloatingHeader` already guards its first-prompt title fallback on `!hasMore`. OK.
 
 ### Pre-existing bug in the code being restructured (fix here, with a test)
+
 - The mirror effect re-runs on every cache write (every streamed WebSocket row calls
   `setQueryData`), re-hydrating the load-time `state` snapshot. A session loaded while idle flips
   `agentActivity` back to `idle` on the first streamed row after a `prompting` signal, and stops the
@@ -102,6 +107,7 @@ Build on PR #2159 (`2967a6cfa`, reopen-within-staleTime reconciliation). Do not 
   on local writes.
 
 ### Other effects of the per-session key
+
 - `useSessionTools` fetches report config once per mount (`useSessionTools.ts:108-115`); the Report
   rail action is hidden until it resolves. With a keyed view that is a refetch and a visible
   Report-icon flicker on every switch → move to TanStack Query (cached).
@@ -114,6 +120,7 @@ Build on PR #2159 (`2967a6cfa`, reopen-within-staleTime reconciliation). Do not 
   while a cached transcript refreshes (policy eac31fbb).
 
 ### File size (rule 18)
+
 - `project-message-view/index.tsx` 877 lines (hard limit) → split first, own commit.
 - `useSessionLifecycle.ts` 787 lines and this change edits it → extract the transcript layer and the
   degraded poll in a separate no-behavior-change commit before the feature commit.
@@ -136,58 +143,108 @@ Build on PR #2159 (`2967a6cfa`, reopen-within-staleTime reconciliation). Do not 
 
 ## Implementation checklist
 
-### Commit 1 — split `index.tsx` (no behavior change)
-- [ ] Extract jump machinery → `useConversationJump.ts`
-- [ ] Extract optimistic user-message animation tracking → hook
-- [ ] Extract status banners, conversation pane, and footer into components
-- [ ] `index.tsx` under 500 lines; drop the FILE SIZE EXCEPTION comment
-- [ ] Lint, typecheck, and the existing message-view tests pass unchanged
+### Commit 1 — split `index.tsx` (no behavior change) — `54043f5a8`
 
-### Commit 2 — split `useSessionLifecycle.ts` (no behavior change)
-- [ ] Extract transcript layer → `useSessionTranscript.ts`
-- [ ] Extract degraded fallback poll → `useFallbackSessionPoll.ts`
-- [ ] Existing lifecycle, resume, recovery, and message-view tests pass unchanged
+- [x] Extract jump machinery → `useConversationJump.ts`
+- [x] Extract optimistic user-message animation tracking → `useAnimatedUserMessages.ts`
+- [x] Extract status banners, conversation pane, and footer into components (`SessionStatusBanners.tsx`, `ConversationPane.tsx`, `SessionFooter.tsx`)
+- [x] `index.tsx` under 500 lines; drop the FILE SIZE EXCEPTION comment
+- [x] Lint, typecheck, and the existing message-view tests pass unchanged
 
-### Commit 3+ — feature
-- [ ] Shared constants + web config module (TTL, max sessions), `vite-env.d.ts`
-- [ ] Transcript query options: `gcTime`, newest-page cold load, forward-delta refresh (moved from the hook, same semantics)
-- [ ] Persistence: per-operation max age in the dehydrate filter; `hydrateOptions` gcTime
-- [ ] Count-bounded eviction of unobserved transcripts on open
-- [ ] Keyed per-session view + per-session drafts
-- [ ] Transcript hook reads from the query cache; server snapshots hydrate on reference change (fixes the activity reset)
-- [ ] Scroll-up paging (`startReached`) with an in-flight guard; keep the button
-- [ ] Jumps to a specific message page back until that id is loaded (`fetchHistoryUntil` target)
-- [ ] Comment inbox: unknown anchor role → neutral label
-- [ ] Report config → TanStack Query
-- [ ] Remove dead code: session-change reset effect, header `loading` spinner prop, `setError` if unused, the size-eviction TODO
-- [ ] Docs: shared defaults, `chat-message-query.ts`, `env.ts`, API `.env.example`, web `.env.example`, `configuration.md`, env-reference skill
+### Commit 2 — split `useSessionLifecycle.ts` (no behavior change) — `77372abba`
 
-### Tests (real triggers, deferred ordering; rule 62)
-- [ ] Page-level: selecting a cached chat renders its transcript on the first commit with no frame of the previous chat while its refresh is pending
-- [ ] Page-level: selecting an uncached chat never shows the previous chat; newest page renders
-- [ ] Page-level: a message persisted while away appears after switching back (#2159 guard at the switch), with production-like `staleTime`
-- [ ] Page-level: a chat left more than the default gcTime ago is still instant (test client gcTime 0)
-- [ ] Page-level: drafts are per chat; report config is not refetched per switch
-- [ ] Newest-first: cold open requests one page; scroll-up (`startReached`) prepends the older page with the `before` cursor; `firstItemIndex` accounting
-- [ ] Jump to an unloaded comment anchor pages back until the anchor loads and scrolls to its 0-based index
-- [ ] Hook: a streamed row after a `prompting` signal keeps the agent working
-- [ ] Persistence: TTL dehydrate filter; restored transcript outlives the default 5-minute gcTime; eviction keeps the most recent and never the observed
-- [ ] Auth: a persisted transcript is not rendered before the session check resolves, and renders on the first frame after
-- [ ] Revert each guard once; record which test went red
+- [x] Extract transcript layer → `useSessionTranscript.ts`
+- [x] Extract degraded fallback poll → `useFallbackSessionPoll.ts`
+- [x] Existing lifecycle, resume, recovery, and message-view tests pass unchanged
+
+### Commit 3+ — feature — `b56369417`
+
+- [x] Shared constants + web config module (TTL, max sessions), `vite-env.d.ts`
+- [x] Transcript query options: `gcTime`, newest-page cold load, forward-delta refresh (moved from the hook, same semantics)
+- [x] Persistence: per-operation max age in the dehydrate filter; `hydrateOptions` gcTime
+- [x] Count-bounded eviction of unobserved transcripts on open
+- [x] Keyed per-session view + per-session drafts
+- [x] Transcript hook reads from the query cache; server snapshots hydrate on reference change (fixes the activity reset)
+- [x] Scroll-up paging (`startReached`) with an in-flight guard; keep the button
+- [x] Jumps to a specific message page back until that id is loaded (`fetchHistoryUntil` target)
+- [x] Comment inbox: unknown anchor role → neutral label
+- [x] Report config → TanStack Query
+- [x] Remove dead code: session-change reset effect, header `loading` spinner prop, `setError`, the size-eviction TODO
+- [x] Docs: shared defaults, `chat-message-query.ts`, `env.ts`, API `.env.example`, web `.env.example`, `configuration.md`, env-reference skill
+
+### Tests (real triggers, deferred ordering; rule 62) — `cca066ed9`
+
+- [x] Page-level: selecting a cached chat renders its transcript on the first commit with no frame of the previous chat while its refresh is pending
+- [x] Page-level: selecting an uncached chat never shows the previous chat; newest page renders
+- [x] Page-level: a message persisted while away appears after switching back (#2159 guard at the switch), with production-like `staleTime`
+- [x] Page-level: a chat left more than the default gcTime ago is still instant (test client gcTime 0)
+- [x] Page-level: drafts are per chat; report config is not refetched per switch
+- [x] Newest-first: cold open requests one page; scroll-up (`startReached`) prepends the older page with the `before` cursor; `firstItemIndex` accounting
+- [x] Jump to an unloaded comment anchor pages back until the anchor loads and scrolls to its 0-based index
+- [x] Hook: a streamed row after a `prompting` signal keeps the agent working
+- [x] Persistence: TTL dehydrate filter; restored transcript outlives the default 5-minute gcTime; eviction keeps the most recent and never the observed
+- [x] Auth: a persisted transcript is not rendered before the session check resolves, and renders on the first frame after
+- [x] Revert each guard once; record which test went red (table below)
 
 ### Visual + staging
-- [ ] Playwright audit at 375x667 and 1280x800: long chat, empty chat, many sessions, long titles; switch flows; scroll paging; no overflow; screenshots opened and reviewed
+
+- [x] Playwright audit at 375x667 and 1280x800: long chat, empty chat, many sessions, long titles; switch flows; scroll paging; no overflow; screenshots opened and reviewed
 - [ ] Staging: switch between several real chats on app.sammy.party; immediate switch, newest visible, older pages in, zero console errors
 
 ## Acceptance criteria
 
-- [ ] A chat used within the last 24 h (configurable) opens from memory or IndexedDB without waiting for the network, and refreshes in the background.
-- [ ] Selecting a chat never renders the previous chat's title or messages, cached or not.
-- [ ] The cold load requests one page (default 500 rows); older history loads on scroll-up.
-- [ ] A message persisted while the chat was closed appears after reopening/switching back.
-- [ ] No cached transcript renders before the auth check resolves.
-- [ ] The transcript cache is bounded by age and count.
-- [ ] `project-message-view/index.tsx` is split in its own commit with no behavior change.
+- [x] A chat used within the last 24 h (configurable) opens from memory or IndexedDB without waiting for the network, and refreshes in the background.
+- [x] Selecting a chat never renders the previous chat's title or messages, cached or not.
+- [x] The cold load requests one page (default 500 rows); older history loads on scroll-up.
+- [x] A message persisted while the chat was closed appears after reopening/switching back.
+- [x] No cached transcript renders before the auth check resolves.
+- [x] The transcript cache is bounded by age and count.
+- [x] `project-message-view/index.tsx` is split in its own commit with no behavior change.
+
+## Implementation notes
+
+- **The keyed view needs a mounted-list gate for jumps.** An uncached chat mounts Virtuoso one
+  render after its data arrives, so a deep-link jump fired on data arrival hit a null list ref.
+  `useConversationJump` takes `listReady` and waits for it (guard G14).
+- **The prepend anchor is derived, not effect-driven.** TanStack delivers cache updates to React
+  via `setTimeout(0)`, so a cache write and a React state update are not one commit.
+  `usePrependAnchor` derives `firstItemIndex` from the message list during render (guard G13).
+- **Restored queries need their own `gcTime`.** A restored query nobody has reopened yet has no
+  observer, so it takes its `gcTime` from the hydrate default options, not from the query options.
+  The first G12 test observed the chat and could not see the difference; the auth test now asserts
+  the `gcTime` of an unopened restored chat.
+- **Test fixtures:** the test client's default `gcTime` is 0 (stands in for the 5-minute default),
+  so tests reach a cached state by visiting chats, not by seeding the cache. Consecutive assistant
+  rows merge into one display item, so paging fixtures use user rows.
+- `chats.ts` was already unformatted on `main`; only the changed lines were formatted (format
+  ratchet), not the whole file.
+- `packages/shared/src/constants/index.ts` (694 lines) is a pure named re-export barrel; the two
+  added lines are exports. `SessionHeader.tsx` shrank from 611 to 599 lines (dead prop removed).
+
+## Guard revert evidence (rule 62)
+
+Each guard was reverted on its own with the rest of the change in place, the web suite was run, and
+the guard was restored. Harness: `.tmp/guards/run_guards.py` (not committed).
+
+| Guard                                                       | Reverted in                         | Test(s) that went red                                                                                                                 |
+| ----------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| G1 per-session key                                          | `project-message-view/index.tsx`    | switching: cached switch paints in the switching commit; uncached switch never shows the previous chat; drafts per chat               |
+| G2 transcript `gcTime`                                      | `lib/query-options/chats.ts`        | switching: cached switch; Report tool not refetched                                                                                   |
+| G3 `refetchOnMount: 'always'` (#2159)                       | `useSessionTranscript.ts`           | switching: cached switch shows what arrived meanwhile; lifecycle: refreshes a fresh cached transcript within staleTime                |
+| G4 newest-page cold load                                    | `lib/message-paging.ts`             | switching: uncached switch; history: opens on the newest page; lifecycle: requests only the newest page                               |
+| G5 cached report config                                     | `useSessionTools.ts`                | switching: Report tool not refetched                                                                                                  |
+| G6 per-session drafts                                       | `session-drafts.tsx`                | switching: drafts per chat                                                                                                            |
+| G7 `startReached` paging                                    | `ConversationPane.tsx`              | history: pages older history in at the top                                                                                            |
+| G8 jump pages until message id                              | `lib/message-paging.ts`             | history: comment jump into unloaded history; message-paging: pages past the target time until the id loads; reads nothing when loaded |
+| G9 hydrate server snapshots only                            | `useSessionLifecycle.ts`            | lifecycle: keeps a working agent working after a streamed row                                                                         |
+| G10 dehydrate age filter                                    | `lib/query-persist-config.ts`       | retention: stops writing a transcript older than the window                                                                           |
+| G11a eviction cap                                           | `lib/query-options/chats.ts`        | retention: keeps the most recent, evicts the rest; never evicts on-screen/opening                                                     |
+| G11b eviction pins                                          | `lib/query-options/chats.ts`        | retention: never evicts a transcript on screen, or the one being opened                                                               |
+| G12 restored-query `gcTime`                                 | `hooks/useQueryCachePersistence.ts` | auth: persisted transcript only after the session check (gcTime of the unopened restored chat)                                        |
+| G13 derived prepend anchor                                  | `useSessionTranscript.ts`           | message view: decrements `firstItemIndex` by the row delta; history: newest page then older                                           |
+| G14 jump waits for mounted list                             | `useConversationJump.ts`            | message view: both deep-link GROUP-row jump tests                                                                                     |
+| G15 unloaded anchor role unknown                            | `SessionMessageView.tsx`            | history: comment jump into unloaded history                                                                                           |
+| Auth gate (`ProtectedRoute` renders children while pending) | `components/ProtectedRoute.tsx`     | auth: persisted transcript only after the session check                                                                               |
 
 ## References
 
