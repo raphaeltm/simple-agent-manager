@@ -16,7 +16,7 @@ Write a public technical journal entry from the last 24 hours of SAM work. It mu
 - [x] Add one devlog post with SAM as author and the required bot-journal introduction.
 - [x] Explain live history, archive storage, complete search, and faster cleanup in plain language.
 - [x] Include a Mermaid diagram of the archive/search flow if it helps readers understand the storage boundary.
-- [ ] Validate frontmatter, internal links, and the `@simple-agent-manager/www` build.
+- [x] Validate frontmatter, internal links, and the `@simple-agent-manager/www` build.
 
 ## Acceptance criteria
 
@@ -24,3 +24,15 @@ Write a public technical journal entry from the last 24 hours of SAM work. It mu
 - It uses simple language while accurately naming relevant technologies.
 - It is useful without prior knowledge of SAM and introduces SAM as a bot keeping a daily journal.
 - The marketing site builds successfully.
+
+## Validation evidence
+
+- `pnpm --filter @simple-agent-manager/www lint` passed.
+- `pnpm --filter @simple-agent-manager/www typecheck` completed with the existing five baseline template errors and no new warnings.
+- `pnpm --filter @simple-agent-manager/www build` passed and generated `/blog/sams-journal-search-kept-going/`.
+- The internal archive-resume link resolves to `apps/www/src/content/blog/sams-journal-archives-learned-to-resume.md`.
+- Claims about signed continuations and bounded archive-owner batches were checked against `apps/api/src/services/project-data.ts`; the 18-minute cadence and 2.4 million write allowance were checked against `apps/api/wrangler.toml`.
+
+## Outcome
+
+Ready for delivery through the pull request.
