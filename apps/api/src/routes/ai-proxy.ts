@@ -12,41 +12,23 @@
  *
  * Mount point: app.route('/ai/v1', aiProxyRoutes) in index.ts.
  */
-import {
-  DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST,
-  DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
-  DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
-  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
-} from '@simple-agent-manager/shared';
-import { drizzle } from 'drizzle-orm/d1';
-import { type Context, Hono } from 'hono';
+import { Hono } from 'hono';
 
-import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { parsePositiveInt } from '../lib/route-helpers';
-import { readRequestJsonRecord, RequestBodyTooLargeError } from '../lib/runtime-validation';
-import { getCredentialEncryptionKey } from '../lib/secrets';
-import {
-  checkRateLimit,
-  createRateLimitKey,
-  getCurrentWindowStart,
-} from '../middleware/rate-limit';
+import { readRequestJsonRecord } from '../lib/runtime-validation';
 import type { UpstreamAuth } from '../services/ai-billing';
-import { resolveUnifiedBillingToken, resolveUpstreamAuth } from '../services/ai-billing';
+import { resolveUpstreamAuth } from '../services/ai-billing';
+import { isAnthropicModel } from '../services/ai-proxy-shared';
 import {
-  AIProxyAuthError,
-  type AIProxyCredentialAttribution,
-  buildAIGatewayMetadata,
-  extractCallbackToken,
-  isAnthropicModel,
-  updateAIProxyAgentCredentialAttribution,
-  verifyAIProxyAuth,
-} from '../services/ai-proxy-shared';
-import { checkAiUsageGate } from '../services/ai-token-budget';
-import { attachTokenUsageAccounting } from '../services/ai-token-usage-accounting';
-import { recordProxyCredentialLimitObservationsFromHeaders } from '../services/credential-limit-events';
-import { getPlatformAgentCredential } from '../services/platform-credentials';
+  aiProxyBodyParseError,
+  aiProxyRequestBodyMaxBytes,
+  enforceInputLimit,
+  enforceRateLimit,
+  enforceUsageGate,
+  prepareAIProxyRequest,
+  validateAllowedModel,
+} from './ai-proxy-admission';
 import {
   estimateInputTokens,
   estimateResponsesInputTokens,
@@ -57,6 +39,12 @@ import {
   resolveModelId,
 } from './ai-proxy-model-resolution';
 import {
+  accountingResponse,
+  buildProxyMetadata,
+  resolveOpenAIProxyCredential,
+  schedulePlatformProxyLimitHeaders,
+} from './ai-proxy-platform-billing';
+import {
   forwardToAnthropic,
   forwardToOpenAI,
   forwardToOpenAIResponses,
@@ -64,293 +52,6 @@ import {
 } from './ai-proxy-upstream';
 
 const aiProxyRoutes = new Hono<{ Bindings: Env }>();
-type AIProxyContext = Context<{ Bindings: Env }>;
-type AIProxyDb = Parameters<typeof verifyAIProxyAuth>[2];
-type AIProxyRequestContext = Awaited<ReturnType<typeof verifyAIProxyAuth>> & { db: AIProxyDb };
-type ProxyErrorStatus = 400 | 401 | 403 | 404 | 413 | 429 | 502 | 503;
-type OpenAIProxyCredential = AIProxyCredentialAttribution & {
-  apiKey: string;
-  credentialProvider: 'openai';
-};
-
-function proxyJsonError(
-  c: AIProxyContext,
-  message: string,
-  type: string,
-  status: ProxyErrorStatus,
-  extra?: Record<string, unknown>
-): Response {
-  return c.json({ error: { message, type, ...(extra ?? {}) } }, status);
-}
-
-function aiProxyRequestBodyMaxBytes(c: AIProxyContext): number {
-  return parsePositiveInt(
-    c.env.AI_PROXY_REQUEST_BODY_MAX_BYTES,
-    DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES
-  );
-}
-
-function aiProxyBodyParseError(c: AIProxyContext, error: unknown): Response {
-  if (error instanceof RequestBodyTooLargeError) {
-    return proxyJsonError(
-      c,
-      `Request body exceeds ${error.maxBytes} bytes`,
-      'invalid_request_error',
-      413
-    );
-  }
-  return c.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, 400);
-}
-
-async function prepareAIProxyRequest(c: AIProxyContext): Promise<Response | AIProxyRequestContext> {
-  if (c.env.AI_PROXY_ENABLED === 'false') {
-    return proxyJsonError(c, 'AI proxy is disabled', 'service_unavailable', 503);
-  }
-
-  const token = extractCallbackToken(c.req.header('Authorization'), undefined);
-  if (!token) {
-    return proxyJsonError(
-      c,
-      'Missing or invalid Authorization header',
-      'invalid_request_error',
-      401
-    );
-  }
-
-  const db = drizzle(c.env.DATABASE, { schema });
-  try {
-    const auth = await verifyAIProxyAuth(token, c.env, db);
-    return { ...auth, db };
-  } catch (err) {
-    if (err instanceof AIProxyAuthError) {
-      return proxyJsonError(
-        c,
-        err.message,
-        'invalid_request_error',
-        err.statusCode as 401 | 403 | 404
-      );
-    }
-    return proxyJsonError(c, 'Invalid or expired token', 'invalid_request_error', 401);
-  }
-}
-
-async function enforceRateLimit(c: AIProxyContext, userId: string): Promise<Response | null> {
-  const rpmLimit =
-    parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
-  const windowSeconds =
-    parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
-    DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
-  const windowStart = getCurrentWindowStart(windowSeconds);
-  const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);
-  const { allowed, remaining, resetAt } = await checkRateLimit(
-    c.env.KV,
-    rateLimitKey,
-    rpmLimit,
-    windowSeconds
-  );
-
-  c.header('X-RateLimit-Limit', rpmLimit.toString());
-  c.header('X-RateLimit-Remaining', remaining.toString());
-  c.header('X-RateLimit-Reset', resetAt.toString());
-
-  if (allowed) return null;
-
-  const retryAfter = resetAt - Math.floor(Date.now() / 1000);
-  c.header('Retry-After', Math.max(1, retryAfter).toString());
-  return proxyJsonError(c, 'Rate limit exceeded. Please try again later.', 'rate_limit_error', 429);
-}
-
-async function enforceUsageGate(c: AIProxyContext, userId: string): Promise<Response | null> {
-  const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
-  if (usageGate.allowed) return null;
-
-  if (usageGate.reason === 'daily-token-budget') {
-    const { budget } = usageGate;
-    return proxyJsonError(
-      c,
-      'Daily token budget exceeded. Resets at midnight UTC.',
-      'rate_limit_error',
-      429,
-      {
-        budget: {
-          inputTokens: { used: budget.usage.inputTokens, limit: budget.inputLimit },
-          outputTokens: { used: budget.usage.outputTokens, limit: budget.outputLimit },
-        },
-      }
-    );
-  }
-
-  return proxyJsonError(
-    c,
-    'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.',
-    'rate_limit_error',
-    429,
-    {
-      monthlyCost: {
-        used: usageGate.monthlyCap.costUsd,
-        cap: usageGate.monthlyCap.capUsd,
-      },
-    }
-  );
-}
-
-function validateAllowedModel(c: AIProxyContext, modelId: string): Response | null {
-  const allowedModels = getAllowedModels(c.env);
-  if (allowedModels.has(modelId)) return null;
-
-  return proxyJsonError(
-    c,
-    `Model '${modelId}' is not available. Allowed models: ${Array.from(allowedModels).join(', ')}`,
-    'invalid_request_error',
-    400
-  );
-}
-
-function enforceInputLimit(c: AIProxyContext, estimatedInputTokens: number): Response | null {
-  const maxInputPerRequest =
-    parseInt(c.env.AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST || '', 10) ||
-    DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST;
-  if (estimatedInputTokens <= maxInputPerRequest) return null;
-
-  return proxyJsonError(
-    c,
-    `Request too large: estimated ${estimatedInputTokens} input tokens exceeds limit of ${maxInputPerRequest}`,
-    'invalid_request_error',
-    400
-  );
-}
-
-function buildProxyMetadata(
-  auth: Pick<
-    AIProxyRequestContext,
-    'userId' | 'workspaceId' | 'projectId' | 'chatSessionId' | 'trialId'
-  >,
-  body: Record<string, unknown>,
-  modelId: string
-): string {
-  return buildAIGatewayMetadata({
-    userId: auth.userId,
-    workspaceId: auth.workspaceId,
-    projectId: auth.projectId,
-    sessionId: auth.chatSessionId,
-    trialId: auth.trialId,
-    modelId,
-    stream: !!body.stream,
-    hasTools: !!body.tools,
-  });
-}
-
-async function resolveOpenAIProxyCredential(
-  c: AIProxyContext,
-  db: AIProxyDb
-): Promise<OpenAIProxyCredential | Response> {
-  if (resolveUnifiedBillingToken(c.env)) {
-    return {
-      apiKey: '',
-      credentialReference: 'platform_proxy:cloudflare-ai-gateway',
-      credentialSource: 'platform',
-      credentialProvider: 'openai',
-      providerMode: 'unified-billing',
-    };
-  }
-
-  const encryptionKey = getCredentialEncryptionKey(c.env);
-  const platformCred = await getPlatformAgentCredential(db, 'codex', encryptionKey);
-  if (platformCred?.credential) {
-    return {
-      apiKey: platformCred.credential,
-      credentialReference: `platform_credentials:${platformCred.credentialId}`,
-      credentialSource: 'platform',
-      credentialProvider: 'openai',
-      providerMode: 'platform-key',
-    };
-  }
-
-  return proxyJsonError(
-    c,
-    'No OpenAI API key configured. An admin must add a Codex platform credential or configure Unified Billing.',
-    'server_error',
-    503
-  );
-}
-
-async function recordPlatformProxyLimitHeaders(input: {
-  env: Env;
-  response: Response;
-  prepared: AIProxyRequestContext;
-  provider: 'anthropic' | 'openai';
-  attribution: AIProxyCredentialAttribution;
-  source: string;
-}): Promise<void> {
-  try {
-    await updateAIProxyAgentCredentialAttribution(input.env, input.prepared, input.attribution);
-  } catch (error) {
-    log.warn('ai_proxy.credential_attribution_update_failed', {
-      userId: input.prepared.userId,
-      workspaceId: input.prepared.workspaceId,
-      agentSessionId: input.prepared.agentSessionId ?? null,
-      source: input.source,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  await recordProxyCredentialLimitObservationsFromHeaders(input.env, input.response.headers, {
-    projectId: input.prepared.projectId,
-    userId: input.prepared.userId,
-    workspaceId: input.prepared.workspaceId,
-    chatSessionId: input.prepared.chatSessionId,
-    agentSessionId: input.prepared.agentSessionId,
-    agentType: input.prepared.agentType,
-    credentialReference: input.attribution.credentialReference,
-    credentialSource: input.attribution.credentialSource,
-    provider: input.provider,
-    providerMode: input.attribution.providerMode ?? 'sam-proxy',
-    source: input.source,
-    responseStatus: input.response.status,
-  });
-}
-
-function schedulePlatformProxyLimitHeaders(
-  c: AIProxyContext,
-  input: Parameters<typeof recordPlatformProxyLimitHeaders>[0]
-): void {
-  const telemetry = recordPlatformProxyLimitHeaders(input).catch((error) => {
-    log.warn('ai_proxy.credential_limit_telemetry_failed', {
-      userId: input.prepared.userId,
-      workspaceId: input.prepared.workspaceId,
-      agentSessionId: input.prepared.agentSessionId ?? null,
-      source: input.source,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  });
-  try {
-    c.executionCtx.waitUntil(telemetry);
-  } catch {
-    /* no execution context in tests */
-  }
-  void telemetry;
-}
-
-function accountingResponse(
-  c: AIProxyContext,
-  response: Response,
-  userId: string,
-  estimatedInputTokens: number
-): Promise<Response> {
-  let executionCtx: Pick<ExecutionContext, 'waitUntil'> | undefined;
-  try {
-    executionCtx = c.executionCtx;
-  } catch {
-    /* no exec ctx in tests */
-  }
-  return attachTokenUsageAccounting(response, {
-    env: c.env,
-    userId,
-    format: 'openai',
-    fallbackInputTokens: estimatedInputTokens,
-    executionCtx,
-  });
-}
 
 // =============================================================================
 // Main Route Handler
