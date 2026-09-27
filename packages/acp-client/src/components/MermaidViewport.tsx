@@ -22,14 +22,14 @@ function parseViewBox(svg: SVGSVGElement | null): [number, number, number, numbe
 
 function getPointerDistance(
   first: { clientX: number; clientY: number },
-  second: { clientX: number; clientY: number },
+  second: { clientX: number; clientY: number }
 ) {
   return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
 }
 
 function getPointerCenter(
   first: { clientX: number; clientY: number },
-  second: { clientX: number; clientY: number },
+  second: { clientX: number; clientY: number }
 ) {
   return {
     clientX: (first.clientX + second.clientX) / 2,

@@ -11,38 +11,12 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import { MERMAID_SVG_SANITIZE_CONFIG } from '../mermaid';
+import { renderMermaidSvg } from '../mermaid';
 import { MermaidViewport } from './MermaidViewport';
-
-export { MERMAID_SVG_SANITIZE_CONFIG } from '../mermaid';
-
-const MERMAID_FONT =
-  'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 const NIGHT_OWL_CODE_BACKGROUND = '#011627';
 const NIGHT_OWL_CODE_FOREGROUND = '#d6deeb';
 
-const MERMAID_THEME_VARIABLES = {
-  darkMode: true,
-  background: '#13201d',
-  primaryColor: '#1a3a32',
-  primaryTextColor: '#e6f2ee',
-  primaryBorderColor: '#29423b',
-  secondaryColor: '#1a2e3a',
-  tertiaryColor: '#2a1a3a',
-  lineColor: '#9fb7ae',
-  textColor: '#e6f2ee',
-  mainBkg: '#1a3a32',
-  nodeBorder: '#29423b',
-  clusterBkg: '#13201d',
-  clusterBorder: '#29423b',
-  titleColor: '#e6f2ee',
-  edgeLabelBackground: '#13201d',
-  nodeTextColor: '#e6f2ee',
-  fontFamily: MERMAID_FONT,
-};
-
-let mermaidInitialized = false;
 let mermaidRenderCounter = 0;
 
 function cleanupMermaidTempElements(diagramId: string) {
@@ -50,23 +24,9 @@ function cleanupMermaidTempElements(diagramId: string) {
   document.getElementById(`d${diagramId}`)?.remove();
 }
 
-async function renderMermaidSvg(code: string, diagramId: string): Promise<string> {
-  const mermaidModule = await import('mermaid');
-  const mermaid = mermaidModule.default;
-  if (!mermaidInitialized) {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'dark',
-      themeVariables: MERMAID_THEME_VARIABLES,
-      fontFamily: MERMAID_FONT,
-      securityLevel: 'strict',
-      logLevel: 5,
-    });
-    mermaidInitialized = true;
-  }
-
-  const { svg } = await mermaid.render(diagramId, code);
-  return DOMPurify.sanitize(svg, MERMAID_SVG_SANITIZE_CONFIG);
+async function renderDiagram(code: string, diagramId: string): Promise<string> {
+  const { default: mermaid } = await import('mermaid');
+  return renderMermaidSvg({ mermaid, domPurify: DOMPurify }, diagramId, code);
 }
 
 function copyToClipboard(text: string) {
@@ -119,7 +79,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
     let cancelled = false;
     setSvg('');
     setError(null);
-    renderMermaidSvg(code, diagramId)
+    renderDiagram(code, diagramId)
       .then((sanitizedSvg) => {
         cleanupMermaidTempElements(diagramId);
         if (!cancelled) setSvg(sanitizedSvg);

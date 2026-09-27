@@ -28,11 +28,9 @@ vi.mock('mermaid', () => {
   };
 });
 
-vi.mock('dompurify', () => {
+vi.mock('dompurify', async (importOriginal) => {
   moduleEvaluations.dompurify += 1;
-  return {
-    default: { sanitize: (html: string) => html },
-  };
+  return importOriginal<typeof import('dompurify')>();
 });
 
 import {
@@ -91,11 +89,7 @@ describe('MarkdownRenderer mermaid loading', () => {
   });
 
   it('initializes mermaid only once when several diagrams load concurrently', async () => {
-    // Measured as a delta rather than an absolute count: vitest caches a mocked module
-    // after its first import, so the module-evaluation counter above cannot distinguish
-    // "loaded again" from "served from the registry" in a later test.
     const { default: mermaid } = await import('mermaid');
-    const initializeCallsBefore = vi.mocked(mermaid.initialize).mock.calls.length;
 
     render(
       <RenderedMarkdown
@@ -107,7 +101,8 @@ describe('MarkdownRenderer mermaid loading', () => {
       expect(document.querySelectorAll('[data-testid="mermaid-diagram"] svg')).toHaveLength(2)
     );
 
-    // Both diagrams share the one memoised load — no duplicate initialize().
-    expect(vi.mocked(mermaid.initialize).mock.calls.length - initializeCallsBefore).toBe(1);
+    // vitest keeps the mocked module for the whole file, so this is the one Mermaid
+    // instance every diagram above rendered with — configured exactly once.
+    expect(vi.mocked(mermaid.initialize)).toHaveBeenCalledTimes(1);
   });
 });

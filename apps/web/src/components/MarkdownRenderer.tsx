@@ -1,4 +1,4 @@
-import { MERMAID_SVG_SANITIZE_CONFIG as SVG_SANITIZE_CONFIG } from '@simple-agent-manager/acp-client/mermaid';
+import { type MermaidRuntime, renderMermaidSvg } from '@simple-agent-manager/acp-client/mermaid';
 import { Spinner } from '@simple-agent-manager/ui';
 import { Highlight, themes } from 'prism-react-renderer';
 import {
@@ -38,9 +38,7 @@ function sanitizeMarkdownHref(href: string | undefined): string {
   }
 }
 
-export { MERMAID_SVG_SANITIZE_CONFIG as SVG_SANITIZE_CONFIG } from '@simple-agent-manager/acp-client/mermaid';
-
-// ---------- Mermaid Initialization ----------
+// ---------- Mermaid Loading ----------
 
 /**
  * Mermaid (~1 MB parsed, plus DOMPurify) is loaded on demand.
@@ -49,71 +47,35 @@ export { MERMAID_SVG_SANITIZE_CONFIG as SVG_SANITIZE_CONFIG } from '@simple-agen
  * the initial bundle for every user on the chat path even though diagrams are rare. It
  * is now pulled in only when a ```mermaid fence is actually rendered.
  *
- * The promise is memoised so concurrent diagrams share one fetch and `initialize()`
- * runs exactly once, and is cleared on failure so a transient network error can retry.
+ * The promise is memoised so concurrent diagrams share one fetch, and is cleared on
+ * failure so a transient network error can retry. Configuration and sanitizing belong
+ * to `renderMermaidSvg`, shared with the chat renderer.
  */
-type MermaidApi = (typeof import('mermaid'))['default'];
-type DomPurifyApi = (typeof import('dompurify'))['default'];
+let mermaidRuntimePromise: Promise<MermaidRuntime> | null = null;
 
-interface MermaidBundle {
-  mermaid: MermaidApi;
-  domPurify: DomPurifyApi;
-}
-
-let mermaidBundlePromise: Promise<MermaidBundle> | null = null;
-
-function loadMermaid(): Promise<MermaidBundle> {
+function loadMermaid(): Promise<MermaidRuntime> {
   // Routed through `importWithRetry` for the same reason route chunks are: these are
   // content-hashed chunks fetched long after the page loaded, so a redeploy mid-session
   // makes them 404. Without it a stale session would render the raw browser fetch-error
   // string inline in the chat transcript instead of recovering.
-  mermaidBundlePromise ??= Promise.all([
+  mermaidRuntimePromise ??= Promise.all([
     importWithRetry(() => import('mermaid')),
     importWithRetry(() => import('dompurify')),
   ])
-    .then(([mermaidModule, domPurifyModule]) => {
-      const mermaid = mermaidModule.default;
-      initializeMermaid(mermaid);
-      return { mermaid, domPurify: domPurifyModule.default };
-    })
+    .then(([mermaidModule, domPurifyModule]) => ({
+      mermaid: mermaidModule.default,
+      domPurify: domPurifyModule.default,
+    }))
     .catch((error: unknown) => {
-      mermaidBundlePromise = null;
+      mermaidRuntimePromise = null;
       throw error;
     });
-  return mermaidBundlePromise;
+  return mermaidRuntimePromise;
 }
 
 /** Exported for tests: forget the memoised module so a fresh load can be observed. */
 export function resetMermaidLoaderForTests() {
-  mermaidBundlePromise = null;
-}
-
-function initializeMermaid(mermaid: MermaidApi) {
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: 'dark',
-    themeVariables: {
-      darkMode: true,
-      background: '#13201d',
-      primaryColor: '#1a3a32',
-      primaryTextColor: '#e6f2ee',
-      primaryBorderColor: '#29423b',
-      secondaryColor: '#1a2e3a',
-      tertiaryColor: '#2a1a3a',
-      lineColor: '#9fb7ae',
-      textColor: '#e6f2ee',
-      mainBkg: '#1a3a32',
-      nodeBorder: '#29423b',
-      clusterBkg: '#13201d',
-      clusterBorder: '#29423b',
-      titleColor: '#e6f2ee',
-      edgeLabelBackground: '#13201d',
-      nodeTextColor: '#e6f2ee',
-    },
-    fontFamily: 'monospace',
-    securityLevel: 'strict',
-    logLevel: 5,
-  });
+  mermaidRuntimePromise = null;
 }
 
 // ---------- Mermaid Diagram Component ----------
@@ -135,12 +97,11 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
       try {
         // First diagram on the page pays for fetching the mermaid engine here, so this
         // await can be seconds on a slow connection — hence the placeholder below.
-        const { mermaid, domPurify } = await loadMermaid();
+        const runtime = await loadMermaid();
         if (cancelled) return;
-        const { svg } = await mermaid.render(diagramId, code);
+        const svg = await renderMermaidSvg(runtime, diagramId, code);
         if (!cancelled && containerRef.current) {
-          const sanitizedSvg = domPurify.sanitize(svg, SVG_SANITIZE_CONFIG) as string;
-          containerRef.current.innerHTML = sanitizedSvg;
+          containerRef.current.innerHTML = svg;
         }
       } catch (err) {
         if (!cancelled) {
