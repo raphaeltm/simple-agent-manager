@@ -209,6 +209,18 @@ describe('ensureSessionRecovery', () => {
     );
   });
 
+  it('does not record a snapshot error for an in-place container wake', async () => {
+    await expect(
+      reportSessionRecoveryRefusal(
+        { DATABASE: databaseMock } as unknown as Env,
+        'chat-1',
+        'container_runtime_wakes_in_place'
+      )
+    ).resolves.toEqual({ status: 'unavailable', reason: 'container_runtime_wakes_in_place' });
+
+    expect(dbMock.update).not.toHaveBeenCalled();
+  });
+
   it('fences an unconfirmed predecessor before claiming or creating recovery state', async () => {
     const { WorkspaceDeletionUnconfirmedError } =
       await import('../../../src/services/replacement-deletion-fence');
