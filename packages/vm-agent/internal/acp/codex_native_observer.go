@@ -41,6 +41,9 @@ type codexNativeObserver struct {
 	reconciling          bool
 	connectionGeneration uint64
 	queuedEvents         []codexNativeEnvelope
+	queuedEventCount     int
+	queuedEventBytes     int64
+	queuedEventErr       error
 	closed               bool
 }
 
@@ -159,7 +162,7 @@ func (o *codexNativeObserver) close() {
 	o.pendingInterrupt = false
 	o.reconciling = false
 	o.connectionGeneration++
-	o.queuedEvents = nil
+	o.resetQueuedEventsLocked()
 	client := o.client
 	workIDs := make([]string, 0, len(o.activeTurns)+len(o.approvals))
 	for id := range o.activeTurns {
@@ -214,7 +217,7 @@ func (o *codexNativeObserver) handleEnvelopeForGeneration(generation uint64, env
 		return
 	}
 	if o.reconciling {
-		o.queuedEvents = append(o.queuedEvents, envelope)
+		o.queueEnvelopeLocked(envelope)
 		o.mu.Unlock()
 		return
 	}
@@ -269,7 +272,7 @@ func (o *codexNativeObserver) beginConnectionGeneration() (uint64, bool) {
 	o.connectionGeneration++
 	generation := o.connectionGeneration
 	o.reconciling = true
-	o.queuedEvents = nil
+	o.resetQueuedEventsLocked()
 	o.mu.Unlock()
 
 	// The generation and reconciliation flag prevent any later Add while Wait
@@ -285,6 +288,12 @@ func (o *codexNativeObserver) reconcileGeneration(snapshot codexNativeSnapshot, 
 		return context.Canceled
 	}
 	defer o.endOperation()
+	o.mu.Lock()
+	queueErr := o.queuedEventErr
+	o.mu.Unlock()
+	if queueErr != nil {
+		return queueErr
+	}
 	if err := o.reconcile(snapshot.Thread); err != nil {
 		return err
 	}
@@ -294,25 +303,74 @@ func (o *codexNativeObserver) reconcileGeneration(snapshot codexNativeSnapshot, 
 			o.mu.Unlock()
 			return context.Canceled
 		}
-		queued := o.queuedEvents
-		o.queuedEvents = nil
-		if len(queued) == 0 {
+		if o.queuedEventErr != nil {
+			err := o.queuedEventErr
+			o.mu.Unlock()
+			return err
+		}
+		if len(o.queuedEvents) == 0 {
 			o.reconciling = false
+			o.resetQueuedEventsLocked()
 			o.mu.Unlock()
 			return nil
 		}
+		envelope := o.queuedEvents[0]
+		o.queuedEvents[0] = codexNativeEnvelope{}
+		o.queuedEvents = o.queuedEvents[1:]
 		o.mu.Unlock()
-		for _, envelope := range queued {
-			if envelope.Sequence != 0 && envelope.Sequence <= snapshot.Sequence && codexNativeSnapshotCovers(envelope.Method) {
-				continue
-			}
+		if envelope.Sequence == 0 || envelope.Sequence > snapshot.Sequence || !codexNativeSnapshotCovers(envelope.Method) {
 			var params codexNativeNotification
-			if err := json.Unmarshal(envelope.Params, &params); err != nil || params.ThreadID != o.threadID {
-				continue
+			if err := json.Unmarshal(envelope.Params, &params); err == nil && params.ThreadID == o.threadID {
+				o.applyEnvelope(envelope, params)
 			}
-			o.applyEnvelope(envelope, params)
 		}
 	}
+}
+
+func (o *codexNativeObserver) queueEnvelopeLocked(envelope codexNativeEnvelope) {
+	if o.queuedEventErr != nil {
+		return
+	}
+	countLimit, byteLimit := codexNativeQueueLimits(o.config)
+	envelopeBytes := codexNativeEnvelopeRetainedBytes(envelope)
+	if o.queuedEventCount >= countLimit {
+		o.queuedEventErr = fmt.Errorf("Codex shared-daemon reconciliation queue exceeds event limit %d", countLimit)
+		return
+	}
+	if envelopeBytes > byteLimit-o.queuedEventBytes {
+		o.queuedEventErr = fmt.Errorf("Codex shared-daemon reconciliation queue exceeds retained byte limit %d", byteLimit)
+		return
+	}
+	o.queuedEvents = append(o.queuedEvents, envelope)
+	o.queuedEventCount++
+	o.queuedEventBytes += envelopeBytes
+}
+
+func (o *codexNativeObserver) resetQueuedEventsLocked() {
+	o.queuedEvents = nil
+	o.queuedEventCount = 0
+	o.queuedEventBytes = 0
+	o.queuedEventErr = nil
+}
+
+func codexNativeQueueLimits(config codexSharedDaemonConfig) (int, int64) {
+	countLimit := config.dedupeLimit
+	if countLimit <= 0 {
+		countLimit = defaultCodexNativeDedupeLimit
+	}
+	byteLimit := config.maxMessageBytes
+	if byteLimit <= 0 {
+		byteLimit = defaultCodexNativeMaxMessageBytes
+	}
+	return countLimit, byteLimit
+}
+
+func codexNativeEnvelopeRetainedBytes(envelope codexNativeEnvelope) int64 {
+	retained := int64(len(envelope.ID)) + int64(len(envelope.Method)) + int64(len(envelope.Params)) + int64(len(envelope.Result))
+	if envelope.Error != nil {
+		retained += int64(len(envelope.Error.Message))
+	}
+	return retained
 }
 
 func codexNativeSnapshotCovers(method string) bool {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -567,6 +568,33 @@ func TestCodexNativeObserverOrdersCompletionAfterInitialSnapshot(t *testing.T) {
 	}
 }
 
+func TestCodexNativeObserverSnapshotSupersedesCoveredPreResponseEvent(t *testing.T) {
+	t.Parallel()
+	host := NewSessionHost(SessionHostConfig{})
+	defer host.Stop()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("thread-1")
+	host.setCodexSharedDaemonConfig(codexSharedDaemonConfig{enabled: true, dedupeLimit: 8, requestTimeout: time.Second, reconnectDelay: time.Millisecond, reconnectTimeout: time.Second})
+	client := &fakeCodexNativeRPC{
+		thread:       json.RawMessage(`{"id":"thread-1","turns":[{"id":"turn-1","status":"completed","items":[]}]}`),
+		readSequence: 2,
+	}
+	host.codexNativeConnect = func(_ context.Context, _ codexSharedDaemonConfig, handler codexNativeEventHandler) (codexNativeRPC, error) {
+		client.readHook = func() {
+			envelope := nativeEnvelope(t, "turn/started", `{"threadId":"thread-1","turn":{"id":"turn-1","status":"inProgress","items":[]}}`)
+			envelope.Sequence = 1
+			handler(envelope)
+		}
+		return client, nil
+	}
+	if err := host.startCodexNativeObserver(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if work := host.harnessWorkSnapshot(); work.Count != 0 {
+		t.Fatalf("pre-response event overrode newer terminal snapshot: %#v", work)
+	}
+}
+
 func TestCodexNativeObserverPreservesApprovalOutsideSnapshot(t *testing.T) {
 	t.Parallel()
 	host := NewSessionHost(SessionHostConfig{})
@@ -591,6 +619,99 @@ func TestCodexNativeObserverPreservesApprovalOutsideSnapshot(t *testing.T) {
 	}
 	if work := host.harnessWorkSnapshot(); work.Count != 1 {
 		t.Fatalf("pre-snapshot approval work = %#v, want one active request", work)
+	}
+}
+
+func TestCodexNativeObserverFailsClosedOnReconciliationEventCountOverflow(t *testing.T) {
+	t.Parallel()
+	reporter := &blockingMessageReporter{started: make(chan struct{}, 1), release: make(chan struct{})}
+	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{MessageReporter: reporter}})
+	defer host.Stop()
+	observer := &codexNativeObserver{
+		host: host, threadID: "thread-1",
+		config:      codexSharedDaemonConfig{dedupeLimit: 1, maxMessageBytes: defaultCodexNativeMaxMessageBytes},
+		activeTurns: map[string]struct{}{}, approvals: map[string]struct{}{},
+	}
+	generation, ok := observer.beginConnectionGeneration()
+	if !ok {
+		t.Fatal("observer did not start reconciliation generation")
+	}
+	first := nativeEnvelope(t, "item/completed", `{"threadId":"thread-1","turnId":"turn-1","item":{"id":"assistant-1","type":"agentMessage","text":"first"}}`)
+	first.Sequence = 1
+	observer.handleEnvelopeForGeneration(generation, first)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- observer.reconcileGeneration(codexNativeSnapshot{Thread: json.RawMessage(`{"id":"thread-1","turns":[]}`)}, generation)
+	}()
+	<-reporter.started
+	second := nativeEnvelope(t, "item/completed", `{"threadId":"thread-1","turnId":"turn-1","item":{"id":"assistant-2","type":"agentMessage","text":"second"}}`)
+	second.Sequence = 2
+	observer.handleEnvelopeForGeneration(generation, second)
+	close(reporter.release)
+	err := <-errCh
+	if err == nil || !strings.Contains(err.Error(), "event limit") {
+		t.Fatalf("count overflow error = %v", err)
+	}
+	observer.mu.Lock()
+	if len(observer.queuedEvents) != 0 || observer.queuedEventCount != 1 || observer.queuedEventBytes <= 0 {
+		t.Fatalf("bounded count queue = len:%d count:%d bytes:%d", len(observer.queuedEvents), observer.queuedEventCount, observer.queuedEventBytes)
+	}
+	observer.mu.Unlock()
+
+	nextGeneration, ok := observer.beginConnectionGeneration()
+	if !ok || nextGeneration == generation {
+		t.Fatal("observer did not reset into a new generation")
+	}
+	observer.mu.Lock()
+	if len(observer.queuedEvents) != 0 || observer.queuedEventCount != 0 || observer.queuedEventBytes != 0 || observer.queuedEventErr != nil {
+		t.Fatalf("new generation retained overflow state: len:%d count:%d bytes:%d err:%v", len(observer.queuedEvents), observer.queuedEventCount, observer.queuedEventBytes, observer.queuedEventErr)
+	}
+	observer.mu.Unlock()
+	observer.close()
+}
+
+func TestCodexNativeObserverFailsClosedOnReconciliationByteOverflow(t *testing.T) {
+	t.Parallel()
+	reporter := &blockingMessageReporter{started: make(chan struct{}, 1), release: make(chan struct{})}
+	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{MessageReporter: reporter}})
+	defer host.Stop()
+	first := nativeEnvelope(t, "item/completed", `{"threadId":"thread-1","turnId":"turn-1","item":{"id":"assistant-1","type":"agentMessage","text":"first payload"}}`)
+	first.Sequence = 1
+	second := nativeEnvelope(t, "item/completed", `{"threadId":"thread-1","turnId":"turn-1","item":{"id":"assistant-2","type":"agentMessage","text":"second payload"}}`)
+	second.Sequence = 2
+	firstBytes := codexNativeEnvelopeRetainedBytes(first)
+	byteLimit := firstBytes + codexNativeEnvelopeRetainedBytes(second) - 1
+	observer := &codexNativeObserver{
+		host: host, threadID: "thread-1",
+		config:      codexSharedDaemonConfig{dedupeLimit: defaultCodexNativeDedupeLimit, maxMessageBytes: byteLimit},
+		activeTurns: map[string]struct{}{}, approvals: map[string]struct{}{},
+	}
+	generation, ok := observer.beginConnectionGeneration()
+	if !ok {
+		t.Fatal("observer did not start reconciliation generation")
+	}
+	observer.handleEnvelopeForGeneration(generation, first)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- observer.reconcileGeneration(codexNativeSnapshot{Thread: json.RawMessage(`{"id":"thread-1","turns":[]}`)}, generation)
+	}()
+	<-reporter.started
+	observer.handleEnvelopeForGeneration(generation, second)
+	close(reporter.release)
+	err := <-errCh
+	if err == nil || !strings.Contains(err.Error(), "retained byte limit") {
+		t.Fatalf("byte overflow error = %v", err)
+	}
+	observer.mu.Lock()
+	if len(observer.queuedEvents) != 0 || observer.queuedEventCount != 1 || observer.queuedEventBytes != firstBytes {
+		t.Fatalf("byte overflow retained rejected event: len:%d count:%d bytes:%d", len(observer.queuedEvents), observer.queuedEventCount, observer.queuedEventBytes)
+	}
+	observer.mu.Unlock()
+	observer.close()
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	if observer.queuedEventErr != nil || observer.queuedEventCount != 0 || observer.queuedEventBytes != 0 {
+		t.Fatalf("close retained overflow state: count:%d bytes:%d err:%v", observer.queuedEventCount, observer.queuedEventBytes, observer.queuedEventErr)
 	}
 }
 
@@ -635,7 +756,8 @@ func TestCodexNativeObserverOrdersCompletionAfterReconnectSnapshot(t *testing.T)
 
 func TestCodexNativeObserverDiscardsFailedReconnectGeneration(t *testing.T) {
 	t.Parallel()
-	host := NewSessionHost(SessionHostConfig{})
+	reporter := &mockMessageReporter{}
+	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{MessageReporter: reporter}})
 	defer host.Stop()
 	host.agentType = "openai-codex"
 	host.setSessionIDLocked("thread-1")
@@ -651,7 +773,7 @@ func TestCodexNativeObserverDiscardsFailedReconnectGeneration(t *testing.T) {
 		case 1:
 			return first, nil
 		case 2:
-			envelope := nativeEnvelope(t, "turn/started", `{"threadId":"thread-1","turn":{"id":"turn-1","status":"inProgress","items":[]}}`)
+			envelope := nativeEnvelope(t, "item/completed", `{"threadId":"thread-1","turnId":"failed-turn","item":{"id":"failed-generation-assistant","type":"agentMessage","text":"must not persist"}}`)
 			envelope.Sequence = 1
 			handler(envelope)
 			return failed, nil
@@ -670,6 +792,9 @@ func TestCodexNativeObserverDiscardsFailedReconnectGeneration(t *testing.T) {
 		t.Fatal("observer did not reach the successful reconnect generation")
 	}
 	waitForCodexNativeWorkCount(t, host, 0)
+	if messages := reporter.Messages(); len(messages) != 0 {
+		t.Fatalf("failed reconnect generation persisted messages: %#v", messages)
+	}
 }
 
 func TestCodexNativeObserverDeliversQueuedCancelAfterReconnect(t *testing.T) {
