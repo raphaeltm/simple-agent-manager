@@ -292,7 +292,7 @@ A chat you opened in the last 24 hours opens at once from a cache in your browse
 
 Each chat opens on its newest messages. Scroll to the top, or select **Load earlier messages**, to load older history. Jumping to a timeline entry or a comment loads the history it needs first.
 
-An unsent message in the composer stays with its chat when you switch to another chat and back, until you leave the project chat or reload the page. The cache belongs to your account, is only read after the sign-in check completes, and is deleted when you sign out. Its lifetime and size are configurable; see [query cache persistence](/docs/reference/configuration/#query-cache-persistence).
+An unsent message in the composer stays with its chat when you switch to another chat in the project and back. Drafts are kept in memory only, never on disk, so a page reload discards them. The transcript cache belongs to your account, is only read after the sign-in check completes, and is deleted when you sign out. Its lifetime and size are configurable; see [query cache persistence](/docs/reference/configuration/#query-cache-persistence).
 
 ## Session Filters (Shared Projects)
 

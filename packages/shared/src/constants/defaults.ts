@@ -345,6 +345,12 @@ export const DEFAULT_CHAT_TRANSCRIPT_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
  * Override via VITE_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS. */
 export const DEFAULT_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS = 20;
 
+/** Newest rows of one chat transcript written to the persisted query cache. Paging
+ * back can grow a transcript in memory without limit; on disk each keeps only the
+ * page a cold open would load, so a persisted write stays bounded by this times
+ * the transcript count. Override via VITE_CHAT_TRANSCRIPT_PERSIST_MAX_ROWS. */
+export const DEFAULT_CHAT_TRANSCRIPT_PERSIST_MAX_ROWS = DEFAULT_CHAT_SESSION_MESSAGE_LIMIT;
+
 // =============================================================================
 // HTTP Response Cache-Control (apps/api)
 // =============================================================================

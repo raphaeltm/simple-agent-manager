@@ -55,6 +55,11 @@ export const virtuosoLastProps: {
    * (the workspace chat surface paginates on scroll only).
    */
   startReached?: () => void;
+  /**
+   * Real Virtuoso reports here whether the list is scrolled to its bottom, so
+   * calling it with `false` is how a test says "the reader scrolled up".
+   */
+  atBottomStateChange?: (atBottom: boolean) => void;
 } = {
   dataLength: 0,
 };
@@ -64,12 +69,14 @@ export function resetVirtuosoMock(): void {
   virtuosoLastProps.firstItemIndex = undefined;
   virtuosoLastProps.dataLength = 0;
   virtuosoLastProps.startReached = undefined;
+  virtuosoLastProps.atBottomStateChange = undefined;
 }
 
 interface MockVirtuosoProps {
   data?: unknown[];
   firstItemIndex?: number;
   startReached?: () => void;
+  atBottomStateChange?: (atBottom: boolean) => void;
   itemContent?: (index: number, item: never) => React.ReactNode;
   style?: React.CSSProperties;
   components?: {
@@ -80,12 +87,22 @@ interface MockVirtuosoProps {
 }
 
 export const MockVirtuoso = React.forwardRef<unknown, MockVirtuosoProps>(function MockVirtuoso(
-  { data, firstItemIndex, startReached, itemContent, style, components, context },
+  {
+    data,
+    firstItemIndex,
+    startReached,
+    atBottomStateChange,
+    itemContent,
+    style,
+    components,
+    context,
+  },
   ref
 ) {
   virtuosoLastProps.firstItemIndex = firstItemIndex;
   virtuosoLastProps.dataLength = data?.length ?? 0;
   virtuosoLastProps.startReached = startReached;
+  virtuosoLastProps.atBottomStateChange = atBottomStateChange;
 
   React.useImperativeHandle(
     ref,

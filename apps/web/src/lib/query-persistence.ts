@@ -3,6 +3,7 @@ import { del, delMany, get, keys, set, type UseStore } from 'idb-keyval';
 
 import {
   buildQueryPersistStorageKey,
+  persistedQueryForDisk,
   QUERY_PERSIST_KEY_PREFIX,
   QUERY_PERSIST_RESTORE_TIMEOUT_MS,
   QUERY_PERSIST_THROTTLE_MS,
@@ -66,9 +67,16 @@ export function createIdbQueryPersister(
 
   const flush = async (): Promise<void> => {
     flushTimer = null;
-    const client = pendingClient;
+    const pending = pendingClient;
     pendingClient = null;
-    if (!client || disabled) return;
+    if (!pending || disabled) return;
+    const client: PersistedClient = {
+      ...pending,
+      clientState: {
+        ...pending.clientState,
+        queries: pending.clientState.queries.map((query) => persistedQueryForDisk(query)),
+      },
+    };
 
     // Skip a write that would not change anything on disk.
     //

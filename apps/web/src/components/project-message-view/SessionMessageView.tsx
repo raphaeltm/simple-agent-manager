@@ -32,6 +32,7 @@ import { ConversationPane } from './ConversationPane';
 import { FloatingHeader } from './FloatingHeader';
 import { type ChatListContext, useFloatingHeaderHeight } from './MessageListScaffold';
 import { ProjectMessageViewDrawers } from './ProjectMessageViewDrawers';
+import { useSessionFocusHandoff } from './session-focus-handoff';
 import { SessionFooter } from './SessionFooter';
 import { SessionHeaderCompletionDialog } from './SessionHeaderCompletionDialog';
 import { SessionStatusBanners } from './SessionStatusBanners';
@@ -326,6 +327,8 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     [floatingHeaderHeight, lc.hasMore, lc.loadingMore, lc.loadMore]
   );
 
+  useSessionFocusHandoff(Boolean(lc.session));
+
   // Nothing renders until the session is known: its first load is outstanding, or
   // failed. A cached chat never waits here — its session is there on the first
   // render, and a background refresh never brings this back.
@@ -333,7 +336,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     return lc.error ? (
       <div className="p-4 text-danger text-sm">{lc.error}</div>
     ) : (
-      <div className="flex justify-center p-8">
+      <div className="flex justify-center p-8" data-testid="chat-loading">
         <Spinner size="lg" />
       </div>
     );

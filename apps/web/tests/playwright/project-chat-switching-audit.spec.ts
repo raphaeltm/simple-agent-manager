@@ -25,9 +25,9 @@ const LONG_URL =
 interface Row {
   id: string;
   sessionId: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'tool';
   content: string;
-  toolMetadata: null;
+  toolMetadata: Record<string, unknown> | null;
   createdAt: number;
   sequence: number;
 }
@@ -78,7 +78,32 @@ const FILLER = Array.from({ length: 32 }, (_, n) =>
     'stopped'
   )
 );
-const SESSIONS = [LONG, EMPTY, WORDY, ...FILLER];
+// An agent run: every page of 500 rows is one short reply followed by an unbroken
+// streak of tool calls, which the view folds into a single card — a whole page
+// renders as two rows.
+const TOOLS = chatSession('sess-tools', 'Agent run with long unbroken tool-call streaks', 1_500);
+const SESSIONS = [LONG, TOOLS, EMPTY, WORDY, ...FILLER];
+
+function toolRun(sessionId: string, length: number): Row[] {
+  return Array.from({ length }, (_, n) => ({
+    id: `${sessionId}-m${n}`,
+    sessionId,
+    role: n % 500 === 0 ? 'assistant' : 'tool',
+    content: n % 500 === 0 ? `Tool run checkpoint ${n}: the next batch is running.` : '(tool call)',
+    toolMetadata:
+      n % 500 === 0
+        ? null
+        : {
+            toolCallId: `tc-${sessionId}-${n}`,
+            title: `Run migration step ${n}`,
+            kind: 'execute',
+            status: 'completed',
+            contentSize: 64,
+          },
+    createdAt: NOW - (length - n) * 1_000,
+    sequence: n + 1,
+  }));
+}
 
 const TRANSCRIPTS: Record<string, Row[]> = {
   [LONG.id]: transcript(LONG.id, 1_200, (n) =>
@@ -86,6 +111,7 @@ const TRANSCRIPTS: Record<string, Row[]> = {
       ? `Long chat message ${n}: please look at the next part of the pager.`
       : `Long chat message ${n}: done — the reply for step ${n} is written, reviewed, and pushed. ${'Detail line. '.repeat(3)}`
   ),
+  [TOOLS.id]: toolRun(TOOLS.id, 1_500),
   [EMPTY.id]: [],
   [WORDY.id]: transcript(WORDY.id, 3, (n) =>
     n === 1
@@ -272,6 +298,33 @@ test.describe('project chat — instant switching audit', () => {
       .toBeLessThan(OLDEST_OF_NEWEST_PAGE);
     await assertNoOverflow(page);
     await screenshot(page, `project-chat-switching-long-older-paged-in-${viewport}`);
+  });
+
+  test('a chat whose newest page folds into a few rows opens on that page alone', async ({
+    page,
+  }, testInfo) => {
+    const viewport = testInfo.project.name.startsWith('iPhone') ? 'mobile' : 'desktop';
+    const requests: DetailRequest[] = [];
+    await setupApi(page, requests);
+
+    await page.goto(`/projects/${PROJECT_ID}/chat/${TOOLS.id}`);
+    await expect(conversation(page).getByText('Tool run checkpoint 1000:')).toBeVisible({
+      timeout: 15_000,
+    });
+    // The whole page fits on screen, so Virtuoso reports the top as reached at
+    // once. Give its debounced callback ample time: nothing older may load until
+    // the reader asks for it.
+    await page.waitForTimeout(1_500);
+    expect(requests.filter((r) => r.sessionId === TOOLS.id)).toEqual([
+      { sessionId: TOOLS.id, limit: '500', before: null, after: null },
+    ]);
+
+    await page.getByRole('button', { name: 'Load earlier messages' }).click();
+    await expect(conversation(page).getByText('Tool run checkpoint 500:')).toBeVisible();
+    await page.waitForTimeout(1_000);
+    expect(requests.filter((r) => r.sessionId === TOOLS.id && r.before)).toHaveLength(1);
+    await assertNoOverflow(page);
+    await screenshot(page, `project-chat-switching-tool-heavy-${viewport}`);
   });
 
   test('switching renders the chosen chat at once and never the previous one', async ({

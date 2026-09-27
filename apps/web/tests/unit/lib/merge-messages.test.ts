@@ -172,6 +172,28 @@ describe('mergeMessages', () => {
       expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'd']);
     });
 
+    it('preserves messages newer than the incoming window: they arrived after the server built it', () => {
+      const prev = [
+        msg({ id: 'a', createdAt: 1 }),
+        msg({ id: 'b', createdAt: 2 }),
+        msg({ id: 'live', createdAt: 9 }),
+      ];
+      const incoming = [msg({ id: 'b', createdAt: 2 }), msg({ id: 'c', createdAt: 3 })];
+      const result = mergeMessages(prev, incoming, 'replace');
+      expect(result.map((m) => m.id)).toEqual(['a', 'b', 'c', 'live']);
+    });
+
+    it('still drops a loaded message inside the window the server no longer returns', () => {
+      const prev = [
+        msg({ id: 'a', createdAt: 1 }),
+        msg({ id: 'gone', createdAt: 3 }),
+        msg({ id: 'd', createdAt: 5 }),
+      ];
+      const incoming = [msg({ id: 'b', createdAt: 2 }), msg({ id: 'd', createdAt: 5 })];
+      const result = mergeMessages(prev, incoming, 'replace');
+      expect(result.map((m) => m.id)).toEqual(['a', 'b', 'd']);
+    });
+
     it('replaces messages within the incoming time range (same IDs)', () => {
       // prev has messages at t=1,2,3; incoming has same messages at t=2,3 plus new at t=4
       // In real usage, IDs are stable — the server returns the same IDs

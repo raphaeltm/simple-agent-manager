@@ -4,16 +4,23 @@
  * Both bounds act on the real TanStack cache: eviction removes queries from it,
  * and the dehydrate predicate decides what the persister writes from it. A
  * transcript that leaves memory also leaves the next persisted record, because
- * the record mirrors memory.
+ * the record mirrors memory — except in size: on disk each transcript keeps only
+ * its newest rows.
  */
+import { persistQueryClient } from '@tanstack/query-persist-client-core';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
+import { clear as idbClear, get as idbGet } from 'idb-keyval';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { chatQueryKeys, evictStaleTranscripts } from '../../../src/lib/query-options';
 import {
   CHAT_TRANSCRIPT_CACHE_TTL_MS,
+  CHAT_TRANSCRIPT_PERSIST_MAX_ROWS,
+  QUERY_PERSIST_MAX_AGE_MS,
+  QUERY_PERSIST_SCHEMA_VERSION,
   shouldDehydratePersistedQuery,
 } from '../../../src/lib/query-persist-config';
+import { createIdbQueryPersister } from '../../../src/lib/query-persistence';
 
 const SCOPE = 'user-1';
 const MINUTE = 60_000;
@@ -59,6 +66,77 @@ describe('transcript retention on disk', () => {
     expect(
       shouldDehydratePersistedQuery(transcriptUpdated(CHAT_TRANSCRIPT_CACHE_TTL_MS + MINUTE), SCOPE)
     ).toBe(false);
+  });
+});
+
+describe('transcript size on disk', () => {
+  afterEach(async () => {
+    await idbClear();
+  });
+
+  function transcript(sessionId: string, length: number) {
+    return {
+      session: { id: sessionId },
+      messages: Array.from({ length }, (_, n) => ({
+        id: `${sessionId}-m${n}`,
+        sessionId,
+        role: 'user',
+        content: `row ${n}`,
+        toolMetadata: null,
+        createdAt: n,
+        sequence: n,
+      })),
+      hasMore: false,
+      state: null,
+    };
+  }
+
+  type Written = {
+    clientState: {
+      queries: Array<{
+        queryKey: unknown[];
+        state: { data: { messages: Array<{ id: string }>; hasMore: boolean } };
+      }>;
+    };
+  };
+
+  it('writes only the newest rows of a long transcript, and reports the rest as older history', async () => {
+    const client = new QueryClient();
+    const persister = createIdbQueryPersister('transcript-size-test', { throttleMs: 0 });
+    const [unsubscribe, restored] = persistQueryClient({
+      queryClient: client,
+      persister,
+      maxAge: QUERY_PERSIST_MAX_AGE_MS,
+      buster: QUERY_PERSIST_SCHEMA_VERSION,
+      dehydrateOptions: {
+        shouldDehydrateQuery: (query) => shouldDehydratePersistedQuery(query, SCOPE),
+      },
+    });
+    await restored;
+
+    // The reader paged far back in one chat; another is short.
+    const long = CHAT_TRANSCRIPT_PERSIST_MAX_ROWS + 50;
+    client.setQueryData(transcriptKey('paged-back'), transcript('paged-back', long));
+    client.setQueryData(transcriptKey('short'), transcript('short', 3));
+
+    const written = await vi.waitFor(async () => {
+      const record = await idbGet<Written>('transcript-size-test');
+      expect(record?.clientState.queries).toHaveLength(2);
+      return record!;
+    });
+    const onDisk = (sessionId: string) =>
+      written.clientState.queries.find((query) => query.queryKey[5] === sessionId)!.state.data;
+
+    expect(onDisk('paged-back').messages).toHaveLength(CHAT_TRANSCRIPT_PERSIST_MAX_ROWS);
+    expect(onDisk('paged-back').messages.at(-1)?.id).toBe(`paged-back-m${long - 1}`);
+    expect(onDisk('paged-back').hasMore).toBe(true);
+    expect(onDisk('short').messages).toHaveLength(3);
+    expect(onDisk('short').hasMore).toBe(false);
+    // Memory keeps everything the reader loaded.
+    expect(
+      client.getQueryData<{ messages: unknown[] }>(transcriptKey('paged-back'))?.messages
+    ).toHaveLength(long);
+    unsubscribe();
   });
 });
 

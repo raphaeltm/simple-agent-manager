@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
     enabled: boolean;
     onMessage?: (msg: Msg) => void;
     onAgentActivity?: (activity: 'prompting' | 'idle', promptStartedAt?: number | null) => void;
+    onCatchUp?: (messages: Msg[], session: unknown, state?: unknown) => void;
   }>,
 }));
 
@@ -98,6 +99,7 @@ vi.mock('../../../src/components/project-message-view/types', async (importOrigi
 
 import { useSessionLifecycle } from '../../../src/components/project-message-view/useSessionLifecycle';
 import { chatQueryKeys } from '../../../src/lib/query-options';
+import { CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS } from '../../../src/lib/query-persist-config';
 
 type Msg = {
   id: string;
@@ -496,6 +498,102 @@ describe('useSessionLifecycle loading semantics', () => {
       signal: expect.any(AbortSignal),
       after: '[1000,1000,"loaded-tail"]',
     });
+  });
+
+  it('keeps a socket row that lands while a reconnect catch-up drains a gap', async () => {
+    mocks.getChatSession.mockResolvedValueOnce(detail([msg('loaded-tail', 1000)], false, 'active'));
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['loaded-tail']));
+
+    // The socket reconnects. Its catch-up window starts after the loaded tail, so
+    // the gap between them drains forward first — and that read is still out.
+    const drain = deferred<ReturnType<typeof detail>>();
+    mocks.getChatSession.mockReturnValueOnce(drain.promise);
+    const socket = mocks.wsOptions.at(-1)!;
+    act(() => {
+      socket.onCatchUp?.([msg('recent-window', 4000)], sessionResponse('active'), null);
+    });
+    await waitFor(() =>
+      expect(mocks.getChatSession).toHaveBeenLastCalledWith('proj-1', 'sess-1', {
+        signal: undefined,
+        after: '[1000,1000,"loaded-tail"]',
+      })
+    );
+
+    act(() => socket.onMessage?.(msg('live', 5000)));
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toContain('live'));
+
+    await act(async () => {
+      drain.resolve(
+        detail(
+          [msg('gap-1', 2000), msg('gap-2', 3000), msg('recent-window', 4000)],
+          false,
+          'active'
+        )
+      );
+      await drain.promise;
+    });
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual([
+        'loaded-tail',
+        'gap-1',
+        'gap-2',
+        'recent-window',
+        'live',
+      ])
+    );
+  });
+
+  it('trims the cached transcripts to the most recently used when a chat opens', async () => {
+    const otherChat = (n: number) => chatQueryKeys.sessionMessages('user-1', 'proj-1', `other-${n}`);
+    for (let n = 1; n <= CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS + 1; n += 1) {
+      queryClient.setQueryData(otherChat(n), detail([msg(`o${n}`, n)], false), { updatedAt: n });
+    }
+    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'active'));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['a']));
+
+    // One chat over the limit: the least recently used goes, the rest and the
+    // chat being opened stay.
+    expect(queryClient.getQueryData(otherChat(1))).toBeUndefined();
+    for (let n = 2; n <= CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS + 1; n += 1) {
+      expect(queryClient.getQueryData(otherChat(n))).toBeDefined();
+    }
+    expect(
+      queryClient.getQueryData(chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1'))
+    ).toBeDefined();
+  });
+
+  it('recovers from a failed older-page load, so the reader can try again', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mocks.getChatSession.mockResolvedValueOnce(
+      detail([msg('b', 2000), msg('c', 3000)], true, 'active')
+    );
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['b', 'c']));
+
+    mocks.getChatSession.mockRejectedValueOnce(new Error('network down'));
+    await act(async () => {
+      await result.current.loadMore();
+    });
+    expect(result.current.loadingMore).toBe(false);
+    expect(result.current.hasMore).toBe(true);
+    expect(result.current.messages.map((m) => m.id)).toEqual(['b', 'c']);
+
+    mocks.getChatSession.mockResolvedValueOnce(detail([msg('a', 1000)], false, 'active'));
+    await act(async () => {
+      await result.current.loadMore();
+    });
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['a', 'b', 'c']));
+    expect(result.current.hasMore).toBe(false);
+    warn.mockRestore();
   });
 
   it('rehydrates a plan-only state change between fallback polls', async () => {

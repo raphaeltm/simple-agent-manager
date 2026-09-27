@@ -165,7 +165,9 @@ export async function mergeRecentWindowOrRefresh(
  * is later than the message it annotates.
  */
 export interface HistoryTarget {
+  /** Exact message anchor, when the target is a persisted message. */
   messageId?: string | null;
+  /** Point in time to reach, and to resolve the nearest message by when there is no anchor. */
   timestamp: number;
 }
 

@@ -84,10 +84,14 @@ export function ConversationPane({
               alignToBottom
               atBottomThreshold={50}
               atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
-              // A chat opens on its newest page; reaching the top pages older
-              // history in (the header's "Load earlier messages" button stays as
-              // the visible and keyboard path to the same load).
-              startReached={lc.hasMore ? lc.loadMore : undefined}
+              // A chat opens on its newest page; scrolling up to the top pages older
+              // history in (the list header's "Load earlier messages" button stays
+              // as the visible and keyboard path to the same load). Only once the
+              // reader has left the bottom: Virtuoso reports the top as reached
+              // whenever the first row is rendered, and a page of tool calls can
+              // fold into a few rows that fit on screen, so opening such a chat
+              // would otherwise page its whole history in unasked.
+              startReached={lc.hasMore && lc.showScrollButton ? lc.loadMore : undefined}
               overscan={200}
               itemContent={renderItem}
               context={listContext}

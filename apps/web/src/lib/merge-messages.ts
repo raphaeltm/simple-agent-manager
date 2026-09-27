@@ -104,10 +104,13 @@ export function mergeMessages(
 
 /**
  * Replace strategy: incoming is authoritative for its time range, but
- * earlier-loaded messages (from "load more" pagination) are preserved.
+ * messages outside that range are preserved: earlier-loaded ones (from "load
+ * more" pagination), and newer ones — live rows that arrived after the server
+ * built the window.
  *
  * This prevents polling and WebSocket catch-up from discarding messages
- * that the user explicitly loaded via the "Load earlier messages" button.
+ * that the user explicitly loaded via the "Load earlier messages" button, or
+ * that the socket delivered while the window was in flight.
  *
  * Note: content-based user message dedup (hasConfirmedDuplicate) is intentionally
  * NOT applied here. The REST API snapshot is the ground truth — if the server has
@@ -120,25 +123,30 @@ function mergeReplace(
 ): ChatMessageResponse[] {
   const map = new Map<string, ChatMessageResponse>();
 
-  // Find the oldest incoming message to determine the boundary.
-  // Messages older than this were loaded via pagination and should be kept.
+  // Find the incoming window's boundaries. Messages older than it were loaded
+  // via pagination, and messages newer than it arrived after the server built
+  // it; both should be kept.
   let oldestIncoming = Infinity;
+  let newestIncoming = -Infinity;
   for (const msg of incoming) {
     if (msg.createdAt < oldestIncoming) {
       oldestIncoming = msg.createdAt;
     }
+    if (msg.createdAt > newestIncoming) {
+      newestIncoming = msg.createdAt;
+    }
   }
 
-  // Preserve earlier-loaded messages from prev that predate the incoming window.
-  // For messages at exactly the boundary timestamp (createdAt === oldestIncoming),
-  // preserve them only if their ID is not in the incoming set — this prevents
-  // silent drops when the server returns only some messages at that timestamp.
+  // Preserve messages from prev outside the incoming window. For messages at
+  // exactly a boundary timestamp, preserve them only if their ID is not in the
+  // incoming set — this prevents silent drops when the server returns only some
+  // messages at that timestamp.
   const incomingIds = new Set(incoming.map((m) => m.id));
   for (const msg of prev) {
     if (
       !isOptimistic(msg) &&
-      (msg.createdAt < oldestIncoming ||
-        (msg.createdAt === oldestIncoming && !incomingIds.has(msg.id)))
+      !incomingIds.has(msg.id) &&
+      (msg.createdAt <= oldestIncoming || msg.createdAt >= newestIncoming)
     ) {
       map.set(msg.id, msg);
     }

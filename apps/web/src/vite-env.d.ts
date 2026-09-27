@@ -24,6 +24,7 @@ interface ImportMetaEnv {
   readonly VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS?: string;
   readonly VITE_CHAT_TRANSCRIPT_CACHE_TTL_MS?: string;
   readonly VITE_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS?: string;
+  readonly VITE_CHAT_TRANSCRIPT_PERSIST_MAX_ROWS?: string;
   readonly VITE_AGENT_CATALOG_STALE_TIME_MS?: string;
   readonly VITE_REPORT_ISSUE_CONFIG_STALE_TIME_MS?: string;
   readonly VITE_PROVIDER_CATALOG_STALE_TIME_MS?: string;

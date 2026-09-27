@@ -1501,6 +1501,7 @@ Project event MCP tools use the ProjectData event limits above: `PROJECT_EVENT_L
 | `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS`     | `250`              | Budget for the initial cache restore before failing open to no cache     |
 | `VITE_CHAT_TRANSCRIPT_CACHE_TTL_MS`         | `86400000` (24 h)  | How long a chat transcript stays cached after it was last used           |
 | `VITE_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS`   | `20`               | Most chat transcripts cached at once; older ones are evicted             |
+| `VITE_CHAT_TRANSCRIPT_PERSIST_MAX_ROWS`     | `500`              | Newest rows of each chat transcript written to IndexedDB                 |
 | `VITE_AGENT_CATALOG_STALE_TIME_MS`          | `300000`           | Freshness window for the installable agent catalog query                 |
 | `VITE_PROVIDER_CATALOG_STALE_TIME_MS`       | `300000`           | Freshness window for provider catalog size/location/price metadata       |
 | `VITE_TRIAL_STATUS_STALE_TIME_MS`           | `60000`            | Freshness window for trial availability status                           |
@@ -1524,7 +1525,9 @@ degrades silently to its normal in-memory cache.
 Project chat transcripts are kept for `VITE_CHAT_TRANSCRIPT_CACHE_TTL_MS` after they were last
 loaded or updated, capped at the `VITE_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS` most recently used. A
 chat opened inside that window renders from the cache at once and refreshes in the background; a
-chat that is not cached loads its newest page first, and older history loads as you scroll up. The
+chat that is not cached loads its newest page first, and older history loads as you scroll up. On
+disk each transcript keeps only its newest `VITE_CHAT_TRANSCRIPT_PERSIST_MAX_ROWS` rows, however far
+back it was read, so a chat restored after a reload pages older history back in the same way. The
 cache is only read after the sign-in check completes.
 
 ## Analytics

@@ -23,7 +23,28 @@ import { VIRTUAL_START } from './types';
 /** One shared empty transcript, so an unloaded session hands every memo the same array. */
 const NO_MESSAGES: ChatMessageResponse[] = [];
 
-export type SessionTranscript = ReturnType<typeof useSessionTranscript>;
+export interface SessionTranscript {
+  /** The latest session detail, including the server's session and state snapshots. */
+  detail: ChatSessionDetailResponse | undefined;
+  messages: ChatMessageResponse[];
+  hasMore: boolean;
+  /** Nothing loaded yet and a load is outstanding. */
+  loading: boolean;
+  /** Why the first load failed; a failed background refresh keeps the transcript. */
+  error: string | null;
+  /** Older history is loading, from paging or a jump. */
+  loadingMore: boolean;
+  /** Virtuoso's `firstItemIndex`, lowered by the rows each older page prepends. */
+  firstItemIndex: number;
+  /** Adds live rows (socket deliveries, optimistic sends) in transcript order. */
+  appendMessages: (incoming: ChatMessageResponse[]) => void;
+  /** Merges a newest-window response, draining any gap to the loaded tail first. */
+  mergeRecentWindow: (recent: ChatSessionDetailResponse, signal?: AbortSignal) => Promise<void>;
+  /** Loads the next page of older history. */
+  loadMore: () => Promise<void>;
+  /** Loads older pages until `target` is loaded or history runs out. */
+  loadUntil: (target: HistoryTarget) => Promise<void>;
+}
 
 /**
  * The transcript of one chat session.
@@ -35,7 +56,7 @@ export type SessionTranscript = ReturnType<typeof useSessionTranscript>;
  * transcript on its first render, and the persisted cache holds what the reader
  * last saw.
  */
-export function useSessionTranscript(projectId: string, sessionId: string) {
+export function useSessionTranscript(projectId: string, sessionId: string): SessionTranscript {
   const queryScope = useQueryScope();
   const queryClient = useQueryClient();
   const queryKey = useMemo(
@@ -91,12 +112,22 @@ export function useSessionTranscript(projectId: string, sessionId: string) {
         recent,
         signal
       );
-      queryClient.setQueryData<ChatSessionDetailResponse>(queryKey, (latest) => ({
-        ...(latest ?? merged),
-        ...merged,
-        // A window that carries no state snapshot must not erase the last known one.
-        state: merged.state ?? latest?.state ?? null,
-      }));
+      queryClient.setQueryData<ChatSessionDetailResponse>(queryKey, (latest) => {
+        // Rows written while the window merged (a socket row, a send, an older
+        // page) are in neither of its inputs; keep them.
+        const merging = new Set(current.messages.map((message) => message.id));
+        const arrived = latest?.messages.filter((message) => !merging.has(message.id)) ?? [];
+        return {
+          ...(latest ?? merged),
+          ...merged,
+          messages:
+            arrived.length > 0
+              ? mergeMessages(merged.messages, arrived, 'append')
+              : merged.messages,
+          // A window that carries no state snapshot must not erase the last known one.
+          state: merged.state ?? latest?.state ?? null,
+        };
+      });
     },
     [projectId, queryClient, queryKey, readDetail, sessionId]
   );
@@ -168,13 +199,10 @@ export function useSessionTranscript(projectId: string, sessionId: string) {
   );
 
   return {
-    /** The latest session detail, including the server's session and state snapshots. */
     detail,
     messages,
     hasMore: detail?.hasMore ?? false,
-    /** Nothing loaded yet and a load is outstanding. */
     loading: query.isPending,
-    /** Why the first load failed; a failed background refresh keeps the transcript. */
     error: !detail && query.error ? errorMessage(query.error) : null,
     loadingMore: olderLoadsInFlight > 0,
     firstItemIndex,

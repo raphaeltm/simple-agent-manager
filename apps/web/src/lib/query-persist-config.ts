@@ -1,11 +1,12 @@
 import {
   DEFAULT_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS,
   DEFAULT_CHAT_TRANSCRIPT_CACHE_TTL_MS,
+  DEFAULT_CHAT_TRANSCRIPT_PERSIST_MAX_ROWS,
   DEFAULT_QUERY_PERSIST_MAX_AGE_MS,
   DEFAULT_QUERY_PERSIST_RESTORE_TIMEOUT_MS,
   DEFAULT_QUERY_PERSIST_THROTTLE_MS,
 } from '@simple-agent-manager/shared';
-import type { Query } from '@tanstack/react-query';
+import type { DehydratedState, Query } from '@tanstack/react-query';
 
 /**
  * Pure configuration and policy for query-cache persistence.
@@ -90,6 +91,9 @@ export const PERSISTED_QUERY_OPERATIONS: ReadonlySet<string> = new Set([
   'sessions/messages',
 ]);
 
+/** The persisted operation that holds a chat transcript. */
+const CHAT_TRANSCRIPT_OPERATION = 'sessions/messages';
+
 /** Prefix for every persisted query-cache record. */
 export const QUERY_PERSIST_KEY_PREFIX = 'sam-query-cache';
 
@@ -144,11 +148,20 @@ export const CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS = readPositiveIntEnv(
 );
 
 /**
+ * Newest rows of one chat transcript written to disk. Paging back grows a
+ * transcript in memory; on disk it keeps only what a cold open would load.
+ */
+export const CHAT_TRANSCRIPT_PERSIST_MAX_ROWS = readPositiveIntEnv(
+  import.meta.env?.VITE_CHAT_TRANSCRIPT_PERSIST_MAX_ROWS,
+  DEFAULT_CHAT_TRANSCRIPT_PERSIST_MAX_ROWS
+);
+
+/**
  * How old a persisted operation's data may be and still be written to disk.
  * Operations without an entry are bounded by the record's own max age.
  */
 const PERSISTED_OPERATION_MAX_AGE_MS: ReadonlyMap<string, number> = new Map([
-  ['sessions/messages', CHAT_TRANSCRIPT_CACHE_TTL_MS],
+  [CHAT_TRANSCRIPT_OPERATION, CHAT_TRANSCRIPT_CACHE_TTL_MS],
 ]);
 
 function persistedDataMaxAgeMs(operation: string): number {
@@ -208,4 +221,29 @@ export function shouldDehydratePersistedQuery(query: Query, scope: string): bool
   const persistedOperation = `${domain}/${operation}`;
   if (!PERSISTED_QUERY_OPERATIONS.has(persistedOperation)) return false;
   return Date.now() - query.state.dataUpdatedAt <= persistedDataMaxAgeMs(persistedOperation);
+}
+
+type DehydratedQuery = DehydratedState['queries'][number];
+
+/**
+ * What a dehydrated query writes to disk. A chat transcript longer than
+ * {@link CHAT_TRANSCRIPT_PERSIST_MAX_ROWS} keeps its newest rows and reports the
+ * rest as older history, so a restored chat pages them back in on scroll-up the
+ * way a cold open does. Everything else is written as is.
+ */
+export function persistedQueryForDisk(
+  query: DehydratedQuery,
+  maxRows: number = CHAT_TRANSCRIPT_PERSIST_MAX_ROWS
+): DehydratedQuery {
+  const [, , domain, operation] = query.queryKey;
+  if (`${String(domain)}/${String(operation)}` !== CHAT_TRANSCRIPT_OPERATION) return query;
+  const data = query.state.data as { messages?: unknown; hasMore?: unknown } | undefined;
+  if (!data || !Array.isArray(data.messages) || data.messages.length <= maxRows) return query;
+  return {
+    ...query,
+    state: {
+      ...query.state,
+      data: { ...data, messages: data.messages.slice(-maxRows), hasMore: true },
+    },
+  };
 }

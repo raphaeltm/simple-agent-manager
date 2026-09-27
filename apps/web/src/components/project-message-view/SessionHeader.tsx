@@ -217,7 +217,10 @@ export function SessionHeader({
             unlabeled 14px icons. They are now named, grouped controls in
             `SessionToolRail`, so the title gets the full width. */}
         <div
-          className="text-sm font-semibold text-fg-primary min-w-0 leading-snug"
+          // Focus target after an in-chat link opens another chat (session-focus-handoff).
+          data-session-title
+          tabIndex={-1}
+          className="text-sm font-semibold text-fg-primary min-w-0 leading-snug outline-none"
           title={sessionTitle}
           style={{
             display: '-webkit-box',

@@ -1,5 +1,4 @@
-import type { ChatMessageResponse, ChatSessionDetailResponse, SessionStateSnapshot } from '../../lib/api';
-import { mergeMessages } from '../../lib/merge-messages';
+import type { SessionStateSnapshot } from '../../lib/api';
 
 export type FilePanelState = {
   mode: 'browse' | 'view' | 'diff' | 'git-status';
@@ -31,16 +30,4 @@ export function getPlanFingerprint(state: SessionStateSnapshot | null | undefine
   return state.planUpdatedAt
     ? `updated:${state.planUpdatedAt}`
     : `content:${hashPlanContent(state.currentPlan)}`;
-}
-
-export function mergeSessionDetailMessages(
-  detail: ChatSessionDetailResponse | undefined,
-  incoming: ChatMessageResponse[],
-  strategy: 'replace' | 'append' | 'prepend'
-): ChatSessionDetailResponse | undefined {
-  if (!detail) return detail;
-  return {
-    ...detail,
-    messages: mergeMessages(detail.messages, incoming, strategy),
-  };
 }

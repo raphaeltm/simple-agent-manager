@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   getChatSession: vi.fn(),
   getReportIssueConfig: vi.fn(),
   listMessageComments: vi.fn(),
+  sendFollowUpPrompt: vi.fn(),
 }));
 
 vi.mock('../../../src/components/AuthProvider', () => ({
@@ -48,6 +49,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   listProjectTasks: mocks.listProjectTasks,
   getChatSession: mocks.getChatSession,
   getReportIssueConfig: mocks.getReportIssueConfig,
+  sendFollowUpPrompt: mocks.sendFollowUpPrompt,
   getTranscribeApiUrl: () => 'https://api.test/api/transcribe',
 }));
 
@@ -152,16 +154,20 @@ type Deferred<T> = ReturnType<typeof deferred<T>>;
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => {};
-  const promise = new Promise<T>((res) => {
+  let reject: (reason: unknown) => void = () => {};
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 interface Frame {
   header: string;
   conversation: string;
   reportTool: boolean;
+  /** The chat's own loading indicator, shown until an uncached chat's first page arrives. */
+  loading: boolean;
 }
 
 /** Everything the chat pane showed, captured at each commit the router drives. */
@@ -176,6 +182,7 @@ function CommitProbe() {
       header: document.querySelector('[data-testid="session-header"]')?.textContent ?? '',
       conversation: document.querySelector('[role="log"]')?.textContent ?? '',
       reportTool: document.querySelector(`[aria-label="${REPORT_TOOL}"]`) !== null,
+      loading: document.querySelector('[data-testid="chat-loading"]') !== null,
     });
   });
   return null;
@@ -333,6 +340,8 @@ describe('Project chat — switching between chats', () => {
     const [switched] = framesSince(start);
     expect(switched!.header).toBe('');
     expect(switched!.conversation).toBe('');
+    // Not a blank pane: the chat's own loading indicator is what the switch painted.
+    expect(switched!.loading).toBe(true);
     expect(screen.queryByText('Alpha answer one')).not.toBeInTheDocument();
     // The cold open asks for one newest page, not the whole conversation.
     await waitFor(() =>
@@ -353,6 +362,104 @@ describe('Project chat — switching between chats', () => {
       expect(frame.header).not.toContain(ALPHA.topic);
       expect(frame.conversation).not.toContain('Alpha answer one');
     }
+  });
+
+  it('shows why an uncached chat failed to load, and never the previous chat', async () => {
+    const client = productionLikeClient();
+    mocks.getChatSession.mockImplementation(async (_projectId: string, sessionId: string) => {
+      if (sessionId === CHARLIE.id) throw new Error('Session store unavailable');
+      return ALPHA_TRANSCRIPT;
+    });
+
+    renderChat(client, ALPHA.id);
+    await screen.findByText('Alpha answer one');
+
+    const start = frames.length;
+    selectChat(CHARLIE.topic);
+
+    expect(await screen.findByText('Session store unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('Alpha answer one')).not.toBeInTheDocument();
+    for (const frame of framesSince(start)) {
+      expect(frame.header).not.toContain(ALPHA.topic);
+      expect(frame.conversation).not.toContain('Alpha answer one');
+    }
+    // The failure is confined to that chat: the previous one still opens.
+    selectChat(ALPHA.topic);
+    expect(await screen.findByText('Alpha answer one')).toBeInTheDocument();
+    expect(screen.queryByText('Session store unavailable')).not.toBeInTheDocument();
+  });
+
+  it('never offers a message still on its way again, and its delivery keeps a newer draft', async () => {
+    const client = productionLikeClient();
+    mocks.getChatSession.mockImplementation(async (_projectId: string, sessionId: string) =>
+      sessionId === BRAVO.id ? BRAVO_TRANSCRIPT : ALPHA_TRANSCRIPT
+    );
+    const delivery = deferred<void>();
+    mocks.sendFollowUpPrompt.mockReturnValue(delivery.promise);
+    const composer = () => screen.getByPlaceholderText('Send a message...');
+
+    renderChat(client, ALPHA.id);
+    await screen.findByText('Alpha answer one');
+    fireEvent.change(composer(), { target: { value: 'Run the migration now' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() =>
+      expect(mocks.sendFollowUpPrompt).toHaveBeenCalledWith(
+        PROJECT_ID,
+        ALPHA.id,
+        'Run the migration now'
+      )
+    );
+
+    selectChat(BRAVO.topic);
+    await screen.findByText('Bravo cached answer');
+    selectChat(ALPHA.topic);
+    await screen.findByText('Alpha answer one');
+    // The message is in the conversation, on its way; the composer does not offer
+    // it to send a second time.
+    expect(screen.getByRole('log', { name: 'Conversation' })).toHaveTextContent(
+      'Run the migration now'
+    );
+    expect(composer()).toHaveValue('');
+
+    fireEvent.change(composer(), { target: { value: 'Then tidy up the old tables' } });
+    await act(async () => {
+      delivery.resolve();
+      await delivery.promise;
+    });
+    expect(composer()).toHaveValue('Then tidy up the old tables');
+
+    selectChat(BRAVO.topic);
+    await screen.findByText('Bravo cached answer');
+    selectChat(ALPHA.topic);
+    await screen.findByText('Alpha answer one');
+    expect(composer()).toHaveValue('Then tidy up the old tables');
+  });
+
+  it('keeps a message whose send failed while the user was away, ready to retry', async () => {
+    const client = productionLikeClient();
+    mocks.getChatSession.mockImplementation(async (_projectId: string, sessionId: string) =>
+      sessionId === BRAVO.id ? BRAVO_TRANSCRIPT : ALPHA_TRANSCRIPT
+    );
+    const delivery = deferred<void>();
+    mocks.sendFollowUpPrompt.mockReturnValue(delivery.promise);
+    const composer = () => screen.getByPlaceholderText('Send a message...');
+
+    renderChat(client, ALPHA.id);
+    await screen.findByText('Alpha answer one');
+    fireEvent.change(composer(), { target: { value: 'Deploy the fix' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() => expect(mocks.sendFollowUpPrompt).toHaveBeenCalled());
+
+    selectChat(BRAVO.topic);
+    await screen.findByText('Bravo cached answer');
+    await act(async () => {
+      delivery.reject(new Error('agent unreachable'));
+      await delivery.promise.catch(() => {});
+    });
+
+    selectChat(ALPHA.topic);
+    await screen.findByText('Alpha answer one');
+    expect(composer()).toHaveValue('Deploy the fix');
   });
 
   it("keeps each chat's unsent draft to itself across a switch", async () => {

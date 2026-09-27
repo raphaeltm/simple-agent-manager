@@ -62,7 +62,8 @@ export function useSessionLifecycle(
   });
 
   const { workspace, node } = useSessionInfrastructure(session?.workspaceId);
-  const [followUp, setFollowUp] = useSessionDraft(sessionId);
+  const draft = useSessionDraft(sessionId);
+  const { text: followUp, setText: setFollowUp } = draft;
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
   const completionDockWorking = useCompletionDockWorking(agentActivity);
@@ -369,6 +370,7 @@ export function useSessionLifecycle(
         createdAt: Date.now(),
       };
       appendMessages([optimisticMessage]);
+      draft.sending(trimmed);
 
       // Persist via DO WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -389,9 +391,10 @@ export function useSessionLifecycle(
       if (sessionState === 'idle' && session?.workspaceId && session?.agentSessionId) {
         recovery.resumeAndSend(trimmed, {
           onDelivered: () => {
-            setFollowUp('');
+            draft.delivered(trimmed);
           },
           onFailed: () => {
+            draft.failed(trimmed);
             setAgentActivity('idle');
           },
         });
@@ -401,12 +404,13 @@ export function useSessionLifecycle(
           await sendFollowUpPrompt(projectId, sessionId, trimmed);
           // Delivery confirmed — clear any stale recovery banner and the composer.
           recovery.clearResumeError();
-          setFollowUp('');
+          draft.delivered(trimmed);
         } catch (err) {
           // reportDeliveryError terminates the session on a terminal RUNTIME_STOPPED
           // (composer disabled) or shows the recovery banner otherwise. Reset the
           // working state and keep the composer text so the user can retry.
           recovery.reportDeliveryError(err);
+          draft.failed(trimmed);
           if (wakingSleepingSession) sleepingWakePendingRef.current = false;
           setAgentActivity('idle');
         }

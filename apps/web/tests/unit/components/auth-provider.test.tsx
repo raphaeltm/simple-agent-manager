@@ -6,6 +6,10 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider, useAuth } from '../../../src/components/AuthProvider';
+import {
+  SessionDraftsProvider,
+  useSessionDraft,
+} from '../../../src/components/project-message-view/session-drafts';
 import { ProtectedRoute } from '../../../src/components/ProtectedRoute';
 import { GITHUB_REAUTH_REQUIRED_EVENT } from '../../../src/lib/api/client';
 import { queryClient } from '../../../src/lib/query-client';
@@ -412,6 +416,60 @@ describe('AuthProvider', () => {
     expect(mockCleanupTerminalSecrets).toHaveBeenCalledOnce();
     expect(mockBroadcastAuthRevocation).toHaveBeenCalledOnce();
     expect(mockResetAuthRevoked).toHaveBeenCalledOnce();
+  });
+
+  it("discards one account's unsent chat drafts before the next account renders", async () => {
+    // Drafts live in memory inside the signed-in subtree (`SessionDraftsProvider`
+    // sits in the chat view, under `ProtectedRoute`), which an account switch
+    // unmounts.
+    function DraftComposer() {
+      const draft = useSessionDraft('session-1');
+      return (
+        <textarea
+          aria-label="Chat draft"
+          value={draft.text}
+          onChange={(event) => draft.setText(event.target.value)}
+        />
+      );
+    }
+    const tree = () => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <AuthProvider>
+            <ProtectedRoute>
+              <SessionDraftsProvider>
+                <DraftComposer />
+              </SessionDraftsProvider>
+            </ProtectedRoute>
+          </AuthProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    mockUseSession.mockReturnValue({
+      data: validSession,
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    const { rerender } = render(tree());
+    fireEvent.change(await screen.findByLabelText('Chat draft'), {
+      target: { value: 'u1 private plan' },
+    });
+    expect(screen.getByLabelText('Chat draft')).toHaveValue('u1 private plan');
+
+    mockUseSession.mockReturnValue({
+      data: {
+        ...validSession,
+        user: { ...validSession.user, id: 'u2', email: 'other@test.com', name: 'Other User' },
+      },
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    rerender(tree());
+
+    // The composer is back for the next account, and empty.
+    await waitFor(() => expect(screen.getByLabelText('Chat draft')).toHaveValue(''));
   });
 
   it('never renders the previous user query cache during a direct account switch', async () => {
