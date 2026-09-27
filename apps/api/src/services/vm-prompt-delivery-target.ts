@@ -83,10 +83,12 @@ export async function resolveVmPromptDeliveryTarget(
             n.runtime AS node_runtime,
             a.id AS agent_session_id,
             a.status AS agent_session_status,
-            a.updated_at AS agent_session_updated_at
+            a.updated_at AS agent_session_updated_at,
+            s.sleep_status AS snapshot_sleep_status
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
      LEFT JOIN agent_sessions a ON a.workspace_id = w.id
+     LEFT JOIN session_snapshots s ON s.chat_session_id = w.chat_session_id
      WHERE w.project_id = ? AND w.chat_session_id = ?
      ORDER BY w.updated_at DESC, a.created_at DESC
      LIMIT 1`
@@ -104,6 +106,7 @@ export async function resolveVmPromptDeliveryTarget(
       agent_session_id: string | null;
       agent_session_status: string | null;
       agent_session_updated_at: string | null;
+      snapshot_sleep_status: string | null;
     }>();
 
   if (!row) {
@@ -121,11 +124,15 @@ export async function resolveVmPromptDeliveryTarget(
     const recovery = await ensureSessionRecovery(env, projectId, chatSessionId, sourceTaskGuard);
     return recoveryResolution(recovery, `Target workspace is ${row.workspace_status}`);
   }
+  const sleepingContainer =
+    row.node_runtime === 'cf-container' && row.snapshot_sleep_status === 'sleeping';
   if (['stopping', 'stopped', 'evicted', 'deleted', 'error'].includes(row.workspace_status)) {
     return {
       kind: 'failed',
-      reason: 'terminal_target',
-      error: `Target workspace is ${row.workspace_status}`,
+      reason: sleepingContainer ? 'wake_refused' : 'terminal_target',
+      error: sleepingContainer
+        ? `Sleeping container workspace is ${row.workspace_status} and cannot wake in place`
+        : `Target workspace is ${row.workspace_status}`,
     };
   }
   if (!row.node_id) {
@@ -135,7 +142,11 @@ export async function resolveVmPromptDeliveryTarget(
     ['stopping', 'stopped', 'deleted', 'error'].includes(row.node_status ?? '') ||
     row.node_health_status === 'unhealthy'
   ) {
-    return { kind: 'failed', reason: 'dead_target', error: 'Target node is unavailable' };
+    return {
+      kind: 'failed',
+      reason: sleepingContainer ? 'wake_refused' : 'dead_target',
+      error: 'Target node is unavailable',
+    };
   }
   const wakeableStatuses = ['running', 'recovery', 'sleeping'];
   if (
@@ -154,7 +165,7 @@ export async function resolveVmPromptDeliveryTarget(
     if (['completed', 'failed', 'error', 'stopped'].includes(row.agent_session_status ?? '')) {
       return {
         kind: 'failed',
-        reason: 'terminal_target',
+        reason: sleepingContainer ? 'wake_refused' : 'terminal_target',
         error: `Target agent session is ${row.agent_session_status}`,
       };
     }

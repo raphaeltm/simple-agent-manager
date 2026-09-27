@@ -69,6 +69,7 @@ const targetRow = {
   agent_session_id: 'acp-1',
   agent_session_status: 'running',
   agent_session_updated_at: '2026-08-09T00:00:00Z',
+  snapshot_sleep_status: null as string | null,
 };
 
 function envWithTarget(row: typeof targetRow | null = targetRow): Env {
@@ -358,6 +359,43 @@ describe('VM prompt delivery adapter', () => {
       });
     }
   );
+
+  it.each([
+    ['deleted workspace', { workspace_status: 'deleted' }],
+    ['deleted node', { workspace_status: 'sleeping', node_status: 'deleted' }],
+    ['stopped agent session', { workspace_status: 'sleeping', agent_session_status: 'stopped' }],
+  ])('reports a failed wake for a sleeping container with a %s', async (_label, overrides) => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({
+        ...targetRow,
+        node_runtime: 'cf-container',
+        snapshot_sleep_status: 'sleeping',
+        ...overrides,
+      })
+    );
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'wake_refused',
+    });
+    expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+  });
+
+  it('does not report a terminal container session as a failed wake', async () => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({
+        ...targetRow,
+        node_runtime: 'cf-container',
+        workspace_status: 'deleted',
+      })
+    );
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+    });
+  });
 
   it('revalidates a guarded parent before creating sleeping-session recovery', async () => {
     const adapter = new DefaultVmPromptDeliveryAdapter(
