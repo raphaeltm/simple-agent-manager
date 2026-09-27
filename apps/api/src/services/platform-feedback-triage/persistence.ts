@@ -1,6 +1,6 @@
 import type { Env } from '../../env';
 import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
-import { normalizeSeverity, parseStoredEvidenceRefs } from './grouping';
+import { groupPlatformErrors, normalizeSeverity, parseStoredEvidenceRefs } from './grouping';
 import type {
   ErrorRow,
   ExistingTriagePriorityRow,
@@ -13,10 +13,15 @@ const FEEDBACK_PROJECT_TASK_ID_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 1;
 interface SignatureAliasRow {
   signature: string;
   canonical_signature: string | null;
+  source: string;
+  evidence_refs: string;
   idea_id: string | null;
   occurrence_count: number;
   created_at: string;
 }
+
+const SIGNATURE_ALIAS_COLUMNS =
+  'signature, canonical_signature, source, evidence_refs, idea_id, occurrence_count, created_at';
 
 function signatureMatchRank(row: SignatureAliasRow, group: FeedbackErrorGroup): number {
   const canonical = group.canonicalSignature ?? group.signature;
@@ -24,6 +29,101 @@ function signatureMatchRank(row: SignatureAliasRow, group: FeedbackErrorGroup): 
   if (row.canonical_signature === canonical) return 1;
   if (row.idea_id) return 2;
   return 3;
+}
+
+function rowMatchesGroup(row: SignatureAliasRow, group: FeedbackErrorGroup): boolean {
+  const canonical = group.canonicalSignature ?? group.signature;
+  const candidates = new Set([canonical, ...(group.legacySignatures ?? [])]);
+  return row.canonical_signature === canonical || candidates.has(row.signature);
+}
+
+async function attachCanonicalSignature(
+  env: Env,
+  row: SignatureAliasRow,
+  canonical: string
+): Promise<SignatureAliasRow> {
+  if (row.canonical_signature === canonical) return row;
+  try {
+    await env.DATABASE.prepare(
+      `UPDATE platform_feedback_triages SET canonical_signature = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE signature = ? AND canonical_signature IS NULL`
+    )
+      .bind(canonical, row.signature)
+      .run();
+    return { ...row, canonical_signature: canonical };
+  } catch (cause) {
+    const winner = await env.DATABASE.prepare(
+      `SELECT ${SIGNATURE_ALIAS_COLUMNS}
+       FROM platform_feedback_triages WHERE canonical_signature = ?`
+    )
+      .bind(canonical)
+      .first<SignatureAliasRow>();
+    if (winner) return winner;
+    throw cause;
+  }
+}
+
+async function backfillCanonicalAliasesFromEvidence(
+  env: Env,
+  groups: FeedbackErrorGroup[]
+): Promise<SignatureAliasRow[]> {
+  const canonicalTargets = new Set(
+    groups.map((group) => group.canonicalSignature ?? group.signature)
+  );
+  const sources = [...new Set(groups.map((group) => group.source))];
+  if (sources.length === 0) return [];
+  const placeholders = sources.map(() => '?').join(',');
+  const unresolved = await env.DATABASE.prepare(
+    `SELECT ${SIGNATURE_ALIAS_COLUMNS}
+     FROM platform_feedback_triages
+     WHERE canonical_signature IS NULL AND source IN (${placeholders})`
+  )
+    .bind(...sources)
+    .all<SignatureAliasRow>();
+  const rows = [...(unresolved.results ?? [])].sort(
+    (left, right) =>
+      Number(Boolean(right.idea_id)) - Number(Boolean(left.idea_id)) ||
+      right.occurrence_count - left.occurrence_count ||
+      left.created_at.localeCompare(right.created_at) ||
+      left.signature.localeCompare(right.signature)
+  );
+  const evidenceBySignature = new Map<string, string[]>();
+  const evidenceIds = new Set<string>();
+  for (const row of rows) {
+    const ids = parseStoredEvidenceRefs(row.evidence_refs, D1_MAX_BOUND_PARAMETERS).map(
+      (evidence) => evidence.errorId
+    );
+    evidenceBySignature.set(row.signature, ids);
+    for (const id of ids) evidenceIds.add(id);
+  }
+  if (evidenceIds.size === 0) return [];
+
+  const errorsById = new Map<string, ErrorRow>();
+  const ids = [...evidenceIds];
+  for (let offset = 0; offset < ids.length; offset += D1_MAX_BOUND_PARAMETERS) {
+    const chunk = ids.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
+    const query = await env.OBSERVABILITY_DATABASE.prepare(
+      `SELECT id, source, level, message, timestamp, task_id, node_id
+       FROM platform_errors WHERE id IN (${chunk.map(() => '?').join(',')})`
+    )
+      .bind(...chunk)
+      .all<ErrorRow>();
+    for (const error of query.results ?? []) errorsById.set(error.id, error);
+  }
+
+  const resolved: SignatureAliasRow[] = [];
+  for (const row of rows) {
+    const evidence = (evidenceBySignature.get(row.signature) ?? [])
+      .map((id) => errorsById.get(id))
+      .filter((error): error is ErrorRow => Boolean(error));
+    if (evidence.length === 0) continue;
+    const historicalGroups = await groupPlatformErrors(evidence, evidence.length);
+    if (historicalGroups.length !== 1) continue;
+    const canonical = historicalGroups[0]?.canonicalSignature ?? historicalGroups[0]?.signature;
+    if (!canonical || !canonicalTargets.has(canonical)) continue;
+    resolved.push(await attachCanonicalSignature(env, row, canonical));
+  }
+  return resolved;
 }
 
 export async function resolveExistingGroupSignatures(
@@ -44,7 +144,7 @@ export async function resolveExistingGroupSignatures(
     const chunk = candidates.slice(offset, offset + chunkSize);
     const placeholders = chunk.map(() => '?').join(',');
     const query = await env.DATABASE.prepare(
-      `SELECT signature, canonical_signature, idea_id, occurrence_count, created_at
+      `SELECT ${SIGNATURE_ALIAS_COLUMNS}
        FROM platform_feedback_triages
        WHERE canonical_signature IN (${placeholders}) OR signature IN (${placeholders})`
     )
@@ -53,12 +153,18 @@ export async function resolveExistingGroupSignatures(
     rows.push(...(query.results ?? []));
   }
 
+  const unmatchedGroups = groups.filter(
+    (group) => !rows.some((row) => rowMatchesGroup(row, group))
+  );
+  if (unmatchedGroups.length > 0) {
+    rows.push(...(await backfillCanonicalAliasesFromEvidence(env, unmatchedGroups)));
+  }
+
   return Promise.all(
     groups.map(async (group) => {
       const canonical = group.canonicalSignature ?? group.signature;
-      const candidates = new Set([canonical, ...(group.legacySignatures ?? [])]);
       const matched = rows
-        .filter((row) => row.canonical_signature === canonical || candidates.has(row.signature))
+        .filter((row) => rowMatchesGroup(row, group))
         .sort(
           (left, right) =>
             signatureMatchRank(left, group) - signatureMatchRank(right, group) ||
@@ -67,27 +173,8 @@ export async function resolveExistingGroupSignatures(
             left.signature.localeCompare(right.signature)
         )[0];
       if (!matched) return group;
-
-      if (matched.canonical_signature !== canonical) {
-        try {
-          await env.DATABASE.prepare(
-            `UPDATE platform_feedback_triages SET canonical_signature = ?, updated_at = CURRENT_TIMESTAMP
-             WHERE signature = ? AND canonical_signature IS NULL`
-          )
-            .bind(canonical, matched.signature)
-            .run();
-        } catch (cause) {
-          const winner = await env.DATABASE.prepare(
-            `SELECT signature, canonical_signature, idea_id, occurrence_count, created_at
-             FROM platform_feedback_triages WHERE canonical_signature = ?`
-          )
-            .bind(canonical)
-            .first<SignatureAliasRow>();
-          if (winner) return { ...group, signature: winner.signature };
-          throw cause;
-        }
-      }
-      return { ...group, signature: matched.signature };
+      const resolved = await attachCanonicalSignature(env, matched, canonical);
+      return { ...group, signature: resolved.signature };
     })
   );
 }

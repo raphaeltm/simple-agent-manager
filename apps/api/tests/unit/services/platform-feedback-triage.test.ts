@@ -174,6 +174,13 @@ describe('platform feedback triage', () => {
       ],
     },
     {
+      name: 'max-lifetime node identifiers from production',
+      messages: [
+        'Failed to destroy max-lifetime node: Cannot confirm managed VM termination for node 01M3BB7WG1GK21RGVBY0EDGYWB: instance identity is missing',
+        'Failed to destroy max-lifetime node: Cannot confirm managed VM termination for node 01M3C74N1JC4QDPCF2G352ZG45: instance identity is missing',
+      ],
+    },
+    {
       name: 'identifiers, hex, ports, timestamps, durations, and quoted values',
       messages: [
         'Worker 01M3BB7WG1GK21RGVBY0EDGYWB request 60f74d90-5e57-45d6-aa9f-6d53f48bcb6c hash deadbeefcafebabe on port 8080 at 2026-09-27T17:20:48.695Z took 12.5ms for "alpha"',
@@ -241,13 +248,16 @@ describe('platform feedback triage', () => {
     expect(new Set(groups.map((group) => group.signature)).size).toBe(messages.length);
   });
 
-  it('reuses a legacy signature row when canonical normalization changes the hash', async () => {
+  it('reuses the linked legacy row across a disjoint window and converging old signatures', async () => {
     const { main, observability } = setup();
     const at = Date.parse('2026-09-27T14:48:40.999Z');
+    const legacyAt = at - 2 * 60 * 60_000;
     const legacyMessage =
       'ProjectData storage usage is degraded (97.92%, 0 bytes/day, time to limit unavailable)';
-    const currentMessage =
+    const secondLegacyMessage =
       'ProjectData storage usage is degraded (97.99%, 0 bytes/day, time to limit unavailable)';
+    const currentMessage =
+      'ProjectData storage usage is degraded (98.07%, 0 bytes/day, time to limit unavailable)';
     const [canonicalGroup] = await groupPlatformErrors(
       [
         {
@@ -255,14 +265,7 @@ describe('platform feedback triage', () => {
           source: 'api',
           level: 'error',
           message: legacyMessage,
-          timestamp: at,
-        },
-        {
-          id: '5110e31e-e1da-41df-ad8a-b7e092fc95f2',
-          source: 'api',
-          level: 'error',
-          message: currentMessage,
-          timestamp: at + 1,
+          timestamp: legacyAt,
         },
       ],
       10
@@ -271,6 +274,21 @@ describe('platform feedback triage', () => {
     expect(canonicalGroup).toBeDefined();
     expect(legacySignature).toBeDefined();
     expect(legacySignature).not.toBe(canonicalGroup?.signature);
+    const [secondLegacyGroup] = await groupPlatformErrors(
+      [
+        {
+          id: 'b9be0307-a456-42b5-83fd-25623883b6e2',
+          source: 'api',
+          level: 'error',
+          message: secondLegacyMessage,
+          timestamp: legacyAt + 1,
+        },
+      ],
+      10
+    );
+    const secondLegacySignature = secondLegacyGroup?.legacySignatures?.[0];
+    expect(secondLegacySignature).toBeDefined();
+    expect(secondLegacySignature).not.toBe(legacySignature);
 
     main
       .prepare(
@@ -280,21 +298,56 @@ describe('platform feedback triage', () => {
        VALUES ('existing-idea', 'feedback-project', 'owner-1', 'Recurring api platform error',
         'existing draft', 'draft', 0, 'task', 0, 'owner-1', ?, ?)`
       )
-      .run(new Date(at).toISOString(), new Date(at).toISOString());
+      .run(new Date(legacyAt).toISOString(), new Date(legacyAt).toISOString());
     main
       .prepare(
         `INSERT INTO platform_feedback_triages
        (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
         severity, idea_id, queue_state, queued_at)
-       VALUES (?, 'api', 'Recurring api platform error', ?, ?, 1, '[]', 'error',
+       VALUES (?, 'api', 'Recurring api platform error', ?, ?, 1, ?, 'error',
         'existing-idea', 'pending', ?)`
       )
-      .run(legacySignature, at, at, at);
+      .run(
+        legacySignature,
+        legacyAt,
+        legacyAt,
+        JSON.stringify([{ errorId: 'afaa96ab-c811-436a-b933-42c79e2e0249', timestamp: legacyAt }]),
+        legacyAt
+      );
+    main
+      .prepare(
+        `INSERT INTO platform_feedback_triages
+       (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
+        severity, queue_state, queued_at)
+       VALUES (?, 'api', 'Recurring api platform error', ?, ?, 1, ?, 'error', 'pending', ?)`
+      )
+      .run(
+        secondLegacySignature,
+        legacyAt + 1,
+        legacyAt + 1,
+        JSON.stringify([
+          { errorId: 'b9be0307-a456-42b5-83fd-25623883b6e2', timestamp: legacyAt + 1 },
+        ]),
+        legacyAt + 1
+      );
     const insertError = observability.prepare(
       'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
     );
-    insertError.run('afaa96ab-c811-436a-b933-42c79e2e0249', 'api', 'error', legacyMessage, at);
-    insertError.run('5110e31e-e1da-41df-ad8a-b7e092fc95f2', 'api', 'error', currentMessage, at + 1);
+    insertError.run(
+      'afaa96ab-c811-436a-b933-42c79e2e0249',
+      'api',
+      'error',
+      legacyMessage,
+      legacyAt
+    );
+    insertError.run(
+      'b9be0307-a456-42b5-83fd-25623883b6e2',
+      'api',
+      'error',
+      secondLegacyMessage,
+      legacyAt + 1
+    );
+    insertError.run('5110e31e-e1da-41df-ad8a-b7e092fc95f2', 'api', 'error', currentMessage, at);
     const diagnose = vi.fn();
 
     const result = await runPlatformFeedbackTriage(
@@ -305,22 +358,25 @@ describe('platform feedback triage', () => {
         PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES: '60',
       } as Env,
       'manual',
-      { now: () => at + 2, diagnose }
+      { now: () => at + 1, diagnose }
     );
 
     expect(result).toMatchObject({ ideasCreated: 0, ideasUpdated: 1 });
     expect(diagnose).not.toHaveBeenCalled();
     expect(main.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 1 });
+    expect(main.prepare('SELECT COUNT(*) AS count FROM platform_feedback_triages').get()).toEqual({
+      count: 2,
+    });
     expect(
       main
         .prepare(
-          'SELECT signature, canonical_signature, occurrence_count FROM platform_feedback_triages'
+          'SELECT signature, canonical_signature, occurrence_count FROM platform_feedback_triages WHERE canonical_signature IS NOT NULL'
         )
         .get()
     ).toEqual({
       signature: legacySignature,
       canonical_signature: canonicalGroup?.signature,
-      occurrence_count: 2,
+      occurrence_count: 1,
     });
   });
 
