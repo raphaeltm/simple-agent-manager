@@ -72,6 +72,19 @@ backs them off without reaching a terminal state.
 - A failing node does not stop later candidates or later scheduled phases.
 - The regression test demonstrably fails when the fix is reverted.
 
+## Validation Evidence
+
+- Focused cleanup coverage passes 108 tests, including the real sweep, exact final
+  provider reread, backoff escape path, unsupported-provider preservation, foreign
+  environment and installation labels, ambiguous labels, malformed timestamps,
+  duplicate inventory, and changed provider identity.
+- Reverting only the `destroying` exclusion from the max-lifetime selector makes
+  the real-sweep regression fail because it observes
+  `node_cleanup.destroying_max_lifetime` instead of the required
+  `node_cleanup.destroying_stale_handoff` path.
+- Reverting the providerless reconciliation makes the same regression fail with
+  zero terminalized nodes and two isolated errors.
+
 ## References
 
 - PR #2157 / merge `8880c8761`

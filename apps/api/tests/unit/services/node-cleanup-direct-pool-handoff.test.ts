@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { log } from '../../../src/lib/logger';
 import { runNodeCleanupSweep } from '../../../src/scheduled/node-cleanup';
 import {
   sweepDestroyingHandoffNodes,
@@ -75,11 +76,21 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
   const providerDeletes: string[] = [];
   const rejectedProviderIds = new Set<string>();
   const rejectedInventoryNodeIds = new Set<string>();
-  const inventoryModeByNodeId = new Map<string, 'exact' | 'foreign' | 'duplicate'>();
+  const inventoryModeByNodeId = new Map<
+    string,
+    | 'exact'
+    | 'foreign-installation'
+    | 'foreign-environment'
+    | 'ambiguous'
+    | 'duplicate'
+    | 'malformed'
+    | 'changed-identity'
+  >();
   const inventoryServerById = new Map<string, Record<string, unknown>>();
   const hangingProviderIds = new Set<string>();
   const providerSignals: AbortSignal[] = [];
   const inventorySignals: AbortSignal[] = [];
+  const providerGets: string[] = [];
   const dnsRequests: string[] = [];
   let hangDns: 'request' | 'error-body' | undefined;
   let rejectCreateDuringDestroy = false;
@@ -152,7 +163,10 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
             return [part.slice(0, separator), part.slice(separator + 1)];
           })
         );
-        if (mode === 'foreign') labels.installation = 'fedcba9876543210fedcba9876543210';
+        if (mode === 'foreign-installation')
+          labels.installation = 'fedcba9876543210fedcba9876543210';
+        if (mode === 'foreign-environment') labels.env = 'production';
+        if (mode === 'ambiguous') labels.__sam_internal_ambiguous_label__installation = 'true';
         const inventory = mode
           ? [
               {
@@ -162,7 +176,8 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
                 public_net: { ipv4: { ip: '192.0.2.123' } },
                 server_type: { name: 'cx23', cores: 2, memory: 4, disk: 40 },
                 location: { name: 'fsn1' },
-                created: '2026-09-08T10:30:00.000Z',
+                created:
+                  mode === 'malformed' ? 'not-a-provider-timestamp' : '2026-09-08T10:30:00.000Z',
                 labels,
               },
               ...(mode === 'duplicate'
@@ -188,8 +203,17 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
         });
       }
       if (url.includes('api.hetzner.cloud/v1/servers/') && !init?.method) {
+        providerGets.push(url);
         const server = inventoryServerById.get(url.split('/').at(-1)!);
-        if (server) return Response.json({ server });
+        if (server) {
+          const nodeId = String(server.name).replace(/^node-/, '');
+          if (inventoryModeByNodeId.get(nodeId) === 'changed-identity') {
+            return Response.json({
+              server: { ...server, location: { name: 'nbg1' } },
+            });
+          }
+          return Response.json({ server });
+        }
         return Response.json(
           { error: { code: 'not_found', message: 'Server not found' } },
           { status: 404 }
@@ -254,6 +278,7 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
     hangingProviderIds,
     providerSignals,
     inventorySignals,
+    providerGets,
     inventoryModeByNodeId,
     dnsRequests,
     setHangDns: (mode: 'request' | 'error-body') => {
@@ -351,6 +376,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
 
   it('drives production-shaped providerless rows through the real sweep and isolates failures', async () => {
     const f = await handoffFixture();
+    const infoSpy = vi.spyOn(log, 'info');
     f.env.MAX_AUTO_NODE_LIFETIME_MS = '1000';
     f.sqlite.exec(`DELETE FROM session_snapshots; DELETE FROM workspaces;`);
     f.sqlite
@@ -410,6 +436,22 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     expect(f.providerDeletes).toEqual([]);
     expect(f.inventorySignals).toHaveLength(2);
     expect(f.inventorySignals.every((signal) => signal instanceof AbortSignal)).toBe(true);
+    expect(infoSpy).toHaveBeenCalledWith(
+      'node_cleanup.destroying_stale_handoff',
+      expect.objectContaining({ nodeId: 'host' })
+    );
+
+    const failedBackoff = f.sqlite
+      .prepare("SELECT cleanup_backoff_until FROM nodes WHERE id = 'bad-inventory'")
+      .get();
+    const secondResult = await runNodeCleanupSweep(f.env);
+    expect(secondResult).toMatchObject({ lifetimeDestroyed: 0, errors: 0 });
+    expect(f.inventorySignals).toHaveLength(2);
+    expect(
+      f.sqlite
+        .prepare("SELECT status, cleanup_backoff_until FROM nodes WHERE id = 'bad-inventory'")
+        .get()
+    ).toEqual({ status: 'destroying', ...failedBackoff });
   });
 
   it('deletes only an exact providerless inventory match after a final ownership read', async () => {
@@ -431,39 +473,99 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
 
     expect(f.result).toMatchObject({ lifetimeDestroyed: 1, errors: 0 });
     expect(f.providerDeletes).toEqual(['https://api.hetzner.cloud/v1/servers/123']);
+    expect(f.providerGets).toEqual(['https://api.hetzner.cloud/v1/servers/123']);
     expect(f.sqlite.prepare("SELECT status FROM nodes WHERE id = 'host'").get()).toEqual({
       status: 'deleted',
     });
   });
 
-  it.each(['foreign', 'duplicate'] as const)(
-    'preserves a providerless row when inventory ownership is %s',
-    async (mode) => {
-      const f = await handoffFixture();
-      f.sqlite.exec(`DELETE FROM session_snapshots; DELETE FROM workspaces;`);
-      f.sqlite
-        .prepare(
-          `UPDATE nodes
+  it.each([
+    'foreign-installation',
+    'foreign-environment',
+    'ambiguous',
+    'duplicate',
+    'malformed',
+    'changed-identity',
+  ] as const)('preserves a providerless row when inventory ownership is %s', async (mode) => {
+    const f = await handoffFixture();
+    f.sqlite.exec(`DELETE FROM session_snapshots; DELETE FROM workspaces;`);
+    f.sqlite
+      .prepare(
+        `UPDATE nodes
               SET status = 'destroying', provider_instance_id = NULL,
                   runtime_incarnation_id = 'incarnation-host',
                   runtime_termination_confirmed_at = NULL, cleanup_backoff_until = NULL
             WHERE id = 'host'`
-        )
-        .run();
+      )
+      .run();
+    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'").run();
+    f.inventoryModeByNodeId.set('host', mode);
+
+    await f.sweepDestroying();
+
+    expect(f.result).toMatchObject({ lifetimeDestroyed: 0, errors: 1 });
+    expect(f.providerDeletes).toEqual([]);
+    expect(
+      f.sqlite.prepare("SELECT status, cleanup_backoff_until FROM nodes WHERE id = 'host'").get()
+    ).toEqual({ status: 'destroying', cleanup_backoff_until: expect.any(String) });
+  });
+
+  it('fails closed for a provider whose inventory completeness is not guaranteed', async () => {
+    const f = await handoffFixture();
+    f.sqlite.exec(`DELETE FROM session_snapshots; DELETE FROM workspaces;`);
+    f.sqlite
+      .prepare(
+        `UPDATE nodes
+            SET status = 'destroying', provider_instance_id = NULL,
+                runtime_incarnation_id = 'incarnation-host', cloud_provider = 'gcp',
+                runtime_termination_confirmed_at = NULL, cleanup_backoff_until = NULL
+          WHERE id = 'host'`
+      )
+      .run();
+    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'").run();
+
+    await f.sweepDestroying();
+
+    expect(f.result).toMatchObject({ lifetimeDestroyed: 0, errors: 1 });
+    expect(f.inventorySignals).toEqual([]);
+    expect(f.providerDeletes).toEqual([]);
+    expect(
       f.sqlite
-        .prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'")
-        .run();
-      f.inventoryModeByNodeId.set('host', mode);
+        .prepare(
+          "SELECT status, runtime_termination_confirmed_at, cleanup_backoff_until FROM nodes WHERE id = 'host'"
+        )
+        .get()
+    ).toEqual({
+      status: 'destroying',
+      runtime_termination_confirmed_at: null,
+      cleanup_backoff_until: expect.any(String),
+    });
+  });
 
-      await f.sweepDestroying();
+  it('fails closed when the persisted node creation timestamp is malformed', async () => {
+    const f = await handoffFixture();
+    f.sqlite.exec(`DELETE FROM session_snapshots; DELETE FROM workspaces;`);
+    f.sqlite
+      .prepare(
+        `UPDATE nodes
+            SET status = 'destroying', provider_instance_id = NULL,
+                runtime_incarnation_id = 'incarnation-host', created_at = '0000-invalid',
+                runtime_termination_confirmed_at = NULL, cleanup_backoff_until = NULL
+          WHERE id = 'host'`
+      )
+      .run();
+    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'").run();
+    f.inventoryModeByNodeId.set('host', 'exact');
 
-      expect(f.result).toMatchObject({ lifetimeDestroyed: 0, errors: 1 });
-      expect(f.providerDeletes).toEqual([]);
-      expect(f.sqlite.prepare("SELECT status FROM nodes WHERE id = 'host'").get()).toEqual({
-        status: 'destroying',
-      });
-    }
-  );
+    await f.sweepDestroying();
+
+    expect(f.result).toMatchObject({ lifetimeDestroyed: 0, errors: 1 });
+    expect(f.providerGets).toEqual([]);
+    expect(f.providerDeletes).toEqual([]);
+    expect(f.sqlite.prepare("SELECT status FROM nodes WHERE id = 'host'").get()).toEqual({
+      status: 'destroying',
+    });
+  });
 
   it('carries a rejected provider create through a concurrent destroy claim and cleanup', async () => {
     const f = await handoffFixture();

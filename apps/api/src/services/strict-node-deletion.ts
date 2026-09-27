@@ -322,8 +322,9 @@ function sameProviderInventoryIdentity(current: VMInstance, discovered: VMInstan
  * resolve the exact credential generation used for allocation. Provider filtering is
  * never trusted by itself; every returned server must repeat the node, incarnation,
  * environment, installation, role, and managed labels locally. A discovered server is
- * re-read immediately before deletion, while a complete empty inventory proves that
- * the old rejected allocation left no runtime to delete.
+ * re-read immediately before deletion. Only Hetzner's fail-closed, fully paginated
+ * inventory is accepted here; its complete empty result proves that the old rejected
+ * allocation left no runtime to delete.
  */
 async function reconcileStrictProviderlessVm(
   db: NodeDb,
@@ -335,6 +336,14 @@ async function reconcileStrictProviderlessVm(
   if (node.status !== 'destroying' || !hasManagedWorkspaceVmPlacementProof(node)) {
     throw new Error(
       `Cannot confirm managed VM termination for node ${node.id}: instance identity is missing`
+    );
+  }
+  // Only Hetzner currently guarantees that a successful filtered inventory read is
+  // complete. Other adapters may deliberately return partial multi-region inventory,
+  // so an empty generic list cannot prove provider-side absence.
+  if (node.cloudProvider !== 'hetzner') {
+    throw new Error(
+      `Cannot reconcile providerless VM ${node.id}: provider inventory completeness is not guaranteed`
     );
   }
   const installationId = resolveInstallationId(env);
@@ -379,9 +388,11 @@ async function reconcileStrictProviderlessVm(
     return 'already-absent';
   }
   const createdAt = Date.parse(discovered.createdAt);
+  const nodeCreatedAt = Date.parse(node.createdAt);
   if (
     !Number.isFinite(createdAt) ||
-    createdAt < Date.parse(node.createdAt) ||
+    !Number.isFinite(nodeCreatedAt) ||
+    createdAt < nodeCreatedAt ||
     createdAt > Date.now() ||
     discovered.location !== node.vmLocation ||
     discovered.serverType !== node.providerInstanceType
