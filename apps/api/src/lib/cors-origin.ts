@@ -4,9 +4,17 @@ function normalizeHostname(value: string): string {
   return value.trim().toLowerCase().replace(/\.$/, '');
 }
 
+/** Hosts the app and the API run on during local development (`pnpm dev`). */
+export const LOCAL_DEVELOPMENT_HOSTS: readonly string[] = ['localhost', '127.0.0.1'];
+
+/** Local development leaves BASE_DOMAIN empty or pointed at localhost. */
+export function isLocalDevelopmentBaseDomain(baseDomainValue: string | undefined): boolean {
+  const baseDomain = normalizeHostname(baseDomainValue || '');
+  return !baseDomain || baseDomain.includes('localhost');
+}
+
 function isLocalDevelopmentOrigin(hostname: string, baseDomain: string): boolean {
-  const isDevEnvironment = !baseDomain || baseDomain.includes('localhost');
-  return isDevEnvironment && (hostname === 'localhost' || hostname === '127.0.0.1');
+  return isLocalDevelopmentBaseDomain(baseDomain) && LOCAL_DEVELOPMENT_HOSTS.includes(hostname);
 }
 
 export function resolveCredentialedCorsOrigin(

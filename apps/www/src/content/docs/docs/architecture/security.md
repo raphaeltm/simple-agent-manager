@@ -182,6 +182,26 @@ The preview starts as soon as a user opens the artifact (`apps/web/src/component
 
 The dedicated origin contains iframe-policy regressions; the CSP sandbox header protects direct-open links. Preview is deliberately absent from credentialed CORS and BetterAuth trusted origins, and responses never set cookies.
 
+## Library Previews, Downloads, and Diagrams
+
+Library files and chat messages are written by agents, so everything they put in front of a browser is treated as untrusted.
+
+**Inline previews** (`GET /api/projects/:id/library/:fileId/preview`, policy in `apps/api/src/services/library-serving-policy.ts`):
+
+- Only images, PDFs, markdown, and HTML (served as inert `text/plain`) preview inline. Every response is `nosniff`, and no preview CSP allows script.
+- `frame-ancestors` names the app origin (`https://app.BASE_DOMAIN`). Previews come from the API origin, so `'self'` or `X-Frame-Options: SAMEORIGIN` would block the app's own PDF viewer.
+- Only a PDF gets the looser policy the browser's viewer needs (`object-src 'self'`, inline styles). It gets it only when its bytes start with the `%PDF-` signature; a file that merely claims to be a PDF is refused.
+- The app frames PDFs without an iframe `sandbox`, because Chromium refuses to render a PDF inside any sandboxed frame. The response headers above keep that frame inert (`apps/web/src/components/library/FilePreviewModal.tsx`).
+
+**Downloads** (`/download`) are always `Content-Disposition: attachment` with `nosniff`. Any stored type a browser could execute is served as `application/octet-stream`, whatever parameters it carries. That covers HTML, XML and `+xml` types, JavaScript, and comma-separated lists.
+
+**Mermaid diagrams** in chat and in library markdown render through one pipeline (`renderMermaidSvg` in `packages/acp-client/src/mermaid.ts`):
+
+- Mermaid draws labels as SVG text, so its output contains no `<foreignObject>` or HTML. A diagram's own directives cannot re-enable HTML labels, inject CSS (`themeCSS`, `fontFamily`), or make marker references absolute.
+- The SVG is sanitized to an SVG-only allowlist in which every reference stays inside the document. An `href` must be a `#fragment`, or an inline raster image on `<image>`. CSS that names a remote resource is dropped.
+
+Mermaid lays a diagram out in the live page before it is sanitized, so a remote image named in diagram syntax can still be fetched once while the diagram renders. Markdown images (`![](…)`) are also shown as written. A platform-wide policy for remote resources in agent content is tracked separately.
+
 ## Security Best Practices
 
 - **Rotate keys quarterly** — regenerate JWT and encryption keys

@@ -40,6 +40,7 @@ import {
 import {
   contentDispositionFilename,
   downloadContentType,
+  hasPreviewableContent,
   isInlinePreviewable,
   previewHeaders,
 } from '../services/library-serving-policy';
@@ -392,8 +393,11 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
       timeoutHandle = setTimeout(() => reject(errors.internal('Preview timed out')), timeoutMs);
     }),
   ]).finally(() => clearTimeout(timeoutHandle));
+  if (!hasPreviewableContent(effectiveMime, data)) {
+    throw errors.badRequest('File type is not supported for inline preview');
+  }
 
-  const { contentType, contentSecurityPolicy } = previewHeaders(effectiveMime);
+  const { contentType, contentSecurityPolicy } = previewHeaders(effectiveMime, c.env);
   return new Response(data, {
     status: 200,
     headers: {
