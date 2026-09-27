@@ -257,16 +257,28 @@ describe('ProjectData Durable Object', () => {
       const wait = await stub.getTaskWait(registered.subscription!.id);
       expect(wait).toMatchObject({ state: 'resolved', resolutionReason: 'condition_met' });
       const { messages } = await stub.getMessages(parentSessionId, 10);
-      expect(messages).toHaveLength(1);
-      expect(messages[0]!.content).toContain('wait_for_subtasks subscription resolved');
-      expect(messages[0]!.content).not.toContain('First child finished');
-      expect(messages[0]!.content).not.toContain('Second child failed safely');
+      const wakeMessages = messages.filter((message) =>
+        message.content.includes('wait_for_subtasks subscription resolved')
+      );
+      expect(wakeMessages).toHaveLength(1);
+      expect(wakeMessages[0]!.content).not.toContain('First child finished');
+      expect(wakeMessages[0]!.content).not.toContain('Second child failed safely');
+      await vi.waitFor(async () => {
+        const latest = await stub.getMessages(parentSessionId, 10);
+        expect(latest.messages.some((message) => message.content.includes('Wake failed:'))).toBe(
+          true
+        );
+      });
       const snapshot = await stub.getDurableExecutionSnapshot(parentSessionId);
       expect(snapshot.deliveries).toHaveLength(1);
       expect(snapshot.deliveries[0]).toMatchObject({ sourceKind: 'parent_wakeup' });
 
       await stub.reconcileTaskWaits(childTwoId);
-      expect((await stub.getMessages(parentSessionId, 10)).messages).toHaveLength(1);
+      expect(
+        (await stub.getMessages(parentSessionId, 10)).messages.filter((message) =>
+          message.content.includes('wait_for_subtasks subscription resolved')
+        )
+      ).toHaveLength(1);
       expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries).toHaveLength(1);
 
       const lostResponseRetry = await stub.registerTaskWait({
@@ -281,7 +293,11 @@ describe('ProjectData Durable Object', () => {
         created: false,
         subscription: { id: registered.subscription!.id, state: 'resolved' },
       });
-      expect((await stub.getMessages(parentSessionId, 10)).messages).toHaveLength(1);
+      expect(
+        (await stub.getMessages(parentSessionId, 10)).messages.filter((message) =>
+          message.content.includes('wait_for_subtasks subscription resolved')
+        )
+      ).toHaveLength(1);
       expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries).toHaveLength(1);
 
       await env.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
@@ -291,7 +307,8 @@ describe('ProjectData Durable Object', () => {
       expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries[0]).toMatchObject(
         {
           deliveryState: 'failed',
-          terminalReason: 'terminal_target',
+          terminalReason: 'wake_refused',
+          lastError: expect.stringContaining('sleeping_snapshot_missing'),
         }
       );
     });
