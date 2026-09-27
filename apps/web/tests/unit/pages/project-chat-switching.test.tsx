@@ -426,8 +426,12 @@ describe('Project chat — switching between chats', () => {
       delivery.resolve();
       await delivery.promise;
     });
+    // The delivery belongs to the view that sent it, which is gone; this view's
+    // own text is untouched either way.
     expect(composer()).toHaveValue('Then tidy up the old tables');
 
+    // Load-bearing: only a fresh view reads the saved draft, which a delivery that
+    // cleared unconditionally would have deleted.
     selectChat(BRAVO.topic);
     await screen.findByText('Bravo cached answer');
     selectChat(ALPHA.topic);
