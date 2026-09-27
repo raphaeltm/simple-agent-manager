@@ -20,8 +20,14 @@ const WRANGLER_PATH = resolve(import.meta.dirname, '../../wrangler.toml');
 
 /** The trigger `scheduled/handler.ts` runs its sweep chain, archive sharding included, on. */
 const SWEEP_CRON = '*/5 * * * *';
-const SWEEP_CRON_PERIOD_MS = 5 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Minutes between sweep ticks, parsed from the trigger itself so the two cannot disagree. */
+function sweepCronPeriodMs(): number {
+  const stepMinutes = /^\*\/(\d+) \* \* \* \*$/.exec(SWEEP_CRON)?.[1];
+  if (!stepMinutes) throw new Error(`Cannot derive a tick period from ${SWEEP_CRON}`);
+  return Number(stepMinutes) * 60 * 1000;
+}
 
 function readShippedConfig(): { vars?: Record<string, unknown>; triggers?: { crons?: unknown } } {
   return TOML.parse(readFileSync(WRANGLER_PATH, 'utf-8')) as {
@@ -43,10 +49,10 @@ export function readShippedVar(name: string): string {
  * sessions-per-day ceiling, because the wall-time gate is checked only between candidates and
  * one real candidate outlasts it, so each tick archives one session.
  *
- * The cadence row falls due `interval` after the last claim, but only a five-minute cron tick
- * can claim it, so the effective period rounds UP to a whole number of cron periods. This is
- * the jitter-free period; the shipped interval sits short of a whole period so that the jitter
- * in when the archive step runs cannot push a claim onto the following tick.
+ * The cadence row falls due `interval` after the last claim, but only a cron tick can claim it,
+ * so the effective period rounds UP to a whole number of cron periods. This is the jitter-free
+ * period, and so an upper bound: the shipped interval sits short of a whole period so that the
+ * jitter in when the archive step runs only rarely pushes a claim onto the following tick.
  */
 export function shippedSweepTicksPerDay(): number {
   const crons = readShippedConfig().triggers?.crons;
@@ -55,8 +61,9 @@ export function shippedSweepTicksPerDay(): number {
       `apps/api/wrangler.toml no longer ships the ${SWEEP_CRON} trigger the archive sweep runs on`
     );
   }
+  const cronPeriodMs = sweepCronPeriodMs();
   const intervalMs = Number(readShippedVar('PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS'));
-  const periodMs = Math.ceil(intervalMs / SWEEP_CRON_PERIOD_MS) * SWEEP_CRON_PERIOD_MS;
+  const periodMs = Math.ceil(intervalMs / cronPeriodMs) * cronPeriodMs;
   return Math.floor(DAY_MS / periodMs);
 }
 

@@ -172,7 +172,7 @@ PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = "true"
 PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
 # Tripled with the sweep cadence on 2026-09-27 (was 800000): the same ~33k estimate units per
 # tick at 3x the ticks. Real candidates reserve ~21.5k units (six production samples, 17.8k-27.1k),
-# so 72 ticks/day use ~1.55M; 800000 would have stopped the drain at ~38/day. Cost
+# so 72 ticks/day use ~1.55M; 800000 would have stopped the drain at ~37/day. Cost
 # (`pnpm quality:cloudflare-cost`, rule 76): DO rows written were projected at 32.8M of the 50M/month
 # included allowance, and the extra ticks add ~0.4-0.6M billed rows/day, so the expected cost is
 # $0; spending the whole allowance at the worst measured ratio would be ~$13/month over it.
@@ -190,13 +190,15 @@ PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "2400000"
 # what the work costs, capping production at 800000/65001 = 12 migrations/day while the hourly
 # cadence allows 24 — so half the ticks ran and reclaimed nothing.
 #
-# 2 exceeds the worst observed ratio of 1.23 by ~63% and moves the ceiling to ~47/day, at
-# which point the per-tick bound (one ~4,849-message candidate per tick, hourly at the time)
-# bound first at 24/day. Two caveats before trusting this number further: n is small (2 budget samples,
-# 4 telemetry buckets), and largest-first selection keeps pulling differently-shaped
-# candidates as the backlog drains, so the ratio can move. Re-measure before changing this
-# again — the condition it stands for is "rows this migration will actually write", and only
-# telemetry says what that is (.claude/rules/74).
+# 2 exceeds the worst observed ratio of 1.23 by ~63%. Under the 800000 allowance and hourly
+# cadence of 2026-09-14 that moved the budget's ceiling to ~47/day, so the one-candidate-per-tick
+# limit (~4,849 messages each) was the binding constraint at 24/day. Since 2026-09-27 the same factor
+# against ~10,250-unit candidates and the 2400000 allowance gives ~111/day, above the 72 ticks the
+# cadence claims, so the cadence still binds. Two caveats before trusting this number further: n
+# is small (2 budget samples, 4 telemetry buckets), and largest-first selection keeps pulling
+# differently-shaped candidates as the backlog drains, so the ratio can move. Re-measure before
+# changing this again — the condition it stands for is "rows this migration will actually
+# write", and only telemetry says what that is (.claude/rules/74).
 PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR = "2"
 PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS = "10000"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS = "604800000"
@@ -207,7 +209,9 @@ PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
 # 43-83 s. 18 min (was one hour until 2026-09-27) triples it to one claim every 20 minutes. It is
 # deliberately short of 20: the */5 cron reaches the archive step 1m15s-3m30s into each invocation,
 # and at a whole-hour interval claims kept missing their tick by seconds (37 claims averaged 62.7 min
-# apart). 18 is always due on the fourth five-minute tick and never on the third. Per-tick copy work
+# apart). 18 is never due on the third five-minute tick and is due on the fourth unless the archive
+# step starts over two minutes earlier than at the previous claim (the observed spread is 2m15s),
+# which pushes that one claim to 25 minutes. Per-tick copy work
 # stays bounded by _WALL_TIME_MS, _SWEEP_SESSIONS and _SWEEP_MESSAGE_BUDGET; daily volume by
 # _DAILY_WRITE_BUDGET. Load review: tasks/archive/2026-09-27-triple-archive-drain-speed.md and the
 # archive-sharding notes in apps/www/src/content/docs/docs/reference/configuration.md.

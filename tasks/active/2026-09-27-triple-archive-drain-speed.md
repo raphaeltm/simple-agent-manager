@@ -24,7 +24,7 @@ one session per hour, which only outpaces growth on quiet days.
 - **The daily write budget would cap a faster cadence.** Production reserved 17,784–27,106 estimate
   units per migration (six sampled `write_budget_reserved` events; 62,480 for the first three
   migrations of 09-27). 72 migrations/day ≈ 1.55M units, above the shipped 800,000 allowance, which
-  would stop the drain at ~38/day (≈1.6×). The per-candidate selection ceiling stays
+  would stop the drain at ~37/day (≈1.5×). The per-candidate selection ceiling stays
   `min(SWEEP_MESSAGE_BUDGET=10000, derived)` = 10000 at either allowance, so raising the allowance
   does not change WHICH sessions are selectable (no selection widening, rule 47 §4).
 - **Override (rule 70).** The production GitHub Environment pins
@@ -38,7 +38,17 @@ one session per hour, which only outpaces growth on quiet days.
   from the measured 0.74–1.23 billed-rows-per-unit ratio). Expected monthly total 35–46M → $0.
   Worst case (entire 2.4M allowance spent at the highest ratio) ≈1.44M archive rows/day → ~63M/month
   → ~$13/month over the allowance; the allowance itself is the cap. DO rows read headroom 2.34B;
-  the extra ~2–3M rows/day of copy/hash reads is negligible.
+  the extra ~2–3M rows/day of copy/hash reads is negligible. DO duration (the billed
+  `durableObjectsPeriodicGroups.sum.duration`): 226.11k GB-s MTD, 249.54k projected of 400k
+  included; the SAM object is already active 41–60 s of every minute around archive ticks, so
+  extra ticks add little billed duration.
+- **Blocking on the oversized SAM object is ~1 s per finalization, not the 4–7 s
+  `sourceFinalization.durationMs`.** That duration is mostly awaited hashing/RPC I/O during which
+  other requests interleave. Per-minute `durableObjectsPeriodicGroups` for the SAM object
+  (09-26 21:30Z–09-27 03:40Z): archive-finalization minutes used 1.0–1.7 s CPU in total including
+  all other traffic, against a 0.42 s median and 0.93 s p90 minute; the busiest minute (00:58, 1.72
+  s) had no archive tick. The 09-26 23:11Z freeze (zero CPU for ~140 s) did not coincide with an
+  archive tick (ticks at 22:47 and 23:47).
 - **Shipped-value tests.** `sweep-message-budget-shipped.test.ts` hardcodes `TICKS_PER_DAY = 24`,
   and `write-budget-shipped-factor.test.ts` pins `previous === 12` (factor 8 under the historical
   800k allowance) and `shipped >= 24`. The Worker throughput test's `sweepEnv` hardcodes the
@@ -59,7 +69,8 @@ one session per hour, which only outpaces growth on quiet days.
 - [x] `SHIPPED_DAILY_WRITE_BUDGET` in `tests/helpers/archive-sweep-ceiling.ts`, pinned to
       `wrangler.toml` by a unit case and used by the Worker test's `sweepEnv`
 - [x] Docs: `apps/www/.../reference/configuration.md`, `.claude/skills/env-reference/SKILL.md`,
-      `apps/api/.env.example` shipped values (and the stale "ships 4" / "ships 5000" notes)
+      `apps/api/.env.example` shipped values (and the stale "ships 4" / "ships 5000" notes); root
+      `.env.example` and the env-reference skill's slot/ceiling lines brought back in line (review)
 - [ ] Production GitHub Environment `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` → `2400000`
       immediately before merge (recorded in the PR body)
 - [ ] Post-deploy: deployed `plain_text` bindings show both values; cadence row
@@ -74,11 +85,22 @@ one session per hour, which only outpaces growth on quiet days.
       `project_data_archive_migrations`), versus ≈1/hour before
 - [x] Shipped-value tests fail if the cadence is raised without a matching allowance (the old
       800k allowance against 72 ticks/day must redden `write-budget-shipped-factor.test.ts`).
-      Verified 2026-09-27: budget-only revert reddened 3 cases (`expected 37 to be greater than or
-      equal to 72`, `expected 800000 to be 2400000`, `expected 35 to be greater than 72`);
-      cadence-only revert reddened `raises the daily message ceiling` (`expected 54 to be less than 24`).
+      Verified 2026-09-27. A budget-only revert reddened 3 cases: 37 admitted against 72 ticks,
+      the 800000 vs 2400000 pin, and 35 previous-ceiling sessions against 72 ticks. A cadence-only
+      revert reddened the constraint-binding case: 54 affordable sessions against 24 ticks.
 - [x] All docs quoting the shipped values match `wrangler.toml` (`git grep` for the old shipped
-      values outside `tasks/archive` returns nothing)
+      values outside `tasks/archive` finds only dated historical notes)
+
+## Rollback Triggers (watch for 48 h after deploy)
+
+Revert `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` to `3600000` through a PR (the raised
+allowance is harmless at the old cadence) if any of these appear:
+
+- A freeze of the SAM object (zero-CPU stall with caller-canceled RPCs, `storage operation exceeded
+timeout`, or an `internal error; reference` 500 on SAM project routes) that coincides with an
+  archive tick.
+- The SAM archive circuit breaker opens, or a new migration is poisoned or failed.
+- Cron invocations regularly overrun five minutes (scheduled-event wall time in Workers Logs).
 
 ## References
 
