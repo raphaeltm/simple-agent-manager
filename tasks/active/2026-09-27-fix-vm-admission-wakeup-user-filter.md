@@ -45,7 +45,8 @@ becomes ready or warm.
 - [x] Temporarily restore the bare `user_id`, run the focused test, and record
       the expected ambiguous-column failure before restoring the fix.
 - [x] Run focused and repository quality checks.
-- [ ] Complete specialist review, staging D1 verification, CI, CodeRabbit (if it
+- [x] Complete specialist review and staging D1 verification.
+- [ ] Complete CI, CodeRabbit (if it
       appears), merge, and production deploy monitoring.
 
 ## Acceptance criteria
@@ -69,6 +70,18 @@ suite. The route emitted `node_ready.vm_admission_wakeup_failed` with
 because no tasks were nudged, while the existing scope-key test continued to
 pass (1 passed, 1 failed). Restoring the qualification returned the suite to
 green.
+
+## Staging verification
+
+- Staging deploy run
+  [36338650023](https://github.com/raphaeltm/simple-agent-manager/actions/runs/36338650023)
+  completed successfully for commit `aac15c9871d1fd1a338e68dc672c0a8582f5f62e` at
+  `2026-09-27T18:11:47Z`, including its health check and smoke tests.
+- At `2026-09-27T18:12:06Z`, the Cloudflare D1 API executed the production-shaped
+  joined wake query against `sam-staging` with every admission column qualified.
+  D1 returned `success: true`, no errors, zero result rows for the sentinel user,
+  `rows_read: 2`, and `rows_written: 0`. This directly verifies that staging SQLite
+  accepts the corrected query without an ambiguous-column error.
 
 ## References
 
