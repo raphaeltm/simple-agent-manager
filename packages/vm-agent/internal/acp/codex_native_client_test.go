@@ -20,41 +20,7 @@ func TestCodexNativeClientJSONRPCLifecycle(t *testing.T) {
 	t.Parallel()
 	serverDone := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		conn, err := (&websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}).Upgrade(writer, request, nil)
-		if err != nil {
-			t.Errorf("upgrade: %v", err)
-			return
-		}
-		defer conn.Close()
-		defer close(serverDone)
-		for {
-			var message map[string]json.RawMessage
-			if err := conn.ReadJSON(&message); err != nil {
-				return
-			}
-			var method string
-			_ = json.Unmarshal(message["method"], &method)
-			if method == "initialized" {
-				continue
-			}
-			id := message["id"]
-			var result any = map[string]any{}
-			switch method {
-			case "initialize":
-				result = map[string]any{"userAgent": "codex-cli " + codexSharedDaemonVersion, "codexHome": "/test", "platformFamily": "unix", "platformOs": "linux"}
-			case "thread/resume":
-				result = map[string]any{"thread": map[string]any{"id": "thread-1"}}
-			case "thread/read":
-				result = map[string]any{"thread": map[string]any{"id": "thread-1", "turns": []any{}}}
-			case "turn/interrupt":
-			default:
-				t.Errorf("unexpected method %q", method)
-			}
-			if err := conn.WriteJSON(map[string]any{"id": id, "result": result}); err != nil {
-				t.Errorf("write: %v", err)
-				return
-			}
-		}
+		serveCodexNativeTestClient(t, writer, request, serverDone)
 	}))
 	defer server.Close()
 
@@ -87,6 +53,59 @@ func TestCodexNativeClientJSONRPCLifecycle(t *testing.T) {
 	case <-serverDone:
 	case <-time.After(time.Second):
 		t.Fatal("server did not observe client close")
+	}
+}
+
+func serveCodexNativeTestClient(t *testing.T, writer http.ResponseWriter, request *http.Request, done chan<- struct{}) {
+	t.Helper()
+	conn, err := (&websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}).Upgrade(writer, request, nil)
+	if err != nil {
+		t.Errorf("upgrade: %v", err)
+		return
+	}
+	defer conn.Close()
+	defer close(done)
+	for {
+		var message map[string]json.RawMessage
+		if err := conn.ReadJSON(&message); err != nil {
+			return
+		}
+		if !writeCodexNativeTestResponse(t, conn, message) {
+			return
+		}
+	}
+}
+
+func writeCodexNativeTestResponse(t *testing.T, conn *websocket.Conn, message map[string]json.RawMessage) bool {
+	t.Helper()
+	var method string
+	_ = json.Unmarshal(message["method"], &method)
+	if method == "initialized" {
+		return true
+	}
+	result, known := codexNativeTestResult(method)
+	if !known {
+		t.Errorf("unexpected method %q", method)
+	}
+	if err := conn.WriteJSON(map[string]any{"id": message["id"], "result": result}); err != nil {
+		t.Errorf("write: %v", err)
+		return false
+	}
+	return true
+}
+
+func codexNativeTestResult(method string) (any, bool) {
+	switch method {
+	case "initialize":
+		return map[string]any{"userAgent": "codex-cli " + codexSharedDaemonVersion, "codexHome": "/test", "platformFamily": "unix", "platformOs": "linux"}, true
+	case "thread/resume":
+		return map[string]any{"thread": map[string]any{"id": "thread-1"}}, true
+	case "thread/read":
+		return map[string]any{"thread": map[string]any{"id": "thread-1", "turns": []any{}}}, true
+	case "turn/interrupt":
+		return map[string]any{}, true
+	default:
+		return map[string]any{}, false
 	}
 }
 

@@ -47,7 +47,7 @@ class ProtocolClient {
     this.pending = new Map();
     this.events = [];
     this.waiters = [];
-    this.process = spawn('node', [bridge, 'app-server'], {
+    this.process = spawn(process.execPath, [bridge, 'app-server'], {
       cwd,
       env,
       stdio: ['pipe', 'pipe', 'inherit'],
@@ -69,11 +69,11 @@ class ProtocolClient {
       return;
     }
     this.events.push(message);
-    for (const waiter of [...this.waiters]) {
-      if (waiter.predicate(message)) {
-        this.waiters.splice(this.waiters.indexOf(waiter), 1);
-        waiter.resolve(message);
-      }
+    let waiterIndex = this.waiters.findIndex((waiter) => waiter.predicate(message));
+    while (waiterIndex >= 0) {
+      const [waiter] = this.waiters.splice(waiterIndex, 1);
+      waiter.resolve(message);
+      waiterIndex = this.waiters.findIndex((candidate) => candidate.predicate(message));
     }
   }
   call(method, params) {
@@ -88,7 +88,7 @@ class ProtocolClient {
     this.process.stdin.write(`${JSON.stringify({ method, params })}\n`);
   }
   waitFor(predicate, label) {
-    const existing = this.events.find(predicate);
+    const existing = this.events.find((event) => predicate(event));
     if (existing) return Promise.resolve(existing);
     return withTimeout(
       new Promise((resolveWait) => this.waiters.push({ predicate, resolve: resolveWait })),
@@ -105,7 +105,7 @@ class ProtocolClient {
     this.notify('initialized', {});
   }
   async close() {
-    if (this.closing) return this.closing;
+    if (this.closing !== undefined) return this.closing;
     this.process.stdin.end();
     this.process.kill('SIGTERM');
     this.closing = (async () => {
@@ -379,7 +379,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+try {
+  await main();
+} catch (error) {
   process.stderr.write(`codex shared-daemon smoke failed: ${error.message}\n`);
   process.exitCode = 1;
-});
+}

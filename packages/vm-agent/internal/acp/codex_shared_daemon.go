@@ -2,7 +2,7 @@ package acp
 
 import (
 	"context"
-	_ "embed"
+	_ "embed" // Required by the go:embed directive below.
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,66 +108,62 @@ func resolveCodexSharedDaemonConfig(startup *agentStartup, containerUser, workDi
 	if !pathWithinRoot(socketPath, workDir) {
 		return codexSharedDaemonConfig{}, fmt.Errorf("%s must be inside this runtime's workspace", codexSharedDaemonSocketEnv)
 	}
-	dedupeLimit := min(defaultCodexNativeDedupeLimit, limits.dedupeLimit)
-	if raw := strings.TrimSpace(envValue(startup.envVars, codexSharedDaemonDedupeLimitEnv)); raw != "" {
-		value, err := strconv.Atoi(raw)
-		if err != nil || value <= 0 || value > limits.dedupeLimit {
-			return codexSharedDaemonConfig{}, fmt.Errorf("%s must be between 1 and %d", codexSharedDaemonDedupeLimitEnv, limits.dedupeLimit)
-		}
-		dedupeLimit = value
-	}
-	handshakeTimeout, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonHandshakeEnv, defaultCodexNativeHandshakeTimeout, limits.duration)
+	config, err := resolveCodexSharedDaemonRuntime(startup.envVars, limits)
 	if err != nil {
 		return codexSharedDaemonConfig{}, err
 	}
-	requestTimeout, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonRequestEnv, defaultCodexNativeRequestTimeout, limits.duration)
+	config.enabled = true
+	config.socketPath = socketPath
+	config.containerID = startup.containerID
+	config.containerUser = containerUser
+	config.workDir = workDir
+	config.envVars = append([]string(nil), startup.envVars...)
+	return config, nil
+}
+
+func resolveCodexSharedDaemonRuntime(envVars []string, limits codexSharedDaemonLimits) (codexSharedDaemonConfig, error) {
+	dedupeLimit, err := codexSharedDaemonInt(envVars, codexSharedDaemonDedupeLimitEnv, defaultCodexNativeDedupeLimit, limits.dedupeLimit)
 	if err != nil {
 		return codexSharedDaemonConfig{}, err
 	}
-	websocketBufferSize := min(defaultCodexNativeWebSocketBufferSize, limits.websocketBufferSize)
-	if raw := strings.TrimSpace(envValue(startup.envVars, codexSharedDaemonWSBufferEnv)); raw != "" {
-		value, parseErr := strconv.Atoi(raw)
-		if parseErr != nil || value <= 0 || value > limits.websocketBufferSize {
-			return codexSharedDaemonConfig{}, fmt.Errorf("%s must be between 1 and %d", codexSharedDaemonWSBufferEnv, limits.websocketBufferSize)
-		}
-		websocketBufferSize = value
+	handshakeTimeout, err := codexSharedDaemonDuration(envVars, codexSharedDaemonHandshakeEnv, defaultCodexNativeHandshakeTimeout, limits.duration)
+	if err != nil {
+		return codexSharedDaemonConfig{}, err
 	}
-	cliPath := strings.TrimSpace(envValue(startup.envVars, codexSharedDaemonCLIEnv))
+	requestTimeout, err := codexSharedDaemonDuration(envVars, codexSharedDaemonRequestEnv, defaultCodexNativeRequestTimeout, limits.duration)
+	if err != nil {
+		return codexSharedDaemonConfig{}, err
+	}
+	websocketBufferSize, err := codexSharedDaemonInt(envVars, codexSharedDaemonWSBufferEnv, defaultCodexNativeWebSocketBufferSize, limits.websocketBufferSize)
+	if err != nil {
+		return codexSharedDaemonConfig{}, err
+	}
+	cliPath := strings.TrimSpace(envValue(envVars, codexSharedDaemonCLIEnv))
 	if cliPath == "" {
 		cliPath = "codex"
 	}
-	reconnectDelay, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonReconnectDelayEnv, defaultCodexNativeReconnectDelay, limits.duration)
+	reconnectDelay, err := codexSharedDaemonDuration(envVars, codexSharedDaemonReconnectDelayEnv, defaultCodexNativeReconnectDelay, limits.duration)
 	if err != nil {
 		return codexSharedDaemonConfig{}, err
 	}
-	reconnectTimeout, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonReconnectTimeoutEnv, defaultCodexNativeReconnectTimeout, limits.duration)
+	reconnectTimeout, err := codexSharedDaemonDuration(envVars, codexSharedDaemonReconnectTimeoutEnv, defaultCodexNativeReconnectTimeout, limits.duration)
 	if err != nil {
 		return codexSharedDaemonConfig{}, err
 	}
-	maxMessageBytes := min(int64(defaultCodexNativeMaxMessageBytes), limits.messageBytes)
-	if raw := strings.TrimSpace(envValue(startup.envVars, codexSharedDaemonMaxMessageEnv)); raw != "" {
-		value, parseErr := strconv.ParseInt(raw, 10, 64)
-		if parseErr != nil || value <= 0 || value > limits.messageBytes {
-			return codexSharedDaemonConfig{}, fmt.Errorf("%s must be between 1 and %d", codexSharedDaemonMaxMessageEnv, limits.messageBytes)
-		}
-		maxMessageBytes = value
-	}
-	pingInterval, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonPingIntervalEnv, defaultCodexNativePingInterval, limits.duration)
+	maxMessageBytes, err := codexSharedDaemonInt64(envVars, codexSharedDaemonMaxMessageEnv, defaultCodexNativeMaxMessageBytes, limits.messageBytes)
 	if err != nil {
 		return codexSharedDaemonConfig{}, err
 	}
-	pongTimeout, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonPongTimeoutEnv, defaultCodexNativePongTimeout, limits.duration)
+	pingInterval, err := codexSharedDaemonDuration(envVars, codexSharedDaemonPingIntervalEnv, defaultCodexNativePingInterval, limits.duration)
+	if err != nil {
+		return codexSharedDaemonConfig{}, err
+	}
+	pongTimeout, err := codexSharedDaemonDuration(envVars, codexSharedDaemonPongTimeoutEnv, defaultCodexNativePongTimeout, limits.duration)
 	if err != nil {
 		return codexSharedDaemonConfig{}, err
 	}
 
 	return codexSharedDaemonConfig{
-		enabled:             true,
-		socketPath:          socketPath,
-		containerID:         startup.containerID,
-		containerUser:       containerUser,
-		workDir:             workDir,
-		envVars:             append([]string(nil), startup.envVars...),
 		dedupeLimit:         dedupeLimit,
 		cliPath:             cliPath,
 		handshakeTimeout:    handshakeTimeout,
@@ -179,6 +175,30 @@ func resolveCodexSharedDaemonConfig(startup *agentStartup, containerUser, workDi
 		pingInterval:        pingInterval,
 		pongTimeout:         pongTimeout,
 	}, nil
+}
+
+func codexSharedDaemonInt(envVars []string, key string, fallback, ceiling int) (int, error) {
+	raw := strings.TrimSpace(envValue(envVars, key))
+	if raw == "" {
+		return min(fallback, ceiling), nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 || value > ceiling {
+		return 0, fmt.Errorf("%s must be between 1 and %d", key, ceiling)
+	}
+	return value, nil
+}
+
+func codexSharedDaemonInt64(envVars []string, key string, fallback int, ceiling int64) (int64, error) {
+	raw := strings.TrimSpace(envValue(envVars, key))
+	if raw == "" {
+		return min(int64(fallback), ceiling), nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 || value > ceiling {
+		return 0, fmt.Errorf("%s must be between 1 and %d", key, ceiling)
+	}
+	return value, nil
 }
 
 func codexSharedDaemonDuration(envVars []string, key string, fallback, ceiling time.Duration) (time.Duration, error) {

@@ -405,98 +405,128 @@ func (o *codexNativeObserver) monitorClient(ctx context.Context, client codexNat
 }
 
 func (o *codexNativeObserver) reconnect(ctx context.Context, cause error) {
-	o.mu.Lock()
-	if o.closed {
-		o.mu.Unlock()
+	if !o.startReconnectWork() {
 		return
 	}
-	changed := o.host.applyCodexNativeWork(o.connectionWorkID(), true)
-	o.mu.Unlock()
-	if changed {
-		o.host.nudgeHarnessActivityReport()
-	}
-	defer func() {
-		if o.host.applyCodexNativeWork(o.connectionWorkID(), false) {
-			o.host.nudgeHarnessActivityReport()
-		}
-	}()
+	defer o.finishReconnectWork()
 	reconnectCtx, cancel := context.WithTimeout(ctx, o.config.reconnectTimeout)
 	defer cancel()
 	lastErr := cause
-	connect := o.connect
-	if connect == nil {
-		connect = defaultCodexNativeConnect
-	}
 	for reconnectCtx.Err() == nil {
-		o.mu.Lock()
-		closed := o.closed
-		o.mu.Unlock()
-		if closed {
+		if o.isClosed() {
 			return
 		}
-		client, err := connect(reconnectCtx, o.config, o.handleEnvelope)
+		client, thread, err := o.connectAndReadThread(reconnectCtx)
 		if err == nil {
-			err = client.initialize(reconnectCtx)
-		}
-		if err == nil {
-			err = client.resumeThread(reconnectCtx, o.threadID)
-		}
-		var thread json.RawMessage
-		if err == nil {
-			thread, err = client.readThread(reconnectCtx, o.threadID)
-		}
-		if err == nil {
-			o.mu.Lock()
-			if o.closed {
-				o.mu.Unlock()
-				_ = client.Close()
+			pendingInterrupt, adopted, adoptErr := o.adoptReconnectedClient(client, thread)
+			if adopted {
+				o.finishReconnect(ctx, client, pendingInterrupt)
 				return
 			}
-			o.client = client
-			o.clearApprovalsLocked()
-			o.mu.Unlock()
-			if err = o.reconcileGuarded(thread); err == nil {
-				o.mu.Lock()
-				if o.closed || o.client != client {
-					o.mu.Unlock()
-					_ = client.Close()
-					return
-				}
-				o.reconnecting = false
-				pendingInterrupt := o.pendingInterrupt
-				o.pendingInterrupt = false
-				o.mu.Unlock()
-				o.host.applyCodexNativeWork(o.connectionWorkID(), false)
-				o.host.nudgeHarnessActivityReport()
-				o.host.reportLifecycle("info", "Codex shared-daemon observer reconnected", map[string]interface{}{"threadId": o.threadID})
-				go o.monitorClient(ctx, client)
-				if pendingInterrupt {
-					o.scheduleInterrupt()
-				}
-				return
-			}
+			err = adoptErr
 		}
 		lastErr = err
 		if client != nil {
 			_ = client.Close()
 		}
-		timer := time.NewTimer(o.config.reconnectDelay)
-		select {
-		case <-reconnectCtx.Done():
-			timer.Stop()
-		case <-timer.C:
+		if !waitCodexNativeReconnect(reconnectCtx, o.config.reconnectDelay) {
+			break
 		}
 	}
-	o.mu.Lock()
-	closed := o.closed
-	o.mu.Unlock()
-	if closed {
+	if o.isClosed() {
 		return
 	}
 	o.host.reportLifecycle("error", "Codex shared-daemon observer recovery failed", map[string]interface{}{
 		"error": redactAgentDiagnosticText(fmt.Sprint(lastErr)),
 	})
 	o.close()
+}
+
+func (o *codexNativeObserver) startReconnectWork() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.closed {
+		return false
+	}
+	if o.host.applyCodexNativeWork(o.connectionWorkID(), true) {
+		o.host.nudgeHarnessActivityReport()
+	}
+	return true
+}
+
+func (o *codexNativeObserver) finishReconnectWork() {
+	if o.host.applyCodexNativeWork(o.connectionWorkID(), false) {
+		o.host.nudgeHarnessActivityReport()
+	}
+}
+
+func (o *codexNativeObserver) isClosed() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.closed
+}
+
+func (o *codexNativeObserver) connectAndReadThread(ctx context.Context) (codexNativeRPC, json.RawMessage, error) {
+	connect := o.connect
+	if connect == nil {
+		connect = defaultCodexNativeConnect
+	}
+	client, err := connect(ctx, o.config, o.handleEnvelope)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := client.initialize(ctx); err != nil {
+		return client, nil, err
+	}
+	if err := client.resumeThread(ctx, o.threadID); err != nil {
+		return client, nil, err
+	}
+	thread, err := client.readThread(ctx, o.threadID)
+	return client, thread, err
+}
+
+func (o *codexNativeObserver) adoptReconnectedClient(client codexNativeRPC, thread json.RawMessage) (bool, bool, error) {
+	o.mu.Lock()
+	if o.closed {
+		o.mu.Unlock()
+		return false, false, context.Canceled
+	}
+	o.client = client
+	o.clearApprovalsLocked()
+	o.mu.Unlock()
+	if err := o.reconcileGuarded(thread); err != nil {
+		return false, false, err
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.closed || o.client != client {
+		return false, false, context.Canceled
+	}
+	o.reconnecting = false
+	pendingInterrupt := o.pendingInterrupt
+	o.pendingInterrupt = false
+	return pendingInterrupt, true, nil
+}
+
+func (o *codexNativeObserver) finishReconnect(ctx context.Context, client codexNativeRPC, pendingInterrupt bool) {
+	o.host.applyCodexNativeWork(o.connectionWorkID(), false)
+	o.host.nudgeHarnessActivityReport()
+	o.host.reportLifecycle("info", "Codex shared-daemon observer reconnected", map[string]interface{}{"threadId": o.threadID})
+	go o.monitorClient(ctx, client)
+	if pendingInterrupt {
+		o.scheduleInterrupt()
+	}
+}
+
+func waitCodexNativeReconnect(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func (o *codexNativeObserver) connectionWorkID() string {

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -302,15 +303,22 @@ func startCodexNativeProxy(ctx context.Context, config codexSharedDaemonConfig) 
 	if config.socketPath != "" {
 		args = append(args, "--sock", config.socketPath)
 	}
-	command := config.cliPath
 	var cmd *exec.Cmd
 	if config.containerID == "" {
+		command, err := resolveHostExecutable(config.cliPath, config.workDir)
+		if err != nil {
+			return nil, fmt.Errorf("resolve Codex CLI: %w", err)
+		}
 		cmd = exec.CommandContext(ctx, command, args...)
 		cmd.Env = mergeProcessEnv(os.Environ(), proxyEnvironment(config.envVars))
 		if config.workDir != "" {
 			cmd.Dir = config.workDir
 		}
 	} else {
+		dockerPath, err := resolveHostExecutable("docker", "")
+		if err != nil {
+			return nil, fmt.Errorf("resolve Docker CLI: %w", err)
+		}
 		dockerArgs := []string{"exec", "-i"}
 		if config.containerUser != "" {
 			dockerArgs = append(dockerArgs, "-u", config.containerUser)
@@ -321,9 +329,9 @@ func startCodexNativeProxy(ctx context.Context, config codexSharedDaemonConfig) 
 		for _, envVar := range proxyEnvironment(config.envVars) {
 			dockerArgs = append(dockerArgs, "-e", envVar)
 		}
-		dockerArgs = append(dockerArgs, config.containerID, command)
+		dockerArgs = append(dockerArgs, config.containerID, config.cliPath)
 		dockerArgs = append(dockerArgs, args...)
-		cmd = exec.CommandContext(ctx, "docker", dockerArgs...)
+		cmd = exec.CommandContext(ctx, dockerPath, dockerArgs...)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -344,13 +352,20 @@ func startCodexNativeProxy(ctx context.Context, config codexSharedDaemonConfig) 
 
 func validateCodexSharedDaemonEndpoint(ctx context.Context, config codexSharedDaemonConfig) error {
 	args := []string{"--validate"}
-	command := config.bridgePath
 	var cmd *exec.Cmd
 	if config.containerID == "" {
+		command, err := resolveHostExecutable(config.bridgePath, config.workDir)
+		if err != nil {
+			return fmt.Errorf("resolve Codex shared-daemon bridge: %w", err)
+		}
 		cmd = exec.CommandContext(ctx, command, args...)
 		cmd.Env = mergeProcessEnv(os.Environ(), sharedDaemonProcessEnvironment(config.envVars))
 		cmd.Dir = config.workDir
 	} else {
+		dockerPath, err := resolveHostExecutable("docker", "")
+		if err != nil {
+			return fmt.Errorf("resolve Docker CLI: %w", err)
+		}
 		dockerArgs := []string{"exec"}
 		if config.containerUser != "" {
 			dockerArgs = append(dockerArgs, "-u", config.containerUser)
@@ -361,14 +376,37 @@ func validateCodexSharedDaemonEndpoint(ctx context.Context, config codexSharedDa
 		for _, envVar := range sharedDaemonProcessEnvironment(config.envVars) {
 			dockerArgs = append(dockerArgs, "-e", envVar)
 		}
-		dockerArgs = append(dockerArgs, config.containerID, command)
+		dockerArgs = append(dockerArgs, config.containerID, config.bridgePath)
 		dockerArgs = append(dockerArgs, args...)
-		cmd = exec.CommandContext(ctx, "docker", dockerArgs...)
+		cmd = exec.CommandContext(ctx, dockerPath, dockerArgs...)
 	}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("validate Codex shared-daemon endpoint: %w: %s", err, redactAgentDiagnosticText(string(output)))
 	}
 	return nil
+}
+
+func resolveHostExecutable(command, workDir string) (string, error) {
+	candidate := command
+	if !filepath.IsAbs(candidate) && strings.ContainsRune(candidate, filepath.Separator) {
+		candidate = filepath.Join(workDir, candidate)
+		absoluteCandidate, err := filepath.Abs(candidate)
+		if err != nil {
+			return "", err
+		}
+		candidate = absoluteCandidate
+	}
+	path, err := exec.LookPath(candidate)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(path) {
+		path, err = filepath.Abs(path)
+		if err != nil {
+			return "", err
+		}
+	}
+	return filepath.Clean(path), nil
 }
 
 func proxyEnvironment(envVars []string) []string {
