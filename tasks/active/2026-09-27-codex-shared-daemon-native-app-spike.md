@@ -48,8 +48,8 @@ Every finding is addressed by the checklist below; production UI/admission for n
 - [x] Run live raw-protocol two-client provider validation, including external item events and daemon process failure, plus deterministic SessionHost activity validation. Full runtime activity remains a staging check. Actual native pairing is pending authorized desktop/mobile access and is not inferred from the second protocol client.
 - [x] Document evidence as deterministic protocol, live provider runtime, real desktop/mobile, and pending/failed rows; include cleanup and production recommendation/provider limitation.
 - [x] Validate deterministic SessionHost suspend/resume against uncommitted files and native thread identity; live snapshot/relay re-enrollment remains a staging check.
-- [x] Run Go race/static/coverage checks and repository lint/typecheck gates. Full Go tests/vet, focused race x10, repository lint/typecheck, format ratchet, file-size, and type-boundary checks pass.
-- [ ] Run task-completion, Go, security, constitution, docs-sync, and test-engineer reviews and address every blocking finding.
+- [x] Run Go race/static/coverage checks and repository lint/typecheck gates. Full Go tests/vet, focused race x10, repository lint/typecheck/test/build, format ratchet, file-size, type-boundary, and Gitleaks current-tree/PR-range checks pass.
+- [x] Run task-completion, Go, security, constitution, docs-sync, and test-engineer reviews and address every blocking finding. The completion validator remains WARN only for the explicitly pending staging/native/provider evidence and will be rerun after staging.
 - [ ] Coordinate a staging deployment, provision a fresh VM, verify heartbeat/workspace/shared-daemon behavior, and remove only resources created by this spike.
 - [ ] Create a **draft** PR, keep `DRAFT / DO NOT MERGE` in task/PR state, wait for CI and CodeRabbit, and stop without merge or production rollout.
 
