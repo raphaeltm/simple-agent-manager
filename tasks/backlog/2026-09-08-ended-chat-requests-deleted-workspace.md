@@ -11,3 +11,15 @@ This was observed with history restored to root before compact migration succeed
 - [ ] Determine which optional ended-session surface fetches workspace state.
 - [ ] Render retained history without a failed request for a known deleted workspace, while preserving access to available workspace/snapshot actions.
 - [ ] Add an ended-session/deleted-workspace browser regression scenario.
+
+## Update 2026-09-27
+
+Seen again during staging verification for project chat instant switching (baseline run on the
+pre-change build, same result after): opening ended chats in Test Project 1 logs
+`Failed to load resource: 404` for `GET /api/workspaces/:id` of workspaces whose D1 status is
+`deleted` (for example `01M33BPH6TG99TR9YQEEVSP21J`, `01M38EYR5S0CP35RY4QBZW18HF`).
+
+Source: `useSessionInfrastructure` (`apps/web/src/components/project-message-view/useSessionInfrastructure.ts`)
+fetches the session's workspace through `useRetryingInfrastructureResource`, which also retries a
+404 on its `VITE_SESSION_INFRA_RETRY_DELAYS_MS` schedule (2 s, 5 s, 10 s), so a reader who stays on
+the chat sees up to four failed requests per open.

@@ -364,8 +364,9 @@ describe('chatRoutes agent session routing', () => {
       total: 0,
     });
 
-    // The client requests the full-load ceiling; it must NOT be clamped down to
-    // the small default page size (that would re-window the conversation).
+    // The project chat no longer asks for the ceiling (it pages newest-first), but
+    // an explicit request up to it must still be honoured, not clamped down to the
+    // small default page size.
     const response = await app.request(
       '/api/projects/proj-1/sessions/chat-1?limit=50000',
       { method: 'GET' },
