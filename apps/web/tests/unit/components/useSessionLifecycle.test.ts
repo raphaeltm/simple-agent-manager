@@ -29,7 +29,11 @@ const mocks = vi.hoisted(() => ({
   startVerifyDecayTimer: vi.fn(),
   stopVerifyDecayTimer: vi.fn(),
   connectionState: 'connected' as 'connected' | 'disconnected',
-  wsOptions: [] as Array<{ enabled: boolean; onMessage?: (msg: Msg) => void }>,
+  wsOptions: [] as Array<{
+    enabled: boolean;
+    onMessage?: (msg: Msg) => void;
+    onAgentActivity?: (activity: 'prompting' | 'idle', promptStartedAt?: number | null) => void;
+  }>,
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -350,6 +354,40 @@ describe('useSessionLifecycle loading semantics', () => {
       signal: expect.any(AbortSignal),
       after: '[1000,1000,"cached"]',
     });
+  });
+
+  it('keeps a working agent working when a streamed row lands after the load-time snapshot', async () => {
+    // The chat loaded while the agent was idle. Every streamed row rewrites the
+    // transcript's cache entry; re-applying that load-time `idle` snapshot on each
+    // one knocked a working agent back to idle mid-turn.
+    const idleAtLoad = detail([msg('a', 1000)], false, 'active');
+    mocks.getChatSession.mockResolvedValue(idleAtLoad);
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+    expect(result.current.agentActivity).toBe('idle');
+
+    const socket = mocks.wsOptions.at(-1)!;
+    act(() => socket.onAgentActivity?.('prompting', Date.now()));
+    act(() => socket.onMessage?.({ ...msg('streamed', 2000), role: 'assistant' }));
+    await waitFor(() =>
+      expect(queryClient.getQueryData<{ messages: Msg[] }>(queryKey)?.messages).toHaveLength(2)
+    );
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toContain('streamed'));
+    expect(result.current.agentActivity).toBe('responding');
+
+    // Control: a snapshot the SERVER reports is still applied.
+    mocks.getChatSession.mockResolvedValue({
+      ...detail([], false, 'active'),
+      state: { ...idleAtLoad.state, activityAt: idleAtLoad.state.activityAt + 1 },
+    });
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey });
+    });
+    await waitFor(() => expect(result.current.agentActivity).toBe('idle'));
   });
 
   it('drains every newer page before merging, keeping hasMore for older history', async () => {
