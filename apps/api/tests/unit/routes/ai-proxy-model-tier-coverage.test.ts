@@ -1,8 +1,9 @@
 /**
- * The admin model-tier restriction is a property of platform AI spend, not of one route
- * (`.claude/rules/61-guards-must-cover-every-runtime.md`): every route file that forwards a user
- * request upstream on platform credentials must run the gate in each of its handlers. Adding a
- * forwarding route without the gate fails here rather than shipping an unrestricted path.
+ * Model admission is a property of platform AI spend, not of one route
+ * (`.claude/rules/61-guards-must-cover-every-runtime.md`): every POST handler that spends platform
+ * credentials must check the operator model allowlist and the admin model-tier restriction before
+ * it resolves a credential or forwards anything upstream. A new handler — or a refactor that moves
+ * a gate below the spend — fails here rather than shipping an ungoverned path.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -11,42 +12,68 @@ import { describe, expect, it } from 'vitest';
 
 import { collectSourceFiles, SRC_ROOT } from '../../helpers/source-tree';
 
-/** Calls that send a request upstream on platform credentials. */
-const PLATFORM_FORWARDING_CALL =
-  /\b(?:resolveUpstreamAuth|forwardToAnthropic|forwardToOpenAI|forwardToOpenAIResponses|forwardToWorkersAI)\(/;
-const TIER_GATE_CALL = /\b(?:enforceModelTier|enforceAnthropicModelTier)\(/g;
-const POST_HANDLER = /\.post\(\s*'/g;
-/** Defines the forwarders; it is not a route. */
-const FORWARDER_MODULE = path.join(SRC_ROOT, 'routes', 'ai-proxy-upstream.ts');
+/** Calls that resolve a platform credential or send a request upstream on one (not definitions). */
+const PLATFORM_SPEND_CALL =
+  /(?<!function )\b(?:resolveUpstreamAuth|resolveOpenAIProxyCredential|forwardToAnthropic|forwardToOpenAI|forwardToOpenAIResponses|forwardToWorkersAI)\(/;
+const ALLOWLIST_GATE_CALL = /\b(?:validateAllowedModel|validateAnthropicAllowedModel)\(/;
+const TIER_GATE_CALL = /\b(?:enforceModelTier|enforceAnthropicModelTier)\(/;
+/** Each POST handler runs from its registration to the next one (or the end of the file). */
+const POST_HANDLER_START = /(?=\.post\(\s*['"`])/;
+
+/**
+ * Comments must not satisfy a gate: a JSDoc or trailing `// enforceModelTier(…)` is not a call.
+ * A line comment needs whitespace (or the line start) before it, so `https://…` strings survive.
+ */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '$1');
+}
 
 const routeSources = collectSourceFiles(path.join(SRC_ROOT, 'routes')).map((file) => ({
   file: path.relative(SRC_ROOT, file),
-  source: readFileSync(file, 'utf8'),
+  source: stripComments(readFileSync(file, 'utf8')),
 }));
-const forwardingRoutes = routeSources.filter(
-  ({ file, source }) =>
-    path.join(SRC_ROOT, file) !== FORWARDER_MODULE && PLATFORM_FORWARDING_CALL.test(source)
+const spendingRoutes = routeSources.filter(({ source }) => PLATFORM_SPEND_CALL.test(source));
+const handlers = spendingRoutes.flatMap(({ file, source }) =>
+  source
+    .split(POST_HANDLER_START)
+    .slice(1)
+    .map((handler) => ({
+      name: `${file} ${handler.match(/\.post\(\s*['"`]([^'"`]+)/)?.[1] ?? '?'}`,
+      handler,
+    }))
 );
 
-describe('every platform-credential AI proxy route runs the model-tier gate', () => {
-  it('finds the platform forwarding routes, so a broken scan cannot pass as "all clear"', () => {
+describe('every platform-credential AI proxy handler admits the model before spending', () => {
+  it('finds the platform-spending routes and handlers, so a broken scan cannot pass as "all clear"', () => {
     expect(routeSources.length).toBeGreaterThan(100);
-    expect(forwardingRoutes.map(({ file }) => file)).toEqual(
-      expect.arrayContaining(['routes/ai-proxy.ts', 'routes/ai-proxy-anthropic.ts'])
-    );
+    expect(spendingRoutes.map(({ file }) => file).sort()).toEqual([
+      'routes/ai-proxy-anthropic.ts',
+      'routes/ai-proxy.ts',
+    ]);
+    expect(handlers.map(({ name }) => name).sort()).toEqual([
+      'routes/ai-proxy-anthropic.ts /messages',
+      'routes/ai-proxy-anthropic.ts /messages/count_tokens',
+      'routes/ai-proxy.ts /chat/completions',
+      'routes/ai-proxy.ts /responses',
+    ]);
   });
 
-  it.each(forwardingRoutes.map(({ file, source }) => [file, source] as const))(
-    '%s gates every POST handler',
-    (_file, source) => {
-      const handlers = source.match(POST_HANDLER)?.length ?? 0;
-      const gates = source.match(TIER_GATE_CALL)?.length ?? 0;
-      expect(handlers).toBeGreaterThan(0);
-      expect(gates).toBeGreaterThanOrEqual(handlers);
+  it.each(handlers.map(({ name, handler }) => [name, handler] as const))(
+    '%s checks the allowlist and the tier gate before any platform spend',
+    (_name, handler) => {
+      const spendAt = handler.search(PLATFORM_SPEND_CALL);
+      const allowlistAt = handler.search(ALLOWLIST_GATE_CALL);
+      const tierAt = handler.search(TIER_GATE_CALL);
+
+      expect(spendAt).toBeGreaterThan(-1);
+      expect(allowlistAt).toBeGreaterThan(-1);
+      expect(allowlistAt).toBeLessThan(spendAt);
+      expect(tierAt).toBeGreaterThan(-1);
+      expect(tierAt).toBeLessThan(spendAt);
     }
   );
 
-  it('BYO-key passthrough stays outside the gate because it never resolves a platform credential', () => {
+  it('BYO-key passthrough stays outside the gates because it never resolves a platform credential', () => {
     const passthrough = routeSources.find(({ file }) => file === 'routes/ai-proxy-passthrough.ts');
     expect(passthrough).toBeDefined();
     // If passthrough ever reaches for platform credentials, it becomes platform spend and must be

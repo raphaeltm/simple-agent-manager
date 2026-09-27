@@ -1317,6 +1317,7 @@ Safe operator sequence for ProjectData storage relief:
 | `CREDENTIAL_LIMIT_SUPPORTED_SOURCES`                        | built-in sources   | Comma-separated allowlist of VM-agent and AI-proxy telemetry source identifiers accepted by credential-limit telemetry                                                                                                     |
 | `CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES`                   | built-in windows   | Comma-separated allowlist of provider quota window identifiers accepted by credential-limit telemetry                                                                                                                      |
 | `AI_PROXY_REQUEST_BODY_MAX_BYTES`                           | `1048576`          | Maximum raw JSON bytes accepted by OpenAI-compatible, Anthropic-native, and passthrough AI proxy request endpoints before request validation                                                                               |
+| `AI_PROXY_ALLOWED_MODELS`                                   | platform catalog   | Comma-separated models the AI proxy serves on every route that spends platform credentials, the native Anthropic endpoint included; any other model returns `400`                                                          |
 
 Ordinary ProjectData storage alarms record O(1) `databaseSize` telemetry and
 bounded cleanup row/byte counters. Category breakdown scans are reserved for

@@ -1,9 +1,10 @@
 /**
- * Admin model-tier restrictions, enforced through the real AI proxy routes.
+ * Admin model-tier restrictions and the operator model allowlist, enforced through the real AI
+ * proxy routes.
  *
  * Every platform-credential route (`/ai/v1/chat/completions`, `/ai/v1/responses`,
  * `/ai/anthropic/v1/messages`, `/ai/anthropic/v1/messages/count_tokens`) runs for real: request
- * admission, the model catalog, the tier gate, billing resolution and upstream forwarding. Only
+ * admission, the model allowlist, the tier gate, billing resolution and upstream forwarding. Only
  * workspace-token auth (JWT + D1 lookups) and the network are stubbed, and the upstream stub
  * records what would have been spent. The vertical case writes the restriction through the real
  * admin route, so the admin write format and the proxy read are tested together.
@@ -285,22 +286,71 @@ describe.each(ROUTES)('model-tier gate on $route', ({ route, standard, premium }
   });
 });
 
+describe.each(['messages', 'count_tokens'] as const)(
+  'operator model allowlist on the native Anthropic %s route',
+  (route) => {
+    // Not in the catalog: a retired model that staging traffic still requested in May 2026.
+    const uncatalogued = 'claude-sonnet-4-20250514';
+
+    it('refuses a claude-* model outside the allowlist for an unrestricted user, before any spend', async () => {
+      const env = makeEnv();
+
+      const res = await proxy(makeApp(), env, route, uncatalogued);
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { type: string; error: { type: string; message: string } };
+      expect(body.type).toBe('error');
+      expect(body.error.type).toBe('invalid_request_error');
+      expect(body.error.message).toContain(`Model '${uncatalogued}' is not available.`);
+      expect(upstreamCalls).toEqual([]);
+      expect(warnLines.some((line) => line.includes('model_not_allowed'))).toBe(true);
+
+      // Control: the same unrestricted user still reaches a catalogued model.
+      expect((await proxy(makeApp(), env, route, 'claude-sonnet-5')).status).toBe(200);
+      expect(upstreamCalls).toEqual([expect.objectContaining({ model: 'claude-sonnet-5' })]);
+    });
+
+    it('honours an operator allowlist narrower than the catalog, naming only the Anthropic models it allows', async () => {
+      const env = makeEnv({
+        AI_PROXY_ALLOWED_MODELS: `${LOW_COST_MODEL},claude-haiku-4-5-20251001`,
+      });
+      expect(getPlatformAIModelTier('claude-opus-5-5')).toBe('premium');
+
+      const res = await proxy(makeApp(), env, route, 'claude-opus-5-5');
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { message: string } };
+      expect(body.error.message).toBe(
+        "Model 'claude-opus-5-5' is not available. Allowed models: claude-haiku-4-5-20251001"
+      );
+      expect(upstreamCalls).toEqual([]);
+
+      expect((await proxy(makeApp(), env, route, 'claude-haiku-4-5-20251001')).status).toBe(200);
+      expect(upstreamCalls).toHaveLength(1);
+    });
+  }
+);
+
 describe('models the catalog does not tier', () => {
-  it('native Anthropic route: refuses an untiered claude-* ID under a restriction, serves it without one', async () => {
-    const untiered = 'claude-sonnet-4-5';
-    expect(getPlatformAIModelTier(untiered)).toBeNull();
+  it.each(['messages', 'count_tokens'] as const)(
+    'native Anthropic %s: refuses an operator-allowlisted claude-* ID that has no catalog tier',
+    async (route) => {
+      const operatorModel = 'claude-sonnet-4-5';
+      expect(getPlatformAIModelTier(operatorModel)).toBeNull();
+      const allowlist = { AI_PROXY_ALLOWED_MODELS: `${operatorModel},claude-sonnet-5` };
 
-    const restricted = makeEnv();
-    await restrict(restricted, ['standard', 'premium']);
-    const error = await denial(await proxy(makeApp(), restricted, 'messages', untiered));
-    expect(error.message).toBe(
-      `Model '${untiered}' has no tier in the platform model catalog, and your account is limited to these tiers: standard, premium.`
-    );
-    expect(upstreamCalls).toEqual([]);
+      const restricted = makeEnv(allowlist);
+      await restrict(restricted, ['standard', 'premium']);
+      const error = await denial(await proxy(makeApp(), restricted, route, operatorModel));
+      expect(error.message).toBe(
+        `Model '${operatorModel}' has no tier in the platform model catalog, and your account is limited to these tiers: standard, premium.`
+      );
+      expect(upstreamCalls).toEqual([]);
 
-    expect((await proxy(makeApp(), makeEnv(), 'messages', untiered)).status).toBe(200);
-    expect(upstreamCalls).toHaveLength(1);
-  });
+      expect((await proxy(makeApp(), makeEnv(allowlist), route, operatorModel)).status).toBe(200);
+      expect(upstreamCalls).toHaveLength(1);
+    }
+  );
 
   it('chat completions: refuses an operator-allowlisted model that has no catalog tier', async () => {
     const operatorModel = '@cf/operator/extra-model';

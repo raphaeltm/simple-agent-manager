@@ -55,6 +55,7 @@ import {
   anthropicUsageGateError,
   enforceAnthropicModelTier,
   scheduleAnthropicPlatformLimitHeaders,
+  validateAnthropicAllowedModel,
 } from './ai-proxy-anthropic-support';
 
 const aiProxyAnthropicRoutes = new Hono<{ Bindings: Env }>();
@@ -143,7 +144,10 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
     );
   }
 
-  const tierError = await enforceAnthropicModelTier(c.env.KV, auth, modelId);
+  const modelError = validateAnthropicAllowedModel(c, auth, modelId);
+  if (modelError) return modelError;
+
+  const tierError = await enforceAnthropicModelTier(c, auth, modelId);
   if (tierError) return tierError;
 
   const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
@@ -368,7 +372,10 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
     );
   }
 
-  const tierError = await enforceAnthropicModelTier(c.env.KV, auth, modelId);
+  const modelError = validateAnthropicAllowedModel(c, auth, modelId);
+  if (modelError) return modelError;
+
+  const tierError = await enforceAnthropicModelTier(c, auth, modelId);
   if (tierError) return tierError;
 
   const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);

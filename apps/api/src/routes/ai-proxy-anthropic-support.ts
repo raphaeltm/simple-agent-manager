@@ -14,6 +14,7 @@ import { RequestBodyTooLargeError } from '../lib/runtime-validation';
 import type { resolveUpstreamAuth } from '../services/ai-billing';
 import { checkModelTierAllowance, describeModelTierDenial } from '../services/ai-model-tier-gate';
 import {
+  isAnthropicModel,
   updateAIProxyAgentCredentialAttribution,
   type verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
@@ -22,6 +23,7 @@ import {
   copyCredentialLimitHeaders,
   recordProxyCredentialLimitObservationsFromHeaders,
 } from '../services/credential-limit-events';
+import { getAllowedModels } from './ai-proxy-model-resolution';
 
 type AnthropicProxyContext = Context<{ Bindings: Env }>;
 type AnthropicProxyAuth = Awaited<ReturnType<typeof verifyAIProxyAuth>>;
@@ -136,15 +138,44 @@ export function scheduleAnthropicPlatformLimitHeaders(
 }
 
 /**
+ * Refuses a model outside the operator's AI proxy allowlist (`AI_PROXY_ALLOWED_MODELS`, by default
+ * the platform catalog) in the Anthropic error format — the boundary `validateAllowedModel`
+ * (`routes/ai-proxy-admission.ts`) enforces on the OpenAI-compatible routes. It applies to every
+ * caller, restricted or not, so an uncatalogued `claude-*` ID never reaches platform credentials.
+ */
+export function validateAnthropicAllowedModel(
+  c: AnthropicProxyContext,
+  auth: Pick<AnthropicProxyAuth, 'userId' | 'workspaceId'>,
+  modelId: string
+): Response | null {
+  const allowedModels = getAllowedModels(c.env);
+  if (allowedModels.has(modelId)) return null;
+
+  // Claude Code picks its own model IDs for background work, so a refusal here is how a new default
+  // that the catalog has not caught up with would first show up.
+  log.warn('ai_proxy_anthropic.model_not_allowed', {
+    userId: auth.userId,
+    workspaceId: auth.workspaceId,
+    modelId,
+  });
+  const allowedAnthropicModels = Array.from(allowedModels).filter(isAnthropicModel);
+  return anthropicError(
+    `Model '${modelId}' is not available. Allowed models: ${allowedAnthropicModels.join(', ') || 'none'}`,
+    'invalid_request_error',
+    400
+  );
+}
+
+/**
  * Refuses a model outside the caller's admin-allowed budget tiers (`services/ai-model-tier-gate.ts`)
  * in the Anthropic error format. Runs before the usage gate and any upstream spend.
  */
 export async function enforceAnthropicModelTier(
-  kv: KVNamespace,
+  c: AnthropicProxyContext,
   auth: Pick<AnthropicProxyAuth, 'userId' | 'workspaceId'>,
   modelId: string
 ): Promise<Response | null> {
-  const decision = await checkModelTierAllowance(kv, auth.userId, modelId);
+  const decision = await checkModelTierAllowance(c.env.KV, auth.userId, modelId);
   if (decision.allowed) return null;
 
   log.warn('ai_proxy_anthropic.model_tier_denied', {
