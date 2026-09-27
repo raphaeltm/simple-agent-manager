@@ -61,8 +61,8 @@ paused, and this work must not triage, resolve, or close existing drafts.
       to red, then restore and rerun green.
 - [x] Keep triage configuration/dispatch unchanged and verify the diff contains no existing-draft
       state mutation.
-- [ ] Run focused tests, API/repository quality checks, specialist reviews, staging verification,
-      PR/CI/CodeRabbit gates, merge, and production deploy monitoring.
+- [x] Run focused tests, API/repository quality checks, specialist reviews, and staging verification.
+- [ ] Complete the PR/CI/CodeRabbit, merge, and production deploy gates.
 
 ## Acceptance criteria
 
@@ -104,3 +104,9 @@ paused, and this work must not triage, resolve, or close existing drafts.
 - Required specialist reviews passed after one review cycle found and fixed the disjoint-window
   rollout gap: task-completion validation (implementation PASS), Cloudflare/D1 review (PASS),
   constitution self-review (PASS), and test-engineer review (PASS).
+- Staging workflow [36345276761](https://github.com/raphaeltm/simple-agent-manager/actions/runs/36345276761)
+  deployed exact commit `2e79a92ffba39367386b4caf1b7b5372d0dd1084`; migration safety,
+  Worker deployment, health checks, and all 12 smoke tests passed. Read-only remote D1 queries
+  confirmed `canonical_signature TEXT` and the partial unique
+  `idx_platform_feedback_triages_canonical_signature` index. No triage endpoint was invoked, and
+  the diff contains no triage scheduling, dispatch, configuration, or existing-draft mutation.
