@@ -337,3 +337,34 @@ export interface AdminProjectDataStorageTelemetryRow {
 export interface AdminProjectDataStorageTelemetryResponse {
   telemetry: AdminProjectDataStorageTelemetryRow[];
 }
+
+// =============================================================================
+// Admin ProjectData storage — problem migrations (abandon control)
+// =============================================================================
+
+export interface AdminProjectDataArchiveProblemMigration {
+  migrationId: string;
+  projectId: string;
+  sessionId: string;
+  state: string;
+  sourceOwnerName: string;
+  targetOwnerName: string;
+  leaseOwner: string | null;
+  leaseExpiresAt: number | null;
+  attemptCount: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  frozenAt: number | null;
+  poisonedAt: number | null;
+  updatedAt: number;
+}
+
+export interface AdminProjectDataArchiveProblemMigrationsResponse {
+  migrations: AdminProjectDataArchiveProblemMigration[];
+  warnings: Array<{ surface: string; skippedRows: number }>;
+  limit: number;
+}
+
+export interface AdminProjectDataArchiveMigrationAbandonResponse {
+  result: Record<string, unknown>;
+}

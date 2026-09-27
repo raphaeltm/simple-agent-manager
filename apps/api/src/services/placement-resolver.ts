@@ -1,23 +1,10 @@
 import type {
   AgentProfileRuntime,
-  CapacityWorkloadRole,
-  CredentialProvider,
   CredentialSource,
   ResourceRequirementsSource,
-  TaskMode,
-  VMLocation,
   VMSize,
-  WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 import {
-  CREDENTIAL_PROVIDERS,
-  DEFAULT_VM_LOCATION,
-  DEFAULT_VM_SIZE,
-  DEFAULT_WORKSPACE_PROFILE,
-  getDefaultLocationForProvider,
-  getLocationsForProvider,
-  isValidLocationForProvider,
-  isValidProvider,
   LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
   resolveResourceReservation,
 } from '@simple-agent-manager/shared';
@@ -28,6 +15,25 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { resolveCapacityPoolPlacementSettings } from './capacity-pool-placement-settings';
 import { resolveEffectiveDefaultCapacityPoolSummary } from './default-capacity-pools';
+import { preferCapacityCandidatesInLocation } from './placement-capacity-ranking';
+import {
+  normalizeCredentialAttribution,
+  resolveCredentialLookup,
+  resolveDevcontainerConfigName,
+  resolvePreferredVmLocation,
+  resolveProvider,
+  resolveTaskMode,
+  resolveVmLocation,
+  resolveVmSize,
+  resolveVmSizeSource,
+  resolveWorkloadRole,
+  resolveWorkspaceProfile,
+  validateResolvedLocation,
+} from './placement-field-resolution';
+import {
+  noEligibleCapacityCandidateMessage,
+  PlacementResolutionError,
+} from './placement-resolution-error';
 import {
   buildCapacityPoolSelection,
   capacityPlacementSnapshotForTaskStart,
@@ -36,17 +42,10 @@ import {
 } from './placement-resolver-capacity';
 import type {
   PlacementCredentialAttribution,
-  PlacementCredentialAttributionInput,
   PlacementCredentialLookup,
-  PlacementCredentialProjectPolicy,
   PlacementCredentialSourceResult,
-  PlacementExplicitOverrides,
   PlacementProfileDefaults,
-  PlacementProfileVmSizeSource,
-  PlacementProjectDefaults,
-  PlacementResolutionErrorCode,
   PlacementRuntimeResolution,
-  PlacementTaskModeDefault,
   TaskStartCapacityCandidate,
   TaskStartCapacityPoolSelection,
   TaskStartPlacement,
@@ -98,17 +97,7 @@ export type {
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
-export class PlacementResolutionError extends Error {
-  readonly code: PlacementResolutionErrorCode;
-  readonly validValues: readonly string[];
-
-  constructor(code: PlacementResolutionErrorCode, message: string, validValues: readonly string[]) {
-    super(message);
-    this.name = 'PlacementResolutionError';
-    this.code = code;
-    this.validValues = validValues;
-  }
-}
+export { PlacementResolutionError } from './placement-resolution-error';
 
 export function resolvePlacementRuntimePreference(input: {
   explicitRuntime?: AgentProfileRuntime | null;
@@ -209,7 +198,17 @@ export function resolveTaskStartPlacement(input: TaskStartPlacementInput): TaskS
   const profile = input.profile ?? null;
   const explicit = input.explicit ?? {};
   const provider = resolveProvider(explicit.provider, profile, input.project);
-  const vmLocation = resolveVmLocation(explicit.vmLocation, profile, input.project, provider);
+  const preferredVmLocation =
+    explicit.vmLocation == null
+      ? resolvePreferredVmLocation(input.preferredVmLocation, provider)
+      : null;
+  const vmLocation = resolveVmLocation(
+    explicit.vmLocation,
+    preferredVmLocation,
+    profile,
+    input.project,
+    provider
+  );
   const workspaceProfile = resolveWorkspaceProfile(
     explicit.workspaceProfile,
     profile,
@@ -251,6 +250,7 @@ export function resolveTaskStartPlacement(input: TaskStartPlacementInput): TaskS
     provider,
     vmLocation,
     explicitVmLocation: explicit.vmLocation != null,
+    ...(preferredVmLocation ? { preferredVmLocation } : {}),
     workspaceProfile,
     devcontainerConfigName: resolveDevcontainerConfigName(
       workspaceProfile,
@@ -316,7 +316,7 @@ export async function resolveTaskStartCapacityPoolSelection(
     });
     if (!summary) return null;
 
-    return buildCapacityPoolSelection(
+    const selection = buildCapacityPoolSelection(
       summary,
       {
         ...placement,
@@ -326,6 +326,15 @@ export async function resolveTaskStartCapacityPoolSelection(
       resolvedSettings?.placementSettings ?? placement.placementSettings ?? undefined,
       resolveEffectiveNodeHostMemoryReserveMb(options.env ?? {})
     );
+    return selection && placement.preferredVmLocation
+      ? {
+          ...selection,
+          candidates: preferCapacityCandidatesInLocation(
+            selection.candidates,
+            placement.preferredVmLocation
+          ),
+        }
+      : selection;
   } catch (error) {
     if (options.failOpen === false) throw error;
     log.warn('placement_resolver.capacity_pool_unavailable', {
@@ -475,245 +484,4 @@ export async function resolveTaskStartPlacementCredentialAttributionFromPlacemen
       ? resolveCapacityPlacementCredentialAttribution(placement, capacityCandidate)
       : resolvePlacementCredentialAttribution(placement, credential)),
   };
-}
-
-function resolveWorkloadRole(value: CapacityWorkloadRole | null | undefined): CapacityWorkloadRole {
-  return value === 'deployment' ? 'deployment' : 'workspace';
-}
-
-function noEligibleCapacityCandidateMessage(
-  placement: TaskStartPlacement,
-  selection: TaskStartCapacityPoolSelection
-): string {
-  const requirements = [
-    `${Math.ceil(placement.resolvedReservation.cpuMillis / 1000)} vCPU`,
-    `${placement.resolvedReservation.memoryMb} MB memory`,
-    placement.resolvedReservation.diskMb > 0
-      ? `${Math.ceil(placement.resolvedReservation.diskMb / 1024)} GB disk`
-      : null,
-  ].filter(Boolean);
-  const provider = placement.provider ? ` provider ${placement.provider}` : '';
-  const location = placement.explicitVmLocation ? ` location ${placement.vmLocation}` : '';
-  return (
-    `No eligible compute-pool offering is available in the ${selection.scope} default pool` +
-    `${provider}${location} for this task's requirements (${requirements.join(', ')}). ` +
-    'Reconcile the pool or add an active provider-native offering that satisfies the request.'
-  );
-}
-
-function resolveProvider(
-  explicitProvider: CredentialProvider | string | null | undefined,
-  profile: PlacementProfileDefaults | null,
-  project: PlacementProjectDefaults
-): CredentialProvider | null {
-  if (explicitProvider != null) {
-    if (!isValidProvider(explicitProvider)) {
-      throw new PlacementResolutionError(
-        'invalid-provider',
-        `provider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`,
-        CREDENTIAL_PROVIDERS
-      );
-    }
-    return explicitProvider;
-  }
-
-  return (
-    providerFromTrustedLayer(profile?.provider) ?? providerFromTrustedLayer(project.defaultProvider)
-  );
-}
-
-function providerFromTrustedLayer(provider: string | null | undefined): CredentialProvider | null {
-  return typeof provider === 'string' && isValidProvider(provider) ? provider : null;
-}
-
-function resolveVmSize(
-  explicitVmSize: VMSize | null | undefined,
-  profile: PlacementProfileDefaults | null,
-  project: PlacementProjectDefaults
-): VMSize {
-  return (
-    explicitVmSize ??
-    (profile?.skillVmSizeOverride as VMSize | null) ??
-    (profile?.agentProfileVmSizeOverride as VMSize | null) ??
-    (profile?.vmSizeOverride as VMSize | null) ??
-    (project.defaultVmSize as VMSize | null) ??
-    DEFAULT_VM_SIZE
-  );
-}
-
-function resolveVmSizeSource(
-  explicit: PlacementExplicitOverrides,
-  profile: PlacementProfileDefaults | null,
-  project: PlacementProjectDefaults,
-  profileVmSizeSource: PlacementProfileVmSizeSource
-): ResourceRequirementsSource {
-  if (explicit.vmSize) return explicit.vmSizeSource ?? 'task';
-  if (profile?.skillVmSizeOverride) return 'skill';
-  if (profile?.agentProfileVmSizeOverride) return 'agent-profile';
-  if (profile?.vmSizeOverride) return profileVmSizeSource;
-  if (project.defaultVmSize) return 'project';
-  return 'platform';
-}
-
-function resolveVmLocation(
-  explicitLocation: string | null | undefined,
-  profile: PlacementProfileDefaults | null,
-  project: PlacementProjectDefaults,
-  provider: CredentialProvider | null
-): VMLocation {
-  return ((explicitLocation as VMLocation | null) ??
-    (profile?.vmLocation as VMLocation | null) ??
-    (project.defaultLocation as VMLocation | null) ??
-    (provider ? (getDefaultLocationForProvider(provider) as VMLocation | null) : null) ??
-    DEFAULT_VM_LOCATION) as VMLocation;
-}
-
-function validateResolvedLocation(
-  provider: CredentialProvider | null,
-  vmLocation: VMLocation
-): void {
-  if (provider === null || isValidLocationForProvider(provider, vmLocation)) return;
-
-  const validLocations = getLocationsForProvider(provider).map((location) => location.id);
-  throw new PlacementResolutionError(
-    'invalid-location',
-    `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`,
-    validLocations
-  );
-}
-
-function resolveWorkspaceProfile(
-  explicitWorkspaceProfile: WorkspaceProfile | null | undefined,
-  profile: PlacementProfileDefaults | null,
-  project: PlacementProjectDefaults
-): WorkspaceProfile {
-  return (
-    explicitWorkspaceProfile ??
-    (profile?.workspaceProfile as WorkspaceProfile | null) ??
-    (project.defaultWorkspaceProfile as WorkspaceProfile | null) ??
-    DEFAULT_WORKSPACE_PROFILE
-  );
-}
-
-function resolveDevcontainerConfigName(
-  workspaceProfile: WorkspaceProfile,
-  explicitDevcontainerConfigName: string | null | undefined,
-  profile: PlacementProfileDefaults | null,
-  project: PlacementProjectDefaults
-): string | null {
-  if (workspaceProfile === 'lightweight') return null;
-  return (
-    explicitDevcontainerConfigName ??
-    profile?.devcontainerConfigName ??
-    project.defaultDevcontainerConfigName ??
-    null
-  );
-}
-
-function resolveTaskMode(
-  explicitTaskMode: TaskMode | null | undefined,
-  profile: PlacementProfileDefaults | null,
-  workspaceProfile: WorkspaceProfile,
-  defaultPolicy: PlacementTaskModeDefault
-): TaskMode {
-  if (explicitTaskMode != null) return explicitTaskMode;
-  if (profile?.taskMode != null) return profile.taskMode as TaskMode;
-  return defaultPolicy === 'workspace-profile' && workspaceProfile === 'lightweight'
-    ? 'conversation'
-    : 'task';
-}
-
-function normalizeCredentialAttribution(
-  input: PlacementCredentialAttributionInput | null | undefined,
-  currentUserId: string,
-  currentProjectId: string
-): Required<PlacementCredentialAttributionInput> {
-  if (!input?.source) {
-    return {
-      userId: null,
-      projectId: null,
-      source: null,
-    };
-  }
-
-  if (input.source === 'project') {
-    const projectId = input.projectId ?? currentProjectId;
-    if (projectId !== currentProjectId) {
-      throw new PlacementResolutionError(
-        'invalid-credential-attribution',
-        'Inherited project credential attribution belongs to a different project',
-        []
-      );
-    }
-    return {
-      userId: currentUserId,
-      projectId,
-      source: 'project',
-    };
-  }
-
-  if (input.source === 'user' || input.source === 'platform') {
-    if (input.userId && input.userId !== currentUserId) {
-      return {
-        userId: null,
-        projectId: null,
-        source: null,
-      };
-    }
-    return {
-      userId: currentUserId,
-      projectId: null,
-      source: input.source,
-    };
-  }
-
-  return {
-    userId: null,
-    projectId: null,
-    source: null,
-  };
-}
-
-function resolveCredentialLookup(input: {
-  userId: string;
-  projectId: string;
-  provider: CredentialProvider | null;
-  inheritedCredentialAttribution: Required<PlacementCredentialAttributionInput>;
-  projectPolicy: PlacementCredentialProjectPolicy;
-}): PlacementCredentialLookup {
-  const inheritedUserId = input.inheritedCredentialAttribution.userId;
-  const inheritedProjectId =
-    input.inheritedCredentialAttribution.source === 'project'
-      ? (input.inheritedCredentialAttribution.projectId ?? input.projectId)
-      : input.inheritedCredentialAttribution.projectId;
-  return {
-    userId: inheritedUserId ?? input.userId,
-    projectId: resolveCredentialLookupProjectId({
-      projectId: input.projectId,
-      inheritedUserId,
-      inheritedProjectId,
-      projectPolicy: input.projectPolicy,
-    }),
-    provider: input.provider ?? undefined,
-  };
-}
-
-function resolveCredentialLookupProjectId(input: {
-  projectId: string;
-  inheritedUserId: string | null;
-  inheritedProjectId: string | null;
-  projectPolicy: PlacementCredentialProjectPolicy;
-}): string | null {
-  switch (input.projectPolicy) {
-    case 'current-project':
-      return input.projectId;
-    case 'current-project-unless-inherited':
-      return input.inheritedUserId ? input.inheritedProjectId : input.projectId;
-    case 'inherited-or-none':
-      return input.inheritedProjectId;
-    default: {
-      const exhaustive: never = input.projectPolicy;
-      return exhaustive;
-    }
-  }
 }

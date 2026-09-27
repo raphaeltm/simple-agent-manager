@@ -110,6 +110,10 @@ func installFakeAgentBinary(t *testing.T, command string) {
 		t.Fatal(err)
 	}
 	if command == "claude-agent-acp" {
+		adapterScript := "#!/bin/sh\nprintf '%s\\n' '" + strings.TrimPrefix(claudeACPInstallPackage, "@agentclientprotocol/claude-agent-acp@") + "'\n"
+		if err := os.WriteFile(filepath.Join(dir, command), []byte(adapterScript), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		versionScript := "#!/bin/sh\nprintf '%s\\n' '" + claudeCodeMinVersion + " (Claude Code)'\n"
 		if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(versionScript), 0o755); err != nil {
 			t.Fatal(err)

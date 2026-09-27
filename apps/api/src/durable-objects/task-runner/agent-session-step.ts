@@ -10,6 +10,7 @@ import {
   buildVisibleInitialPrompt,
 } from '../../services/agent-bootstrap-prompt';
 import { getRecoverySourceTaskGuard } from './helpers';
+import { prepareSnapshotRestoreAttempt } from './snapshot-restore-retry';
 import { transitionToInProgress } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -70,65 +71,62 @@ export async function handleAgentSession(
     const { startSamAwareAgentSession } = await import('../../services/agent-session-bootstrap');
     const db = drizzle(rc.env.DATABASE, { schema });
     const agentType = state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
-    let result;
     const sourceTaskGuard = getRecoverySourceTaskGuard(state);
-    try {
-      result = await startSamAwareAgentSession(db, rc.env, {
-        nodeId: state.stepResults.nodeId,
-        workspaceId: state.stepResults.workspaceId,
-        projectId: state.projectId,
-        userId: state.userId,
-        chatSessionId: state.stepResults.chatSessionId,
-        agentSessionId: sessionId,
-        label: buildTaskAgentSessionLabel(state.config.taskTitle),
-        agentType,
-        visibleInitialPrompt: buildVisibleTaskInitialPrompt(state),
-        restoreSnapshotChatSessionId: state.config.resumeSnapshotChatSessionId,
-        promptKind: 'task',
-        taskContext: {
-          taskId: state.taskId,
-          taskMode: state.config.taskMode,
-          outputBranch: state.config.outputBranch,
-        },
-        overrides: {
-          model: state.config.model,
-          effort: state.config.effort,
-          permissionMode: state.config.permissionMode,
-          opencodeProvider: state.config.opencodeProvider,
-          opencodeBaseUrl: state.config.opencodeBaseUrl,
-        },
-        existingMcpToken: state.stepResults.mcpToken,
-        onAgentSessionId: async (agentSessionId) => {
-          state.stepResults.agentSessionId = agentSessionId;
+    // failTask owns terminal recovery failure; a retry must retain its claim.
+    const result = await startSamAwareAgentSession(db, rc.env, {
+      nodeId: state.stepResults.nodeId,
+      workspaceId: state.stepResults.workspaceId,
+      projectId: state.projectId,
+      userId: state.userId,
+      chatSessionId: state.stepResults.chatSessionId,
+      agentSessionId: sessionId,
+      label: buildTaskAgentSessionLabel(state.config.taskTitle),
+      agentType,
+      visibleInitialPrompt: buildVisibleTaskInitialPrompt(state),
+      restoreSnapshotChatSessionId: state.config.resumeSnapshotChatSessionId,
+      promptKind: 'task',
+      taskContext: {
+        taskId: state.taskId,
+        taskMode: state.config.taskMode,
+        outputBranch: state.config.outputBranch,
+      },
+      overrides: {
+        model: state.config.model,
+        effort: state.config.effort,
+        permissionMode: state.config.permissionMode,
+        opencodeProvider: state.config.opencodeProvider,
+        opencodeBaseUrl: state.config.opencodeBaseUrl,
+      },
+      existingMcpToken: state.stepResults.mcpToken,
+      onAgentSessionId: async (agentSessionId) => {
+        state.stepResults.agentSessionId = agentSessionId;
+        await rc.ctx.storage.put('state', state);
+      },
+      onMcpToken: async (mcpToken) => {
+        const previousToken = state.stepResults.mcpToken;
+        state.stepResults.mcpToken = mcpToken;
+        try {
           await rc.ctx.storage.put('state', state);
-        },
-        onMcpToken: async (mcpToken) => {
-          state.stepResults.mcpToken = mcpToken;
-          await rc.ctx.storage.put('state', state);
-        },
-        beforeExternalMutation: async () => {
-          await rc.assertRecoveryAuthority(state);
-        },
-        sourceTaskGuard,
-        actor: {
-          type: 'system',
-          id: 'task-runner',
-          reasonPrefix: 'Task runner agent session',
-        },
-      });
-    } catch (error) {
-      if (state.config.resumeSnapshotChatSessionId) {
-        const { failSessionSnapshotRecovery } = await import('../../services/session-snapshots');
-        await failSessionSnapshotRecovery(
-          db,
-          rc.env,
-          state.config.resumeSnapshotChatSessionId,
-          state.taskId,
-          error instanceof Error ? error.message : String(error)
-        );
-      }
-      throw error;
-    }
+        } catch (error) {
+          // Bootstrap revokes a rejected handoff; retries must not reuse it.
+          state.stepResults.mcpToken = previousToken;
+          throw error;
+        }
+      },
+      runPhase: async (phase, run) => {
+        if (phase === 'restore_acp_session') await prepareSnapshotRestoreAttempt(state, rc);
+        return run();
+      },
+      beforeExternalMutation: async () => {
+        await rc.assertRecoveryAuthority(state);
+      },
+      sourceTaskGuard,
+      actor: {
+        type: 'system',
+        id: 'task-runner',
+        reasonPrefix: 'Task runner agent session',
+      },
+    });
 
     state.stepResults.agentSessionId = result.agentSessionId;
     state.stepResults.mcpToken = result.mcpToken;

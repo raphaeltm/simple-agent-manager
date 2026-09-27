@@ -48,7 +48,6 @@ describe('handleNodeSelection runtime guards', () => {
           memoryMb: 4_096,
           diskMb: 40_960,
           exclusiveNode: false,
-          maxCoTenants: 4,
           source: 'platform',
           sourceId: 'platform',
           version: 1,

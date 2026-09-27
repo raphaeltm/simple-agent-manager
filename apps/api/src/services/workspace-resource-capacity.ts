@@ -1,5 +1,4 @@
 import {
-  DEFAULT_MAX_WORKSPACES_PER_NODE,
   DEFAULT_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT,
   type ResolvedResourceReservation,
@@ -21,7 +20,6 @@ export const RESOURCE_REQUIREMENTS_SOURCE_SQL =
 const D1_BIND_LIMIT = D1_MAX_BOUND_PARAMETERS;
 
 export interface WorkspaceAdmissionPolicy {
-  maxWorkspaces: number;
   cpuShareBudgetPercent: number;
   hostMemoryReserveMb: number;
   diskPressureThresholdPercent: number;
@@ -47,7 +45,6 @@ export interface ActiveWorkspaceReservationUsage {
   activeCount: number;
   invalidCount: number;
   exclusiveCount: number;
-  minMaxCoTenants: number | null;
   cpuMillis: number;
   memoryMb: number;
   diskMb: number;
@@ -85,7 +82,6 @@ export interface TrustedWorkspaceNodeCapacity {
 export function resolveWorkspaceAdmissionPolicy(
   env: Pick<
     Env,
-    | 'MAX_WORKSPACES_PER_NODE'
     | 'TASK_RUN_NODE_CPU_THRESHOLD_PERCENT'
     | 'TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT'
     | 'TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT'
@@ -97,7 +93,6 @@ export function resolveWorkspaceAdmissionPolicy(
     | 'TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT'
   >,
   scaling?: {
-    maxWorkspacesPerNode?: number | null;
     nodeCpuThresholdPercent?: number | null;
     nodeMemoryThresholdPercent?: number | null;
     nodeCpuShareBudgetPercent?: number | null;
@@ -125,10 +120,6 @@ export function resolveWorkspaceAdmissionPolicy(
   const totalWeight = cpuScoreWeightPercent + memoryScoreWeightPercent;
 
   return {
-    maxWorkspaces: positiveInt(
-      scaling?.maxWorkspacesPerNode,
-      parseEnvInt(env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE)
-    ),
     cpuShareBudgetPercent: boundedInt(
       scaling?.nodeCpuShareBudgetPercent,
       parseEnvInt(
@@ -201,9 +192,6 @@ export function isResolvedResourceReservation(
     positiveInteger(record.cpuMillis) !== null &&
     positiveInteger(record.memoryMb) !== null &&
     nonNegativeInteger(record.diskMb) !== null &&
-    (record.version === 3
-      ? !Object.hasOwn(record, 'maxCoTenants') || positiveInteger(record.maxCoTenants) !== null
-      : positiveInteger(record.maxCoTenants) !== null) &&
     typeof record.exclusiveNode === 'boolean' &&
     typeof record.source === 'string' &&
     ['task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'].includes(
@@ -426,12 +414,6 @@ function addReservationUsage(usage: ActiveWorkspaceReservationUsage, value: stri
   usage.memoryMb += reservation.memoryMb;
   usage.diskMb += reservation.diskMb;
   if (reservation.exclusiveNode) usage.exclusiveCount += 1;
-  if (reservation.maxCoTenants !== undefined) {
-    usage.minMaxCoTenants = Math.min(
-      usage.minMaxCoTenants ?? reservation.maxCoTenants,
-      reservation.maxCoTenants
-    );
-  }
 }
 
 export function evaluateWorkspaceReservationCapacity(
@@ -508,7 +490,6 @@ export function emptyUsage(): ActiveWorkspaceReservationUsage {
     activeCount: 0,
     invalidCount: 0,
     exclusiveCount: 0,
-    minMaxCoTenants: null,
     cpuMillis: 0,
     memoryMb: 0,
     diskMb: 0,

@@ -20,6 +20,34 @@ func TestRunPrintsHelp(t *testing.T) {
 	if !strings.Contains(stdout.String(), "SAM CLI") || !strings.Contains(stdout.String(), "sam projects") {
 		t.Fatalf("help output missing expected text: %s", stdout.String())
 	}
+	// Resource flags are still documented; the retired per-node count cap is not.
+	if !strings.Contains(stdout.String(), "--min-vcpu") {
+		t.Fatalf("help output missing resource flags: %s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "max-co-tenants") {
+		t.Fatalf("help output still advertises the removed --max-co-tenants flag: %s", stdout.String())
+	}
+}
+
+func TestSummarizeResourceJSON(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"all fields", `{"minVcpu":2,"minMemoryGb":3.5,"minDiskGb":20,"exclusiveNode":false}`, "2 vCPU, 3.50 GB memory, 20 GB disk, exclusive=false"},
+		{"exclusive only", `{"exclusiveNode":true}`, "exclusive=true"},
+		{"legacy row ignores the retired cap", `{"minVcpu":2,"maxCoTenants":3}`, "2 vCPU"},
+		{"legacy cap alone is not a workload", `{"maxCoTenants":3}`, "unknown workload (compatibility metadata)"},
+		{"malformed", `{`, "unknown workload (malformed compatibility metadata)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := summarizeResourceJSON(tc.raw); got != tc.want {
+				t.Fatalf("summarizeResourceJSON(%s) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
 }
 
 func TestAuthLoginReadsCookieFromStdin(t *testing.T) {
@@ -110,7 +138,6 @@ func TestTasksDispatchSendsModernResourceFlags(t *testing.T) {
 		"--min-memory-gb", "16",
 		"--min-disk-gb=80",
 		"--exclusive-node=false",
-		"--max-co-tenants=3",
 	}, doer, nil)
 
 	code := Run(context.Background(), runtime)
@@ -124,8 +151,7 @@ func TestTasksDispatchSendsModernResourceFlags(t *testing.T) {
 	if resources["minVcpu"] != 4.0 ||
 		resources["minMemoryGb"] != 16.0 ||
 		resources["minDiskGb"] != 80.0 ||
-		resources["exclusiveNode"] != false ||
-		resources["maxCoTenants"] != 3.0 {
+		resources["exclusiveNode"] != false {
 		t.Fatalf("resource requirements = %#v", resources)
 	}
 }
@@ -155,7 +181,6 @@ func TestTasksDispatchResourceFlagsWithHTTPCanary(t *testing.T) {
 		"--min-memory-gb=8",
 		"--min-disk-gb=0",
 		"--exclusive-node",
-		"--max-co-tenants=2",
 	}, server.Client(), map[string]string{
 		"SAM_API_URL":        server.URL,
 		"SAM_SESSION_COOKIE": "cookie=value",
@@ -175,8 +200,7 @@ func TestTasksDispatchResourceFlagsWithHTTPCanary(t *testing.T) {
 	if resources["minVcpu"] != 2.5 ||
 		resources["minMemoryGb"] != 8.0 ||
 		resources["minDiskGb"] != 0.0 ||
-		resources["exclusiveNode"] != true ||
-		resources["maxCoTenants"] != 2.0 {
+		resources["exclusiveNode"] != true {
 		t.Fatalf("resource requirements = %#v", resources)
 	}
 }
@@ -345,9 +369,8 @@ func TestTasksDispatchRejectsMalformedResourceFlags(t *testing.T) {
 		{name: "nan", args: []string{"--min-memory-gb=NaN"}, want: "--min-memory-gb must be a finite positive number"},
 		{name: "infinity", args: []string{"--min-disk-gb=+Inf"}, want: "--min-disk-gb must be a finite non-negative number"},
 		{name: "bool", args: []string{"--exclusive-node=maybe"}, want: "--exclusive-node must be true or false"},
-		{name: "zero co-tenants", args: []string{"--max-co-tenants=0"}, want: "--max-co-tenants must be a positive safe integer"},
-		{name: "fractional co-tenants", args: []string{"--max-co-tenants=1.5"}, want: "--max-co-tenants must be a positive safe integer"},
-		{name: "unsafe co-tenants", args: []string{"--max-co-tenants=9007199254740992"}, want: "--max-co-tenants must be a positive safe integer"},
+		{name: "retired co-tenant cap with value", args: []string{"--max-co-tenants=3"}, want: "--max-co-tenants was removed"},
+		{name: "retired co-tenant cap bare", args: []string{"--max-co-tenants"}, want: "--max-co-tenants was removed"},
 	}
 
 	for _, tt := range tests {

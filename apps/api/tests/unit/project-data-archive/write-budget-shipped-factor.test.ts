@@ -9,19 +9,26 @@
  * four archive ticks in DO namespace fb36fe21 billed 5,950 / 6,436 / 7,942 / 9,823 `rowsWritten`,
  * so billed rows per inventory unit spans 0.74-1.23. `factor` is pure safety margin over that.
  *
- * At factor 8 the daily allowance bought only 800000 / (1000 + 8 x 8000) = 12 migrations/day
- * while the hourly cadence allows 24, so half the ticks ran and reclaimed nothing. Confirmed
- * forward: at 12:15Z only 19,984 units remained, and the 13:00Z tick was refused.
+ * At factor 8 the then-shipped 800000 allowance bought only 800000 / (1000 + 8 x 8000) = 12
+ * migrations/day while the then-hourly cadence allowed 24, so half the ticks ran and reclaimed
+ * nothing. Confirmed forward: at 12:15Z only 19,984 units remained, and the 13:00Z tick was
+ * refused.
+ *
+ * Since 2026-09-27 the cadence claims every 20 minutes (72 ticks/day) and the allowance was
+ * tripled with it. One migration per tick is the drain's real ceiling, so the allowance must pay
+ * for a current-size migration on every tick or the faster cadence buys nothing once the window
+ * runs out. `shippedSweepTicksPerDay` reads the shipped interval, so raising the cadence without
+ * the allowance turns that case red.
  *
  * These cases read the value this repository actually ships rather than a number retyped into
  * the test, because a test that pins a hand-copied constant stays green when someone edits
  * `wrangler.toml` — the exact "the diff is not the deployed value" failure class in
- * `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`. BOTH vars these cases read —
- * `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` and `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` —
- * were verified absent from the `production` and `staging` Environments on 2026-09-14, so for
- * both the checked-in value IS the deployed value. The assertions below depend on the allowance
- * as much as on the factor, so that second check is load-bearing, not incidental. If either ever
- * gains an Environment override, the deploy now annotates it as unexpected.
+ * `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+ * `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` is absent from the `production` and `staging`
+ * Environments, so its checked-in value IS the deployed value.
+ * `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` IS pinned in the `production` Environment and is
+ * changed in lockstep with `wrangler.toml` (2400000 since 2026-09-27); the deploy log names any
+ * divergence between the two.
  *
  * The reservation runs against a real SQLite engine through `createSqliteD1`, not a stub,
  * because the thing under test is a conditional UPDATE predicate: a mock that ignores its
@@ -36,7 +43,7 @@ import {
   archiveWriteBudgetConfig,
   reserveArchiveWrites,
 } from '../../../src/project-data-archive/write-budget';
-import { shippedBudgetEnv } from '../../helpers/shipped-archive-budget';
+import { shippedBudgetEnv, shippedSweepTicksPerDay } from '../../helpers/shipped-archive-budget';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 /**
@@ -46,6 +53,14 @@ import { createSqliteD1 } from '../../helpers/sqlite-d1';
  * occurred — a 9% error that made the margin look better than it is.
  */
 const MEASURED_UNITS_PER_MIGRATION = 8_000;
+/** The allowance production ran when that factor-8 standstill was measured. */
+const ALLOWANCE_WHEN_MEASURED = 800_000;
+/**
+ * Row inventory per migration in six production reservations sampled 2026-09-25/26 (17,784-27,106
+ * estimated writes, mean ~21,500, at factor 2): (21,500 - 1000) / 2. Larger than the 2026-09-14
+ * figure because the 10000-message ceiling shipped in #2109 admits ~8k-message sessions.
+ */
+const CURRENT_UNITS_PER_MIGRATION = 10_250;
 const WINDOW_START = Date.UTC(2026, 8, 14, 0, 0, 0);
 
 describe('shipped archive write-estimate factor', () => {
@@ -68,8 +83,12 @@ describe('shipped archive write-estimate factor', () => {
     sqlite.close();
   });
 
-  async function reserveUntilRefused(allowance: number, factor: number): Promise<number> {
-    const estimate = ARCHIVE_WRITE_FIXED_RESERVATION + factor * MEASURED_UNITS_PER_MIGRATION;
+  async function reserveUntilRefused(
+    allowance: number,
+    factor: number,
+    unitsPerMigration: number
+  ): Promise<number> {
+    const estimate = ARCHIVE_WRITE_FIXED_RESERVATION + factor * unitsPerMigration;
     let admitted = 0;
     // Bounded well above any plausible ceiling so a runaway loop fails the test rather than
     // hanging the suite.
@@ -81,22 +100,39 @@ describe('shipped archive write-estimate factor', () => {
     throw new Error('reservation never refused');
   }
 
-  it('admits roughly twice the migrations per UTC window that factor 8 did', async () => {
+  it('reproduces the factor-8 standstill measured on 2026-09-14', async () => {
+    // Calibration of MEASURED_UNITS_PER_MIGRATION, not a claim about shipped config: the
+    // measured session at that day's allowance reproduces the 12 migrations/day production
+    // actually managed.
+    expect(
+      await reserveUntilRefused(ALLOWANCE_WHEN_MEASURED, 8, MEASURED_UNITS_PER_MIGRATION)
+    ).toBe(12);
+  });
+
+  it('admits more migrations per UTC window than factor 8 does at the same allowance', async () => {
     const { allowance, factor } = archiveWriteBudgetConfig(shippedBudgetEnv());
 
-    const shipped = await reserveUntilRefused(allowance, factor);
+    const shipped = await reserveUntilRefused(allowance, factor, MEASURED_UNITS_PER_MIGRATION);
 
     // Divergence case: the same allowance and the same measured session under the PREVIOUS
     // factor. This must fail against pre-change config, which is what makes the assertion
-    // above mean something (`.claude/rules/74`).
+    // mean something (`.claude/rules/74`).
     sqlite.exec('DELETE FROM project_data_archive_write_budget');
-    const previous = await reserveUntilRefused(allowance, 8);
+    const previous = await reserveUntilRefused(allowance, 8, MEASURED_UNITS_PER_MIGRATION);
 
-    expect(previous).toBe(12);
-    // 24 is the real ceiling: the hourly cadence admits one ~26.6s migration per tick, so the
-    // budget must clear that bar with room, not merely beat 12.
-    expect(shipped).toBeGreaterThanOrEqual(24);
     expect(shipped).toBeGreaterThan(previous);
+  });
+
+  it('pays for a current-size migration on every tick the shipped cadence claims', async () => {
+    const { allowance, factor } = archiveWriteBudgetConfig(shippedBudgetEnv());
+
+    const admitted = await reserveUntilRefused(allowance, factor, CURRENT_UNITS_PER_MIGRATION);
+
+    // A tick archives one session (the wall-time gate is only checked between candidates), so
+    // ticks/day is the drain's ceiling and an allowance below it silently caps the cadence.
+    // Proven discriminating on 2026-09-27: the previous 800000 allowance admits 37 against the
+    // 72 ticks an 18-minute interval claims, and this goes red.
+    expect(admitted).toBeGreaterThanOrEqual(shippedSweepTicksPerDay());
   });
 
   it('keeps a safety margin over the measured billed-rows ratio', async () => {

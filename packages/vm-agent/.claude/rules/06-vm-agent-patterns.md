@@ -92,3 +92,13 @@ as hung applies. `runCompose` now treats compose stderr as the liveness signal
 
 Full rule, including the tail-retention and cancel-cause traps:
 `apps/api/.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md` §5c.
+
+## Model Catalog and Harness Compatibility
+
+When adding models, verify the minimum supported harness **and the SDK bundled
+inside its ACP adapter**, not just the separately installed CLI. Update the shared
+agent install manifest, Go installer, Instant image and sandbox companion pins
+in the same change. Run `pnpm quality:agent-install-manifest`, execute installed
+version checks against stale adapter/current CLI pairs, and verify a real model
+prompt before shipping. A successful ACP initialization alone does not prove that
+the provider accepts the bundled SDK version.

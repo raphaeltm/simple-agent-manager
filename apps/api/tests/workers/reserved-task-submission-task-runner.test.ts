@@ -33,7 +33,11 @@ import {
   type TaskRunnerReservedSubmissionGuard,
 } from '../../src/services/task-runner-start-guard';
 import { reserveWorkspacePlacement } from '../../src/services/workspace-placement';
+import { resolveWorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
 import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
+
+/** Default admission policy: the placement contract takes a resolved policy, never a count. */
+const ADMISSION_POLICY = resolveWorkspaceAdmissionPolicy({} as never);
 
 const testEnv = env as unknown as Env;
 type TaskRunnerStartBoundaryInput = Parameters<typeof startTaskRunnerDO>[1];
@@ -73,6 +77,45 @@ async function runTaskRunnerAlarm(taskId: string): Promise<void> {
   await runInDurableObject(stub, async (instance) => {
     await instance.alarm();
     await instance.ctx.storage.deleteAlarm();
+  });
+}
+
+async function runWithTaskRunnerTimerDeliveryPaused<T>(
+  stub: DurableObjectStub<TaskRunner>,
+  fn: (instance: TaskRunner) => T | Promise<T>
+): Promise<{ result: T; scheduledAlarm: number | null }> {
+  return runInDurableObject(stub, async (instance) => {
+    await instance.ctx.storage.deleteAlarm();
+    const scheduledAlarms: number[] = [];
+    const captureAlarm = (scheduledTime: number | Date) => {
+      scheduledAlarms.push(scheduledTime instanceof Date ? scheduledTime.getTime() : scheduledTime);
+    };
+    const setAlarm = vi
+      .spyOn(instance.ctx.storage, 'setAlarm')
+      .mockImplementation(async (scheduledTime) => captureAlarm(scheduledTime));
+    const originalTransaction = instance.ctx.storage.transaction.bind(instance.ctx.storage);
+    const transaction = vi.spyOn(instance.ctx.storage, 'transaction').mockImplementation(
+      (async (callback: (transaction: DurableObjectTransaction) => unknown) =>
+        originalTransaction((transaction) =>
+          callback(
+            new Proxy(transaction, {
+              get(target, prop, receiver) {
+                if (prop === 'setAlarm') return async (scheduledTime: number | Date) => captureAlarm(scheduledTime);
+                const value = Reflect.get(target, prop, receiver) as unknown;
+                return typeof value === 'function' ? value.bind(target) : value;
+              },
+            }) as DurableObjectTransaction
+          )
+        )) as DurableObjectStorage['transaction']
+    );
+    try {
+      const result = await fn(instance);
+      return { result, scheduledAlarm: scheduledAlarms.at(-1) ?? null };
+    } finally {
+      transaction.mockRestore();
+      setAlarm.mockRestore();
+      await instance.ctx.storage.deleteAlarm();
+    }
   });
 }
 
@@ -579,7 +622,7 @@ async function reserveOrphanWorkspaceAllocation(
   workspaceId: string
 ): Promise<void> {
   const input = await reservedPlacementInput(fixture, nodeId, workspaceId);
-  await expect(reserveWorkspacePlacement(env.DATABASE, input, 2)).resolves.toBe(true);
+  await expect(reserveWorkspacePlacement(env.DATABASE, input, ADMISSION_POLICY)).resolves.toBe(true);
 }
 
 describe('reserved submission adapter and TaskRunner durable fencing', () => {
@@ -658,10 +701,10 @@ describe('reserved submission adapter and TaskRunner durable fencing', () => {
 
     const taskStart = await toTaskRunnerStartInput(capturedStarts[0]!);
     const stub = taskRunnerStub(fixture.input.identities.taskId);
-    await runInDurableObject(stub, async (instance) => {
+    const start = await runWithTaskRunnerTimerDeliveryPaused(stub, async (instance) => {
       await Promise.all([instance.start(taskStart), instance.start(taskStart)]);
-      await instance.ctx.storage.deleteAlarm();
     });
+    expect(start.scheduledAlarm).toBeTypeOf('number');
     expect(await stub.getStatus()).toMatchObject({
       taskId: fixture.input.identities.taskId,
       currentStep: 'node_selection',
@@ -1259,7 +1302,7 @@ describe('reserved submission adapter and TaskRunner durable fencing', () => {
         normalizedDisplayName: `workspace-${fixture.executionId}`,
       }
     );
-    await expect(reserveWorkspacePlacement(env.DATABASE, placement, 2)).resolves.toBe(false);
+    await expect(reserveWorkspacePlacement(env.DATABASE, placement, ADMISSION_POLICY)).resolves.toBe(false);
 
     expect((await taskCounts(fixture.input.identities.taskId)).workspaces).toBe(0);
     expect(await allWorkspaceRowsForFixture(fixture)).toEqual([]);

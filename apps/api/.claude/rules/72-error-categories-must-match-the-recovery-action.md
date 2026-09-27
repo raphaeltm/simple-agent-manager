@@ -17,8 +17,9 @@ error" sounds like the request was wrong. It is not: a Hetzner 412 "error during
 Hetzner cannot place **that server type in that location right now**. The request is valid; the
 capacity is not there.
 
-`node-provisioning-step.ts` branches on exactly one question — _is this transient capacity?_ — and
-its else-branch is `throw ... { permanent: true }`. So a user whose pool was configured
+`node-provisioning-step.ts` branched on exactly one question — _is this transient capacity?_ — and
+its else-branch was `throw ... { permanent: true }` (that decision now lives in
+`node-provisioning-failure.ts`, `handleProvisioningAttemptFailure`). So a user whose pool was configured
 `exhaustionPolicy: fallback-chain` with four eligible offerings got **one** attempt. Production
 `tasks.placement_explanation_json` recorded the chain sitting untouched:
 

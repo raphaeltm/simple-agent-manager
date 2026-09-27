@@ -18,7 +18,11 @@ import { getCredentialEncryptionKey } from '../lib/secrets';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
 import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signNodeCallbackToken } from './jwt';
-import { type DurableNodeAllocation,NodeAllocationUncertainError, recoverNodeAllocation } from './node-allocation-recovery';
+import {
+  type DurableNodeAllocation,
+  NodeAllocationUncertainError,
+  recoverNodeAllocation,
+} from './node-allocation-recovery';
 import {
   assertNodeAllocationPlanCurrent,
   type NodeAllocationPlanRole,
@@ -28,6 +32,7 @@ import {
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
+import { recordRejectedAllocationAbsence } from './node-rejection-proof';
 import { persistError } from './observability';
 import {
   createProviderForUser,
@@ -109,6 +114,8 @@ export interface ProvisionNodeOptions {
    * Legacy callers omit this and retain the original swallow-and-record behavior.
    */
   rethrowProviderError?: boolean;
+  /** Persist caller recovery intent before removing a proven pre-identity rejection. */
+  beforeRejectedNodeDelete?: () => Promise<void>;
   /** Durable direct allocation owner: retries reconcile this nonce, never repeat an uncertain POST. */
   durableAllocation?: DurableNodeAllocation;
   /** Explicit lifecycle cancellation for provider work; detached HTTP callers omit this. */
@@ -170,7 +177,8 @@ async function deleteCreatedProviderVmDirectly(input: {
   providerContext?: ProviderRequestContext;
 }): Promise<void> {
   try {
-    if (input.providerContext) await input.provider.deleteVM(input.providerInstanceId, input.providerContext);
+    if (input.providerContext)
+      await input.provider.deleteVM(input.providerInstanceId, input.providerContext);
     else await input.provider.deleteVM(input.providerInstanceId);
   } catch (err) {
     log.error('node_provisioning.created_vm_direct_cleanup_failed', {
@@ -253,7 +261,10 @@ export async function provisionNode(
   const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
   let attemptedProvider = targetProvider;
   let provisioningRuntimeIncarnationId = node.runtimeIncarnationId;
+  let providerCreateRejected = false;
   let providerAllocationRejected = false;
+  let rejectedPlacementPredicate: ReturnType<typeof and>;
+  let providerRejectionProofAt: string | null = null;
   const attributionUserId = node.credentialAttributionUserId ?? node.userId;
   const attributionProjectId =
     node.credentialAttributionSource === 'project'
@@ -268,21 +279,28 @@ export async function provisionNode(
     : { nodeRole: 'workspace', workloadRole: 'workspace' };
 
   const durable = options?.durableAllocation;
-  const resuming = !!durable && node.runtimeIncarnationId === durable.incarnationId
-    && node.runtimeTerminationConfirmedAt === null;
-  if (durable && !resuming && (node.runtimeIncarnationId !== durable.initialIncarnationId
-    || node.runtimeTerminationConfirmedAt === null)) {
+  const resuming =
+    !!durable &&
+    node.runtimeIncarnationId === durable.incarnationId &&
+    node.runtimeTerminationConfirmedAt === null;
+  if (
+    durable &&
+    !resuming &&
+    (node.runtimeIncarnationId !== durable.initialIncarnationId ||
+      node.runtimeTerminationConfirmedAt === null)
+  ) {
     throw new NodeAllocationUncertainError('Node incarnation changed before durable allocation');
   }
 
   try {
-    if (!resuming) await assertNodeAllocationPlanCurrent(
-      env,
-      node.id,
-      node.userId,
-      authorityProjectId,
-      authorityRole
-    );
+    if (!resuming)
+      await assertNodeAllocationPlanCurrent(
+        env,
+        node.id,
+        node.userId,
+        authorityProjectId,
+        authorityRole
+      );
     const providerResult = await createProviderForUser(
       db,
       attributionUserId,
@@ -317,7 +335,8 @@ export async function provisionNode(
             providerResult.credentialSource === 'project' ? attributionProjectId : null,
           credentialAttributionSource: providerResult.credentialSource,
           placementCredentialSource:
-            providerResult.exactCredentialBinding?.credentialSource ?? node.placementCredentialSource,
+            providerResult.exactCredentialBinding?.credentialSource ??
+            node.placementCredentialSource,
           placementCredentialReference:
             providerResult.exactCredentialBinding?.credentialReference ??
             node.placementCredentialReference,
@@ -423,7 +442,13 @@ export async function provisionNode(
     // that races createVM is handled by the post-request check below, which can
     // strictly destroy the resource using the persisted provider identity.
     if (!resuming) {
-      await assertNodeAllocationPlanCurrent(env, node.id, node.userId, authorityProjectId, authorityRole);
+      await assertNodeAllocationPlanCurrent(
+        env,
+        node.id,
+        node.userId,
+        authorityProjectId,
+        authorityRole
+      );
       await options?.assertExternalMutationAuthority?.();
     }
     const vmConfig = applyNativePlanToVmConfig(
@@ -444,25 +469,39 @@ export async function provisionNode(
       },
       node
     );
-    const vm = await (resuming && durable
-      ? recoverNodeAllocation(provider, node, env, durable, providerContext)
-      : providerContext
-      ? provider.createVM(vmConfig, providerContext)
-      : provider.createVM(vmConfig)).catch((err: unknown) => {
+    let vm: Awaited<ReturnType<typeof provider.createVM>>;
+    try {
+      vm = await (resuming && durable
+        ? recoverNodeAllocation(provider, node, env, durable, providerContext)
+        : providerContext
+          ? provider.createVM(vmConfig, providerContext)
+          : provider.createVM(vmConfig));
+    } catch (err) {
       if (err instanceof NodeAllocationUncertainError) throw err;
       // Hetzner's placement/capacity retries only repeat rejected creates. A
       // transport failure has no HTTP status and cannot prove absence. Keep
       // this at the create boundary: later failures and multi-step providers
       // can occur after allocation even when no VM identity reached the caller.
-      providerAllocationRejected = isProviderCreateRejectedBeforeVmIdentity(
+      providerCreateRejected = isProviderCreateRejectedBeforeVmIdentity(
         providerResult.providerName,
         err
       );
+      if (providerCreateRejected) {
+        const proof = await recordRejectedAllocationAbsence(
+          db,
+          node,
+          providerResult,
+          provisioningRuntimeIncarnationId
+        );
+        providerAllocationRejected = !!proof;
+        providerRejectionProofAt = proof?.proofAt ?? null;
+        rejectedPlacementPredicate = proof?.placementPredicate;
+      }
       if (durable && !providerAllocationRejected) {
         throw new NodeAllocationUncertainError();
       }
       throw err;
-    });
+    }
     throwIfProviderRequestAborted(providerContext);
 
     // Persist the provider identity before the post-request authority check so
@@ -471,7 +510,11 @@ export async function provisionNode(
       .update(schema.nodes)
       .set({
         providerInstanceId: vm.id,
-        ...(durable ? { status: sql`CASE WHEN ${schema.nodes.status} IN ('creating','running','recovery','error') THEN 'creating' ELSE ${schema.nodes.status} END` } : {}),
+        ...(durable
+          ? {
+              status: sql`CASE WHEN ${schema.nodes.status} IN ('creating','running','recovery','error') THEN 'creating' ELSE ${schema.nodes.status} END`,
+            }
+          : {}),
         ...observedHardwareDbValues(vm),
         ipAddress: vm.ip || null,
         runtimeTerminationConfirmedAt: null,
@@ -491,7 +534,8 @@ export async function provisionNode(
       throw new Error('Node lifecycle changed before provider identity could be recorded');
     }
     try {
-      if (['destroying', 'deleted', 'stopped'].includes(node.status)) throw new Error('Node allocation was cancelled');
+      if (['destroying', 'deleted', 'stopped'].includes(node.status))
+        throw new Error('Node allocation was cancelled');
       await assertNodeAllocationPlanCurrent(
         env,
         node.id,
@@ -681,10 +725,27 @@ export async function provisionNode(
     // Delete the failed node row when the create boundary proved the provider rejected
     // allocation before returning a VM identity; there is no runtime to tear down.
     if (options?.rethrowProviderError) {
-      if (isCapacityFailure || providerAllocationRejected) {
+      if ((isCapacityFailure && !providerCreateRejected) || providerAllocationRejected) {
+        if (
+          providerAllocationRejected &&
+          (!providerRejectionProofAt || !rejectedPlacementPredicate)
+        ) {
+          throw new Error('Rejected allocation proof identity is unavailable');
+        }
+        await options.beforeRejectedNodeDelete?.();
         await db
           .delete(schema.nodes)
-          .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
+          .where(
+            and(
+              creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId),
+              ...(providerAllocationRejected
+                ? [
+                    sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${providerRejectionProofAt}`,
+                    rejectedPlacementPredicate,
+                  ]
+                : [])
+            )
+          )
           .run();
       } else {
         const truncatedError = truncateNodeErrorMessage(errorMessage);

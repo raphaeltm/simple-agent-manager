@@ -11,17 +11,6 @@ import type { CatalogOffering, ProviderCatalog, Tier } from './catalog';
  * (apps/api/src/services/workspace-resource-capacity.ts). Memory the host keeps for itself. */
 export const HOST_MEMORY_RESERVE_MB = 512;
 
-/** Real default: `PLATFORM_RESOURCE_DEFAULTS.maxCoTenants` (packages/shared). */
-export const MAX_CO_TENANTS = 4;
-
-/** Real default: `DEFAULT_MAX_WORKSPACES_PER_NODE`
- * (packages/shared/src/constants/task-execution.ts). A second, node-wide ceiling that
- * `evaluateWorkspaceReservationCapacity` enforces alongside the per-request co-tenant cap. At the
- * defaults it is the STRICTER of the two (3 < 4), so it is the one that actually binds —
- * modelling only the co-tenant cap would let this widget admit a fourth workload that a default
- * deployment refuses. */
-export const MAX_WORKSPACES_PER_NODE = 3;
-
 /** Illustrative step counts. Real equivalents are wall-clock and configurable. */
 export const LAB = {
   bootSteps: 3,

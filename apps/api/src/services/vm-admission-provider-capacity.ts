@@ -1,4 +1,9 @@
-import { ProviderError } from '@simple-agent-manager/providers';
+import {
+  classifyHetznerAccountLimit,
+  type HetznerAccountLimit,
+  ProviderError,
+} from '@simple-agent-manager/providers';
+import type { CredentialSource } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import {
@@ -32,28 +37,55 @@ export async function activeProviderCapacityCooldown(
   return retryMs && retryMs > Date.now() ? row : null;
 }
 
+/**
+ * A provider account quota, recorded as a cooldown on the whole credential domain before the
+ * task is parked on `provider_account_capacity` until capacity returns.
+ *
+ * Every Hetzner account limit qualifies — servers, vCPU cores and anything else
+ * `resource_limit_exceeded` covers. A core quota reaches this only after the attempt chain has no
+ * smaller offering left to descend to (`node-provisioning-core-quota.ts`); until then a smaller
+ * offering may still fit, and a domain-wide cooldown would stall every other task in it.
+ */
 export function classifyVmProviderCapacityError(err: unknown): VmProviderCapacityInfo | null {
-  if (!(err instanceof ProviderError)) return null;
-  if (
-    err.providerName === 'hetzner' &&
-    err.statusCode === 403 &&
-    (err.providerCode === 'server_limit_exceeded' ||
-      err.message.toLowerCase().includes('server_limit_exceeded') ||
-      err.message.toLowerCase().includes('server limit'))
-  ) {
-    return {
-      provider: err.providerName,
-      providerCategory: err.category,
-      providerCode: err.providerCode ?? 'server_limit_exceeded',
-      providerStatusCode: err.statusCode,
-      providerMessage: err.message,
-    };
-  }
-  return null;
+  if (!(err instanceof ProviderError) || !classifyHetznerAccountLimit(err)) return null;
+  return {
+    provider: err.providerName,
+    providerCategory: err.category,
+    providerCode: err.providerCode ?? null,
+    providerStatusCode: err.statusCode ?? null,
+    providerMessage: err.message,
+  };
 }
 
-export function isProviderAccountCapacityError(err: unknown): boolean {
-  return classifyVmProviderCapacityError(err) !== null;
+/**
+ * User-legible text for a provider account quota: which limit, whose account, what the user can
+ * do about it, and the provider's own words for operators. Replaces the bare
+ * "hetzner API error (403): shared core limit exceeded" that three failed wakes showed on
+ * 2026-09-25.
+ */
+export function describeProviderAccountLimit(input: {
+  limit: HetznerAccountLimit;
+  providerMessage: string;
+  credentialSource?: CredentialSource | null;
+}): string {
+  const account = accountOwnerPhrase(input.credentialSource);
+  const reached =
+    input.limit.resource === 'cores'
+      ? `${account} has reached its ${input.limit.coreClass ? `${input.limit.coreClass} ` : ''}vCPU core limit, and no smaller server type this compute pool allows fits under it.`
+      : input.limit.resource === 'servers'
+        ? `${account} has reached its server limit.`
+        : `${account} has reached one of its resource limits.`;
+  const remedy =
+    input.credentialSource === 'platform'
+      ? 'Capacity frees up as other machines are released; try again later.'
+      : 'Delete unused nodes to free capacity, or raise the limit in the Hetzner Console (Limits).';
+  return `${reached} ${remedy} Provider error: ${input.providerMessage}`;
+}
+
+function accountOwnerPhrase(credentialSource: CredentialSource | null | undefined): string {
+  if (credentialSource === 'platform') return "SAM's shared Hetzner account";
+  if (credentialSource === 'project') return "This project's Hetzner account";
+  return 'Your Hetzner account';
 }
 
 export async function recordVmProviderCapacityFailure(

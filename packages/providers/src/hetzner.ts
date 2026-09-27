@@ -15,23 +15,17 @@ import {
   HETZNER_SIZE_CONFIGS,
   HETZNER_VOLUME_CAPABILITIES,
   type HetznerProviderRuntimeOptions,
-  isAlreadyDetachedVolumeError,
-  isHetznerPlacementCapacityError,
-  isTransientCapacityError,
-  mapHetznerProviderError,
   mapHetznerServerToVMInstance,
-  mapHetznerVolumeToInstance,
-  validateHetznerVolumeSize,
 } from './hetzner-metadata';
-import { fetchPaginatedHetznerList } from './hetzner-pagination';
+import { fetchPaginatedHetznerList, hetznerLabelSelectorParts } from './hetzner-pagination';
+import { HetznerServerCreate } from './hetzner-server-create';
+import { HetznerVolumes } from './hetzner-volumes';
 import { getProviderCatalogOfferings } from './instance-offerings';
 import {
   assertIncludedBootDiskCapacity,
-  type ResolvedNativeVMConfig,
   resolveVMConfigWithLegacySizeAdapter,
 } from './native-vm-config';
 import {
-  providerDelay,
   providerFetch,
   rethrowIfProviderRequestAborted,
   throwIfProviderRequestAborted,
@@ -52,17 +46,14 @@ import type {
   VolumeLookupConfig,
   VolumeResizeConfig,
 } from './types';
-import { noopProviderLogger, ProviderError, SAM_VOLUME_FILESYSTEM_FORMAT } from './types';
+import { noopProviderLogger, ProviderError } from './types';
 import {
   type HetznerServerPayload,
   type HetznerServerTypePayload,
-  type HetznerVolumePayload,
   parseProviderJson,
   validateHetznerServerResponse,
   validateHetznerServersResponse,
   validateHetznerServerTypesResponse,
-  validateHetznerVolumeResponse,
-  validateHetznerVolumesResponse,
 } from './validation';
 
 export type { HetznerProviderRuntimeOptions } from './hetzner-metadata';
@@ -93,14 +84,11 @@ export class HetznerProvider implements Provider {
 
   private readonly apiToken: string;
   private readonly datacenter: string;
-  private readonly placementRetryDelayMs: number;
   private readonly placementFallbackEnabled: boolean;
-  private readonly capacityRetryInitialDelayMs: number;
-  private readonly capacityRetryMaxDelayMs: number;
-  private readonly capacityRetryMaxAttempts: number;
-  private readonly capacityRetryBudgetMs: number;
   private readonly maxListPages: number;
   private readonly logger: ProviderLogger;
+  private readonly serverCreate: HetznerServerCreate;
+  private readonly volumes: HetznerVolumes;
 
   constructor(
     apiToken: string,
@@ -123,16 +111,20 @@ export class HetznerProvider implements Provider {
     this.apiToken = apiToken;
     this.datacenter = datacenter || DEFAULT_HETZNER_DATACENTER;
     this.defaultLocation = this.datacenter;
-    this.placementRetryDelayMs = placementRetryDelayMs ?? DEFAULT_PLACEMENT_RETRY_DELAY_MS;
     this.placementFallbackEnabled = placementFallbackEnabled ?? true;
-    this.capacityRetryInitialDelayMs =
-      capacityRetryInitialDelayMs ?? DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS;
-    this.capacityRetryMaxDelayMs = capacityRetryMaxDelayMs ?? DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS;
-    this.capacityRetryMaxAttempts = capacityRetryMaxAttempts ?? DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS;
-    this.capacityRetryBudgetMs =
-      runtimeOptions?.capacityRetryBudgetMs ?? DEFAULT_CAPACITY_RETRY_BUDGET_MS;
     this.maxListPages = runtimeOptions?.maxListPages ?? DEFAULT_HETZNER_MAX_LIST_PAGES;
+    this.volumes = new HetznerVolumes(apiToken, this.maxListPages);
     this.logger = runtimeOptions?.logger ?? noopProviderLogger;
+    this.serverCreate = new HetznerServerCreate(apiToken, {
+      placementRetryDelayMs: placementRetryDelayMs ?? DEFAULT_PLACEMENT_RETRY_DELAY_MS,
+      capacityRetryInitialDelayMs:
+        capacityRetryInitialDelayMs ?? DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS,
+      capacityRetryMaxDelayMs: capacityRetryMaxDelayMs ?? DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS,
+      capacityRetryMaxAttempts: capacityRetryMaxAttempts ?? DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS,
+      capacityRetryBudgetMs:
+        runtimeOptions?.capacityRetryBudgetMs ?? DEFAULT_CAPACITY_RETRY_BUDGET_MS,
+      logger: this.logger,
+    });
   }
 
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
@@ -148,178 +140,7 @@ export class HetznerProvider implements Provider {
     // fallback must be a new control-plane placement decision.
     const allowLocationFallback = config.native === undefined && this.placementFallbackEnabled;
 
-    const deadline = Date.now() + this.capacityRetryBudgetMs;
-    let lastCapacityError: ProviderError | undefined;
-
-    for (
-      let capacityAttempt = 0;
-      capacityAttempt < this.capacityRetryMaxAttempts;
-      capacityAttempt++
-    ) {
-      try {
-        return await this.attemptCreateWithPlacementFallback(
-          nativeConfig,
-          allowLocationFallback,
-          context
-        );
-      } catch (err) {
-        lastCapacityError = await this.retryAfterCapacityError(
-          err,
-          capacityAttempt,
-          deadline,
-          nativeConfig,
-          context
-        );
-      }
-    }
-
-    // Unreachable, but TypeScript needs it
-    throw new ProviderError(this.name, undefined, 'Capacity retry loop exited unexpectedly', {
-      cause: lastCapacityError,
-    });
-  }
-
-  private async retryAfterCapacityError(
-    error: unknown,
-    attempt: number,
-    deadline: number,
-    config: ResolvedNativeVMConfig,
-    context?: ProviderRequestContext
-  ): Promise<ProviderError> {
-    rethrowIfProviderRequestAborted(error, context);
-    if (!(error instanceof ProviderError) || !isTransientCapacityError(error)) throw error;
-    // A placement failure is transient capacity for the CONTROL PLANE (it should try another
-    // offering from the pool) but not for THIS loop, which would spend the whole
-    // `capacityRetryBudgetMs` re-asking for the same server type in the same location. Surface it
-    // immediately so the pool's fallback chain descends. `attemptCreateWithPlacementFallback` has
-    // already retried the primary location twice. See `.claude/rules/67`.
-    if (isHetznerPlacementCapacityError(error)) throw error;
-
-    const delay = this.computeCapacityRetryDelay(attempt);
-    const isLastAttempt = attempt >= this.capacityRetryMaxAttempts - 1;
-    const wouldExceedBudget = Date.now() + delay > deadline;
-    if (isLastAttempt || wouldExceedBudget) {
-      throw new ProviderError(
-        this.name,
-        422,
-        `Capacity exhausted after ${attempt + 1} attempts for ` +
-          `server type ${config.instanceType} in ${config.location}: ` +
-          error.message,
-        { cause: error, providerCode: error.providerCode, category: 'transient_capacity' }
-      );
-    }
-
-    this.logger.warn('hetzner transient capacity error; retrying createVM', {
-      delayMs: delay,
-      attempt: attempt + 1,
-      maxAttempts: this.capacityRetryMaxAttempts,
-      budgetRemainingMs: Math.max(0, deadline - Date.now()),
-      serverType: config.instanceType,
-      location: config.location,
-      statusCode: error.statusCode,
-      providerCode: error.providerCode,
-    });
-    await providerDelay(delay, context);
-    return error;
-  }
-
-  /**
-   * Compute exponential backoff delay for capacity retries.
-   * delay = min(initialDelay * 2^attempt, maxDelay)
-   */
-  private computeCapacityRetryDelay(attempt: number): number {
-    const delay = this.capacityRetryInitialDelayMs * Math.pow(2, attempt);
-    return Math.min(delay, this.capacityRetryMaxDelayMs);
-  }
-
-  /**
-   * Inner placement loop: tries the primary location (twice with a delay),
-   * then falls back to other locations on 412 placement errors.
-   */
-  private async attemptCreateWithPlacementFallback(
-    config: ResolvedNativeVMConfig,
-    allowLocationFallback: boolean,
-    context?: ProviderRequestContext
-  ): Promise<VMInstance> {
-    throwIfProviderRequestAborted(context);
-    const primaryLocation = config.location;
-
-    const fallbackLocations = allowLocationFallback
-      ? HETZNER_LOCATIONS.filter((loc) => loc !== primaryLocation)
-      : [];
-    const attemptsToTry: Array<{ location: string; delayMs: number }> = [
-      { location: primaryLocation, delayMs: 0 },
-      { location: primaryLocation, delayMs: this.placementRetryDelayMs },
-      ...fallbackLocations.map((loc) => ({ location: loc, delayMs: 0 })),
-    ];
-
-    let lastError: ProviderError | undefined;
-    for (const attempt of attemptsToTry) {
-      throwIfProviderRequestAborted(context);
-      if (lastError && attempt.delayMs > 0) {
-        this.logger.warn('hetzner retrying primary placement after delay', {
-          location: attempt.location,
-          delayMs: attempt.delayMs,
-        });
-        await providerDelay(attempt.delayMs, context);
-      }
-
-      try {
-        const response = await providerFetch(
-          this.name,
-          `${HETZNER_API_URL}/servers`,
-          {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${this.apiToken}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              name: config.name,
-              server_type: config.instanceType,
-              image: config.image || DEFAULT_HETZNER_IMAGE,
-              location: attempt.location,
-              user_data: config.userData,
-              labels: config.labels,
-              start_after_create: true,
-            }),
-          },
-          undefined,
-          undefined,
-          context
-        );
-
-        throwIfProviderRequestAborted(context);
-        const data = validateHetznerServerResponse(
-          await parseProviderJson(response, this.name, 'createVM'),
-          'createVM'
-        );
-        throwIfProviderRequestAborted(context);
-        if (attempt.location !== primaryLocation) {
-          this.logger.info('hetzner placement fallback succeeded', {
-            primaryLocation,
-            selectedLocation: attempt.location,
-          });
-        }
-        return mapHetznerServerToVMInstance(data.server);
-      } catch (err) {
-        rethrowIfProviderRequestAborted(err, context);
-        // Deliberately broader than `isHetznerPlacementCapacityError` — see its docstring for
-        // why the three 412 checks in this codebase differ in precision.
-        if (err instanceof ProviderError && err.statusCode === 412) {
-          this.logger.warn('hetzner placement attempt failed', {
-            location: attempt.location,
-            statusCode: err.statusCode,
-          });
-          lastError = err;
-          continue;
-        }
-        throw err; // Non-placement errors bubble up (including transient 422s)
-      }
-    }
-
-    if (lastError) throw lastError;
-    throw new ProviderError(this.name, undefined, 'No Hetzner placement attempts were available');
+    return this.serverCreate.create(nativeConfig, allowLocationFallback, context);
   }
 
   async deleteVM(id: string, context?: ProviderRequestContext): Promise<void> {
@@ -384,7 +205,7 @@ export class HetznerProvider implements Provider {
     context?: ProviderRequestContext
   ): Promise<VMInstance[]> {
     throwIfProviderRequestAborted(context);
-    const labelParts = this.toHetznerLabelSelectorParts(labels);
+    const labelParts = hetznerLabelSelectorParts(labels);
     const servers: HetznerServerPayload[] = [];
 
     await fetchPaginatedHetznerList({
@@ -512,286 +333,46 @@ export class HetznerProvider implements Provider {
     }
   }
 
-  async createVolume(
-    config: VolumeConfig,
-    context?: ProviderRequestContext
-  ): Promise<VolumeInstance> {
-    throwIfProviderRequestAborted(context);
-    validateHetznerVolumeSize(config.sizeGb);
-
-    let response: Response;
-    try {
-      response = await providerFetch(
-        this.name,
-        `${HETZNER_API_URL}/volumes`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.apiToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            name: config.name,
-            size: config.sizeGb,
-            location: config.location,
-            format: config.format ?? SAM_VOLUME_FILESYSTEM_FORMAT,
-            labels: config.labels || {},
-          }),
-        },
-        undefined,
-        undefined,
-        context
-      );
-    } catch (err) {
-      rethrowIfProviderRequestAborted(err, context);
-      throw mapHetznerProviderError(err);
-    }
-
-    throwIfProviderRequestAborted(context);
-    const data = validateHetznerVolumeResponse(
-      await parseProviderJson(response, this.name, 'createVolume'),
-      'createVolume'
-    );
-    throwIfProviderRequestAborted(context);
-    return mapHetznerVolumeToInstance(data.volume);
+  createVolume(config: VolumeConfig, context?: ProviderRequestContext): Promise<VolumeInstance> {
+    return this.volumes.createVolume(config, context);
   }
 
-  async attachVolume(
+  attachVolume(
     config: VolumeAttachmentConfig,
     context?: ProviderRequestContext
   ): Promise<VolumeInstance> {
-    throwIfProviderRequestAborted(context);
-    await providerFetch(
-      this.name,
-      `${HETZNER_API_URL}/volumes/${config.volumeId}/actions/attach`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.apiToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          server: Number(config.serverId),
-          automount: false,
-        }),
-      },
-      undefined,
-      undefined,
-      context
-    );
-
-    throwIfProviderRequestAborted(context);
-    const volume = await this.getVolume(
-      { volumeId: config.volumeId, location: config.location },
-      context
-    );
-    if (!volume) {
-      throw new ProviderError(
-        this.name,
-        404,
-        `Hetzner volume ${config.volumeId} not found after attach`,
-        {
-          category: 'invalid_config',
-        }
-      );
-    }
-    return volume;
+    return this.volumes.attachVolume(config, context);
   }
 
-  async detachVolume(
+  detachVolume(
     config: VolumeDetachConfig,
     context?: ProviderRequestContext
   ): Promise<VolumeInstance | null> {
-    throwIfProviderRequestAborted(context);
-    try {
-      await providerFetch(
-        this.name,
-        `${HETZNER_API_URL}/volumes/${config.volumeId}/actions/detach`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.apiToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({}),
-        },
-        undefined,
-        undefined,
-        context
-      );
-    } catch (err) {
-      rethrowIfProviderRequestAborted(err, context);
-      if (err instanceof ProviderError) {
-        if (err.statusCode === 404) {
-          return null;
-        }
-        if (isAlreadyDetachedVolumeError(err)) {
-          return this.getVolume({ volumeId: config.volumeId, location: config.location }, context);
-        }
-      }
-      throw err;
-    }
-
-    throwIfProviderRequestAborted(context);
-    return this.getVolume({ volumeId: config.volumeId, location: config.location }, context);
+    return this.volumes.detachVolume(config, context);
   }
 
-  async resizeVolume(
+  resizeVolume(
     config: VolumeResizeConfig,
     context?: ProviderRequestContext
   ): Promise<VolumeInstance> {
-    throwIfProviderRequestAborted(context);
-    validateHetznerVolumeSize(config.sizeGb);
-    const currentSizeGb =
-      config.currentSizeGb ?? (await this.getCurrentVolumeSize(config, context));
-    if (config.sizeGb < currentSizeGb) {
-      throw new ProviderError(
-        this.name,
-        undefined,
-        `Cannot shrink Hetzner volume ${config.volumeId} from ${currentSizeGb}GB to ${config.sizeGb}GB`,
-        { category: 'invalid_config' }
-      );
-    }
-
-    await providerFetch(
-      this.name,
-      `${HETZNER_API_URL}/volumes/${config.volumeId}/actions/resize`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.apiToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ size: config.sizeGb }),
-      },
-      undefined,
-      undefined,
-      context
-    );
-
-    throwIfProviderRequestAborted(context);
-    const volume = await this.getVolume(
-      { volumeId: config.volumeId, location: config.location },
-      context
-    );
-    if (!volume) {
-      throw new ProviderError(
-        this.name,
-        404,
-        `Hetzner volume ${config.volumeId} not found after resize`,
-        {
-          category: 'invalid_config',
-        }
-      );
-    }
-    return volume;
+    return this.volumes.resizeVolume(config, context);
   }
 
-  async deleteVolume(config: VolumeLookupConfig, context?: ProviderRequestContext): Promise<void> {
-    throwIfProviderRequestAborted(context);
-    try {
-      await providerFetch(
-        this.name,
-        `${HETZNER_API_URL}/volumes/${config.volumeId}`,
-        {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${this.apiToken}`,
-          },
-        },
-        undefined,
-        undefined,
-        context
-      );
-    } catch (err) {
-      rethrowIfProviderRequestAborted(err, context);
-      if (err instanceof ProviderError && err.statusCode === 404) {
-        return;
-      }
-      throw err;
-    }
+  deleteVolume(config: VolumeLookupConfig, context?: ProviderRequestContext): Promise<void> {
+    return this.volumes.deleteVolume(config, context);
   }
 
-  async getVolume(
+  getVolume(
     config: VolumeLookupConfig,
     context?: ProviderRequestContext
   ): Promise<VolumeInstance | null> {
-    throwIfProviderRequestAborted(context);
-    try {
-      const response = await providerFetch(
-        this.name,
-        `${HETZNER_API_URL}/volumes/${config.volumeId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${this.apiToken}`,
-          },
-        },
-        undefined,
-        undefined,
-        context
-      );
-
-      throwIfProviderRequestAborted(context);
-      const data = validateHetznerVolumeResponse(
-        await parseProviderJson(response, this.name, 'getVolume'),
-        'getVolume'
-      );
-      throwIfProviderRequestAborted(context);
-      return mapHetznerVolumeToInstance(data.volume);
-    } catch (err) {
-      rethrowIfProviderRequestAborted(err, context);
-      if (err instanceof ProviderError && err.statusCode === 404) {
-        return null;
-      }
-      throw err;
-    }
+    return this.volumes.getVolume(config, context);
   }
 
-  async listVolumes(
+  listVolumes(
     config: VolumeListConfig,
     context?: ProviderRequestContext
   ): Promise<VolumeInstance[]> {
-    throwIfProviderRequestAborted(context);
-    const volumes: HetznerVolumePayload[] = [];
-
-    await fetchPaginatedHetznerList({
-      apiToken: this.apiToken,
-      resource: 'volumes',
-      baseParams: new URLSearchParams({ location: config.location }),
-      operation: 'listVolumes',
-      handlePage: (data) => {
-        const validated = validateHetznerVolumesResponse(data, 'listVolumes');
-        volumes.push(...validated.volumes);
-        return validated.nextPage;
-      },
-      labelParts: this.toHetznerLabelSelectorParts(config.labels),
-      maxPages: this.maxListPages,
-      context,
-    });
-
-    throwIfProviderRequestAborted(context);
-    return volumes.map(mapHetznerVolumeToInstance);
-  }
-
-  private toHetznerLabelSelectorParts(labels?: Record<string, string>): string[] {
-    if (!labels) return [];
-    return Object.entries(labels).map(([key, value]) => `${key}=${value}`);
-  }
-
-  private async getCurrentVolumeSize(
-    config: VolumeResizeConfig,
-    context?: ProviderRequestContext
-  ): Promise<number> {
-    throwIfProviderRequestAborted(context);
-    const volume = await this.getVolume(
-      { volumeId: config.volumeId, location: config.location },
-      context
-    );
-    if (!volume) {
-      throw new ProviderError(this.name, 404, `Hetzner volume ${config.volumeId} not found`, {
-        category: 'invalid_config',
-      });
-    }
-    return volume.sizeGb;
+    return this.volumes.listVolumes(config, context);
   }
 }

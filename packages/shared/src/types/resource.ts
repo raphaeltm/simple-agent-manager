@@ -18,8 +18,6 @@ export interface ResourceRequirements {
   minDiskGb?: number;
   /** If true, the task must have a node to itself (no co-tenants). */
   exclusiveNode?: boolean;
-  /** Deprecated compatibility metadata; use exclusiveNode for isolation. */
-  maxCoTenants?: number;
 }
 
 export type ResourceRequirementField = keyof ResourceRequirements;
@@ -64,11 +62,6 @@ export interface ResolvedResourceReservation {
   diskMb: number;
   /** Whether this task requires exclusive node access. */
   exclusiveNode: boolean;
-  /**
-   * Deprecated compatibility metadata from reservation schemas v1/v2.
-   * The resource scheduler does not use this value as a placement limit.
-   */
-  maxCoTenants?: number;
   /** Which level in the precedence chain provided the requirements. */
   source: ResourceRequirementsSource;
   /** ID of the source entity (profile ID, project ID, 'platform', etc.). */

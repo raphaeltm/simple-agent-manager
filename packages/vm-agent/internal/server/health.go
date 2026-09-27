@@ -113,7 +113,7 @@ func (s *Server) sendNodeReady() {
 	if resp.StatusCode >= 300 {
 		body := readAcpHeartbeatErrorBody(resp.Body)
 		if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
-			s.markControlPlaneCallbacksTerminal("node_ready", resp.StatusCode, body)
+			s.markControlPlaneCallbacksTerminal(nodeReadyCallback, resp.StatusCode, body)
 			return
 		}
 		slog.Warn("Node ready callback returned non-success status",
@@ -247,7 +247,7 @@ func (s *Server) sendNodeHeartbeat() {
 	if resp.StatusCode >= 300 {
 		body := readAcpHeartbeatErrorBody(resp.Body)
 		if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
-			s.markControlPlaneCallbacksTerminal("node_heartbeat", resp.StatusCode, body)
+			s.markControlPlaneCallbacksTerminal(nodeHeartbeatCallback, resp.StatusCode, body)
 			return
 		}
 		slog.Warn("Node heartbeat returned non-success status",

@@ -2,6 +2,7 @@ import { queryOptions } from '@tanstack/react-query';
 
 import {
   fetchAdminProjectDataArchiveCircuitBreakers,
+  fetchAdminProjectDataArchiveProblemMigrations,
   fetchAdminProjectDataStorageTelemetry,
 } from '../api';
 
@@ -19,6 +20,12 @@ export const adminProjectDataStorageQueryKeys = {
       'telemetry',
       { limit: limit ?? null },
     ] as const,
+  problemMigrations: (queryScope: string, limit?: number) =>
+    [
+      ...adminProjectDataStorageQueryKeys.all(queryScope),
+      'problem-migrations',
+      { limit: limit ?? null },
+    ] as const,
 };
 
 export function adminProjectDataArchiveBreakersQueryOptions(queryScope: string, limit?: number) {
@@ -32,5 +39,15 @@ export function adminProjectDataStorageTelemetryQueryOptions(queryScope: string,
   return queryOptions({
     queryKey: adminProjectDataStorageQueryKeys.telemetry(queryScope, limit),
     queryFn: () => fetchAdminProjectDataStorageTelemetry(limit),
+  });
+}
+
+export function adminProjectDataArchiveProblemMigrationsQueryOptions(
+  queryScope: string,
+  limit?: number
+) {
+  return queryOptions({
+    queryKey: adminProjectDataStorageQueryKeys.problemMigrations(queryScope, limit),
+    queryFn: () => fetchAdminProjectDataArchiveProblemMigrations(limit),
   });
 }

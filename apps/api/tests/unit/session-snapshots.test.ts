@@ -997,6 +997,55 @@ describe('session snapshot recovery lifecycle', () => {
     }
   });
 
+  it('advances restored_at only when an in-place wake finds the session asleep', async () => {
+    // `commitContainerWake` runs on every delivery attempt to an Instant session,
+    // awake or not. Only the attempt that finds it asleep is a restore; the rest
+    // must not re-date it (a failed task's preservation wait is dated by it).
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.projectDataSessionLocations]);
+      sqlite
+        .prepare(
+          `INSERT INTO session_snapshots
+             (id, project_id, workspace_id, user_id, chat_session_id, runtime, status, degradation,
+              manifest_r2_key, expires_at, sleep_status, sleeping_at, recovery_attempts, updated_at)
+           VALUES ('snap-wake', 'proj-1', 'ws-1', 'user-1', 'chat-wake', 'cf-container', 'available',
+                   'none', 'm.json', '2099-01-01T00:00:00.000Z', 'sleeping',
+                   '2026-08-15T00:00:00.000Z', 0, '2026-08-15T00:00:00.000Z')`
+        )
+        .run();
+      const testEnv = env({ DATABASE: createSqliteD1(sqlite) });
+      const restoredAt = () =>
+        sqlite
+          .prepare(
+            `SELECT restored_at, sleeping_at, recovery_status FROM session_snapshots
+             WHERE chat_session_id = 'chat-wake'`
+          )
+          .get();
+
+      vi.setSystemTime(new Date('2026-08-15T01:00:00.000Z'));
+      await markSessionSnapshotAwakeInPlace(testEnv, 'chat-wake', 'task-1', 'ws-1');
+      expect(restoredAt()).toEqual({
+        restored_at: '2026-08-15T01:00:00.000Z',
+        sleeping_at: null,
+        recovery_status: 'restored',
+      });
+
+      // A later delivery attempt to the now-awake session.
+      vi.setSystemTime(new Date('2026-08-15T09:00:00.000Z'));
+      await markSessionSnapshotAwakeInPlace(testEnv, 'chat-wake', 'task-1', 'ws-1');
+      expect(restoredAt()).toEqual({
+        restored_at: '2026-08-15T01:00:00.000Z',
+        sleeping_at: null,
+        recovery_status: 'restored',
+      });
+    } finally {
+      sqlite.close();
+      vi.useRealTimers();
+    }
+  });
+
   it('fences snapshot recovery claims and in-place wake while ProjectData archive migration owns the session', async () => {
     const sqlite = new Database(':memory:');
     try {

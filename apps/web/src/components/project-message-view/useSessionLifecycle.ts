@@ -1,5 +1,4 @@
 import {
-  DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
   DEFAULT_CHAT_SESSION_MESSAGE_MAX,
 } from '@simple-agent-manager/shared';
@@ -27,6 +26,12 @@ import {
   sendFollowUpPrompt,
 } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
+import {
+  fetchHistoryUntil,
+  mergeRecentWindowOrRefresh,
+  oldestPersistedCursor,
+  refreshCachedTranscript,
+} from '../../lib/message-paging';
 import { chatQueryKeys, chatSessionMessagesQueryOptions } from '../../lib/query-options';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { FilePanelState } from './session-lifecycle-helpers';
@@ -77,21 +82,20 @@ export function useSessionLifecycle(
   const sessionQuery = useQuery({
     ...chatSessionMessagesQueryOptions(queryScope, projectId, sessionId),
     enabled: Boolean(queryScope && projectId && sessionId),
+    refetchOnMount: 'always',
     queryFn: async ({ signal }) => {
       const cached = queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey);
-      const latestCachedAt = cached?.messages.at(-1)?.createdAt;
-      if (cached && typeof latestCachedAt === 'number') {
-        const delta = await getChatSession(projectId, sessionId, {
-          signal,
-          after: latestCachedAt,
-        });
+      const refreshed =
+        cached && (await refreshCachedTranscript(projectId, sessionId, cached, signal));
+      if (refreshed) {
+        const latest =
+          queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey) ?? cached;
         return {
-          ...delta,
-          messages: mergeMessages(cached.messages, delta.messages, 'append'),
-          hasMore: cached.hasMore || delta.hasMore,
+          ...refreshed,
+          messages: mergeMessages(latest.messages, refreshed.messages, 'append'),
+          hasMore: latest.hasMore,
         };
       }
-
       return getChatSession(projectId, sessionId, {
         signal,
         limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
@@ -254,22 +258,45 @@ export function useSessionLifecycle(
         state?: SessionStateSnapshot | null
       ) => {
         setSession(catchUpSession);
-        setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
-        queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
-          sessionMessagesQueryKey,
-          (old) =>
-            old
-              ? {
-                  ...old,
-                  session: catchUpSession,
-                  messages: mergeMessages(old.messages, catchUpMessages, 'replace'),
-                  state: state ?? old.state,
-                }
-              : old
-        );
+        void (async () => {
+          try {
+            const recentDetail = {
+              session: catchUpSession,
+              messages: catchUpMessages,
+              hasMore: hasMoreRef.current,
+              state: state ?? null,
+            } as ChatSessionDetailResponse;
+            const current =
+              queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey) ??
+              ({
+                ...recentDetail,
+                messages: messagesRef.current,
+                hasMore: hasMoreRef.current,
+              } as ChatSessionDetailResponse);
+            const merged = await mergeRecentWindowOrRefresh(
+              projectId,
+              sessionId,
+              current,
+              recentDetail
+            );
+            setMessages(merged.messages);
+            setHasMore(merged.hasMore);
+            queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
+              sessionMessagesQueryKey,
+              (old) => ({
+                ...(old ?? merged),
+                ...merged,
+                state: state ?? old?.state ?? merged.state,
+              })
+            );
+          } catch {
+            // Best-effort catch-up: the socket remains connected, and the next
+            // explicit refresh/reconnect will retry from the current cache.
+          }
+        })();
         hydrateState(state);
       },
-      [hydrateState, queryClient, sessionMessagesQueryKey]
+      [hydrateState, projectId, queryClient, sessionId, sessionMessagesQueryKey]
     ),
     onAgentCompleted: useCallback(
       (agentCompletedAt: number) => {
@@ -451,23 +478,36 @@ export function useSessionLifecycle(
         if (fingerprint !== lastPollFingerprint) {
           lastPollFingerprint = fingerprint;
           setSession(data.session);
-          setMessages((prev) => mergeMessages(prev, data.messages, 'replace'));
+          const current =
+            queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey) ??
+            ({
+              ...data,
+              messages: messagesRef.current,
+              hasMore: hasMoreRef.current,
+            } as ChatSessionDetailResponse);
+          const merged = await mergeRecentWindowOrRefresh(
+            projectId,
+            sessionId,
+            current,
+            data,
+            abortController.signal
+          );
+          setMessages(merged.messages);
+          setHasMore(merged.hasMore);
           queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
             sessionMessagesQueryKey,
-            (old) =>
-              old
-                ? {
-                    ...data,
-                    messages: mergeMessages(old.messages, data.messages, 'replace'),
-                  }
-                : data
+            (old) => ({
+              ...(old ?? merged),
+              ...merged,
+            })
           );
           if (data.session.task) setTaskEmbed(data.session.task);
         }
         const wakeAttemptFailed =
           sleepingWakePendingRef.current &&
           data.session.status === 'sleeping' &&
-          ['failed', 'cancelled'].includes(data.session.task?.status ?? '');
+          (['failed', 'cancelled'].includes(data.session.task?.status ?? '') ||
+            data.session.attention?.kind === 'wake_failed');
         if (wakeAttemptFailed) {
           sleepingWakePendingRef.current = false;
         }
@@ -630,14 +670,12 @@ export function useSessionLifecycle(
   // Load more (pagination)
   const loadMore = async () => {
     if (!hasMore || loadingMore) return;
-    const firstMessage = messages[0];
-    if (!firstMessage) return;
+    const before = oldestPersistedCursor(messages);
+    if (!before) return;
 
     setLoadingMore(true);
     try {
-      const data = await getChatSession(projectId, sessionId, {
-        before: firstMessage.createdAt,
-      });
+      const data = await getChatSession(projectId, sessionId, { before });
       setMessages((prev) => {
         const merged = mergeMessages(prev, data.messages, 'prepend');
         // Virtuoso's anchor moves by RENDERED ROWS, not messages: a page of tool
@@ -662,39 +700,20 @@ export function useSessionLifecycle(
   // where the target predates the loaded window, so a jump never dead-clicks.
   const loadUntil = useCallback(
     async (targetTimestamp: number) => {
-      let oldest = messagesRef.current[0]?.createdAt ?? Infinity;
-      if (oldest <= targetTimestamp) return;
-      let more = hasMoreRef.current;
-      if (!more) return;
+      const oldest = messagesRef.current[0]?.createdAt ?? Infinity;
+      if (oldest <= targetTimestamp || !hasMoreRef.current) return;
 
       setLoadingMore(true);
       try {
-        let before: number | undefined = oldest === Infinity ? undefined : oldest;
-        const accumulated: ChatMessageResponse[] = [];
-        // Safety bound: never loop unbounded even if the server misreports hasMore.
-        const maxPages =
-          Number.parseInt(import.meta.env.VITE_CHAT_LOAD_UNTIL_MAX_PAGES || '', 10) ||
-          DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES;
-        let pages = 0;
-        while (more && oldest > targetTimestamp && pages++ < maxPages) {
-          const data = await getChatSession(projectId, sessionId, {
-            before,
-            limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
-          });
-          if (data.messages.length === 0) {
-            more = false;
-            break;
-          }
-          accumulated.unshift(...data.messages);
-          const firstMessage = data.messages[0];
-          if (!firstMessage) break; // Unreachable — the length check above guarantees this.
-          oldest = firstMessage.createdAt;
-          before = oldest;
-          more = data.hasMore;
-        }
-        if (accumulated.length > 0) {
+        const history = await fetchHistoryUntil(
+          projectId,
+          sessionId,
+          messagesRef.current,
+          targetTimestamp
+        );
+        if (history.messages.length > 0) {
           setMessages((prev) => {
-            const merged = mergeMessages(prev, accumulated, 'prepend');
+            const merged = mergeMessages(prev, history.messages, 'prepend');
             // Same rendered-row accounting as `loadMore` above.
             const displayRowsAdded = countDisplayRows(merged) - countDisplayRows(prev);
             if (displayRowsAdded > 0) {
@@ -702,9 +721,9 @@ export function useSessionLifecycle(
             }
             return merged;
           });
-          updateCachedMessages(accumulated, 'prepend');
+          updateCachedMessages(history.messages, 'prepend');
         }
-        setHasMore(more);
+        setHasMore(history.hasMore);
       } finally {
         setLoadingMore(false);
       }

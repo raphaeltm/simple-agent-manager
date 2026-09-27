@@ -66,7 +66,6 @@ describe('direct workspace resource inheritance through HTTP and persisted reser
           minMemoryGb: 1,
           minDiskGb: 2,
           exclusiveNode: false,
-          maxCoTenants: 8,
         })
       );
       const app = new Hono<{ Bindings: Env }>();
@@ -116,9 +115,12 @@ describe('direct workspace resource inheritance through HTTP and persisted reser
     }
   );
 
-  it.each([1.5, Number.MAX_SAFE_INTEGER + 1])(
-    'rejects invalid co-tenant count %s before allocation',
-    async (maxCoTenants) => {
+  it.each([
+    ['minVcpu', { minVcpu: 0 }],
+    ['exclusiveNode', { exclusiveNode: 'yes' }],
+  ])(
+    'rejects an invalid %s before allocation',
+    async (field, resourceRequirements) => {
       const f = fixture();
       const app = new Hono<{ Bindings: Env }>();
       registerWorkspaceCreateRoute(app);
@@ -135,15 +137,17 @@ describe('direct workspace resource inheritance through HTTP and persisted reser
           body: JSON.stringify({
             name: 'Invalid workspace',
             projectId: 'project-1',
-            resourceRequirements: { maxCoTenants },
+            resourceRequirements,
           }),
         },
         f.env
       );
 
+      // Invalid known fields short-circuit before any node or workspace row exists and before
+      // any provider/GitHub call is attempted.
       expect(response.status).toBe(400);
       expect(((await response.json()) as { message: string }).message).toContain(
-        'resourceRequirements.maxCoTenants'
+        `resourceRequirements.${field}`
       );
       expect(f.sqlite.prepare('SELECT COUNT(*) AS count FROM workspaces').get()).toEqual({
         count: 0,

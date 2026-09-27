@@ -64,6 +64,19 @@ type ProjectDataExpectedErrorOperation =
  * behavior while returning a serializable assertion value to Vitest.
  */
 export class ProjectDataTestDouble extends ProjectData {
+  /**
+   * Test convenience over the production `searchMessagesWithCoverage` RPC: the same bounded
+   * search, results only. Production callers must use the coverage variant and disclose it.
+   */
+  searchMessages(
+    query: string,
+    sessionId: string | null = null,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
+    return this.searchMessagesWithCoverage(query, sessionId, roles, limit).results;
+  }
+
   async archiveTargetCommitChunkRollbackForTest(
     input: archiveSharding.ArchiveTargetCommitChunkInput
   ): Promise<CapturedExpectedError> {

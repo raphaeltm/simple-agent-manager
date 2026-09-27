@@ -27,7 +27,6 @@ vi.mock('../../../src/services/placement-resolver', () => ({
         memoryMb: 1024,
         diskMb: 10240,
         exclusiveNode: false,
-        maxCoTenants: 1,
         source: 'platform',
         sourceId: 'platform',
         version: 1,

@@ -91,6 +91,29 @@ describe('boundToolMetadataForStorage', () => {
     });
   });
 
+  it('keeps the stable tool name typed tool cards match on', () => {
+    const raw = JSON.stringify({
+      toolCallId: 'tc-typed',
+      title: 'Show design notes',
+      kind: 'fetch',
+      status: 'completed',
+      toolName: 'mcp__sam-mcp__display_from_library',
+      rawInput: { blob: 'z'.repeat(4096) },
+    });
+
+    const result = boundToolMetadataForStorage(raw, {
+      PROJECT_DATA_TOOL_METADATA_MAX_BYTES: '1024',
+    } as Env);
+
+    expect(result.truncated).toBe(true);
+    expect(JSON.parse(result.value ?? '{}')).toMatchObject({
+      storageSafetyTruncated: true,
+      toolCallId: 'tc-typed',
+      title: 'Show design notes',
+      toolName: 'mcp__sam-mcp__display_from_library',
+    });
+  });
+
   it('stores a valid JSON marker for oversized malformed metadata', () => {
     const raw = `{${'x'.repeat(2048)}`;
     const result = boundToolMetadataForStorage(raw, {

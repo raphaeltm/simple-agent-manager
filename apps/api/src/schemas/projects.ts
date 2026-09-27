@@ -55,7 +55,6 @@ export const UpdateProjectSchema = v.object({
   maxDispatchDepth: v.optional(v.nullable(v.number())),
   maxSubTasksPerTask: v.optional(v.nullable(v.number())),
   warmNodeTimeoutMs: v.optional(v.nullable(v.number())),
-  maxWorkspacesPerNode: v.optional(v.nullable(v.number())),
   nodeCpuThresholdPercent: v.optional(v.nullable(v.number())),
   nodeMemoryThresholdPercent: v.optional(v.nullable(v.number())),
   maxTriggers: v.optional(v.nullable(v.number())),

@@ -124,6 +124,46 @@ export async function seedNode(
     .run();
 }
 
+/** Seed a providerless managed VM with exact placement and durable absence proof. */
+export async function seedManagedVmAbsenceProof(nodeId: string, userId: string): Promise<void> {
+  const poolId = `${nodeId}-proof-pool`;
+  const sourceId = `${nodeId}-proof-source`;
+  const credentialId = `${nodeId}-proof-credential`;
+  await env.DATABASE.prepare(
+    `INSERT INTO platform_credentials
+     (id, credential_type, provider, label, encrypted_token, iv, created_by)
+     VALUES (?, 'cloud-provider', 'hetzner', 'proof-credential', 'unused', 'unused', ?)`
+  )
+    .bind(credentialId, userId)
+    .run();
+  await env.DATABASE.prepare(
+    "INSERT INTO capacity_pools (id, scope, owner_user_id, name) VALUES (?, 'user', ?, 'proof-pool')"
+  )
+    .bind(poolId, userId)
+    .run();
+  await env.DATABASE.prepare(
+    `INSERT INTO capacity_sources
+     (id, scope, owner_user_id, source_kind, provider, credential_source,
+      platform_credential_id, credential_reference, credential_version)
+     VALUES (?, 'user', ?, 'cloud-provider-credential', 'hetzner', 'platform', ?, ?, 1)`
+  )
+    .bind(sourceId, userId, credentialId, credentialId)
+    .run();
+  await env.DATABASE.prepare(
+    `UPDATE nodes SET runtime = 'vm', runtime_incarnation_id = 'original',
+    runtime_termination_confirmed_at = datetime('now'), cloud_provider = 'hetzner',
+    node_role = 'workspace', workload_role = 'workspace', provider_instance_type = 'cx23',
+    provider_instance_vcpu_count = 2, provider_instance_memory_mb = 4096,
+    capacity_pool_id = ?, capacity_pool_scope = 'user', capacity_pool_revision = 1,
+    capacity_source_id = ?, capacity_source_generation = 1,
+    capacity_pool_candidate_id = 'proof-candidate', placement_credential_source = 'platform',
+    placement_credential_reference = ?, placement_credential_version = 1,
+    placement_credential_fingerprint = 'proof-fingerprint' WHERE id = ?`
+  )
+    .bind(poolId, sourceId, credentialId, nodeId)
+    .run();
+}
+
 /**
  * Seed a mission into D1. Idempotent. Requires project + user to exist.
  */
@@ -223,7 +263,6 @@ export async function seedWorkspace(
           memoryMb: 1024,
           diskMb: 1024,
           exclusiveNode: false,
-          maxCoTenants: 4,
           source: 'platform',
           sourceId: 'platform',
           version: 1,

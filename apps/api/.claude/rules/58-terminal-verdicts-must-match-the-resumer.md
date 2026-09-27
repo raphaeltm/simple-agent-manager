@@ -12,7 +12,7 @@ The canonical pair in this repo:
 | Role      | Function                                                                         | Signal it reads                 |
 | --------- | -------------------------------------------------------------------------------- | ------------------------------- |
 | Destroyer | `classifyTaskRuntimeLiveness` (`apps/api/src/services/task-runtime-liveness.ts`) | `workspaces.status`             |
-| Resumer   | `loadRecoveryContext` (`apps/api/src/services/session-recovery.ts`)              | `session_snapshots.sleeping_at` |
+| Resumer   | `loadRecoveryContext` (`apps/api/src/services/session-recovery-context.ts`)      | `session_snapshots.sleeping_at` |
 
 **Find the whole resumer before you mirror it.** The restore path is usually more than one
 function, and the one that reads most naturally as "the resumer" is often not the one that

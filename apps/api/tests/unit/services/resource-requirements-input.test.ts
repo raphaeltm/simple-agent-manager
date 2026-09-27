@@ -12,25 +12,27 @@ import {
 } from '../../../src/services/resource-requirements-input';
 
 describe('resource requirements input validation', () => {
-  it('accepts current reservations without deprecated maxCoTenants metadata', () => {
-    expect(
-      parseStoredResolvedReservationJson(
-        JSON.stringify({
-          version: 3,
-          cpuMillis: 250,
-          memoryMb: 256,
-          diskMb: 1_024,
-          exclusiveNode: false,
-          source: 'task',
-          sourceId: 'environment-1',
-        })
-      )
-    ).toMatchObject({
+  it('accepts current reservations and drops the retired maxCoTenants key from legacy rows', () => {
+    const stored = {
+      version: 3,
+      cpuMillis: 250,
+      memoryMb: 256,
+      diskMb: 1_024,
+      exclusiveNode: false,
+      source: 'task',
+      sourceId: 'environment-1',
+    };
+    expect(parseStoredResolvedReservationJson(JSON.stringify(stored))).toMatchObject({
       cpuMillis: 250,
       memoryMb: 256,
       diskMb: 1_024,
       exclusiveNode: false,
     });
+    const legacy = parseStoredResolvedReservationJson(
+      JSON.stringify({ ...stored, version: 2, maxCoTenants: 2 })
+    );
+    expect(legacy).toMatchObject({ cpuMillis: 250, version: 2 });
+    expect(legacy).not.toHaveProperty('maxCoTenants');
   });
 
   it('preserves supported modern fields, explicit false, and disk zero', () => {
@@ -39,8 +41,8 @@ describe('resource requirements input validation', () => {
       minMemoryGb: 16,
       minDiskGb: 0,
       exclusiveNode: false,
-      maxCoTenants: 1,
       legacyNote: 'ignored',
+      maxCoTenants: 3,
     });
 
     expect(result).toEqual({
@@ -48,7 +50,6 @@ describe('resource requirements input validation', () => {
       minMemoryGb: 16,
       minDiskGb: 0,
       exclusiveNode: false,
-      maxCoTenants: 1,
     });
   });
 
@@ -93,8 +94,6 @@ describe('resource requirements input validation', () => {
       { minMemoryGb: Number.NaN },
       { minDiskGb: Number.POSITIVE_INFINITY },
       { exclusiveNode: 'false' },
-      { maxCoTenants: 0 },
-      { maxCoTenants: 1.5 },
       [],
     ]) {
       expect(() => normalizeResourceRequirementsInput(value)).toThrow();

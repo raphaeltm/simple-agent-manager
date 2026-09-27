@@ -9,6 +9,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { requireProjectAccess } from '../../middleware/project-auth';
 import * as projectDataService from '../../services/project-data';
+import { describeRootSearchCoverage } from '../../services/project-data-search-coverage';
 import { getWorkspaceResourceHistory } from '../../services/workspace-resource-history';
 import {
   getMcpLimits,
@@ -303,6 +304,8 @@ export async function handleSearchMessages(
             count: search.results.length,
             query,
             archiveSearch: search.archiveSearch,
+            rootSearch: search.rootSearch,
+            coverageNotes: describeRootSearchCoverage(search.rootSearch),
           },
           null,
           2

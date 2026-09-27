@@ -3,36 +3,36 @@
     "agentType": "claude-code",
     "method": "npm",
     "package": "@agentclientprotocol/claude-agent-acp",
-    "version": "0.73.0",
+    "version": "0.81.2",
     "bin": "claude-agent-acp",
     "npmCompanion": {
       "package": "@anthropic-ai/claude-code",
-      "version": "2.1.260"
+      "version": "2.1.281"
     }
   },
   {
     "agentType": "openai-codex",
     "method": "npm",
     "package": "@agentclientprotocol/codex-acp",
-    "version": "1.10.0",
+    "version": "1.13.1",
     "bin": "codex-acp",
     "npmCompanion": {
       "package": "@openai/codex",
-      "version": "0.153.4"
+      "version": "0.156.1"
     }
   },
   {
     "agentType": "google-gemini",
     "method": "npm",
     "package": "@google/gemini-cli",
-    "version": "0.50.0",
+    "version": "0.61.0",
     "bin": "gemini"
   },
   {
     "agentType": "mistral-vibe",
     "method": "uv-tool",
     "package": "mistral-vibe",
-    "version": "2.19.1",
+    "version": "2.25.8",
     "bin": "vibe-acp",
     "python": "3.12"
   },
@@ -40,7 +40,7 @@
     "agentType": "opencode",
     "method": "npm",
     "package": "opencode-ai",
-    "version": "1.18.27",
+    "version": "1.18.32",
     "bin": "opencode"
   },
   {
@@ -61,7 +61,7 @@
     ],
     "npmCompanion": {
       "package": "@ampcode/cli",
-      "version": "0.0.1783785389-g0da70d"
+      "version": "0.0.1790261352-g2ab14a"
     },
     "postInstallHook": "amp-sdk-patch"
   }

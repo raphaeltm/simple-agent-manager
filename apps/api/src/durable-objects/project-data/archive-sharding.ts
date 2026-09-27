@@ -1,4 +1,6 @@
 // FILE SIZE EXCEPTION: ProjectData terminal archive migration state machine — keeping source intent, target copy/seal, canonical hash, exact-read guards, and final source-delete invariants in one module avoids cross-file transaction coupling during Fable review. See .claude/rules/18-file-size-limits.md
+import type { MessageCursor } from '@simple-agent-manager/shared';
+
 import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import {
@@ -3666,8 +3668,8 @@ export function archiveSourceReadMessages(
   env: Env,
   input: ProjectDataArchiveExactReadInput,
   limit: number,
-  before: number | null,
-  after: number | null,
+  before: MessageCursor | null,
+  after: MessageCursor | null,
   roles: string[] | undefined,
   compact: boolean,
   order: 'asc' | 'desc'
@@ -3771,15 +3773,16 @@ export async function archiveSourceReadArchivedToolPayloads(
   return toolPayloadArchive.listArchivedToolPayloads(sql, env, projectId, input);
 }
 
-export function archiveSourceSearchMessages(
+export function archiveSourceSearchMessagesWithCoverage(
   sql: SqlStorage,
   input: ProjectDataArchiveExactReadInput,
   query: string,
   roles: string[] | null,
-  limit: number
-) {
+  limit: number,
+  bounds: messages.MessageSearchBounds
+): messages.MessageSearchWithCoverage {
   assertSourceExactReadAvailable(sql, input, 'search read');
-  return messages.searchMessages(sql, query, input.sessionId, roles, limit);
+  return messages.searchMessagesWithCoverage(sql, query, input.sessionId, roles, limit, bounds);
 }
 
 export async function archiveTargetReadMessages(

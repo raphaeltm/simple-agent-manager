@@ -350,10 +350,15 @@ describe('task-runner-do service', () => {
         providerInstanceDiskGb: candidate.providerInstanceDiskGb,
       },
     });
-    expect(snapshot).toMatchObject({ providerInstancePriceCurrency: 'EUR', providerInstancePriceHourlyMicros: 8001 });
+    expect(snapshot).toMatchObject({
+      providerInstancePriceCurrency: 'EUR',
+      providerInstancePriceHourlyMicros: 8001,
+    });
     expect(JSON.parse(snapshot!.placementExplanationJson!)).toMatchObject({
-      providerInstancePriceDisplay: '€6.00/mo', providerInstancePriceCurrency: 'EUR',
-      providerInstancePriceMonthlyCents: 501, providerInstancePriceHourlyMicros: 8001,
+      providerInstancePriceDisplay: '€6.00/mo',
+      providerInstancePriceCurrency: 'EUR',
+      providerInstancePriceMonthlyCents: 501,
+      providerInstancePriceHourlyMicros: 8001,
     });
   });
 
@@ -424,8 +429,10 @@ describe('task-runs route uses TaskRunner DO', () => {
     expect(taskRunsSource).not.toContain('initiateTaskRun');
   });
 
-  it('still imports cleanupTaskRun for cleanup endpoint', () => {
-    expect(taskRunsSource).toContain("import { cleanupTaskRun } from '../../services/task-runner'");
+  it('routes the cleanup endpoint through the requested-run cleanup service', () => {
+    expect(taskRunsSource).toContain(
+      "import { cleanupRequestedTaskRun } from '../../services/requested-task-run-cleanup'"
+    );
   });
 
   it('transitions task to queued before starting DO', () => {

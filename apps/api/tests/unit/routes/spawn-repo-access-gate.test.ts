@@ -206,7 +206,6 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
           memoryMb: 1024,
           diskMb: 1024,
           exclusiveNode: false,
-          maxCoTenants: 4,
           source: 'task',
           sourceId: 'direct-workspace-test',
           version: 1,

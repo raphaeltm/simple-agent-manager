@@ -14,6 +14,62 @@ const LONG_REASON =
   'attempts_exhausted:Error: Compact archive R2 deadline exceeded after 3 attempts on migration 67927ce6 ' +
   '(session 1d438cc7, 8,962 messages) — see project_data_archive_migrations for the poisoned row <script>alert(1)</script> 🚨';
 
+const PROBLEM_MIGRATIONS = {
+  migrations: [
+    {
+      migrationId: '67927ce6',
+      projectId: '01KHRJGANBBWGDY1NZ0KVF0D4J',
+      sessionId: '1d438cc7-aaaa-bbbb-cccc-dddddddddddd',
+      state: 'frozen',
+      sourceOwnerName: 'g1:s62',
+      targetOwnerName: 'g1:a0',
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      attemptCount: 3,
+      errorCode: 'compact_archive_deadline_exceeded',
+      errorMessage: LONG_REASON,
+      frozenAt: Date.now() - 86_400_000,
+      poisonedAt: null,
+      updatedAt: Date.now() - 3_600_000,
+    },
+    {
+      migrationId: '6d6f3099',
+      projectId: 'project-frozen',
+      sessionId: '210e8062-1111-2222-3333-444444444444',
+      state: 'poisoned',
+      sourceOwnerName: 'g1:s0',
+      targetOwnerName: 'g1:a1',
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      attemptCount: 5,
+      errorCode: null,
+      errorMessage: null,
+      frozenAt: null,
+      poisonedAt: Date.now() - 2 * 86_400_000,
+      updatedAt: Date.now() - 86_400_000,
+    },
+    {
+      migrationId: 'failed-abc1',
+      projectId: 'project-deleted',
+      sessionId: 'sess-deleted-1',
+      state: 'failed',
+      sourceOwnerName: 'g1:s5',
+      targetOwnerName: 'g1:a2',
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      attemptCount: 1,
+      errorCode: 'copy_chunk_failed',
+      errorMessage:
+        'Copy chunk 3/12 failed: R2 put returned 503 — https://very-long-r2-url.example.com/bucket/path/to/shard/with/many/segments/that/should/wrap-properly-on-mobile.tar.gz',
+      frozenAt: null,
+      poisonedAt: null,
+      updatedAt: Date.now() - 5 * 86_400_000,
+    },
+  ],
+  warnings: [],
+  limit: 25,
+};
+
 const BREAKERS = {
   breakers: [
     {
@@ -129,8 +185,10 @@ async function setupMocks(
   options: {
     breakers?: unknown;
     telemetry?: unknown;
+    problemMigrations?: unknown;
     breakerStatus?: number;
     telemetryStatus?: number;
+    problemMigrationsStatus?: number;
   }
 ) {
   await dismissOnboardingWizard(page);
@@ -147,6 +205,12 @@ async function setupMocks(
     if (path === '/api/github/installations') return respond(200, []);
     if (path === '/api/workspaces') return respond(200, []);
     if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
+    if (path === '/api/admin/project-data/storage/archive-sharding/problem-migrations') {
+      return respond(
+        options.problemMigrationsStatus ?? 200,
+        options.problemMigrations ?? PROBLEM_MIGRATIONS
+      );
+    }
     if (path === '/api/admin/project-data/storage/archive-sharding/circuit-breakers') {
       return respond(options.breakerStatus ?? 200, options.breakers ?? BREAKERS);
     }
@@ -227,6 +291,9 @@ test.describe('AdminStorage', () => {
       if (path.startsWith('/api/provider-catalog'))
         return respondJson(route, 200, { catalogs: [] });
       if (path === '/api/admin/project-data/storage') return respondJson(route, 200, TELEMETRY);
+      if (path === '/api/admin/project-data/storage/archive-sharding/problem-migrations') {
+        return respondJson(route, 200, PROBLEM_MIGRATIONS);
+      }
       if (path === '/api/admin/project-data/storage/archive-sharding/circuit-breakers') {
         return respondJson(route, 200, breakers);
       }
@@ -287,6 +354,116 @@ test.describe('AdminStorage', () => {
       },
     ]);
     await screenshot(page, 'admin-storage-after-close');
+    await assertNoOverflow(page);
+  });
+
+  test('problem migrations with long error messages and multiple states', async ({ page }) => {
+    await setupMocks(page, {});
+    await openStoragePage(page);
+    await expect(page.getByRole('heading', { name: 'Problem migrations' })).toBeVisible();
+    await expect(page.getByTestId('migration-67927ce6')).toBeVisible();
+    await expect(page.getByTestId('migration-6d6f3099')).toBeVisible();
+    await expect(page.getByTestId('migration-failed-abc1')).toBeVisible();
+    await expect(page.getByRole('button', { name: /abandon/i })).toHaveCount(3);
+    await page.getByRole('heading', { name: 'Problem migrations' }).scrollIntoViewIfNeeded();
+    await screenshot(page, 'admin-storage-problem-migrations');
+    await assertNoOverflow(page);
+  });
+
+  test('problem migrations empty state', async ({ page }) => {
+    await setupMocks(page, {
+      problemMigrations: { migrations: [], warnings: [], limit: 25 },
+    });
+    await openStoragePage(page);
+    await expect(page.getByText('No problem migrations.')).toBeVisible();
+    await page.getByRole('heading', { name: 'Problem migrations' }).scrollIntoViewIfNeeded();
+    await screenshot(page, 'admin-storage-problem-migrations-empty');
+    await assertNoOverflow(page);
+  });
+
+  test('abandon dialog shows migration details and is usable on mobile', async ({ page }) => {
+    await setupMocks(page, {});
+    await openStoragePage(page);
+    await page.getByTestId('migration-67927ce6').getByRole('button', { name: /abandon/i }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('heading', { name: 'Abandon migration' })).toBeVisible();
+    await expect(dialog.getByText('67927ce6')).toBeVisible();
+    await expect(dialog.getByText('1d438cc7-aaaa-bbbb-cccc-dddddddddddd')).toBeVisible();
+    await screenshot(page, 'admin-storage-abandon-dialog');
+    await assertNoOverflow(page);
+  });
+
+  test('abandoning a migration posts the correct URL and body and refreshes the list', async ({
+    page,
+  }) => {
+    let migrations = structuredClone(PROBLEM_MIGRATIONS);
+    const postBodies: Array<{ path: string; body: unknown }> = [];
+    await dismissOnboardingWizard(page);
+    await page.route('**/api/**', async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path === '/api/auth/get-session') return respondJson(route, 200, ADMIN_USER);
+      if (path === '/api/dashboard/active-tasks') return respondJson(route, 200, { tasks: [] });
+      if (path === '/api/trial-status') return respondJson(route, 200, { isTrial: false });
+      if (path === '/api/projects') return respondJson(route, 200, { projects: [], total: 0 });
+      if (path === '/api/notifications/unread-count') return respondJson(route, 200, { count: 0 });
+      if (path === '/api/notifications') {
+        return respondJson(route, 200, { notifications: [], unreadCount: 0, nextCursor: null });
+      }
+      if (path.startsWith('/api/credentials')) return respondJson(route, 200, []);
+      if (path === '/api/github/installations') return respondJson(route, 200, []);
+      if (path === '/api/workspaces') return respondJson(route, 200, []);
+      if (path.startsWith('/api/provider-catalog'))
+        return respondJson(route, 200, { catalogs: [] });
+      if (path === '/api/admin/project-data/storage') return respondJson(route, 200, TELEMETRY);
+      if (path === '/api/admin/project-data/storage/archive-sharding/circuit-breakers') {
+        return respondJson(route, 200, BREAKERS);
+      }
+      if (path === '/api/admin/project-data/storage/archive-sharding/problem-migrations') {
+        return respondJson(route, 200, migrations);
+      }
+      const abandonMatch = path.match(
+        /^\/api\/admin\/project-data\/storage\/([^/]+)\/archive-sharding\/migrations\/([^/]+)\/abandon$/
+      );
+      if (abandonMatch && request.method() === 'POST') {
+        const body = request.postDataJSON() as { reason: string };
+        postBodies.push({ path, body });
+        migrations = {
+          ...migrations,
+          migrations: migrations.migrations.filter(
+            (m) => m.migrationId !== decodeURIComponent(abandonMatch[2])
+          ),
+        };
+        return respondJson(route, 200, {
+          result: {
+            migrationId: abandonMatch[2],
+            journalState: 'operator_abandoned',
+          },
+        });
+      }
+      return respondJson(route, 200, {});
+    });
+
+    await openStoragePage(page);
+    const frozenCard = page.getByTestId('migration-67927ce6');
+    await frozenCard.getByRole('button', { name: /abandon/i }).click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    await dialog.getByLabel('Reason').fill('Stuck on g1:s62; abandon to unblock drain');
+    await dialog.getByRole('button', { name: /^abandon migration$/i }).click();
+
+    await expect(dialog).toHaveCount(0);
+    await expect(frozenCard).toHaveCount(0);
+    expect(postBodies).toEqual([
+      {
+        path: '/api/admin/project-data/storage/01KHRJGANBBWGDY1NZ0KVF0D4J/archive-sharding/migrations/67927ce6/abandon',
+        body: { reason: 'Stuck on g1:s62; abandon to unblock drain' },
+      },
+    ]);
+    await screenshot(page, 'admin-storage-after-abandon');
     await assertNoOverflow(page);
   });
 });

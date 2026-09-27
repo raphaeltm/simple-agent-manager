@@ -24,10 +24,12 @@ import { deriveAgentActivityState } from '../../../src/services/agent-activity';
 import { failAndRestoreSessionRecoveryHandoff } from '../../../src/services/session-recovery-authority';
 import {
   claimSessionSnapshotRecovery,
-  completeSessionSnapshotRecovery,
-  failSessionSnapshotRecovery,
   hasRestorableSleepingSessionSnapshot,
 } from '../../../src/services/session-snapshot-recovery-lifecycle';
+import {
+  completeSessionSnapshotRecovery,
+  failSessionSnapshotRecovery,
+} from '../../../src/services/session-snapshot-wake-outcome';
 import { isSessionResumable } from '../../../src/services/task-runtime-liveness';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 

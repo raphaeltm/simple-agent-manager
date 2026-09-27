@@ -14,6 +14,10 @@ provision/manage VMs without coupling to a specific cloud vendor.
 | `src/types.ts` | `Provider` interface, `VMConfig`, `NativeVMConfig`, `VMInstance`, shared types |
 | `src/native-vm-config.ts` | Native VM request resolver and the named legacy-size compatibility adapter |
 | `src/hetzner.ts` | Hetzner Cloud provider implementation |
+| `src/hetzner-metadata.ts` | Hetzner constants and error classification (`classifyHetznerError`, `mapHetznerProviderError`) |
+| `src/hetzner-account-limits.ts` | Which Hetzner account quota a 403 hit (servers, shared or dedicated vCPU cores) |
+| `src/hetzner-server-create.ts` | `createVM`'s capacity-retry loop and placement fallback, delegated to by `HetznerProvider` |
+| `src/hetzner-volumes.ts` | Hetzner block-volume operations, delegated to by `HetznerProvider` |
 | `src/scaleway.ts` | Scaleway provider implementation |
 | `src/gcp.ts` | GCP provider (partial/placeholder) |
 | `src/provider-fetch.ts` | Shared HTTP fetch utilities for provider APIs |

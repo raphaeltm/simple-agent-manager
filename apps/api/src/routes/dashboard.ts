@@ -1,12 +1,13 @@
 /**
  * Dashboard API routes.
  *
- * Provides aggregated views of active tasks with session enrichment
- * from per-project Durable Objects.
+ * Serves the dashboard's Active Tasks list: the user's most recently active
+ * tasks, enriched with session data from per-project Durable Objects.
  */
 import {
   type DashboardActiveTasksResponse,
   type DashboardTask,
+  DEFAULT_DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT,
   DEFAULT_DASHBOARD_ACTIVE_TASK_LIMIT,
   DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS,
   type TaskExecutionStep,
@@ -15,6 +16,7 @@ import {
 import { Hono } from 'hono';
 
 import type { Env } from '../env';
+import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
@@ -25,6 +27,25 @@ const dashboardRoutes = new Hono<{ Bindings: Env }>();
 
 dashboardRoutes.use('/*', requireAuth(), requireApproved());
 
+/**
+ * When a task last did something: its newest message or, before it has one,
+ * when it started or was submitted. Ranking on messages alone would bury a
+ * task submitted a moment ago beneath every dormant session that ever spoke.
+ */
+function lastActivityAt(task: DashboardTask): number {
+  const submittedAt = Date.parse(task.startedAt ?? task.createdAt);
+  return Math.max(task.lastMessageAt ?? 0, Number.isFinite(submittedAt) ? submittedAt : 0);
+}
+
+/** The `limit` most recently active tasks, newest first; ties break on id. */
+function mostRecentlyActive(tasks: DashboardTask[], limit: number): DashboardTask[] {
+  return tasks
+    .map((task) => ({ task, activityAt: lastActivityAt(task) }))
+    .sort((a, b) => b.activityAt - a.activityAt || a.task.id.localeCompare(b.task.id))
+    .slice(0, limit)
+    .map(({ task }) => task);
+}
+
 dashboardRoutes.get('/active-tasks', async (c) => {
   const userId = getUserId(c);
 
@@ -32,15 +53,28 @@ dashboardRoutes.get('/active-tasks', async (c) => {
     c.env.DASHBOARD_INACTIVE_THRESHOLD_MS,
     DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS
   );
-  const activeTaskLimit = parsePositiveInt(
+  const displayLimit = parsePositiveInt(
     c.env.DASHBOARD_ACTIVE_TASK_LIMIT,
     DEFAULT_DASHBOARD_ACTIVE_TASK_LIMIT
   );
+  // Each project's candidates are resolved by one `IN (...)` lookup in its
+  // Durable Object, and Cloudflare SQL rejects a statement's 101st bound parameter.
+  const candidateLimit = Math.min(
+    parsePositiveInt(
+      c.env.DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT,
+      DEFAULT_DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT
+    ),
+    D1_MAX_BOUND_PARAMETERS
+  );
 
+  // Message recency lives in each project's Durable Object, not in D1, so every
+  // candidate is enriched and ranked before the display limit applies. Capping
+  // this read instead would keep the most recently *started* tasks and drop an
+  // older conversation that is still in use.
   const rows = await listAgentActivityTasks(c.env, {
     userId,
     activeOnly: true,
-    limit: activeTaskLimit,
+    limit: candidateLimit,
   });
 
   if (rows.length === 0) {
@@ -65,9 +99,11 @@ dashboardRoutes.get('/active-tasks', async (c) => {
     Array.from(tasksByProject.entries()).map(async ([projectId, tasks]) => {
       const taskIds = tasks.map((t) => t.id);
       const sessions = await projectDataService.getSessionsByTaskIds(c.env, projectId, taskIds);
+      // Sessions arrive most recently updated first, so a task's first session is
+      // the one it is on now; a later, older one must not overwrite it.
       for (const session of sessions) {
         const taskId = session.taskId as string;
-        if (taskId) {
+        if (taskId && !sessionMap.has(taskId)) {
           sessionMap.set(taskId, {
             sessionId: session.id as string,
             lastMessageAt: (session.lastMessageAt as number) ?? null,
@@ -110,17 +146,9 @@ dashboardRoutes.get('/active-tasks', async (c) => {
     };
   });
 
-  // Sort by lastMessageAt descending (tasks with messages first, then by createdAt)
-  dashboardTasks.sort((a, b) => {
-    if (a.lastMessageAt != null && b.lastMessageAt != null) {
-      return b.lastMessageAt - a.lastMessageAt;
-    }
-    if (a.lastMessageAt != null) return -1;
-    if (b.lastMessageAt != null) return 1;
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-  });
-
-  return c.json({ tasks: dashboardTasks } satisfies DashboardActiveTasksResponse);
+  return c.json({
+    tasks: mostRecentlyActive(dashboardTasks, displayLimit),
+  } satisfies DashboardActiveTasksResponse);
 });
 
 export { dashboardRoutes };

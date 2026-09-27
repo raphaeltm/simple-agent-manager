@@ -49,14 +49,15 @@ vi.mock('../../../src/services/jwt', () => ({
 }));
 
 vi.mock('../../../src/services/limits', () => ({
-  getRuntimeLimits: vi.fn(() => ({ maxNodes: 10, maxWorkspacesPerNode: 5, canCreateNode: true })),
+  getRuntimeLimits: vi.fn(() => ({ maxNodes: 10, canCreateNode: true })),
 }));
 
 vi.mock('../../../src/services/telemetry', () => ({
   recordNodeRoutingMetric: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
 }));
 

@@ -395,8 +395,8 @@ describe('deployment native placement SQL', () => {
 
   it.each([
     { source: 'unknown' },
-    { version: 2, maxCoTenants: null },
-    { version: 3, maxCoTenants: 0 },
+    { version: 2, exclusiveNode: 'yes' },
+    { version: 3, cpuMillis: 0 },
   ])(
     'fails closed when an occupied reservation violates the canonical contract: %j',
     async (bad) => {

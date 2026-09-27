@@ -102,8 +102,6 @@ describe('MCP dispatch_task resource requirements input', () => {
       { minMemoryGb: Number.NaN },
       { minDiskGb: Number.POSITIVE_INFINITY },
       { exclusiveNode: 'false' },
-      { maxCoTenants: 0 },
-      { maxCoTenants: 1.5 },
       [],
     ]) {
       const result = parseDispatchTaskParams(

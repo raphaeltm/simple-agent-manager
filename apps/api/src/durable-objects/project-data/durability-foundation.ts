@@ -16,6 +16,7 @@ import * as delivery from './prompt-delivery';
 import { runPromptDeliveryClaim } from './prompt-delivery-runner';
 import * as sessionState from './session-state';
 import type { Env } from './types';
+import { raiseSessionWakeFailure } from './wake-failure';
 
 const log = createModuleLogger('project_data.durability_foundation');
 
@@ -317,6 +318,25 @@ export function processPromptDeliveryAlarm(
   try {
     const config = resolveDurableExecutionConfig(env);
     if (!config.deliveryEnabled) return;
+    const expired = hooks.transactionSync(() => delivery.expireDuePromptDeliveries(sql, config));
+    if (expired.expiredWakeFailures.length > 0) {
+      for (const wakeFailure of expired.expiredWakeFailures) {
+        raiseSessionWakeFailure(
+          sql,
+          {
+            sessionId: wakeFailure.targetSessionId,
+            taskId: wakeFailure.sourceTaskId,
+            deliveryId: wakeFailure.deliveryId,
+            reason: wakeFailure.terminalReason,
+            detail:
+              wakeFailure.lastError ??
+              'SAM retried the wake until the delivery expired, but the session did not wake.',
+          },
+          hooks.broadcastEvent
+        );
+      }
+      hooks.scheduleSummarySync();
+    }
     const claims = hooks.transactionSync(() => delivery.claimDuePromptDeliveries(sql, config));
     const adapter = new DefaultVmPromptDeliveryAdapter(env as unknown as import('../../env').Env);
     for (const claim of claims) {
@@ -327,6 +347,7 @@ export function processPromptDeliveryAlarm(
           broadcastEvent: hooks.broadcastEvent,
           armIdleCleanup: hooks.armIdleCleanup,
           nudgeDeliveries: hooks.nudgeDeliveries,
+          scheduleSummarySync: hooks.scheduleSummarySync,
         }).catch((error) => {
           log.error('alarm.prompt_delivery_claim_failed', {
             messageId: claim.message.id,

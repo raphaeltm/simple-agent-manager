@@ -199,7 +199,6 @@ export function ScalingSettings({
   const nodeParams = SCALING_PARAMS.filter((p) =>
     [
       'warmNodeTimeoutMs',
-      'maxWorkspacesPerNode',
       'nodeCpuThresholdPercent',
       'nodeMemoryThresholdPercent',
     ].includes(p.key)

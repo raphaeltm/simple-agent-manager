@@ -24,6 +24,7 @@ import {
   reconciliationIdleMs,
   reconciliationProbeMaxAttempts,
 } from './reconciliation-thresholds';
+import { freshRuntimeWorkProgressAt } from './runtime-work-progress';
 import type { Env } from './types';
 
 const log = createModuleLogger('reconciliation');
@@ -45,6 +46,9 @@ const SessionStateRowSchema = v.object({
   activity: v.nullable(v.string()),
   activity_at: v.nullable(v.number()),
   prompt_started_at: v.nullable(v.number()),
+  runtime_work_state: v.nullable(v.string()),
+  runtime_work_progress_at: v.nullable(v.number()),
+  runtime_work_updated_at: v.nullable(v.number()),
 });
 
 interface LocalCandidateRow {
@@ -242,7 +246,9 @@ function resolvePromptAction(
   const stateRow = parseRowOrNull(
     sql
       .exec(
-        `SELECT activity, activity_at, prompt_started_at FROM session_state WHERE session_id = ?`,
+        `SELECT activity, activity_at, prompt_started_at,
+                runtime_work_state, runtime_work_progress_at, runtime_work_updated_at
+         FROM session_state WHERE session_id = ?`,
         acpSessionId
       )
       .toArray()[0],
@@ -258,7 +264,18 @@ function resolvePromptAction(
     deferReconciliationCandidateUntil(sql, sessionId, promptStartedAt + softPromptMs);
     return null;
   }
-  const action = promptAgeMs >= hardPromptMs ? 'cancel_prompt' : 'observe_prompt';
+  const hasProgress =
+    freshRuntimeWorkProgressAt(
+      {
+        runtimeWorkState: stateRow.runtime_work_state,
+        runtimeWorkProgressAt: stateRow.runtime_work_progress_at,
+        runtimeWorkUpdatedAt: stateRow.runtime_work_updated_at,
+      },
+      now,
+      hardPromptMs,
+      promptStartedAt
+    ) !== null;
+  const action = promptAgeMs >= hardPromptMs && !hasProgress ? 'cancel_prompt' : 'observe_prompt';
   return { action, promptStartedAt, promptAgeMs };
 }
 

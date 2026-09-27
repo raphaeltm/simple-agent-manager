@@ -25,7 +25,7 @@ const METADATA_READERS = [
     'maps a concrete offering back to a historical candidate id to preserve user membership edits',
   ],
   [
-    'apps/api/src/services/placement-resolver.ts',
+    'apps/api/src/services/placement-field-resolution.ts',
     'resolveVmSize',
     'collects the deprecated request label from its original request layers',
   ],

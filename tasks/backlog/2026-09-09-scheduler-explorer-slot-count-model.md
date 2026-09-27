@@ -28,12 +28,12 @@ ask for, and the two posts teach different lessons.
    post's scenarios are tuned around 2 slots and would all need retuning.
 2. Keep the slot model but relabel it explicitly as a simplification, with a sentence pointing at
    the aggregate model and the newer post. Cheap, honest, leaves the diagram intact.
-3. Retire the slot concept from the prose only, and have the lab show the co-tenant cap (which IS
-   real — `PLATFORM_RESOURCE_DEFAULTS.maxCoTenants = 4`) rather than an invented 2-slot limit.
-
-Option 3 is probably the best value: the co-tenant cap is a genuine count-based limit that exists
-alongside the resource budgets, so the lab keeps a countable mechanic without teaching that counts
-are how capacity works.
+3. ~~Retire the slot concept from the prose only, and have the lab show the co-tenant cap.~~
+   **No longer possible (2026-09-25):** `maxCoTenants` and `MAX_WORKSPACES_PER_NODE` were removed
+   from SAM entirely (task `2026-09-25-remove-legacy-per-node-workspace-caps`). There is no
+   count-based capacity mechanic left to name. Only options 1 and 2 remain; the placement explorer
+   (`components/placement/`) already models admission as resource budgets plus exclusivity and is
+   the reference for option 1.
 
 ## Acceptance criteria
 

@@ -10,6 +10,7 @@ import {
   finishSleepingWorkspaceComputeCleanup,
   markWorkspaceNodeWarmIfEmpty,
 } from '../services/session-sleep';
+import { chatSessionTaskOwnerJoins } from '../services/session-sleep-task-owner';
 import { markSessionSnapshotSleeping } from '../services/session-snapshot-sleep-lifecycle';
 import { sessionSleepInFlightMaxAgeMs } from '../services/session-snapshot-sleep-predicate';
 
@@ -27,7 +28,8 @@ export interface SessionSleepLifecycleRepairStats {
 async function projectDataSessionAlreadyClosedForSleep(
   env: Env,
   projectId: string,
-  chatSessionId: string
+  chatSessionId: string,
+  taskStatus: string | null
 ): Promise<boolean> {
   const session = await projectDataService.getSession(env, projectId, chatSessionId).catch((error) => {
     log.warn('session_sleep_lifecycle_repair.project_data_status_failed', {
@@ -38,7 +40,13 @@ async function projectDataSessionAlreadyClosedForSleep(
     return null;
   });
   const status = typeof session?.status === 'string' ? session.status : null;
-  return status === 'sleeping' || status === 'stopped';
+  // A failed task's failed session is closed too: a terminal reconciler can fail
+  // it after its preservation sleep passed the point of no return, and the sleep
+  // must still finish its teardown rather than hold the runtime at `stopping`.
+  // Scoped to failed tasks: any other task's failed session keeps its handling.
+  return (
+    status === 'sleeping' || status === 'stopped' || (status === 'failed' && taskStatus === 'failed')
+  );
 }
 
 function repairBatchSize(env: Env): number {
@@ -66,6 +74,7 @@ export async function runSessionSleepLifecycleRepair(
 ): Promise<SessionSleepLifecycleRepairStats> {
   const db = drizzle(env.DATABASE, { schema });
   const cutoff = new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString();
+  const snapshotChatOwner = chatSessionTaskOwnerJoins(schema.sessionSnapshots.chatSessionId);
   const rows = await db
     .select({
       snapshotId: schema.sessionSnapshots.id,
@@ -77,26 +86,15 @@ export async function runSessionSleepLifecycleRepair(
       nodeRole: schema.nodes.nodeRole,
       runtime: schema.sessionSnapshots.runtime,
       taskId: schema.tasks.id,
+      taskStatus: schema.tasks.status,
       warmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
     })
     .from(schema.sessionSnapshots)
     .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.sessionSnapshots.workspaceId))
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.sessionSnapshots.nodeId))
     .leftJoin(schema.projects, eq(schema.projects.id, schema.sessionSnapshots.projectId))
-    .leftJoin(
-      schema.sessionSummaries,
-      eq(schema.sessionSummaries.id, schema.sessionSnapshots.chatSessionId)
-    )
-    .leftJoin(
-      schema.tasks,
-      or(
-        eq(schema.tasks.id, schema.sessionSummaries.taskId),
-        and(
-          isNull(schema.sessionSummaries.taskId),
-          eq(schema.tasks.chatSessionId, schema.sessionSnapshots.chatSessionId)
-        )
-      )
-    )
+    .leftJoin(schema.sessionSummaries, snapshotChatOwner.summary)
+    .leftJoin(schema.tasks, snapshotChatOwner.task)
     .where(
       and(
         isNull(schema.sessionSnapshots.sleepingAt),
@@ -166,7 +164,8 @@ export async function runSessionSleepLifecycleRepair(
         const alreadyClosed = await projectDataSessionAlreadyClosedForSleep(
           env,
           row.projectId,
-          row.chatSessionId
+          row.chatSessionId,
+          row.taskStatus
         );
         if (!alreadyClosed) {
           stats.projectDataErrors++;

@@ -114,6 +114,7 @@ export function getSessionMode(session: ChatSessionListItem): SessionMode {
 /** Attention state derived from attention markers and task/session lifecycle. */
 export type AttentionState =
   | 'needs_input'
+  | 'wake_failed'
   | 'error'
   | 'active'
   | 'idle'
@@ -129,6 +130,7 @@ export type AttentionState =
 export function getAttentionState(session: ChatSessionResponse): AttentionState {
   // 1. Durable attention markers take highest precedence
   if (session.attention?.kind === 'needs_input') return 'needs_input';
+  if (session.attention?.kind === 'wake_failed') return 'wake_failed';
 
   // Sleeping is a resumable lifecycle state, even when the task that produced
   // the latest turn is complete.
@@ -158,7 +160,7 @@ export function getAttentionState(session: ChatSessionResponse): AttentionState 
 
 /** Whether a session's attention state should be treated as high-priority. */
 export function isHighPriorityAttention(state: AttentionState): boolean {
-  return state === 'needs_input' || state === 'error';
+  return state === 'needs_input' || state === 'wake_failed' || state === 'error';
 }
 
 /**
@@ -177,6 +179,11 @@ export const ATTENTION_ICON: Record<
     icon: HelpCircle,
     color: 'var(--sam-color-warning, #f59e0b)',
     label: 'Needs input',
+  },
+  wake_failed: {
+    icon: AlertCircle,
+    color: 'var(--sam-color-danger, #ef4444)',
+    label: 'Wake failed',
   },
   error: { icon: AlertCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Error' },
   active: { icon: Loader2, color: 'var(--sam-color-success)', label: 'Running' },

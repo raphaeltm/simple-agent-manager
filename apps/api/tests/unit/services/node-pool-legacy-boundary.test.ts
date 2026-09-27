@@ -536,7 +536,7 @@ describe('node-pool metadata exemptions preserve real authority detection', () =
       'return input.machineSize;',
     ],
     [
-      'apps/api/src/services/placement-resolver.ts',
+      'apps/api/src/services/placement-field-resolution.ts',
       'resolveVmSize',
       'return input.vmSizeOverride ?? fallback;',
     ],

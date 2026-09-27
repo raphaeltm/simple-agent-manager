@@ -18,7 +18,7 @@ import {
   recordAcpActivityAdmissionSuccess,
   type WaitUntilFn,
 } from './acp-activity-admission';
-import { isTransientDurableObjectError } from './durable-object-retry';
+import { isRetryableForIdempotentDurableObjectOperation } from './durable-object-retry';
 import { nodeStatusTerminatesCallbacks } from './node-callback-auth';
 import * as projectDataService from './project-data';
 import { cancelScheduledSessionSleep } from './session-snapshots';
@@ -278,7 +278,9 @@ export async function persistIntermediateActivity(input: {
     });
     return 'persisted';
   } catch (err) {
-    if (!isTransientDurableObjectError(err)) throw err;
+    // Idempotent report: an ambiguous outcome (CPU reset, lost connection) is coalesced and
+    // re-sent with the latest state rather than failed back to a retrying VM.
+    if (!isRetryableForIdempotentDurableObjectOperation(err)) throw err;
     if (!input.config.enabled) throw err;
     coalesceAcpActivityAfterProjectDataTransient({
       env: input.env,
@@ -350,7 +352,7 @@ export async function flushCoalescedAcpActivity(
     });
     return { action: 'flushed' };
   } catch (err) {
-    if (isTransientDurableObjectError(err)) {
+    if (isRetryableForIdempotentDurableObjectOperation(err)) {
       return { action: 'retry', reason: 'project_data_transient' };
     }
     if (err instanceof AppError && err.statusCode === 410) {

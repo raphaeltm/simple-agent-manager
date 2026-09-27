@@ -4296,7 +4296,6 @@ describe('default capacity pool creation', () => {
             minMemoryGb: 2,
             minDiskGb: 20,
             exclusiveNode: false,
-            maxCoTenants: 4,
           },
         })
       );
@@ -4328,7 +4327,6 @@ describe('default capacity pool creation', () => {
           minMemoryGb: 4,
           minDiskGb: 40,
           exclusiveNode: false,
-          maxCoTenants: 4,
         })
       );
 
@@ -4341,21 +4339,18 @@ describe('default capacity pool creation', () => {
             minMemoryGb: 3,
             minDiskGb: 4,
             exclusiveNode: false,
-            maxCoTenants: 5,
           },
           medium: {
             minVcpu: 3,
             minMemoryGb: 4,
             minDiskGb: 5,
             exclusiveNode: false,
-            maxCoTenants: 4,
           },
           large: {
             minVcpu: 4,
             minMemoryGb: 5,
             minDiskGb: 6,
             exclusiveNode: false,
-            maxCoTenants: 3,
           },
         }),
         CAPACITY_POOL_SELECTION_SETTINGS_JSON: JSON.stringify({
@@ -4367,7 +4362,6 @@ describe('default capacity pool creation', () => {
           minMemoryGb: 10,
           minDiskGb: 0,
           exclusiveNode: false,
-          maxCoTenants: 2,
         }),
       } as Env
     );
@@ -4378,7 +4372,6 @@ describe('default capacity pool creation', () => {
       minMemoryGb: 10,
       minDiskGb: 0,
       exclusiveNode: false,
-      maxCoTenants: 2,
     });
     expect(result.placementSettings.selectionWeights).toEqual({
       priority: 2,
@@ -4415,7 +4408,6 @@ describe('default capacity pool creation', () => {
           minMemoryGb: 99,
           minDiskGb: 99,
           exclusiveNode: true,
-          maxCoTenants: 99,
         })
       );
 
@@ -4428,21 +4420,18 @@ describe('default capacity pool creation', () => {
             minMemoryGb: 3,
             minDiskGb: 4,
             exclusiveNode: false,
-            maxCoTenants: 5,
           },
           medium: {
             minVcpu: 3,
             minMemoryGb: 4,
             minDiskGb: 5,
             exclusiveNode: false,
-            maxCoTenants: 4,
           },
           large: {
             minVcpu: 4,
             minMemoryGb: 5,
             minDiskGb: 6,
             exclusiveNode: false,
-            maxCoTenants: 3,
           },
         }),
         CAPACITY_POOL_SELECTION_SETTINGS_JSON: JSON.stringify({
@@ -4454,7 +4443,6 @@ describe('default capacity pool creation', () => {
           minMemoryGb: 10,
           minDiskGb: 0,
           exclusiveNode: false,
-          maxCoTenants: 2,
         }),
       } as Env
     );

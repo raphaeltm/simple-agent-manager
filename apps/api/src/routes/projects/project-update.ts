@@ -66,7 +66,6 @@ export function registerProjectUpdateRoute(crudRoutes: Hono<{ Bindings: Env }>):
       'maxDispatchDepth',
       'maxSubTasksPerTask',
       'warmNodeTimeoutMs',
-      'maxWorkspacesPerNode',
       'nodeCpuThresholdPercent',
       'nodeMemoryThresholdPercent',
       'maxTriggers',
@@ -346,10 +345,6 @@ export function registerProjectUpdateRoute(crudRoutes: Hono<{ Bindings: Env }>):
           body.warmNodeTimeoutMs === undefined
             ? existing.warmNodeTimeoutMs
             : (body.warmNodeTimeoutMs ?? null),
-        maxWorkspacesPerNode:
-          body.maxWorkspacesPerNode === undefined
-            ? existing.maxWorkspacesPerNode
-            : (body.maxWorkspacesPerNode ?? null),
         nodeCpuThresholdPercent:
           body.nodeCpuThresholdPercent === undefined
             ? existing.nodeCpuThresholdPercent

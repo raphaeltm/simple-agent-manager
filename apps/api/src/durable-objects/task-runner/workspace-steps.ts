@@ -236,7 +236,6 @@ async function createAndProvisionWorkspace(
     log.warn('task_runner_do.workspace_placement_lost', {
       taskId: state.taskId,
       nodeId,
-      maxWorkspaces: admissionPolicy.maxWorkspaces,
       cpuShareBudgetPercent: admissionPolicy.cpuShareBudgetPercent,
       hostMemoryReserveMb: admissionPolicy.hostMemoryReserveMb,
       diskPressureThresholdPercent: admissionPolicy.diskPressureThresholdPercent,

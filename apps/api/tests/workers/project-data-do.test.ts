@@ -5,9 +5,9 @@
  * exercising real SQLite storage, DO lifecycle, and migrations.
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/seed-d1';
+import { seedInstallation, seedProject, seedTask, seedUser, seedWorkspace } from './helpers/seed-d1';
 import {
   captureProjectDataExpectedError,
   type ProjectDataTestDouble,
@@ -190,6 +190,85 @@ describe('ProjectData Durable Object', () => {
         })
       );
     });
+
+    it('records and shows a refused wake after a sleeping Instant workspace is deleted', async () => {
+      const suffix = crypto.randomUUID();
+      const projectId = `wake-failure-project-${suffix}`;
+      const userId = `wake-failure-user-${suffix}`;
+      const installationId = `wake-failure-installation-${suffix}`;
+      const workspaceId = `wake-failure-workspace-${suffix}`;
+      const deliveryId = `wake-failure-delivery-${suffix}`;
+      await seedUser(userId);
+      await seedInstallation(installationId, userId);
+      await seedProject(projectId, userId, installationId);
+      await seedWorkspace(workspaceId, null, userId, { projectId, status: 'sleeping' });
+
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      const sessionId = await stub.createSession(workspaceId, 'Deleted Instant wake');
+      expect(await stub.sleepSession(sessionId)).toBe(true);
+      await env.DATABASE.prepare(
+        `INSERT INTO session_snapshots
+           (id, project_id, workspace_id, user_id, chat_session_id, runtime, status,
+            degradation, manifest_r2_key, expires_at, sleeping_at, sleep_status,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'cf-container', 'available', 'none', ?, ?, ?, 'sleeping', ?, ?)`
+      )
+        .bind(
+          `wake-failure-snapshot-${suffix}`,
+          projectId,
+          workspaceId,
+          userId,
+          sessionId,
+          `snapshots/${sessionId}/manifest.json`,
+          '2099-01-01T00:00:00.000Z',
+          new Date().toISOString(),
+          new Date().toISOString(),
+          new Date().toISOString()
+        )
+        .run();
+      await env.DATABASE.prepare('DELETE FROM workspaces WHERE id = ?').bind(workspaceId).run();
+
+      await stub.acceptPromptDelivery({
+        deliveryId,
+        targetSessionId: sessionId,
+        displayContent: 'Wake this conversation',
+        deliveryContent: 'Wake this conversation',
+        senderType: 'human',
+        senderId: userId,
+        messageClass: 'deliver',
+        sourceKind: 'user_followup',
+        ttlMs: 60_000,
+      });
+      await runInDurableObject(stub, async (instance) => {
+        await instance.alarmWithDurablePromptDelivery();
+      });
+
+      await vi.waitFor(async () => {
+        const snapshot = await stub.getDurableExecutionSnapshot(sessionId);
+        expect(snapshot.deliveries).toContainEqual(
+          expect.objectContaining({
+            id: deliveryId,
+            deliveryState: 'failed',
+            terminalReason: 'wake_refused',
+          })
+        );
+      });
+      const snapshot = await env.DATABASE.prepare(
+        'SELECT recovery_error FROM session_snapshots WHERE chat_session_id = ?'
+      )
+        .bind(sessionId)
+        .first<{ recovery_error: string | null }>();
+      expect(snapshot?.recovery_error).toContain('sleeping container runtime is gone');
+      expect(await stub.getSessionAttentionSummary(sessionId)).toMatchObject({
+        kind: 'wake_failed',
+        reason: 'wake_refused',
+      });
+      const { messages } = await stub.getMessages(sessionId, 10);
+      expect(messages.filter((message) => message.role === 'system')).toEqual([
+        expect.objectContaining({ content: expect.stringContaining('Wake failed:') }),
+      ]);
+    });
   });
 
   describe('durable task waits', () => {
@@ -257,16 +336,28 @@ describe('ProjectData Durable Object', () => {
       const wait = await stub.getTaskWait(registered.subscription!.id);
       expect(wait).toMatchObject({ state: 'resolved', resolutionReason: 'condition_met' });
       const { messages } = await stub.getMessages(parentSessionId, 10);
-      expect(messages).toHaveLength(1);
-      expect(messages[0]!.content).toContain('wait_for_subtasks subscription resolved');
-      expect(messages[0]!.content).not.toContain('First child finished');
-      expect(messages[0]!.content).not.toContain('Second child failed safely');
+      const wakeMessages = messages.filter((message) =>
+        message.content.includes('wait_for_subtasks subscription resolved')
+      );
+      expect(wakeMessages).toHaveLength(1);
+      expect(wakeMessages[0]!.content).not.toContain('First child finished');
+      expect(wakeMessages[0]!.content).not.toContain('Second child failed safely');
+      await vi.waitFor(async () => {
+        const latest = await stub.getMessages(parentSessionId, 10);
+        expect(latest.messages.some((message) => message.content.includes('Wake failed:'))).toBe(
+          true
+        );
+      });
       const snapshot = await stub.getDurableExecutionSnapshot(parentSessionId);
       expect(snapshot.deliveries).toHaveLength(1);
       expect(snapshot.deliveries[0]).toMatchObject({ sourceKind: 'parent_wakeup' });
 
       await stub.reconcileTaskWaits(childTwoId);
-      expect((await stub.getMessages(parentSessionId, 10)).messages).toHaveLength(1);
+      expect(
+        (await stub.getMessages(parentSessionId, 10)).messages.filter((message) =>
+          message.content.includes('wait_for_subtasks subscription resolved')
+        )
+      ).toHaveLength(1);
       expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries).toHaveLength(1);
 
       const lostResponseRetry = await stub.registerTaskWait({
@@ -281,7 +372,11 @@ describe('ProjectData Durable Object', () => {
         created: false,
         subscription: { id: registered.subscription!.id, state: 'resolved' },
       });
-      expect((await stub.getMessages(parentSessionId, 10)).messages).toHaveLength(1);
+      expect(
+        (await stub.getMessages(parentSessionId, 10)).messages.filter((message) =>
+          message.content.includes('wait_for_subtasks subscription resolved')
+        )
+      ).toHaveLength(1);
       expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries).toHaveLength(1);
 
       await env.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
@@ -291,7 +386,8 @@ describe('ProjectData Durable Object', () => {
       expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries[0]).toMatchObject(
         {
           deliveryState: 'failed',
-          terminalReason: 'terminal_target',
+          terminalReason: 'wake_refused',
+          lastError: expect.stringContaining('sleeping_snapshot_missing'),
         }
       );
     });

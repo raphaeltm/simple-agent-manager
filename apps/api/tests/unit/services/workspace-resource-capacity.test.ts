@@ -28,7 +28,6 @@ function reservation(
     memoryMb: 1024,
     diskMb: 1024,
     exclusiveNode: false,
-    maxCoTenants: 4,
     source: 'platform',
     sourceId: 'platform',
     version: 1,
@@ -38,7 +37,6 @@ function reservation(
 
 function policy(overrides: Partial<WorkspaceAdmissionPolicy> = {}): WorkspaceAdmissionPolicy {
   return {
-    maxWorkspaces: 4,
     cpuShareBudgetPercent: 100,
     hostMemoryReserveMb: 512,
     diskPressureThresholdPercent: 90,
@@ -68,7 +66,6 @@ function aggregateCopies(
     cpuMillis: request.cpuMillis * activeCount,
     memoryMb: request.memoryMb * activeCount,
     diskMb: request.diskMb * activeCount,
-    minMaxCoTenants: request.maxCoTenants,
   });
 }
 
@@ -98,9 +95,13 @@ describe('workspace resource capacity accounting', () => {
       })
     ).toBe(true);
     expect(isResolvedResourceReservation(reservation({ version: 3 }))).toBe(true);
-    const current = reservation({ version: 3 });
-    delete current.maxCoTenants;
-    expect(isResolvedResourceReservation(current)).toBe(true);
+    // Legacy rows may still carry the retired co-tenant cap; it is ignored whatever its value.
+    expect(
+      isResolvedResourceReservation({ ...reservation({ version: 1 }), maxCoTenants: 2 })
+    ).toBe(true);
+    expect(
+      isResolvedResourceReservation({ ...reservation({ version: 3 }), maxCoTenants: 0 })
+    ).toBe(true);
     expect(isResolvedResourceReservation(reservation({ version: 4 }))).toBe(false);
     expect(isResolvedResourceReservation({ ...reservation(), cpuMillis: '1000' })).toBe(false);
   });
@@ -128,7 +129,7 @@ describe('workspace resource capacity accounting', () => {
         lastMetrics: JSON.stringify({ diskPercent: 10 }),
         lastHeartbeatAt: new Date().toISOString(),
       },
-      usage({ activeCount: 1, cpuMillis: 1000, memoryMb: 1024, diskMb: 1024, minMaxCoTenants: 4 }),
+      usage({ activeCount: 1, cpuMillis: 1000, memoryMb: 1024, diskMb: 1024 }),
       request,
       policy()
     );
@@ -157,7 +158,6 @@ describe('workspace resource capacity accounting', () => {
         cpuMillis: 1000,
         memoryMb: 7000,
         diskMb: 1024,
-        minMaxCoTenants: 4,
       }),
       reservation({ memoryMb: 1024 }),
       policy(),
@@ -176,7 +176,6 @@ describe('workspace resource capacity accounting', () => {
       cpuMillis: 1000,
       memoryMb: 1024,
       diskMb: 1024,
-      minMaxCoTenants: 4,
     });
     const baseNode = {
       id: 'occupied',
@@ -224,7 +223,6 @@ describe('workspace resource capacity accounting', () => {
       cpuMillis: 1000,
       memoryMb: 1024,
       diskMb: 1024,
-      minMaxCoTenants: 4,
     });
     const baseNode = {
       id: 'occupied',
@@ -297,7 +295,6 @@ const REQUEST: ResolvedResourceReservation = {
   memoryMb: 4_096,
   diskMb: 40_960,
   exclusiveNode: false,
-  maxCoTenants: 4,
   source: 'platform',
   sourceId: 'platform',
   version: 1,
@@ -341,7 +338,6 @@ describe('workspace resource capacity', () => {
             cpuMillis: 1_000,
             memoryMb: 2_048,
             diskMb: 20_480,
-            maxCoTenants: 2,
           }),
         },
         { resolvedReservationJson: null },
@@ -353,7 +349,6 @@ describe('workspace resource capacity', () => {
       diskMb: 61_440,
       exclusiveCount: 0,
       invalidCount: 1,
-      minMaxCoTenants: 2,
     });
   });
 
@@ -366,7 +361,7 @@ describe('workspace resource capacity', () => {
         CX23,
         occupied,
         REQUEST,
-        policy({ maxWorkspaces: 4, hostMemoryReserveMb: 0 })
+        policy({ hostMemoryReserveMb: 0 })
       )
     ).toBe(false);
     expect(
@@ -379,7 +374,7 @@ describe('workspace resource capacity', () => {
         },
         occupied,
         REQUEST,
-        policy({ maxWorkspaces: 4, hostMemoryReserveMb: 0 })
+        policy({ hostMemoryReserveMb: 0 })
       )
     ).toBe(true);
     expect(
@@ -391,8 +386,8 @@ describe('workspace resource capacity', () => {
           observedProviderInstanceDiskGb: 160,
         },
         occupied,
-        { ...REQUEST, exclusiveNode: true, maxCoTenants: 1 },
-        policy({ maxWorkspaces: 10, hostMemoryReserveMb: 0 })
+        { ...REQUEST, exclusiveNode: true },
+        policy({ hostMemoryReserveMb: 0 })
       )
     ).toBe(false);
   });
@@ -413,7 +408,7 @@ describe('workspace resource capacity', () => {
         largeNode,
         occupied,
         REQUEST,
-        policy({ maxWorkspaces: 1, hostMemoryReserveMb: 0 })
+        policy({ hostMemoryReserveMb: 0 })
       )
     ).toBe(true);
     expect(
@@ -421,15 +416,15 @@ describe('workspace resource capacity', () => {
         largeNode,
         occupied,
         REQUEST,
-        policy({ maxWorkspaces: 10, hostMemoryReserveMb: 0 })
+        policy({ hostMemoryReserveMb: 0 })
       )
     ).toBe(true);
     expect(
       hasWorkspaceReservationCapacity(
         largeNode,
         occupied,
-        { ...REQUEST, maxCoTenants: 1 },
-        policy({ maxWorkspaces: 10, hostMemoryReserveMb: 0 })
+        REQUEST,
+        policy({ hostMemoryReserveMb: 0 })
       )
     ).toBe(true);
     expect(
@@ -439,19 +434,17 @@ describe('workspace resource capacity', () => {
           { resolvedReservationJson: JSON.stringify({ ...REQUEST, maxCoTenants: 1 }) },
         ]),
         REQUEST,
-        policy({ maxWorkspaces: 10, hostMemoryReserveMb: 0 })
+        policy({ hostMemoryReserveMb: 0 })
       )
     ).toBe(true);
   });
 
-  it('packs a 32 GB node until explicit resources are exhausted despite maxCoTenants=2', () => {
-    const request = reservation({
-      version: 2,
-      cpuMillis: 400,
-      memoryMb: 800,
-      diskMb: 2048,
+  it('packs a 32 GB node until explicit resources are exhausted despite legacy maxCoTenants=2', () => {
+    // A v2 reservation persisted before the cap was retired still carries the field.
+    const request = {
+      ...reservation({ version: 2, cpuMillis: 400, memoryMb: 800, diskMb: 2048 }),
       maxCoTenants: 2,
-    });
+    } as ResolvedResourceReservation;
     const node = observedCapacityNode({
       id: 'large-pack',
       vcpuCount: 16,
@@ -459,7 +452,6 @@ describe('workspace resource capacity', () => {
       diskGb: 80,
     });
     const admission = policy({
-      maxWorkspaces: 2,
       hostMemoryReserveMb: 512,
       memoryThresholdPercent: 1,
     });
@@ -520,7 +512,7 @@ describe('workspace resource capacity', () => {
         node,
         aggregateCopies(request, fitExisting),
         request,
-        policy({ maxWorkspaces: 3, hostMemoryReserveMb: 512 })
+        policy({ hostMemoryReserveMb: 512 })
       );
       expect(fitting.admitted, `${name} fitting tenant`).toBe(true);
 
@@ -528,7 +520,7 @@ describe('workspace resource capacity', () => {
         node,
         aggregateCopies(request, fitExisting + 1),
         request,
-        policy({ maxWorkspaces: 3, hostMemoryReserveMb: 512 })
+        policy({ hostMemoryReserveMb: 512 })
       );
       expect(overflowing.admitted, `${name} overflowing tenant`).toBe(false);
       expect(overflowing.reasons.length, `${name} overflow reasons`).toBeGreaterThan(0);
@@ -539,7 +531,7 @@ describe('workspace resource capacity', () => {
     const small = legacyReservation('small');
     const medium = legacyReservation('medium');
     const large = legacyReservation('large');
-    const defaultPolicy = policy({ maxWorkspaces: 3, hostMemoryReserveMb: 512 });
+    const defaultPolicy = policy({ hostMemoryReserveMb: 512 });
 
     expect(
       evaluateWorkspaceReservationCapacity(
@@ -583,7 +575,7 @@ describe('workspace resource capacity', () => {
         },
         occupied,
         REQUEST,
-        policy({ maxWorkspaces: 10, hostMemoryReserveMb: 0 })
+        policy({ hostMemoryReserveMb: 0 })
       )
     ).toBe(false);
   });
@@ -629,7 +621,7 @@ describe('live CPU is a saturation ceiling, not an admission authority', () => {
   }
 
   const oneCoTenant = () =>
-    usage({ activeCount: 1, cpuMillis: 1000, memoryMb: 1024, diskMb: 1024, minMaxCoTenants: 4 });
+    usage({ activeCount: 1, cpuMillis: 1000, memoryMb: 1024, diskMb: 1024 });
 
   it('admits a busy-but-unsaturated host whose declared budget still fits', () => {
     // The incident: at the previous 50% default this host was refused and the
@@ -706,7 +698,6 @@ describe('live CPU is a saturation ceiling, not an admission authority', () => {
       cpuMillis: 100,
       memoryMb: 256,
       diskMb: 1024,
-      minMaxCoTenants: 4,
     });
 
     const belowCeiling = evaluateWorkspaceReservationCapacity(
@@ -741,7 +732,6 @@ describe('live CPU is a saturation ceiling, not an admission authority', () => {
       cpuMillis: 3000,
       memoryMb: 1024,
       diskMb: 1024,
-      minMaxCoTenants: 4,
     });
 
     // 3000 + 2000 exceeds a 100% budget (4000 millis) but fits a 200% one.

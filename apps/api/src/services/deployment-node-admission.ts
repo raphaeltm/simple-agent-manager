@@ -312,24 +312,7 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
     AND json_extract(resolved_reservation_json, '$.diskMb') >= 0
     AND json_type(resolved_reservation_json, '$.exclusiveNode') IN ('true', 'false')
     AND json_type(resolved_reservation_json, '$.source') = 'text'
-    AND json_extract(resolved_reservation_json, '$.source') IN (${RESOURCE_REQUIREMENTS_SOURCE_SQL})
-    AND (
-      (
-        json_extract(resolved_reservation_json, '$.version') IN (1, 2)
-        AND json_type(resolved_reservation_json, '$.maxCoTenants') = 'integer'
-        AND json_extract(resolved_reservation_json, '$.maxCoTenants') > 0
-      )
-      OR (
-        json_extract(resolved_reservation_json, '$.version') = 3
-        AND (
-          json_type(resolved_reservation_json, '$.maxCoTenants') IS NULL
-          OR (
-            json_type(resolved_reservation_json, '$.maxCoTenants') = 'integer'
-            AND json_extract(resolved_reservation_json, '$.maxCoTenants') > 0
-          )
-        )
-      )
-    ))`;
+    AND json_extract(resolved_reservation_json, '$.source') IN (${RESOURCE_REQUIREMENTS_SOURCE_SQL}))`;
   const maxEnvironments =
     nodeMode === 'exclusive'
       ? 1

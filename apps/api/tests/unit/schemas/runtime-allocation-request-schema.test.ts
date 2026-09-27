@@ -37,7 +37,6 @@ describe('runtime allocation request schemas', () => {
         minMemoryGb: 4,
         minDiskGb: 0,
         exclusiveNode: false,
-        maxCoTenants: 3,
       },
     });
 
@@ -46,7 +45,6 @@ describe('runtime allocation request schemas', () => {
       minMemoryGb: 4,
       minDiskGb: 0,
       exclusiveNode: false,
-      maxCoTenants: 3,
     });
   });
 
@@ -62,11 +60,6 @@ describe('runtime allocation request schemas', () => {
       'workspace disk negative',
       CreateWorkspaceSchema,
       { name: 'bad', projectId: 'project-1', resourceRequirements: { minDiskGb: -1 } },
-    ],
-    [
-      'workspace max co-tenants fractional',
-      CreateWorkspaceSchema,
-      { name: 'bad', projectId: 'project-1', resourceRequirements: { maxCoTenants: 1.5 } },
     ],
   ])('rejects invalid numeric native/resource field: %s', (_name, schema, payload) => {
     expect(v.safeParse(schema, payload).success).toBe(false);

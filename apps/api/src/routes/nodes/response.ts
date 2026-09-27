@@ -1,36 +1,12 @@
-import type { NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
+import type { NodeResponse } from '@simple-agent-manager/shared';
 import { eq, inArray } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
+import type { Env } from '../../env';
+import { deriveNodeHealth, recordNodeHealthEvent } from '../../services/node-health';
 
 type DeploymentEnvironmentNodeSummary = NonNullable<NodeResponse['deploymentEnvironments']>[number];
-
-function deriveHealthStatus(node: schema.Node, now: number): NodeHealthStatus {
-  if (node.status !== 'running') {
-    return (node.healthStatus as NodeHealthStatus) || 'stale';
-  }
-
-  if (!node.lastHeartbeatAt) {
-    return 'stale';
-  }
-
-  const lastHeartbeat = Date.parse(node.lastHeartbeatAt);
-  if (Number.isNaN(lastHeartbeat)) {
-    return 'unhealthy';
-  }
-
-  const ageSeconds = Math.max(0, Math.floor((now - lastHeartbeat) / 1000));
-  const staleThreshold = Math.max(1, node.heartbeatStaleAfterSeconds || 180);
-
-  if (ageSeconds <= staleThreshold) {
-    return 'healthy';
-  }
-  if (ageSeconds <= staleThreshold * 2) {
-    return 'stale';
-  }
-  return 'unhealthy';
-}
 
 export function toNodeResponse(
   node: schema.Node,
@@ -116,24 +92,37 @@ export async function loadDeploymentEnvironmentSummaries(
 
 export async function refreshNodeHealth(
   db: ReturnType<typeof drizzle<typeof schema>>,
-  node: schema.Node
+  node: schema.Node,
+  env: Env
 ): Promise<schema.Node> {
-  const computedHealth = deriveHealthStatus(node, Date.now());
+  const computedHealth = deriveNodeHealth(node, Date.now());
   if (computedHealth === node.healthStatus) {
     return node;
   }
 
-  await db
-    .update(schema.nodes)
-    .set({
-      healthStatus: computedHealth,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.nodes.id, node.id));
+  const updatedAt = new Date().toISOString();
+  const updated = await env.DATABASE.prepare(
+    `UPDATE nodes SET health_status = ?, updated_at = ?
+     WHERE id = ? AND status = ? AND last_heartbeat_at IS ? AND health_status = ?`
+  )
+    .bind(computedHealth, updatedAt, node.id, node.status, node.lastHeartbeatAt, node.healthStatus)
+    .run();
+  if ((updated.meta.changes ?? 0) !== 1) {
+    const [current] = await db.select().from(schema.nodes).where(eq(schema.nodes.id, node.id));
+    return current ?? node;
+  }
+
+  await recordNodeHealthEvent(env, {
+    nodeId: node.id,
+    episodeStartedAt: node.lastHeartbeatAt ?? node.createdAt,
+    event: computedHealth,
+    reason: computedHealth === 'healthy' ? 'node_heartbeat_resumed' : 'node_heartbeat_missing',
+    createdAt: updatedAt,
+  });
 
   return {
     ...node,
     healthStatus: computedHealth,
-    updatedAt: new Date().toISOString(),
+    updatedAt,
   };
 }

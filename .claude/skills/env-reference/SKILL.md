@@ -91,21 +91,24 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS` — Budget for vm-agent acceptance of the final checkpoint request (default: `300000`)
 - `SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS` — No-progress watchdog after a final checkpoint is accepted (default: `120000`)
 - `SESSION_SNAPSHOT_POLL_INTERVAL_MS` — D1 poll interval while waiting for final checkpoint progress/completion (default: `1000`)
-- `SESSION_SNAPSHOT_OPERATION_TIMEOUT` — VM-agent checkpoint operation deadline, passed to new VM nodes and Instant containers as a Go duration (default: `15m`)
+- `SESSION_SNAPSHOT_OPERATION_TIMEOUT` — VM-agent checkpoint/restore deadline, passed to new VM nodes and Instant containers as a Go duration (default: `15m`). Snapshot TaskRunner restore retries pin this duration plus `SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS` at the first restore RPC; retries/restarts cannot renew it. Other steps retain the retry-count limit.
 - `SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL` — VM-agent snapshot progress callback throttle, passed to new VM nodes and Instant containers as a Go duration (default: `15s`)
 - `SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT` — VM-agent snapshot progress callback timeout, passed to new VM nodes and Instant containers as a Go duration (default: `5s`)
 - `SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES` — Maximum snapshot coordination JSON body (default: `262144`)
 - `SESSION_SNAPSHOT_R2_PREFIX` — Private R2 object prefix for session snapshots (default: `session-snapshots`)
 - `SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS` — Maximum replacement-VM wake attempts before the sleeping session becomes unavailable (default: `3`)
-- `SESSION_SLEEP_AFTER_MS` — Runtime-neutral idle time before automatic VM-session sleep (default: `900000`)
+- `SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS` — How long a spent wake-attempt burst stays spent (default: `900000`)
+- `SESSION_RECOVERY_LINEAGE_MAX_DEPTH` — Wake→wake links followed back to the conversation's first run when deciding whether a wake must stay in its original location (default: `256`)
+- `SESSION_SLEEP_AFTER_MS` — Runtime-neutral idle time before automatic VM-session sleep; completed and failed tasks queue sleep immediately and drain for this long past the agent's last turn report (default: `900000`)
+- `FAILED_TASK_PRESERVATION_MAX_WAIT_MS` — Longest a failed task's runtime waits for its work-preservation sleep, from the latest of the failure, an in-place wake and the agent's current turn start, before the sweep tears it down with a chat notice (default: `28800000`)
 - `SESSION_SLEEP_SWEEP_BATCH_SIZE` — Maximum due VM sleeps atomically claimed by one scheduled sweep (default: `10`)
 - `SESSION_SLEEP_RETRY_DELAY_MS` — Delay after a fail-closed automatic sleep attempt (default: `300000`)
-- `SESSION_SLEEP_MAX_ATTEMPTS` — Maximum automatic sleep attempts; exhaustion preserves compute and records the error (default: `9`)
+- `SESSION_SLEEP_MAX_ATTEMPTS` — Maximum automatic sleep attempts; exhaustion preserves compute and records the error, except a failed task's preservation, which then tears the runtime down and says so (default: `9`)
 - `SESSION_SLEEP_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted automatic-sleep claim (default: `600000`)
 - `HARNESS_BACKGROUND_WORK_LEASE_MS` — Finite sleep-protection lease renewed by normalized harness background-work lifecycle signals (default: `300000`)
 - `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS` — Absolute ceiling, measured from the last harness lifecycle progress edge, on how long background work may defer sleep (default: `1800000`)
 - `ACP_ACTIVITY_ADMISSION_ENABLED` — Enables Worker-side admission control/coalescing for redundant intermediate ACP activity callbacks (default: `true`)
-- `ACP_ACTIVITY_COALESCE_WINDOW_MS` — Minimum interval between redundant intermediate ProjectData activity writes; transitions and terminal/error reports bypass it (default: `2000`)
+- `ACP_ACTIVITY_COALESCE_WINDOW_MS` — Minimum interval between redundant intermediate ProjectData activity writes, and the first retry delay for a coalesced report whose flush hit a retryable ProjectData failure (including a CPU-limit reset or lost connection); each further retry doubles, capped at `ACP_ACTIVITY_COALESCE_TTL_MS`. Transitions and terminal/error reports bypass it (default: `2000`)
 - `ACP_ACTIVITY_COALESCE_TTL_MS` — Maximum lifetime for a coalesced activity report before eviction leaves convergence to probe-backed reconciliation (default: `60000`)
 - `ACP_ACTIVITY_COALESCE_MAX_PENDING` — Maximum pending coalesced activity reports retained by one Worker isolate (default: `512`)
 - `ACP_ACTIVITY_BINDING_CACHE_TTL_MS` — Short-lived authorized ACP session binding cache used to avoid ProjectData reads during callback storms (default: `30000`)
@@ -164,9 +167,15 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `CRON_FAILURE_NOTIFICATION_THROTTLE_MS` — Per-sweep failure-notification throttle backed by KV and an atomic per-user Notification DO claim (default: `3600000`)
 - `CRON_FAILURE_NOTIFICATION_KV_PREFIX` — KV prefix for failure-notification throttle markers (default: `cron-failure-notification`)
 - `NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS` — Maximum destroying-state residence before DO self-cleanup (default: `86400000`)
-- `NODE_WORKSPACE_IDLE_TIMEOUT_MS` — Last-workspace-activity window before an auto-provisioned workspace-role node with no active workspaces is destroy-eligible (default: `1800000`; parsed by `buildCleanupConfig()` and enforced by `claimNodeForCleanup()` in `apps/api/src/scheduled/node-cleanup/shared.ts`)
-- `NODE_ORPHAN_IDLE_TIMEOUT_MS` — Legacy alias for `NODE_WORKSPACE_IDLE_TIMEOUT_MS` when the primary variable is unset (resolved by `buildCleanupConfig()` in `apps/api/src/scheduled/node-cleanup/shared.ts`)
+- `NODE_WORKSPACE_IDLE_TIMEOUT_MS` — Last-workspace-activity window before an auto-provisioned workspace-role node with no active workspaces is destroy-eligible (default: `1800000`; resolved in `apps/api/src/scheduled/node-cleanup/config.ts` and enforced by `claimNodeForCleanup()` in `shared.ts`)
+- `NODE_ORPHAN_IDLE_TIMEOUT_MS` — Legacy alias for `NODE_WORKSPACE_IDLE_TIMEOUT_MS` when the primary variable is unset (resolved in `apps/api/src/scheduled/node-cleanup/config.ts`)
 - `NODE_CLEANUP_FAILURE_BACKOFF_MS` — Failed cleanup-candidate exclusion window (default: `3600000`)
+- `NODE_UNHEALTHY_DRAIN_AFTER_MS` — Node-heartbeat silence before the managed VM cleanup sweep requests session sleep and posts a chat notice (default: `600000`)
+- `NODE_UNHEALTHY_RELEASE_AFTER_MS` — Node-heartbeat silence before strict provider deletion is attempted, including with active workspaces (default: `1800000`; must exceed the drain threshold)
+- `NODE_UNHEALTHY_FLEET_MAX_FRACTION` — Hold destructive unhealthy-node cleanup and escalate when this fraction of at least three managed workspace VMs is silent together (default: `0.5`)
+- `NODE_UNHEALTHY_FLEET_MIN_NODES` — Minimum managed workspace VMs before the fleet-wide guard applies (default: `3`)
+- `NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS` — Per-node deadline for attempting chat notices and sleep requests before release proceeds (default: `5000`)
+- `NODE_UNHEALTHY_RETRY_MS` — Backoff after failed provider deletion of an unhealthy node (default: `60000`)
 - `NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS` — Wall-clock budget for the stopped-node handoff phase; unstarted candidates remain eligible for the next sweep (default: `20000`)
 - `NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS` — Per-candidate provider/DNS deadline during stopped-node handoff, capped by remaining sweep time; provider failures enter cleanup backoff (default: `5000`)
 - `IDLE_CLEANUP_MAX_RESIDENCE_MS` — Maximum ProjectData idle-cleanup schedule residence before preserved/error outcomes stop re-arming and surface attention (default: `7200000`)
@@ -277,17 +286,17 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS` — Delay before the next terminal event-log cleanup alarm batch when more candidates remain (default: `86400000`, daily)
 - `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED` — Production-disabled switch for exact archive read routing (default: disabled)
 - `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED` — Write new archives as compact SQLite + compressed R2; existing formats remain readable. Default: `false`.
-- `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` — Installation-wide daily allowance of ESTIMATE UNITS (not billed rows) for compact migration attempts; 0 pauses admission. Also the source of the per-candidate selection ceiling, so lowering it automatically narrows which sessions a sweep selects (default: `250000`, shipped: `800000`). Migrations/day ceiling is `allowance / (1000 + factor x units-per-session)`; check it against the sweep cadence, because whichever is smaller is what actually runs.
+- `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` — Installation-wide daily allowance of ESTIMATE UNITS (not billed rows) for compact migration attempts; 0 pauses admission. Also the source of the per-candidate selection ceiling, so lowering it automatically narrows which sessions a sweep selects (default: `250000`, shipped: `2400000`, tripled with the cadence on 2026-09-27). Migrations/day ceiling is `allowance / (1000 + factor x units-per-session)`; check it against the sweep cadence, because whichever is smaller is what actually runs. The GitHub `production` Environment pins this var, so change it there in lockstep.
 - `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` — Safety multiplier on the row inventory `estimateArchiveWrites` already counts (rows, archived tool payloads, grouped rows, 512-byte units of grouped FTS text, source deletion included) — not an independent amplification factor. Default: `32`, shipped: `2`. Production measurement 2026-09-14: ~65,001 estimated writes per migration from two budget samples an hour apart (~8,000 inventory units at the then-shipped factor 8), against 5,950-9,823 DO rows actually billed across four isolated ticks, so billed/unit spans 0.74-1.23 and 2 exceeds the worst case by ~63%. The previous 8 capped the sweep at 12 migrations/day when its hourly cadence allowed 24. Small sample; re-measure before retuning.
 - `PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS` — R2 I/O deadline shared across each compact read/export/seal operation, or one chunk write, in milliseconds. Default: `10000`.
 - `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS` — Unused reservation receipt retention; minimum one UTC budget day. Default: `604800000` (7 days).
 - `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT` — Maximum expired receipts removed per unused release; zero disables cleanup. Default: `100`.
 - `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` — Separate production-disabled switch for the unscoped scheduled archive-sharding sweep; enabling exact routing alone does not run global migration (default: disabled)
-- `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` — Persisted cadence gate between unscoped scheduled archive-sharding sweeps; the Worker scheduled handler wakes every five minutes and claims the cadence row only when it is due. The code fallback is daily; the checked-in `wrangler.toml` ships 1 hour after the 2026-09-08 billing firebreak (default: `86400000`, shipped: `3600000`)
+- `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` — Persisted cadence gate between unscoped scheduled archive-sharding sweeps; the Worker scheduled handler wakes every five minutes and claims the cadence row only when it is due. The code fallback is daily; the checked-in `wrangler.toml` ships 18 minutes, which lands a claim on the fourth five-minute tick (occasionally the fifth when the archive step starts over two minutes earlier than at the previous claim). Each claim archives one session, so this interval sets the drain rate (default: `86400000`, shipped: `1080000`)
 - `PROJECT_DATA_ARCHIVE_SHARD_COUNT` — Deterministic archive-shard fanout used when assigning terminal sessions to ProjectData archive Durable Objects (default: `128`)
 - `PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS` — Maximum projects selected by one archive-sharding cron pass (default: `1`)
-- `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS` — Hard ceiling on sessions (in-flight plus new candidates) one archive-sharding pass may FENCE and process; a candidate the write budget refuses opens no fence and consumes no slot (default: `10`, shipped: `4`)
-- `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` — Cumulative `session_summaries.message_count` of NEW candidates one pass may journal, largest first. An upper bound only: the per-candidate ceiling is the smaller of this and the ceiling derived from `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` (default: `20000`, shipped: `5000`)
+- `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS` — Hard ceiling on sessions (in-flight plus new candidates) one archive-sharding pass may FENCE and process; a candidate the write budget refuses opens no fence and consumes no slot (default: `10`, shipped: `8`)
+- `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` — Cumulative `session_summaries.message_count` of NEW candidates one pass may journal, largest first. An upper bound only: the per-candidate ceiling is the smaller of this and the ceiling derived from `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` (default: `20000`, shipped: `10000`)
 - `PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT` — Assumed percentage by which a session's write estimate exceeds its `message_count` (archived tool payloads, grouped rows, FTS units); reserved as headroom when deriving the selection ceiling from the daily allowance (default: `100`, shipped: `100`)
 - `PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH` — Spare candidates read beyond the pass's session slots, so a candidate the daily write budget refuses can descend to a smaller one instead of ending the pass with nothing migrated (default: `4`, shipped: `4`)
 - `PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS` — Consecutive sweeps that may migrate nothing because every candidate exceeded the whole daily allowance before the cadence row reports `partial` instead of `succeeded`; an exhausted daily pool is normal backpressure and is not counted (default: `3`, shipped: `3`)
@@ -316,6 +325,13 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_DATA_ARCHIVE_SEARCH_CONTINUATION_TTL_MS` — Fixed lifetime of a signed project-wide archive-search continuation; continuation does not extend it (default: `900000`, max: `86400000`)
 - `PROJECT_DATA_ARCHIVE_SEARCH_CURSOR_MAX_BYTES` — Maximum encoded byte size accepted or emitted for a signed archive-search continuation (default: `1048576`, max: `4194304`)
 - `PROJECT_DATA_ARCHIVE_SEARCH_ERROR_LIMIT` — Maximum entries retained independently in each public execution- and index-error collection (default: `20`, max: `100`)
+- `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` — Newest full-text matches bm25-ranked per ProjectData message search; when more match, results report `rootSearch.ftsCandidatesTruncated` (default: `2000`)
+- `PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT` — Full-text index entries inside a session's rowid span that a session-scoped search examines, newest first, to collect that session's newest matches; never smaller than `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` (default: `20000`)
+- `PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT` — Newest raw messages the keyword fallback scans for not-yet-indexed text; older rows are reported as `rootSearch.keywordScanTruncated` (default: `50000`)
+- `PROJECT_DATA_ALARM_SECTION_GATING_ENABLED` — Run only the ProjectData alarm sections that are due each tick; `false` runs every section every tick (default: `true`)
+- `PROJECT_DATA_ALARM_FULL_RUN_INTERVAL_MS` — Maximum interval between ProjectData alarm ticks that run every section regardless of due times (default: `900000`)
+- `PROJECT_DATA_ALARM_DUE_TOLERANCE_MS` — A ProjectData alarm section due within this many ms of the tick runs in that tick (default: `2000`)
+- `PROJECT_DATA_ALARM_SLOW_SECTION_MS` — ProjectData alarm sections at or above this wall time log `project_data.alarm.section_slow` (default: `1000`)
 - `PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT` — Maximum active durable event subscriptions in one ProjectData object (default: `200`)
 - `PROJECT_EVENT_FILTER_MAX_VALUES_PER_FIELD` — Maximum exact/set values accepted for one v1 event filter field (default: `20`)
 - `PROJECT_EVENT_FILTER_MAX_MATCH_KEYS` — Maximum deterministic match keys compiled for one event subscription (default: `100`)
@@ -471,7 +487,8 @@ by the read-only cron-liveness check.
 
 ### Pagination
 
-- `DASHBOARD_ACTIVE_TASK_LIMIT` — Maximum active tasks returned by `/api/dashboard/active-tasks` (default: `100`)
+- `DASHBOARD_ACTIVE_TASK_LIMIT` — Maximum active tasks returned by `/api/dashboard/active-tasks`: the most recently active (newest message, else start/submit time), newest first (default: `6`)
+- `DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT` — Active tasks read and ranked by recency before `DASHBOARD_ACTIVE_TASK_LIMIT` applies (default and maximum: `100`, the per-statement SQL bind ceiling of the per-project session lookup)
 - `DASHBOARD_INACTIVE_THRESHOLD_MS` — Last-message freshness threshold for Active vs Idle on `/api/dashboard/active-tasks` (default: `900000`)
 - `TASK_LIST_DEFAULT_PAGE_SIZE` — Default task/project list page size
 - `TASK_LIST_MAX_PAGE_SIZE` — Maximum task/project list page size
@@ -704,7 +721,8 @@ Generated deployments validate and pass these values through cloud-init to newly
 
 ### Message Reporting
 
-- `MSG_MAX_MESSAGE_CONTENT_BYTES` — Max single persisted message content before truncation (default: 102400)
+- `MSG_MAX_MESSAGE_CONTENT_BYTES` — Max content bytes of one message; longer content keeps its longest rune-aligned prefix plus a `[truncated]` marker (default: 102400, matches the API's `MESSAGE_SIZE_THRESHOLD`)
+- `MSG_BATCH_MAX_BYTES` — Max serialized request body per batch (default: 262144, matches the API's `MAX_MESSAGES_PAYLOAD_BYTES`). Every message is shaped at enqueue to fit one request on its own: tool metadata that cannot fit is replaced by an identity summary flagged `contentTruncated`/`transportTruncated` with `originalSizeBytes`. Keep both values at or below the API's limits.
 
 ### ACP (Agent Communication Protocol)
 

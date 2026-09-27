@@ -423,6 +423,11 @@ export const projects = sqliteTable(
     maxDispatchDepth: integer('max_dispatch_depth'),
     maxSubTasksPerTask: integer('max_sub_tasks_per_task'),
     warmNodeTimeoutMs: integer('warm_node_timeout_ms'),
+    /**
+     * Retired 2026-09-25. The per-node workspace-count cap no longer exists; placement is decided
+     * by CPU/memory/disk reservations and exclusiveNode. The column stays for audit history only
+     * (never read, never written, not exposed by the API).
+     */
     maxWorkspacesPerNode: integer('max_workspaces_per_node'),
     nodeCpuThresholdPercent: integer('node_cpu_threshold_percent'),
     nodeMemoryThresholdPercent: integer('node_memory_threshold_percent'),
@@ -1273,6 +1278,27 @@ export const reservedTaskSessionRevocations = sqliteTable(
 // =============================================================================
 // Nodes
 // =============================================================================
+export const nodeHealthEvents = sqliteTable(
+  'node_health_events',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id').notNull(),
+    episodeStartedAt: text('episode_started_at').notNull(),
+    event: text('event').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    episodeEventIdx: uniqueIndex('idx_node_health_events_episode_event').on(
+      table.nodeId,
+      table.episodeStartedAt,
+      table.event,
+      table.reason
+    ),
+    nodeCreatedIdx: index('idx_node_health_events_node_created').on(table.nodeId, table.createdAt),
+  })
+);
+
 export const nodes = sqliteTable(
   'nodes',
   {
@@ -1344,7 +1370,7 @@ export const nodes = sqliteTable(
     /** Cloudflare Tunnel display name for user-owned tunnel nodes. Null otherwise. */
     tunnelName: text('tunnel_name'),
     errorMessage: text('error_message'),
-    /** Written only after strict provider/container teardown confirms the runtime is absent. */
+    /** Durable runtime absence proof; cleared before any provider create request. */
     runtimeTerminationConfirmedAt: text('runtime_termination_confirmed_at'),
     /** Server-written identity rotated whenever the runtime behind this node row is replaced. */
     runtimeIncarnationId: text('runtime_incarnation_id'),

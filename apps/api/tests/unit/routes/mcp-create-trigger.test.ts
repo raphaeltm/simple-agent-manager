@@ -320,9 +320,8 @@ describe('MCP create_trigger tool', () => {
     const parsed = JSON.parse(content.text);
     expect(parsed.taskMode).toBe('conversation');
     expect(parsed.vmSizeOverride).toBe('large');
-    expect(parsed.resourceRequirementsJson).toBe(
-      '{"minVcpu":4,"exclusiveNode":false,"maxCoTenants":2}'
-    );
+    // Older clients may still send the retired maxCoTenants cap; it is dropped, not stored.
+    expect(parsed.resourceRequirementsJson).toBe('{"minVcpu":4,"exclusiveNode":false}');
   });
 
   it('rejects invalid vmSizeOverride values', async () => {

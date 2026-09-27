@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "--version" ]]; then
+  echo "0.81.2"
+  exit 0
+fi
+
 log_file="${ACP_LOG_FILE:-/tmp/mock-acp-input.log}"
 session_id="${ACP_SESSION_ID:-session-e2e}"
 

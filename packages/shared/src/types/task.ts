@@ -698,5 +698,6 @@ export interface DashboardTask {
 }
 
 export interface DashboardActiveTasksResponse {
+  /** The most recently active tasks, newest first, capped at `DASHBOARD_ACTIVE_TASK_LIMIT`. */
   tasks: DashboardTask[];
 }

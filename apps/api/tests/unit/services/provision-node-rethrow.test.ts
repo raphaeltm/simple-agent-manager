@@ -1,6 +1,10 @@
-import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
+import {
+  HetznerProvider,
+  isTransientCapacityError,
+  ProviderError,
+} from '@simple-agent-manager/providers';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { agentRoutes } from '../../../src/routes/agent';
@@ -162,12 +166,25 @@ function placementError(): ProviderError {
   });
 }
 
-function accountLimitError(): ProviderError {
-  return new ProviderError('hetzner', 403, 'hetzner API error (403): server limit reached', {
-    providerCode: 'server_limit_exceeded',
-    category: 'quota_exceeded',
-  });
+/**
+ * Answer every request with one production-shaped Hetzner error body, minted fresh per call
+ * (`.claude/rules/72`). Restored after each test by the `afterEach` below.
+ */
+function stubHetznerCreateResponse(
+  status: number,
+  error: { code: string; message: string }
+): ReturnType<typeof vi.fn> {
+  const fetchMock = vi
+    .fn()
+    .mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ error }), { status })));
+  globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+  return fetchMock;
 }
+
+const originalFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 function invalidConfigError(): ProviderError {
   return new ProviderError('hetzner', 400, 'Bad VM config', {
@@ -428,7 +445,9 @@ describe('provisionNode backend DNS records', () => {
   it('propagates exact installation ownership to the provider create boundary', async () => {
     await provisionNode('node-1', ENV);
 
-    const allocationClaim = ops.find((op) => op.set?.runtimeIncarnationId && op.set.runtimeTerminationConfirmedAt === null);
+    const allocationClaim = ops.find(
+      (op) => op.set?.runtimeIncarnationId && op.set.runtimeTerminationConfirmedAt === null
+    );
     expect(allocationClaim?.set?.runtimeIncarnationId).toEqual(expect.any(String));
     expect(allocationClaim?.set?.runtimeIncarnationId).not.toBe('runtime-1');
 
@@ -892,16 +911,64 @@ describe('provisionNode rethrowProviderError', () => {
     expect(ops.some((o) => o.kind === 'update' && o.set?.status === 'error')).toBe(false);
   });
 
-  it('deletes the failed node row on a Hetzner account-limit rejection', async () => {
-    const err = accountLimitError();
-    createVM.mockRejectedValue(err);
+  // 2026-09-25, at production fidelity. The 403 comes from the REAL HetznerProvider over a
+  // stubbed fetch, so its category is whatever `createVM` actually assigns. This test used to
+  // hand-feed `category: 'quota_exceeded'`, a shape production never built: `providerFetch`
+  // leaves the category 'unknown', so `isProviderCreateRejectedBeforeVmIdentity`'s quota arm
+  // never fired and the three rejected incident rows were marked `error`, then sat in
+  // `destroying` with no provider instance.
+  it('deletes the failed node row when the real Hetzner provider reports an account quota', async () => {
+    const fetchMock = stubHetznerCreateResponse(403, {
+      code: 'resource_limit_exceeded',
+      message: 'shared core limit exceeded',
+    });
+    createProviderForUser.mockResolvedValue({
+      provider: new HetznerProvider('test-token', 'fsn1', 0, false, 0, 0),
+      providerName: 'hetzner',
+      credentialSource: 'user',
+    });
 
-    await expect(
-      provisionNode('node-1', ENV, undefined, { rethrowProviderError: true })
-    ).rejects.toBe(err);
+    const thrown = await provisionNode('node-1', ENV, undefined, {
+      rethrowProviderError: true,
+    }).catch((error: unknown) => error);
 
+    expect(thrown).toMatchObject({
+      statusCode: 403,
+      providerCode: 'resource_limit_exceeded',
+      category: 'quota_exceeded',
+      message: 'hetzner API error (403): shared core limit exceeded',
+    });
+    // One create, no same-SKU retry against a quota.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(ops.some((o) => o.kind === 'delete')).toBe(true);
     expect(ops.some((o) => o.kind === 'update' && o.set?.status === 'error')).toBe(false);
+  });
+
+  it('control: a real permission 403 keeps the error row for the user to see', async () => {
+    stubHetznerCreateResponse(403, {
+      code: 'forbidden',
+      message: 'insufficient permissions for this request',
+    });
+    createProviderForUser.mockResolvedValue({
+      provider: new HetznerProvider('test-token', 'fsn1', 0, false, 0, 0),
+      providerName: 'hetzner',
+      credentialSource: 'user',
+    });
+
+    const thrown = await provisionNode('node-1', ENV, undefined, {
+      rethrowProviderError: true,
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toMatchObject({ statusCode: 403, category: 'auth_error' });
+    expect(ops.some((o) => o.kind === 'delete')).toBe(false);
+    expect(ops).toContainEqual({
+      kind: 'update',
+      set: expect.objectContaining({
+        status: 'error',
+        errorMessage:
+          '[hetzner] hetzner API error (403): insufficient permissions for this request',
+      }),
+    });
   });
 
   it('preserves the ProviderError category and providerCode when re-throwing capacity errors', async () => {

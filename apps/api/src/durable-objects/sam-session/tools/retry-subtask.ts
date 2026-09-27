@@ -111,7 +111,6 @@ export async function retrySubtask(
       projectDefaultAgentType: schema.projects.defaultAgentType,
       projectAgentDefaults: schema.projects.agentDefaults,
       projectTaskExecutionTimeoutMs: schema.projects.taskExecutionTimeoutMs,
-      projectMaxWorkspacesPerNode: schema.projects.maxWorkspacesPerNode,
       projectNodeCpuThresholdPercent: schema.projects.nodeCpuThresholdPercent,
       projectNodeMemoryThresholdPercent: schema.projects.nodeMemoryThresholdPercent,
       projectWarmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
@@ -366,7 +365,6 @@ export async function retrySubtask(
       agentProfileHint: resolvedProfile?.profileId ?? original.agentProfileHint ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: original.projectTaskExecutionTimeoutMs ?? null,
-        maxWorkspacesPerNode: original.projectMaxWorkspacesPerNode ?? null,
         nodeCpuThresholdPercent: original.projectNodeCpuThresholdPercent ?? null,
         nodeMemoryThresholdPercent: original.projectNodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: original.projectWarmNodeTimeoutMs ?? null,

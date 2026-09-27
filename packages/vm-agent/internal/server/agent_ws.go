@@ -363,7 +363,7 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 	}
 	if runtime != nil {
 		if resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue); resolver != nil {
-			if _, resolveErr := resolver(); isContainerUnavailableError(resolveErr) {
+			if _, resolveErr := resolver(); !restoreOwner && isContainerUnavailableError(resolveErr) {
 				slog.Warn("SessionHost detected unavailable container, attempting recovery", "workspace", workspaceID, "error", resolveErr)
 				if recoverErr := s.recoverWorkspaceRuntime(context.Background(), runtime); recoverErr != nil {
 					slog.Error("SessionHost recovery failed", "workspace", workspaceID, "error", recoverErr)

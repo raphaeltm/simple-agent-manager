@@ -1,19 +1,4 @@
-import {
-  and,
-  eq,
-  exists,
-  gt,
-  gte,
-  inArray,
-  isNotNull,
-  isNull,
-  lte,
-  not,
-  notInArray,
-  or,
-  sql,
-} from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
+import { and, eq, exists, gt, gte, isNotNull, isNull, lte, not, notInArray, or } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 
 import * as schema from '../db/schema';
@@ -24,7 +9,6 @@ import type { SessionRecoverySourceTaskGuard } from './session-recovery-authorit
 import {
   DEFAULT_SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS,
   isRestorableSnapshot,
-  sessionLifecycleError,
   type SessionSnapshotRecoveryClaim,
 } from './session-snapshot-artifacts';
 import {
@@ -36,10 +20,13 @@ import {
   sessionRecoveryDecayCutoffIso,
   sessionRecoveryMaxAttempts,
 } from './session-snapshot-recovery-budget';
+import {
+  archiveMigrationFenceCondition,
+  type Db,
+  restorableSnapshotCondition,
+  TERMINAL_TASK_STATUSES,
+} from './session-snapshot-recovery-conditions';
 
-type Db = ReturnType<typeof drizzle<typeof schema>>;
-
-const TERMINAL_TASK_STATUSES = ['completed', 'failed', 'cancelled'];
 function sourceTaskGuardCondition(db: Db, guard: SessionRecoverySourceTaskGuard | undefined) {
   if (!guard) return undefined;
   const sourceTask = alias(schema.tasks, 'recovery_source_task');
@@ -154,36 +141,6 @@ async function sourceTaskGuardIsValid(
     )
     .get();
   return Boolean(row);
-}
-
-function restorableSnapshotCondition() {
-  return or(
-    and(
-      eq(schema.sessionSnapshots.status, 'available'),
-      eq(schema.sessionSnapshots.degradation, 'none')
-    ),
-    and(
-      eq(schema.sessionSnapshots.status, 'degraded'),
-      isNotNull(schema.sessionSnapshots.degradation),
-      sql`${schema.sessionSnapshots.degradation} != 'none'`
-    )
-  );
-}
-
-function archiveMigrationFenceCondition(db: Db, chatSessionId: string) {
-  return not(
-    exists(
-      db
-        .select({ sessionId: schema.projectDataSessionLocations.sessionId })
-        .from(schema.projectDataSessionLocations)
-        .where(
-          and(
-            eq(schema.projectDataSessionLocations.sessionId, chatSessionId),
-            not(eq(schema.projectDataSessionLocations.locationState, 'root'))
-          )
-        )
-    )
-  );
 }
 
 async function archiveMigrationFenceIsClear(db: Db, chatSessionId: string): Promise<boolean> {
@@ -510,159 +467,4 @@ export async function hasAuthorizedRestorableSnapshotWakeClaim(
     )
     .first<{ found: number }>();
   return Boolean(row);
-}
-
-export async function recordSessionSnapshotRecoveryWorkspace(
-  db: Db,
-  chatSessionId: string,
-  taskId: string,
-  workspaceId: string
-): Promise<void> {
-  await db
-    .update(schema.sessionSnapshots)
-    .set({ recoveryWorkspaceId: workspaceId, updatedAt: new Date().toISOString() })
-    .where(
-      and(
-        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        eq(schema.sessionSnapshots.recoveryTaskId, taskId),
-        inArray(schema.sessionSnapshots.recoveryStatus, ['waking', 'restored'])
-      )
-    );
-}
-
-export async function completeSessionSnapshotRecovery(
-  db: Db,
-  chatSessionId: string,
-  taskId: string,
-  workspaceId: string,
-  recoverySourceTaskId?: string | null
-): Promise<boolean> {
-  const recoveryTask = alias(schema.tasks, 'snapshot_recovery_task');
-  const recoverySourceTask = alias(schema.tasks, 'snapshot_recovery_source_task');
-  const liveSourceCondition = recoverySourceTaskId
-    ? exists(
-        db
-          .select({ id: recoveryTask.id })
-          .from(recoveryTask)
-          .innerJoin(
-            recoverySourceTask,
-            and(
-              eq(recoverySourceTask.id, recoveryTask.recoverySourceTaskId),
-              eq(recoverySourceTask.projectId, recoveryTask.projectId)
-            )
-          )
-          .where(
-            and(
-              eq(recoveryTask.id, taskId),
-              eq(recoveryTask.recoverySourceTaskId, recoverySourceTaskId),
-              eq(recoveryTask.chatSessionId, chatSessionId),
-              eq(recoveryTask.triggeredBy, 'session-recovery'),
-              notInArray(recoveryTask.status, TERMINAL_TASK_STATUSES),
-              or(
-                notInArray(recoverySourceTask.status, TERMINAL_TASK_STATUSES),
-                and(
-                  eq(recoverySourceTask.status, 'cancelled'),
-                  eq(recoverySourceTask.supersededByTaskId, recoveryTask.id)
-                )
-              ),
-              eq(recoveryTask.projectId, schema.sessionSnapshots.projectId)
-            )
-          )
-      )
-    : undefined;
-  const result = await db
-    .update(schema.sessionSnapshots)
-    .set({
-      recoveryStatus: 'restored',
-      recoveryWorkspaceId: workspaceId,
-      recoveryError: null,
-      recoveryClaimedAt: null,
-      sleepStatus: null,
-      sleepAfter: null,
-      sleepAttempts: 0,
-      sleepError: null,
-      sleepStoppingSince: null,
-      sleepingAt: null,
-      recoveryAttempts: 0,
-      recoveryFailedAt: null,
-      restoredAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    })
-    .where(
-      and(
-        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        eq(schema.sessionSnapshots.recoveryTaskId, taskId),
-        inArray(schema.sessionSnapshots.recoveryStatus, ['waking', 'restored']),
-        liveSourceCondition
-      )
-    );
-  return (result.meta.changes ?? 0) > 0;
-}
-
-/** Record the in-place Cloudflare Container wake after its DO restored the runtime. */
-export async function markSessionSnapshotAwakeInPlace(
-  env: Env,
-  chatSessionId: string,
-  taskId: string,
-  workspaceId: string
-): Promise<void> {
-  const db = drizzle(env.DATABASE, { schema });
-  const now = new Date().toISOString();
-  await db
-    .update(schema.sessionSnapshots)
-    .set({
-      sleepingAt: null,
-      recoveryStatus: 'restored',
-      recoveryTaskId: taskId,
-      recoveryWorkspaceId: workspaceId,
-      recoveryError: null,
-      recoveryClaimedAt: null,
-      sleepStatus: null,
-      sleepAfter: null,
-      sleepAttempts: 0,
-      sleepError: null,
-      sleepStoppingSince: null,
-      recoveryAttempts: 0,
-      recoveryFailedAt: null,
-      restoredAt: now,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        restorableSnapshotCondition(),
-        archiveMigrationFenceCondition(db, chatSessionId)
-      )
-    );
-}
-
-export async function failSessionSnapshotRecovery(
-  db: Db,
-  env: Env,
-  chatSessionId: string,
-  taskId: string,
-  error: string
-): Promise<void> {
-  await db
-    .update(schema.sessionSnapshots)
-    .set({
-      recoveryStatus: 'failed',
-      recoveryError: sessionLifecycleError(env, error),
-      recoveryClaimedAt: null,
-      // The clean-failure timestamp the attempt budget decays from. Only a
-      // reported failure sets it; an attempt that never returns leaves it NULL
-      // and keeps its slot spent (`session-snapshot-recovery-budget.ts`).
-      // `failAndRestoreSessionRecoveryHandoff` is the OTHER writer of this
-      // status and stamps the same anchor; the pair is pinned by
-      // `session-snapshot-failed-writer-coverage.test.ts`.
-      recoveryFailedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    })
-    .where(
-      and(
-        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        eq(schema.sessionSnapshots.recoveryTaskId, taskId),
-        inArray(schema.sessionSnapshots.recoveryStatus, ['waking', 'restored'])
-      )
-    );
 }

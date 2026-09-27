@@ -44,6 +44,7 @@ import type {
   ChatSessionResponse,
 } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
+import { oldestPersistedCursor } from '../../lib/message-paging';
 import { useWorkspaceChatSocket } from './useWorkspaceChatSocket';
 
 interface WorkspaceChatViewProps {
@@ -288,14 +289,12 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   // ── Load more (pagination) ──
   const loadMore = useCallback(async () => {
     if (!hasMore || loadingMore) return;
-    const firstMessage = messages[0];
-    if (!firstMessage) return;
+    const before = oldestPersistedCursor(messages);
+    if (!before) return;
 
     setLoadingMore(true);
     try {
-      const data = await getChatSession(projectId, sessionId, {
-        before: firstMessage.createdAt,
-      });
+      const data = await getChatSession(projectId, sessionId, { before });
       setMessages((prev) => {
         const merged = mergeMessages(prev, data.messages, 'prepend');
         // Rendered rows, not messages — same accounting as project chat. See

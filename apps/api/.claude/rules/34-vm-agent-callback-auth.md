@@ -27,6 +27,11 @@ Any route that is called by the VM agent over HTTP with a callback JWT Bearer to
 
 ## Terminal Callback Classification
 
+A terminal response has the scope of the identity that was rejected. A live node
+with no active workspace left in one project should acknowledge that project's
+ACP heartbeat without refreshing a session; it must not return a node-terminal
+response. Only rejection of the node's own identity can stop node-wide delivery.
+
 Callback JWT routes are not allowed to convert designed terminal callback states into server faults:
 
 1. Expired, malformed, or otherwise unverifiable callback JWTs MUST return a designed auth status such as `401`, not an unhandled `500`. Keep callback signing-key import, JWKS, or storage failures as genuine `5xx` auth-system faults.

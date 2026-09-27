@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../../src/env';
+
 const {
   claimSessionSnapshotRecoveryMock,
   databaseMock,
@@ -157,8 +159,10 @@ vi.mock('../../../src/services/placement-resolver', async (importOriginal) => {
 
 import {
   ensureSessionRecovery,
+  reportSessionRecoveryRefusal,
   SESSION_RECOVERY_INITIAL_PROMPT,
 } from '../../../src/services/session-recovery';
+import { classifySessionRecoveryRefusal } from '../../../src/services/session-recovery-refusals';
 
 const emptyCapacityPlacement = {
   capacityPoolId: null,
@@ -185,6 +189,36 @@ describe('ensureSessionRecovery', () => {
       taskId: 'recovery-task-1',
     });
     assertReplacementDeletionConfirmedMock.mockResolvedValue(undefined);
+  });
+
+  it('records a container wake refusal on the sleeping snapshot', async () => {
+    await expect(
+      reportSessionRecoveryRefusal(
+        { DATABASE: databaseMock } as unknown as Env,
+        'chat-1',
+        'container_runtime_unavailable',
+        'Sleeping container workspace is deleted'
+      )
+    ).resolves.toEqual({ status: 'unavailable', reason: 'container_runtime_unavailable' });
+
+    const update = dbMock.update.mock.results[0]?.value;
+    expect(update.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recoveryError: expect.stringContaining('Sleeping container workspace is deleted'),
+      })
+    );
+  });
+
+  it('does not record a snapshot error for an in-place container wake', async () => {
+    await expect(
+      reportSessionRecoveryRefusal(
+        { DATABASE: databaseMock } as unknown as Env,
+        'chat-1',
+        'container_runtime_wakes_in_place'
+      )
+    ).resolves.toEqual({ status: 'unavailable', reason: 'container_runtime_wakes_in_place' });
+
+    expect(dbMock.update).not.toHaveBeenCalled();
   });
 
   it('fences an unconfirmed predecessor before claiming or creating recovery state', async () => {
@@ -235,13 +269,17 @@ describe('ensureSessionRecovery', () => {
       new WorkspaceDeletionUnconfirmedError('workspace-unconfirmed')
     );
 
-    await expect(
-      ensureSessionRecovery(
-        { DATABASE: databaseMock, BASE_DOMAIN: 'example.test' } as never,
-        'project-1',
-        'chat-1'
-      )
-    ).resolves.toEqual({ status: 'unavailable', reason: 'workspace_deletion_unconfirmed' });
+    const refused = await ensureSessionRecovery(
+      { DATABASE: databaseMock, BASE_DOMAIN: 'example.test' } as never,
+      'project-1',
+      'chat-1'
+    );
+    expect(refused).toEqual({ status: 'unavailable', reason: 'workspace_deletion_unconfirmed' });
+    // Delivery and eviction retry this refusal: its name is their contract.
+    expect(
+      refused.status === 'unavailable' &&
+        classifySessionRecoveryRefusal(refused.reason).action === 'retry'
+    ).toBe(true);
 
     expect(assertReplacementDeletionConfirmedMock).toHaveBeenCalledWith(expect.anything(), {
       sourceTaskId: 'source-task-unconfirmed',
@@ -275,7 +313,6 @@ describe('ensureSessionRecovery', () => {
         defaultAgentType: null,
         defaultProvider: null,
         taskExecutionTimeoutMs: null,
-        maxWorkspacesPerNode: null,
         nodeCpuThresholdPercent: null,
         nodeMemoryThresholdPercent: null,
         warmNodeTimeoutMs: null,
@@ -466,7 +503,6 @@ describe('session recovery consumes the canonical persisted resource plan', () =
     // A project-layer requirement added AFTER the session went to sleep.
     resourceRequirementsJson: JSON.stringify({ minVcpu: 8, minMemoryGb: 16 }),
     taskExecutionTimeoutMs: null,
-    maxWorkspacesPerNode: null,
     nodeCpuThresholdPercent: null,
     nodeMemoryThresholdPercent: null,
     warmNodeTimeoutMs: null,
@@ -514,6 +550,7 @@ describe('session recovery consumes the canonical persisted resource plan', () =
       resourceRequirements: Record<string, unknown>;
       resolvedReservationOverride: unknown;
       explicit: { vmSize: string; vmSizeSource: string; vmLocation: string | null };
+      preferredVmLocation?: string | null;
     };
   }
 
@@ -535,13 +572,32 @@ describe('session recovery consumes the canonical persisted resource plan', () =
 
     await wake(evictionOptions);
 
-    expect((await placementInput()).explicit.vmLocation).toBeNull();
+    const input = await placementInput();
+    expect(input.explicit.vmLocation).toBeNull();
+    // Eviction relocates through normal placement (policy 95c3329a): not even a preference.
+    expect(input.preferredVmLocation).toBeNull();
   });
 
+  it('preserves an old location the conversation explicitly asked for, on eviction too', async () => {
+    queueWake({
+      placementExplanationJson: JSON.stringify({ explicitVmLocation: true }),
+      requestedVmSize: 'small',
+      requestedVmSizeSource: 'task',
+    });
+
+    await wake(evictionOptions);
+
+    expect((await placementInput()).explicit.vmLocation).toBe('hel1');
+  });
+
+  // Changed 2026-09-25. Unknown provenance used to pin the old location. `explicitVmLocation` has
+  // only been recorded since 2026-09-20 (#2108), no production root run has ever requested a
+  // location, and pinning on "unknown" is exactly how a wake stranded itself in a region at its
+  // core quota. Absence of evidence of a request is not a request.
   it.each([
-    ['explicit provenance', JSON.stringify({ explicitVmLocation: true })],
     ['legacy unknown provenance', null],
-  ])('preserves an old location when required by %s', async (_label, placementExplanationJson) => {
+    ['an explanation without the field', JSON.stringify({ kind: 'capacity_pool_default' })],
+  ])('treats %s as a preference, not a pin', async (_label, placementExplanationJson) => {
     queueWake({
       placementExplanationJson,
       requestedVmSize: 'small',
@@ -550,7 +606,39 @@ describe('session recovery consumes the canonical persisted resource plan', () =
 
     await wake(evictionOptions);
 
-    expect((await placementInput()).explicit.vmLocation).toBe('hel1');
+    expect((await placementInput()).explicit.vmLocation).toBeNull();
+  });
+
+  describe('human and durable wakes', () => {
+    it('prefer the region the session slept in without requiring it', async () => {
+      queueWake({
+        placementExplanationJson: JSON.stringify({ explicitVmLocation: false }),
+        requestedVmSize: 'small',
+        requestedVmSizeSource: 'task',
+      });
+
+      await wake();
+
+      const input = await placementInput();
+      // Before 2026-09-25 this was 'hel1': the wake pinned its own old region, which dropped every
+      // other permitted offering and host from placement.
+      expect(input.explicit.vmLocation).toBeNull();
+      expect(input.preferredVmLocation).toBe('hel1');
+    });
+
+    it('keep a location the first run explicitly asked for as a hard constraint', async () => {
+      queueWake({
+        placementExplanationJson: JSON.stringify({ explicitVmLocation: true }),
+        requestedVmSize: 'small',
+        requestedVmSizeSource: 'task',
+      });
+
+      await wake();
+
+      const input = await placementInput();
+      expect(input.explicit.vmLocation).toBe('hel1');
+      expect(input.preferredVmLocation).toBe('hel1');
+    });
   });
 
   it('replays every persisted layer at its original precedence, not just the task layer', async () => {
@@ -564,7 +652,7 @@ describe('session recovery consumes the canonical persisted resource plan', () =
           task: { minVcpu: 2 },
           trigger: { minMemoryGb: 3 },
           skill: { minDiskGb: 20 },
-          agentProfile: { maxCoTenants: 2 },
+          agentProfile: { minVcpu: 1 },
           project: { exclusiveNode: false },
           user: null,
         },
@@ -573,7 +661,6 @@ describe('session recovery consumes the canonical persisted resource plan', () =
           cpuMillis: 1500,
           memoryMb: 3072,
           diskMb: 20480,
-          maxCoTenants: 3,
           exclusiveNode: false,
           source: 'task',
           sourceId: 'source-task-1',
@@ -592,7 +679,7 @@ describe('session recovery consumes the canonical persisted resource plan', () =
       task: expect.objectContaining({ minVcpu: 2 }),
       trigger: expect.objectContaining({ minMemoryGb: 3 }),
       skill: expect.objectContaining({ minDiskGb: 20 }),
-      agentProfile: expect.objectContaining({ maxCoTenants: 2 }),
+      agentProfile: expect.objectContaining({ minVcpu: 1 }),
       project: expect.objectContaining({ exclusiveNode: false }),
     });
   });
@@ -607,7 +694,6 @@ describe('session recovery consumes the canonical persisted resource plan', () =
           cpuMillis: 1500,
           memoryMb: 3072,
           diskMb: 20480,
-          maxCoTenants: 3,
           exclusiveNode: false,
           source: 'task',
           sourceId: 'source-task-1',
@@ -678,14 +764,39 @@ describe('session recovery consumes the canonical persisted resource plan', () =
       // ensureSessionRecovery, and not a silent wake onto current defaults.
       expect(result).toEqual({
         status: 'unavailable',
-        reason: 'session_recovery_placement_placement',
+        reason: 'stored_resource_plan_invalid',
       });
+      expect(classifySessionRecoveryRefusal(result.reason).action).toBe('report');
       expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
       const { resolveTaskStartPlacement } =
         await import('../../../src/services/placement-resolver');
       expect(resolveTaskStartPlacement).not.toHaveBeenCalled();
     }
   );
+
+  it('names a placement that fails for now as a refusal its callers retry', async () => {
+    // The producer half of the delivery/eviction retry contract: a rename here
+    // would silently turn a retried refusal into a dropped one.
+    queueWake({ requestedVmSize: 'small', requestedVmSizeSource: 'task' });
+    const { resolveTaskStartPlacement } = await import('../../../src/services/placement-resolver');
+    (resolveTaskStartPlacement as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => {
+        throw new Error('capacity pool summary unavailable');
+      }
+    );
+
+    const result = await wake();
+
+    expect(result).toEqual({
+      status: 'unavailable',
+      reason: 'session_recovery_placement_lookup_failed',
+    });
+    expect(
+      result.status === 'unavailable' &&
+        classifySessionRecoveryRefusal(result.reason).action === 'retry'
+    ).toBe(true);
+    expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+  });
 
   it('control: a well-formed plan still wakes normally', async () => {
     // Absence assertions above are also satisfied by wake being broken outright
@@ -699,7 +810,6 @@ describe('session recovery consumes the canonical persisted resource plan', () =
           cpuMillis: 1500,
           memoryMb: 3072,
           diskMb: 0,
-          maxCoTenants: 3,
           exclusiveNode: false,
           source: 'task',
           sourceId: 'source-task-1',

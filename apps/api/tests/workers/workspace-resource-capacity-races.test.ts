@@ -45,7 +45,6 @@ function reservation(
     memoryMb: 1024,
     diskMb: 1024,
     exclusiveNode: false,
-    maxCoTenants: 4,
     source: 'platform',
     sourceId: 'platform',
     version: 1,
@@ -67,7 +66,6 @@ function admissionPolicy(
   overrides: Partial<WorkspaceAdmissionPolicy> = {}
 ): WorkspaceAdmissionPolicy {
   return {
-    maxWorkspaces: 4,
     cpuShareBudgetPercent: 100,
     hostMemoryReserveMb: 0,
     diskPressureThresholdPercent: 90,
@@ -422,7 +420,7 @@ function taskState(
       systemPromptAppend: null,
       agentProfileHint: null,
       attachments: null,
-      projectScaling: overrides.projectScaling ?? { maxWorkspacesPerNode: 4 },
+      projectScaling: overrides.projectScaling ?? {},
       resourceRequirements: null,
       resolvedReservation: overrides.resolvedReservation ?? reservation(),
       capacityPoolSelection: null,
@@ -456,7 +454,6 @@ function selectorContext(): TaskRunnerContext {
   return {
     env: {
       DATABASE: env.DATABASE,
-      MAX_WORKSPACES_PER_NODE: '4',
       TASK_RUN_NODE_CPU_THRESHOLD_PERCENT: '90',
       TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT: '90',
       TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT: '90',
@@ -678,7 +675,6 @@ describe('workspace resource capacity final reservation CAS', () => {
           projectId,
           installationId,
           projectScaling: {
-            maxWorkspacesPerNode: 4,
             nodeCpuThresholdPercent: 90,
             nodeMemoryThresholdPercent: 90,
           },
@@ -800,7 +796,6 @@ describe('workspace resource capacity advisory selection', () => {
         projectId,
         installationId,
         projectScaling: {
-          maxWorkspacesPerNode: 4,
           nodeCpuThresholdPercent: 70,
           nodeMemoryThresholdPercent: 90,
         },
@@ -1010,7 +1005,7 @@ describe('native exclusive reservation admission', () => {
       status: 'running',
       resolvedReservationJson: JSON.stringify(reservation()),
     });
-    const exclusive = reservation({ exclusiveNode: true, maxCoTenants: 1 });
+    const exclusive = reservation({ exclusiveNode: true });
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,

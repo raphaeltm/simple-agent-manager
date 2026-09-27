@@ -236,6 +236,16 @@ Indexing is incremental: it runs every time a session sleeps and again when it s
   a week to reclaim space, and deliberately never re-indexes them — re-indexing would undo the
   reclaimed bytes. In practice those old sessions are hard to find by search.
 
+Search work is bounded by configured windows rather than by how much history the project holds
+(`searchMessagesWithCoverage()` in `apps/api/src/durable-objects/project-data/message-search.ts`).
+Full-text ranking scores and reads only the newest `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` matches
+(2,000 by default), and the keyword fallback scans the newest
+`PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT` raw messages (50,000 by default). The index still counts
+a term's matches once per search, which takes tens of milliseconds even for hundreds of thousands of
+matches. Small projects never reach either limit. In very large projects, a search that reached one
+says so: the `rootSearch` field flags it and `coverageNotes` explains what was not searched, so an
+empty result then does not prove the text is absent.
+
 Agents search messages with the `search_messages` MCP tool. The project chat's own "Search chats"
 box is a different thing: it filters the session list by topic, session ID, and creator, and does
 not look inside messages.
@@ -263,8 +273,10 @@ SAM also collapses platform-injected setup messages in the chat timeline. Those 
 
 Persistent chat sessions can sleep and recover on both [Instant and VM-backed runtimes](/docs/guides/instant-sessions/):
 
-- **Sleeping.** The session went idle or you manually chose **Sleep** for an awake idle conversation-mode session with a workspace. SAM writes a checkpoint, releases compute, and keeps the composer visible so sending a message wakes the same chat.
+- **Sleeping.** The session went idle or you manually chose **Sleep** for an awake idle conversation-mode session with a workspace. SAM writes a checkpoint, releases compute, and keeps the composer visible so sending a message wakes the same chat. A message sent in the first minutes after it slept waits (up to an hour) until the old workspace has finished shutting down, then wakes it, usually within a minute or two of the shutdown.
 - **Recovery.** SAM is rebuilding the session's runtime and restoring its saved state. Wait for it to finish instead of resending.
+- **Wake failed.** SAM could not safely wake the sleeping session or the queued wake prompt expired before delivery. The session is marked **Wake failed** in the list and a system message in the chat explains the reason, so the failure is visible instead of hidden in retry state.
+- **Failed tasks.** When a task fails while its workspace is still running, SAM snapshots the workspace and puts the conversation to sleep instead of deleting it. That covers a provider usage limit, an expired request for your input, and an agent that went quiet after a SAM check-in. If the agent is still working when the task fails, SAM waits for its turn to end first (up to 8 hours by default). The failure banner stays, and sending a message wakes the same chat with its files restored. If SAM could not save the workspace, or the snapshot is incomplete, the chat says so. An agent that crashed, timed out, or hung mid-turn has no session SAM can safely snapshot, so its uncommitted changes are lost and the chat says that too. **Archive** still deletes it right away.
 
 You may also see a banner telling you a message was saved but its delivery was interrupted. **That one needs a decision from you** — SAM will not replay the message automatically, because replaying a prompt that already half-ran duplicates commits and pull requests. See [what to do when a session is interrupted](/docs/guides/instant-sessions/#what-to-do-when-a-session-is-interrupted).
 

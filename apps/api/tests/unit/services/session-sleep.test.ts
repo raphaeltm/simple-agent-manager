@@ -89,7 +89,8 @@ function buildDb(
   taskStatus = 'in_progress',
   activeNodeWorkspaces: Array<{ id: string }> = [],
   nodeWarmSince: string | null = null,
-  includeAgentQuery = true
+  includeAgentQuery = true,
+  postEnsureWorkspace?: { nodeId: string; chatSessionId: string }
 ) {
   const selectRows = [
     [
@@ -107,7 +108,7 @@ function buildDb(
       },
     ],
     ...(includeAgentQuery ? [[{ id: 'agent-session-1', agentType: 'openai-codex' }]] : []),
-    [{ warmSince: nodeWarmSince }],
+    [postEnsureWorkspace ?? { warmSince: nodeWarmSince }],
     activeNodeWorkspaces,
   ];
   const select = vi.fn(() => {
@@ -200,18 +201,14 @@ describe('parseHarnessWorkConfig', () => {
 
 describe('isHarnessWorkLeaseActive', () => {
   it('returns false for null state', async () => {
-    const { isHarnessWorkLeaseActive } = await import(
-      '../../../src/services/session-idleness'
-    );
+    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-idleness');
     expect(
       isHarnessWorkLeaseActive(null, new Date(), { leaseMs: 300000, maxDurationMs: 1800000 })
     ).toBe(false);
   });
 
   it('returns true for active work within lease', async () => {
-    const { isHarnessWorkLeaseActive } = await import(
-      '../../../src/services/session-idleness'
-    );
+    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-idleness');
     const now = new Date();
     expect(
       isHarnessWorkLeaseActive(
@@ -227,9 +224,7 @@ describe('isHarnessWorkLeaseActive', () => {
   });
 
   it('returns false for expired lease', async () => {
-    const { isHarnessWorkLeaseActive } = await import(
-      '../../../src/services/session-idleness'
-    );
+    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-idleness');
     const now = new Date();
     expect(
       isHarnessWorkLeaseActive(
@@ -245,9 +240,7 @@ describe('isHarnessWorkLeaseActive', () => {
   });
 
   it('returns false for inactive work state', async () => {
-    const { isHarnessWorkLeaseActive } = await import(
-      '../../../src/services/session-idleness'
-    );
+    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-idleness');
     const now = new Date();
     expect(
       isHarnessWorkLeaseActive(
@@ -338,6 +331,70 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
     expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+  });
+
+  it('does not schedule a deferred unhealthy-node sleep after its budget is cancelled', async () => {
+    const env = buildEnv();
+    const { queueWorkspaceSessionSleep } = await import('../../../src/services/session-sleep');
+    let finishSnapshot: (() => void) | undefined;
+    mocks.ensureSessionSnapshotForSleep.mockImplementation(
+      () => new Promise<void>((resolve) => (finishSnapshot = resolve))
+    );
+    const controller = new AbortController();
+    const queued = queueWorkspaceSessionSleep(env, {
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      reason: 'node_heartbeat_lost',
+      expectedNodeId: 'node-1',
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(mocks.ensureSessionSnapshotForSleep).toHaveBeenCalledTimes(1));
+
+    controller.abort(); // The node has now been released by the bounded cleanup.
+    finishSnapshot?.();
+
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+    expect(mocks.scheduleSessionSnapshotSleep).not.toHaveBeenCalled();
+  });
+
+  it('does not queue a sleep for a workspace on a replacement node', async () => {
+    const env = buildEnv();
+    const { queueWorkspaceSessionSleep } = await import('../../../src/services/session-sleep');
+
+    await expect(
+      queueWorkspaceSessionSleep(env, {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'node_heartbeat_lost',
+        expectedNodeId: 'retired-node',
+      })
+    ).rejects.toThrow('Workspace moved from the unhealthy node');
+
+    expect(mocks.ensureSessionSnapshotForSleep).not.toHaveBeenCalled();
+    expect(mocks.scheduleSessionSnapshotSleep).not.toHaveBeenCalled();
+  });
+
+  it('rechecks ownership after snapshot setup before scheduling sleep', async () => {
+    const env = buildEnv();
+    mocks.drizzle.mockReturnValue(
+      buildDb('vm', 'running', 'in_progress', [], null, true, {
+        nodeId: 'replacement-node',
+        chatSessionId: 'chat-1',
+      })
+    );
+    const { queueWorkspaceSessionSleep } = await import('../../../src/services/session-sleep');
+
+    await expect(
+      queueWorkspaceSessionSleep(env, {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'node_heartbeat_lost',
+        expectedNodeId: 'node-1',
+      })
+    ).rejects.toThrow('Workspace moved from the unhealthy node');
+
+    expect(mocks.ensureSessionSnapshotForSleep).toHaveBeenCalledTimes(1);
+    expect(mocks.scheduleSessionSnapshotSleep).not.toHaveBeenCalled();
   });
 
   it('defers heartbeat-live prompting activity without consuming a sleep claim', async () => {

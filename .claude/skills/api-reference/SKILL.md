@@ -54,9 +54,9 @@ user-invocable: false
 ## Chat Sessions (Project Scoped)
 
 - `GET /api/projects/:projectId/sessions` — List chat sessions for a project
-- `GET /api/projects/:projectId/sessions/:sessionId` — Get chat session detail with recent messages
+- `GET /api/projects/:projectId/sessions/:sessionId` — Get chat session detail with recent messages (`before`/`after` take the same cursors as the message list below; an `after`-only request reads forward so a client can drain newer messages page by page)
 - `GET /api/projects/:projectId/sessions/:sessionId/state` — Get lightweight ACP activity state for a chat session
-- `GET /api/projects/:projectId/sessions/:sessionId/messages` — List persisted session messages (supports `roles`, `before`, `limit`, `compact`, `order=asc|desc`)
+- `GET /api/projects/:projectId/sessions/:sessionId/messages` — List persisted session messages (supports `roles`, `before`, `after`, `limit`, `compact`, `order=asc|desc`). `before`/`after` accept an exact `[createdAt,sequence,id]` cursor taken from a page's edge row — required to resume inside a group of rows sharing one timestamp — or a legacy millisecond timestamp that excludes every row at that time. Without `order`, an `after`-only request reads ascending; anything else reads newest-first. Pages are always returned oldest-first.
 - `GET /api/projects/:projectId/sessions/:sessionId/messages/:messageId/tool-content` — Lazy-load stored tool content for compact messages, falling back to the private R2 archive when inline payloads have been stripped
 - `GET /api/projects/:projectId/sessions/:sessionId/comments` — List message-anchored comment threads (supports `messageId`, `status=open|sent|resolved`, `afterSequence`, `limit`)
 - `POST /api/projects/:projectId/sessions/:sessionId/comments` — Create a message-anchored comment thread (`{ messageId, body, quote?, clientMutationId? }`)

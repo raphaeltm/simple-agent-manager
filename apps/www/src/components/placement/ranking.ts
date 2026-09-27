@@ -10,8 +10,6 @@ import { candidatesFor } from './catalog';
 import type { Lab, LabNode, Usage, WorkloadShape } from './types';
 import {
   HOST_MEMORY_RESERVE_MB,
-  MAX_CO_TENANTS,
-  MAX_WORKSPACES_PER_NODE,
   WORKLOAD_PRESETS,
 } from './types';
 
@@ -58,11 +56,8 @@ export function admissionRefusal(lab: Lab, node: LabNode, shape: WorkloadShape):
   if (node.state !== 'active' && node.state !== 'warm') return `node is ${node.state}`;
   const preset = WORKLOAD_PRESETS[shape];
   const usage = usageOf(lab, node.id);
-  // Both ceilings are real and both are checked; at the defaults the node-wide one is stricter.
-  if (usage.coTenants >= MAX_WORKSPACES_PER_NODE) {
-    return `node workspace cap (${MAX_WORKSPACES_PER_NODE}) reached`;
-  }
-  if (usage.coTenants >= MAX_CO_TENANTS) return `co-tenant cap (${MAX_CO_TENANTS}) reached`;
+  // There is no count-based density cap. A host is full when a resource dimension is full; the
+  // co-tenant count is only a ranking input for `spread`.
   if (usage.cpuMillis + preset.cpuMillis > cpuBudgetMillis(node)) return 'not enough vCPU';
   if (usage.memoryMb + preset.memoryMb > usableMemoryMb(node)) {
     return `not enough memory after the ${HOST_MEMORY_RESERVE_MB} MB host reserve`;

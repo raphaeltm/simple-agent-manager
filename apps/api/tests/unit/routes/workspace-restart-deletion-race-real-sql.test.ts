@@ -174,7 +174,6 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
           cpuMillis: 1000,
           memoryMb: 1024,
           diskMb: 1024,
-          maxCoTenants: 4,
           exclusiveNode: false,
           source: 'platform',
           sourceId: 'platform',

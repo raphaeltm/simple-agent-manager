@@ -111,16 +111,15 @@ describe('save handler semantics (all four surfaces)', () => {
   });
 });
 
-describe('exclusive checkbox preserves maxCoTenants (Fix 5)', () => {
-  it('unchecking exclusive does NOT clear stored maxCoTenants', () => {
+describe('exclusive checkbox and the retired maxCoTenants field', () => {
+  it('unchecking exclusive drops a stored maxCoTenants instead of writing it back', () => {
     const json = JSON.stringify({ exclusiveNode: true, maxCoTenants: 2 });
     const state = deserializeResourceRequirements(json);
     expect(state.exclusiveNode).toBe(true);
-    expect(state.maxCoTenants).toBe('2');
+    expect(state._opaqueFields).toBeUndefined();
     const toggled = { ...state, exclusiveNode: false as boolean | undefined };
-    expect(toggled.maxCoTenants).toBe('2');
     const saved = serializeResourceRequirements(toggled);
-    expect(JSON.parse(saved!)).toEqual({ exclusiveNode: false, maxCoTenants: 2 });
+    expect(JSON.parse(saved!)).toEqual({ exclusiveNode: false });
   });
 
   it('explicit false is distinct from inherit undefined', () => {

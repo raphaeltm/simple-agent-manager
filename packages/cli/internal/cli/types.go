@@ -149,7 +149,6 @@ type ResourceRequirements struct {
 	MinMemoryGB   *float64 `json:"minMemoryGb,omitempty"`
 	MinDiskGB     *float64 `json:"minDiskGb,omitempty"`
 	ExclusiveNode *bool    `json:"exclusiveNode,omitempty"`
-	MaxCoTenants  *float64 `json:"maxCoTenants,omitempty"`
 }
 
 // Project represents a project in list responses.

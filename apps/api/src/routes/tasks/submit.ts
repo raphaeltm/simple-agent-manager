@@ -718,7 +718,6 @@ submitRoutes.post(
         attachments: validatedAttachments.length > 0 ? validatedAttachments : null,
         projectScaling: {
           taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
-          maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
           nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
           nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
           warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,

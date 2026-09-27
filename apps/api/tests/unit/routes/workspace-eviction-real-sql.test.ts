@@ -338,7 +338,11 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
     });
   });
 
-  it.each(['eviction_snapshot_missing_or_stale', 'source_task_not_wakeable'])(
+  it.each([
+    'eviction_snapshot_missing_or_stale',
+    'source_task_not_wakeable',
+    'recovery_start_failed:task runner unavailable',
+  ])(
     'acknowledges terminal recovery outcome %s and records the eviction activity',
     async (reason) => {
       mocks.recoverWorkspaceAfterEviction.mockResolvedValueOnce({ status: 'unavailable', reason });
@@ -351,9 +355,8 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
 
   it.each([
     'workspace_deletion_unconfirmed',
-    'session_recovery_placement_placement',
+    'session_recovery_placement_lookup_failed',
     'session_recovery_placement_transient',
-    'recovery_start_failed:task runner unavailable',
   ])('keeps retryable recovery outcome %s queued with a conflict', async (reason) => {
     mocks.recoverWorkspaceAfterEviction.mockResolvedValueOnce({ status: 'unavailable', reason });
 

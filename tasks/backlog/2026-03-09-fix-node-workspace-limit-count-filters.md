@@ -1,5 +1,10 @@
 # Fix Node/Workspace Limit Checks Counting Deleted Entities
 
+> **Partially obsolete (2026-09-25):** `MAX_WORKSPACES_PER_NODE` no longer exists — the per-node
+> workspace-count cap was removed entirely (task
+> `2026-09-25-remove-legacy-per-node-workspace-caps`). Only the `MAX_NODES_PER_USER` count-filter
+> items below can still apply; re-verify the cited file/line references before acting.
+
 ## Problem
 
 Node and workspace limit checks in two locations count **all** entities regardless of status, causing users to hit `MAX_NODES_PER_USER` and `MAX_WORKSPACES_PER_NODE` limits when they shouldn't be — deleted and stopped nodes/workspaces are counted toward the cap.

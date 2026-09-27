@@ -407,8 +407,7 @@ function extractStaticBindings(topLevel: WranglerToml): {
     durable_objects: topLevel.durable_objects as DurableObjectsConfig | undefined,
     ai: topLevel.ai as AIBinding | undefined,
     analytics_engine_datasets: topLevel.analytics_engine_datasets as
-      | AnalyticsEngineDatasetBinding[]
-      | undefined,
+      AnalyticsEngineDatasetBinding[] | undefined,
     containers: topLevel.containers as ContainerBinding[] | undefined,
     migrations: topLevel.migrations as MigrationEntry[] | undefined,
     artifacts: topLevel.artifacts as unknown[] | undefined,
@@ -645,11 +644,7 @@ function append(path: string | undefined, content: string): void {
   }
 }
 
-function overrideSummaryTable(
-  heading: string,
-  note: string,
-  rows: readonly string[]
-): string {
+function overrideSummaryTable(heading: string, note: string, rows: readonly string[]): string {
   return [
     `### ${heading}`,
     '',
@@ -834,6 +829,12 @@ function getApiWorkerVars(
       'NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS',
       'NODE_WORKSPACE_IDLE_TIMEOUT_MS',
       'NODE_CLEANUP_FAILURE_BACKOFF_MS',
+      'NODE_UNHEALTHY_DRAIN_AFTER_MS',
+      'NODE_UNHEALTHY_RELEASE_AFTER_MS',
+      'NODE_UNHEALTHY_FLEET_MAX_FRACTION',
+      'NODE_UNHEALTHY_FLEET_MIN_NODES',
+      'NODE_UNHEALTHY_RETRY_MS',
+      'NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS',
       'NODE_AGENT_REQUEST_TIMEOUT_MS',
       'NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS',
       'WORKSPACE_DELETION_RETRY_BASE_MS',
@@ -987,6 +988,13 @@ function getApiWorkerVars(
       'PROJECT_DATA_ARCHIVE_SEARCH_CONTINUATION_TTL_MS',
       'PROJECT_DATA_ARCHIVE_SEARCH_CURSOR_MAX_BYTES',
       'PROJECT_DATA_ARCHIVE_SEARCH_ERROR_LIMIT',
+      'PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT',
+      'PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT',
+      'PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT',
+      'PROJECT_DATA_ALARM_SECTION_GATING_ENABLED',
+      'PROJECT_DATA_ALARM_FULL_RUN_INTERVAL_MS',
+      'PROJECT_DATA_ALARM_DUE_TOLERANCE_MS',
+      'PROJECT_DATA_ALARM_SLOW_SECTION_MS',
       'PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED',
       'PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS',
       'PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS',
@@ -997,6 +1005,7 @@ function getApiWorkerVars(
       'SESSION_SLEEP_RETRY_DELAY_MS',
       'SESSION_SLEEP_MAX_ATTEMPTS',
       'SESSION_SLEEP_CLAIM_LEASE_MS',
+      'FAILED_TASK_PRESERVATION_MAX_WAIT_MS',
       'HARNESS_BACKGROUND_WORK_LEASE_MS',
       'HARNESS_BACKGROUND_WORK_MAX_DURATION_MS',
       'ACP_ACTIVITY_ADMISSION_ENABLED',

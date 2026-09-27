@@ -55,6 +55,7 @@ import { assertTaskRunnerStartGuard } from '../../services/task-runner-start-gua
 import { handleAgentSession } from './agent-session-step';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
+import { hasTaskStepRetryBudget } from './snapshot-restore-retry';
 import { failTask } from './state-machine';
 import { redactTaskRunnerStatus } from './status';
 import type { StartTaskInput, TaskRunnerContext, TaskRunnerState } from './types';
@@ -342,7 +343,7 @@ export class TaskRunner extends DurableObject<Env> {
         durationMs,
       });
 
-      if (isTransientError(err) && state.retryCount < this.getMaxRetries()) {
+      if (isTransientError(err) && hasTaskStepRetryBudget(state, this.getMaxRetries())) {
         // Transient failure — retry with backoff
         state.retryCount++;
         await this.ctx.storage.put('state', state);
@@ -360,7 +361,7 @@ export class TaskRunner extends DurableObject<Env> {
           backoffMs: backoff,
         });
       } else {
-        // Permanent failure or max retries exceeded
+        // Permanent failure or retry budget exhausted
         await failTask(state, errorMessage, rc);
       }
     }

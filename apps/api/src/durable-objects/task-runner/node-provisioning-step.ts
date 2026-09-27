@@ -4,15 +4,10 @@
  * Split out of `node-steps.ts` (rule 18): capacity-exhaustion handling, the VM
  * admission lease and the provider allocation loop are a single concern that is
  * independently reviewable from node SELECTION, which stays in `node-steps.ts`.
- * Pure code motion plus the imports the moved handler needs — no behaviour
- * change is introduced by the split itself.
+ * Crash-recovery adoption, the pre-allocation gates and provider-failure handling
+ * live in the sibling `node-provisioning-*` modules.
  */
-import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
-import type {
-  CredentialProvider,
-  PlacementAttemptDiagnostic,
-  VMSize,
-} from '@simple-agent-manager/shared';
+import type { PlacementAttemptDiagnostic, VMSize } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
 import {
@@ -20,24 +15,16 @@ import {
   capacityPlacementSnapshotSqlValues,
 } from '../../services/capacity-placement-snapshot';
 import {
-  type CapacityPlacementSnapshotRow,
-  toCapacityPlacementSnapshot,
-} from '../../services/capacity-pools';
-import {
   capacityPoolNoCandidatesError,
   hasNoCapacityPoolCandidates,
-  resolveCapacityAwareQuotaCredentialSource,
 } from '../../services/placement-resolver';
 import {
   assertVmProvisioningLease,
-  getVmAdmissionConfig,
   markVmProvisioningLeaseInflightNode,
-  recordVmProviderCapacityFailure,
   recordVmProviderCapacitySuccess,
   releaseVmProvisioningLease,
   renewVmProvisioningLease,
   tryAcquireVmProvisioningLease,
-  waitForVmAdmissionCapacity,
 } from '../../services/vm-admission-control';
 import {
   countActiveManagedPoolNodes,
@@ -45,19 +32,21 @@ import {
   shouldProvisionSpreadNode,
 } from './capacity-pool-node-limit';
 import { assertClaimedNodeAvailable } from './claimed-node-availability';
-import { parseEnvInt } from './helpers';
 import {
   buildAdmissionIdentity,
   handleLeaseResult,
-  scheduleAdmissionWait,
   waitOrThrowForCapacityPoolNodeLimit,
 } from './node-provisioning-admission';
-import {
-  buildProvisioningExhaustionPlan,
-  exhaustionPolicyQueues,
-  exhaustionTerminalMessage,
-} from './node-provisioning-exhaustion';
+import { coreQuotaExclusionReason, type CoreQuotaRejection } from './node-provisioning-core-quota';
+import { buildProvisioningExhaustionPlan } from './node-provisioning-exhaustion';
+import { handleProvisioningAttemptFailure } from './node-provisioning-failure';
+import { enforceComputeQuota, enforceUserNodeLimit } from './node-provisioning-gates';
 import { rankProvisioningCandidates } from './node-provisioning-ranking';
+import { adoptProvisionedNodeAfterCrash } from './node-provisioning-recovery';
+import {
+  discardProviderRejectedNode,
+  recordProviderRejectedNode,
+} from './node-provisioning-rejected-node';
 import { trySelectReusableNodeForProvisioning } from './node-provisioning-reuse';
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
@@ -77,90 +66,10 @@ export async function handleNodeProvisioning(
     throw capacityPoolNoCandidatesError(state.config.capacityPoolSelection);
   }
 
-  // Self-healing recovery: a prior attempt may have provisioned a node in D1
-  // (and in the cloud) but crashed before persisting nodeId to DO storage. The
-  // task row records the node via auto_provisioned_node_id, which is written
-  // BEFORE provisionNode (so it survives the crash window between provision
-  // success and the storage.put below). Adopt that node instead of creating a
-  // duplicate (orphan). Capacity-failed nodes are deleted from D1, so a
-  // missing/dead row means the attempt failed and we should (re)provision below.
-  if (!state.stepResults.nodeId) {
-    const taskRow = await rc.env.DATABASE.prepare(
-      `SELECT auto_provisioned_node_id FROM tasks WHERE id = ?`
-    )
-      .bind(state.taskId)
-      .first<{ auto_provisioned_node_id: string | null }>();
-    const recoveredNodeId = taskRow?.auto_provisioned_node_id ?? null;
-    if (recoveredNodeId) {
-      const existing = await rc.env.DATABASE.prepare(
-        `SELECT
-           id,
-           status,
-           vm_size AS vmSize,
-           capacity_pool_id AS capacityPoolId,
-           capacity_pool_scope AS capacityPoolScope,
-           capacity_pool_revision AS capacityPoolRevision,
-           capacity_source_id AS capacitySourceId,
-           capacity_pool_candidate_id AS capacityPoolCandidateId,
-           placement_credential_source AS placementCredentialSource,
-           placement_credential_reference AS placementCredentialReference,
-           placement_credential_version AS placementCredentialVersion,
-           capacity_pool_project_id AS capacityPoolProjectId,
-           workload_role AS workloadRole,
-           provider_instance_type AS providerInstanceType,
-           provider_instance_vcpu_count AS providerInstanceVcpuCount,
-           provider_instance_memory_mb AS providerInstanceMemoryMb,
-           provider_instance_disk_gb AS providerInstanceDiskGb,
-           provider_instance_boot_disk_size_gb AS providerInstanceBootDiskSizeGb,
-           provider_instance_image AS providerInstanceImage,
-           provider_instance_architecture AS providerInstanceArchitecture,
-           provider_instance_price_display AS providerInstancePriceDisplay,
-           provider_instance_price_currency AS providerInstancePriceCurrency,
-           provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
-           provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
-           placement_explanation_json AS placementExplanationJson
-         FROM nodes WHERE id = ?`
-      )
-        .bind(recoveredNodeId)
-        .first<
-          (CapacityPlacementSnapshotRow & { id: string; status: string; vmSize: string }) | null
-        >();
-      if (
-        existing &&
-        (existing.status === 'running' ||
-          existing.status === 'creating' ||
-          existing.status === 'recovery')
-      ) {
-        const recoveredSize = existing.vmSize as VMSize;
-        const requestedBeforeRecovery = state.config.vmSize;
-        state.stepResults.nodeId = existing.id;
-        state.stepResults.autoProvisioned = true;
-        state.stepResults.provisionedVmSize = recoveredSize;
-        const recoveredSnapshot = toCapacityPlacementSnapshot(existing);
-        state.stepResults.capacityPlacementSnapshot = recoveredSnapshot.capacityPoolId
-          ? recoveredSnapshot
-          : null;
-        state.config.vmSize = recoveredSize;
-        state.provisioningStartedAt ??= Date.now();
-        await rc.ctx.storage.put('state', state);
-        log.info('task_runner_do.node_provisioning.recovered', {
-          taskId: state.taskId,
-          nodeId: existing.id,
-          recoveredVmSize: recoveredSize,
-          requestedVmSize: requestedBeforeRecovery,
-        });
-        if (recoveredSize !== requestedBeforeRecovery) {
-          // Re-record the downgrade in case the crash happened before it was
-          // persisted on the original success path.
-          await rc.env.DATABASE.prepare(
-            `UPDATE tasks SET provisioned_vm_size = ?, updated_at = ? WHERE id = ?`
-          )
-            .bind(recoveredSize, new Date().toISOString(), state.taskId)
-            .run();
-        }
-      }
-    }
+  if (state.stepResults.providerRejectedNodeId) {
+    await discardProviderRejectedNode(state, rc, state.stepResults.providerRejectedNodeId);
   }
+  await adoptProvisionedNodeAfterCrash(state, rc);
 
   // If we already created the node (retry scenario, or recovery above), check its status
   if (state.stepResults.nodeId) {
@@ -244,92 +153,9 @@ export async function handleNodeProvisioning(
     return;
   }
 
-  // Check user node limit. User-owned (BYO) nodes are excluded — they cost SAM nothing to run, so
-  // they must not consume an auto-provisioning slot or block cloud provisioning (critique #8).
-  const maxNodes = parseEnvInt(rc.env.MAX_NODES_PER_USER, 10);
-  const countResult = await rc.env.DATABASE.prepare(
-    `SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery') AND node_role = 'workspace' AND node_class != 'user-owned'`
-  )
-    .bind(state.userId)
-    .first<{ c: number }>();
+  if ((await enforceUserNodeLimit(state, rc, admissionIdentity)) === 'waiting') return;
 
-  if ((countResult?.c ?? 0) >= maxNodes) {
-    if (admissionIdentity && getVmAdmissionConfig(rc.env).mode === 'enforce') {
-      const waitResult = await waitForVmAdmissionCapacity(
-        rc.env,
-        admissionIdentity,
-        'user_node_limit'
-      );
-      if (waitResult.kind === 'expired') {
-        await persistPlacementDiagnostics(state, rc, {
-          selectedNodeId: null,
-          queue: {
-            state: 'expired',
-            reason: waitResult.reason,
-            waitDeadlineAt: waitResult.waitDeadlineAt,
-          },
-        });
-        throw Object.assign(
-          new Error(`Maximum ${maxNodes} nodes allowed. Cannot auto-provision.`),
-          {
-            permanent: true,
-          }
-        );
-      }
-      await scheduleAdmissionWait(state, rc, waitResult);
-      return;
-    }
-    throw Object.assign(new Error(`Maximum ${maxNodes} nodes allowed. Cannot auto-provision.`), {
-      permanent: true,
-    });
-  }
-
-  // Re-check quota before provisioning (hard gate for platform compute).
-  // Resolves credential source for the target provider — not just whether the user
-  // has ANY cloud credential. A user with a Hetzner credential who provisions on
-  // Scaleway (platform) must still be quota-enforced.
-  const quotaEnforcementEnabled = rc.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
-  if (quotaEnforcementEnabled) {
-    const { drizzle } = await import('drizzle-orm/d1');
-    const drizzleSchema = await import('../../db/schema');
-    const db = drizzle(rc.env.DATABASE, { schema: drizzleSchema });
-    const { resolveCredentialSource } = await import('../../services/provider-credentials');
-    const attributionProjectId =
-      state.config.credentialAttributionSource === 'project'
-        ? state.config.credentialAttributionProjectId
-        : null;
-    const credResult = await resolveCredentialSource(
-      db,
-      state.config.credentialAttributionUserId,
-      (state.config.cloudProvider as CredentialProvider) ?? undefined,
-      attributionProjectId
-    );
-
-    if (!credResult) {
-      throw Object.assign(new Error('No cloud provider credentials available for provisioning.'), {
-        permanent: true,
-      });
-    }
-
-    const quotaCredentialSource = resolveCapacityAwareQuotaCredentialSource(
-      credResult,
-      state.config.capacityPoolSelection ?? null
-    );
-    if (quotaCredentialSource === 'platform') {
-      const { checkQuotaForUser } = await import('../../services/compute-quotas');
-      const quotaCheck = await checkQuotaForUser(db, state.userId);
-
-      if (!quotaCheck.allowed) {
-        throw Object.assign(
-          new Error(
-            `Monthly compute quota exceeded: ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours used. ` +
-              'Add your own cloud provider credentials or contact your admin.'
-          ),
-          { permanent: true }
-        );
-      }
-    }
-  }
+  await enforceComputeQuota(state, rc);
 
   if (admissionIdentity) {
     const leaseResult = await tryAcquireVmProvisioningLease(rc.env, admissionIdentity);
@@ -420,12 +246,15 @@ export async function handleNodeProvisioning(
   );
   await persistPlacementDiagnostics(state, rc, { attempts: diagnosticAttempts, queue: {} });
 
+  // Offerings an account core quota has already ruled out, filled in by the failure
+  // handler. Skipped attempts keep `not-attempted`, with the handler's reason.
+  const coreQuotaRejections: CoreQuotaRejection[] = [];
   for (const [i, attempt] of exhaustionPlan.attempts.entries()) {
     const diagnosticAttempt = diagnosticAttempts[i];
     if (!diagnosticAttempt) throw new Error('Missing provisioning attempt diagnostic');
+    if (coreQuotaExclusionReason(attempt, coreQuotaRejections)) continue;
     diagnosticAttempt.outcome = 'pending';
     await persistPlacementDiagnostics(state, rc, { attempts: diagnosticAttempts });
-    const isLastAttempt = i === exhaustionPlan.attempts.length - 1;
     const size = attempt.vmSize;
     // Every attempt after the first re-points the provisioning target at that
     // candidate's own offering, so the provider payload matches the attempt.
@@ -548,6 +377,7 @@ export async function handleNodeProvisioning(
         },
         {
           rethrowProviderError: true,
+          beforeRejectedNodeDelete: () => recordProviderRejectedNode(state, rc, createdNode.id),
           assertExternalMutationAuthority: async () => {
             await rc.assertRecoveryAuthority(state);
             await assertVmProvisioningLease(
@@ -569,173 +399,20 @@ export async function handleNodeProvisioning(
         state.admissionLeaseToken
       );
     } catch (err) {
-      diagnosticAttempt.outcome =
-        err instanceof ProviderError && isTransientCapacityError(err)
-          ? 'capacity-exhausted'
-          : 'failed';
-      // Name the provider's own cause. A fixed string here is what made the originating
-      // incident's `placement_explanation_json` say only "Provider allocation failed" — true,
-      // and useless for working out that Hetzner could not place a cx53 in fsn1.
-      const providerDetail = err instanceof ProviderError ? `: ${err.message}` : '';
-      diagnosticAttempt.reason =
-        diagnosticAttempt.outcome === 'capacity-exhausted'
-          ? `Provider offering has no available capacity${providerDetail}`
-          : `Provider allocation failed${providerDetail}`;
-      await persistPlacementDiagnostics(state, rc, {
-        attempts: diagnosticAttempts,
-        selectedNodeId: null,
-      });
-      if (admissionIdentity) {
-        const providerCapacity = await recordVmProviderCapacityFailure(rc.env, {
-          scope: admissionIdentity,
-          error: err,
-        });
-        if (providerCapacity) {
-          diagnosticAttempt.outcome = 'capacity-exhausted';
-          diagnosticAttempt.reason = 'Provider account capacity is exhausted';
-          await persistPlacementDiagnostics(state, rc, {
-            attempts: diagnosticAttempts,
-            selectedNodeId: null,
-          });
-          await rc.env.DATABASE.prepare(
-            `DELETE FROM nodes WHERE id = ? AND provider_instance_id IS NULL`
-          )
-            .bind(createdNode.id)
-            .run();
-          await rc.env.DATABASE.prepare(
-            `UPDATE tasks SET auto_provisioned_node_id = NULL, updated_at = ? WHERE id = ?`
-          )
-            .bind(new Date().toISOString(), state.taskId)
-            .run();
-          state.stepResults.nodeId = null;
-          state.stepResults.autoProvisioned = false;
-          state.stepResults.provisionedVmSize = null;
-          await releaseVmProvisioningLease(
-            rc.env,
-            state.admissionScopeKey,
-            state.taskId,
-            state.admissionLeaseToken,
-            'provider_account_capacity'
-          );
-          state.admissionScopeKey = null;
-          state.admissionLeaseToken = null;
-          await rc.ctx.storage.put('state', state);
-          const retryAt = new Date(
-            Date.now() + getVmAdmissionConfig(rc.env).providerCooldownMs
-          ).toISOString();
-          const waitResult = await waitForVmAdmissionCapacity(
-            rc.env,
-            admissionIdentity,
-            'provider_account_capacity',
-            retryAt,
-            providerCapacity
-          );
-          if (waitResult.kind === 'expired') {
-            await persistPlacementDiagnostics(state, rc, {
-              selectedNodeId: null,
-              queue: {
-                state: 'expired',
-                reason: waitResult.reason,
-                waitDeadlineAt: waitResult.waitDeadlineAt,
-              },
-            });
-            throw Object.assign(new Error('Timed out waiting for provider account capacity'), {
-              permanent: true,
-            });
-          }
-          await scheduleAdmissionWait(state, rc, waitResult);
-          return;
-        }
+      if (state.stepResults.providerRejectedNodeId) {
+        await discardProviderRejectedNode(state, rc, state.stepResults.providerRejectedNodeId);
       }
-      const isCapacityFailure = err instanceof ProviderError && isTransientCapacityError(err);
-
-      // Any non-capacity provider failure fails fast — never descend on
-      // invalid_config / quota_exceeded / auth_error / rate_limited / unknown.
-      if (!isCapacityFailure) {
-        await releaseVmProvisioningLease(
-          rc.env,
-          state.admissionScopeKey,
-          state.taskId,
-          state.admissionLeaseToken,
-          'provisioning_failed'
-        );
-        state.admissionScopeKey = null;
-        state.admissionLeaseToken = null;
-        await rc.ctx.storage.put('state', state);
-        const message = err instanceof Error ? err.message : 'Node provisioning failed';
-        throw Object.assign(new Error(message), { permanent: true });
-      }
-
-      // transient_capacity: this is SKU/region scarcity for one offering, not
-      // an account-wide limit (that branch returned above, and it deliberately
-      // does NOT try alternatives — retrying other SKUs against an exhausted
-      // account multiplies cost without any chance of succeeding).
-      // The failed node row was already deleted inside provisionNode (decision #1).
-      state.stepResults.nodeId = null;
-      state.stepResults.autoProvisioned = false;
-      state.stepResults.provisionedVmSize = null;
-      await rc.ctx.storage.put('state', state);
-
-      if (!isLastAttempt) {
-        const nextAttempt = exhaustionPlan.attempts[i + 1];
-        if (nextAttempt === undefined) {
-          throw Object.assign(
-            new Error('Internal error: provisioning attempt index out of range'),
-            { permanent: true }
-          );
-        }
-        log.info('task_runner_do.node_provisioning.exhaustion_fallback', {
-          taskId: state.taskId,
-          policy: exhaustionPlan.policy,
-          fromProviderInstanceType: attempt.providerInstanceType,
-          toProviderInstanceType: nextAttempt.providerInstanceType,
-          fromLocation: attempt.location,
-          toLocation: nextAttempt.location,
-          capacityPoolId: state.config.capacityPoolSelection?.poolId ?? null,
-          providerCode: err instanceof ProviderError ? err.providerCode : undefined,
-        });
-        continue;
-      }
-
-      // Every permitted offering is exhausted. The pool's `queue` policy parks
-      // the task on the SHARED admission queue instead of failing it; `fail`
-      // and `fallback-chain` terminalize with the list of offerings tried.
-      await releaseVmProvisioningLease(
-        rc.env,
-        state.admissionScopeKey,
-        state.taskId,
-        state.admissionLeaseToken,
-        'transient_capacity_exhausted'
-      );
-      state.admissionScopeKey = null;
-      state.admissionLeaseToken = null;
-      await rc.ctx.storage.put('state', state);
-
-      const terminalMessage = exhaustionTerminalMessage(
+      const outcome = await handleProvisioningAttemptFailure(state, rc, {
+        err,
+        i,
         exhaustionPlan,
-        err instanceof ProviderError ? err.message : null
-      );
-      if (admissionIdentity && exhaustionPolicyQueues(exhaustionPlan)) {
-        const waitResult = await waitForVmAdmissionCapacity(
-          rc.env,
-          admissionIdentity,
-          'provider_transient_capacity'
-        );
-        if (waitResult.kind === 'expired') {
-          await persistPlacementDiagnostics(state, rc, {
-            selectedNodeId: null,
-            queue: {
-              state: 'expired',
-              reason: waitResult.reason,
-              waitDeadlineAt: waitResult.waitDeadlineAt,
-            },
-          });
-          throw Object.assign(new Error(terminalMessage), { permanent: true });
-        }
-        await scheduleAdmissionWait(state, rc, waitResult);
-        return;
-      }
-      throw Object.assign(new Error(terminalMessage), { permanent: true });
+        diagnosticAttempts,
+        admissionIdentity,
+        createdNode,
+        coreQuotaRejections,
+      });
+      if (outcome === 'next-attempt') continue;
+      return;
     }
 
     diagnosticAttempt.outcome = 'succeeded';

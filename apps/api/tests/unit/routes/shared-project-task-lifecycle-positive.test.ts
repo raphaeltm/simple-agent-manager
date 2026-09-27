@@ -306,6 +306,61 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
     expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env, undefined, MEMBER);
   });
 
+  it('POST /:taskId/run/cleanup: a failed run goes through preservation-first cleanup', async () => {
+    // Explicit cleanup of a failed run must not destroy work SAM would otherwise
+    // snapshot: it takes the same terminal cleanup as the automatic failure paths,
+    // which consults failed-task preservation. The completed-run case above is the
+    // control that keeps the direct teardown.
+    await seedTask({ status: 'failed', workspaceId: 'ws-creator', errorMessage: 'Prompt failed' });
+
+    const response = await makeApp(runRoutes).fetch(
+      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/run/cleanup`, {
+        method: 'POST',
+      }),
+      env,
+      mockCtx
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.cleanupTerminalTaskResourcesOrThrow).toHaveBeenCalledWith(env, 'task-1', {
+      status: 'failed',
+      requiredUserId: MEMBER,
+      projectId: PROJECT,
+      failureLogEvent: 'task.run_cleanup.failed',
+      logContext: { projectId: PROJECT, source: 'tasks.run_cleanup' },
+    });
+    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+  });
+
+  it('POST /:taskId/status: failing a task hands it to non-destructive terminal cleanup', async () => {
+    await seedTask({ status: 'in_progress' });
+
+    const response = await makeApp(crudRoutes).fetch(
+      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ toStatus: 'failed', errorMessage: 'Abandoned by the user' }),
+      }),
+      env,
+      mockCtx
+    );
+
+    expect(response.status).toBe(200);
+    expect(await readTask()).toMatchObject({
+      status: 'failed',
+      errorMessage: 'Abandoned by the user',
+    });
+    const [, , options] = mocks.cleanupTerminalTaskResourcesOrThrow.mock.calls[0] ?? [];
+    expect(options).toMatchObject({
+      status: 'failed',
+      errorMessage: 'Abandoned by the user',
+      requiredUserId: MEMBER,
+      projectId: PROJECT,
+    });
+    // No destructive intent: preservation decides whether the runtime is kept.
+    expect(options).not.toHaveProperty('destructiveSessionEnd');
+  });
+
   it('POST /:taskId/delegate: a member can delegate another member ready task to their own workspace', async () => {
     await seedTask({ status: 'ready' });
     mocks.requireOwnedWorkspace.mockResolvedValue({

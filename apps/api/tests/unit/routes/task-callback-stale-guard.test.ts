@@ -295,6 +295,33 @@ describe('task callback stale Instant guard', () => {
     expect(mocks.cleanupTerminalTaskResourcesOrThrow).toHaveBeenCalled();
   });
 
+  it('returns unchanged 200 for a late failed callback after completion', async () => {
+    mocks.task.status = 'completed';
+    mocks.task.errorMessage = null;
+    const app = createTestApp();
+
+    const res = await postFailed(app);
+
+    expect(res.status).toBe(200);
+    expect(mocks.setTaskStatus).not.toHaveBeenCalled();
+    expect(mocks.cleanupTerminalTaskResourcesOrThrow).not.toHaveBeenCalled();
+    expect(mocks.recordTaskLifecycleEventBestEffort).not.toHaveBeenCalled();
+    expect(mocks.task.status).toBe('completed');
+    const body = (await res.json()) as { status: string; errorMessage: string | null };
+    expect(body.status).toBe('completed');
+    expect(body.errorMessage).toBeNull();
+    expect(mocks.log.warn).toHaveBeenCalledWith(
+      'task.ignored_late_terminal_callback',
+      expect.objectContaining({
+        projectId: 'proj-stale',
+        taskId: 'task-stale',
+        fromStatus: 'completed',
+        toStatus: 'failed',
+        action: 'preserved_existing_terminal_status',
+      })
+    );
+  });
+
   it('does not emit a lifecycle event for a replayed same-status in_progress callback', async () => {
     const app = createTestApp();
 

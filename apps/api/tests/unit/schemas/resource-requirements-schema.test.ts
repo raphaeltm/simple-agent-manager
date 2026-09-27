@@ -40,18 +40,27 @@ describe('resource requirements request schemas', () => {
     ).toBe(true);
   });
 
-  it('rejects zero CPU, zero memory, malformed booleans, and invalid co-tenant counts', () => {
+  it('rejects zero CPU, zero memory, and malformed booleans', () => {
     for (const resourceRequirements of [
       { minVcpu: 0 },
       { minMemoryGb: 0 },
       { exclusiveNode: 'false' },
-      { maxCoTenants: 0 },
-      { maxCoTenants: 1.5 },
       [],
     ]) {
       expect(v.safeParse(SubmitTaskSchema, { message: 'ship', resourceRequirements }).success).toBe(
         false
       );
+    }
+  });
+
+  it('ignores the retired maxCoTenants field from older clients instead of rejecting it', () => {
+    const parsed = v.safeParse(SubmitTaskSchema, {
+      message: 'ship',
+      resourceRequirements: { minVcpu: 2, maxCoTenants: 0 },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.output.resourceRequirements).toEqual({ minVcpu: 2 });
     }
   });
 });

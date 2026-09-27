@@ -92,8 +92,10 @@ export {
   updateSignupApprovalConfig,
 } from './admin';
 export {
+  abandonAdminProjectDataArchiveMigration,
   closeAdminProjectDataArchiveCircuitBreaker,
   fetchAdminProjectDataArchiveCircuitBreakers,
+  fetchAdminProjectDataArchiveProblemMigrations,
   fetchAdminProjectDataStorageTelemetry,
 } from './admin-project-data-storage';
 export {

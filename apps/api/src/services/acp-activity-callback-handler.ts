@@ -38,7 +38,7 @@ import {
   persistIntermediateActivity,
 } from './acp-activity-callback-flush';
 import { normalizeAgentActivityErrorMessage } from './acp-activity-error-message';
-import { isTransientDurableObjectError } from './durable-object-retry';
+import { isRetryableForIdempotentDurableObjectOperation } from './durable-object-retry';
 import { type CallbackTokenPayload, verifyCallbackToken } from './jwt';
 import { hibernateAgentSessionOnNode } from './node-agent';
 import { callbackTokenMatchesNode, callbackTokenMatchesWorkspace } from './node-callback-auth';
@@ -189,10 +189,13 @@ async function handleTransientLookupFallback(input: {
   isIntermediate: boolean;
 }): Promise<Response | null> {
   const { context } = input;
+  // Activity reports are idempotent (the DO applies them through an observed-time CAS), so a CPU
+  // reset or lost connection may fall back to coalescing too; answering 500 instead made the VM
+  // retry every report up to 5x through the 2026-09-24 outage.
   if (
     !input.isIntermediate ||
     !context.config.enabled ||
-    !isTransientDurableObjectError(input.lookupError)
+    !isRetryableForIdempotentDurableObjectOperation(input.lookupError)
   ) {
     return null;
   }

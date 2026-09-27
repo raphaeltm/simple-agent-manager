@@ -358,7 +358,7 @@ async function autoDispatchSchedulableTasks(
   const projectRow = await env.DATABASE.prepare(
     `SELECT repository, installation_id, default_branch, default_vm_size, default_provider,
             default_location, default_agent_type, default_workspace_profile, default_devcontainer_config_name,
-            task_execution_timeout_ms, max_workspaces_per_node, node_cpu_threshold_percent,
+            task_execution_timeout_ms, node_cpu_threshold_percent,
             node_memory_threshold_percent, warm_node_timeout_ms
      FROM projects WHERE id = ?`
   )
@@ -374,7 +374,6 @@ async function autoDispatchSchedulableTasks(
       default_workspace_profile: string | null;
       default_devcontainer_config_name: string | null;
       task_execution_timeout_ms: number | null;
-      max_workspaces_per_node: number | null;
       node_cpu_threshold_percent: number | null;
       node_memory_threshold_percent: number | null;
       warm_node_timeout_ms: number | null;
@@ -532,7 +531,6 @@ async function autoDispatchSchedulableTasks(
         effort: null,
         projectScaling: {
           taskExecutionTimeoutMs: projectRow.task_execution_timeout_ms ?? null,
-          maxWorkspacesPerNode: projectRow.max_workspaces_per_node ?? null,
           nodeCpuThresholdPercent: projectRow.node_cpu_threshold_percent ?? null,
           nodeMemoryThresholdPercent: projectRow.node_memory_threshold_percent ?? null,
           warmNodeTimeoutMs: projectRow.warm_node_timeout_ms ?? null,

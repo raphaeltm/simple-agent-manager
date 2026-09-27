@@ -33,7 +33,7 @@ func TestSessionCreationReservationBlocksRestoreHostsAndCanceledRetries(t *testi
 	if host := s.getOrCreateSessionHost("ws:session", "ws", "session", session, input.runtime, ""); host != nil {
 		t.Error("host captured reporter before create setup finished")
 	}
-	if _, err := s.runSessionRestore(context.Background(), input, func() map[string]interface{} {
+	if _, err := s.runSessionRestore(context.Background(), input, func(context.Context) map[string]interface{} {
 		t.Error("restore ran before create setup finished")
 		return nil
 	}); err == nil {
@@ -81,7 +81,7 @@ func TestSessionRestoreRejectsConcurrentStartAndSiblingCreateBeforeMetadataEffec
 		handler(rec, req)
 		return rec
 	}
-	_, err := s.runSessionRestore(context.Background(), input, func() map[string]interface{} {
+	_, err := s.runSessionRestore(context.Background(), input, func(context.Context) map[string]interface{} {
 		start := post(s.handleStartAgentSession, `{"agentType":"claude-code","initialPrompt":"must not run","model":"other","taskId":"other-task","projectId":"other-project","mcpServers":[{"url":"https://other.example/mcp","token":"other"}]}`)
 		if start.Code != http.StatusConflict {
 			t.Errorf("concurrent start status = %d %s", start.Code, start.Body.String())

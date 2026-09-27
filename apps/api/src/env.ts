@@ -262,12 +262,13 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS?: string; // Final checkpoint request-acceptance timeout (default: 300000)
   SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS?: string; // No-progress final checkpoint watchdog after acceptance (default: 120000)
   SESSION_SNAPSHOT_POLL_INTERVAL_MS?: string; // D1 completion poll interval for final checkpoints (default: 1000)
-  SESSION_SNAPSHOT_OPERATION_TIMEOUT?: string; // VM-agent checkpoint operation deadline as a Go duration (default: 15m)
+  SESSION_SNAPSHOT_OPERATION_TIMEOUT?: string; // VM-agent checkpoint/restore deadline and TaskRunner restore retry window, as a Go duration (default: 15m)
   SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL?: string; // VM-agent progress callback throttle as a Go duration (default: 15s)
   SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT?: string; // VM-agent progress callback timeout as a Go duration (default: 5s)
   SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES?: string; // Max snapshot control-plane JSON request size (default: 262144)
   SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS?: string; // Max replacement-runtime wake attempts per burst (default: 3)
   SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS?: string; // How long a spent wake-attempt burst stays spent (default: 900000)
+  SESSION_RECOVERY_LINEAGE_MAX_DEPTH?: string; // Wake→wake links followed to the conversation's first run when deciding whether its location is pinned (default: 256)
   SESSION_SLEEP_AFTER_MS?: string; // Idle duration before verified snapshot teardown (default: 900000)
   HARNESS_BACKGROUND_WORK_LEASE_MS?: string; // Fresh normalized harness-work report lease before sleep is allowed (default: 300000)
   HARNESS_BACKGROUND_WORK_MAX_DURATION_MS?: string; // Absolute ceiling, from the last lifecycle progress edge, on harness-work sleep deferral (default: 1800000)
@@ -304,6 +305,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SLEEP_MAX_ATTEMPTS?: string; // Max automatic sleep attempts before preserving compute (default: 9)
   SESSION_SLEEP_CLAIM_LEASE_MS?: string; // Reclaim timeout for interrupted automatic sleep claims (default: 600000)
   SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS?: string; // Absolute ceiling for in-flight sleep destroyer deferral (default: 1800000)
+  FAILED_TASK_PRESERVATION_MAX_WAIT_MS?: string; // Longest a failed task's runtime waits for its preservation sleep before release (default: 28800000)
   SESSION_SLEEP_IN_FLIGHT_REPAIR_BATCH_SIZE?: string; // Bounded cron repair for stale post-capture in-flight sleep rows (default: 25)
   TERMINAL_NODE_LIFECYCLE_REPAIR_BATCH_SIZE?: string; // Bounded cron repair for active-looking rows on terminal nodes (default: 25)
   TERMINAL_NODE_LIFECYCLE_REPAIR_WALL_BUDGET_MS?: string; // Wall-clock budget for terminal-node lifecycle repair (default: 10000)
@@ -339,7 +341,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   IDENTITY_TOKEN_CACHE_MIN_TTL_SECONDS?: string;
   // Hierarchy limits
   MAX_NODES_PER_USER?: string;
-  MAX_WORKSPACES_PER_NODE?: string;
   CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE?: string; // Optional max user/project scopes reconciled by one unscoped capacity-pool backfill call
   CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE?: string; // Optional candidate rows published per source per pass before the durable cursor resumes the rest
   CAPACITY_POOL_CATALOG_CACHE_TTL_MS?: string; // Optional per-isolate credential-scoped provider catalog cache TTL
@@ -413,6 +414,12 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   NODE_ABSOLUTE_MAX_LIFETIME_MS?: string; // Absolute age ceiling for auto-provisioned workspace nodes (default: 86400000 = 24 h)
   NODE_CLEANUP_SWEEP_LIMIT?: string; // Max node candidates per cleanup phase per cron run (default: 25)
   NODE_CLEANUP_FAILURE_BACKOFF_MS?: string; // Failed candidate exclusion window (default: 3600000)
+  NODE_UNHEALTHY_DRAIN_AFTER_MS?: string; // Heartbeat-loss window before drain (default: 600000)
+  NODE_UNHEALTHY_RELEASE_AFTER_MS?: string; // Heartbeat-loss window before release (default: 1800000)
+  NODE_UNHEALTHY_FLEET_MAX_FRACTION?: string; // Fleet-wide loss guard (default: 0.5)
+  NODE_UNHEALTHY_FLEET_MIN_NODES?: string; // Minimum managed workspace VMs before fleet guard applies (default: 3)
+  NODE_UNHEALTHY_RETRY_MS?: string; // Retry failed unhealthy-node provider deletion (default: 60000)
+  NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS?: string; // Per-node budget for chat notices and sleep requests (default: 5000)
   NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS?: string; // Stopped-node phase wall-time budget (default: 20000)
   NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS?: string; // Stopped-node provider/DNS budget per candidate (default: 5000)
   WORKSPACE_CLEANUP_SWEEP_LIMIT?: string; // Max workspace candidates per cleanup phase per cron run (default: 50)
@@ -456,6 +463,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ACCOUNT_MAP_MAX_SESSIONS_PER_PROJECT?: string;
   ACCOUNT_MAP_CACHE_TTL_SECONDS?: string;
   // Dashboard configuration
+  DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT?: string;
   DASHBOARD_ACTIVE_TASK_LIMIT?: string;
   DASHBOARD_INACTIVE_THRESHOLD_MS?: string;
   // Boot log configuration
@@ -739,6 +747,20 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_ARCHIVE_SEARCH_CONTINUATION_TTL_MS?: string;
   PROJECT_DATA_ARCHIVE_SEARCH_CURSOR_MAX_BYTES?: string;
   PROJECT_DATA_ARCHIVE_SEARCH_ERROR_LIMIT?: string;
+  /** Newest full-text matches ranked per ProjectData search (default 2000). */
+  PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT?: string;
+  /** Full-text entries a session-scoped search may walk to fill its window (default 20000). */
+  PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT?: string;
+  /** Newest raw messages the keyword search fallback scans (default 50000). */
+  PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT?: string;
+  /** Run only due ProjectData alarm sections per tick (default true; false runs every section). */
+  PROJECT_DATA_ALARM_SECTION_GATING_ENABLED?: string;
+  /** Max interval between ProjectData alarm ticks that run every section (default 900000). */
+  PROJECT_DATA_ALARM_FULL_RUN_INTERVAL_MS?: string;
+  /** A section due within this many ms of the tick runs in it (default 2000). */
+  PROJECT_DATA_ALARM_DUE_TOLERANCE_MS?: string;
+  /** ProjectData alarm sections at or above this wall time log a warning (default 1000). */
+  PROJECT_DATA_ALARM_SLOW_SECTION_MS?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS?: string;
@@ -864,6 +886,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   DO_RETRY_MAX_ATTEMPTS?: string;
   DO_RETRY_BASE_DELAY_MS?: string;
   DO_RETRY_MAX_DELAY_MS?: string;
+  DO_RETRY_CONNECTION_LOST_MAX_ATTEMPTS?: string;
   // Max per-isolate memo entries for ProjectData DOs with a persisted projectId
   PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES?: string;
   /**

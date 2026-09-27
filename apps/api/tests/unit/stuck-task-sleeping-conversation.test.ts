@@ -504,18 +504,38 @@ describe('runaway-cost ceiling — a sleeping conversation is not runaway comput
   });
 
   /**
-   * The bound (`.claude/rules/58` requirement 3). An expired snapshot is not
-   * recoverable, so preserving it would strand the task forever.
+   * Day-7 regression: the runtime snapshot expired, but the conversation task
+   * itself is still human-resumable from the chat transcript and durable prompt
+   * delivery. The sweep must not turn that idle conversation into a failure.
    */
-  it('terminalizes once the snapshot has expired', async () => {
+  it('preserves a conversation after its runtime snapshot expires', async () => {
     seedTask();
     seedWorkspace({ status: 'deleted' });
     seedNode();
     seedSnapshot({ expiresAt: iso(-HOUR) });
 
-    await recoverStuckTasks(env());
+    const result = await recoverStuckTasks(env());
+
+    expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    expect(result.candidatesScanned).toBe(1);
+    expect(result.failedInProgress).toBe(0);
+  });
+
+  /**
+   * Discriminating control for the conversation fallback. A task-mode row with
+   * the same expired snapshot is not a resumable idle conversation, so the real
+   * terminal writer still fires.
+   */
+  it('still terminalizes a task-mode row after its snapshot expires', async () => {
+    seedTask({ taskMode: 'task' });
+    seedWorkspace({ status: 'deleted' });
+    seedNode();
+    seedSnapshot({ expiresAt: iso(-HOUR) });
+
+    const result = await recoverStuckTasks(env());
 
     expect(taskRow().status).toBe('failed');
+    expect(result.failedInProgress).toBe(1);
   });
 
   /** Cross-project scoping, proven against a real SQL engine (`.claude/rules/28`). */

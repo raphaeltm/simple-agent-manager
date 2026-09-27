@@ -167,6 +167,41 @@ const HETZNER_PLACEMENT_ERROR_CODE = 'placement_error';
 const HETZNER_PLACEMENT_STATUS_CODE = 412;
 
 /**
+ * Hetzner's documented account-quota code: `403 resource_limit_exceeded`, "Error when exceeding
+ * the maximum quantity of a resource for an account" (error table in
+ * https://docs.hetzner.cloud/cloud.spec.json). One code covers every per-account limit — servers,
+ * shared vCPU cores, dedicated vCPU cores, primary IPs — and only the message says which.
+ */
+const HETZNER_RESOURCE_LIMIT_ERROR_CODE = 'resource_limit_exceeded';
+
+/**
+ * The server-count code SAM has always matched. It is NOT in Hetzner's documented error table.
+ * Production persists only the message text ("server limit reached"), never the code, so which
+ * code those 403s actually carried is unrecorded; kept so a response shaped this way still
+ * classifies as the quota it names.
+ */
+export const HETZNER_LEGACY_SERVER_LIMIT_ERROR_CODE = 'server_limit_exceeded';
+
+/** HTTP status Hetzner returns for an account quota. */
+const HETZNER_RESOURCE_LIMIT_STATUS_CODE = 403;
+
+/**
+ * Message fallback for an account quota whose structured code is absent or unrecognized.
+ * Production has recorded exactly two texts, both 403s: "server limit reached" (66 tasks,
+ * 2026-03..08) and "shared core limit exceeded" (2026-09-25).
+ */
+const ACCOUNT_LIMIT_MESSAGE_PATTERN = /\blimit (?:reached|exceeded)\b/i;
+
+/**
+ * Credential vocabulary that vetoes the message fallback above. A 403 whose text is about the
+ * token or its permissions stays `auth_error` even if it also mentions a limit: a revoked or
+ * read-only token must fail fast and say so, not park the task behind an account-capacity wait
+ * whose message blames the quota. No recorded quota text contains these words.
+ */
+const CREDENTIAL_MESSAGE_PATTERN =
+  /\b(?:permissions?|token|forbidden|unauthori[sz]ed|credentials?)\b/i;
+
+/**
  * Classify a Hetzner API error into a normalized ProviderErrorCategory.
  *
  * Primary signal: structured `error.code` from the JSON response, except for a
@@ -181,7 +216,10 @@ const HETZNER_PLACEMENT_STATUS_CODE = 412;
  * - unauthorized → auth_error
  * - rate_limit_exceeded → rate_limited
  * - conflict → invalid_config
- * - server_limit_exceeded → quota_exceeded
+ * - resource_limit_exceeded (and the legacy server_limit_exceeded) → quota_exceeded (an account
+ *   quota rejected the create before any server existed; the same server type cannot succeed
+ *   until capacity is freed, so the caller must never retry it — whether a SMALLER offering can
+ *   escape the quota depends on what it counts, see `classifyHetznerAccountLimit`)
  * - placement_error → transient_capacity (Hetzner cannot place that server type in that
  *   location right now; the request itself is valid, so the caller should try another
  *   offering rather than give up)
@@ -211,7 +249,10 @@ export function classifyHetznerError(
       // the rest. See tasks/archive/2026-09-09-hetzner-412-placement-blocks-fallback-chain.md.
       case HETZNER_PLACEMENT_ERROR_CODE:
         return 'transient_capacity';
-      case 'server_limit_exceeded':
+      // Never `transient_capacity`: that would send the quota into `createVM`'s 300 s same-SKU
+      // retry loop, which cannot succeed while the account is at its limit.
+      case HETZNER_RESOURCE_LIMIT_ERROR_CODE:
+      case HETZNER_LEGACY_SERVER_LIMIT_ERROR_CODE:
         return 'quota_exceeded';
       case 'uniqueness_error':
       case 'invalid_input':
@@ -225,6 +266,16 @@ export function classifyHetznerError(
     }
   }
 
+  // A 403 that names a limit is the account quota even when the structured code is missing or
+  // unrecognized. Before 2026-09-25 it fell through to `auth_error` below: the shared-core quota
+  // read as a credential failure, so the wake failed fast on its first offering (rule 72).
+  if (
+    statusCode === HETZNER_RESOURCE_LIMIT_STATUS_CODE &&
+    ACCOUNT_LIMIT_MESSAGE_PATTERN.test(message) &&
+    !CREDENTIAL_MESSAGE_PATTERN.test(message)
+  ) {
+    return 'quota_exceeded';
+  }
   if (statusCode === 401 || statusCode === 403) return 'auth_error';
   if (statusCode === 429) return 'rate_limited';
 
@@ -262,8 +313,8 @@ export function classifyHetznerError(
  * excluding it here keeps provisioning latency exactly as it is today.
  *
  * THREE 412 CHECKS, THREE PRECISIONS — keep them in mind together:
- *   - `attemptCreateWithPlacementFallback` (hetzner.ts): any 412 retries another location.
- *     Deliberately broad; being wrong costs one extra create attempt.
+ *   - `attemptCreateWithPlacementFallback` (hetzner-server-create.ts): any 412 retries another
+ *     location. Deliberately broad; being wrong costs one extra create attempt.
  *   - `providerAllocationRejected` (node-provisioning.ts): any 412 means "Hetzner definitely
  *     rejected the allocation". Also broad, and safe in that direction.
  *   - this predicate: gates a 300 s retry budget, so it must be precise.
@@ -416,11 +467,23 @@ function mapHetznerStatus(status: string): VMStatus {
   }
 }
 
+/**
+ * Give a Hetzner error its category at construction (`.claude/rules/72` requirement 3), so
+ * consumers read `category` instead of re-running a classifier behind a status allowlist.
+ *
+ * An error that already carries a category keeps it. `createVM`'s budget-exhausted wrapper
+ * deliberately says `transient_capacity` about an inner error whose own text would classify
+ * differently, and re-deriving it here would undo that decision. An error the classifier cannot
+ * place stays exactly as thrown.
+ */
 export function mapHetznerProviderError(err: unknown): unknown {
-  if (!(err instanceof ProviderError)) return err;
+  if (!(err instanceof ProviderError) || err.category !== 'unknown') return err;
+  const category = classifyHetznerError(err.statusCode, err.providerCode, err.message);
+  if (category === 'unknown') return err;
   return new ProviderError('hetzner', err.statusCode, err.message, {
     cause: err,
+    context: err.context,
     providerCode: err.providerCode,
-    category: classifyHetznerError(err.statusCode, err.providerCode, err.message),
+    category,
   });
 }

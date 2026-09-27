@@ -39,6 +39,7 @@ import {
   nodeStatusTerminatesCallbacks,
   verifyNodeCallbackAuth,
 } from '../services/node-callback-auth';
+import { recordNodeHealthEvent } from '../services/node-health';
 import { issueNodeOriginCertificate } from '../services/origin-ca-certificates';
 import * as projectDataService from '../services/project-data';
 import {
@@ -494,6 +495,16 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
       .where(eq(schema.nodes.id, nodeId))
       .get();
     rejectTerminalNodeCallback(nodeId, latest?.status, 'heartbeat');
+  }
+
+  if (node.healthStatus === 'unhealthy' && node.lastHeartbeatAt) {
+    await recordNodeHealthEvent(c.env, {
+      nodeId,
+      episodeStartedAt: node.lastHeartbeatAt,
+      event: 'recovered',
+      reason: 'node_heartbeat_resumed',
+      createdAt: now,
+    });
   }
 
   // Backup ACP heartbeat sweep — primary heartbeat is now sent directly by the

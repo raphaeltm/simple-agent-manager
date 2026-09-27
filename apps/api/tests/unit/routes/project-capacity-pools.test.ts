@@ -157,7 +157,6 @@ function expectSafePlacementSettings(body: Record<string, any>) {
         minMemoryGb: 4,
         minDiskGb: 40,
         exclusiveNode: false,
-        maxCoTenants: 4,
       },
     },
   });

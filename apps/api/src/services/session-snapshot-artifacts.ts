@@ -6,6 +6,7 @@ import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord, parseJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
+import { ensureUnhealthyNodeSleepPlaceholder } from './session-snapshot-unhealthy-guard';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -558,33 +559,38 @@ export async function prepareSessionSnapshot(
 export async function ensureSessionSnapshotForSleep(
   db: Db,
   env: Env,
-  input: PrepareSessionSnapshotInput
-): Promise<void> {
+  input: PrepareSessionSnapshotInput,
+  options: { expectedNodeId?: string } = {}
+): Promise<boolean> {
   const now = new Date();
   const placeholderGeneration = ulid();
+  const row = {
+    id: ulid(),
+    projectId: input.projectId,
+    workspaceId: input.workspaceId,
+    nodeId: input.nodeId,
+    userId: input.userId,
+    chatSessionId: input.chatSessionId,
+    agentSessionId: input.agentSessionId,
+    runtime: input.runtime,
+    status: 'pending',
+    degradation: 'none',
+    manifestR2Key: buildSessionSnapshotR2Key(
+      env,
+      input.chatSessionId,
+      placeholderGeneration,
+      'manifest'
+    ),
+    expiresAt: snapshotExpiry(now, getSessionSnapshotConfig(env).ttlDays),
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  };
+  if (options.expectedNodeId) {
+    return ensureUnhealthyNodeSleepPlaceholder(env, row, options.expectedNodeId);
+  }
   await db
     .insert(schema.sessionSnapshots)
-    .values({
-      id: ulid(),
-      projectId: input.projectId,
-      workspaceId: input.workspaceId,
-      nodeId: input.nodeId,
-      userId: input.userId,
-      chatSessionId: input.chatSessionId,
-      agentSessionId: input.agentSessionId,
-      runtime: input.runtime,
-      status: 'pending',
-      degradation: 'none',
-      manifestR2Key: buildSessionSnapshotR2Key(
-        env,
-        input.chatSessionId,
-        placeholderGeneration,
-        'manifest'
-      ),
-      expiresAt: snapshotExpiry(now, getSessionSnapshotConfig(env).ttlDays),
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-    })
+    .values(row)
     .onConflictDoUpdate({
       target: schema.sessionSnapshots.chatSessionId,
       // Recovery can move a conversation to a replacement workspace. Refresh
@@ -601,4 +607,5 @@ export async function ensureSessionSnapshotForSleep(
         updatedAt: now.toISOString(),
       },
     });
+  return true;
 }

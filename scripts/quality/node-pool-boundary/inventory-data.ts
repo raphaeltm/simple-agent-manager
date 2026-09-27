@@ -86,6 +86,10 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     requiredEvidence: CANONICAL_TASK_START,
   },
   {
+    // Module-scoped evidence: the placement call lives in `resolveRecoveryPlacement` and the
+    // runner start in `ensureSessionRecovery`, both in this file beside the writer. The request
+    // builder sits in `session-recovery-request.ts`, named without a `placement` token so
+    // `legacy-authority-scope.ts` does not classify it as placement authority.
     filePath: 'apps/api/src/services/session-recovery.ts',
     table: 'tasks',
     owner: 'createRecoveryTask',

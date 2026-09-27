@@ -637,12 +637,17 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       if (status === 'absent') {
         await env.DATABASE.prepare('DELETE FROM nodes WHERE id = ?').bind(nodeId).run();
       } else {
-        await env.DATABASE.prepare('UPDATE nodes SET status = ? WHERE id = ?').bind(status, nodeId).run();
+        await env.DATABASE.prepare('UPDATE nodes SET status = ? WHERE id = ?')
+          .bind(status, nodeId)
+          .run();
       }
       await runInDurableObject(stub, async (instance) => {
         await instance.ctx.storage.put('state', {
-          nodeId, userId: TEST_USER_ID, status: 'warm',
-          warmSince: Date.now() - 600_000, claimedByTask: null,
+          nodeId,
+          userId: TEST_USER_ID,
+          status: 'warm',
+          warmSince: Date.now() - 600_000,
+          claimedByTask: null,
         });
         await instance.ctx.storage.put('other-durable-work', { preserve: true });
         await instance.alarm();
@@ -2574,7 +2579,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       })
     ).resolves.toMatchObject({
       status: 'unavailable',
-      reason: 'session_recovery_placement_credentials',
+      reason: 'placement_credentials_missing',
     });
   });
 

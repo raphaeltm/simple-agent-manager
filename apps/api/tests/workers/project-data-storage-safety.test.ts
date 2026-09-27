@@ -7,7 +7,7 @@
  * alarm-driven telemetry writes.
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { runProjectDataGroupedFtsCleanup } from '../../src/durable-objects/project-data/grouped-fts-cleanup';
 import {
@@ -57,6 +57,41 @@ async function withProjectDataStorageEnv<T>(
     }
   }
 }
+
+async function runProjectDataAlarmWithTimerDeliveryPaused<T extends Record<string, unknown>>(
+  stub: DurableObjectStub<ProjectDataTestDouble>,
+  readAfterAlarm: (
+    instance: ProjectDataTestDouble,
+    state: DurableObjectState
+  ) => T | Promise<T>
+): Promise<T & { scheduledAlarm: number | null }> {
+  return runInDurableObject(stub, async (instance, state) => {
+    await state.storage.deleteAlarm();
+    const scheduledAlarms: number[] = [];
+    const setAlarm = vi.spyOn(state.storage, 'setAlarm').mockImplementation(async (scheduledTime) => {
+      scheduledAlarms.push(scheduledTime instanceof Date ? scheduledTime.getTime() : scheduledTime);
+    });
+    try {
+      await instance.alarm();
+      return {
+        ...(await readAfterAlarm(instance, state)),
+        scheduledAlarm: scheduledAlarms.at(-1) ?? null,
+      };
+    } finally {
+      setAlarm.mockRestore();
+      await state.storage.deleteAlarm();
+    }
+  });
+}
+
+/**
+ * Back-to-back `alarm()` calls here stand in for time passing. With section gating on, a follow-up
+ * tick runs only the sections whose schedule is due, and storage safety's is never less than a
+ * minute away (`STORAGE_SAFETY_MIN_ALARM_SPACING_MS`), so tests that step the cleanup through
+ * several passes run every tick in full to reach its own recheck and cursor logic. Gated ticks are
+ * covered in `project-data-alarm-sections.test.ts`.
+ */
+const EVERY_TICK_RUNS_STORAGE_SAFETY = { PROJECT_DATA_ALARM_SECTION_GATING_ENABLED: 'false' };
 
 async function readTelemetry(projectId: string) {
   return env.DATABASE.prepare(
@@ -386,7 +421,7 @@ describe('ProjectData storage safety firebreak', () => {
     await stub.createSession(null, 'Storage measurement cadence');
 
     await withProjectDataStorageEnv(
-      { PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS: '86400000' },
+      { ...EVERY_TICK_RUNS_STORAGE_SAFETY, PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS: '86400000' },
       async () => {
         await runInDurableObject(stub, async (instance) => instance.alarm());
         const first = await readTelemetry(projectId);
@@ -514,6 +549,7 @@ describe('ProjectData storage safety firebreak', () => {
 
     await withProjectDataStorageEnv(
       {
+        ...EVERY_TICK_RUNS_STORAGE_SAFETY,
         PROJECT_DATA_STORAGE_LIMIT_BYTES: '10000',
         PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS: '86400000',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: '0.2',
@@ -752,6 +788,7 @@ describe('ProjectData storage safety firebreak', () => {
 
     await withProjectDataStorageEnv(
       {
+        ...EVERY_TICK_RUNS_STORAGE_SAFETY,
         PROJECT_DATA_STORAGE_LIMIT_BYTES: '10000',
         PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS: '86400000',
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO: '0.2',
@@ -1638,6 +1675,7 @@ describe('ProjectData storage safety firebreak', () => {
     );
     await withProjectDataStorageEnv(
       {
+        ...EVERY_TICK_RUNS_STORAGE_SAFETY,
         PROJECT_DATA_STORAGE_LIMIT_BYTES: String(Math.ceil(currentSize / 0.85)),
         PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
         PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'true',
@@ -1646,9 +1684,8 @@ describe('ProjectData storage safety firebreak', () => {
         PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS: '60000',
       },
       async () => {
-        await runInDurableObject(stub, async (instance) => instance.alarm());
-
-        const after = await runInDurableObject(stub, async (_instance, state) => {
+        const alarmStartedAt = Date.now();
+        const after = await runProjectDataAlarmWithTimerDeliveryPaused(stub, async (_instance, state) => {
           const sql = state.storage.sql;
           const activityRows = sql
             .exec(
@@ -1676,8 +1713,7 @@ describe('ProjectData storage safety firebreak', () => {
             .toArray()[0] as {
             count: number;
           };
-          const alarm = await state.storage.getAlarm();
-          return { activityRows, acpRows, messageCount, alarm };
+          return { activityRows, acpRows, messageCount };
         });
 
         const activityIds = new Set(after.activityRows.map((row) => row.id));
@@ -1689,7 +1725,9 @@ describe('ProjectData storage safety firebreak', () => {
         expect(seeded.terminalAcpEventIds.filter((id) => acpEventIds.has(id))).toHaveLength(1);
         expect(seeded.activeAcpEventIds.every((id) => acpEventIds.has(id))).toBe(true);
         expect(after.messageCount.count).toBe(3);
-        expect(after.alarm).toBeTypeOf('number');
+        expect(after.scheduledAlarm).toBeTypeOf('number');
+        // A short retry may already be due by the time the DO result is read.
+        expect(after.scheduledAlarm as number).toBeGreaterThan(alarmStartedAt);
       }
     );
   });

@@ -8,10 +8,16 @@
  * - DO session enrichment via getSessionsByTaskIds (per project, in parallel)
  * - DO failure tolerance (Promise.allSettled — partial failure does not fail request)
  * - isActive calculation against DASHBOARD_INACTIVE_THRESHOLD_MS
- * - Sorting: tasks with recent messages first, then tasks without messages by createdAt
+ * - Ranking: most recent activity first (newest message, else start/submit time),
+ *   capped at DASHBOARD_ACTIVE_TASK_LIMIT only after every candidate is ranked
+ * - Candidate read bounded by DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT and the SQL bind ceiling
  * - Response shape matches DashboardActiveTasksResponse
+ *
+ * The real-SQL vertical slice for "rank before capping" lives in
+ * dashboard-active-tasks-real-sql.test.ts.
  */
 import {
+  DEFAULT_DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT,
   DEFAULT_DASHBOARD_ACTIVE_TASK_LIMIT,
   DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS,
 } from '@simple-agent-manager/shared';
@@ -146,7 +152,7 @@ describe('GET /dashboard/active-tasks', () => {
       mockEnv,
       expect.objectContaining({
         activeOnly: true,
-        limit: DEFAULT_DASHBOARD_ACTIVE_TASK_LIMIT,
+        limit: DEFAULT_DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT,
         userId: 'user-123',
       })
     );
@@ -269,10 +275,37 @@ describe('GET /dashboard/active-tasks', () => {
     expect(body.tasks[0].isActive).toBe(false);
   });
 
-  it('uses DASHBOARD_ACTIVE_TASK_LIMIT env var when set', async () => {
-    const customEnv = { ...mockEnv, DASHBOARD_ACTIVE_TASK_LIMIT: '7' } as unknown as Env;
-    buildMockDB([]);
+  it('caps the response at DASHBOARD_ACTIVE_TASK_LIMIT without shrinking the candidate read', async () => {
+    const customEnv = { ...mockEnv, DASHBOARD_ACTIVE_TASK_LIMIT: '2' } as unknown as Env;
+    const now = Date.now();
+    // Oldest first, so slicing before ranking would return the wrong two.
+    buildMockDB(
+      [4, 3, 2, 1].map((minutesAgo) =>
+        makeTaskRow({
+          id: `task-${minutesAgo}m`,
+          createdAt: new Date(now - minutesAgo * 60 * 1000).toISOString(),
+        })
+      )
+    );
     (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([]);
+
+    const app = buildApp();
+    const res = await app.request('/dashboard/active-tasks', {}, customEnv);
+    const body = (await res.json()) as { tasks: any[] };
+
+    expect(body.tasks.map((t: any) => t.id)).toEqual(['task-1m', 'task-2m']);
+    expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
+      customEnv,
+      expect.objectContaining({ limit: DEFAULT_DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT })
+    );
+  });
+
+  it('reads DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT candidates when set', async () => {
+    const customEnv = {
+      ...mockEnv,
+      DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT: '40',
+    } as unknown as Env;
+    buildMockDB([]);
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, customEnv);
@@ -280,11 +313,25 @@ describe('GET /dashboard/active-tasks', () => {
     expect(res.status).toBe(200);
     expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
       customEnv,
-      expect.objectContaining({
-        activeOnly: true,
-        limit: 7,
-        userId: 'user-123',
-      })
+      expect.objectContaining({ activeOnly: true, limit: 40, userId: 'user-123' })
+    );
+  });
+
+  it('clamps the candidate read to the SQL bind ceiling of the per-project session lookup', async () => {
+    // Every candidate in one project travels in a single DO `IN (...)` list, and
+    // Cloudflare SQL rejects a statement's 101st bound parameter.
+    const customEnv = {
+      ...mockEnv,
+      DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT: '500',
+    } as unknown as Env;
+    buildMockDB([]);
+
+    const app = buildApp();
+    await app.request('/dashboard/active-tasks', {}, customEnv);
+
+    expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
+      customEnv,
+      expect.objectContaining({ limit: 100 })
     );
   });
 
@@ -355,6 +402,52 @@ describe('GET /dashboard/active-tasks', () => {
     expect(task2.sessionId).toBe('session-2'); // proj-2 succeeded
   });
 
+  it('ranks tasks from a project whose session lookup failed by start time, then caps the mix', async () => {
+    const now = Date.now();
+    const minutesAgo = (m: number) => new Date(now - m * 60 * 1000).toISOString();
+    buildMockDB([
+      ...[10, 20, 90, 120].map((m) =>
+        makeTaskRow({ id: `task-ok-${m}m`, projectId: 'proj-ok', createdAt: minutesAgo(180) })
+      ),
+      ...[5, 60, 150].map((m) =>
+        makeTaskRow({
+          id: `task-down-${m}m`,
+          projectId: 'proj-down',
+          createdAt: minutesAgo(200),
+          startedAt: minutesAgo(m),
+        })
+      ),
+    ]);
+    (projectDataService.getSessionsByTaskIds as any).mockImplementation(
+      async (_env: Env, projectId: string) => {
+        if (projectId === 'proj-down') throw new Error('proj-down DO unreachable');
+        return [10, 20, 90, 120].map((m) =>
+          makeSessionInfo({
+            id: `session-ok-${m}m`,
+            taskId: `task-ok-${m}m`,
+            lastMessageAt: now - m * 60 * 1000,
+          })
+        );
+      }
+    );
+
+    const app = buildApp();
+    const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
+    const body = (await res.json()) as { tasks: any[] };
+
+    expect(res.status).toBe(200);
+    expect(body.tasks.map((t: any) => t.id)).toEqual([
+      'task-down-5m',
+      'task-ok-10m',
+      'task-ok-20m',
+      'task-down-60m',
+      'task-ok-90m',
+      'task-ok-120m',
+    ]);
+    expect(body.tasks.find((t: any) => t.id === 'task-down-5m').sessionId).toBeNull();
+    expect(body.tasks.find((t: any) => t.id === 'task-ok-10m').sessionId).toBe('session-ok-10m');
+  });
+
   // -------------------------------------------------------------------------
   // Cross-project batching — DO called once per project
   // -------------------------------------------------------------------------
@@ -386,35 +479,186 @@ describe('GET /dashboard/active-tasks', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Sorting
+  // Ranking and the display cap
   // -------------------------------------------------------------------------
 
-  it('sorts tasks with messages before tasks without messages', async () => {
+  it('returns only the six most recently active tasks by default', async () => {
+    const now = Date.now();
+    const submittedAt = new Date(now - 2 * 60 * 60 * 1000).toISOString();
+    const minutesAgo = [80, 10, 70, 20, 60, 30, 50, 40];
+    buildMockDB(minutesAgo.map((m) => makeTaskRow({ id: `task-${m}m`, createdAt: submittedAt })));
+    (projectDataService.getSessionsByTaskIds as any).mockResolvedValue(
+      minutesAgo.map((m) =>
+        makeSessionInfo({
+          id: `session-${m}m`,
+          taskId: `task-${m}m`,
+          lastMessageAt: now - m * 60 * 1000,
+        })
+      )
+    );
+
+    const app = buildApp();
+    const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
+    const body = (await res.json()) as { tasks: any[] };
+
+    expect(DEFAULT_DASHBOARD_ACTIVE_TASK_LIMIT).toBe(6);
+    expect(body.tasks.map((t: any) => t.id)).toEqual([
+      'task-10m',
+      'task-20m',
+      'task-30m',
+      'task-40m',
+      'task-50m',
+      'task-60m',
+    ]);
+  });
+
+  it('ranks a task without messages by when it was submitted, not below every task with messages', async () => {
     const now = Date.now();
     buildMockDB([
       makeTaskRow({
-        id: 'task-no-msg',
-        title: 'No messages task',
-        projectId: 'proj-1',
+        id: 'task-dormant',
+        createdAt: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+      makeTaskRow({
+        id: 'task-older-submitted',
         createdAt: new Date(now - 5 * 60 * 1000).toISOString(),
       }),
       makeTaskRow({
-        id: 'task-with-msg',
-        title: 'Has messages task',
-        projectId: 'proj-1',
+        id: 'task-recent-msg',
         createdAt: new Date(now - 20 * 60 * 1000).toISOString(),
+      }),
+      makeTaskRow({
+        id: 'task-just-submitted',
+        status: 'queued',
+        createdAt: new Date(now - 1 * 60 * 1000).toISOString(),
       }),
     ]);
     (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([
-      makeSessionInfo({ taskId: 'task-with-msg', lastMessageAt: now - 3 * 60 * 1000 }),
+      makeSessionInfo({ taskId: 'task-recent-msg', lastMessageAt: now - 3 * 60 * 1000 }),
+      makeSessionInfo({
+        id: 'session-dormant',
+        taskId: 'task-dormant',
+        lastMessageAt: now - 24 * 60 * 60 * 1000,
+      }),
     ]);
 
     const app = buildApp();
     const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
     const body = (await res.json()) as { tasks: any[] };
 
-    expect(body.tasks[0].id).toBe('task-with-msg');
-    expect(body.tasks[1].id).toBe('task-no-msg');
+    expect(body.tasks.map((t: any) => t.id)).toEqual([
+      'task-just-submitted',
+      'task-recent-msg',
+      'task-older-submitted',
+      'task-dormant',
+    ]);
+  });
+
+  it('ranks a started task without messages by when it started', async () => {
+    const now = Date.now();
+    buildMockDB([
+      makeTaskRow({
+        id: 'task-submitted-recently',
+        createdAt: new Date(now - 10 * 60 * 1000).toISOString(),
+      }),
+      makeTaskRow({
+        id: 'task-started-recently',
+        createdAt: new Date(now - 30 * 60 * 1000).toISOString(),
+        startedAt: new Date(now - 2 * 60 * 1000).toISOString(),
+      }),
+    ]);
+    (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([]);
+
+    const app = buildApp();
+    const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
+    const body = (await res.json()) as { tasks: any[] };
+
+    expect(body.tasks.map((t: any) => t.id)).toEqual([
+      'task-started-recently',
+      'task-submitted-recently',
+    ]);
+  });
+
+  it('breaks activity ties on task id so repeated polls return the same order', async () => {
+    const lastMessageAt = Date.now() - 60 * 1000;
+    const sessions = [
+      makeSessionInfo({ id: 'session-b', taskId: 'task-b', lastMessageAt }),
+      makeSessionInfo({ id: 'session-a', taskId: 'task-a', lastMessageAt }),
+    ];
+    (projectDataService.getSessionsByTaskIds as any).mockResolvedValue(sessions);
+    const app = buildApp();
+
+    for (const order of [
+      ['task-b', 'task-a'],
+      ['task-a', 'task-b'],
+    ]) {
+      buildMockDB(order.map((id) => makeTaskRow({ id })));
+      const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
+      const body = (await res.json()) as { tasks: any[] };
+      expect(body.tasks.map((t: any) => t.id)).toEqual(['task-a', 'task-b']);
+    }
+  });
+
+  it('ranks and links a task by its most recently updated session when it has several', async () => {
+    const now = Date.now();
+    const threeDaysAgo = new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString();
+    const others = [10, 20, 30, 40, 50, 60];
+    buildMockDB([
+      makeTaskRow({ id: 'task-multi', createdAt: threeDaysAgo }),
+      ...others.map((m) => makeTaskRow({ id: `task-${m}m`, createdAt: threeDaysAgo })),
+    ]);
+    // The DO returns sessions most recently updated first (ORDER BY updated_at DESC).
+    (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([
+      makeSessionInfo({
+        id: 'session-current',
+        taskId: 'task-multi',
+        lastMessageAt: now - 60 * 1000,
+        messageCount: 12,
+      }),
+      ...others.map((m) =>
+        makeSessionInfo({
+          id: `session-${m}m`,
+          taskId: `task-${m}m`,
+          lastMessageAt: now - m * 60 * 1000,
+        })
+      ),
+      makeSessionInfo({
+        id: 'session-previous',
+        taskId: 'task-multi',
+        lastMessageAt: now - 2 * 24 * 60 * 60 * 1000,
+        messageCount: 40,
+      }),
+    ]);
+
+    const app = buildApp();
+    const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
+    const body = (await res.json()) as { tasks: any[] };
+
+    expect(body.tasks).toHaveLength(6);
+    expect(body.tasks[0]).toMatchObject({
+      id: 'task-multi',
+      sessionId: 'session-current',
+      lastMessageAt: now - 60 * 1000,
+      messageCount: 12,
+    });
+  });
+
+  it('ranks a task with an unparseable timestamp last instead of failing the request', async () => {
+    buildMockDB([
+      makeTaskRow({ id: 'task-malformed', createdAt: 'not-a-date' }),
+      makeTaskRow({
+        id: 'task-valid',
+        createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      }),
+    ]);
+    (projectDataService.getSessionsByTaskIds as any).mockResolvedValue([]);
+
+    const app = buildApp();
+    const res = await app.request('/dashboard/active-tasks', {}, mockEnv);
+    const body = (await res.json()) as { tasks: any[] };
+
+    expect(res.status).toBe(200);
+    expect(body.tasks.map((t: any) => t.id)).toEqual(['task-valid', 'task-malformed']);
   });
 
   it('sorts tasks with messages by lastMessageAt descending', async () => {

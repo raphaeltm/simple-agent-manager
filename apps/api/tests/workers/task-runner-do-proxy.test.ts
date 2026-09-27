@@ -30,7 +30,6 @@ const RESOLVED_RESERVATION = {
   memoryMb: 4_096,
   diskMb: 40_960,
   exclusiveNode: false,
-  maxCoTenants: 4,
   source: 'task' as const,
   sourceId: 'task-start-001',
   version: 1,
@@ -83,7 +82,6 @@ function makeStartInput(taskId: string) {
     ],
     projectScaling: {
       taskExecutionTimeoutMs: 7200000,
-      maxWorkspacesPerNode: 3,
       nodeCpuThresholdPercent: 80,
       nodeMemoryThresholdPercent: 85,
       warmNodeTimeoutMs: 60000,
@@ -271,7 +269,7 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
     expect(config.attachments![0]!.id).toBe('att-001');
     expect(config.attachments![0]!.filename).toBe('spec.md');
     expect(config.projectScaling?.taskExecutionTimeoutMs).toBe(7200000);
-    expect(config.projectScaling?.maxWorkspacesPerNode).toBe(3);
+    expect(config.projectScaling?.nodeCpuThresholdPercent).toBe(80);
     expect(config.resolvedReservation).toEqual(RESOLVED_RESERVATION);
   });
 

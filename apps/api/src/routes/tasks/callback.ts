@@ -23,7 +23,10 @@ import {
   getAllowedTaskTransitions,
   isTaskStatus,
 } from '../../services/task-status';
-import { cleanupTerminalTaskResourcesOrThrow } from '../../services/task-terminal-cleanup';
+import {
+  cleanupTerminalTaskResourcesOrThrow,
+  type TerminalTaskCleanupStatus,
+} from '../../services/task-terminal-cleanup';
 import {
   callbackTokenIssuedAtMs,
   getInstantStaleCallbackMarginMs,
@@ -56,6 +59,10 @@ import {
  * See: docs/notes/2026-05-12-task-callback-middleware-leak-postmortem.md
  */
 const taskCallbackRoute = new Hono<{ Bindings: Env }>();
+
+function asTerminalTaskCleanupStatus(status: string): TerminalTaskCleanupStatus | null {
+  return status === 'completed' || status === 'failed' || status === 'cancelled' ? status : null;
+}
 
 taskCallbackRoute.post(
   '/:projectId/tasks/:taskId/status/callback',
@@ -105,7 +112,10 @@ taskCallbackRoute.post(
       const now = new Date().toISOString();
       const stepUpdate: Partial<schema.NewTask> = {
         executionStep: body.executionStep,
-        errorMessage: body.errorMessage?.trim() || null,
+        // A step report is progress, not an outcome: it must not erase why a
+        // task failed (a preserved failed task's agent can keep reporting steps).
+        errorMessage:
+          task.status === 'failed' ? task.errorMessage : body.errorMessage?.trim() || null,
         updatedAt: now,
       };
 
@@ -254,13 +264,30 @@ taskCallbackRoute.post(
       throw errors.badRequest(`Invalid task status in database: ${task.status}`);
     }
 
+    const taskTerminalStatus = asTerminalTaskCleanupStatus(task.status);
+    const callbackTerminalStatus = asTerminalTaskCleanupStatus(body.toStatus);
+
+    if (taskTerminalStatus && callbackTerminalStatus && task.status !== body.toStatus) {
+      log.warn('task.ignored_late_terminal_callback', {
+        projectId,
+        taskId,
+        workspaceId: task.workspaceId,
+        callerWorkspace: payload.workspace,
+        fromStatus: task.status,
+        toStatus: body.toStatus,
+        action: 'preserved_existing_terminal_status',
+      });
+      const blocked = await computeBlockedForTask(db, task.id);
+      return c.json(toTaskResponse(task, blocked));
+    }
+
     if (
       task.status === body.toStatus &&
-      (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled')
+      callbackTerminalStatus
     ) {
       await revalidateWorkspace();
       await cleanupTerminalTaskResourcesOrThrow(c.env, taskId, {
-        status: body.toStatus,
+        status: callbackTerminalStatus,
         errorMessage: task.errorMessage,
         projectId,
         failureLogEvent: 'task.callback_terminal_cleanup_failed',

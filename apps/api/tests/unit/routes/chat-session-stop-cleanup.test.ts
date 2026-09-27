@@ -227,6 +227,49 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
     });
   });
 
+  it('archives an already-failed task destructively, keeping its failure', async () => {
+    // Archive is explicit destructive intent (policy e8897480) even when the task
+    // already failed and its work is being preserved: the failed status and its
+    // error are forwarded as-is, the task is not re-cancelled, and the snapshot is
+    // discarded (`destructiveSessionEnd`) instead of kept by sleep.
+    const db = buildDb([
+      [{ id: 'task-failed-1', status: 'failed', errorMessage: 'Agent prompt failed' }],
+    ]);
+    vi.mocked(drizzle).mockReturnValue(db as never);
+    mocks.ensureSessionTaskBacked.mockResolvedValue({ id: 'task-failed-1' });
+    mocks.getSession.mockResolvedValue({
+      id: 'session-failed-1',
+      workspaceId: 'workspace-failed-1',
+      taskId: 'task-failed-1',
+      createdByUserId: 'user-stop-1',
+      status: 'active',
+    });
+
+    const response = await createApp().fetch(
+      new Request('https://api.test/api/projects/project-stop-1/sessions/session-failed-1/stop', {
+        method: 'POST',
+      }),
+      { DATABASE: {} } as Env
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.update).not.toHaveBeenCalled();
+    expect(mocks.cleanupTerminalTaskResources).toHaveBeenCalledWith(
+      expect.anything(),
+      'task-failed-1',
+      {
+        status: 'failed',
+        errorMessage: 'Agent prompt failed',
+        destructiveSessionEnd: true,
+        logContext: {
+          projectId: 'project-stop-1',
+          sessionId: 'session-failed-1',
+          stopPath: 'task-session',
+        },
+      }
+    );
+  });
+
   /**
    * Archiving used to be silent from the VM's point of view: the control plane
    * cancelled the task row and deleted the workspace while the agent kept

@@ -126,6 +126,14 @@ export {
   isHetznerPlacementCapacityError,
   isTransientCapacityError,
 } from './hetzner';
+export {
+  classifyHetznerAccountLimit,
+  type HetznerAccountLimit,
+  type HetznerAccountLimitResource,
+  type HetznerCoreClass,
+  hetznerCoreLimitCovers,
+  hetznerServerTypeCoreClass,
+} from './hetzner-account-limits';
 export { HETZNER_SIZE_CONFIGS } from './hetzner-metadata';
 export {
   classifyInfomaniakError,

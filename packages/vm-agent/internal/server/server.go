@@ -1118,79 +1118,6 @@ func (s *Server) StopAllWorkspacesAndSessions() {
 	}
 }
 
-// Stop gracefully stops the server.
-func (s *Server) Stop(ctx context.Context) error {
-	s.stopOnce.Do(func() {
-		// Signal background goroutines to stop.
-		close(s.done)
-		s.resourceHistoryStarted.Store(false)
-		s.stopAllResourceHistoryCollectors(ctx)
-
-		// Stop all port scanners
-		s.stopAllPortScanners()
-
-		// Stop browser auth session cleanup.
-		s.sessionManager.Stop()
-
-		// Close JWT validator
-		s.jwtValidator.Close()
-
-		s.sessionHostMu.Lock()
-		for key, host := range s.sessionHosts {
-			if host != nil {
-				host.Stop()
-			}
-			delete(s.sessionHosts, key)
-		}
-		s.sessionHostMu.Unlock()
-
-		// Close all workspace PTY sessions.
-		s.workspaceMu.Lock()
-		for _, runtime := range s.workspaces {
-			runtime.PTY.CloseAllSessions()
-		}
-		s.workspaceMu.Unlock()
-
-		// Flush and stop error reporter
-		s.errorReporter.Shutdown()
-
-		// Flush and stop all per-workspace message reporters
-		s.shutdownAllReporters()
-
-		if s.resourceEviction != nil {
-			s.resourceEviction.Close()
-		}
-
-		if s.resourceGuard != nil {
-			if err := s.resourceGuard.Close(); err != nil {
-				slog.Warn("Failed to close resource guard", "error", err)
-			}
-		}
-
-		if s.resourceMonitor != nil {
-			if err := s.resourceMonitor.Close(); err != nil {
-				slog.Warn("Failed to close resource monitor", "error", err)
-			}
-		}
-
-		// Close persistence store
-		if s.store != nil {
-			if err := s.store.Close(); err != nil {
-				slog.Warn("Failed to close persistence store", "error", err)
-			}
-		}
-
-		// Shutdown HTTP server
-		stopErr := s.httpServer.Shutdown(ctx)
-		s.stopErrMu.Lock()
-		s.stopErr = stopErr
-		s.stopErrMu.Unlock()
-	})
-	s.stopErrMu.Lock()
-	defer s.stopErrMu.Unlock()
-	return s.stopErr
-}
-
 // setupRoutes configures the HTTP routes.
 func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// Health check
@@ -1675,13 +1602,14 @@ func (s *Server) postTaskCallback(callbackURL, taskID, token string, body map[st
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		slog.Info("Task callback sent", "taskId", taskID, "body", string(payload))
 	} else if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
-		slog.Warn("Task callback: terminal status",
+		// The task is gone, reassigned, or its workspace ended. That is final
+		// for this task only; the node's other tasks keep reporting.
+		slog.Warn("Task callback: terminal status for this task",
 			"statusCode", resp.StatusCode,
 			"taskId", taskID,
 			"callbackURL", callbackURL,
 			"responseBody", responseBody,
 		)
-		s.markControlPlaneCallbacksTerminal("task_callback", resp.StatusCode, responseBody)
 	} else {
 		slog.Error("Task callback: unexpected status",
 			"statusCode", resp.StatusCode,

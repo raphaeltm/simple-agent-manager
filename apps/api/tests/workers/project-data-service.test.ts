@@ -795,7 +795,11 @@ describe('project-data service: message persistence', () => {
     );
     await svc.persistMessage(testEnv, pid, sessionId, 'user', 'Deploy to production', null);
 
-    const results = await svc.searchMessages(testEnv, pid, 'authentication');
+    const { results } = await svc.searchMessagesWithArchiveMetadata(
+      testEnv,
+      pid,
+      'authentication'
+    );
     expect(results.length).toBeGreaterThanOrEqual(2);
     for (const r of results) {
       expect(r.snippet.toLowerCase()).toContain('authentication');

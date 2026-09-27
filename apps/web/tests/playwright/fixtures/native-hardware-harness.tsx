@@ -105,6 +105,7 @@ const workspace: WorkspaceResponse = {
           memoryMb: 5120,
           diskMb: 10240,
           exclusiveNode: false,
+          // Retired legacy cap still present on old rows; the panel must not render it.
           maxCoTenants: 3,
           source: 'project',
           sourceId: 'PRIVATE-IDENTITY',

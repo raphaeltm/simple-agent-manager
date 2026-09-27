@@ -548,13 +548,18 @@ describe('TaskRunner capacity exhaustion', () => {
       message: 'Bad VM config',
     },
     {
-      // quota_exceeded is NOT transient capacity — descent must not happen.
+      // quota_exceeded is NOT transient capacity — descent must not happen. With no
+      // admission queue to park on it still fails fast, but since 2026-09-25 it says
+      // which limit was hit and what to do, keeping the provider's text at the end.
       label: 'quota-exhausted',
       error: new ProviderError('hetzner', 429, 'Server limit exceeded', {
         providerCode: 'server_limit_exceeded',
         category: 'quota_exceeded',
       }),
-      message: 'Server limit exceeded',
+      message:
+        'Your Hetzner account has reached its server limit. Delete unused nodes to free ' +
+        'capacity, or raise the limit in the Hetzner Console (Limits). Provider error: ' +
+        'Server limit exceeded',
     },
   ])('fails fast on a $label provider error without descending', async ({ error, message }) => {
     provisionNode.mockImplementation(async () => {

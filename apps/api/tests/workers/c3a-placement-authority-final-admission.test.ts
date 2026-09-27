@@ -32,7 +32,6 @@ function reservation(
     memoryMb: 1024,
     diskMb: 1024,
     exclusiveNode: false,
-    maxCoTenants: 4,
     source: 'platform',
     sourceId: 'platform',
     version: 1,
@@ -44,7 +43,6 @@ function admissionPolicy(
   overrides: Partial<WorkspaceAdmissionPolicy> = {}
 ): WorkspaceAdmissionPolicy {
   return {
-    maxWorkspaces: 4,
     cpuShareBudgetPercent: 100,
     hostMemoryReserveMb: 0,
     diskPressureThresholdPercent: 90,

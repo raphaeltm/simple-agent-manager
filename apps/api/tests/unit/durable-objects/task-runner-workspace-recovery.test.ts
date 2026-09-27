@@ -11,7 +11,6 @@ const RESOLVED_RESERVATION = {
   memoryMb: 4_096,
   diskMb: 40_960,
   exclusiveNode: false,
-  maxCoTenants: 4,
   source: 'project' as const,
   sourceId: 'project-1',
   version: 1,

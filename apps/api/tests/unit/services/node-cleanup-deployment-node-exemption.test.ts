@@ -50,9 +50,13 @@ vi.mock('../../../src/services/node-agent', () => ({
   stopWorkspaceOnNode: vi.fn().mockResolvedValue(undefined),
   getNodeAgentBackgroundRequestTimeoutMs: vi.fn().mockReturnValue(5_000),
 }));
-vi.mock('../../../src/services/project-data', () => ({
+vi.mock('../../../src/services/project-data', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/project-data')>()),
   stopSession: vi.fn().mockResolvedValue(undefined),
   cleanupWorkspaceActivity: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../../../src/scheduled/node-cleanup/unhealthy-nodes', () => ({
+  sweepUnhealthyNodes: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../../../src/services/observability', () => ({
   persistError: vi.fn().mockResolvedValue(undefined),
@@ -60,7 +64,8 @@ vi.mock('../../../src/services/observability', () => ({
 vi.mock('../../../src/services/workspace-lifecycle-finalizer', () => ({
   finalizeWorkspaceLifecycleClosure: vi.fn().mockResolvedValue({}),
 }));
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
@@ -128,10 +133,15 @@ beforeEach(() => {
       auto_provisioned_node_id TEXT, claimed_warm_node_id TEXT,
       claimed_warm_node_at TEXT, updated_at TEXT
     );
+    -- The sleep columns and agent_sessions are read by the terminal-task
+    -- ownership predicate (sleepLifecycleOwnsTerminalTaskWorkspaceSql).
     CREATE TABLE session_snapshots (
       chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL,
-      degradation TEXT NOT NULL, expires_at TEXT NOT NULL
+      degradation TEXT NOT NULL, expires_at TEXT NOT NULL,
+      sleeping_at TEXT, sleep_status TEXT, sleep_after TEXT, capture_generation TEXT,
+      sleep_attempts INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE agent_sessions (id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT);
   `);
   vi.mocked(deleteNodeResourcesStrict).mockImplementation(async (nodeId: string) => {
     deleteCalls.push(nodeId);

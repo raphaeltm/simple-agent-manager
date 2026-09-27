@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
+import { processPromptDeliveryAlarm } from '../../../src/durable-objects/project-data/durability-foundation';
 import type { DurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
 import * as mailbox from '../../../src/durable-objects/project-data/mailbox';
 import { admitProjectEvent } from '../../../src/durable-objects/project-data/project-events';
@@ -289,6 +290,7 @@ describe('ProjectData durable prompt delivery', () => {
     projectId: 'project-1',
     recalculateAlarm: vi.fn(async () => {}),
     broadcastEvent: vi.fn(),
+    scheduleSummarySync: vi.fn(),
     armIdleCleanup: vi.fn(),
     nudgeDeliveries: vi.fn((chatSessionId: string) =>
       nudgePromptDeliveriesForTarget(sql, chatSessionId)
@@ -546,12 +548,15 @@ describe('ProjectData durable prompt delivery', () => {
   it('blocks a cancelled event wake at the real VM fetch boundary after token signing stalls', async () => {
     const claim = acceptProjectEventWake('event-wake-transport-cancel');
     const env = {
-      BASE_DOMAIN: 'example.com', PROJECT_EVENT_WAKE_ENABLED: 'true',
+      BASE_DOMAIN: 'example.com',
+      PROJECT_EVENT_WAKE_ENABLED: 'true',
       DATABASE: {
-        prepare: () => ({ bind: () => ({
-          first: async () => ({ id: 'source-task-1' }),
-          raw: async () => [['vm']],
-        }) }),
+        prepare: () => ({
+          bind: () => ({
+            first: async () => ({ id: 'source-task-1' }),
+            raw: async () => [['vm']],
+          }),
+        }),
       },
     } as never;
     const realNodeAgent = await vi.importActual<typeof import('../../../src/services/node-agent')>(
@@ -561,8 +566,12 @@ describe('ProjectData durable prompt delivery', () => {
     preparationMocks.capabilities.mockResolvedValue(capabilities);
     let signingStarted!: () => void;
     let releaseSigning!: () => void;
-    const started = new Promise<void>((resolve) => { signingStarted = resolve; });
-    const barrier = new Promise<void>((resolve) => { releaseSigning = resolve; });
+    const started = new Promise<void>((resolve) => {
+      signingStarted = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      releaseSigning = resolve;
+    });
     preparationMocks.sign.mockImplementationOnce(async () => {
       signingStarted();
       await barrier;
@@ -572,17 +581,29 @@ describe('ProjectData durable prompt delivery', () => {
     vi.stubGlobal('fetch', fetchMock);
     const realAdapter = new DefaultVmPromptDeliveryAdapter(env);
     const adapter: VmPromptDeliveryAdapter = {
-      submit: (input) => realAdapter.submit({ ...input, resolvedTarget: {
-        projectId: 'project-1', chatSessionId: 'chat-1', workspaceId: 'workspace-1',
-        nodeId: 'node-1', agentSessionId: 'acp-1', userId: 'user-1',
-        runtimeIdentity: 'runtime-1', runtime: 'vm',
-      } }),
+      submit: (input) =>
+        realAdapter.submit({
+          ...input,
+          resolvedTarget: {
+            projectId: 'project-1',
+            chatSessionId: 'chat-1',
+            workspaceId: 'workspace-1',
+            nodeId: 'node-1',
+            agentSessionId: 'acp-1',
+            userId: 'user-1',
+            runtimeIdentity: 'runtime-1',
+            runtime: 'vm',
+          },
+        }),
       reconcile: (input) => realAdapter.reconcile(input),
     };
     try {
       const pending = runPromptDeliveryClaim(sql, env, config, claim, adapter, hooks);
       await started;
-      sql.exec("UPDATE project_event_subscriptions SET lifecycle_state = 'cancelled' WHERE id = ?", 'sub-event-wake');
+      sql.exec(
+        "UPDATE project_event_subscriptions SET lifecycle_state = 'cancelled' WHERE id = ?",
+        'sub-event-wake'
+      );
       releaseSigning();
       expect(await pending).toMatchObject({ kind: 'failed', reason: 'terminal_target' });
       expect(fetchMock).not.toHaveBeenCalled();
@@ -862,9 +883,17 @@ describe('ProjectData durable prompt delivery', () => {
       now = pending!.nextAttemptAt!;
     }
 
-    expect(expireDuePromptDeliveries(sql, config, 69_999)).toEqual({ expired: 0, failed: 0 });
+    expect(expireDuePromptDeliveries(sql, config, 69_999)).toEqual({
+      expired: 0,
+      failed: 0,
+      expiredWakeFailures: [],
+    });
     expect(mailbox.getMessage(sql, 'delivery-1')?.deliveryState).toBe('retry_wait');
-    expect(expireDuePromptDeliveries(sql, config, 70_000)).toEqual({ expired: 1, failed: 0 });
+    expect(expireDuePromptDeliveries(sql, config, 70_000)).toEqual({
+      expired: 1,
+      failed: 0,
+      expiredWakeFailures: [],
+    });
     expect(mailbox.getMessage(sql, 'delivery-1')?.terminalReason).toBe('ttl_expired');
   });
 
@@ -984,6 +1013,64 @@ describe('ProjectData durable prompt delivery', () => {
     expect(message?.lastError).toBe(error);
   });
 
+  it('raises a visible wake failure when a real claim applies wake_refused', async () => {
+    sql.exec(
+      "UPDATE chat_sessions SET status = 'sleeping', task_id = 'task-1' WHERE id = 'chat-1'"
+    );
+    accept('wake-refused');
+    const [claim] = claimDuePromptDeliveries(sql, config, 10_000);
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>().mockResolvedValue({
+      kind: 'failed',
+      reason: 'wake_refused',
+      error: 'The retained sleep snapshot has expired. (snapshot_expired)',
+      runtimeIdentity: null,
+      capabilities: null,
+    });
+
+    await expect(
+      runPromptDeliveryClaim(sql, {}, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'failed', reason: 'wake_refused' });
+
+    expect(mailbox.getMessage(sql, 'wake-refused')).toMatchObject({
+      deliveryState: 'failed',
+      terminalReason: 'wake_refused',
+    });
+    expect(
+      sql
+        .exec(
+          `SELECT kind, reason, task_id
+             FROM session_attention_markers
+            WHERE session_id = 'chat-1' AND resolved_at IS NULL`
+        )
+        .toArray()
+    ).toEqual([{ kind: 'wake_failed', reason: 'wake_refused', task_id: 'task-1' }]);
+    expect(
+      sql
+        .exec(
+          `SELECT role, content
+             FROM chat_messages
+            WHERE session_id = 'chat-1'
+            ORDER BY sequence DESC
+            LIMIT 1`
+        )
+        .toArray()[0]
+    ).toEqual({
+      role: 'system',
+      content: 'Wake failed: The retained sleep snapshot has expired. (snapshot_expired)',
+    });
+    expect(hooks.broadcastEvent).toHaveBeenCalledWith(
+      'session.wake_failed',
+      expect.objectContaining({ sessionId: 'chat-1', reason: 'wake_refused' }),
+      'chat-1'
+    );
+    expect(hooks.broadcastEvent).toHaveBeenCalledWith(
+      'message.new',
+      expect.objectContaining({ sessionId: 'chat-1', role: 'system' }),
+      'chat-1'
+    );
+    expect(hooks.scheduleSummarySync).toHaveBeenCalled();
+  });
+
   it('marks cross-runtime uncertainty ambiguous and never requeues it', () => {
     accept();
     const [claim] = claimDuePromptDeliveries(sql, config, 10_000);
@@ -1018,10 +1105,73 @@ describe('ProjectData durable prompt delivery', () => {
       config.maxAttempts
     );
 
-    expect(expireDuePromptDeliveries(sql, config, 10_100)).toEqual({ expired: 1, failed: 1 });
+    expect(expireDuePromptDeliveries(sql, config, 10_100)).toEqual({
+      expired: 1,
+      failed: 1,
+      expiredWakeFailures: [],
+    });
     expect(mailbox.getMessage(sql, 'ttl-delivery')?.deliveryState).toBe('expired');
     expect(mailbox.getMessage(sql, 'attempt-delivery')?.deliveryState).toBe('failed');
     expect(claimDuePromptDeliveries(sql, config, 10_100)).toHaveLength(0);
+  });
+
+  it('raises a visible wake failure when the real alarm expires a sleeping wake delivery', () => {
+    sql.exec(
+      "UPDATE chat_sessions SET status = 'sleeping', task_id = 'task-1' WHERE id = 'chat-1'"
+    );
+    accept('ttl-wake', 100, 'user_followup');
+    const waitUntil = vi.fn((promise: Promise<unknown>) => void promise.catch(() => undefined));
+    const alarmHooks = {
+      getProjectId: () => 'project-1',
+      transactionSync: <T>(callback: () => T) => callback(),
+      waitUntil,
+      recalculateAlarm: vi.fn(async () => {}),
+      scheduleSummarySync: vi.fn(),
+      broadcastEvent: vi.fn(),
+      armIdleCleanup: vi.fn(),
+      nudgeDeliveries: vi.fn((chatSessionId: string) =>
+        nudgePromptDeliveriesForTarget(sql, chatSessionId)
+      ),
+    };
+
+    vi.setSystemTime(10_100);
+    processPromptDeliveryAlarm(sql, {}, alarmHooks);
+
+    expect(mailbox.getMessage(sql, 'ttl-wake')).toMatchObject({
+      deliveryState: 'expired',
+      terminalReason: 'ttl_expired',
+    });
+    expect(
+      sql
+        .exec(
+          `SELECT kind, reason, task_id
+             FROM session_attention_markers
+            WHERE session_id = 'chat-1' AND resolved_at IS NULL`
+        )
+        .toArray()
+    ).toEqual([{ kind: 'wake_failed', reason: 'ttl_expired', task_id: 'task-1' }]);
+    expect(
+      sql
+        .exec(
+          `SELECT role, content FROM chat_messages WHERE session_id = 'chat-1' ORDER BY sequence DESC LIMIT 1`
+        )
+        .toArray()[0]
+    ).toEqual({
+      role: 'system',
+      content:
+        'Wake failed: SAM retried the wake until the delivery expired, but the session did not wake.',
+    });
+    expect(alarmHooks.broadcastEvent).toHaveBeenCalledWith(
+      'session.wake_failed',
+      expect.objectContaining({ sessionId: 'chat-1', reason: 'ttl_expired' }),
+      'chat-1'
+    );
+    expect(alarmHooks.broadcastEvent).toHaveBeenCalledWith(
+      'message.new',
+      expect.objectContaining({ sessionId: 'chat-1', role: 'system' }),
+      'chat-1'
+    );
+    expect(alarmHooks.scheduleSummarySync).toHaveBeenCalled();
   });
 
   it('keeps durable delivery states out of the legacy mailbox expiry sweep', () => {
@@ -1050,7 +1200,11 @@ describe('ProjectData durable prompt delivery', () => {
     expect(mailbox.getMessage(sql, 'durable-exhausted')?.deliveryState).toBe('queued');
     expect(mailbox.getMessage(sql, 'legacy-expired')?.deliveryState).toBe('expired');
 
-    expect(expireDuePromptDeliveries(sql, config, 10_100)).toEqual({ expired: 1, failed: 1 });
+    expect(expireDuePromptDeliveries(sql, config, 10_100)).toEqual({
+      expired: 1,
+      failed: 1,
+      expiredWakeFailures: [],
+    });
     expect(mailbox.getMessage(sql, 'durable-expired')?.terminalReason).toBe('ttl_expired');
     expect(mailbox.getMessage(sql, 'durable-exhausted')?.terminalReason).toBe(
       'max_attempts_exceeded'
@@ -1199,9 +1353,9 @@ describe('ProjectData durable prompt delivery', () => {
       targetAgentSessionId: 'acp-1',
       observedAt: expect.any(Number),
     });
-    expect((JSON.parse(provenance.payload) as { observedAt: number }).observedAt).toBeLessThanOrEqual(
-      Date.now()
-    );
+    expect(
+      (JSON.parse(provenance.payload) as { observedAt: number }).observedAt
+    ).toBeLessThanOrEqual(Date.now());
 
     // The turn-end fan-out released the queue surface and re-armed idle.
     expect(hooks.nudgeDeliveries).toHaveBeenCalledWith('chat-1');
@@ -1240,7 +1394,9 @@ describe('ProjectData durable prompt delivery', () => {
     });
     expect(
       db
-        .prepare(`SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`)
+        .prepare(
+          `SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`
+        )
         .get()
     ).toEqual({ count: 0 });
     // No turn ended and no stop happened, so nothing nudged the queue: the
@@ -1297,7 +1453,9 @@ describe('ProjectData durable prompt delivery', () => {
     // No stop signal reached the VM, so this is a repair, not an interruption.
     expect(
       db
-        .prepare(`SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`)
+        .prepare(
+          `SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`
+        )
         .get()
     ).toEqual({ count: 0 });
     // The busy turn already ended, so the parked urgent delivery is due
@@ -1343,7 +1501,9 @@ describe('ProjectData durable prompt delivery', () => {
     });
     expect(
       db
-        .prepare(`SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`)
+        .prepare(
+          `SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`
+        )
         .get()
     ).toEqual({ count: 0 });
     // A stop signal still reached the VM, so the parked delivery re-nudges due

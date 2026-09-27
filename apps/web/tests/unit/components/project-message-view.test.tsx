@@ -288,14 +288,15 @@ function makeMessage(
   content: string,
   role: 'assistant' | 'user' | 'system' | 'tool' = 'assistant'
 ) {
+  const createdAt = Date.now();
   return {
     id,
     sessionId,
     role,
     content,
     toolMetadata: null,
-    createdAt: Date.now(),
-    sequence: null,
+    createdAt,
+    sequence: createdAt,
   };
 }
 
@@ -653,7 +654,7 @@ describe('ProjectMessageView — message rendering', () => {
           content: errorLog,
           toolMetadata: null,
           createdAt: Date.now(),
-          sequence: null,
+          sequence: 1,
         },
       ],
       hasMore: false,
@@ -2683,7 +2684,7 @@ describe('ProjectMessageView — timeline jump-to-message', () => {
       content,
       toolMetadata: null,
       createdAt,
-      sequence: null,
+      sequence: createdAt,
     };
   }
   function makeAgentMessage(id: string, sessionId: string, content: string, createdAt: number) {
@@ -2694,7 +2695,7 @@ describe('ProjectMessageView — timeline jump-to-message', () => {
       content,
       toolMetadata: null,
       createdAt,
-      sequence: null,
+      sequence: createdAt,
     };
   }
 
@@ -2806,11 +2807,19 @@ describe('ProjectMessageView — prepend anchors on rendered rows, not messages'
       content: '(tool call)',
       toolMetadata: { toolCallId: `tc-${id}`, title, kind: 'execute', status: 'completed' },
       createdAt,
-      sequence: null,
+      sequence: createdAt,
     };
   }
   function textRow(id: string, role: 'user' | 'assistant', content: string, createdAt: number) {
-    return { id, sessionId: 'session-prepend', role, content, toolMetadata: null, createdAt };
+    return {
+      id,
+      sessionId: 'session-prepend',
+      role,
+      content,
+      toolMetadata: null,
+      createdAt,
+      sequence: createdAt,
+    };
   }
 
   beforeEach(() => {
@@ -2939,7 +2948,7 @@ describe('ProjectMessageView — tool call activity groups', () => {
         ...metadata,
       },
       createdAt,
-      sequence: null,
+      sequence: createdAt,
     };
   }
 
@@ -2969,7 +2978,7 @@ describe('ProjectMessageView — tool call activity groups', () => {
         ],
       },
       createdAt,
-      sequence: null,
+      sequence: createdAt,
     };
   }
 
@@ -2980,7 +2989,7 @@ describe('ProjectMessageView — tool call activity groups', () => {
     content: string,
     createdAt: number
   ) {
-    return { id, sessionId, role, content, toolMetadata: null, createdAt, sequence: null };
+    return { id, sessionId, role, content, toolMetadata: null, createdAt, sequence: createdAt };
   }
 
   beforeEach(() => {

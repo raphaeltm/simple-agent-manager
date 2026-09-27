@@ -9,8 +9,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
-import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/node-phases';
 import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
+import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/terminal-cf-container-phase';
+import { sleepLifecycleOwnsTerminalTaskWorkspaceSql } from '../../src/services/sleep-preserved-task-status';
 
 // Mock strict external teardown. Scheduled cleanup must fail closed when the
 // provider/container boundary cannot confirm deletion.
@@ -33,7 +34,8 @@ vi.mock('../../src/services/node-agent', () => ({
 }));
 
 // Mock project-data service
-vi.mock('../../src/services/project-data', () => ({
+vi.mock('../../src/services/project-data', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/project-data')>()),
   stopSession: vi.fn().mockResolvedValue(undefined),
   cleanupWorkspaceActivity: vi.fn().mockResolvedValue(undefined),
 }));
@@ -44,7 +46,8 @@ vi.mock('../../src/services/observability', () => ({
 }));
 
 // Mock logger
-vi.mock('../../src/lib/logger', () => ({
+vi.mock('../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
@@ -66,6 +69,24 @@ function mockPreparedStatement(results: unknown[] = []) {
   };
 }
 
+function mockPreparedStatementByFirstBind(responses: Map<string, unknown[]>) {
+  return {
+    bind: vi.fn((status: string) => {
+      const results = responses.get(`WHERE n.status = '${status}'`) ?? [];
+      return {
+        all: vi.fn().mockResolvedValue({ results }),
+        raw: vi.fn().mockResolvedValue([]),
+        first: vi.fn().mockResolvedValue(results[0] ?? null),
+        run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
+      };
+    }),
+    all: vi.fn().mockResolvedValue({ results: [] }),
+    raw: vi.fn().mockResolvedValue([]),
+    first: vi.fn().mockResolvedValue(null),
+    run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
+  };
+}
+
 /**
  * Create a minimal mock Env with D1 database stubs.
  * The `prepareResponses` map lets you configure SQL query responses by substring match.
@@ -76,6 +97,12 @@ function createMockEnv(
 ): Env {
   const mockDb = {
     prepare: vi.fn((sql: string) => {
+      if (sql.includes('WHERE n.status = ?')) {
+        return mockPreparedStatementByFirstBind(prepareResponses);
+      }
+      if (sql.includes("WHERE n.status = 'destroying'")) {
+        return mockPreparedStatement(prepareResponses.get("WHERE n.status = 'destroying'") ?? []);
+      }
       if (sql.includes("WHERE n.status = 'stopped'")) {
         return mockPreparedStatement(prepareResponses.get("WHERE n.status = 'stopped'") ?? []);
       }
@@ -250,7 +277,7 @@ describe('runNodeCleanupSweep', () => {
       .mocked(env.DATABASE.prepare)
       .mock.calls.map(([sql]) => sql)
       .filter((sql) => sql.includes('FROM nodes n'));
-    expect(nodeCandidateQueries).toHaveLength(6);
+    expect(nodeCandidateQueries).toHaveLength(7);
     expect(nodeCandidateQueries.every((sql) => sql.includes('cleanup_backoff_until'))).toBe(true);
   });
 
@@ -337,10 +364,15 @@ describe('runNodeCleanupSweep', () => {
       const result = await runNodeCleanupSweep(env);
 
       expect(result.lifetimeDestroyed).toBe(1);
-      expect(deleteNodeResourcesStrict).toHaveBeenCalledWith('node-stopped-handoff', 'user-1', env, {
-        providerRequestContext: { signal: expect.any(AbortSignal) },
-        requestDeadlineMs: expect.any(Number),
-      });
+      expect(deleteNodeResourcesStrict).toHaveBeenCalledWith(
+        'node-stopped-handoff',
+        'user-1',
+        env,
+        {
+          providerRequestContext: { signal: expect.any(AbortSignal) },
+          requestDeadlineMs: expect.any(Number),
+        }
+      );
     });
 
     it('does not destroy stopped handoff nodes with active workspaces', async () => {
@@ -430,6 +462,8 @@ describe('runNodeCleanupSweep', () => {
         orphanedNodesSkipped: 0,
         stoppedWorkspacesQueued: 0,
         stoppedWorkspacesDeleted: 0,
+        unhealthyHeld: 0,
+        unhealthyReleased: 0,
         cfContainersDestroyed: 0,
         incompatibleDestroyed: 0,
         incompatibleSkipped: 0,
@@ -454,6 +488,7 @@ describe('runNodeCleanupSweep', () => {
 
       const env = createMockEnv(responses, {
         CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT: '3',
+        SESSION_SLEEP_MAX_ATTEMPTS: '4',
       });
 
       const result = await runNodeCleanupSweep(env);
@@ -471,8 +506,11 @@ describe('runNodeCleanupSweep', () => {
       };
       expect(cfStatement.bind.mock.calls[0]?.[2]).toBe(3);
       const terminalQuery = String(prepare.mock.calls[cfQueryIndex]?.[0]);
-      expect(terminalQuery).toContain("t.status IN ('failed', 'cancelled')");
-      expect(terminalQuery).toContain("t.status = 'completed' AND w.chat_session_id IS NULL");
+      // Behaviour against real SQL: tests/workers/scheduled-node-cleanup.test.ts.
+      expect(terminalQuery).toContain("t.status IN ('completed', 'failed', 'cancelled')");
+      expect(terminalQuery).toContain(
+        `AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', 4)}`
+      );
     });
   });
 });

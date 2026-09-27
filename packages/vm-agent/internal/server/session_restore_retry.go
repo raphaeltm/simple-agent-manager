@@ -16,11 +16,19 @@ type sessionRestoreAttempt struct {
 	chatSessionID string
 	agentType     string
 	done          chan struct{}
+	cancel        context.CancelFunc
 	result        map[string]interface{}
 	err           error
 }
 
-func (s *Server) runSessionRestore(ctx context.Context, input *sessionSnapshotHandlerInput, restore func() map[string]interface{}) (map[string]interface{}, error) {
+// runSessionRestore admits one restore per workspace session and waits for its
+// result. The restore is accepted work (.claude/rules/43): it runs on its own
+// context, so a caller that stops waiting cannot cut it short. VM nodes sit
+// behind a Cloudflare proxy that answers 524 after 100 s, while a wake onto a
+// fresh devcontainer can spend longer than that installing the agent inside the
+// restore. Bound to the request, that install was killed and the attempt cached
+// "degraded" for a snapshot that was complete. A retry now joins the attempt.
+func (s *Server) runSessionRestore(ctx context.Context, input *sessionSnapshotHandlerInput, restore func(context.Context) map[string]interface{}) (map[string]interface{}, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -29,17 +37,18 @@ func (s *Server) runSessionRestore(ctx context.Context, input *sessionSnapshotHa
 	}
 	key := input.workspaceID + ":" + input.sessionID
 	s.sessionHostMu.Lock()
+	select {
+	case <-s.done:
+		s.sessionHostMu.Unlock()
+		return nil, fmt.Errorf("server is stopping")
+	default:
+	}
 	if existing := s.sessionRestores[key]; existing != nil {
 		s.sessionHostMu.Unlock()
 		if existing.chatSessionID != input.chatSessionID || existing.agentType != input.agentType {
 			return nil, fmt.Errorf("session restore identity conflicts")
 		}
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("wait for session restore: %w", ctx.Err())
-		case <-existing.done:
-			return existing.result, existing.err
-		}
+		return awaitSessionRestore(ctx, existing)
 	}
 	// Admission and ordinary host creation share sessionHostMu, including the
 	// host factory's post-I/O recheck. Snapshot files belong to the workspace,
@@ -78,31 +87,29 @@ func (s *Server) runSessionRestore(ctx context.Context, input *sessionSnapshotHa
 		s.sessionHostMu.Unlock()
 		return nil, fmt.Errorf("workspace snapshot restore already in progress")
 	}
+	restoreCtx, cancel := context.WithTimeout(context.Background(), s.sessionSnapshotOperationTimeout())
 	attempt := &sessionRestoreAttempt{
 		chatSessionID: input.chatSessionID, agentType: input.agentType,
-		done: make(chan struct{}), err: fmt.Errorf("session restore did not finish"),
+		done: make(chan struct{}), cancel: cancel, err: fmt.Errorf("session restore did not finish"),
 	}
 	if s.sessionRestores == nil {
 		s.sessionRestores = make(map[string]*sessionRestoreAttempt)
 	}
 	s.sessionRestores[key] = attempt
 	s.sessionHostMu.Unlock()
-	defer func() {
-		close(attempt.done)
-		s.clearRemovedWorkspaceRestores(input.workspaceID)
-	}()
-	// Persist a non-adoption fence before token, HOME/WIP, or ACP effects.
-	if err := s.persistSessionRestoreFence(input.workspaceID, input.sessionID); err != nil {
-		attempt.err = err
-		return nil, err
+	go s.completeSessionRestore(restoreCtx, attempt, input, runtime, restore)
+	return awaitSessionRestore(ctx, attempt)
+}
+
+// awaitSessionRestore returns the attempt's result once it finishes, or stops
+// waiting when the caller does. Stopping to wait never stops the attempt.
+func awaitSessionRestore(ctx context.Context, attempt *sessionRestoreAttempt) (map[string]interface{}, error) {
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("wait for session restore: %w", ctx.Err())
+	case <-attempt.done:
+		return attempt.result, attempt.err
 	}
-	// Only the reserved operation may replace routing credentials.
-	if input.workspaceCallbackToken != "" {
-		s.upsertWorkspaceRuntime(input.workspaceID, "", "", "", input.workspaceCallbackToken)
-	}
-	attempt.result = restore()
-	attempt.err = nil
-	return attempt.result, nil
 }
 
 // A deletion first removes the runtime/registry, then releases completed

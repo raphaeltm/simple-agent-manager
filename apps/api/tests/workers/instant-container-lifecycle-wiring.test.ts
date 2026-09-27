@@ -20,7 +20,7 @@
  * classifier never ran.
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
 import { shouldDeferRuntimeHeartbeatTimeout } from '../../src/durable-objects/project-data/runtime-heartbeat-policy';
@@ -35,6 +35,7 @@ import {
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
+import { alarmCompletions, letHeartbeatDeadlinePass } from './support/project-data-alarm';
 import type { VmAgentContainerTestDouble } from './support/vm-agent-container-double';
 
 function getProjectStub(projectId: string): DurableObjectStub<ProjectData> {
@@ -61,6 +62,10 @@ async function getTask(taskId: string) {
 }
 
 describe('Instant container lifecycle wiring — alarm + sweep', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('preserves a sleeping cf-container task+session across both loops, then reconciles once stopped', async () => {
     const prefix = `instant-wiring-${Date.now()}-${crypto.randomUUID()}`;
     const userId = `${prefix}-user`;
@@ -138,15 +143,18 @@ describe('Instant container lifecycle wiring — alarm + sweep', () => {
       )
     ).toEqual({ defer: true, reason: 'cf_container_sleeping' });
 
-    // Actor 1 — ProjectData alarm stale-heartbeat pass: session stays running.
+    // Actor 1 — ProjectData alarm stale-heartbeat pass: session stays running, and the heartbeat
+    // section really examined it (a skipped section would also leave it running).
+    const logSpy = vi.spyOn(console, 'log');
     await runInDurableObject(stub, async (instance, state) => {
-      state.storage.sql.exec(
-        `UPDATE acp_sessions SET last_heartbeat_at = ? WHERE id = ?`,
-        Date.now() - 10 * 60 * 1000,
-        acpSession.id
-      );
+      await letHeartbeatDeadlinePass(instance, state.storage, acpSession.id);
       await instance.alarm();
     });
+    expect(
+      alarmCompletions(logSpy).some((completion) =>
+        completion.ranSections.includes('runtime_heartbeat_timeouts')
+      )
+    ).toBe(true);
     expect((await stub.getAcpSession(acpSession.id))?.status).toBe('running');
 
     // Actor 2 — stuck-task sweep: a resumable runtime is NOT reconciled.

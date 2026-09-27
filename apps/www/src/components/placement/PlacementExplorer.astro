@@ -6,7 +6,6 @@ import {
   EXHAUSTION_POLICIES,
   HOST_MEMORY_RESERVE_MB,
   HOST_ORDERING,
-  MAX_WORKSPACES_PER_NODE,
   STRATEGIES,
   WORKLOAD_PRESETS,
 } from './model';
@@ -146,7 +145,7 @@ const policyLabels: Record<string, string> = {
 
     <p class="model-note">
       A teaching model, not production scheduling code. The host memory reserve ({HOST_MEMORY_RESERVE_MB} MB)
-      and the node workspace cap ({MAX_WORKSPACES_PER_NODE}) are real defaults; boot, run, warm and wait durations are compressed into
+      is a real default; boot, run, warm and wait durations are compressed into
       countable steps and are <strong>illustrative values, not SAM defaults</strong>. Machine
       names, sizes and prices are snapshotted from the provider catalogs in
       <code>packages/providers</code>, with one price per SKU across regions.

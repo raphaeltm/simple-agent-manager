@@ -88,13 +88,12 @@ export const dispatchTaskDef: AnthropicToolDef = {
       resourceRequirements: {
         type: 'object',
         description:
-          'Modern workload requirements for this task. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, and deprecated compatibility metadata maxCoTenants. Placement uses explicit CPU, memory, and disk reservations. Omitted fields inherit; explicit false is preserved.',
+          'Modern workload requirements for this task. Known fields: minVcpu, minMemoryGb, minDiskGb, and exclusiveNode. Placement uses explicit CPU, memory, and disk reservations. Omitted fields inherit; explicit false is preserved.',
         properties: {
           minVcpu: { type: 'number', exclusiveMinimum: 0 },
           minMemoryGb: { type: 'number', exclusiveMinimum: 0 },
           minDiskGb: { type: 'number', minimum: 0 },
           exclusiveNode: { type: 'boolean' },
-          maxCoTenants: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
         },
         additionalProperties: true,
       },
@@ -525,7 +524,6 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       agentProfileHint: resolvedProfile?.profileId ?? null,
       projectScaling: {
         taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
-        maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
         nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
         nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
         warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
