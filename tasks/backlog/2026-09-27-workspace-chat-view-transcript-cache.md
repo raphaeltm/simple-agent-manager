@@ -34,6 +34,6 @@ The architecture review of the project chat instant-switching PR raised this on
 - [ ] Opening a session already cached by the project chat renders it at once on the
       workspace page, and the reverse.
 - [ ] Scroll-up paging on the workspace page uses the shared `loadMore`, gated the same way
-      as the project chat (only once the reader has left the bottom).
+      as the project chat (only once the reader scrolls up).
 - [ ] The duplicated merge/cursor/row-count code in `WorkspaceChatView.tsx` is removed.
 - [ ] Tests enter through the real triggers: mount, socket rows, and scroll-up.

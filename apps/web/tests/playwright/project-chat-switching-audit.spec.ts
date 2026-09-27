@@ -276,12 +276,22 @@ test.describe('project chat — instant switching audit', () => {
     await assertNoOverflow(page);
     await screenshot(page, `project-chat-switching-long-newest-${viewport}`);
 
-    // Scroll the conversation to the top of what is loaded: the next older page
-    // is requested from the oldest loaded row, and its rows become reachable.
+    // Nothing older loads until the reader scrolls.
+    await page.waitForTimeout(1_000);
+    expect(requests.filter((r) => r.sessionId === LONG.id && r.before)).toHaveLength(0);
+
+    // The reader scrolls up to the top of what is loaded: the next older page is
+    // requested from the oldest loaded row, and its rows become reachable.
     const scroller = page.locator('[data-sam-conversation-scroller="true"]');
-    await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+    await scroller.hover();
     await expect
-      .poll(() => requests.filter((r) => r.sessionId === LONG.id && r.before).length)
+      .poll(
+        async () => {
+          await page.mouse.wheel(0, -20_000);
+          return requests.filter((r) => r.sessionId === LONG.id && r.before).length;
+        },
+        { timeout: 15_000 }
+      )
       .toBeGreaterThan(0);
     expect(requests.find((r) => r.before)?.before).toContain(
       `"${LONG.id}-m${OLDEST_OF_NEWEST_PAGE}"`
@@ -290,10 +300,10 @@ test.describe('project chat — instant switching audit', () => {
     await expect
       .poll(
         async () => {
-          await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+          await page.mouse.wheel(0, -20_000);
           return oldestRenderedMessage(page);
         },
-        { timeout: 10_000 }
+        { timeout: 15_000 }
       )
       .toBeLessThan(OLDEST_OF_NEWEST_PAGE);
     await assertNoOverflow(page);

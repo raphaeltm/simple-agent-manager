@@ -2,7 +2,7 @@
  * A chat opens on its newest page. These tests pin how the rest of its history
  * arrives: when the reader scrolls up to the top, and when a jump targets a
  * message older than anything loaded. Both are reached through their real
- * triggers — Virtuoso's `atBottomStateChange` and `startReached` callbacks, and
+ * triggers — the reader's wheel scroll, Virtuoso's `startReached` callback, and
  * the comments drawer's "Show in conversation" — against a server that pages by
  * the same cursors the API uses.
  */
@@ -157,15 +157,18 @@ describe('ProjectMessageView — history arrives newest first', () => {
     });
     expect(virtuosoLastProps.firstItemIndex).toBe(VIRTUAL_START);
 
-    // At the bottom, where a chat opens, reaching the top pages nothing in: a page
-    // that fits on screen shows its first row at once, before any scrolling.
+    // Until the reader scrolls up, reaching the top pages nothing in: a page that
+    // fits on screen shows its first row at once, and a chat whose newest message
+    // is taller than the screen opens away from the bottom — neither is the reader.
     expect(virtuosoLastProps.startReached).toBeUndefined();
-
-    // The reader scrolls up, away from the bottom, and on to the top of what is
-    // loaded. Virtuoso ignores what the callback returns, so neither does this call.
     act(() => {
       virtuosoLastProps.atBottomStateChange?.(false);
     });
+    expect(virtuosoLastProps.startReached).toBeUndefined();
+
+    // The reader scrolls up, on to the top of what is loaded. Virtuoso ignores what
+    // the callback returns, so neither does this call.
+    fireEvent.wheel(screen.getByRole('log', { name: 'Conversation' }), { deltaY: -120 });
     expect(virtuosoLastProps.startReached).toBeTypeOf('function');
     act(() => {
       virtuosoLastProps.startReached?.();

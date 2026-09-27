@@ -56,8 +56,8 @@ export const virtuosoLastProps: {
    */
   startReached?: () => void;
   /**
-   * Real Virtuoso reports here whether the list is scrolled to its bottom, so
-   * calling it with `false` is how a test says "the reader scrolled up".
+   * Real Virtuoso reports here whether the list is scrolled to its bottom — also
+   * on open, when the newest item is taller than the screen.
    */
   atBottomStateChange?: (atBottom: boolean) => void;
 } = {
