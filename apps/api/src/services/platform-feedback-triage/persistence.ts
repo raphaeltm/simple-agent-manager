@@ -10,6 +10,88 @@ import type {
 
 const FEEDBACK_PROJECT_TASK_ID_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 1;
 
+interface SignatureAliasRow {
+  signature: string;
+  canonical_signature: string | null;
+  idea_id: string | null;
+  occurrence_count: number;
+  created_at: string;
+}
+
+function signatureMatchRank(row: SignatureAliasRow, group: FeedbackErrorGroup): number {
+  const canonical = group.canonicalSignature ?? group.signature;
+  if (row.signature === canonical) return 0;
+  if (row.canonical_signature === canonical) return 1;
+  if (row.idea_id) return 2;
+  return 3;
+}
+
+export async function resolveExistingGroupSignatures(
+  env: Env,
+  groups: FeedbackErrorGroup[]
+): Promise<FeedbackErrorGroup[]> {
+  const rows: SignatureAliasRow[] = [];
+  const candidates = [
+    ...new Set(
+      groups.flatMap((group) => [
+        group.canonicalSignature ?? group.signature,
+        ...(group.legacySignatures ?? []),
+      ])
+    ),
+  ];
+  const chunkSize = Math.floor(D1_MAX_BOUND_PARAMETERS / 2);
+  for (let offset = 0; offset < candidates.length; offset += chunkSize) {
+    const chunk = candidates.slice(offset, offset + chunkSize);
+    const placeholders = chunk.map(() => '?').join(',');
+    const query = await env.DATABASE.prepare(
+      `SELECT signature, canonical_signature, idea_id, occurrence_count, created_at
+       FROM platform_feedback_triages
+       WHERE canonical_signature IN (${placeholders}) OR signature IN (${placeholders})`
+    )
+      .bind(...chunk, ...chunk)
+      .all<SignatureAliasRow>();
+    rows.push(...(query.results ?? []));
+  }
+
+  return Promise.all(
+    groups.map(async (group) => {
+      const canonical = group.canonicalSignature ?? group.signature;
+      const candidates = new Set([canonical, ...(group.legacySignatures ?? [])]);
+      const matched = rows
+        .filter((row) => row.canonical_signature === canonical || candidates.has(row.signature))
+        .sort(
+          (left, right) =>
+            signatureMatchRank(left, group) - signatureMatchRank(right, group) ||
+            right.occurrence_count - left.occurrence_count ||
+            left.created_at.localeCompare(right.created_at) ||
+            left.signature.localeCompare(right.signature)
+        )[0];
+      if (!matched) return group;
+
+      if (matched.canonical_signature !== canonical) {
+        try {
+          await env.DATABASE.prepare(
+            `UPDATE platform_feedback_triages SET canonical_signature = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE signature = ? AND canonical_signature IS NULL`
+          )
+            .bind(canonical, matched.signature)
+            .run();
+        } catch (cause) {
+          const winner = await env.DATABASE.prepare(
+            `SELECT signature, canonical_signature, idea_id, occurrence_count, created_at
+             FROM platform_feedback_triages WHERE canonical_signature = ?`
+          )
+            .bind(canonical)
+            .first<SignatureAliasRow>();
+          if (winner) return { ...group, signature: winner.signature };
+          throw cause;
+        }
+      }
+      return { ...group, signature: matched.signature };
+    })
+  );
+}
+
 export async function recordGroupFailure(
   env: Env,
   signature: string,
@@ -131,7 +213,7 @@ export async function loadExistingTriageRows(
     const chunk = signatures.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
     if (chunk.length === 0) continue;
     const query = await env.DATABASE.prepare(
-      `SELECT triage.signature, triage.source, triage.diagnosis_id, triage.idea_id,
+      `SELECT triage.signature, triage.canonical_signature, triage.source, triage.diagnosis_id, triage.idea_id,
         triage.occurrence_count, triage.severity, triage.budget_deferred_until,
         triage.rejected_at, triage.queue_state, triage.resolved_at,
         triage.resolved_by_task_id, resolved_task.output_pr_url AS resolved_task_output_pr_url,

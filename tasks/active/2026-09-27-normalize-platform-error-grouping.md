@@ -45,21 +45,21 @@ paused, and this work must not triage, resolve, or close existing drafts.
 
 ## Implementation checklist
 
-- [ ] Add focused canonical message normalization for numeric values (including decimals,
+- [x] Add focused canonical message normalization for numeric values (including decimals,
       durations, ports, and timestamps), hexadecimal/UUID/ULID identifiers, quoted values, and
       embedded JSON while retaining stable semantic words and source separation.
-- [ ] Return enough legacy-signature metadata from grouping to match rows created by the previous
+- [x] Return enough legacy-signature metadata from grouping to match rows created by the previous
       algorithm.
-- [ ] Add an append-only D1 migration and schema field/index for a canonical signature alias.
-- [ ] Resolve new canonical groups against either the canonical alias or any legacy signature;
+- [x] Add an append-only D1 migration and schema field/index for a canonical signature alias.
+- [x] Resolve new canonical groups against either the canonical alias or any legacy signature;
       attach the alias to the selected existing row and preserve its primary key/Idea linkage.
-- [ ] Add table-driven tests from the production messages above for collapsing volatile variants,
+- [x] Add table-driven tests from the production messages above for collapsing volatile variants,
       plus controls for distinct operation/error shapes and different sources.
-- [ ] Add a persistence/runner regression proving an old-signature row is reused and no new Idea is
+- [x] Add a persistence/runner regression proving an old-signature row is reused and no new Idea is
       created after normalization changes.
-- [ ] Perform the Rule 62 mutation check by reverting normalization locally, run the collapse tests
+- [x] Perform the Rule 62 mutation check by reverting normalization locally, run the collapse tests
       to red, then restore and rerun green.
-- [ ] Keep triage configuration/dispatch unchanged and verify the diff contains no existing-draft
+- [x] Keep triage configuration/dispatch unchanged and verify the diff contains no existing-draft
       state mutation.
 - [ ] Run focused tests, API/repository quality checks, specialist reviews, staging verification,
       PR/CI/CodeRabbit gates, merge, and production deploy monitoring.
@@ -85,3 +85,12 @@ paused, and this work must not triage, resolve, or close existing drafts.
 - `apps/api/.claude/rules/31-migration-safety.md`
 - `tasks/archive/2026-07-29-automated-error-store-triage.md`
 - `tasks/archive/2026-07-30-platform-feedback-triage-resilience.md`
+
+## Validation evidence
+
+- Rule 62 mutation check: temporarily routed canonical grouping through the legacy normalizer and
+  ran the four `collapses production-shaped …` table cases. All four failed with two groups instead
+  of one. Restoring canonical normalization made all four pass.
+- Focused suite: `platform-feedback-triage.test.ts` plus the canonical-signature migration test,
+  26/26 tests passed.
+- API typecheck passed after building `shared`, `providers`, and `cloud-init`; API lint passed.
