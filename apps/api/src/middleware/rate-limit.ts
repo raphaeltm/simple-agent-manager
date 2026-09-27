@@ -302,6 +302,9 @@ export function rateLimitReportIssuePost(env: Env): MiddlewareHandler<{ Bindings
   });
 }
 
+/** Session summarization's window: per hour. Override via RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS. */
+export const DEFAULT_SESSION_SUMMARIZE_WINDOW_SECONDS = 3600;
+
 /**
  * Rate limit shared by the two session-summarization routes, `POST …/sessions/:id/fork-prepare`
  * and `POST …/sessions/:id/summarize`. Default: 30 per hour per user, across both.
@@ -309,6 +312,10 @@ export function rateLimitReportIssuePost(env: Env): MiddlewareHandler<{ Bindings
 export function rateLimitSessionSummarize(env: Env): MiddlewareHandler<{ Bindings: Env }> {
   return rateLimit({
     limit: getRateLimit(env, 'SESSION_SUMMARIZE'),
+    windowSeconds: parsePositiveInt(
+      env.RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS,
+      DEFAULT_SESSION_SUMMARIZE_WINDOW_SECONDS
+    ),
     keyPrefix: 'session-summarize',
   });
 }

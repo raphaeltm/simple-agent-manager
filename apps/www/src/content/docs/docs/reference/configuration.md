@@ -793,14 +793,15 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 
 ## Context Summarization (Forking)
 
-| Variable                          | Default                         | Description                                                                              |
-| --------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------- |
-| `CONTEXT_SUMMARY_MODEL`           | `@cf/google/gemma-4-26b-a4b-it` | Model for conversation context summarization                                             |
-| `CONTEXT_SUMMARY_MAX_LENGTH`      | `4000`                          | Max summary length in characters                                                         |
-| `CONTEXT_SUMMARY_TIMEOUT_MS`      | `10000`                         | Summarization timeout                                                                    |
-| `CONTEXT_SUMMARY_MAX_MESSAGES`    | `50`                            | Max messages to include in summary                                                       |
-| `CONTEXT_SUMMARY_SHORT_THRESHOLD` | `5`                             | Skip AI for conversations this short                                                     |
-| `RATE_LIMIT_SESSION_SUMMARIZE`    | `30`                            | Fork + Retry summaries per user per hour (one shared bucket); exceeding it returns `429` |
+| Variable                                      | Default                         | Description                                                                                |
+| --------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------ |
+| `CONTEXT_SUMMARY_MODEL`                       | `@cf/google/gemma-4-26b-a4b-it` | Model for conversation context summarization                                               |
+| `CONTEXT_SUMMARY_MAX_LENGTH`                  | `4000`                          | Max summary length in characters                                                           |
+| `CONTEXT_SUMMARY_TIMEOUT_MS`                  | `10000`                         | Summarization timeout                                                                      |
+| `CONTEXT_SUMMARY_MAX_MESSAGES`                | `50`                            | Max messages to include in summary                                                         |
+| `CONTEXT_SUMMARY_SHORT_THRESHOLD`             | `5`                             | Skip AI for conversations this short                                                       |
+| `RATE_LIMIT_SESSION_SUMMARIZE`                | `30`                            | Fork + Retry summaries per user per window (one shared bucket); exceeding it returns `429` |
+| `RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS` | `3600`                          | Summarization rate-limit window (seconds)                                                  |
 
 ## Idea Execution Timeouts
 

@@ -571,7 +571,8 @@ by the read-only cron-liveness check.
 
 ### Session Summarization (Fork / Retry)
 
-- `RATE_LIMIT_SESSION_SUMMARIZE` — Fork (`fork-prepare`) + Retry (`summarize`) summaries per user per hour, one shared bucket (default: 30)
+- `RATE_LIMIT_SESSION_SUMMARIZE` — Fork (`fork-prepare`) + Retry (`summarize`) summaries per user per window, one shared bucket (default: 30)
+- `RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS` — Summarization rate-limit window in seconds (default: 3600)
 
 ### Client Error Reporting
 

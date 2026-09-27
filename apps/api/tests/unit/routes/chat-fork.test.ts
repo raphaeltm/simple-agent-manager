@@ -237,4 +237,23 @@ describe('session summarization rate limit (fork-prepare + summarize)', () => {
     expect((await call(app, env, 'summarize')).status).toBe(200);
     expect(mocks.summarizeSession).toHaveBeenCalledTimes(2);
   });
+
+  it('honours RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS for the window length', async () => {
+    const app = makeApp();
+    const env = makeEnv({
+      RATE_LIMIT_SESSION_SUMMARIZE: '1',
+      RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS: '600',
+    });
+
+    expect((await call(app, env, 'fork-prepare')).status).toBe(200);
+    const rejected = await call(app, env, 'summarize');
+    expect(rejected.status).toBe(429);
+    // 10:15:00 inside a 10-minute window (10:10–10:20): five minutes, not the default 45.
+    expect(rejected.headers.get('Retry-After')).toBe(String(5 * 60));
+
+    // 10:20:01 is a new 10-minute window but would still be inside the default hourly one.
+    vi.setSystemTime(new Date('2026-09-27T10:20:01Z'));
+    expect((await call(app, env, 'summarize')).status).toBe(200);
+    expect(mocks.summarizeSession).toHaveBeenCalledTimes(2);
+  });
 });

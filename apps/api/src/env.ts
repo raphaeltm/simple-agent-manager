@@ -327,6 +327,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   RATE_LIMIT_TRIAL_CREATE?: string;
   RATE_LIMIT_REPORT_ISSUE_POST?: string;
   RATE_LIMIT_SESSION_SUMMARIZE?: string;
+  RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS?: string;
   RATE_LIMIT_IDENTITY_TOKEN?: string;
   RATE_LIMIT_IDENTITY_TOKEN_WINDOW_SECONDS?: string;
   /**
