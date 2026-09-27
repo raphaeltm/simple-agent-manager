@@ -15,7 +15,6 @@ export function rejectedAllocationPlacementPredicate(node: Node, provider: Resol
     sql`${schema.nodes.cloudProvider} IS ${provider.providerName}`,
     sql`${schema.nodes.nodeRole} IS ${node.nodeRole}`,
     sql`${schema.nodes.workloadRole} IS ${node.workloadRole}`,
-    sql`${schema.nodes.vmSize} IS ${node.vmSize}`,
     sql`${schema.nodes.vmLocation} IS ${node.vmLocation}`,
     sql`${schema.nodes.providerInstanceType} IS ${node.providerInstanceType}`,
     sql`${schema.nodes.capacityPoolId} IS ${node.capacityPoolId}`,
