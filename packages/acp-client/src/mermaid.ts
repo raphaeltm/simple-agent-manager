@@ -28,8 +28,9 @@ const MERMAID_TEXT_COLOR = '#e6f2ee';
 
 /**
  * Config keys a diagram may not change through its own `%%{init}%%` directive or
- * front matter. Mermaid deletes them from directives at every nesting level, so
- * `htmlLabels` also covers `flowchart.htmlLabels`.
+ * front matter. Mermaid deletes them from directives at every nesting level.
+ * Keys outside Mermaid's config schema (`altFontFamily`, `dompurifyConfig`)
+ * never survive a directive, so they need no entry.
  */
 const DIRECTIVE_LOCKED_KEYS = [
   // Mermaid's own defaults, listed so this list is complete on its own.
@@ -39,16 +40,14 @@ const DIRECTIVE_LOCKED_KEYS = [
   'maxTextSize',
   'suppressErrorRendering',
   'maxEdges',
-  // Would bring back HTML labels.
+  // Would bring back HTML labels. `flowchart.htmlLabels` is covered too, and
+  // the top-level `htmlLabels: false` below outranks it anyway.
   'htmlLabels',
-  // Raw CSS, and font names that Mermaid pastes into CSS rules unvalidated.
+  // Raw CSS, and a font name that Mermaid pastes into CSS rules unvalidated.
   'themeCSS',
   'fontFamily',
-  'altFontFamily',
   // Turns in-document marker references into absolute URLs.
   'arrowMarkerAbsolute',
-  // Mermaid's own label-sanitizer settings.
-  'dompurifyConfig',
 ];
 
 /**
