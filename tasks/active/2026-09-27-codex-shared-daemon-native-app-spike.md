@@ -36,16 +36,16 @@ Every finding is addressed by the checklist below; production UI/admission for n
 
 ## Implementation checklist
 
-- [ ] Add one experimental configuration authority that validates opt-in, derives the private socket/home paths, and leaves the default ACP launch byte-for-byte equivalent.
-- [ ] Add a small single-purpose newline-JSON/WebSocket bridge compatible with the pinned codex-acp launch contract; validate the appended `app-server` argument and reject non-private/invalid socket targets.
-- [ ] Start/reuse one workspace-owned managed daemon without making the adapter its lifecycle owner; record exact CLI/daemon versions and fail clearly on mismatch or daemon loss.
-- [ ] Persist the canonical native thread identity as the existing Codex ACP session identity mapped to the SAM session/task, with an explicit attribution fence that rejects automatic adoption of unknown threads.
-- [ ] Normalize external user, assistant, tool, error, turn, approval, cancellation, and background-work events through existing SessionHost message/activity/lifecycle paths with replay deduplication.
-- [ ] Define one turn-control/approval owner at a time; test steering, interruption, races, pending approvals, and reconnect reconciliation without rerunning side effects.
-- [ ] Preserve profile model/effort/sandbox settings, SAM MCP servers, and verified SAM principal configuration for turns started outside the SAM viewer.
-- [ ] Add deterministic two-client protocol tests for same-thread attachment, bidirectional turns, replay dedupe, daemon failure, reconnect, activity leasing, attribution rejection, and suspend/resume identity/filesystem preservation.
-- [ ] Add a runnable isolated-home/workspace smoke harness that uses Codex 0.156.1/codex-acp 1.13.1, redacts sensitive values, owns cleanup, and never touches an existing daemon/auth state.
-- [ ] Run live two-client provider validation, including tool/background activity and process failure. Run actual native pairing only with authorized account/app access; otherwise publish precise private manual steps and mark it pending.
+- [x] Add one experimental configuration authority that validates opt-in, constrains an explicit socket to the configured workspace, and leaves the default ACP launch unchanged.
+- [x] Add a small single-purpose newline-JSON/WebSocket bridge compatible with the pinned codex-acp launch contract; validate the appended `app-server` argument, WebSocket accept key, frame bounds, heartbeat, CLI version, and private socket target.
+- [x] Attach only to one explicitly owned, workspace-private daemon; record the pinned CLI/server version in a restrictive ownership marker and fail clearly on mismatch or daemon loss. Managed-daemon/native relay remains provider-limited as documented below.
+- [x] Persist the canonical native thread identity as the existing Codex ACP session identity mapped to the SAM session/task, with an explicit attribution fence that rejects automatic adoption of unknown threads.
+- [x] Normalize external user, assistant, tool, turn, approval, cancellation, and background-work events through existing SessionHost message/activity/lifecycle paths with stable-ID replay deduplication.
+- [x] Fail shared-mode ACP approvals closed so SAM never approves on another attached client's behalf; native approval routing remains a live provider check.
+- [x] Preserve profile model/effort/sandbox settings, SAM MCP servers, and verified SAM principal configuration by attaching external clients only to the exact thread created by the configured SAM ACP session.
+- [x] Add deterministic tests for replay dedupe, activity leasing, attribution rejection, persistence authority, interruption, approval ownership, and default-path isolation.
+- [x] Add a runnable isolated-home/workspace smoke harness that uses Codex 0.156.1/codex-acp 1.13.1, redacts sensitive values, owns cleanup, and never copies or prints auth state.
+- [x] Run live two-client provider validation, including external tool/activity events and daemon process failure. Actual native pairing is pending authorized desktop/mobile access and is not inferred from the second protocol client.
 - [ ] Document evidence as deterministic protocol, live provider runtime, real desktop/mobile, and pending/failed rows; include cleanup and production recommendation/provider limitation.
 - [ ] Validate suspend/resume against uncommitted files and native thread identity; state whether relocation/relay re-enrollment remains unsupported.
 - [ ] Run Go race/static/coverage checks and repository lint/typecheck/test/build gates.
@@ -78,3 +78,69 @@ Every finding is addressed by the checklist below; production UI/admission for n
 ## Explicit deferrals
 
 - Production UI for pairing/revocation, native-created-thread admission, cost/account ownership, cross-host relocation, and sustained relay soak testing require a follow-up SAM Idea after the spike result. They are not silently implemented or claimed here.
+
+## Experimental activation and cleanup
+
+The default path remains pinned `codex-acp` over its private stdio app-server. Shared mode activates only when the attributed Codex profile/runtime supplies `SAM_CODEX_SHARED_DAEMON=1` and `SAM_CODEX_SHARED_DAEMON_SOCKET` points to an already-running dedicated Unix listener inside the configured workspace. The socket and its versioned `<socket>.sam-owner.json` marker must resolve to objects owned by the runtime UID with no group/other permissions; the marker records the requested socket, its provider-resolved real path, and server version. This prevents the spike from discovering or reusing a host-global daemon. Automatic `SAM_CODEX_SHARED_DAEMON_REMOTE_CONTROL=1` is rejected because SAM cannot yet prove ownership and restore relay state safely. The bridge owns client connections; it deliberately does not stop the separately owned daemon when one client disconnects.
+
+The supported experimental settings are:
+
+| Setting | Default | Purpose |
+|---|---:|---|
+| `SAM_CODEX_SHARED_DAEMON` | off | Explicit opt-in; must equal a true flag value. |
+| `SAM_CODEX_SHARED_DAEMON_SOCKET` | required | Absolute dedicated socket path inside the configured workspace. |
+| `SAM_CODEX_SHARED_DAEMON_CLI` | `codex` | Pinned CLI executable used by the bridge and observer proxy. |
+| `SAM_CODEX_SHARED_DAEMON_HANDSHAKE_TIMEOUT_MS` | `15000` | Bridge WebSocket upgrade deadline. |
+| `SAM_CODEX_SHARED_DAEMON_REQUEST_TIMEOUT_MS` | `30000` | Native observer JSON-RPC request deadline. |
+| `SAM_CODEX_SHARED_DAEMON_WS_BUFFER_BYTES` | `4096` | Observer WebSocket read/write buffer size. |
+| `SAM_CODEX_SHARED_DAEMON_RECONNECT_DELAY_MS` | `2000` | Delay between observer reconnect attempts. |
+| `SAM_CODEX_SHARED_DAEMON_RECONNECT_TIMEOUT_MS` | `30000` | Total observer recovery window before fail-closed process recovery. |
+| `SAM_CODEX_SHARED_DAEMON_MAX_FRAME_BYTES` | `16777216` | Bridge and observer message bound. |
+| `SAM_CODEX_SHARED_DAEMON_PING_INTERVAL_MS` | `2000` | Bridge heartbeat interval. |
+| `SAM_CODEX_SHARED_DAEMON_PONG_TIMEOUT_MS` | `5000` | Bridge heartbeat failure deadline. |
+| `SAM_CODEX_SHARED_DAEMON_DEDUPE_LIMIT` | `4096` | In-memory replay accelerator; deterministic message IDs and the durable outbox unique key remain the full-history dedupe authority. |
+
+SAM generates `CODEX_PATH`, `SAM_CODEX_SHARED_DAEMON_EXPECTED_VERSION`, and `SAM_CODEX_SHARED_DAEMON_SOCKET_OWNER_FILE`; profile/runtime configuration must not set them. `SAM_CODEX_SHARED_DAEMON_REMOTE_CONTROL` is deliberately rejected. The smoke-only `SAM_CODEX_SHARED_DAEMON_SMOKE_TIMEOUT_MS` and `SAM_CODEX_SHARED_DAEMON_SMOKE_EXIT_TIMEOUT_MS` default to `120000` and `10000`.
+
+Only the smoke harness currently owns listener startup, marker creation, restart, and cleanup as one runnable operation. Runtime activation outside that harness requires an orchestrator to start `codex app-server --listen unix://<socket>` as the same runtime UID, wait for the socket, make the resolved socket private, and atomically write a mode-`0600` marker with `{"version":"0.156.1","socketPath":"<requested absolute path>","realSocketPath":"<resolved absolute path>"}`. That orchestrator must retain the exact child process identity for cleanup. General daemon supervision is intentionally not installed by this spike.
+
+For the reproducible pinned test, use a dedicated test home containing an already-authorized test credential and run:
+
+```bash
+HOME=/path/to/isolated-home \
+CODEX_HOME=/path/to/isolated-home/.codex \
+SAM_CODEX_SHARED_DAEMON_SMOKE=1 \
+node packages/vm-agent/scripts/codex-shared-daemon-smoke.mjs
+```
+
+The harness creates its workspace and private socket under a unique temporary directory, launches the installed 0.156.1 app-server directly, and deletes only those resources. It never copies credentials. For a manually launched direct listener, terminate only the recorded owned process group, wait for it to exit, and then remove its requested socket, resolved private socket, owner marker, and isolated workspace. After a manual managed-daemon test, stop only the isolated test daemon with the same `HOME` and `CODEX_HOME`: `codex app-server daemon stop`. Remove the dedicated test home only after confirming no other session uses it.
+
+The managed-daemon path currently has an exact-version limitation. On 2026-09-27, installed CLI 0.156.1 downloaded managed app-server 0.157.1. The bridge rejected that combination instead of silently validating newer server behavior. The live proof therefore used the 0.156.1 binary's direct private Unix listener. A production design needs a provider-supported way to pin the managed daemon package, or a compatibility contract between the pinned adapter/CLI and managed server.
+
+## Evidence matrix
+
+| Dimension | Status | Evidence / limitation |
+|---|---|---|
+| Existing default ACP behavior | PASS | Feature flag defaults off; full `internal/acp` suite passes. |
+| Exact versions | PASS / provider limitation | codex-acp 1.13.1 and CLI/direct app-server 0.156.1 verified. Managed daemon self-installed 0.157.1 and was rejected. |
+| Raw app-server same-thread attachment | PASS | Live protocol smoke created one thread, resumed it from client two, and compared the exact ID. This is not a native-app or full SessionHost result. |
+| Raw app-server prompts from both clients | PASS | Live protocol smoke changed one uncommitted file from turns initiated by each client. |
+| SessionHost external event normalization | DETERMINISTIC PASS / staging pending | Observer tests normalize user, assistant, and tool items into stable durable message IDs and existing activity paths. The live two-client smoke observed all item categories but did not run SessionHost/codex-acp. |
+| Steering and cancellation | PASS | Live `turn/steer` kept the active turn ID; a separate client then interrupted a running command. |
+| Approval ownership | PARTIAL / provider routing pending | Observer has no response path, and shared-mode codex-acp fails every permission callback closed even during a SAM prompt. Actual native-origin request delivery and response ownership remain pending; no live approval was accepted or leaked. |
+| Reconnect and replay dedupe | PASS by layer / full runtime pending | Live protocol disconnect/resume/read retained history. Deterministic observer tests cover atomic concurrent reservation, stable message IDs, and durable full-history dedupe beyond the bounded cache. Full SessionHost/codex-acp runtime remains a staging check. |
+| Direct private-listener failure/recovery | PASS | Live direct-listener process-group kill closed bridge clients; a replacement 0.156.1 listener resumed the persisted thread. Managed daemon remains failed/pending because it installed 0.157.1. |
+| External activity tracking | DETERMINISTIC PASS / staging pending | Tests assert native turn, approval, connection-loss, recovery, and exhaustion enter and leave the existing bounded activity authority. Live SessionHost reporting remains pending. |
+| Task/chat/native identity mapping | PASS | Observer starts only after ACP persists the native session ID and rejects a mismatched `thread/read` identity. |
+| Profile and SAM MCP identity | PASS by construction / staging pending | Native turns attach to the exact SAM-created thread, whose model/settings/MCP configuration was established by the existing ACP NewSession/LoadSession path. End-to-end staging identity check remains pending. |
+| Suspend/resume with uncommitted files | PARTIAL | Live daemon/client teardown preserved thread identity and uncommitted files. Full SAM snapshot sleep/wake remains a staging check. |
+| Native desktop/mobile discovery and pairing | PENDING | No authorized native test account/app was available. A second protocol client is explicitly not counted as native proof. |
+| Staging runtime | PENDING | Requires coordinated fresh-VM deployment after review; no production rollout is authorized. |
+
+## Private native pairing check (pending)
+
+Use a dedicated desktop host/test account and an isolated Codex home that contains no unrelated threads. Confirm the installed CLI and managed app-server versions first; do not proceed when they differ from the compatibility target. Start remote control with `codex remote-control start`; obtain a short-lived code with `codex remote-control pair` only at the moment the native app asks for it. Enter the code directly in the signed-in native app's remote-environment flow. Do not paste the code into logs, chat, the task, or the PR. Verify that the app lists the already-attributed SAM thread rather than creating/adopting another thread, run one turn from each surface, then revoke/stop the isolated host with `codex remote-control stop`. Record only pass/fail, client platform/version, thread-ID equality, and redacted timestamps. This is a separate manual compatibility check: the SAM spike never enables remote control on the runtime. Official documentation currently frames initial setup around a macOS/Windows desktop host, so agent-box's headless flow remains compatibility work rather than established native support.
+
+## Production recommendation
+
+Keep this implementation experimental. The clean production direction is an official codex-acp socket transport (or a SAM native app-server backend) plus a provider-supported managed-daemon version contract and authenticated native attribution metadata. Retain one SAM observer as the persistence/activity authority, exact-thread admission, stable native item IDs, and origin-client approval routing. Do not enable native-created-thread adoption until task, profile, principal, cost, and revocation ownership are explicit.

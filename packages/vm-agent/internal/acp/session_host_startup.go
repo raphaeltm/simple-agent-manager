@@ -512,6 +512,9 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 		}
 	}
 	startup.envVars = append(startup.envVars, codexMcpEnvVars...)
+	if err := h.configureCodexSharedDaemon(ctx, startup); err != nil {
+		return fmt.Errorf("configure experimental Codex shared daemon: %w", err)
+	}
 	slog.Info("Wrote Codex config.toml",
 		"mcpServers", len(h.config.McpServers),
 		"hasProxyProvider", proxyConfig != nil,

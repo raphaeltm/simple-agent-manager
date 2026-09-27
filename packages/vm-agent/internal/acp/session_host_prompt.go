@@ -77,7 +77,9 @@ func (h *SessionHost) AcceptPrompt(
 	// prompt. A rejected concurrent delivery therefore cannot be persisted or
 	// mirrored as if the agent had consumed it.
 	h.persistLastPrompt(promptReq.firstTextContent)
-	h.injectUserMessageNotifications(promptReq.sessionID, promptReq.blocks, promptReq.messageID)
+	if !h.sharedCodexDaemonEnabled() {
+		h.injectUserMessageNotifications(promptReq.sessionID, promptReq.blocks, promptReq.messageID)
+	}
 	h.cancelAutoSuspendTimer()
 
 	return &AcceptedPrompt{

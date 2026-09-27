@@ -295,6 +295,7 @@ func (h *SessionHost) clearCurrentAgentSessionLocked() {
 	// heartbeat at the detach boundary so a crash whose restart never reaches
 	// attachACPConnection cannot renew an active lease forever.
 	h.clearHarnessWork()
+	h.stopCodexNativeObserver()
 	h.process = nil
 	h.acpConn = nil
 	h.setSessionIDLocked("")

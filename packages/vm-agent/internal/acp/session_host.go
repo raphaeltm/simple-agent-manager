@@ -338,6 +338,7 @@ type SessionHost struct {
 	harnessWorkMu         sync.Mutex
 	harnessWork           harnessWorkStatus
 	harnessTaskIDs        map[string]struct{}
+	codexNativeTaskIDs    map[string]struct{}
 	harnessActivityCancel context.CancelFunc
 	// harnessReportMu owns the debounced, single-flight activity reporter
 	// triggered by harness lifecycle notifications. The ACP notification
@@ -352,6 +353,16 @@ type SessionHost struct {
 	lastActivityReportMu  sync.Mutex
 	lastActivityReport    activityReportSnapshot
 	lastActivityReportSet bool
+
+	// The Codex shared-daemon spike is opt-in. The native observer has its own
+	// lock because its event loop must never contend on mu with an ACP handshake.
+	codexNativeMu            sync.Mutex
+	codexSharedDaemon        codexSharedDaemonConfig
+	codexNativeObserver      *codexNativeObserver
+	codexNativeConnect       codexNativeConnectFunc
+	codexNativeSeen          map[string]codexNativeSeenState
+	codexNativeSeenOrder     []string
+	codexSharedDaemonEnabled atomic.Bool
 	// activePromptID identifies the in-flight prompt associated with promptCancel.
 	// Protected by promptCancelMu.
 	activePromptID uint64
@@ -726,6 +737,7 @@ func (h *SessionHost) autoSuspend() {
 // (separate from promptMu) so we never deadlock with HandlePrompt.
 func (h *SessionHost) CancelPrompt() {
 	h.cancelPrompt(true)
+	h.scheduleCodexNativeInterrupt()
 }
 
 // CancelPromptFromControlPlane mirrors the viewer WebSocket session/cancel path
@@ -737,7 +749,14 @@ func (h *SessionHost) CancelPromptFromControlPlane() {
 		return
 	}
 
-	h.CancelPrompt()
+	h.promptCancelMu.Lock()
+	hasPrompt := h.promptCancel != nil
+	h.promptCancelMu.Unlock()
+	interruptScheduled := h.scheduleCodexNativeInterrupt()
+	if !hasPrompt && interruptScheduled {
+		return
+	}
+	h.cancelPrompt(true)
 	cancelMessage, err := h.cancelNotification()
 	if err != nil {
 		slog.Warn("CancelPromptFromControlPlane: could not build session/cancel notification", "error", err)
@@ -1165,6 +1184,7 @@ func (h *SessionHost) stopCurrentAgentLocked() {
 	// Stop the process-scoped harness heartbeat before clearing the ACP
 	// connection. A replacement connection will establish fresh state.
 	h.clearHarnessWork()
+	h.stopCodexNativeObserver()
 	if h.process != nil {
 		_ = h.process.Stop()
 		h.process = nil
