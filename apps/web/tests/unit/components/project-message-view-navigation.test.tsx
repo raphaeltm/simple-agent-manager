@@ -1,16 +1,19 @@
 /**
+ * Moving through a chat, and between chats.
+ *
  * A chat opens on its newest page. These tests pin how the rest of its history
- * arrives: when the reader scrolls up to the top, and when a jump targets a
- * message older than anything loaded. Both are reached through their real
- * triggers — the reader's wheel scroll, Virtuoso's `startReached` callback, and
- * the comments drawer's "Show in conversation" — against a server that pages by
- * the same cursors the API uses.
+ * arrives — when the reader scrolls up to the top, and when a jump targets a
+ * message older than anything loaded — and where keyboard focus goes when a link
+ * inside one chat opens another. Each is reached through its real trigger: the
+ * reader's wheel scroll, Virtuoso's `startReached` callback, the comments
+ * drawer's "Show in conversation", and a focused link activated through the real
+ * router, against a server that pages by the same cursors the API uses.
  */
 import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactElement } from 'react';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes, useNavigate, useParams } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -126,6 +129,32 @@ function beforeCursors(): Array<string | undefined> {
   );
 }
 
+/** An open comment, written after everything loaded, on the message `messageId`. */
+function commentOn(messageId: string) {
+  return {
+    id: `comment-on-${messageId}`,
+    clientId: null,
+    projectId: 'proj-1',
+    sessionId: SESSION_ID,
+    // No quote, so the inbox row falls back to describing the anchor.
+    anchor: { kind: 'message', messageId, quote: '' },
+    author: { id: 'user-1', name: 'Test User', email: 't@x', avatarUrl: null, kind: 'human' },
+    body: 'Worth revisiting this early decision.',
+    // Written long after the message, and after everything loaded: a jump that
+    // stopped at this time would not load the message at all.
+    createdAt: 9_000,
+    updatedAt: 9_000,
+    status: 'open',
+    replies: [],
+  };
+}
+
+/** Opens the comments drawer on the one thread and returns its row. */
+async function openCommentThread() {
+  fireEvent.click(await screen.findByRole('button', { name: /1 unresolved comment/i }));
+  return screen.findByRole('button', { name: /Worth revisiting this early decision\./i });
+}
+
 function renderView(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -186,34 +215,12 @@ describe('ProjectMessageView — history arrives newest first', () => {
 
   it('jumps to a comment on a message older than the loaded window, paging back until that message loads', async () => {
     serveTranscript([row(1), row(2), row(3), row(4), row(5), row(6)], 2);
-    mocks.listMessageComments.mockResolvedValue({
-      comments: [
-        {
-          id: 'comment-on-m2',
-          clientId: null,
-          projectId: 'proj-1',
-          sessionId: SESSION_ID,
-          // No quote, so the row falls back to describing the anchor.
-          anchor: { kind: 'message', messageId: 'm2', quote: '' },
-          author: { id: 'user-1', name: 'Test User', email: 't@x', avatarUrl: null, kind: 'human' },
-          body: 'Worth revisiting this early decision.',
-          // Written long after m2, and after everything loaded: a jump that stopped
-          // at this time would not load m2 at all.
-          createdAt: 9_000,
-          updatedAt: 9_000,
-          status: 'open',
-          replies: [],
-        },
-      ],
-    });
+    mocks.listMessageComments.mockResolvedValue({ comments: [commentOn('m2')] });
 
     renderView(<ProjectMessageView projectId="proj-1" sessionId={SESSION_ID} />);
     expect(await screen.findByText('Message number 6')).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole('button', { name: /1 unresolved comment/i }));
-    const threadRow = await screen.findByRole('button', {
-      name: /Worth revisiting this early decision\./i,
-    });
+    const threadRow = await openCommentThread();
     // m2 is not loaded, so who wrote it is unknown and the row does not guess.
     expect(within(threadRow).getByText('on a message')).toBeInTheDocument();
     fireEvent.click(threadRow);
@@ -231,23 +238,7 @@ describe('ProjectMessageView — history arrives newest first', () => {
 
   it('scrolls again until a row that arrived with older history stays on screen', async () => {
     serveTranscript([row(1), row(2), row(3), row(4), row(5), row(6)], 2);
-    mocks.listMessageComments.mockResolvedValue({
-      comments: [
-        {
-          id: 'comment-on-m2',
-          clientId: null,
-          projectId: 'proj-1',
-          sessionId: SESSION_ID,
-          anchor: { kind: 'message', messageId: 'm2', quote: '' },
-          author: { id: 'user-1', name: 'Test User', email: 't@x', avatarUrl: null, kind: 'human' },
-          body: 'Worth revisiting this early decision.',
-          createdAt: 9_000,
-          updatedAt: 9_000,
-          status: 'open',
-          replies: [],
-        },
-      ],
-    });
+    mocks.listMessageComments.mockResolvedValue({ comments: [commentOn('m2')] });
     // In a browser the list shifts to keep its rows in place when older pages
     // arrive, which can carry the first scroll's target back off screen. Here the
     // target row reads as off screen for its first two checks.
@@ -275,10 +266,7 @@ describe('ProjectMessageView — history arrives newest first', () => {
 
     renderView(<ProjectMessageView projectId="proj-1" sessionId={SESSION_ID} />);
     expect(await screen.findByText('Message number 6')).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole('button', { name: /1 unresolved comment/i }));
-    fireEvent.click(
-      await screen.findByRole('button', { name: /Worth revisiting this early decision\./i })
-    );
+    fireEvent.click(await openCommentThread());
     fireEvent.click(screen.getByRole('button', { name: /show in conversation/i }));
 
     expect(await screen.findByText('Message number 2')).toBeInTheDocument();
@@ -289,5 +277,119 @@ describe('ProjectMessageView — history arrives newest first', () => {
       ).toBeGreaterThanOrEqual(3)
     );
     rect.mockRestore();
+  });
+});
+
+const TOPICS: Record<string, string> = {
+  'sess-parent': 'Parent chat: plan the migration',
+  'sess-child': 'Child chat: run the migration',
+};
+
+function serveChats() {
+  mocks.getChatSession.mockImplementation(async (_projectId: string, sessionId: string) => ({
+    session: {
+      id: sessionId,
+      workspaceId: null,
+      topic: TOPICS[sessionId],
+      status: 'stopped',
+      messageCount: 1,
+      startedAt: 1,
+      endedAt: 2,
+      createdAt: 1,
+    },
+    messages: [
+      {
+        id: `${sessionId}-m1`,
+        sessionId,
+        role: 'user',
+        content: `First message of ${sessionId}`,
+        toolMetadata: null,
+        createdAt: 1_000,
+        sequence: 1,
+      },
+    ],
+    hasMore: false,
+    state: null,
+  }));
+}
+
+/** The chat page, reduced to what a switch needs: the route and one control outside the chat. */
+function ChatRoute() {
+  const { sessionId = '' } = useParams();
+  const navigate = useNavigate();
+  return (
+    <>
+      <button type="button" onClick={() => navigate('/projects/proj-1/chat/sess-child')}>
+        Open the child chat
+      </button>
+      <ProjectMessageView
+        projectId="proj-1"
+        sessionId={sessionId}
+        sourceContext={
+          sessionId === 'sess-child'
+            ? {
+                lineageText: 'Fork of',
+                parentTaskId: 'task-parent',
+                parentSessionId: 'sess-parent',
+                parentTitle: TOPICS['sess-parent']!,
+              }
+            : undefined
+        }
+      />
+    </>
+  );
+}
+
+function renderAt(sessionId: string) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <MemoryRouter initialEntries={[`/projects/proj-1/chat/${sessionId}`]}>
+      <QueryClientProvider client={client}>
+        <Routes>
+          <Route path="/projects/:projectId/chat/:sessionId" element={<ChatRoute />} />
+        </Routes>
+      </QueryClientProvider>
+    </MemoryRouter>
+  );
+}
+
+function sessionTitle(): HTMLElement | undefined {
+  return document.activeElement instanceof HTMLElement &&
+    document.activeElement.hasAttribute('data-session-title')
+    ? document.activeElement
+    : undefined;
+}
+
+describe('ProjectMessageView — focus across a switch', () => {
+  beforeEach(() => {
+    serveChats();
+  });
+
+  it('moves focus to the next chat title when a link inside the chat opens it', async () => {
+    renderAt('sess-child');
+    expect(await screen.findByText('First message of sess-child')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('session-tool-details'));
+    const parentLink = await screen.findByRole('link', { name: TOPICS['sess-parent'] });
+    parentLink.focus();
+    expect(document.activeElement).toBe(parentLink);
+    fireEvent.click(parentLink);
+
+    expect(await screen.findByText('First message of sess-parent')).toBeInTheDocument();
+    // The link went away with the chat it was in; focus did not fall to the body.
+    await waitFor(() => expect(sessionTitle()).toHaveTextContent(TOPICS['sess-parent']!));
+    expect(parentLink).not.toBeInTheDocument();
+  });
+
+  it('leaves focus where it is when the switch starts outside the chat', async () => {
+    renderAt('sess-parent');
+    expect(await screen.findByText('First message of sess-parent')).toBeInTheDocument();
+
+    const outside = screen.getByRole('button', { name: 'Open the child chat' });
+    outside.focus();
+    fireEvent.click(outside);
+
+    expect(await screen.findByText('First message of sess-child')).toBeInTheDocument();
+    expect(document.activeElement).toBe(outside);
   });
 });

@@ -248,6 +248,29 @@ async function flushGarbageCollection() {
   });
 }
 
+const composer = () => screen.getByPlaceholderText('Send a message...');
+
+/**
+ * Opens Alpha (with Bravo beside it) and sends `text` from its composer. The
+ * delivery is held until the test settles it.
+ */
+async function sendFromAlpha(text: string) {
+  mocks.getChatSession.mockImplementation(async (_projectId: string, sessionId: string) =>
+    sessionId === BRAVO.id ? BRAVO_TRANSCRIPT : ALPHA_TRANSCRIPT
+  );
+  const delivery = deferred<void>();
+  mocks.sendFollowUpPrompt.mockReturnValue(delivery.promise);
+
+  renderChat(productionLikeClient(), ALPHA.id);
+  await screen.findByText('Alpha answer one');
+  fireEvent.change(composer(), { target: { value: text } });
+  fireEvent.click(screen.getByRole('button', { name: /send/i }));
+  await waitFor(() =>
+    expect(mocks.sendFollowUpPrompt).toHaveBeenCalledWith(PROJECT_ID, ALPHA.id, text)
+  );
+  return delivery;
+}
+
 describe('Project chat — switching between chats', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -390,25 +413,7 @@ describe('Project chat — switching between chats', () => {
   });
 
   it('never offers a message still on its way again, and its delivery keeps a newer draft', async () => {
-    const client = productionLikeClient();
-    mocks.getChatSession.mockImplementation(async (_projectId: string, sessionId: string) =>
-      sessionId === BRAVO.id ? BRAVO_TRANSCRIPT : ALPHA_TRANSCRIPT
-    );
-    const delivery = deferred<void>();
-    mocks.sendFollowUpPrompt.mockReturnValue(delivery.promise);
-    const composer = () => screen.getByPlaceholderText('Send a message...');
-
-    renderChat(client, ALPHA.id);
-    await screen.findByText('Alpha answer one');
-    fireEvent.change(composer(), { target: { value: 'Run the migration now' } });
-    fireEvent.click(screen.getByRole('button', { name: /send/i }));
-    await waitFor(() =>
-      expect(mocks.sendFollowUpPrompt).toHaveBeenCalledWith(
-        PROJECT_ID,
-        ALPHA.id,
-        'Run the migration now'
-      )
-    );
+    const delivery = await sendFromAlpha('Run the migration now');
 
     selectChat(BRAVO.topic);
     await screen.findByText('Bravo cached answer');
@@ -440,19 +445,7 @@ describe('Project chat — switching between chats', () => {
   });
 
   it('keeps a message whose send failed while the user was away, ready to retry', async () => {
-    const client = productionLikeClient();
-    mocks.getChatSession.mockImplementation(async (_projectId: string, sessionId: string) =>
-      sessionId === BRAVO.id ? BRAVO_TRANSCRIPT : ALPHA_TRANSCRIPT
-    );
-    const delivery = deferred<void>();
-    mocks.sendFollowUpPrompt.mockReturnValue(delivery.promise);
-    const composer = () => screen.getByPlaceholderText('Send a message...');
-
-    renderChat(client, ALPHA.id);
-    await screen.findByText('Alpha answer one');
-    fireEvent.change(composer(), { target: { value: 'Deploy the fix' } });
-    fireEvent.click(screen.getByRole('button', { name: /send/i }));
-    await waitFor(() => expect(mocks.sendFollowUpPrompt).toHaveBeenCalled());
+    const delivery = await sendFromAlpha('Deploy the fix');
 
     selectChat(BRAVO.topic);
     await screen.findByText('Bravo cached answer');
@@ -474,19 +467,17 @@ describe('Project chat — switching between chats', () => {
 
     renderChat(client, ALPHA.id);
     await screen.findByText('Alpha answer one');
-    fireEvent.change(screen.getByPlaceholderText('Send a message...'), {
+    fireEvent.change(composer(), {
       target: { value: 'half-written thought for Alpha' },
     });
 
     selectChat(BRAVO.topic);
     await screen.findByText('Bravo cached answer');
-    expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('');
+    expect(composer()).toHaveValue('');
 
     selectChat(ALPHA.topic);
     await screen.findByText('Alpha answer one');
-    expect(screen.getByPlaceholderText('Send a message...')).toHaveValue(
-      'half-written thought for Alpha'
-    );
+    expect(composer()).toHaveValue('half-written thought for Alpha');
   });
 
   it('keeps the Report tool on screen through switches without refetching its config', async () => {
