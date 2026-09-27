@@ -117,12 +117,15 @@ export const MockVirtuoso = React.forwardRef<unknown, MockVirtuosoProps>(functio
   const HeaderComponent = components?.Header;
   const ListComponent = components?.List;
 
+  // `data-index` is the 0-based data position, as real Virtuoso renders it.
   const rows = data?.map((item, index) => (
-    <div key={index}>{itemContent?.(index, item as never)}</div>
+    <div key={index} data-index={index}>
+      {itemContent?.(index, item as never)}
+    </div>
   ));
 
   return (
-    <div data-testid="virtuoso-scroller" style={style}>
+    <div data-testid="virtuoso-scroller" data-sam-conversation-scroller="true" style={style}>
       {HeaderComponent ? <HeaderComponent context={context} /> : null}
       {ListComponent ? <ListComponent context={context}>{rows}</ListComponent> : rows}
     </div>

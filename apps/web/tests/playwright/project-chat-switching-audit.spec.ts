@@ -128,6 +128,19 @@ const TRANSCRIPTS: Record<string, Row[]> = {
 
 const OLDEST_OF_NEWEST_PAGE = 1_200 - 500; // message 700 is the first row the cold open reads
 
+// A comment on a message older than the newest page, which a cold open does not load.
+const UNLOADED_ANCHOR_COMMENT = {
+  id: 'comment-on-early-message',
+  sessionId: LONG.id,
+  anchor: { kind: 'message', messageId: `${LONG.id}-m10`, quote: '' },
+  author: { id: USER.id, kind: 'human', name: USER.name },
+  body: 'Worth revisiting this early decision before the refactor lands.',
+  createdAt: NOW - 30_000,
+  updatedAt: NOW - 30_000,
+  status: 'open',
+  replies: [],
+};
+
 interface DetailRequest {
   sessionId: string;
   limit: string | null;
@@ -211,7 +224,10 @@ async function setupApi(page: Page, detailRequests: DetailRequest[]) {
       if (url.searchParams.get('after')) await new Promise((r) => setTimeout(r, REFRESH_DELAY_MS));
       return respond(detailPage(sessionId, url.searchParams));
     }
-    if (/^\/sessions\/[^/]+\/comments/.test(sub)) return respond({ comments: [] });
+    const comments = sub.match(/^\/sessions\/([^/]+)\/comments/);
+    if (comments) {
+      return respond({ comments: comments[1] === LONG.id ? [UNLOADED_ANCHOR_COMMENT] : [] });
+    }
     if (sub === '/tasks') return respond({ tasks: [], nextCursor: null });
     if (sub === '/agent-profiles') return respond({ items: [] });
     if (sub.startsWith('/commands')) return respond({ commands: [] });
@@ -335,6 +351,53 @@ test.describe('project chat — instant switching audit', () => {
     expect(requests.filter((r) => r.sessionId === TOOLS.id && r.before)).toHaveLength(1);
     await assertNoOverflow(page);
     await screenshot(page, `project-chat-switching-tool-heavy-${viewport}`);
+  });
+
+  test('a comment on history not loaded yet does not guess who wrote the message', async ({
+    page,
+  }, testInfo) => {
+    const viewport = testInfo.project.name.startsWith('iPhone') ? 'mobile' : 'desktop';
+    await setupApi(page, []);
+
+    await page.goto(`/projects/${PROJECT_ID}/chat/${LONG.id}`);
+    await expect(conversation(page).getByText('Long chat message 1199:')).toBeVisible({
+      timeout: 15_000,
+    });
+    await page
+      .getByRole('button', { name: /1 unresolved comment/i })
+      .first()
+      .click();
+    await expect(
+      page.getByText('Worth revisiting this early decision', { exact: false }).first()
+    ).toBeVisible();
+    if (isMobile(page)) {
+      // The drawer lists the thread; its message is not loaded, so the row names no author.
+      await expect(page.getByText('on a message').first()).toBeVisible();
+      await expect(page.getByText("on the agent's reply")).toHaveCount(0);
+    } else {
+      // Desktop docks the thread beside the conversation instead of listing it.
+      await expect(page.getByText('on a message')).toHaveCount(0);
+    }
+    await assertNoOverflow(page);
+    await screenshot(page, `project-chat-switching-comment-unloaded-anchor-${viewport}`);
+
+    // Following the comment pages back until its message is loaded, and lands on it.
+    if (isMobile(page)) {
+      await page
+        .getByText('Worth revisiting this early decision', { exact: false })
+        .first()
+        .click();
+      await page.getByRole('button', { name: /show in conversation/i }).click();
+    } else {
+      await page
+        .getByRole('button', { name: `Show message ${LONG.id}-m10 in conversation` })
+        .click();
+    }
+    await expect(conversation(page).getByText('Long chat message 10:')).toBeInViewport({
+      timeout: 15_000,
+    });
+    await assertNoOverflow(page);
+    await screenshot(page, `project-chat-switching-comment-jump-${viewport}`);
   });
 
   test('switching renders the chosen chat at once and never the previous one', async ({

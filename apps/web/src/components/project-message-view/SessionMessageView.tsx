@@ -178,6 +178,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     sessionId,
     displayItems,
     virtuosoRef,
+    listRootRef: chatLogRef,
     // `ConversationPane` mounts the list once the session is known and has rows.
     listReady: Boolean(lc.session) && displayItems.length > 0,
     loadUntil: lc.loadUntil,

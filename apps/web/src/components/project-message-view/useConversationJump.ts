@@ -5,10 +5,32 @@ import { nearestItemId } from './timeline-jump';
 import type { TimelineJumpTarget } from './timeline-types';
 import type { DisplayItem, GroupedItem } from './tool-call-groups';
 
+/**
+ * Scroll attempts a jump into freshly loaded history makes before settling. Each
+ * attempt waits two frames and checks the target row is on screen: Virtuoso
+ * shifts the list to keep its rows in place when older pages arrive at the front,
+ * and that shift can land after the scroll that was meant to follow it.
+ */
+const JUMP_SCROLL_ATTEMPTS = 8;
+/** Consecutive checks the target row must stay on screen for the jump to count as landed. */
+const JUMP_SETTLED_CHECKS = 2;
+
+/** Whether the list row at 0-based `index` is rendered inside the list's visible area. */
+function rowOnScreen(root: HTMLElement | null, index: number): boolean {
+  const scroller = root?.querySelector('[data-sam-conversation-scroller="true"]');
+  const row = scroller?.querySelector(`[data-index="${index}"]`);
+  if (!scroller || !row) return false;
+  const view = scroller.getBoundingClientRect();
+  const box = row.getBoundingClientRect();
+  return box.bottom >= view.top && box.top <= view.bottom;
+}
+
 interface UseConversationJumpInput {
   sessionId: string;
   displayItems: DisplayItem[];
   virtuosoRef: RefObject<VirtuosoHandle | null>;
+  /** Contains the list's scroller, to confirm a jump's target row is on screen. */
+  listRootRef: RefObject<HTMLElement | null>;
   /**
    * Whether the virtualized list is mounted. A chat's transcript can arrive a
    * render before the list does, and a jump resolved then would scroll nothing.
@@ -42,6 +64,7 @@ export function useConversationJump({
   sessionId,
   displayItems,
   virtuosoRef,
+  listRootRef,
   listReady,
   loadUntil,
   loadingMore,
@@ -105,10 +128,10 @@ export function useConversationJump({
   const consumedTargetMessageRef = useRef<string | null>(null);
 
   const scrollAndHighlight = useCallback(
-    (itemId: string): boolean => {
+    (itemId: string, behavior: 'smooth' | 'auto' = 'smooth'): boolean => {
       const index = itemIndexById.get(itemId);
       if (index === undefined) return false;
-      virtuosoRef.current?.scrollToIndex({ index, behavior: 'smooth', align: 'center' });
+      virtuosoRef.current?.scrollToIndex({ index, behavior, align: 'center' });
       setHighlightedItemId(itemId);
       return true;
     },
@@ -148,7 +171,9 @@ export function useConversationJump({
   }, [jumpToMessage, onTargetMessageConsumed, sessionId, targetMessageId, targetMessageTimestamp]);
 
   // Resolve a pending jump once the target (or the nearest message, after
-  // loading settles) is available in the rendered list.
+  // loading settles) is available in the rendered list. The target usually just
+  // arrived with older pages, so the jump is instant and confirmed: it scrolls,
+  // waits for the list to settle, and scrolls again until the row stays on screen.
   useEffect(() => {
     if (!pendingJump || !listReady) return;
     let targetId: string | undefined;
@@ -159,10 +184,43 @@ export function useConversationJump({
       // settled → jump to the nearest loaded message by timestamp.
       targetId = nearestItemId(displayItems, pendingJump.timestamp);
     }
-    if (targetId && scrollAndHighlight(targetId)) {
-      setPendingJump(null);
-    }
-  }, [pendingJump, listReady, itemIndexById, displayItems, loadingMore, scrollAndHighlight]);
+    const index = targetId === undefined ? undefined : itemIndexById.get(targetId);
+    if (targetId === undefined || index === undefined) return;
+    const id = targetId;
+
+    let frame = 0;
+    let attempts = 0;
+    let onScreenChecks = 0;
+    const afterTwoFrames = (step: () => void) => {
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(step);
+      });
+    };
+    const check = () => {
+      onScreenChecks = rowOnScreen(listRootRef.current, index) ? onScreenChecks + 1 : 0;
+      if (onScreenChecks >= JUMP_SETTLED_CHECKS || attempts >= JUMP_SCROLL_ATTEMPTS) {
+        setPendingJump(null);
+        return;
+      }
+      if (onScreenChecks === 0) {
+        attempts += 1;
+        scrollAndHighlight(id, 'auto');
+      }
+      afterTwoFrames(check);
+    };
+    attempts += 1;
+    scrollAndHighlight(id, 'auto');
+    afterTwoFrames(check);
+    return () => cancelAnimationFrame(frame);
+  }, [
+    pendingJump,
+    listReady,
+    itemIndexById,
+    displayItems,
+    loadingMore,
+    listRootRef,
+    scrollAndHighlight,
+  ]);
 
   // Auto-clear the jump highlight after the flash animation. The 2200ms here is
   // coupled to the `.sam-message-highlight` animation-duration (2.2s) in index.css

@@ -228,4 +228,66 @@ describe('ProjectMessageView — history arrives newest first', () => {
       expect(scrollToIndexCalls.at(-1)).toMatchObject({ index: 1, align: 'center' })
     );
   });
+
+  it('scrolls again until a row that arrived with older history stays on screen', async () => {
+    serveTranscript([row(1), row(2), row(3), row(4), row(5), row(6)], 2);
+    mocks.listMessageComments.mockResolvedValue({
+      comments: [
+        {
+          id: 'comment-on-m2',
+          clientId: null,
+          projectId: 'proj-1',
+          sessionId: SESSION_ID,
+          anchor: { kind: 'message', messageId: 'm2', quote: '' },
+          author: { id: 'user-1', name: 'Test User', email: 't@x', avatarUrl: null, kind: 'human' },
+          body: 'Worth revisiting this early decision.',
+          createdAt: 9_000,
+          updatedAt: 9_000,
+          status: 'open',
+          replies: [],
+        },
+      ],
+    });
+    // In a browser the list shifts to keep its rows in place when older pages
+    // arrive, which can carry the first scroll's target back off screen. Here the
+    // target row reads as off screen for its first two checks.
+    let offScreenReads = 2;
+    const realRect = Element.prototype.getBoundingClientRect;
+    const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element
+    ) {
+      if (this.getAttribute('data-index') === '1' && offScreenReads > 0) {
+        offScreenReads -= 1;
+        return {
+          top: 5_000,
+          bottom: 5_100,
+          left: 0,
+          right: 0,
+          width: 0,
+          height: 100,
+          x: 0,
+          y: 5_000,
+          toJSON: () => ({}),
+        };
+      }
+      return realRect.call(this);
+    });
+
+    renderView(<ProjectMessageView projectId="proj-1" sessionId={SESSION_ID} />);
+    expect(await screen.findByText('Message number 6')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /1 unresolved comment/i }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Worth revisiting this early decision\./i })
+    );
+    fireEvent.click(screen.getByRole('button', { name: /show in conversation/i }));
+
+    expect(await screen.findByText('Message number 2')).toBeInTheDocument();
+    await waitFor(() => expect(offScreenReads).toBe(0));
+    await waitFor(() =>
+      expect(
+        scrollToIndexCalls.filter((call) => typeof call === 'object' && call.index === 1).length
+      ).toBeGreaterThanOrEqual(3)
+    );
+    rect.mockRestore();
+  });
 });
