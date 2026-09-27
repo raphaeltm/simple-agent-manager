@@ -89,8 +89,13 @@ paused, and this work must not triage, resolve, or close existing drafts.
 ## Validation evidence
 
 - Rule 62 mutation check: temporarily routed canonical grouping through the legacy normalizer and
-  ran the four `collapses production-shaped …` table cases. All four failed with two groups instead
-  of one. Restoring canonical normalization made all four pass.
+  ran the four production-derived `collapses production-shaped …` table cases. All four failed with
+  two groups instead of one. Restoring canonical normalization made all four pass.
 - Focused suite: `platform-feedback-triage.test.ts` plus the canonical-signature migration test,
-  26/26 tests passed.
+  27/27 tests passed, including an additional red-then-green JSON-array ordering case.
 - API typecheck passed after building `shared`, `providers`, and `cloud-init`; API lint passed.
+- Repository lint, typecheck, build, format ratchet, file-size check, and D1 migration-safety check
+  passed. The reduced-concurrency full test run passed 10,661/10,665 API tests and all 3,834 web
+  tests; four unrelated API tests timed out or inherited shared state under the 22-minute aggregate
+  load, then all 34 tests in their three files passed together in 11.52 seconds on immediate isolated
+  rerun. The directly affected focused suite remained green.

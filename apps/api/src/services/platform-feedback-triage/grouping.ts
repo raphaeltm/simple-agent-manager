@@ -75,7 +75,7 @@ function normalizeTextTokens(value: string, normalizeQuotedValues = true): strin
 function jsonShape(value: unknown, key?: string): string {
   if (value === null) return '[null]';
   if (Array.isArray(value)) {
-    const shapes = [...new Set(value.map((item) => jsonShape(item)))];
+    const shapes = [...new Set(value.map((item) => jsonShape(item)))].sort();
     return `[${shapes.join(',')}]`;
   }
   if (typeof value === 'object') {

@@ -187,6 +187,13 @@ describe('platform feedback triage', () => {
         'callback failed: { "attempt": 9, "requestId": "727be9d1-d817-44ab-a07f-f99dc9a3e307", "message": "Internal server error", "error": "INTERNAL_ERROR" }',
       ],
     },
+    {
+      name: 'embedded JSON arrays with reordered volatile entries',
+      messages: [
+        'batch failed: [{"error":"TIMEOUT","requestId":"60f74d90-5e57-45d6-aa9f-6d53f48bcb6c","durationMs":1200},{"port":8080}]',
+        'batch failed: [{"port":9090},{"durationMs":8700,"requestId":"727be9d1-d817-44ab-a07f-f99dc9a3e307","error":"TIMEOUT"}]',
+      ],
+    },
   ])('collapses production-shaped $name variants', async ({ messages }) => {
     const groups = await groupPlatformErrors(
       messages.map((message, index) => ({
