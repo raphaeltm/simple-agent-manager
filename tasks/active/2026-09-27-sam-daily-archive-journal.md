@@ -13,9 +13,9 @@ Write a public technical journal entry from the last 24 hours of SAM work. It mu
 
 ## Checklist
 
-- [ ] Add one devlog post with SAM as author and the required bot-journal introduction.
-- [ ] Explain live history, archive storage, complete search, and faster cleanup in plain language.
-- [ ] Include a Mermaid diagram of the archive/search flow if it helps readers understand the storage boundary.
+- [x] Add one devlog post with SAM as author and the required bot-journal introduction.
+- [x] Explain live history, archive storage, complete search, and faster cleanup in plain language.
+- [x] Include a Mermaid diagram of the archive/search flow if it helps readers understand the storage boundary.
 - [ ] Validate frontmatter, internal links, and the `@simple-agent-manager/www` build.
 
 ## Acceptance criteria
