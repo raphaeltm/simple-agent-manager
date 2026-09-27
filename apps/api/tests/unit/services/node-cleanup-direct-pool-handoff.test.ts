@@ -90,6 +90,7 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
   const hangingProviderIds = new Set<string>();
   const providerSignals: AbortSignal[] = [];
   const inventorySignals: AbortSignal[] = [];
+  const inventorySelectors: Array<Record<string, string>> = [];
   const providerGets: string[] = [];
   const dnsRequests: string[] = [];
   let hangDns: 'request' | 'error-body' | undefined;
@@ -150,6 +151,13 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
           .split(',')
           .find((part) => part.startsWith('node='))
           ?.slice('node='.length);
+        const labels = Object.fromEntries(
+          selector.split(',').map((part) => {
+            const separator = part.indexOf('=');
+            return [part.slice(0, separator), part.slice(separator + 1)];
+          })
+        );
+        inventorySelectors.push({ ...labels });
         if (nodeId && rejectedInventoryNodeIds.has(nodeId)) {
           return Response.json(
             { error: { code: 'service_error', message: 'Inventory unavailable' } },
@@ -157,16 +165,21 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
           );
         }
         const mode = nodeId ? inventoryModeByNodeId.get(nodeId) : undefined;
-        const labels = Object.fromEntries(
-          selector.split(',').map((part) => {
-            const separator = part.indexOf('=');
-            return [part.slice(0, separator), part.slice(separator + 1)];
-          })
-        );
+        const inventoryLabels: Record<string, string> = nodeId
+          ? {
+              node: nodeId,
+              managed: 'simple-agent-manager',
+              role: 'workspace',
+              env: 'staging',
+              installation: '0123456789abcdef0123456789abcdef',
+              incarnation: `incarnation-${nodeId}`,
+            }
+          : {};
         if (mode === 'foreign-installation')
-          labels.installation = 'fedcba9876543210fedcba9876543210';
-        if (mode === 'foreign-environment') labels.env = 'production';
-        if (mode === 'ambiguous') labels.__sam_internal_ambiguous_label__installation = 'true';
+          inventoryLabels.installation = 'fedcba9876543210fedcba9876543210';
+        if (mode === 'foreign-environment') inventoryLabels.env = 'production';
+        if (mode === 'ambiguous')
+          inventoryLabels.__sam_internal_ambiguous_label__installation = 'true';
         const inventory = mode
           ? [
               {
@@ -178,7 +191,7 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
                 location: { name: 'fsn1' },
                 created:
                   mode === 'malformed' ? 'not-a-provider-timestamp' : '2026-09-08T10:30:00.000Z',
-                labels,
+                labels: inventoryLabels,
               },
               ...(mode === 'duplicate'
                 ? [
@@ -190,7 +203,7 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
                       server_type: { name: 'cx23', cores: 2, memory: 4, disk: 40 },
                       location: { name: 'fsn1' },
                       created: '2026-09-08T10:31:00.000Z',
-                      labels,
+                      labels: inventoryLabels,
                     },
                   ]
                 : []),
@@ -278,6 +291,7 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
     hangingProviderIds,
     providerSignals,
     inventorySignals,
+    inventorySelectors,
     providerGets,
     inventoryModeByNodeId,
     dnsRequests,
@@ -436,6 +450,24 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     expect(f.providerDeletes).toEqual([]);
     expect(f.inventorySignals).toHaveLength(2);
     expect(f.inventorySignals.every((signal) => signal instanceof AbortSignal)).toBe(true);
+    expect(f.inventorySelectors).toEqual([
+      {
+        node: 'bad-inventory',
+        managed: 'simple-agent-manager',
+        role: 'workspace',
+        env: 'staging',
+        installation: '0123456789abcdef0123456789abcdef',
+        incarnation: 'incarnation-bad-inventory',
+      },
+      {
+        node: 'host',
+        managed: 'simple-agent-manager',
+        role: 'workspace',
+        env: 'staging',
+        installation: '0123456789abcdef0123456789abcdef',
+        incarnation: 'incarnation-host',
+      },
+    ]);
     expect(infoSpy).toHaveBeenCalledWith(
       'node_cleanup.destroying_stale_handoff',
       expect.objectContaining({ nodeId: 'host' })
@@ -443,7 +475,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
 
     const failedBackoff = f.sqlite
       .prepare("SELECT cleanup_backoff_until FROM nodes WHERE id = 'bad-inventory'")
-      .get();
+      .get() as { cleanup_backoff_until: string };
     const secondResult = await runNodeCleanupSweep(f.env);
     expect(secondResult).toMatchObject({ lifetimeDestroyed: 0, errors: 0 });
     expect(f.inventorySignals).toHaveLength(2);
@@ -452,6 +484,20 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
         .prepare("SELECT status, cleanup_backoff_until FROM nodes WHERE id = 'bad-inventory'")
         .get()
     ).toEqual({ status: 'destroying', ...failedBackoff });
+
+    f.rejectedInventoryNodeIds.delete('bad-inventory');
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse(failedBackoff.cleanup_backoff_until) + 1);
+    const thirdResult = await runNodeCleanupSweep(f.env);
+    expect(thirdResult).toMatchObject({ lifetimeDestroyed: 1, errors: 0 });
+    expect(f.inventorySignals).toHaveLength(3);
+    expect(
+      f.sqlite
+        .prepare(
+          "SELECT status, runtime_termination_confirmed_at FROM nodes WHERE id = 'bad-inventory'"
+        )
+        .get()
+    ).toEqual({ status: 'deleted', runtime_termination_confirmed_at: expect.any(String) });
   });
 
   it('deletes only an exact providerless inventory match after a final ownership read', async () => {
@@ -474,9 +520,11 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     expect(f.result).toMatchObject({ lifetimeDestroyed: 1, errors: 0 });
     expect(f.providerDeletes).toEqual(['https://api.hetzner.cloud/v1/servers/123']);
     expect(f.providerGets).toEqual(['https://api.hetzner.cloud/v1/servers/123']);
-    expect(f.sqlite.prepare("SELECT status FROM nodes WHERE id = 'host'").get()).toEqual({
-      status: 'deleted',
-    });
+    expect(
+      f.sqlite
+        .prepare("SELECT status, runtime_termination_confirmed_at FROM nodes WHERE id = 'host'")
+        .get()
+    ).toEqual({ status: 'deleted', runtime_termination_confirmed_at: expect.any(String) });
   });
 
   it.each([
