@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   nodeAgentRequest: vi.fn(),
   sendPromptToAgentOnNode: vi.fn(),
   ensureSessionRecovery: vi.fn(),
+  reportSessionRecoveryRefusal: vi.fn(),
   wakeSession: vi.fn(),
   markSessionSnapshotAwakeInPlace: vi.fn(),
   NodeAgentHttpError: class NodeAgentHttpError extends Error {
@@ -32,6 +33,7 @@ vi.mock('../../../src/services/node-agent', () => ({
 
 vi.mock('../../../src/services/session-recovery', () => ({
   ensureSessionRecovery: mocks.ensureSessionRecovery,
+  reportSessionRecoveryRefusal: mocks.reportSessionRecoveryRefusal,
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
@@ -62,13 +64,15 @@ const targetRow = {
   user_id: 'user-1',
   workspace_status: 'running',
   node_id: 'node-1',
-  node_status: 'running',
+  node_status: 'running' as string | null,
   node_health_status: 'healthy',
   agent_version: 'v1',
-  node_runtime: 'vm',
+  node_runtime: 'vm' as string | null,
   agent_session_id: 'acp-1',
   agent_session_status: 'running',
   agent_session_updated_at: '2026-08-09T00:00:00Z',
+  snapshot_sleep_status: null as string | null,
+  snapshot_runtime: null as string | null,
 };
 
 function envWithTarget(row: typeof targetRow | null = targetRow): Env {
@@ -134,6 +138,10 @@ describe('VM prompt delivery adapter', () => {
     mocks.ensureSessionRecovery.mockResolvedValue({
       status: 'unavailable',
       reason: 'snapshot_missing',
+    });
+    mocks.reportSessionRecoveryRefusal.mockResolvedValue({
+      status: 'unavailable',
+      reason: 'container_runtime_unavailable',
     });
   });
 
@@ -327,7 +335,7 @@ describe('VM prompt delivery adapter', () => {
     async (_label, row) => {
       for (const reason of [
         'workspace_deletion_unconfirmed',
-        'session_recovery_placement_placement',
+        'session_recovery_placement_lookup_failed',
         'session_recovery_placement_transient',
       ]) {
         mocks.ensureSessionRecovery.mockResolvedValueOnce({ status: 'unavailable', reason });
@@ -353,11 +361,95 @@ describe('VM prompt delivery adapter', () => {
 
       await expect(adapter.submit(input(false))).resolves.toMatchObject({
         kind: 'failed',
-        reason: 'terminal_target',
-        error: `Target workspace is sleeping (${reason})`,
+        reason: 'wake_refused',
+        error: expect.stringContaining(reason),
       });
     }
   );
+
+  it.each([
+    ['deleted workspace', { workspace_status: 'deleted' }],
+    ['deleted node', { workspace_status: 'sleeping', node_status: 'deleted' }],
+    ['stopped agent session', { workspace_status: 'sleeping', agent_session_status: 'stopped' }],
+  ])('reports a failed wake for a sleeping container with a %s', async (_label, overrides) => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({
+        ...targetRow,
+        node_runtime: 'cf-container',
+        snapshot_sleep_status: 'sleeping',
+        ...overrides,
+      })
+    );
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'wake_refused',
+    });
+    expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+    expect(mocks.reportSessionRecoveryRefusal).toHaveBeenCalledWith(
+      expect.anything(),
+      'chat-1',
+      'container_runtime_unavailable',
+      expect.any(String)
+    );
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+  });
+
+  it('reports a sleeping container whose node row was deleted', async () => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({
+        ...targetRow,
+        node_runtime: null,
+        snapshot_runtime: 'cf-container',
+        snapshot_sleep_status: 'sleeping',
+        workspace_status: 'deleted',
+        node_status: null,
+      })
+    );
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'wake_refused',
+    });
+    expect(mocks.reportSessionRecoveryRefusal).toHaveBeenCalledOnce();
+    expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+  });
+
+  it('reports a sleeping container whose workspace row was deleted', async () => {
+    const database = {
+      prepare: vi
+        .fn()
+        .mockReturnValueOnce({ bind: () => ({ first: async () => null }) })
+        .mockReturnValueOnce({
+          bind: () => ({
+            first: async () => ({ runtime: 'cf-container', sleep_status: 'sleeping' }),
+          }),
+        }),
+    } as unknown as D1Database;
+    const adapter = new DefaultVmPromptDeliveryAdapter({ DATABASE: database } as Env);
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'wake_refused',
+    });
+    expect(mocks.reportSessionRecoveryRefusal).toHaveBeenCalledOnce();
+    expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
+  });
+
+  it('does not report a terminal container session as a failed wake', async () => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({
+        ...targetRow,
+        node_runtime: 'cf-container',
+        workspace_status: 'deleted',
+      })
+    );
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+    });
+  });
 
   it('revalidates a guarded parent before creating sleeping-session recovery', async () => {
     const adapter = new DefaultVmPromptDeliveryAdapter(

@@ -15,5 +15,12 @@ Found while reviewing the exact-cursor pagination fix (branch `sam/fix-silent-tr
 
 ## Acceptance Criteria
 
-- [ ] When a recent-window response does not reach back to the newest persisted row already loaded, the client drains forward from that row (`refreshCachedTranscript`) instead of merging a window with a hole.
-- [ ] A rendered test loads a transcript, persists more than one window of newer rows while the socket is down, triggers the poll or reconnect catch-up, and asserts every row is present and in order; it fails against the current `replace` merge.
+- [x] When a recent-window response does not reach back to the newest persisted row already loaded, the client drains forward from that row (`refreshCachedTranscript`) instead of merging a window with a hole.
+- [x] A rendered test loads a transcript, persists more than one window of newer rows while the socket is down, triggers the poll or reconnect catch-up, and asserts every row is present and in order; it fails against the current `replace` merge.
+
+## Implementation Notes
+
+- Added `mergeRecentWindowOrRefresh`, which compares the newest persisted loaded row to the oldest persisted row in the recent response. If the recent window starts after the loaded tail, it drains forward from the loaded tail with `refreshCachedTranscript`; otherwise it keeps the existing replace merge behavior.
+- Routed degraded fallback polling and WebSocket reconnect catch-up through that helper so both recent-window paths share the same gap detection.
+- Added focused helper coverage for overlap vs. gap behavior and a rendered hook test that loads a transcript, returns a newer recent window through the fallback poll, and asserts the drained middle rows render in order.
+- Guard proof performed locally: disabled the gap branch in `mergeRecentWindowOrRefresh`; `drains forward when the recent window starts after the loaded transcript tail` failed with the middle row missing.

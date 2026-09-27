@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -10,6 +10,7 @@ import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
   capacityPlacementSnapshotSqlValues,
 } from './capacity-placement-snapshot';
+import { PlacementResolutionError } from './placement-resolution-error';
 import {
   resolveTaskStartPlacement,
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
@@ -24,6 +25,7 @@ import {
   evictionRecoveryFenceMatches,
   type SessionRecoveryOptions,
 } from './session-recovery-eviction';
+import { classifySessionRecoveryRefusal } from './session-recovery-refusals';
 import {
   buildRecoveryPlacementInput,
   type RecoveryPlacementResolution,
@@ -46,6 +48,57 @@ export { SESSION_RECOVERY_INITIAL_PROMPT } from './session-recovery-task';
 
 export type SessionRecoveryResult =
   { status: 'waking'; taskId: string } | { status: 'unavailable'; reason: string };
+
+async function reportRefusal(
+  db: Db,
+  env: Env,
+  chatSessionId: string,
+  reason: string,
+  detail?: string | null
+): Promise<SessionRecoveryResult> {
+  const classification = classifySessionRecoveryRefusal(reason);
+  if (classification.action === 'report') {
+    await db
+      .update(schema.sessionSnapshots)
+      .set({
+        recoveryError: sessionLifecycleError(
+          env,
+          detail ? `${classification.description} ${detail}` : classification.description
+        ),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(
+        and(
+          eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
+          isNotNull(schema.sessionSnapshots.sleepingAt)
+        )
+      );
+    log.warn('session_recovery.refused', {
+      chatSessionId,
+      reason,
+      action: classification.action,
+      detail: detail ?? null,
+    });
+  } else {
+    log.info('session_recovery.deferred', {
+      chatSessionId,
+      reason,
+      action: classification.action,
+      detail: detail ?? null,
+    });
+  }
+  return { status: 'unavailable', reason };
+}
+
+/** Record a terminal wake refusal found outside the VM recovery claim path. */
+export function reportSessionRecoveryRefusal(
+  env: Env,
+  chatSessionId: string,
+  reason: string,
+  detail?: string | null
+): Promise<SessionRecoveryResult> {
+  return reportRefusal(drizzle(env.DATABASE, { schema }), env, chatSessionId, reason, detail);
+}
 
 // The node-pool boundary inventory (`scripts/quality/node-pool-boundary/inventory-data.ts`)
 // requires the module that holds this tasks-INSERT writer to also call
@@ -310,18 +363,38 @@ async function resolveRecoveryPlacement(
   context: RecoveryContext,
   taskId: string,
   options: SessionRecoveryOptions = {}
-): Promise<
-  RecoveryPlacementResolution | { error: string; errorKind: 'placement' | 'credentials' }
-> {
+): Promise<RecoveryPlacementResolution | { error: string; reason: string }> {
   const input = await buildRecoveryPlacementInput(db, env, context, taskId, options);
   if ('error' in input) return input;
-  const placement = resolveTaskStartPlacement(input);
+  let placement;
+  try {
+    placement = resolveTaskStartPlacement(input);
+  } catch (error) {
+    if (error instanceof PlacementResolutionError) {
+      return { error: error.message, reason: 'placement_unsatisfiable' };
+    }
+    throw error;
+  }
 
-  return resolveTaskStartPlacementCredentialAttributionFromPlacement(db, placement, {
-    credentialsRequiredMessage:
-      'Cloud provider credentials required. Connect an account in Settings or enable a platform credential.',
-    env,
-  });
+  const resolved = await resolveTaskStartPlacementCredentialAttributionFromPlacement(
+    db,
+    placement,
+    {
+      credentialsRequiredMessage:
+        'Cloud provider credentials required. Connect an account in Settings or enable a platform credential.',
+      env,
+    }
+  );
+  if ('error' in resolved) {
+    return {
+      error: resolved.error,
+      reason:
+        resolved.errorKind === 'credentials'
+          ? 'placement_credentials_missing'
+          : 'placement_unsatisfiable',
+    };
+  }
+  return resolved;
 }
 
 /**
@@ -338,7 +411,7 @@ export async function ensureSessionRecovery(
 ): Promise<SessionRecoveryResult> {
   const db = drizzle(env.DATABASE, { schema });
   const context = await loadRecoveryContext(db, projectId, chatSessionId);
-  if (!context) return { status: 'unavailable', reason: 'sleeping_snapshot_missing' };
+  if (!context) return reportRefusal(db, env, chatSessionId, 'sleeping_snapshot_missing');
   if (options.evictionFence && !(await evictionRecoveryFenceMatches(env, options.evictionFence))) {
     return { status: 'unavailable', reason: 'stale_eviction_generation' };
   }
@@ -360,7 +433,7 @@ export async function ensureSessionRecovery(
       });
     } catch (error) {
       if (error instanceof WorkspaceDeletionUnconfirmedError) {
-        return { status: 'unavailable', reason: 'workspace_deletion_unconfirmed' };
+        return reportRefusal(db, env, chatSessionId, 'workspace_deletion_unconfirmed');
       }
       throw error;
     }
@@ -371,7 +444,7 @@ export async function ensureSessionRecovery(
   try {
     const resolved = await resolveRecoveryPlacement(db, env, context, recoveryTaskId, options);
     if ('error' in resolved) {
-      return { status: 'unavailable', reason: `session_recovery_placement_${resolved.errorKind}` };
+      return reportRefusal(db, env, chatSessionId, resolved.reason, resolved.error);
     }
     placementResolution = resolved;
   } catch (error) {
@@ -380,7 +453,7 @@ export async function ensureSessionRecovery(
       chatSessionId,
       error: error instanceof Error ? error.message : String(error),
     });
-    return { status: 'unavailable', reason: 'session_recovery_placement_transient' };
+    return reportRefusal(db, env, chatSessionId, 'session_recovery_placement_lookup_failed');
   }
 
   const claim = await claimSessionSnapshotRecovery(db, env, {
@@ -389,7 +462,7 @@ export async function ensureSessionRecovery(
     taskId: recoveryTaskId,
     sourceTaskGuard,
   });
-  if (claim.status === 'unavailable') return claim;
+  if (claim.status === 'unavailable') return reportRefusal(db, env, chatSessionId, claim.reason);
   if (claim.status === 'waking') return claim;
 
   if (options.evictionFence && !(await evictionRecoveryFenceMatches(env, options.evictionFence))) {
@@ -437,7 +510,7 @@ export async function ensureSessionRecovery(
         await abandonRecoveryHandoff(env.DATABASE, context, recoveryTask, chatSessionId, message);
       }
       await failSessionSnapshotRecovery(db, env, chatSessionId, claim.taskId, message);
-      return { status: 'unavailable', reason: 'source_task_not_wakeable' };
+      return reportRefusal(db, env, chatSessionId, 'source_task_not_wakeable', message);
     }
     if (await ensureTaskRunnerStarted(env, claim.taskId).catch(() => false)) {
       log.warn('session_recovery.start_response_ambiguous_but_durable', {
@@ -461,6 +534,6 @@ export async function ensureSessionRecovery(
       taskId: claim.taskId,
       error: message,
     });
-    return { status: 'unavailable', reason: `recovery_start_failed:${message}` };
+    return reportRefusal(db, env, chatSessionId, `recovery_start_failed:${message}`, message);
   }
 }

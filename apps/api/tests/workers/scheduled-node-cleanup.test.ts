@@ -1328,7 +1328,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         })
       ).resolves.toMatchObject({
         status: 'unavailable',
-        reason: 'session_recovery_placement_credentials',
+        reason: 'placement_credentials_missing',
       });
 
       const recoveryTask = await env.DATABASE.prepare(

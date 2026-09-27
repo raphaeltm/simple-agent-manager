@@ -16,7 +16,7 @@ import {
   nodeStatusTerminatesCallbacks,
 } from '../../services/node-callback-auth';
 import * as projectDataService from '../../services/project-data';
-import { isTransientSessionRecoveryRefusal } from '../../services/session-recovery-refusals';
+import { classifySessionRecoveryRefusal } from '../../services/session-recovery-refusals';
 import { finalizeWorkspaceEvictionOnNode } from '../../services/workspace-eviction-lifecycle';
 import { recoverWorkspaceAfterEviction } from '../../services/workspace-eviction-recovery';
 
@@ -118,7 +118,7 @@ function workspaceEvictionErrorMessage(reason: WorkspaceEvictionBody['reason']):
 }
 
 function evictionRecoveryReasonIsRetryable(reason: string): boolean {
-  return isTransientSessionRecoveryRefusal(reason) || reason.startsWith('recovery_start_failed:');
+  return classifySessionRecoveryRefusal(reason).action === 'retry';
 }
 
 async function finalizeEvictionLifecycle(env: Env, workspace: WorkspaceEvictionResource) {

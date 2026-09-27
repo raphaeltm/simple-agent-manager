@@ -48,7 +48,7 @@ export async function resolveRecoveryLocationIntent(
   );
   // One bounded round trip. Each step stays inside this project, and the depth bound also ends the
   // walk on a corrupt cycle. A failed read is not guessed around: it throws before the wake is
-  // claimed, so `ensureSessionRecovery` defers it as `session_recovery_placement_transient`
+  // claimed, so `ensureSessionRecovery` defers it as `session_recovery_placement_lookup_failed`
   // without spending the wake budget.
   const root = await env.DATABASE.prepare(
     `WITH RECURSIVE lineage(id, recovery_source_task_id, triggered_by, placement_explanation_json, depth) AS (

@@ -9,6 +9,7 @@
  * persisted "before" that local time.
  */
 import {
+  compareMessagePositions,
   DEFAULT_CHAT_DELTA_MAX_PAGES,
   DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
@@ -84,6 +85,58 @@ export async function refreshCachedTranscript(
     messages: mergeMessages(cached.messages, newer, 'append'),
     // The refresh read forward to the newest row; `hasMore` still describes older history.
     hasMore: cached.hasMore,
+  };
+}
+
+function oldestPersistedMessage(
+  messages: readonly ChatMessageResponse[]
+): (ChatMessageResponse & { sequence: number }) | undefined {
+  for (const message of messages) {
+    if (isPersistedMessage(message)) return message;
+  }
+  return undefined;
+}
+
+function newestPersistedMessage(
+  messages: readonly ChatMessageResponse[]
+): (ChatMessageResponse & { sequence: number }) | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message && isPersistedMessage(message)) return message;
+  }
+  return undefined;
+}
+
+/**
+ * Merges a newest-window response into an already loaded transcript. If the
+ * window no longer reaches back to the newest persisted loaded row, a plain
+ * replace merge would leave a permanent hole. In that case, drain forward from
+ * the loaded row and merge the complete delta instead.
+ */
+export async function mergeRecentWindowOrRefresh(
+  projectId: string,
+  sessionId: string,
+  current: ChatSessionDetailResponse,
+  recent: ChatSessionDetailResponse,
+  signal?: AbortSignal
+): Promise<ChatSessionDetailResponse> {
+  const currentNewest = newestPersistedMessage(current.messages);
+  const recentOldest = oldestPersistedMessage(recent.messages);
+  if (currentNewest && recentOldest && compareMessagePositions(currentNewest, recentOldest) < 0) {
+    const refreshed = await refreshCachedTranscript(projectId, sessionId, current, signal);
+    if (refreshed) {
+      return {
+        ...recent,
+        messages: mergeMessages(refreshed.messages, recent.messages, 'append'),
+        hasMore: refreshed.hasMore,
+      };
+    }
+  }
+
+  return {
+    ...recent,
+    messages: mergeMessages(current.messages, recent.messages, 'replace'),
+    hasMore: current.hasMore,
   };
 }
 

@@ -21,17 +21,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-const { createAgentSessionOnNodeMock, startAgentSessionOnNodeMock } = vi.hoisted(() => ({
-  createAgentSessionOnNodeMock: vi.fn(async () => undefined),
-  startAgentSessionOnNodeMock: vi.fn(async () => undefined),
-}));
+const { createAgentSessionOnNodeMock, restoreAgentSessionOnNodeMock, startAgentSessionOnNodeMock } =
+  vi.hoisted(() => ({
+    createAgentSessionOnNodeMock: vi.fn(async () => undefined),
+    restoreAgentSessionOnNodeMock: vi.fn(async () => ({ status: 'restored' })),
+    startAgentSessionOnNodeMock: vi.fn(async () => undefined),
+  }));
 
 // Mock ONLY the outermost system boundary (the HTTP call to the VM). Everything between the
 // entry point and that boundary — resolution, decryption, merge, composition — runs for real.
 vi.mock('../../../src/services/node-agent', () => ({
   createAgentSessionOnNode: createAgentSessionOnNodeMock,
   startAgentSessionOnNode: startAgentSessionOnNodeMock,
-  restoreAgentSessionOnNode: vi.fn(async () => ({ status: 'restored' })),
+  restoreAgentSessionOnNode: restoreAgentSessionOnNodeMock,
 }));
 
 vi.mock('../../../src/services/mcp-token', () => ({
@@ -44,14 +46,14 @@ vi.mock('../../../src/services/project-data', () => ({
   ensureAcpSession: vi.fn(async () => ({ id: 'acp-1' })),
   createAcpSession: vi.fn(async () => ({ id: 'acp-1' })),
   getAcpSession: vi.fn(async () => null),
+  persistMessage: vi.fn(async () => undefined),
   transitionAcpSession: vi.fn(async () => undefined),
   prepareAcpSessionForFreshStart: vi.fn(async () => ({ id: 'acp-1' })),
 }));
 
-const { startSamAwareAgentSession } = await import(
-  '../../../src/services/agent-session-bootstrap'
-);
+const { startSamAwareAgentSession } = await import('../../../src/services/agent-session-bootstrap');
 const { createMcpConnection } = await import('../../../src/services/mcp-connections');
+const projectDataService = await import('../../../src/services/project-data');
 
 const ENCRYPTION_KEY = Buffer.alloc(32, 5).toString('base64');
 const LIMITS = { maxPerScope: 25, urlMaxBytes: 2048, tokenMaxBytes: 8192 };
@@ -86,13 +88,11 @@ function startInput(overrides: Record<string, unknown> = {}) {
 /** The mcpServers argument is positional in both node-agent calls. */
 function capturedCreateServers() {
   return createAgentSessionOnNodeMock.mock.calls[0]?.[8] as
-    | Array<{ url: string; token: string; name: string }>
-    | undefined;
+    Array<{ url: string; token: string; name: string }> | undefined;
 }
 function capturedStartServers() {
   return startAgentSessionOnNodeMock.mock.calls[0]?.[7] as
-    | Array<{ url: string; token: string; name: string }>
-    | undefined;
+    Array<{ url: string; token: string; name: string }> | undefined;
 }
 
 beforeEach(() => {
@@ -208,6 +208,40 @@ describe('bring-your-own MCP servers reach the vm-agent request', () => {
   it('always sends sam-mcp even when the user has no connections at all', async () => {
     await startSamAwareAgentSession(db, makeEnv(), startInput({ userId: 'nobody' }));
 
+    expect(capturedStartServers()).toEqual([
+      { url: 'https://api.example.com/mcp', token: 'sam-session-token', name: 'sam-mcp' },
+    ]);
+  });
+
+  it('persists a degraded-wake notice before starting fresh from a degraded restore', async () => {
+    restoreAgentSessionOnNodeMock.mockResolvedValueOnce({ status: 'degraded' });
+
+    await startSamAwareAgentSession(
+      db,
+      makeEnv(),
+      startInput({ restoreSnapshotChatSessionId: 'chat-1' })
+    );
+
+    expect(projectDataService.persistMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      'system',
+      expect.stringContaining('degraded snapshot'),
+      null,
+      expect.stringMatching(/^degraded-wake-/)
+    );
+    expect(projectDataService.prepareAcpSessionForFreshStart).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      expect.any(String),
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          chatSessionId: 'chat-1',
+          restoreSnapshotChatSessionId: 'chat-1',
+        }),
+      })
+    );
     expect(capturedStartServers()).toEqual([
       { url: 'https://api.example.com/mcp', token: 'sam-session-token', name: 'sam-mcp' },
     ]);

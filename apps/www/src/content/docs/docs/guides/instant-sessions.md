@@ -85,6 +85,8 @@ Sending a message in the same chat wakes it. The composer stays visible while th
 
 SAM tears VM compute down only after it has re-read and re-verified durable snapshot metadata. A complete snapshot restores the full HOME and work-in-progress state. A degraded snapshot, such as `home-skipped` or `transcript-only`, can also release compute once its manifest and any claimed artifacts are verified; the degradation remains visible so the wake path can report the reduced restore state. A stalled final checkpoint is converted into an explicit degraded snapshot instead of leaving the workspace awake indefinitely.
 
+If a sleeping session cannot wake, SAM marks the chat **Wake failed** and writes a system message explaining the reason instead of leaving the queued prompt invisible. The composer stays available when another attempt is safe, and the session list treats the failure as high-priority attention. If SAM can start compute but only from a degraded snapshot, the chat also records a system notice that the agent is starting fresh and must read the persisted transcript before continuing.
+
 During an Instant wake you may see:
 
 > **Waking and restoring the Instant session. Wait for restore to finish, then send your message.**
@@ -113,6 +115,7 @@ Three limits are worth planning around, because SAM does not currently surface a
 - **Size is capped** at 256 MiB, including a 256 MiB per-entry ceiling (`SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`). Snapshot artifacts use short-lived direct R2 uploads when configured (with exact checksum binding on current agents); busy legacy VM agents use a same-user current-agent relay, so this budget is not reduced by the Worker's request-body limit. The repository bundle is captured first and includes the commit graph needed for the saved `HEAD` plus worktree and index state. Repository history, clean local commits, or large changes can therefore crowd out the agent's HOME state. Skipped content is recorded server-side but you are not told about it.
 - **Final checkpoint waiting is progress-based** (`SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS`). Large snapshots may run longer than the request-acceptance budget as long as the vm-agent continues reporting durable progress; no-progress captures degrade and sleep rather than keeping a VM awake forever.
 - **A repository mid-merge is skipped entirely.** If a merge, rebase, cherry-pick, or revert is in progress when the runtime goes away, none of the repository work in progress is captured.
+- **Wake failures are visible.** If the wake cannot safely start, or if the queued wake prompt expires before SAM can deliver it, the chat is marked **Wake failed** and gets a system message with the failure reason.
 
 Push anything you care about. A snapshot is a convenience for resuming a conversation, not a backup.
 :::

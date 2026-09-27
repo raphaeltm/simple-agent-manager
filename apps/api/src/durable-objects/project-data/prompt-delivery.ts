@@ -138,7 +138,12 @@ export function expireDuePromptDeliveries(
   sql: SqlStorage,
   config: DurableExecutionConfig,
   now = Date.now()
-): { expired: number; failed: number } {
+): {
+  expired: number;
+  failed: number;
+  expiredWakeFailures: ExpiredWakeDelivery[];
+} {
+  const expiredWakeFailures = listExpiringWakeDeliveries(sql, now);
   const expired = sql.exec(
     `UPDATE session_inbox
      SET delivery_state = 'expired',
@@ -158,7 +163,42 @@ export function expireDuePromptDeliveries(
        AND delivery_attempts >= ?`,
     config.maxAttempts
   ).rowsWritten;
-  return { expired, failed };
+  return { expired, failed, expiredWakeFailures };
+}
+
+export interface ExpiredWakeDelivery {
+  deliveryId: string;
+  targetSessionId: string;
+  sourceTaskId: string | null;
+  lastError: string | null;
+  terminalReason: string;
+}
+
+function listExpiringWakeDeliveries(sql: SqlStorage, now: number): ExpiredWakeDelivery[] {
+  return sql
+    .exec(
+      `SELECT inbox.id AS delivery_id,
+              inbox.target_session_id,
+              inbox.source_task_id,
+              inbox.last_error,
+              'ttl_expired' AS terminal_reason
+         FROM session_inbox inbox
+         JOIN chat_sessions session ON session.id = inbox.target_session_id
+        WHERE inbox.delivery_state IN ('queued', 'retry_wait', 'delivering')
+          AND inbox.expires_at IS NOT NULL
+          AND inbox.expires_at <= ?
+          AND inbox.source_kind IN ('user_followup', 'parent_wakeup', 'project_event_wake', 'scheduled_action')
+          AND session.status = 'sleeping'`,
+      now
+    )
+    .toArray()
+    .map((row) => ({
+      deliveryId: String(row.delivery_id),
+      targetSessionId: String(row.target_session_id),
+      sourceTaskId: typeof row.source_task_id === 'string' ? row.source_task_id : null,
+      lastError: typeof row.last_error === 'string' ? row.last_error : null,
+      terminalReason: String(row.terminal_reason),
+    }));
 }
 
 export function failParentWakeDeliveries(
@@ -317,7 +357,12 @@ export type PromptDeliveryResult =
     }
   | {
       kind: 'failed';
-      reason: 'terminal_target' | 'dead_target' | 'unsupported_capability' | 'delivery_conflict';
+      reason:
+        | 'terminal_target'
+        | 'dead_target'
+        | 'wake_refused'
+        | 'unsupported_capability'
+        | 'delivery_conflict';
       error: string;
       runtimeIdentity: string | null;
       capabilities: VmPromptDeliveryCapabilities | null;

@@ -7,8 +7,13 @@ const mocks = vi.hoisted(() => ({ getChatSession: vi.fn() }));
 
 vi.mock('../../../src/lib/api', () => ({ getChatSession: mocks.getChatSession }));
 
-const { fetchHistoryUntil, newestPersistedCursor, oldestPersistedCursor, refreshCachedTranscript } =
-  await import('../../../src/lib/message-paging');
+const {
+  fetchHistoryUntil,
+  mergeRecentWindowOrRefresh,
+  newestPersistedCursor,
+  oldestPersistedCursor,
+  refreshCachedTranscript,
+} = await import('../../../src/lib/message-paging');
 
 function persisted(id: string, createdAt: number, sequence = createdAt): ChatMessageResponse {
   return {
@@ -82,6 +87,43 @@ describe('refreshCachedTranscript', () => {
       `Message refresh for session s-1 stopped after ${DEFAULT_CHAT_DELTA_MAX_PAGES} pages`
     );
     expect(mocks.getChatSession).toHaveBeenCalledTimes(DEFAULT_CHAT_DELTA_MAX_PAGES);
+  });
+});
+
+describe('mergeRecentWindowOrRefresh', () => {
+  beforeEach(() => mocks.getChatSession.mockReset());
+
+  it('uses a replace merge when the recent window overlaps the loaded transcript', async () => {
+    const merged = await mergeRecentWindowOrRefresh(
+      'p-1',
+      's-1',
+      page([persisted('old', 100), persisted('overlap', 200)], true),
+      page([persisted('overlap', 200), persisted('new', 300)], false)
+    );
+
+    expect(merged.messages.map((message) => message.id)).toEqual(['old', 'overlap', 'new']);
+    expect(merged.hasMore).toBe(true);
+    expect(mocks.getChatSession).not.toHaveBeenCalled();
+  });
+
+  it('drains forward when the recent window starts after the loaded transcript tail', async () => {
+    mocks.getChatSession.mockResolvedValueOnce(
+      page([persisted('gap', 200), persisted('recent', 300)], false)
+    );
+
+    const merged = await mergeRecentWindowOrRefresh(
+      'p-1',
+      's-1',
+      page([persisted('loaded-tail', 100)], true),
+      page([persisted('recent', 300)], false)
+    );
+
+    expect(merged.messages.map((message) => message.id)).toEqual(['loaded-tail', 'gap', 'recent']);
+    expect(merged.hasMore).toBe(true);
+    expect(mocks.getChatSession).toHaveBeenCalledWith('p-1', 's-1', {
+      after: '[100,100,"loaded-tail"]',
+      signal: undefined,
+    });
   });
 });
 

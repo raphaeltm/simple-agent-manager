@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../../src/env';
+
 const {
   claimSessionSnapshotRecoveryMock,
   databaseMock,
@@ -157,9 +159,10 @@ vi.mock('../../../src/services/placement-resolver', async (importOriginal) => {
 
 import {
   ensureSessionRecovery,
+  reportSessionRecoveryRefusal,
   SESSION_RECOVERY_INITIAL_PROMPT,
 } from '../../../src/services/session-recovery';
-import { isTransientSessionRecoveryRefusal } from '../../../src/services/session-recovery-refusals';
+import { classifySessionRecoveryRefusal } from '../../../src/services/session-recovery-refusals';
 
 const emptyCapacityPlacement = {
   capacityPoolId: null,
@@ -186,6 +189,36 @@ describe('ensureSessionRecovery', () => {
       taskId: 'recovery-task-1',
     });
     assertReplacementDeletionConfirmedMock.mockResolvedValue(undefined);
+  });
+
+  it('records a container wake refusal on the sleeping snapshot', async () => {
+    await expect(
+      reportSessionRecoveryRefusal(
+        { DATABASE: databaseMock } as unknown as Env,
+        'chat-1',
+        'container_runtime_unavailable',
+        'Sleeping container workspace is deleted'
+      )
+    ).resolves.toEqual({ status: 'unavailable', reason: 'container_runtime_unavailable' });
+
+    const update = dbMock.update.mock.results[0]?.value;
+    expect(update.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recoveryError: expect.stringContaining('Sleeping container workspace is deleted'),
+      })
+    );
+  });
+
+  it('does not record a snapshot error for an in-place container wake', async () => {
+    await expect(
+      reportSessionRecoveryRefusal(
+        { DATABASE: databaseMock } as unknown as Env,
+        'chat-1',
+        'container_runtime_wakes_in_place'
+      )
+    ).resolves.toEqual({ status: 'unavailable', reason: 'container_runtime_wakes_in_place' });
+
+    expect(dbMock.update).not.toHaveBeenCalled();
   });
 
   it('fences an unconfirmed predecessor before claiming or creating recovery state', async () => {
@@ -244,7 +277,8 @@ describe('ensureSessionRecovery', () => {
     expect(refused).toEqual({ status: 'unavailable', reason: 'workspace_deletion_unconfirmed' });
     // Delivery and eviction retry this refusal: its name is their contract.
     expect(
-      refused.status === 'unavailable' && isTransientSessionRecoveryRefusal(refused.reason)
+      refused.status === 'unavailable' &&
+        classifySessionRecoveryRefusal(refused.reason).action === 'retry'
     ).toBe(true);
 
     expect(assertReplacementDeletionConfirmedMock).toHaveBeenCalledWith(expect.anything(), {
@@ -730,8 +764,9 @@ describe('session recovery consumes the canonical persisted resource plan', () =
       // ensureSessionRecovery, and not a silent wake onto current defaults.
       expect(result).toEqual({
         status: 'unavailable',
-        reason: 'session_recovery_placement_placement',
+        reason: 'stored_resource_plan_invalid',
       });
+      expect(classifySessionRecoveryRefusal(result.reason).action).toBe('report');
       expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
       const { resolveTaskStartPlacement } =
         await import('../../../src/services/placement-resolver');
@@ -754,10 +789,11 @@ describe('session recovery consumes the canonical persisted resource plan', () =
 
     expect(result).toEqual({
       status: 'unavailable',
-      reason: 'session_recovery_placement_transient',
+      reason: 'session_recovery_placement_lookup_failed',
     });
     expect(
-      result.status === 'unavailable' && isTransientSessionRecoveryRefusal(result.reason)
+      result.status === 'unavailable' &&
+        classifySessionRecoveryRefusal(result.reason).action === 'retry'
     ).toBe(true);
     expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
   });

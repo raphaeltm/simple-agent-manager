@@ -127,11 +127,17 @@ async function setupApiMocks(page: Page) {
     if (path === '/api/client-errors') return respond(204, null);
     if (path === '/api/t') return respond(204, null);
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
-    if (path === '/api/github/installations') return respond(200, []);
+    if (path === '/api/github/installations')
+      return respond(200, [{ id: 1, accountLogin: 'testuser', accountType: 'User' }]);
     if (path.startsWith('/api/notifications'))
       return respond(200, { notifications: [], unreadCount: 0 });
-    if (path === '/api/agents') return respond(200, []);
-    if (path.startsWith('/api/credentials')) return respond(200, { credentials: [] });
+    if (path === '/api/agents') return respond(200, { agents: [] });
+    if (path === '/api/credentials/agent')
+      return respond(200, {
+        credentials: [{ agentType: 'claude-code', credentialKind: 'api-key', isActive: true }],
+      });
+    if (path.startsWith('/api/credentials'))
+      return respond(200, [{ id: 'cred-hetzner', provider: 'hetzner', name: 'Hetzner' }]);
     // Note: real path is /api/providers/catalog
     if (path === '/api/providers/catalog') return respond(200, MOCK_CATALOGS);
 
