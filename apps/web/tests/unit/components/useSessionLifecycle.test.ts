@@ -1,12 +1,15 @@
 /**
  * Behavioral tests for useSessionLifecycle loading semantics:
- * - Initial load requests the FULL conversation (CHAT_SESSION_MESSAGE_MAX ceiling).
- * - The 3s poll requests only the small recent window (CHAT_SESSION_MESSAGE_LIMIT).
- * - loadUntil() pages backward until a target timestamp is covered (the timeline
- *   jump fallback for oversized/guard-trimmed sessions), and short-circuits when
- *   the target is already loaded or there is no more history.
+ * - Initial load requests only the newest page (CHAT_SESSION_MESSAGE_LIMIT), never
+ *   the CHAT_SESSION_MESSAGE_MAX ceiling; older history pages in on demand.
+ * - The fallback poll requests the same small newest window.
+ * - loadUntil() pages backward until a jump target is loaded, and short-circuits
+ *   when the target is already loaded or there is no more history.
  */
-import { DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+  DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+} from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -237,17 +240,22 @@ describe('useSessionLifecycle loading semantics', () => {
     expect(mocks.wsOptions.every((o) => o.enabled === false)).toBe(true);
   });
 
-  it('requests the FULL conversation (max ceiling) on initial load', async () => {
-    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false));
+  it('requests only the newest page on initial load, never the ceiling', async () => {
+    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], true));
 
-    renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), { wrapper });
-
-    await waitFor(() => {
-      expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
-        signal: expect.any(AbortSignal),
-        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
-      });
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
     });
+
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['a']));
+    expect(mocks.getChatSession).toHaveBeenCalledTimes(1);
+    expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+    });
+    expect(DEFAULT_CHAT_SESSION_MESSAGE_LIMIT).toBeLessThan(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
+    // Older history is still there to page in.
+    expect(result.current.hasMore).toBe(true);
   });
 
   it('delta-fetches after the newest cached message and merges cached plus new rows', async () => {
@@ -679,7 +687,7 @@ describe('useSessionLifecycle loading semantics', () => {
       mocks.getChatSession.mockClear();
 
       await act(async () => {
-        await result.current.loadUntil(700);
+        await result.current.loadUntil({ timestamp: 700 });
       });
 
       // Oldest loaded is 500 <= 700 → nothing to fetch.
@@ -695,7 +703,7 @@ describe('useSessionLifecycle loading semantics', () => {
       mocks.getChatSession.mockClear();
 
       await act(async () => {
-        await result.current.loadUntil(200);
+        await result.current.loadUntil({ timestamp: 200 });
       });
 
       // Target (200) predates the loaded window, but hasMore=false → no fetch.

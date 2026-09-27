@@ -1,4 +1,6 @@
 import {
+  DEFAULT_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS,
+  DEFAULT_CHAT_TRANSCRIPT_CACHE_TTL_MS,
   DEFAULT_QUERY_PERSIST_MAX_AGE_MS,
   DEFAULT_QUERY_PERSIST_RESTORE_TIMEOUT_MS,
   DEFAULT_QUERY_PERSIST_THROTTLE_MS,
@@ -127,6 +129,47 @@ export const QUERY_PERSIST_RESTORE_TIMEOUT_MS = readPositiveIntEnv(
 );
 
 /**
+ * How long a chat transcript stays cached after it was last loaded or updated:
+ * in memory (its `gcTime`) and on disk (older transcript data is not written).
+ */
+export const CHAT_TRANSCRIPT_CACHE_TTL_MS = readPositiveIntEnv(
+  import.meta.env?.VITE_CHAT_TRANSCRIPT_CACHE_TTL_MS,
+  DEFAULT_CHAT_TRANSCRIPT_CACHE_TTL_MS
+);
+
+/** Most chat transcripts kept at once; opening a chat evicts the least recently updated beyond it. */
+export const CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS = readPositiveIntEnv(
+  import.meta.env?.VITE_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS,
+  DEFAULT_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS
+);
+
+/**
+ * How old a persisted operation's data may be and still be written to disk.
+ * Operations without an entry are bounded by the record's own max age.
+ */
+const PERSISTED_OPERATION_MAX_AGE_MS: ReadonlyMap<string, number> = new Map([
+  ['sessions/messages', CHAT_TRANSCRIPT_CACHE_TTL_MS],
+]);
+
+function persistedDataMaxAgeMs(operation: string): number {
+  return PERSISTED_OPERATION_MAX_AGE_MS.get(operation) ?? QUERY_PERSIST_MAX_AGE_MS;
+}
+
+/**
+ * `gcTime` for queries restored from disk.
+ *
+ * Hydration builds restored queries from default options, and the app default
+ * (five minutes) would drop every restored entry nobody opened within five
+ * minutes — and with it the entry's copy on disk, because each write mirrors the
+ * in-memory cache. A restored query therefore lives as long as the longest
+ * persisted lifetime.
+ */
+export const RESTORED_QUERY_GC_TIME_MS = Math.max(
+  QUERY_PERSIST_MAX_AGE_MS,
+  ...PERSISTED_OPERATION_MAX_AGE_MS.values()
+);
+
+/**
  * IndexedDB key for a user namespace. Returns `null` for an absent namespace, so
  * an unauthenticated session persists nothing at all.
  *
@@ -144,7 +187,10 @@ export function buildQueryPersistStorageKey(namespace: string | null | undefined
  *  - it succeeded and actually has data (never persist errors or in-flight state);
  *  - its key is `['auth', scope, domain, operation, …]`;
  *  - `scope` is the *currently authenticated* scope, not merely some scope;
- *  - `domain/operation` is in {@link PERSISTED_QUERY_OPERATIONS}.
+ *  - `domain/operation` is in {@link PERSISTED_QUERY_OPERATIONS};
+ *  - its data is younger than that operation's age limit (chat transcripts:
+ *    {@link CHAT_TRANSCRIPT_CACHE_TTL_MS}), so data past it leaves the disk even
+ *    while it is still in memory.
  *
  * @param scope the active `queryScope` (`user.id`) — an empty scope persists nothing
  */
@@ -156,12 +202,10 @@ export function shouldDehydratePersistedQuery(query: Query, scope: string): bool
   if (!Array.isArray(key) || key.length < 4) return false;
 
   const [prefix, keyScope, domain, operation] = key;
-  return (
-    prefix === 'auth' &&
-    typeof keyScope === 'string' &&
-    keyScope === scope &&
-    typeof domain === 'string' &&
-    typeof operation === 'string' &&
-    PERSISTED_QUERY_OPERATIONS.has(`${domain}/${operation}`)
-  );
+  if (prefix !== 'auth' || keyScope !== scope) return false;
+  if (typeof domain !== 'string' || typeof operation !== 'string') return false;
+
+  const persistedOperation = `${domain}/${operation}`;
+  if (!PERSISTED_QUERY_OPERATIONS.has(persistedOperation)) return false;
+  return Date.now() - query.state.dataUpdatedAt <= persistedDataMaxAgeMs(persistedOperation);
 }

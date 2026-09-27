@@ -1404,7 +1404,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SAM_SEARCH_MAX_LIMIT?: string; // Max allowed search results (default: 50)
   SAM_HISTORY_LOAD_LIMIT?: string; // Max messages loaded on page mount (default: 200)
   CHAT_SESSION_MESSAGE_LIMIT?: string; // Default page size when no explicit limit is requested — poll & load-more (default: 500)
-  CHAT_SESSION_MESSAGE_MAX?: string; // Ceiling (max clamp) for a chat session REST response — the initial full-conversation load requests up to this (default: 50000)
+  CHAT_SESSION_MESSAGE_MAX?: string; // Ceiling (max clamp) for a chat session REST response; the project chat pages newest-first and never requests it (default: 50000)
   CHAT_SESSION_DELTA_MESSAGE_LIMIT?: string; // Default page size for forward-cursor chat delta fetches (default: 5000)
   CHAT_COMPACT_MODE_DEFAULT?: string; // Whether compact mode strips tool content by default (default: true)
   SAM_MAX_REQUEST_BODY_BYTES?: string; // Override max request body bytes for LLM trimming

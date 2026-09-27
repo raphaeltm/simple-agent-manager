@@ -54,6 +54,22 @@ function persistedCursor(message: ChatMessageResponse): string | undefined {
 }
 
 /**
+ * The newest page of a transcript: its most recent rows in transcript order, and
+ * whether older history remains. How a chat opens when nothing is cached, and
+ * the window the fallback poll and reconnect catch-up compare against.
+ */
+export function fetchNewestPage(
+  projectId: string,
+  sessionId: string,
+  signal?: AbortSignal
+): Promise<ChatSessionDetailResponse> {
+  return getChatSession(projectId, sessionId, {
+    signal,
+    limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+  });
+}
+
+/**
  * Brings a cached transcript up to date by reading every message persisted
  * after its newest persisted row, oldest-first, until the server has nothing
  * newer. Returns null when the cache holds no persisted row to resume from.
@@ -141,34 +157,51 @@ export async function mergeRecentWindowOrRefresh(
 }
 
 /**
+ * Where history paging should stop: at a specific message when the target names
+ * one, otherwise at a point in time.
+ *
+ * A message id wins over the timestamp because callers do not always know the
+ * message's own time — a comment jump carries the comment's creation time, which
+ * is later than the message it annotates.
+ */
+export interface HistoryTarget {
+  messageId?: string | null;
+  timestamp: number;
+}
+
+/** Whether `messages` already reach back to `target`. */
+export function historyReaches(
+  messages: readonly ChatMessageResponse[],
+  target: HistoryTarget
+): boolean {
+  if (target.messageId) return messages.some((message) => message.id === target.messageId);
+  return (messages[0]?.createdAt ?? Infinity) <= target.timestamp;
+}
+
+/**
  * Older history, read newest-first from the oldest persisted row in `loaded`,
- * until a page reaches back to `untilCreatedAt` or history runs out. Returns
- * the rows in transcript order and whether older history remains. Bounded so a
- * server that never clears `hasMore` cannot spin the client.
+ * until a page reaches `target` or history runs out. Returns the rows in
+ * transcript order and whether older history remains. Bounded so a server that
+ * never clears `hasMore` cannot spin the client.
  */
 export async function fetchHistoryUntil(
   projectId: string,
   sessionId: string,
   loaded: readonly ChatMessageResponse[],
-  untilCreatedAt: number
+  target: HistoryTarget
 ): Promise<{ messages: ChatMessageResponse[]; hasMore: boolean }> {
   const older: ChatMessageResponse[] = [];
   let before = oldestPersistedCursor(loaded);
-  let oldest = loaded[0]?.createdAt ?? Infinity;
+  let reached = historyReaches(loaded, target);
   let hasMore = true;
-  for (
-    let pages = 0;
-    hasMore && before && oldest > untilCreatedAt && pages < CHAT_LOAD_UNTIL_MAX_PAGES;
-    pages++
-  ) {
+  for (let pages = 0; hasMore && before && !reached && pages < CHAT_LOAD_UNTIL_MAX_PAGES; pages++) {
     const page = await getChatSession(projectId, sessionId, {
       before,
       limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
     });
-    const first = page.messages[0];
-    if (!first) return { messages: older, hasMore: false };
+    if (page.messages.length === 0) return { messages: older, hasMore: false };
     older.unshift(...page.messages);
-    oldest = first.createdAt;
+    reached = historyReaches(page.messages, target);
     before = oldestPersistedCursor(page.messages);
     hasMore = page.hasMore;
   }

@@ -21,9 +21,10 @@ import { errors } from '../middleware/error';
  *   requested (the 3s poll and load-more pagination). Kept small so polling does
  *   not re-fetch the whole conversation every cycle.
  * - `CHAT_SESSION_MESSAGE_MAX` — the ceiling any request is clamped to. The
- *   client's initial load explicitly requests this so the full conversation
- *   arrives in one request. The 30 MiB RPC size guard in `getMessages()` is the
- *   ultimate cap; oversized sessions keep `hasMore=true` and paginate.
+ *   project chat no longer requests it (it opens on the newest page and pages
+ *   older history in); it bounds what any API caller asks for. The 30 MiB RPC
+ *   size guard in `getMessages()` is the ultimate cap; a response trimmed by
+ *   either keeps `hasMore=true`.
  */
 export function getSessionMessageLimit(env: Env, requestedLimit?: string): number {
   const configuredDefault = Number.parseInt(env.CHAT_SESSION_MESSAGE_LIMIT || '', 10);

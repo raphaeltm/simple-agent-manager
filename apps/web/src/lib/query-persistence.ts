@@ -25,6 +25,7 @@ export {
   QUERY_PERSIST_RESTORE_TIMEOUT_MS,
   QUERY_PERSIST_SCHEMA_VERSION,
   QUERY_PERSIST_THROTTLE_MS,
+  RESTORED_QUERY_GC_TIME_MS,
   shouldDehydratePersistedQuery,
 } from './query-persist-config';
 

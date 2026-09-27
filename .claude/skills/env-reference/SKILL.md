@@ -493,7 +493,7 @@ by the read-only cron-liveness check.
 - `TASK_LIST_DEFAULT_PAGE_SIZE` — Default task/project list page size
 - `TASK_LIST_MAX_PAGE_SIZE` — Maximum task/project list page size
 - `CHAT_SESSION_MESSAGE_LIMIT` — Default page size for chat session message REST responses when no limit is requested — used by the 3s poll and load-more (default: 500)
-- `CHAT_SESSION_MESSAGE_MAX` — Ceiling any chat session message request is clamped to; the initial full-conversation load requests up to this (default: 50000)
+- `CHAT_SESSION_MESSAGE_MAX` — Ceiling any chat session message request is clamped to; the project chat opens on the newest page, pages older history in, and never requests it (default: 50000)
 - `CHAT_SESSION_DELTA_MESSAGE_LIMIT` — Default page size for forward-cursor chat delta fetches after the newest cached browser message (default: 5000)
 - `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT` — Default result count for the `get_archived_tool_payloads` MCP tool (default: 10)
 - `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX` — Maximum result count accepted by the `get_archived_tool_payloads` MCP tool (default: 50)

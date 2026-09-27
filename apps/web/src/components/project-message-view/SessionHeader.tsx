@@ -57,7 +57,6 @@ export function SessionHeader({
   projectId,
   session,
   sessionState,
-  loading,
   idleCountdownMs,
   taskEmbed,
   workspace,
@@ -81,7 +80,6 @@ export function SessionHeader({
   projectId: string;
   session: ChatSessionResponse;
   sessionState: SessionState;
-  loading: boolean;
   idleCountdownMs: number | null;
   taskEmbed: ChatSessionResponse['task'] | null;
   workspace: WorkspaceResponse | null;
@@ -317,16 +315,6 @@ export function SessionHeader({
               title={lineageText}
             >
               {lineageText.startsWith('⑂') ? '⑂ fork' : lineageText}
-            </span>
-          )}
-
-          {loading && (
-            <span
-              role="status"
-              aria-label="Refreshing messages"
-              className="inline-flex items-center shrink-0"
-            >
-              <Spinner size="sm" />
             </span>
           )}
         </div>

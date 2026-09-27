@@ -1499,10 +1499,13 @@ Project event MCP tools use the ProjectData event limits above: `PROJECT_EVENT_L
 | `VITE_QUERY_PERSIST_MAX_AGE_MS`             | `86400000` (24 h)  | How long a persisted query-cache record may be restored after writing    |
 | `VITE_QUERY_PERSIST_THROTTLE_MS`            | `1000`             | Minimum gap between IndexedDB writes of the query cache                  |
 | `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS`     | `250`              | Budget for the initial cache restore before failing open to no cache     |
+| `VITE_CHAT_TRANSCRIPT_CACHE_TTL_MS`         | `86400000` (24 h)  | How long a chat transcript stays cached after it was last used           |
+| `VITE_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS`   | `20`               | Most chat transcripts cached at once; older ones are evicted             |
 | `VITE_AGENT_CATALOG_STALE_TIME_MS`          | `300000`           | Freshness window for the installable agent catalog query                 |
 | `VITE_PROVIDER_CATALOG_STALE_TIME_MS`       | `300000`           | Freshness window for provider catalog size/location/price metadata       |
 | `VITE_TRIAL_STATUS_STALE_TIME_MS`           | `60000`            | Freshness window for trial availability status                           |
 | `VITE_CACHED_COMMANDS_STALE_TIME_MS`        | `300000`           | Freshness window for cached slash-command registries                     |
+| `VITE_REPORT_ISSUE_CONFIG_STALE_TIME_MS`    | `300000`           | Freshness window for the report-issue availability flag                  |
 | `VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS`  | `300000`           | Freshness window for project-creation config flags                       |
 
 ### Query cache persistence
@@ -1517,6 +1520,12 @@ Records are namespaced by authenticated user and by a schema version, and are de
 and on account switch, so one account can never be shown another account's cached data. If
 IndexedDB is unavailable — private browsing, a storage quota failure, or a disabled store — the app
 degrades silently to its normal in-memory cache.
+
+Project chat transcripts are kept for `VITE_CHAT_TRANSCRIPT_CACHE_TTL_MS` after they were last
+loaded or updated, capped at the `VITE_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS` most recently used. A
+chat opened inside that window renders from the cache at once and refreshes in the background; a
+chat that is not cached loads its newest page first, and older history loads as you scroll up. The
+cache is only read after the sign-in check completes.
 
 ## Analytics
 

@@ -113,6 +113,12 @@ export function useQueryCachePersistence(
           persister,
           maxAge: persistence.QUERY_PERSIST_MAX_AGE_MS,
           buster: persistence.QUERY_PERSIST_SCHEMA_VERSION,
+          // Restored queries are built from default options; without this their
+          // five-minute default `gcTime` would evict every entry nobody reopens
+          // within five minutes — from memory, then from the next write to disk.
+          hydrateOptions: {
+            defaultOptions: { queries: { gcTime: persistence.RESTORED_QUERY_GC_TIME_MS } },
+          },
           dehydrateOptions: {
             shouldDehydrateQuery: (query) =>
               persistence.shouldDehydratePersistedQuery(query, scope),

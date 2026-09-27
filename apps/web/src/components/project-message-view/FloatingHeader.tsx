@@ -71,7 +71,6 @@ export function FloatingHeader({
         projectId={projectId}
         session={lc.session}
         sessionState={lc.sessionState}
-        loading={lc.loading}
         idleCountdownMs={lc.idleCountdownMs}
         taskEmbed={lc.taskEmbed}
         workspace={lc.workspace}

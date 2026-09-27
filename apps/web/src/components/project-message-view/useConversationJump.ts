@@ -9,8 +9,13 @@ interface UseConversationJumpInput {
   sessionId: string;
   displayItems: DisplayItem[];
   virtuosoRef: RefObject<VirtuosoHandle | null>;
-  /** Pages older history in until `targetTimestamp` is covered. */
-  loadUntil: (targetTimestamp: number) => Promise<void>;
+  /**
+   * Whether the virtualized list is mounted. A chat's transcript can arrive a
+   * render before the list does, and a jump resolved then would scroll nothing.
+   */
+  listReady: boolean;
+  /** Pages older history in until the target message (or time) is loaded. */
+  loadUntil: (target: TimelineJumpTarget) => Promise<void>;
   loadingMore: boolean;
   /** Message id requested by a route-level deep link, such as Project → Comments. */
   targetMessageId?: string | null;
@@ -37,6 +42,7 @@ export function useConversationJump({
   sessionId,
   displayItems,
   virtuosoRef,
+  listReady,
   loadUntil,
   loadingMore,
   targetMessageId,
@@ -89,12 +95,11 @@ export function useConversationJump({
     return map;
   }, [displayItems]);
 
-  // A jump targets either an exact message (user message) or the nearest message
-  // to a timestamp (status/activity entries). Because the full conversation loads
-  // on open, the target is almost always already rendered. For the rare
-  // oversized/guard-trimmed session the target may predate the loaded window — we
-  // set a pending jump and load older pages until it resolves, so a jump never
-  // dead-clicks.
+  // A jump targets either an exact message (user message, comment anchor) or the
+  // nearest message to a timestamp (status/activity entries). A chat opens on its
+  // newest page, so the target may predate the loaded window — we set a pending
+  // jump and load older pages until the target is loaded, so a jump never
+  // dead-clicks and never settles on the wrong message.
   const [pendingJump, setPendingJump] = useState<TimelineJumpTarget | null>(null);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
   const consumedTargetMessageRef = useRef<string | null>(null);
@@ -113,17 +118,17 @@ export function useConversationJump({
   const jumpToMessage = useCallback(
     (target: TimelineJumpTarget) => {
       onJump();
-      // Fast path: exact message already loaded.
-      if (target.messageId && itemIndexById.has(target.messageId)) {
+      // Fast path: exact message already loaded and on screen.
+      if (listReady && target.messageId && itemIndexById.has(target.messageId)) {
         scrollAndHighlight(target.messageId);
         return;
       }
-      // Otherwise resolve via the pending-jump effect, loading older pages toward
-      // the target timestamp first (no-op when the history is already fully loaded).
+      // Otherwise resolve via the pending-jump effect, loading older pages until
+      // the target is loaded first (no-op when the history is already loaded).
       setPendingJump(target);
-      void loadUntil(target.timestamp);
+      void loadUntil(target);
     },
-    [itemIndexById, loadUntil, onJump, scrollAndHighlight]
+    [itemIndexById, listReady, loadUntil, onJump, scrollAndHighlight]
   );
 
   // Route-driven jump from the project Comments page. This deliberately reuses
@@ -145,7 +150,7 @@ export function useConversationJump({
   // Resolve a pending jump once the target (or the nearest message, after
   // loading settles) is available in the rendered list.
   useEffect(() => {
-    if (!pendingJump) return;
+    if (!pendingJump || !listReady) return;
     let targetId: string | undefined;
     if (pendingJump.messageId && itemIndexById.has(pendingJump.messageId)) {
       targetId = pendingJump.messageId;
@@ -157,7 +162,7 @@ export function useConversationJump({
     if (targetId && scrollAndHighlight(targetId)) {
       setPendingJump(null);
     }
-  }, [pendingJump, itemIndexById, displayItems, loadingMore, scrollAndHighlight]);
+  }, [pendingJump, listReady, itemIndexById, displayItems, loadingMore, scrollAndHighlight]);
 
   // Auto-clear the jump highlight after the flash animation. The 2200ms here is
   // coupled to the `.sam-message-highlight` animation-duration (2.2s) in index.css

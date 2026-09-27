@@ -435,7 +435,7 @@ describe('ProjectMessageView — session isolation', () => {
     vi.useRealTimers();
   });
 
-  it('loads the full conversation on open and polls with only the small window', async () => {
+  it('opens on the newest page and polls with the same small window', async () => {
     // The fallback poll only runs while the WebSocket is not connected.
     mockWsConnectionState = 'reconnecting';
     const limits: Array<number | undefined> = [];
@@ -448,9 +448,9 @@ describe('ProjectMessageView — session isolation', () => {
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
 
-    // Initial load requests the full-conversation ceiling.
+    // Initial load requests only the newest page — never the ceiling.
     await waitFor(() => expect(limits.length).toBeGreaterThanOrEqual(1));
-    expect(limits[0]).toBe(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
+    expect(limits[0]).toBe(DEFAULT_CHAT_SESSION_MESSAGE_LIMIT);
     // The fallback poll must request only the small recent window — never the ceiling.
     // Under full coverage load, React may commit the polling effect after the
     // first timer advance, so advance multiple intervals until it fires.

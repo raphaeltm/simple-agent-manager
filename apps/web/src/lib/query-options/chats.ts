@@ -1,19 +1,23 @@
-import { DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
-import { queryOptions } from '@tanstack/react-query';
+import { type QueryClient, type QueryKey, queryOptions } from '@tanstack/react-query';
 
 import {
   type ActivityEventResponse,
   type ChatMessageResponse,
+  type ChatSessionDetailResponse,
   type ChatSessionListItem,
   getAllChats,
-  getChatSession,
   getRecentChats,
   listActivityEvents,
   listChatMessages,
   listChatSessions,
   type SessionSummaryItem,
 } from '../api';
-import { oldestPersistedCursor } from '../message-paging';
+import { mergeMessages } from '../merge-messages';
+import { fetchNewestPage, oldestPersistedCursor, refreshCachedTranscript } from '../message-paging';
+import {
+  CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS,
+  CHAT_TRANSCRIPT_CACHE_TTL_MS,
+} from '../query-persist-config';
 
 /**
  * Cross-project chat session summaries, served by a single D1 query each.
@@ -35,8 +39,10 @@ export const chatQueryKeys = {
     [...chatQueryKeys.all(queryScope), 'list', { limit }] as const,
   projectSessions: (queryScope: string, projectId: string, limit: number) =>
     [...chatQueryKeys.all(queryScope), 'project-sessions', projectId, { limit }] as const,
+  /** Every chat transcript cached for this scope, across projects. */
+  transcripts: (queryScope: string) => ['auth', queryScope, 'sessions', 'messages'] as const,
   sessionMessages: (queryScope: string, projectId: string, sessionId: string) =>
-    ['auth', queryScope, 'sessions', 'messages', projectId, sessionId] as const,
+    [...chatQueryKeys.transcripts(queryScope), projectId, sessionId] as const,
   timelineMessages: (queryScope: string, projectId: string, sessionId: string, maxPages: number) =>
     [...chatQueryKeys.all(queryScope), 'timeline-messages', projectId, sessionId, { maxPages }] as const,
   timelineActivity: (queryScope: string, projectId: string, sessionId: string, limit: number) =>
@@ -94,6 +100,15 @@ export function projectChatSessionsQueryOptions(
   });
 }
 
+/**
+ * One chat session's transcript, loaded newest first.
+ *
+ * A transcript the cache already holds is brought up to date by reading only what
+ * was persisted after its newest row. Otherwise only the newest page is read, and
+ * older history pages in as the reader scrolls up. `gcTime` keeps a transcript
+ * nobody is viewing for the retention window: in memory, and therefore on disk,
+ * because the persisted cache mirrors memory.
+ */
 export function chatSessionMessagesQueryOptions(
   queryScope: string,
   projectId: string,
@@ -101,12 +116,60 @@ export function chatSessionMessagesQueryOptions(
 ) {
   return queryOptions({
     queryKey: chatQueryKeys.sessionMessages(queryScope, projectId, sessionId),
-    queryFn: ({ signal }) =>
-      getChatSession(projectId, sessionId, {
-        signal,
-        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
-      }),
+    queryFn: ({ client, queryKey, signal }) =>
+      loadTranscript(client, queryKey, projectId, sessionId, signal),
+    gcTime: CHAT_TRANSCRIPT_CACHE_TTL_MS,
   });
+}
+
+async function loadTranscript(
+  client: QueryClient,
+  queryKey: QueryKey,
+  projectId: string,
+  sessionId: string,
+  signal: AbortSignal
+): Promise<ChatSessionDetailResponse> {
+  const cached = client.getQueryData<ChatSessionDetailResponse>(queryKey);
+  const refreshed = cached && (await refreshCachedTranscript(projectId, sessionId, cached, signal));
+  if (!refreshed) return fetchNewestPage(projectId, sessionId, signal);
+
+  // Rows the socket or an optimistic send appended while the refresh was in
+  // flight are in the latest cache entry, not in the snapshot it started from.
+  const latest = client.getQueryData<ChatSessionDetailResponse>(queryKey) ?? cached;
+  return {
+    ...refreshed,
+    messages: mergeMessages(latest.messages, refreshed.messages, 'append'),
+    hasMore: latest.hasMore,
+  };
+}
+
+/**
+ * Keeps only the most recently updated transcripts cached: every transcript
+ * beyond `maxEntries`, least recently updated first, is evicted — from memory,
+ * and so from the next persisted write. A transcript on screen is never evicted,
+ * nor is `opening`, whose observer may not have subscribed yet.
+ */
+export function evictStaleTranscripts(
+  client: QueryClient,
+  queryScope: string,
+  opening: QueryKey,
+  maxEntries: number = CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS
+): void {
+  const cache = client.getQueryCache();
+  const openingQuery = cache.find({ queryKey: opening, exact: true });
+  const byRecency = cache
+    .findAll({ queryKey: chatQueryKeys.transcripts(queryScope) })
+    .sort((a, b) => b.state.dataUpdatedAt - a.state.dataUpdatedAt);
+
+  let retained = 0;
+  for (const query of byRecency) {
+    const onScreen = query === openingQuery || query.getObserversCount() > 0;
+    if (onScreen || retained < maxEntries) {
+      retained += 1;
+    } else {
+      cache.remove(query);
+    }
+  }
 }
 
 export async function fetchTimelineUserMessages(

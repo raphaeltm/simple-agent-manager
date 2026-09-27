@@ -222,7 +222,6 @@ function renderHeader(overrides: Partial<HarnessProps> = {}) {
     projectId: 'proj-1',
     session: makeSession(),
     sessionState: 'active',
-    loading: false,
     idleCountdownMs: null,
     taskEmbed: makeTaskEmbed(),
     workspace: makeWorkspace(),
@@ -457,11 +456,6 @@ describe('SessionHeader', () => {
     fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
     expect(screen.getByText('Hetzner')).toBeInTheDocument();
     expect(screen.getByText(/nbg1/)).toBeInTheDocument();
-  });
-
-  it('shows loading spinner when loading prop is true', () => {
-    renderHeader({ loading: true });
-    expect(screen.getByTestId('spinner')).toBeInTheDocument();
   });
 
   it('shows idle countdown when session is idle', () => {

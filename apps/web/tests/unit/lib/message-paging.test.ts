@@ -1,4 +1,7 @@
-import { DEFAULT_CHAT_DELTA_MAX_PAGES } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CHAT_DELTA_MAX_PAGES,
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+} from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatMessageResponse, ChatSessionDetailResponse } from '../../../src/lib/api';
@@ -9,6 +12,7 @@ vi.mock('../../../src/lib/api', () => ({ getChatSession: mocks.getChatSession })
 
 const {
   fetchHistoryUntil,
+  fetchNewestPage,
   mergeRecentWindowOrRefresh,
   newestPersistedCursor,
   oldestPersistedCursor,
@@ -139,7 +143,7 @@ describe('fetchHistoryUntil', () => {
       'p-1',
       's-1',
       [optimistic('optimistic-first', 450), persisted('p5', 500, 5)],
-      150
+      { timestamp: 150 }
     );
 
     expect(history.messages.map((message) => message.id)).toEqual(['p1', 'p2', 'p3', 'p4']);
@@ -153,8 +157,67 @@ describe('fetchHistoryUntil', () => {
   it('reports the end of history when a page comes back empty', async () => {
     mocks.getChatSession.mockResolvedValueOnce(page([], true));
 
-    const history = await fetchHistoryUntil('p-1', 's-1', [persisted('p5', 500, 5)], 0);
+    const history = await fetchHistoryUntil('p-1', 's-1', [persisted('p5', 500, 5)], {
+      timestamp: 0,
+    });
 
     expect(history).toEqual({ messages: [], hasMore: false });
+  });
+
+  // A comment jump carries the COMMENT's time, which is later than the message it
+  // annotates. Stopping at that time would leave the message unloaded and the
+  // jump would settle on whatever message is nearest the comment instead.
+  it('pages past the target time until the target message itself is loaded', async () => {
+    mocks.getChatSession
+      .mockResolvedValueOnce(page([persisted('p3', 300, 3), persisted('p4', 400, 4)], true))
+      .mockResolvedValueOnce(page([persisted('p1', 100, 1), persisted('p2', 200, 2)], true));
+
+    const history = await fetchHistoryUntil('p-1', 's-1', [persisted('p5', 500, 5)], {
+      messageId: 'p1',
+      timestamp: 450,
+    });
+
+    expect(history.messages.map((message) => message.id)).toEqual(['p1', 'p2', 'p3', 'p4']);
+    expect(mocks.getChatSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops at the target time when the target names no message', async () => {
+    mocks.getChatSession
+      .mockResolvedValueOnce(page([persisted('p3', 300, 3), persisted('p4', 400, 4)], true))
+      .mockResolvedValueOnce(page([persisted('p1', 100, 1), persisted('p2', 200, 2)], true));
+
+    const history = await fetchHistoryUntil('p-1', 's-1', [persisted('p5', 500, 5)], {
+      timestamp: 450,
+    });
+
+    expect(history.messages.map((message) => message.id)).toEqual(['p3', 'p4']);
+    expect(mocks.getChatSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads nothing when the target message is already loaded', async () => {
+    const history = await fetchHistoryUntil('p-1', 's-1', [persisted('p5', 500, 5)], {
+      messageId: 'p5',
+      timestamp: 0,
+    });
+
+    expect(history).toEqual({ messages: [], hasMore: true });
+    expect(mocks.getChatSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('fetchNewestPage', () => {
+  beforeEach(() => mocks.getChatSession.mockReset());
+
+  it('asks for one page from the newest end, not the whole transcript', async () => {
+    mocks.getChatSession.mockResolvedValueOnce(page([persisted('p9', 900, 9)], true));
+    const signal = new AbortController().signal;
+
+    const newest = await fetchNewestPage('p-1', 's-1', signal);
+
+    expect(newest.messages.map((message) => message.id)).toEqual(['p9']);
+    expect(mocks.getChatSession).toHaveBeenCalledWith('p-1', 's-1', {
+      signal,
+      limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+    });
   });
 });

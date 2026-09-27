@@ -52,6 +52,7 @@ export {
   chatQueryKeys,
   chatSessionMessagesQueryOptions,
   type ChatSessionSummary,
+  evictStaleTranscripts,
   projectChatSessionsQueryOptions,
   recentChatsQueryOptions,
   timelineActivityEventsQueryOptions,
@@ -95,6 +96,7 @@ export {
   projectListQueryOptions,
   projectQueryKeys,
 } from './projects';
+export { reportIssueConfigQueryOptions, reportIssueQueryKeys } from './report-issue';
 export {
   activeTasksQueryOptions,
   draftIdeasQueryOptions,

@@ -6,7 +6,6 @@ import { useTokenRefresh } from '../../hooks/useTokenRefresh';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type {
   ChatMessageResponse,
-  ChatSessionDetailResponse,
   ChatSessionResponse,
   MessageCommentRealtimeEvent,
   SessionStateSnapshot,
@@ -17,9 +16,8 @@ import {
   resetIdleTimer,
   sendFollowUpPrompt,
 } from '../../lib/api';
-import { mergeMessages } from '../../lib/merge-messages';
-import { mergeRecentWindowOrRefresh } from '../../lib/message-paging';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
+import { useSessionDraft } from './session-drafts';
 import type { FilePanelState } from './session-lifecycle-helpers';
 import { parsePlanContent } from './session-lifecycle-helpers';
 import type { AgentActivityState } from './types';
@@ -42,29 +40,20 @@ export function useSessionLifecycle(
   _onSessionMutated?: () => void,
   onCommentEvent?: (event: MessageCommentRealtimeEvent) => void
 ): UseSessionLifecycleResult {
-  const [session, setSession] = useState<ChatSessionResponse | null>(null);
-  const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(null);
-
   const transcript = useSessionTranscript(projectId, sessionId);
-  const {
-    queryClient,
-    queryKey: sessionMessagesQueryKey,
-    query: sessionQuery,
-    messages,
-    setMessages,
-    messagesRef,
-    hasMore,
-    setHasMore,
-    hasMoreRef,
-    updateCachedMessages,
-  } = transcript;
+  const { appendMessages, mergeRecentWindow } = transcript;
+  // Seeded from the cached transcript so a cached chat renders whole on its first
+  // render; the server-snapshot effect below keeps both current from then on.
+  const [session, setSession] = useState<ChatSessionResponse | null>(
+    () => transcript.detail?.session ?? null
+  );
+  const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(
+    () => transcript.detail?.session.task ?? null
+  );
 
   const appendOptimisticMessage = useCallback(
-    (message: ChatMessageResponse) => {
-      setMessages((prev) => [...prev, message]);
-      updateCachedMessages([message], 'append');
-    },
-    [updateCachedMessages]
+    (message: ChatMessageResponse) => appendMessages([message]),
+    [appendMessages]
   );
   const { uploading, handleUploadFiles } = useSessionFileUpload({
     projectId,
@@ -73,7 +62,7 @@ export function useSessionLifecycle(
   });
 
   const { workspace, node } = useSessionInfrastructure(session?.workspaceId);
-  const [followUp, setFollowUp] = useState('');
+  const [followUp, setFollowUp] = useSessionDraft(sessionId);
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
   const completionDockWorking = useCompletionDockWorking(agentActivity);
@@ -157,8 +146,7 @@ export function useSessionLifecycle(
     enabled: session?.status === 'active' || wake.isWaking,
     onMessage: useCallback(
       (msg: ChatMessageResponse) => {
-        setMessages((prev) => mergeMessages(prev, [msg], 'append'));
-        updateCachedMessages([msg], 'append');
+        appendMessages([msg]);
 
         if (msg.role === 'plan' && msg.content) {
           const parsed = parsePlanContent(msg.content);
@@ -174,7 +162,7 @@ export function useSessionLifecycle(
           startVerifyDecayTimer();
         }
       },
-      [startVerifyDecayTimer, updateCachedMessages]
+      [appendMessages, startVerifyDecayTimer]
     ),
     onSessionStopped: useCallback(() => {
       setSession((prev) => (prev ? { ...prev, status: 'stopped' } : prev));
@@ -190,45 +178,20 @@ export function useSessionLifecycle(
         state?: SessionStateSnapshot | null
       ) => {
         setSession(catchUpSession);
-        void (async () => {
-          try {
-            const recentDetail = {
-              session: catchUpSession,
-              messages: catchUpMessages,
-              hasMore: hasMoreRef.current,
-              state: state ?? null,
-            } as ChatSessionDetailResponse;
-            const current =
-              queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey) ??
-              ({
-                ...recentDetail,
-                messages: messagesRef.current,
-                hasMore: hasMoreRef.current,
-              } as ChatSessionDetailResponse);
-            const merged = await mergeRecentWindowOrRefresh(
-              projectId,
-              sessionId,
-              current,
-              recentDetail
-            );
-            setMessages(merged.messages);
-            setHasMore(merged.hasMore);
-            queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
-              sessionMessagesQueryKey,
-              (old) => ({
-                ...(old ?? merged),
-                ...merged,
-                state: state ?? old?.state ?? merged.state,
-              })
-            );
-          } catch {
-            // Best-effort catch-up: the socket remains connected, and the next
-            // explicit refresh/reconnect will retry from the current cache.
-          }
-        })();
+        mergeRecentWindow({
+          session: catchUpSession,
+          messages: catchUpMessages,
+          // A window's own `hasMore` is used only when no transcript is loaded
+          // yet; the catch-up does not report it, so assume older history.
+          hasMore: true,
+          state: state ?? null,
+        }).catch(() => {
+          // Best-effort catch-up: the socket remains connected, and the next
+          // explicit refresh/reconnect will retry from the current cache.
+        });
         hydrateState(state);
       },
-      [hydrateState, projectId, queryClient, sessionId, sessionMessagesQueryKey]
+      [hydrateState, mergeRecentWindow]
     ),
     onAgentCompleted: useCallback(
       (agentCompletedAt: number) => {
@@ -296,49 +259,38 @@ export function useSessionLifecycle(
     setSession,
   });
 
-  // Reset the scroll button and idle timer on session change; cleanup on unmount.
-  // (The transcript resets its own virtual-scroll anchor.)
+  // Hydrate from each session and state snapshot the SERVER reports — a load, a
+  // refresh, a poll, a catch-up. Keyed on those two objects rather than on the
+  // whole transcript entry: every streamed row rewrites the entry, and
+  // re-applying a load-time `idle` snapshot on each one would knock a working
+  // agent back to idle. Structural sharing keeps both references stable until
+  // the server reports something different.
+  const serverSession = transcript.detail?.session;
+  const serverState = transcript.detail?.state;
   useEffect(() => {
-    sleepingWakePendingRef.current = false;
-    stopVerifyDecayTimer();
-    setShowScrollButton(false);
-  }, [sessionId, stopVerifyDecayTimer]);
+    if (!serverSession) return;
 
-  // The transcript mirrors the query's messages; this mirrors its session and state.
-  useEffect(() => {
-    if (!sessionQuery.data) return;
-
-    setSession(sessionQuery.data.session);
-    setTaskEmbed(sessionQuery.data.session.task ?? null);
+    setSession(serverSession);
+    setTaskEmbed(serverSession.task ?? null);
     const serverStillHasStaleSleepingState =
       sleepingWakePendingRef.current &&
-      sessionQuery.data.session.status === 'sleeping' &&
-      !isWorkingActivity(sessionQuery.data.state?.activity);
+      serverSession.status === 'sleeping' &&
+      !isWorkingActivity(serverState?.activity);
     if (serverStillHasStaleSleepingState) {
-      hydratePlan(sessionQuery.data.state);
+      hydratePlan(serverState);
       // The guard exists to stop a stale `idle` activity from erasing the user's
       // wake feedback — NOT to discard wake progress. Its condition holds for most
       // of a wake (status stays `sleeping`, activity stays `idle` until the agent
       // actually starts), so routing around `hydrateState` without this would drop
       // every phase update and leave `isWaking` false for the entire wake.
-      hydrateWakeProgress(sessionQuery.data.state);
+      hydrateWakeProgress(serverState);
     } else {
-      if (
-        sessionQuery.data.session.status !== 'sleeping' ||
-        isWorkingActivity(sessionQuery.data.state?.activity)
-      ) {
+      if (serverSession.status !== 'sleeping' || isWorkingActivity(serverState?.activity)) {
         sleepingWakePendingRef.current = false;
       }
-      hydrateState(sessionQuery.data.state);
+      hydrateState(serverState);
     }
-  }, [
-    sessionQuery.data,
-    sessionQuery.error,
-    sessionQuery.isPending,
-    hydrateState,
-    hydratePlan,
-    hydrateWakeProgress,
-  ]);
+  }, [serverSession, serverState, hydrateState, hydratePlan, hydrateWakeProgress]);
 
   // Token refresh for port scanning
   const isWorkspaceRunning = isWorkspaceOperational(workspace?.status);
@@ -365,7 +317,7 @@ export function useSessionLifecycle(
     sessionId,
     session,
     connectionState,
-    transcript,
+    mergeRecentWindow,
     sleepingWakePendingRef,
     setSession,
     setTaskEmbed,
@@ -416,8 +368,7 @@ export function useSessionLifecycle(
         toolMetadata: null,
         createdAt: Date.now(),
       };
-      setMessages((prev) => [...prev, optimisticMessage]);
-      updateCachedMessages([optimisticMessage], 'append');
+      appendMessages([optimisticMessage]);
 
       // Persist via DO WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -481,11 +432,10 @@ export function useSessionLifecycle(
 
   return {
     session,
-    messages,
-    hasMore,
+    messages: transcript.messages,
+    hasMore: transcript.hasMore,
     loading: transcript.loading,
     error: transcript.error,
-    setError: transcript.setError,
     sessionState,
     taskEmbed,
     workspace,

@@ -5,17 +5,10 @@ import { ElapsedTime } from './session-view-utils';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
 import { WakeProgressBanner } from './WakeProgressBanner';
 
-/** The status strips stacked above the conversation: errors, connection, resume and wake. */
+/** The status strips stacked above the conversation: connection, resume and wake. */
 export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleResult }>) {
   return (
     <>
-      {/* Inline error when session already loaded */}
-      {lc.error && lc.session && (
-        <div className="px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs">
-          {lc.error}
-        </div>
-      )}
-
       {/* Connection indicator (DO WebSocket) */}
       {lc.sessionState === 'active' &&
         lc.connectionState !== 'connected' &&

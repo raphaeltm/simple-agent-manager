@@ -1,4 +1,3 @@
-import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT } from '@simple-agent-manager/shared';
 import {
   type Dispatch,
   type MutableRefObject,
@@ -9,13 +8,8 @@ import {
 
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 import { useDocumentVisible } from '../../hooks/useVisibilityAwarePoll';
-import type {
-  ChatSessionDetailResponse,
-  ChatSessionResponse,
-  SessionStateSnapshot,
-} from '../../lib/api';
-import { getChatSession } from '../../lib/api';
-import { mergeRecentWindowOrRefresh } from '../../lib/message-paging';
+import type { ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
+import { fetchNewestPage } from '../../lib/message-paging';
 import { getPlanFingerprint } from './session-lifecycle-helpers';
 import { CHAT_FALLBACK_POLL_MS, isWorkingActivity } from './types';
 import type { SessionTranscript } from './useSessionTranscript';
@@ -27,10 +21,7 @@ interface FallbackSessionPollInput {
   sessionId: string;
   session: ChatSessionResponse | null;
   connectionState: ChatConnectionState;
-  transcript: Pick<
-    SessionTranscript,
-    'queryClient' | 'queryKey' | 'messagesRef' | 'hasMoreRef' | 'setMessages' | 'setHasMore'
-  >;
+  mergeRecentWindow: SessionTranscript['mergeRecentWindow'];
   /** Set while a user-triggered wake is in flight; see `serverStillHasStaleSleepingState`. */
   sleepingWakePendingRef: MutableRefObject<boolean>;
   setSession: Dispatch<SetStateAction<ChatSessionResponse | null>>;
@@ -50,7 +41,7 @@ export function useFallbackSessionPoll({
   sessionId,
   session,
   connectionState,
-  transcript,
+  mergeRecentWindow,
   sleepingWakePendingRef,
   setSession,
   setTaskEmbed,
@@ -58,7 +49,6 @@ export function useFallbackSessionPoll({
   hydratePlan,
   hydrateWakeProgress,
 }: FallbackSessionPollInput): void {
-  const { queryClient, queryKey, messagesRef, hasMoreRef, setMessages, setHasMore } = transcript;
   const documentVisible = useDocumentVisible();
   // Tracks the hidden→visible edge so the effect below can tell a visibility
   // return (which must catch up immediately) apart from its other re-run causes.
@@ -83,12 +73,9 @@ export function useFallbackSessionPoll({
       if (pollInFlight) return;
       pollInFlight = true;
       try {
-        // Poll only the most-recent window — mergeReplace preserves the fully
-        // loaded history, so polling must NOT re-fetch the whole conversation.
-        const data: ChatSessionDetailResponse = await getChatSession(projectId, sessionId, {
-          signal: abortController.signal,
-          limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
-        });
+        // Poll only the newest window — the merge keeps every older loaded row,
+        // so polling must NOT re-fetch the whole conversation.
+        const data = await fetchNewestPage(projectId, sessionId, abortController.signal);
         if (data.session.id !== sessionId) return;
         const newLastId = data.messages[data.messages.length - 1]?.id ?? '';
         const taskStatus = data.session.task?.status ?? '';
@@ -98,26 +85,7 @@ export function useFallbackSessionPoll({
         if (fingerprint !== lastPollFingerprint) {
           lastPollFingerprint = fingerprint;
           setSession(data.session);
-          const current =
-            queryClient.getQueryData<ChatSessionDetailResponse>(queryKey) ??
-            ({
-              ...data,
-              messages: messagesRef.current,
-              hasMore: hasMoreRef.current,
-            } as ChatSessionDetailResponse);
-          const merged = await mergeRecentWindowOrRefresh(
-            projectId,
-            sessionId,
-            current,
-            data,
-            abortController.signal
-          );
-          setMessages(merged.messages);
-          setHasMore(merged.hasMore);
-          queryClient.setQueryData<ChatSessionDetailResponse | undefined>(queryKey, (old) => ({
-            ...(old ?? merged),
-            ...merged,
-          }));
+          await mergeRecentWindow(data, abortController.signal);
           if (data.session.task) setTaskEmbed(data.session.task);
         }
         const wakeAttemptFailed =
@@ -175,7 +143,6 @@ export function useFallbackSessionPoll({
     hydrateState,
     connectionState,
     documentVisible,
-    queryClient,
-    queryKey,
+    mergeRecentWindow,
   ]);
 }

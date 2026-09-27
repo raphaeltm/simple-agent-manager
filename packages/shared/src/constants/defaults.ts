@@ -67,18 +67,16 @@ export const DEFAULT_CHAT_SESSION_MESSAGE_LIMIT = 500;
 /**
  * Ceiling (max clamp) for a single chat session message REST response.
  *
- * This is distinct from DEFAULT_CHAT_SESSION_MESSAGE_LIMIT (the page size used
- * when no explicit limit is requested — e.g. the 3s poll and load-more). The
- * client's INITIAL session load requests up to this ceiling so the entire
- * conversation arrives in one request, making the timeline jump index map
- * complete (no dead clicks) and removing the windowed-loading UX for typical
- * sessions.
+ * This is distinct from DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, the page size used
+ * when no explicit limit is requested. The project chat no longer asks for this
+ * ceiling: it opens a session on its newest page and pages older history in as
+ * the reader scrolls up, and a jump to an unloaded message pages back until the
+ * message is loaded. The ceiling bounds whatever an API caller does request.
  *
  * Compact-mode token rows are small (~150 B), so even the largest observed
- * production sessions (~30k token rows ≈ ~4.5 MB) load fully in one request and
- * stay well under the Cloudflare DO 30 MiB RPC size guard in
- * `getMessages()`. Sessions larger than the ceiling OR larger than the RPC size
- * guard keep `hasMore=true` and fall back to `before`/"Load earlier" pagination.
+ * production sessions (~30k token rows ≈ ~4.5 MB) fit in one response and stay
+ * well under the Cloudflare DO 30 MiB RPC size guard in `getMessages()`.
+ * Responses larger than the ceiling OR the RPC size guard keep `hasMore=true`.
  *
  * Override via CHAT_SESSION_MESSAGE_MAX env var.
  */
@@ -89,8 +87,8 @@ export const DEFAULT_CHAT_SESSION_MESSAGE_MAX = 50000;
  *
  * Browser-side cached conversations only need rows newer than the newest cached
  * message during background revalidation. Keep this configurable separately from
- * full initial loads so operators can tune the catch-up payload without reducing
- * the full-conversation cache seed.
+ * the newest-page initial load so operators can tune the catch-up payload
+ * without changing how much a cold open reads.
  *
  * Override via CHAT_SESSION_DELTA_MESSAGE_LIMIT env var.
  */
@@ -334,6 +332,18 @@ export const DEFAULT_QUERY_PERSIST_THROTTLE_MS = 1_000;
  * beats holding a blank screen.
  * Override via VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS. */
 export const DEFAULT_QUERY_PERSIST_RESTORE_TIMEOUT_MS = 250;
+
+/** How long the browser keeps a project chat transcript after it was last loaded
+ * or updated, in memory and in the persisted query cache. Opening a chat inside
+ * this window paints the cached transcript at once and refreshes it in the
+ * background. Override via VITE_CHAT_TRANSCRIPT_CACHE_TTL_MS. */
+export const DEFAULT_CHAT_TRANSCRIPT_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/** Most chat transcripts the browser keeps at once. Opening a chat evicts the
+ * least recently updated ones beyond this, which bounds memory, the persisted
+ * record, and the cost of serializing that record on every write.
+ * Override via VITE_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS. */
+export const DEFAULT_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS = 20;
 
 // =============================================================================
 // HTTP Response Cache-Control (apps/api)

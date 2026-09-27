@@ -6,10 +6,13 @@
  * with the actions themselves so the header stays presentational and the rail has a
  * single place to dispatch from.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useCallback, useMemo, useState } from 'react';
 
+import { useQueryScope } from '../../hooks/useQueryScope';
 import type { ChatSessionResponse } from '../../lib/api';
-import { getReportIssueConfig, updateProjectTaskStatus } from '../../lib/api';
+import { updateProjectTaskStatus } from '../../lib/api';
+import { reportIssueConfigQueryOptions } from '../../lib/query-options';
 import {
   buildSessionToolActions,
   DEFAULT_TOOL_STRIP_MODE,
@@ -103,16 +106,13 @@ export function useSessionTools(input: UseSessionToolsInput): UseSessionToolsRes
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
 
-  const [reportEnabled, setReportEnabled] = useState<boolean | null>(null);
-  const reportConfigFetchedRef = useRef(false);
-
-  useEffect(() => {
-    if (reportConfigFetchedRef.current) return;
-    reportConfigFetchedRef.current = true;
-    getReportIssueConfig()
-      .then((config) => setReportEnabled(config.enabled))
-      .catch(() => setReportEnabled(false));
-  }, []);
+  const queryScope = useQueryScope();
+  const reportConfig = useQuery({
+    ...reportIssueConfigQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+  });
+  // Null while the first load is outstanding; a failed load hides the action.
+  const reportEnabled = reportConfig.data?.enabled ?? (reportConfig.isError ? false : null);
 
   /**
    * Sets the mode and remembers it.

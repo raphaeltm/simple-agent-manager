@@ -84,6 +84,10 @@ export function ConversationPane({
               alignToBottom
               atBottomThreshold={50}
               atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
+              // A chat opens on its newest page; reaching the top pages older
+              // history in (the header's "Load earlier messages" button stays as
+              // the visible and keyboard path to the same load).
+              startReached={lc.hasMore ? lc.loadMore : undefined}
               overscan={200}
               itemContent={renderItem}
               context={listContext}

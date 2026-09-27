@@ -15,6 +15,7 @@ import type {
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 import type { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
+import type { HistoryTarget } from '../../lib/message-paging';
 import type { FilePanelState } from './session-lifecycle-helpers';
 import type { AgentActivityState, SessionState } from './types';
 
@@ -22,9 +23,10 @@ export interface UseSessionLifecycleResult {
   session: ChatSessionResponse | null;
   messages: ChatMessageResponse[];
   hasMore: boolean;
+  /** Nothing loaded yet and the first load is outstanding. */
   loading: boolean;
+  /** Why the first load failed; a failed background refresh keeps the transcript. */
   error: string | null;
-  setError: (e: string | null) => void;
   sessionState: SessionState;
   taskEmbed: ChatSessionResponse['task'] | null;
   workspace: WorkspaceResponse | null;
@@ -69,7 +71,8 @@ export interface UseSessionLifecycleResult {
   handleSendFollowUp: () => Promise<void>;
   handleUploadFiles: (files: FileList | File[]) => Promise<void>;
   loadMore: () => Promise<void>;
-  loadUntil: (targetTimestamp: number) => Promise<void>;
+  /** Pages older history in until the target message (or, without an id, time) is loaded. */
+  loadUntil: (target: HistoryTarget) => Promise<void>;
   loadingMore: boolean;
   transcribeApiUrl: string;
   wsRef: React.RefObject<WebSocket | null>;
