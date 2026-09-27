@@ -17,6 +17,36 @@ import { fixture, seedHost } from '../routes/node-pool-upgrade-test-helpers';
 
 const NOW = new Date('2026-09-08T12:00:00.000Z');
 const OLD = '2026-09-08T10:00:00.000Z';
+
+const protectedHandoffMutations = [
+  ['future cleanup backoff', "UPDATE nodes SET cleanup_backoff_until = '2026-09-08T13:00:00.000Z'"],
+  ['missing native CPU', 'UPDATE nodes SET provider_instance_vcpu_count = NULL'],
+  ['missing native memory', 'UPDATE nodes SET provider_instance_memory_mb = NULL'],
+  ['missing workload role', 'UPDATE nodes SET workload_role = NULL'],
+  ['missing pool', 'UPDATE nodes SET capacity_pool_id = NULL'],
+  ['missing source', 'UPDATE nodes SET capacity_source_id = NULL'],
+  ['missing generation', 'UPDATE nodes SET capacity_source_generation = NULL'],
+  ['invalid revision', 'UPDATE nodes SET capacity_pool_revision = 0'],
+  ['missing candidate', "UPDATE nodes SET capacity_pool_candidate_id = ''"],
+  ['missing credential fingerprint', 'UPDATE nodes SET placement_credential_fingerprint = NULL'],
+  ['missing credential reference', 'UPDATE nodes SET placement_credential_reference = NULL'],
+  ['untrusted credential source', "UPDATE nodes SET placement_credential_source = 'client'"],
+  ['invalid credential version', 'UPDATE nodes SET placement_credential_version = 0'],
+  ['invalid scope', "UPDATE nodes SET capacity_pool_scope = 'client'"],
+  [
+    'project scope without project',
+    "UPDATE nodes SET capacity_pool_scope = 'project', capacity_pool_project_id = NULL",
+  ],
+  ['user-owned', "UPDATE nodes SET node_class = 'user-owned'"],
+  ['deployment', "UPDATE nodes SET node_role = 'deployment'"],
+  ['container', "UPDATE nodes SET runtime = 'cf-container'"],
+  ['active workspace', "UPDATE workspaces SET status = 'running'"],
+  ['recent workspace activity', "UPDATE workspaces SET updated_at = '2026-09-08T11:59:00.000Z'"],
+  [
+    'live warm claim',
+    "UPDATE tasks SET status = 'in_progress', claimed_warm_node_id = 'host', claimed_warm_node_at = '2026-09-08T11:59:00.000Z'",
+  ],
+] as const;
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -255,60 +285,32 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     expect(f.cleanupWorkspaceActivity).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [
-      'future cleanup backoff',
-      "UPDATE nodes SET cleanup_backoff_until = '2026-09-08T13:00:00.000Z'",
-    ],
-    ['missing native CPU', 'UPDATE nodes SET provider_instance_vcpu_count = NULL'],
-    ['missing native memory', 'UPDATE nodes SET provider_instance_memory_mb = NULL'],
-    ['missing workload role', 'UPDATE nodes SET workload_role = NULL'],
-    ['missing pool', 'UPDATE nodes SET capacity_pool_id = NULL'],
-    ['missing source', 'UPDATE nodes SET capacity_source_id = NULL'],
-    ['missing generation', 'UPDATE nodes SET capacity_source_generation = NULL'],
-    ['invalid revision', 'UPDATE nodes SET capacity_pool_revision = 0'],
-    ['missing candidate', "UPDATE nodes SET capacity_pool_candidate_id = ''"],
-    ['missing credential fingerprint', 'UPDATE nodes SET placement_credential_fingerprint = NULL'],
-    ['missing credential reference', 'UPDATE nodes SET placement_credential_reference = NULL'],
-    ['untrusted credential source', "UPDATE nodes SET placement_credential_source = 'client'"],
-    ['invalid credential version', 'UPDATE nodes SET placement_credential_version = 0'],
-    ['invalid scope', "UPDATE nodes SET capacity_pool_scope = 'client'"],
-    [
-      'project scope without project',
-      "UPDATE nodes SET capacity_pool_scope = 'project', capacity_pool_project_id = NULL",
-    ],
-    ['user-owned', "UPDATE nodes SET node_class = 'user-owned'"],
-    ['deployment', "UPDATE nodes SET node_role = 'deployment'"],
-    ['container', "UPDATE nodes SET runtime = 'cf-container'"],
-    ['active workspace', "UPDATE workspaces SET status = 'running'"],
-    ['recent workspace activity', "UPDATE workspaces SET updated_at = '2026-09-08T11:59:00.000Z'"],
-    [
-      'live warm claim',
-      "UPDATE tasks SET status = 'in_progress', claimed_warm_node_id = 'host', claimed_warm_node_at = '2026-09-08T11:59:00.000Z'",
-    ],
-  ])('keeps %s protected during destroying handoff cleanup', async (_label, mutation) => {
-    const f = await handoffFixture();
-    f.sqlite
-      .prepare(
-        `UPDATE nodes
+  it.each(protectedHandoffMutations)(
+    'keeps %s protected during destroying handoff cleanup',
+    async (_label, mutation) => {
+      const f = await handoffFixture();
+      f.sqlite
+        .prepare(
+          `UPDATE nodes
       SET status = 'destroying',
           provider_instance_id = NULL,
           runtime_termination_confirmed_at = NULL,
           cleanup_backoff_until = NULL
       WHERE id = 'host'`
-      )
-      .run();
-    f.sqlite.exec(mutation);
+        )
+        .run();
+      f.sqlite.exec(mutation);
 
-    await f.sweepDestroying();
+      await f.sweepDestroying();
 
-    expect(f.providerDeletes).toEqual([]);
-    expect(f.result).toMatchObject({ lifetimeDestroyed: 0, errors: 0 });
-    expect(
-      f.sqlite.prepare('SELECT status, runtime_termination_confirmed_at FROM nodes').get()
-    ).toEqual({ status: 'destroying', runtime_termination_confirmed_at: null });
-    expect(f.cleanupWorkspaceActivity).not.toHaveBeenCalled();
-  });
+      expect(f.providerDeletes).toEqual([]);
+      expect(f.result).toMatchObject({ lifetimeDestroyed: 0, errors: 0 });
+      expect(
+        f.sqlite.prepare('SELECT status, runtime_termination_confirmed_at FROM nodes').get()
+      ).toEqual({ status: 'destroying', runtime_termination_confirmed_at: null });
+      expect(f.cleanupWorkspaceActivity).not.toHaveBeenCalled();
+    }
+  );
 
   it('aborts dead provider requests within the phase budget and reaches deferred work next tick', async () => {
     const f = await handoffFixture();
@@ -429,39 +431,10 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
   });
 
   it.each([
-    [
-      'future cleanup backoff',
-      "UPDATE nodes SET cleanup_backoff_until = '2026-09-08T13:00:00.000Z'",
-    ],
-    ['missing native CPU', 'UPDATE nodes SET provider_instance_vcpu_count = NULL'],
-    ['missing native memory', 'UPDATE nodes SET provider_instance_memory_mb = NULL'],
+    ...protectedHandoffMutations,
     ['missing provider identity', 'UPDATE nodes SET provider_instance_id = NULL'],
-    ['missing workload role', 'UPDATE nodes SET workload_role = NULL'],
-    ['missing pool', 'UPDATE nodes SET capacity_pool_id = NULL'],
-    ['missing source', 'UPDATE nodes SET capacity_source_id = NULL'],
-    ['missing generation', 'UPDATE nodes SET capacity_source_generation = NULL'],
-    ['invalid revision', 'UPDATE nodes SET capacity_pool_revision = 0'],
-    ['missing candidate', "UPDATE nodes SET capacity_pool_candidate_id = ''"],
-    ['missing credential fingerprint', 'UPDATE nodes SET placement_credential_fingerprint = NULL'],
-    ['missing credential reference', 'UPDATE nodes SET placement_credential_reference = NULL'],
-    ['untrusted credential source', "UPDATE nodes SET placement_credential_source = 'client'"],
-    ['invalid credential version', 'UPDATE nodes SET placement_credential_version = 0'],
-    ['invalid scope', "UPDATE nodes SET capacity_pool_scope = 'client'"],
-    [
-      'project scope without project',
-      "UPDATE nodes SET capacity_pool_scope = 'project', capacity_pool_project_id = NULL",
-    ],
-    ['user-owned', "UPDATE nodes SET node_class = 'user-owned'"],
     ['running', "UPDATE nodes SET status = 'running'"],
-    ['deployment', "UPDATE nodes SET node_role = 'deployment'"],
-    ['container', "UPDATE nodes SET runtime = 'cf-container'"],
-    ['active workspace', "UPDATE workspaces SET status = 'running'"],
-    ['recent workspace activity', "UPDATE workspaces SET updated_at = '2026-09-08T11:59:00.000Z'"],
-    [
-      'live warm claim',
-      "UPDATE tasks SET status = 'in_progress', claimed_warm_node_id = 'host', claimed_warm_node_at = '2026-09-08T11:59:00.000Z'",
-    ],
-  ])(
+  ] as const)(
     'keeps %s protected in both candidate selection and the atomic claim',
     async (_label, mutation) => {
       const f = await handoffFixture();
