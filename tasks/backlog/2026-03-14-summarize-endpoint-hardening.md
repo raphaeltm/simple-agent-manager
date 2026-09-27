@@ -32,7 +32,7 @@ The `/summarize` endpoint works correctly but has several hardening opportunitie
 
 ## Status (2026-09-27)
 
-The rate-limit item shipped with `tasks/active/2026-09-27-close-four-api-security-gaps.md`
+The rate-limit item shipped with `tasks/archive/2026-09-27-close-four-api-security-gaps.md`
 (branch `sam/close-four-pre-existing-wzcag1`): `summarize` and `fork-prepare` share one per-user
 bucket, `RATE_LIMIT_SESSION_SUMMARIZE` (default 30 per `RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS`,
 default 3600), and the `summarize` route moved from `routes/chat.ts` to `routes/chat-fork.ts`. This

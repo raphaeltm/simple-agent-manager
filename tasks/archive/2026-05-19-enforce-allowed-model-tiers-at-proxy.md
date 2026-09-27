@@ -20,7 +20,7 @@ Discovered during security/Cloudflare specialist review of PR #1073. This is a p
 
 ## Resolution (2026-09-27)
 
-Implemented under `tasks/active/2026-09-27-close-four-api-security-gaps.md`. The tier map is the
+Implemented under `tasks/archive/2026-09-27-close-four-api-security-gaps.md`. The tier map is the
 catalog's own `PlatformAIModel.tier` (`low-cost | standard | premium`), read through
 `getPlatformAIModelTier`; the spec's `frontier` example does not exist. The native Anthropic path is
 `/ai/anthropic/v1/messages` (plus `count_tokens`), not `/ai/v1/messages`.

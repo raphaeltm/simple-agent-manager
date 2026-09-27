@@ -221,7 +221,9 @@ API redactors and their `sk-` coverage:
 - [x] Docs sync: architecture/security.md (setup responses + redaction), reference/configuration.md,
       reference/api.md (admin AI allowances), guides/agents.md, apps/api/.env.example, env-reference + api-reference skills
 - [x] Update summarize backlog file with what shipped and what remains
-- [ ] PR comment: each hardening, its test, revert evidence, bypass attempts
+- [x] PR comment: each hardening, its test, revert evidence, bypass attempts — PR #2168
+      (https://github.com/raphaeltm/simple-agent-manager/pull/2168#issuecomment-5860564803). Not merged by its
+      author: the orchestrator runs the independent adversarial review and merges.
 
 ## Acceptance Criteria
 
