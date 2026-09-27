@@ -90,6 +90,16 @@ async function reportRefusal(
   return { status: 'unavailable', reason };
 }
 
+/** Record a terminal wake refusal found outside the VM recovery claim path. */
+export function reportSessionRecoveryRefusal(
+  env: Env,
+  chatSessionId: string,
+  reason: string,
+  detail?: string | null
+): Promise<SessionRecoveryResult> {
+  return reportRefusal(drizzle(env.DATABASE, { schema }), env, chatSessionId, reason, detail);
+}
+
 // The node-pool boundary inventory (`scripts/quality/node-pool-boundary/inventory-data.ts`)
 // requires the module that holds this tasks-INSERT writer to also call
 // `resolveTaskStartPlacement*` and `ensureTaskRunnerStarted`. Keep the writer beside

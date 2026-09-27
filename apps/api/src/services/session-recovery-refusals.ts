@@ -39,6 +39,10 @@ const SESSION_RECOVERY_REFUSALS: Record<string, SessionRecoveryRefusalClassifica
     action: 'drop',
     description: 'This runtime wakes in place and does not use VM snapshot recovery.',
   },
+  container_runtime_unavailable: {
+    action: 'report',
+    description: 'The sleeping container runtime is gone and cannot wake in place.',
+  },
   sleeping_snapshot_missing: {
     action: 'report',
     description: 'SAM could not find the retained sleep snapshot for this conversation.',

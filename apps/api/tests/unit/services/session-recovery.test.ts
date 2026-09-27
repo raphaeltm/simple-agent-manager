@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../../src/env';
+
 const {
   claimSessionSnapshotRecoveryMock,
   databaseMock,
@@ -157,6 +159,7 @@ vi.mock('../../../src/services/placement-resolver', async (importOriginal) => {
 
 import {
   ensureSessionRecovery,
+  reportSessionRecoveryRefusal,
   SESSION_RECOVERY_INITIAL_PROMPT,
 } from '../../../src/services/session-recovery';
 import { classifySessionRecoveryRefusal } from '../../../src/services/session-recovery-refusals';
@@ -186,6 +189,24 @@ describe('ensureSessionRecovery', () => {
       taskId: 'recovery-task-1',
     });
     assertReplacementDeletionConfirmedMock.mockResolvedValue(undefined);
+  });
+
+  it('records a container wake refusal on the sleeping snapshot', async () => {
+    await expect(
+      reportSessionRecoveryRefusal(
+        { DATABASE: databaseMock } as unknown as Env,
+        'chat-1',
+        'container_runtime_unavailable',
+        'Sleeping container workspace is deleted'
+      )
+    ).resolves.toEqual({ status: 'unavailable', reason: 'container_runtime_unavailable' });
+
+    const update = dbMock.update.mock.results[0]?.value;
+    expect(update.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recoveryError: expect.stringContaining('Sleeping container workspace is deleted'),
+      })
+    );
   });
 
   it('fences an unconfirmed predecessor before claiming or creating recovery state', async () => {

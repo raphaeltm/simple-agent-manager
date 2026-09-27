@@ -5,7 +5,11 @@
  */
 import type { PromptDeliveryResult } from '../durable-objects/project-data/prompt-delivery';
 import type { Env } from '../env';
-import { ensureSessionRecovery, type SessionRecoveryResult } from './session-recovery';
+import {
+  ensureSessionRecovery,
+  reportSessionRecoveryRefusal,
+  type SessionRecoveryResult,
+} from './session-recovery';
 import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
 import { classifySessionRecoveryRefusal } from './session-recovery-refusals';
 
@@ -65,6 +69,27 @@ function recoveryResolution(
   };
 }
 
+function isSleepingContainer(runtime: string | null, sleepStatus: string | null): boolean {
+  return runtime === 'cf-container' && sleepStatus === 'sleeping';
+}
+
+async function reportUnavailableContainer(
+  env: Env,
+  chatSessionId: string,
+  detail: string,
+  runSideEffectGuard: () => Promise<PromptDeliveryResult | null>
+): Promise<TargetResolution> {
+  const guarded = await runSideEffectGuard();
+  if (guarded) return { kind: 'guarded', result: guarded };
+  const refusal = await reportSessionRecoveryRefusal(
+    env,
+    chatSessionId,
+    'container_runtime_unavailable',
+    detail
+  );
+  return recoveryResolution(refusal, detail);
+}
+
 export async function resolveVmPromptDeliveryTarget(
   env: Env,
   projectId: string,
@@ -84,7 +109,8 @@ export async function resolveVmPromptDeliveryTarget(
             a.id AS agent_session_id,
             a.status AS agent_session_status,
             a.updated_at AS agent_session_updated_at,
-            s.sleep_status AS snapshot_sleep_status
+            s.sleep_status AS snapshot_sleep_status,
+            s.runtime AS snapshot_runtime
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
      LEFT JOIN agent_sessions a ON a.workspace_id = w.id
@@ -107,16 +133,30 @@ export async function resolveVmPromptDeliveryTarget(
       agent_session_status: string | null;
       agent_session_updated_at: string | null;
       snapshot_sleep_status: string | null;
+      snapshot_runtime: string | null;
     }>();
 
   if (!row) {
+    const snapshot = await env.DATABASE.prepare(
+      `SELECT runtime, sleep_status FROM session_snapshots WHERE chat_session_id = ? LIMIT 1`
+    )
+      .bind(chatSessionId)
+      .first<{ runtime: string | null; sleep_status: string | null }>();
+    if (snapshot && isSleepingContainer(snapshot.runtime, snapshot.sleep_status)) {
+      return reportUnavailableContainer(
+        env,
+        chatSessionId,
+        'Sleeping container workspace no longer exists',
+        runSideEffectGuard
+      );
+    }
     const guarded = await runSideEffectGuard();
     if (guarded) return { kind: 'guarded', result: guarded };
     const recovery = await ensureSessionRecovery(env, projectId, chatSessionId, sourceTaskGuard);
     return recoveryResolution(recovery, 'Target workspace no longer exists');
   }
   if (
-    row.node_runtime !== 'cf-container' &&
+    (row.snapshot_runtime ?? row.node_runtime) !== 'cf-container' &&
     ['sleeping', 'stopping', 'stopped', 'deleted', 'error'].includes(row.workspace_status)
   ) {
     const guarded = await runSideEffectGuard();
@@ -124,27 +164,52 @@ export async function resolveVmPromptDeliveryTarget(
     const recovery = await ensureSessionRecovery(env, projectId, chatSessionId, sourceTaskGuard);
     return recoveryResolution(recovery, `Target workspace is ${row.workspace_status}`);
   }
-  const sleepingContainer =
-    row.node_runtime === 'cf-container' && row.snapshot_sleep_status === 'sleeping';
+  const sleepingContainer = isSleepingContainer(
+    row.snapshot_runtime ?? row.node_runtime,
+    row.snapshot_sleep_status
+  );
   if (['stopping', 'stopped', 'evicted', 'deleted', 'error'].includes(row.workspace_status)) {
+    if (sleepingContainer) {
+      return reportUnavailableContainer(
+        env,
+        chatSessionId,
+        `Sleeping container workspace is ${row.workspace_status}`,
+        runSideEffectGuard
+      );
+    }
     return {
       kind: 'failed',
-      reason: sleepingContainer ? 'wake_refused' : 'terminal_target',
-      error: sleepingContainer
-        ? `Sleeping container workspace is ${row.workspace_status} and cannot wake in place`
-        : `Target workspace is ${row.workspace_status}`,
+      reason: 'terminal_target',
+      error: `Target workspace is ${row.workspace_status}`,
     };
   }
   if (!row.node_id) {
+    if (sleepingContainer) {
+      return reportUnavailableContainer(
+        env,
+        chatSessionId,
+        'Sleeping container has no assigned node',
+        runSideEffectGuard
+      );
+    }
     return { kind: 'retry', reason: 'Target workspace has no assigned node yet' };
   }
   if (
+    (sleepingContainer && !row.node_status) ||
     ['stopping', 'stopped', 'deleted', 'error'].includes(row.node_status ?? '') ||
     row.node_health_status === 'unhealthy'
   ) {
+    if (sleepingContainer) {
+      return reportUnavailableContainer(
+        env,
+        chatSessionId,
+        'Sleeping container node is unavailable',
+        runSideEffectGuard
+      );
+    }
     return {
       kind: 'failed',
-      reason: sleepingContainer ? 'wake_refused' : 'dead_target',
+      reason: 'dead_target',
       error: 'Target node is unavailable',
     };
   }
@@ -159,13 +224,29 @@ export async function resolveVmPromptDeliveryTarget(
     };
   }
   if (!row.agent_session_id) {
+    if (sleepingContainer) {
+      return reportUnavailableContainer(
+        env,
+        chatSessionId,
+        'Sleeping container has no agent session',
+        runSideEffectGuard
+      );
+    }
     return { kind: 'retry', reason: 'Target agent session has not started yet' };
   }
   if (row.agent_session_status !== 'running') {
     if (['completed', 'failed', 'error', 'stopped'].includes(row.agent_session_status ?? '')) {
+      if (sleepingContainer) {
+        return reportUnavailableContainer(
+          env,
+          chatSessionId,
+          `Sleeping container agent session is ${row.agent_session_status}`,
+          runSideEffectGuard
+        );
+      }
       return {
         kind: 'failed',
-        reason: sleepingContainer ? 'wake_refused' : 'terminal_target',
+        reason: 'terminal_target',
         error: `Target agent session is ${row.agent_session_status}`,
       };
     }
@@ -187,7 +268,7 @@ export async function resolveVmPromptDeliveryTarget(
         row.agent_version ?? 'legacy',
         row.agent_session_updated_at ?? 'unknown',
       ].join(':'),
-      runtime: row.node_runtime ?? 'vm',
+      runtime: row.node_runtime ?? row.snapshot_runtime ?? 'vm',
     },
   };
 }
