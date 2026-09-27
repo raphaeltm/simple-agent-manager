@@ -2163,12 +2163,44 @@ describe('MCP Routes', () => {
     });
 
     it('rechecks active project membership before accepting a continuation', async () => {
+      mockD1._stmt.all.mockResolvedValue({
+        results: [
+          { owner_name: 'proj-456:archive:g1:s0', generation: 1 },
+          { owner_name: 'proj-456:archive:g1:s1', generation: 1 },
+        ],
+      });
+      Object.assign(mockEnv, {
+        ENCRYPTION_KEY: 'mcp-archive-search-test-key',
+        PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS: '1',
+      });
+      mockDoStub.archiveTargetSearchProjectMessages.mockResolvedValue({
+        results: [],
+        coverage: {
+          sessionsAvailable: 0,
+          sessionsIndexed: 0,
+          sessionsIncomplete: 0,
+          errors: [],
+        },
+      });
+      const first = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: { query: 'test' },
+        })
+      );
+      const firstBody = await first.json();
+      const continuation = JSON.parse(firstBody.result.content[0].text).archiveSearch.continuation;
+      expect(continuation).toEqual(expect.any(String));
+
+      mockDoStub.searchMessages.mockClear();
+      mockDoStub.archiveTargetSearchProjectMessages.mockClear();
       mockDispatchProjectAccess({ memberRole: null });
       const res = await mcpRequest(
         app,
         jsonRpcRequest('tools/call', {
           name: 'search_messages',
-          arguments: { query: 'test', continuation: 'previously-valid-signed-cursor' },
+          arguments: { query: 'test', continuation },
         })
       );
 
@@ -2176,6 +2208,7 @@ describe('MCP Routes', () => {
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(mockDoStub.searchMessages).not.toHaveBeenCalled();
+      expect(mockDoStub.archiveTargetSearchProjectMessages).not.toHaveBeenCalled();
     });
 
     it('rejects a continuation combined with a session-scoped search', async () => {
