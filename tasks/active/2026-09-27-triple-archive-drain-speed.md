@@ -46,20 +46,20 @@ one session per hour, which only outpaces growth on quiet days.
 
 ## Implementation Checklist
 
-- [ ] `apps/api/wrangler.toml`: `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` `3600000` → `1080000`
+- [x] `apps/api/wrangler.toml`: `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` `3600000` → `1080000`
       (18 min: always due at the fourth five-minute tick despite the observed start jitter, never
       at the third) with a comment giving the evidence
-- [ ] `apps/api/wrangler.toml`: `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` `800000` → `2400000` with
+- [x] `apps/api/wrangler.toml`: `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` `800000` → `2400000` with
       the cost evidence in its comment; fix "hourly" wording in the adjacent message-budget comment
-- [ ] Test helper `shippedSweepTicksPerDay()` in `tests/helpers/shipped-archive-budget.ts`, used by
+- [x] Test helper `shippedSweepTicksPerDay()` in `tests/helpers/shipped-archive-budget.ts`, used by
       both shipped-value tests instead of a hardcoded 24
-- [ ] `write-budget-shipped-factor.test.ts`: keep the factor-8 calibration against a named
+- [x] `write-budget-shipped-factor.test.ts`: keep the factor-8 calibration against a named
       historical 800k allowance; assert the shipped allowance clears every shipped tick
-- [ ] `sweep-message-budget-shipped.test.ts`: derive ticks/day; update the override note
-- [ ] `SHIPPED_DAILY_WRITE_BUDGET` in `tests/helpers/archive-sweep-ceiling.ts`, pinned to
+- [x] `sweep-message-budget-shipped.test.ts`: derive ticks/day; update the override note
+- [x] `SHIPPED_DAILY_WRITE_BUDGET` in `tests/helpers/archive-sweep-ceiling.ts`, pinned to
       `wrangler.toml` by a unit case and used by the Worker test's `sweepEnv`
-- [ ] Docs: `apps/www/.../reference/configuration.md`, `.claude/skills/env-reference/SKILL.md`,
-      `apps/api/.env.example` shipped values (and the stale "ships 4" sessions note)
+- [x] Docs: `apps/www/.../reference/configuration.md`, `.claude/skills/env-reference/SKILL.md`,
+      `apps/api/.env.example` shipped values (and the stale "ships 4" / "ships 5000" notes)
 - [ ] Production GitHub Environment `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` → `2400000`
       immediately before merge (recorded in the PR body)
 - [ ] Post-deploy: deployed `plain_text` bindings show both values; cadence row
@@ -72,9 +72,13 @@ one session per hour, which only outpaces growth on quiet days.
       `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET=2400000` (script-settings API, not the diff)
 - [ ] Production archives ≈3 SAM sessions per hour in the first hours after deploy (D1
       `project_data_archive_migrations`), versus ≈1/hour before
-- [ ] Shipped-value tests fail if the cadence is raised without a matching allowance (the old
-      800k allowance against 72 ticks/day must redden `write-budget-shipped-factor.test.ts`)
-- [ ] All docs quoting the shipped values match `wrangler.toml`
+- [x] Shipped-value tests fail if the cadence is raised without a matching allowance (the old
+      800k allowance against 72 ticks/day must redden `write-budget-shipped-factor.test.ts`).
+      Verified 2026-09-27: budget-only revert reddened 3 cases (`expected 37 to be greater than or
+      equal to 72`, `expected 800000 to be 2400000`, `expected 35 to be greater than 72`);
+      cadence-only revert reddened `raises the daily message ceiling` (`expected 54 to be less than 24`).
+- [x] All docs quoting the shipped values match `wrangler.toml` (`git grep` for the old shipped
+      values outside `tasks/archive` returns nothing)
 
 ## References
 
