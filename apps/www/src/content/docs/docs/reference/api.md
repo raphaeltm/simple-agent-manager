@@ -588,7 +588,7 @@ user's own provider credential.
 Before the tier check, each of those routes also requires the model to be on the operator's
 allowlist, `AI_PROXY_ALLOWED_MODELS` (by default every model in the platform catalog), whether or
 not the user has an allowance; any other model returns `400` with an `invalid_request_error`.
-Allowances live in Workers KV, so a change can take up to about a minute to reach every Cloudflare
+Allowances live in Workers KV, so a change can take a minute or more to reach every Cloudflare
 location.
 
 ### `DELETE /api/admin/ai-allowance/:userId`
