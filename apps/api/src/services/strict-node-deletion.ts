@@ -1,4 +1,8 @@
-import type { ProviderRequestContext } from '@simple-agent-manager/providers';
+import {
+  hasAmbiguousLabel,
+  type ProviderRequestContext,
+  type VMInstance,
+} from '@simple-agent-manager/providers';
 import { type CredentialProvider, isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -9,6 +13,11 @@ import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { deleteDNSRecord } from './dns';
 import { getTimeoutMs } from './fetch-timeout';
+import {
+  buildNodeProviderLabels,
+  resolveEnvironmentLabel,
+  resolveInstallationId,
+} from './node-provider-labels';
 import { persistError } from './observability';
 import {
   hasExactProviderCredentialGenerationProof,
@@ -287,6 +296,119 @@ async function deleteStrictProviderInstance(
   return 'deleted';
 }
 
+function providerInventoryMatchesLabels(
+  server: VMInstance,
+  labels: Record<string, string>
+): boolean {
+  return Object.entries(labels).every(
+    ([key, value]) => !hasAmbiguousLabel(server.labels, key) && server.labels[key] === value
+  );
+}
+
+function sameProviderInventoryIdentity(current: VMInstance, discovered: VMInstance): boolean {
+  return (
+    current.id === discovered.id &&
+    current.createdAt === discovered.createdAt &&
+    current.location === discovered.location &&
+    current.serverType === discovered.serverType
+  );
+}
+
+/**
+ * Resolve a stale providerless destroy claim against the exact provider inventory.
+ *
+ * This path is deliberately narrower than ordinary strict deletion: the row must
+ * already be destroying, carry a complete server-authored placement snapshot, and
+ * resolve the exact credential generation used for allocation. Provider filtering is
+ * never trusted by itself; every returned server must repeat the node, incarnation,
+ * environment, installation, role, and managed labels locally. A discovered server is
+ * re-read immediately before deletion, while a complete empty inventory proves that
+ * the old rejected allocation left no runtime to delete.
+ */
+async function reconcileStrictProviderlessVm(
+  db: NodeDb,
+  node: NodeRow,
+  userId: string,
+  env: Env,
+  requestContext?: ProviderRequestContext
+): Promise<StrictNodeDeletionResult['providerVm']> {
+  if (node.status !== 'destroying' || !hasManagedWorkspaceVmPlacementProof(node)) {
+    throw new Error(
+      `Cannot confirm managed VM termination for node ${node.id}: instance identity is missing`
+    );
+  }
+  const installationId = resolveInstallationId(env);
+  const environmentLabel = resolveEnvironmentLabel(env);
+  if (!installationId || !environmentLabel || !node.runtimeIncarnationId) {
+    throw new Error(
+      `Cannot reconcile providerless VM ${node.id}: exact ownership scope is unavailable`
+    );
+  }
+
+  const labels = buildNodeProviderLabels({
+    nodeId: node.id,
+    isDeploymentNode: false,
+    environmentLabel,
+    installationId,
+    runtimeIncarnationId: node.runtimeIncarnationId,
+  });
+  const providerResult = await requireStrictNodeProvider(db, node, userId, env);
+  if (providerResult.providerName !== node.cloudProvider) {
+    throw new Error(
+      `Cannot reconcile providerless VM ${node.id}: persisted provider binding did not resolve exactly`
+    );
+  }
+  const servers = requestContext
+    ? await providerResult.provider.listVMs(labels, requestContext)
+    : await providerResult.provider.listVMs(labels);
+
+  if (servers.some((server) => !providerInventoryMatchesLabels(server, labels))) {
+    throw new Error(
+      `Cannot reconcile providerless VM ${node.id}: provider inventory returned foreign or ambiguous ownership`
+    );
+  }
+  if (servers.length > 1) {
+    throw new Error(
+      `Cannot reconcile providerless VM ${node.id}: provider inventory returned duplicate exact ownership`
+    );
+  }
+
+  const discovered = servers[0];
+  if (!discovered) {
+    await requireSameNodeIncarnation(db, node, 'providerless inventory absence proof');
+    return 'already-absent';
+  }
+  const createdAt = Date.parse(discovered.createdAt);
+  if (
+    !Number.isFinite(createdAt) ||
+    createdAt < Date.parse(node.createdAt) ||
+    createdAt > Date.now() ||
+    discovered.location !== node.vmLocation ||
+    discovered.serverType !== node.providerInstanceType
+  ) {
+    throw new Error(
+      `Cannot reconcile providerless VM ${node.id}: provider inventory identity is inconsistent`
+    );
+  }
+
+  const current = requestContext
+    ? await providerResult.provider.getVM(discovered.id, requestContext)
+    : await providerResult.provider.getVM(discovered.id);
+  if (
+    !current ||
+    !sameProviderInventoryIdentity(current, discovered) ||
+    !providerInventoryMatchesLabels(current, labels)
+  ) {
+    throw new Error(
+      `Cannot reconcile providerless VM ${node.id}: exact ownership changed before deletion`
+    );
+  }
+  await requireSameNodeIncarnation(db, node, 'providerless inventory delete');
+  if (requestContext) await providerResult.provider.deleteVM(current.id, requestContext);
+  else await providerResult.provider.deleteVM(current.id);
+  return 'deleted';
+}
+
 async function persistStrictDnsCleanupError(
   env: Env,
   input: {
@@ -525,13 +647,10 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
-  const providerVm = await deleteStrictProviderInstance(
-    db,
-    node,
-    userId,
-    env,
-    options.providerRequestContext
-  );
+  const providerVm =
+    initialNode.status === 'destroying' && node.runtime === 'vm' && !node.providerInstanceId
+      ? await reconcileStrictProviderlessVm(db, node, userId, env, options.providerRequestContext)
+      : await deleteStrictProviderInstance(db, node, userId, env, options.providerRequestContext);
   const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
   if (options.cleanupDns !== false) {
     await deleteStrictNodeDnsRecord(

@@ -570,7 +570,7 @@ describe('node resource deletion services', () => {
     );
 
     await expect(deleteNodeResourcesStrict('pool-node-1', 'user-1', ENV)).rejects.toThrow(
-      /instance identity is missing/
+      /exact ownership scope is unavailable/
     );
     expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(deleteDNSRecord).not.toHaveBeenCalled();

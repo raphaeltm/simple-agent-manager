@@ -147,7 +147,7 @@ export async function sweepMaxLifetimeNodes(
             ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
      FROM nodes n
      LEFT JOIN workspaces w ON w.node_id = n.id
-     WHERE n.status NOT IN ('stopped', 'deleted')
+     WHERE n.status NOT IN ('stopped', 'destroying', 'deleted')
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
        AND EXISTS (

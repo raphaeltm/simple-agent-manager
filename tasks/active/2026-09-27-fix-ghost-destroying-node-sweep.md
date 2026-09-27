@@ -44,17 +44,17 @@ backs them off without reaching a terminal state.
 
 ## Checklist
 
-- [ ] Route `destroying` rows away from max-lifetime cleanup and into their
+- [x] Route `destroying` rows away from max-lifetime cleanup and into their
       dedicated handoff phase.
-- [ ] Reconcile a stale providerless managed VM using its exact credential and
+- [x] Reconcile a stale providerless managed VM using its exact credential and
       full provider ownership labels before terminalization.
-- [ ] Preserve exact-incarnation CAS fences and revalidate any discovered VM
+- [x] Preserve exact-incarnation CAS fences and revalidate any discovered VM
       immediately before the provider delete boundary.
-- [ ] Fail closed for unavailable scope, failed/partial inventory, ambiguous or
+- [x] Fail closed for unavailable scope, failed/partial inventory, ambiguous or
       foreign labels, duplicate matches, changed identity, and credential drift.
-- [ ] Add a regression test that invokes `runNodeCleanupSweep` with production-
+- [x] Add a regression test that invokes `runNodeCleanupSweep` with production-
       shaped providerless `destroying` rows and verifies candidate isolation.
-- [ ] Revert the production fix once and record that the regression test fails.
+- [x] Revert the production fix once and record that the regression test fails.
 - [ ] Run focused and repository quality gates, specialist reviews, staging
       verification, PR CI, CodeRabbit, merge, and production deployment.
 - [ ] After one or two production cron ticks, query D1 and report the
