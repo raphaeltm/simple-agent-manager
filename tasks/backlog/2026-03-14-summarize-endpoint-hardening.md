@@ -17,7 +17,7 @@ The `/summarize` endpoint works correctly but has several hardening opportunitie
 ## Acceptance Criteria
 
 - [ ] `/summarize` route passes `['user', 'assistant']` as `roles` to `getMessages()`
-- [ ] Rate limit added for `/summarize` endpoint (`RATE_LIMIT_SUMMARIZE` env var)
+- [x] Rate limit added for `/summarize` endpoint (shipped as `RATE_LIMIT_SESSION_SUMMARIZE`, shared with `fork-prepare`)
 - [ ] `session.taskId` guarded with `typeof` check
 - [ ] Miniflare integration test covers: session not found (404), empty messages (400), successful summarize
 - [ ] `CONTEXT_SUMMARY_*` vars documented in `wrangler.toml` `[vars]` section
@@ -29,3 +29,19 @@ The `/summarize` endpoint works correctly but has several hardening opportunitie
 - `apps/api/src/services/session-summarize.ts`
 - `apps/api/src/services/task-title.ts` (classifyError source)
 - Review report: Cloudflare specialist review of PR #376
+
+## Status (2026-09-27)
+
+The rate-limit item shipped with `tasks/active/2026-09-27-close-four-api-security-gaps.md`
+(branch `sam/close-four-pre-existing-wzcag1`): `summarize` and `fork-prepare` share one per-user
+bucket, `RATE_LIMIT_SESSION_SUMMARIZE` (default 30 per hour), and the `summarize` route moved from
+`routes/chat.ts` to `routes/chat-fork.ts`. This file stays in backlog for the remaining items:
+
+- Item 1: role pre-filtering at the DO boundary (`getMessages` `roles` parameter) — both routes still
+  fetch all 1,000 messages and filter in JS.
+- Item 3: the `session.taskId as string | null` cast in the `summarize` route (now in
+  `routes/chat-fork.ts`).
+- Item 4: Miniflare integration test for the route handler (404 / 400 / success).
+- Item 5: `CONTEXT_SUMMARY_*` vars in `wrangler.toml` `[vars]`.
+- Item 6: `classifyError` extracted to `src/lib/errors.ts`.
+

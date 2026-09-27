@@ -129,18 +129,25 @@ API redactors and their `sk-` coverage:
       client secret found in the body)
 
 ### 2. Model-tier enforcement
-- [ ] `packages/shared`: `PLATFORM_AI_MODEL_TIERS` (exhaustive over the union), `isPlatformAIModelTier`,
+- [x] `packages/shared`: `PLATFORM_AI_MODEL_TIERS` (exhaustive over the union), `isPlatformAIModelTier`,
       `getPlatformAIModelTier(modelId)` derived from `PLATFORM_AI_MODELS`; export + shared tests
-- [ ] `services/ai-model-tier-gate.ts`: read allowance once (Valibot-validated), decide
+- [x] `services/ai-model-tier-gate.ts`: read allowance once via `getAdminAiAllowance` (Valibot-validated), decide
       allowed / tier-not-allowed / uncataloged-model; null = all tiers; malformed stored value fails closed
-- [ ] Wire gate into `/ai/v1/chat/completions`, `/ai/v1/responses`, `/ai/anthropic/v1/messages`,
+- [x] Wire gate into `/ai/v1/chat/completions`, `/ai/v1/responses`, `/ai/anthropic/v1/messages`,
       `/ai/anthropic/v1/messages/count_tokens` after model validation, before the usage gate / upstream auth / fetch
-- [ ] 403 with clear message in each route's native error format
-- [ ] Admin allowance route: reject unknown tier names (400); reuse `getAdminAiAllowance` (drop duplicate)
-- [ ] Route tests per route: allowed passes (owner-path control), disallowed → 403 and no upstream fetch,
-      null → all allowed, uncataloged model under restriction → 403, malformed allowance → 403
-- [ ] Machine-checked enumeration: every proxy route file that forwards with platform credentials runs the gate
-- [ ] Revert gate once per route family → tests red; restore
+      (after pure-move splits of ai-proxy.ts 655→356 and ai-proxy-anthropic.ts 582→478)
+- [x] 403 with clear message in each route's native error format
+- [x] Admin allowance route: reject unknown tier names (400); reuse `getAdminAiAllowance` (drop duplicate)
+- [x] Route tests per route: allowed passes (owner-path control), disallowed → 403 and no upstream fetch,
+      null → all allowed, uncataloged model under restriction → 403, malformed allowance → 403, thrown KV read → 500
+      without spend, admin-route vertical slice
+- [x] Machine-checked enumeration: every proxy route file that forwards with platform credentials runs the gate
+      (`ai-proxy-model-tier-coverage.test.ts`; also pins passthrough as platform-credential-free)
+- [x] Revert gate once per route family → tests red; restore (ai-proxy.ts gate calls removed: 10 red —
+      4 denial cases × chat/completions+responses, operator-model, admin vertical; Anthropic gate calls removed:
+      9 red — 4 denial cases × messages+count_tokens, untiered native model; gate mutations: unreadable→allowed
+      reddens exactly the 4 fail-closed tests, untiered→allowed exactly the 2 untiered tests; one handler's gate
+      removed reddens the coverage test)
 
 ### 3. Redaction
 - [x] `lib/credential-token-redaction.ts`: one `redactCredentialTokens` (provider `sk-`, GitHub, SAM token families)

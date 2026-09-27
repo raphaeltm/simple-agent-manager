@@ -52,6 +52,8 @@ vi.mock('../../../src/middleware/rate-limit', () => ({
   getCurrentWindowStart: () => 1000,
 }));
 vi.mock('../../../src/services/ai-token-budget', () => ({
+  // No admin allowance: the model-tier gate allows every tier (covered in ai-proxy-model-tiers.test.ts).
+  getAdminAiAllowance: async () => null,
   checkAiUsageGate: (...args: unknown[]) => mockCheckAiUsageGate(...args),
   checkTokenBudget: (...args: unknown[]) => mockCheckTokenBudget(...args),
   checkMonthlyCostCap: (...args: unknown[]) => mockCheckMonthlyCostCap(...args),

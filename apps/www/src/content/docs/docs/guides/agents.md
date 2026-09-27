@@ -111,6 +111,8 @@ Each agent runs in one of three provider modes, which control where LLM traffic 
 
 You pick the mode when you connect an agent. The **SAM** platform proxy is never selected automatically — you have to opt in.
 
+In **SAM** mode an administrator can limit your account to certain model tiers (low-cost, standard, premium). A model outside your allowed tiers is refused with an error naming the model and the tiers you can use; your own API keys and subscriptions are not affected.
+
 ## Agent Profiles
 
 An **agent profile** bundles a connected agent, a model, and settings into a reusable configuration. Profiles are how you choose what runs: pick a profile from the chat input when you start a session, or attach one to a [trigger](/docs/guides/webhook-triggers/) for automated work. Create and manage profiles under a project's **Profiles** page.

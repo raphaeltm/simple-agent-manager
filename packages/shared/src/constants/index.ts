@@ -478,6 +478,11 @@ export {
   type ToolCallSupport,
   VALID_BILLING_MODES,
 } from './ai-services';
+export {
+  getPlatformAIModelTier,
+  isPlatformAIModelTier,
+  PLATFORM_AI_MODEL_TIERS,
+} from './ai-model-tiers';
 
 // Agent Settings
 export {

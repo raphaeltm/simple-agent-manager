@@ -24,6 +24,7 @@ import {
   aiProxyBodyParseError,
   aiProxyRequestBodyMaxBytes,
   enforceInputLimit,
+  enforceModelTier,
   enforceRateLimit,
   enforceUsageGate,
   prepareAIProxyRequest,
@@ -96,6 +97,8 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   );
   const modelError = validateAllowedModel(c, modelId);
   if (modelError) return modelError;
+  const tierError = await enforceModelTier(c, prepared, modelId);
+  if (tierError) return tierError;
   const usageError = await enforceUsageGate(c, prepared.userId);
   if (usageError) return usageError;
 
@@ -263,6 +266,8 @@ aiProxyRoutes.post('/responses', async (c) => {
     );
   }
 
+  const tierError = await enforceModelTier(c, prepared, modelId);
+  if (tierError) return tierError;
   const usageError = await enforceUsageGate(c, prepared.userId);
   if (usageError) return usageError;
 

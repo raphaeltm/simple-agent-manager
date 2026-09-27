@@ -67,7 +67,8 @@ user-invocable: false
 - `POST /api/projects/:projectId/sessions/:sessionId/prompt` — Send a follow-up prompt to the active agent session
 - `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/send-to-agent` — Queue one idempotent comment directive through ProjectData prompt delivery for the explicit human "send to agent" action
 - `POST /api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve` — Validate, forward, and record one structured human-input answer (`{ answer }`)
-- `POST /api/projects/:projectId/sessions/:sessionId/summarize` — Generate a session summary for conversation forking
+- `POST /api/projects/:projectId/sessions/:sessionId/fork-prepare` — Repair fork lineage and summarize the source session for Fork
+- `POST /api/projects/:projectId/sessions/:sessionId/summarize` — Generate a session summary for Retry. Shares one per-user rate-limit bucket with `fork-prepare` (`RATE_LIMIT_SESSION_SUMMARIZE`, default 30/hour); over it both return `429` with `Retry-After`
 - `POST /api/projects/:projectId/sessions/:sessionId/stop` — Stop a chat session
 
 Comment threads are scoped to the ProjectData Durable Object addressed by `projectId`; route authorization requires project `task:read` for list and project-wide inbox reads, and `task:write` for mutations. The DO rejects missing sessions, missing messages, and cross-session message anchors. Mutations return `{ thread, idempotent }` or `{ thread, reply, idempotent }`; successful first writes use HTTP 201 for create/reply and 200 for status transitions. Project session WebSocket listeners receive `{ type: "comment.thread.changed", payload: { sessionId, thread, reason } }` with `reason` in `thread_created | reply_created | marked_sent | resolved | reopened`.
@@ -113,6 +114,7 @@ Project event pull loop: create a subscription with the narrowest useful filter,
 
 ## Administration (Superadmin Only)
 
+- `GET|PUT|DELETE /api/admin/ai-allowance/:userId` — Per-user AI allowance: budget ceilings plus `allowedModelTiers` (`null` = every tier, else a subset of `low-cost`/`standard`/`premium`; unknown names are `400`). The AI proxy enforces the tiers on every platform-credential route (`services/ai-model-tier-gate.ts`): out-of-tier or untiered models get `403 permission_error`, an unreadable allowance fails closed; BYO-key passthrough is not restricted
 - `GET /api/admin/tasks/stuck` — List tasks currently in transient states
 - `GET /api/admin/tasks/:taskId/reconciliation-diagnostics` — Read the TaskRunner probe, task-scoped runtime liveness, eligibility threshold, reconciliation decision, and whether/where the bounded cursor page selects the task, without mutating task state
 - `GET /api/admin/tasks/recent-failures` — List recent failed tasks with error details
@@ -247,7 +249,7 @@ The MCP `create_trigger` tool intentionally creates cron triggers only. Generic 
 
 ## Voice Transcription
 
-- `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper)
+- `POST /api/transcribe` — Transcribe audio via Workers AI (Whisper). Rate-limited per user (`RATE_LIMIT_TRANSCRIBE`, default 30 per `RATE_LIMIT_TRANSCRIBE_WINDOW_SECONDS` = 60)
 
 ## Client Error Reporting
 

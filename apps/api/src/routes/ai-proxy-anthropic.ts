@@ -53,6 +53,7 @@ import {
   anthropicError,
   anthropicProviderErrorHeaders,
   anthropicUsageGateError,
+  enforceAnthropicModelTier,
   scheduleAnthropicPlatformLimitHeaders,
 } from './ai-proxy-anthropic-support';
 
@@ -141,6 +142,9 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
       400
     );
   }
+
+  const tierError = await enforceAnthropicModelTier(c.env.KV, auth, modelId);
+  if (tierError) return tierError;
 
   const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
   if (!usageGate.allowed) {
@@ -363,6 +367,9 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
       400
     );
   }
+
+  const tierError = await enforceAnthropicModelTier(c.env.KV, auth, modelId);
+  if (tierError) return tierError;
 
   const usageGate = await checkAiUsageGate(c.env.KV, userId, c.env);
   if (!usageGate.allowed) {

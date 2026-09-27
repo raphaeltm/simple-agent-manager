@@ -15,6 +15,7 @@ import type { Context } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { RequestBodyTooLargeError } from '../lib/runtime-validation';
 import {
@@ -22,6 +23,7 @@ import {
   createRateLimitKey,
   getCurrentWindowStart,
 } from '../middleware/rate-limit';
+import { checkModelTierAllowance, describeModelTierDenial } from '../services/ai-model-tier-gate';
 import {
   AIProxyAuthError,
   extractCallbackToken,
@@ -176,6 +178,29 @@ export function validateAllowedModel(c: AIProxyContext, modelId: string): Respon
     'invalid_request_error',
     400
   );
+}
+
+/**
+ * Refuses a model outside the caller's admin-allowed budget tiers (`services/ai-model-tier-gate.ts`).
+ * Runs once the model is resolved and allowlisted, before the usage gate and any upstream spend.
+ */
+export async function enforceModelTier(
+  c: AIProxyContext,
+  auth: Pick<AIProxyRequestContext, 'userId' | 'workspaceId'>,
+  modelId: string
+): Promise<Response | null> {
+  const decision = await checkModelTierAllowance(c.env.KV, auth.userId, modelId);
+  if (decision.allowed) return null;
+
+  log.warn('ai_proxy.model_tier_denied', {
+    userId: auth.userId,
+    workspaceId: auth.workspaceId,
+    modelId,
+    ...decision,
+  });
+  return proxyJsonError(c, describeModelTierDenial(modelId, decision), 'permission_error', 403, {
+    code: decision.reason,
+  });
 }
 
 export function enforceInputLimit(

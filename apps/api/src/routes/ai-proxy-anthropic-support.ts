@@ -12,6 +12,7 @@ import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { RequestBodyTooLargeError } from '../lib/runtime-validation';
 import type { resolveUpstreamAuth } from '../services/ai-billing';
+import { checkModelTierAllowance, describeModelTierDenial } from '../services/ai-model-tier-gate';
 import {
   updateAIProxyAgentCredentialAttribution,
   type verifyAIProxyAuth,
@@ -132,4 +133,25 @@ export function scheduleAnthropicPlatformLimitHeaders(
   });
   optionalExecutionContext(() => c.executionCtx)?.waitUntil(telemetry);
   void telemetry;
+}
+
+/**
+ * Refuses a model outside the caller's admin-allowed budget tiers (`services/ai-model-tier-gate.ts`)
+ * in the Anthropic error format. Runs before the usage gate and any upstream spend.
+ */
+export async function enforceAnthropicModelTier(
+  kv: KVNamespace,
+  auth: Pick<AnthropicProxyAuth, 'userId' | 'workspaceId'>,
+  modelId: string
+): Promise<Response | null> {
+  const decision = await checkModelTierAllowance(kv, auth.userId, modelId);
+  if (decision.allowed) return null;
+
+  log.warn('ai_proxy_anthropic.model_tier_denied', {
+    userId: auth.userId,
+    workspaceId: auth.workspaceId,
+    modelId,
+    ...decision,
+  });
+  return anthropicError(describeModelTierDenial(modelId, decision), 'permission_error', 403);
 }

@@ -12,8 +12,16 @@ Discovered during security/Cloudflare specialist review of PR #1073. This is a p
 
 ## Acceptance Criteria
 
-- [ ] AI proxy request handler checks the requesting user's `allowedModelTiers` against the requested model's tier
-- [ ] If the model tier is not in the allowed list, return 403 with a clear error message
-- [ ] Model-to-tier mapping is defined (e.g., `claude-opus-4-7` → `frontier`, `claude-haiku-4-5` → `standard`)
-- [ ] Admin can set `allowedModelTiers: null` to allow all tiers (default behavior)
-- [ ] Tests cover: allowed tier passes, disallowed tier blocked, null allows all
+- [x] AI proxy request handler checks the requesting user's `allowedModelTiers` against the requested model's tier
+- [x] If the model tier is not in the allowed list, return 403 with a clear error message
+- [x] Model-to-tier mapping is defined (e.g., `claude-opus-4-7` → `frontier`, `claude-haiku-4-5` → `standard`)
+- [x] Admin can set `allowedModelTiers: null` to allow all tiers (default behavior)
+- [x] Tests cover: allowed tier passes, disallowed tier blocked, null allows all
+
+## Resolution (2026-09-27)
+
+Implemented under `tasks/active/2026-09-27-close-four-api-security-gaps.md`. The tier map is the
+catalog's own `PlatformAIModel.tier` (`low-cost | standard | premium`), read through
+`getPlatformAIModelTier`; the spec's `frontier` example does not exist. The native Anthropic path is
+`/ai/anthropic/v1/messages` (plus `count_tokens`), not `/ai/v1/messages`.
+
