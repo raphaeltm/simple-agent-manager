@@ -474,16 +474,27 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
-  const canUseProviderlessVmAbsenceProof =
-    hasManagedWorkspaceVmPlacementProof(initialNode) &&
-    !initialNode.providerInstanceId &&
-    (initialNode.status === 'destroying' ||
-      (!!initialNode.runtimeTerminationConfirmedAt && initialNode.status === 'error'));
-
   const node = await claimManagedNodeDeletion(db, initialNode);
 
   if (node.runtimeTerminationConfirmedAt) {
+    if (
+      initialNode.status === 'destroying' &&
+      node.runtime === 'vm' &&
+      !node.providerInstanceId &&
+      !hasManagedWorkspaceVmPlacementProof(initialNode)
+    ) {
+      throw new Error(`Providerless VM termination proof lacks managed placement: node=${nodeId}`);
+    }
     await requireSameNodeIncarnation(db, node, 'existing termination proof use');
+    if (options.cleanupDns !== false) {
+      await deleteStrictNodeDnsRecord(
+        node,
+        userId,
+        env,
+        options.requestDeadlineMs,
+        options.providerRequestContext?.signal
+      );
+    }
     await markWorkspaceRuntimeTerminationConfirmed(db, node, node.runtimeTerminationConfirmedAt);
     return {
       providerVm: node.providerInstanceId ? 'already-absent' : 'no-instance',
@@ -497,27 +508,6 @@ export async function deleteNodeResourcesStrict(
     await requireSameNodeIncarnation(db, node, 'container teardown');
     await destroyVmAgentContainer(env, node.id);
     const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
-    if (options.cleanupDns !== false) {
-      await deleteStrictNodeDnsRecord(
-        node,
-        userId,
-        env,
-        options.requestDeadlineMs,
-        options.providerRequestContext?.signal
-      );
-    }
-    return {
-      providerVm: 'no-instance',
-      runtimeTerminationConfirmedAt,
-      runtimeIncarnationId: node.runtimeIncarnationId,
-      providerInstanceId: node.providerInstanceId,
-    };
-  }
-
-  if (canUseProviderlessVmAbsenceProof && node.runtime === 'vm' && !node.providerInstanceId) {
-    await requireSameNodeIncarnation(db, node, 'providerless VM absence proof');
-    const runtimeTerminationConfirmedAt =
-      node.runtimeTerminationConfirmedAt ?? (await markRuntimeTerminationConfirmed(db, node));
     if (options.cleanupDns !== false) {
       await deleteStrictNodeDnsRecord(
         node,

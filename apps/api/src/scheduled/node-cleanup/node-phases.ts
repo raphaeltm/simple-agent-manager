@@ -279,6 +279,11 @@ async function sweepManagedHandoffNodes(
        AND n.node_class != 'user-owned'
        AND ${cleanupNodeProvenanceSql('n')}
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
+       AND NOT EXISTS (
+         SELECT 1 FROM workspaces active_workspace
+         WHERE active_workspace.node_id = n.id
+           AND active_workspace.status IN ('running', 'creating', 'recovery')
+       )
        ${boundedWarmPlacementClaimGuardSql('n.id')}
      GROUP BY n.id, n.user_id, n.status, n.created_at
      HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?

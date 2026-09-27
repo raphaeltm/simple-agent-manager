@@ -222,21 +222,25 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
   it('terminalizes a destroying pool VM row that never received a provider instance ID', async () => {
     const f = await handoffFixture();
     const snapshot = f.sqlite.prepare('SELECT * FROM session_snapshots').get();
+    f.env.CF_ZONE_ID = 'test-zone';
+    f.env.CF_API_TOKEN = 'test-dns-token';
     f.sqlite
       .prepare(
         `UPDATE nodes
       SET status = 'destroying',
           provider_instance_id = NULL,
-          runtime_termination_confirmed_at = NULL,
+          runtime_termination_confirmed_at = ?,
+          backend_dns_record_id = 'dns-host',
           cleanup_backoff_until = NULL
       WHERE id = 'host'`
       )
-      .run();
+      .run(OLD);
 
     await f.sweepDestroying();
 
     expect(f.result).toMatchObject({ lifetimeDestroyed: 1, errors: 0 });
     expect(f.providerDeletes).toHaveLength(0);
+    expect(f.dnsRequests).toHaveLength(1);
     expect(
       f.sqlite.prepare('SELECT status, runtime_termination_confirmed_at FROM nodes').get()
     ).toEqual({ status: 'deleted', runtime_termination_confirmed_at: expect.any(String) });
@@ -285,32 +289,78 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     expect(f.cleanupWorkspaceActivity).not.toHaveBeenCalled();
   });
 
-  it.each(protectedHandoffMutations)(
-    'keeps %s protected during destroying handoff cleanup',
-    async (_label, mutation) => {
-      const f = await handoffFixture();
-      f.sqlite
-        .prepare(
-          `UPDATE nodes
+  it('excludes old active rows before the bounded page so eligible destroying work advances', async () => {
+    const f = await handoffFixture();
+    f.env.NODE_CLEANUP_SWEEP_LIMIT = '1';
+    f.sqlite
+      .prepare(
+        `UPDATE nodes SET status = 'destroying', provider_instance_id = NULL,
+          runtime_termination_confirmed_at = ? WHERE id = 'host'`
+      )
+      .run(OLD);
+    await seedHost(f, f.starts[0]!, 'active-blocker');
+    f.sqlite
+      .prepare(
+        `UPDATE nodes SET status = 'destroying', created_at = ?, updated_at = ?,
+          placement_credential_fingerprint =
+            (SELECT placement_credential_fingerprint FROM nodes WHERE id = 'host')
+        WHERE id = 'active-blocker'`
+      )
+      .run('2026-09-08T08:00:00.000Z', OLD);
+    f.sqlite
+      .prepare(
+        `INSERT INTO workspaces
+          (id, node_id, user_id, project_id, status, created_at, updated_at)
+        VALUES ('active-workspace', 'active-blocker', 'user-1', 'project-1',
+          'running', '2026-09-08T08:00:00.000Z', '2026-09-08T08:00:00.000Z')`
+      )
+      .run();
+
+    await f.sweepDestroying();
+
+    expect(f.result).toMatchObject({ lifetimeDestroyed: 1, errors: 0 });
+    expect(f.sqlite.prepare("SELECT status FROM nodes WHERE id = 'host'").get()).toEqual({
+      status: 'deleted',
+    });
+    expect(f.sqlite.prepare("SELECT status FROM nodes WHERE id = 'active-blocker'").get()).toEqual({
+      status: 'destroying',
+    });
+  });
+
+  it.each([
+    ...protectedHandoffMutations,
+    [
+      'missing provider rejection proof',
+      'UPDATE nodes SET runtime_termination_confirmed_at = NULL',
+    ],
+  ] as const)('keeps %s protected during destroying handoff cleanup', async (_label, mutation) => {
+    const f = await handoffFixture();
+    f.sqlite
+      .prepare(
+        `UPDATE nodes
       SET status = 'destroying',
           provider_instance_id = NULL,
-          runtime_termination_confirmed_at = NULL,
+          runtime_termination_confirmed_at = ?,
           cleanup_backoff_until = NULL
       WHERE id = 'host'`
-        )
-        .run();
-      f.sqlite.exec(mutation);
+      )
+      .run(OLD);
+    f.sqlite.exec(mutation);
 
-      await f.sweepDestroying();
+    await f.sweepDestroying();
 
-      expect(f.providerDeletes).toEqual([]);
-      expect(f.result).toMatchObject({ lifetimeDestroyed: 0, errors: 0 });
-      expect(
-        f.sqlite.prepare('SELECT status, runtime_termination_confirmed_at FROM nodes').get()
-      ).toEqual({ status: 'destroying', runtime_termination_confirmed_at: null });
-      expect(f.cleanupWorkspaceActivity).not.toHaveBeenCalled();
-    }
-  );
+    expect(f.providerDeletes).toEqual([]);
+    expect(f.result).toMatchObject({ lifetimeDestroyed: 0, errors: 0 });
+    expect(
+      f.sqlite.prepare('SELECT status, runtime_termination_confirmed_at FROM nodes').get()
+    ).toEqual({
+      status: 'destroying',
+      runtime_termination_confirmed_at: mutation.includes('runtime_termination_confirmed_at')
+        ? null
+        : OLD,
+    });
+    expect(f.cleanupWorkspaceActivity).not.toHaveBeenCalled();
+  });
 
   it('aborts dead provider requests within the phase budget and reaches deferred work next tick', async () => {
     const f = await handoffFixture();

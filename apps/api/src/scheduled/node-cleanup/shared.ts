@@ -97,7 +97,8 @@ export function cleanupNodeProvenanceSql(
     AND ${alias}.capacity_source_generation > 0
     AND ${alias}.placement_credential_source IN ('user', 'project', 'platform')
     AND ${alias}.placement_credential_version > 0
-    AND (${alias}.provider_instance_id IS NOT NULL OR ${alias}.status = 'destroying')
+    AND (${alias}.provider_instance_id IS NOT NULL
+      OR (${alias}.status = 'destroying' AND ${alias}.runtime_termination_confirmed_at IS NOT NULL))
     AND ${alias}.provider_instance_vcpu_count > 0
     AND ${alias}.provider_instance_memory_mb > 0
     AND ${present}

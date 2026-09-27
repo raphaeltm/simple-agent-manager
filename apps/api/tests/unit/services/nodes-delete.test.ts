@@ -532,14 +532,14 @@ describe('node resource deletion services', () => {
     ]);
   });
 
-  it('confirms absence for a terminal managed VM placeholder that never received provider identity', async () => {
+  it('uses confirmed rejection proof for a destroying VM without provider identity', async () => {
     nodeRows.push(
       managedPoolNode({
         id: 'placeholder-node',
         status: 'destroying',
         providerInstanceId: null,
         runtimeIncarnationId: 'runtime-incarnation-without-provider-id',
-        runtimeTerminationConfirmedAt: null,
+        runtimeTerminationConfirmedAt: '2026-09-08T10:00:00.000Z',
         cloudProvider: 'hetzner',
         backendDnsRecordId: 'dns-placeholder',
       })
@@ -555,10 +555,25 @@ describe('node resource deletion services', () => {
     expect(createProviderForUser).not.toHaveBeenCalled();
     expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(deleteDNSRecord).toHaveBeenCalledWith('dns-placeholder', ENV);
-    expect(updateCalls).toContainEqual({ runtimeTerminationConfirmedAt: expect.any(String) });
     expect(updateCalls).toContainEqual(
       expect.objectContaining({ runtimeDeletionProof: 'node_runtime_terminated' })
     );
+  });
+
+  it('refuses a destroying VM with no provider identity or absence proof', async () => {
+    nodeRows.push(
+      managedPoolNode({
+        status: 'destroying',
+        providerInstanceId: null,
+        runtimeTerminationConfirmedAt: null,
+      })
+    );
+
+    await expect(deleteNodeResourcesStrict('pool-node-1', 'user-1', ENV)).rejects.toThrow(
+      /instance identity is missing/
+    );
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(deleteDNSRecord).not.toHaveBeenCalled();
   });
 
   it('does not write termination proof when provider deletion races a new VM incarnation', async () => {

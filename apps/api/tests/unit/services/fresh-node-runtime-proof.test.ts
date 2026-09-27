@@ -149,6 +149,67 @@ describe('fresh VM absence proof through real provisioning and cleanup SQL', () 
     expect(await cleanup(node.id)).toBe('skipped');
   });
 
+  it('does not attach rejection proof after a concurrent placement change', async () => {
+    const node = await freshNode();
+    mocks.createVM.mockImplementationOnce(async () => {
+      sqlite.prepare("UPDATE nodes SET vm_location = 'fsn1' WHERE id = ?").run(node.id);
+      throw new ProviderError('hetzner', 412, 'Placement unavailable');
+    });
+
+    await expect(
+      provisionNode(node.id, env, undefined, { rethrowProviderError: true })
+    ).rejects.toThrow('Placement unavailable');
+
+    expect(readNode(node.id)).toMatchObject({
+      status: 'error',
+      providerId: null,
+      proof: null,
+    });
+  });
+
+  it('does not delete a placement changed after rejection proof was recorded', async () => {
+    const node = await freshNode();
+    mocks.createVM.mockRejectedValueOnce(
+      new ProviderError('hetzner', 412, 'Placement unavailable')
+    );
+
+    await expect(
+      provisionNode(node.id, env, undefined, {
+        rethrowProviderError: true,
+        beforeRejectedNodeDelete: async () => {
+          sqlite.prepare("UPDATE nodes SET vm_location = 'fsn1' WHERE id = ?").run(node.id);
+        },
+      })
+    ).rejects.toThrow('Placement unavailable');
+
+    expect(readNode(node.id)).toMatchObject({ status: 'creating', providerId: null });
+    expect(
+      sqlite.prepare('SELECT vm_location FROM nodes WHERE id = ?').get(node.id)
+    ).toEqual({ vm_location: 'fsn1' });
+  });
+
+  it.each([
+    ['definite rejection', new ProviderError('hetzner', 412, 'Placement unavailable'), true],
+    ['ambiguous timeout', new ProviderError('hetzner', undefined, 'Network timeout'), false],
+  ] as const)(
+    'records proof on an already destroying node only after %s',
+    async (_name, error, provenAbsent) => {
+      const node = await freshNode();
+      mocks.createVM.mockImplementationOnce(async () => {
+        sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = ?").run(node.id);
+        throw error;
+      });
+
+      await provisionNode(node.id, env);
+
+      expect(readNode(node.id)).toMatchObject({
+        status: 'destroying',
+        providerId: null,
+        proof: provenAbsent ? expect.any(String) : null,
+      });
+    }
+  );
+
   it('lets ordinary cleanup confirm a recovery allocation rejected before provider resolution', async () => {
     const node = await freshNode();
     mocks.assertPlan.mockRejectedValueOnce(new Error('Node allocation plan is no longer current'));

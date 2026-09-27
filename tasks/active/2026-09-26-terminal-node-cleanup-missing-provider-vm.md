@@ -21,6 +21,10 @@ created these servers, so retrying provider deletion can never make progress.
 - Existing cleanup terminal state for this path is `nodes.status = 'deleted'`
   plus `runtime_termination_confirmed_at`, with workspace lifecycle finalization
   after proof.
+- A null provider ID does not itself prove absence: provider creation can succeed
+  before its ID is persisted. Only a definite provider rejection can write
+  absence proof for a concurrent `destroying` claim. Ambiguous responses stay
+  unproven and require reconciliation.
 - Provider 404 from `deleteVM` is already treated as an idempotent successful
   provider absence by provider implementations; ambiguous provider failures still
   throw and are backed off by cleanup.
@@ -30,20 +34,25 @@ created these servers, so retrying provider deletion can never make progress.
 - [x] Add a bounded cleanup phase for stale `destroying` managed workspace nodes.
 - [x] Admit already-`destroying` rows with no provider ID only when the rest of
       the managed VM provenance is present.
-- [x] Let strict deletion write termination proof for claimed `destroying` VM
-      rows with no provider ID.
+- [x] Persist exact-incarnation termination proof after a definite provider
+      rejection, including when deletion already claimed the row.
+- [x] Require that proof before a providerless `destroying` row enters cleanup.
+- [x] Exclude active workspaces before the bounded candidate page.
 - [x] Preserve fail-closed behavior for creating/in-flight rows with no provider
       ID and transient provider errors.
 - [x] Add unit/vertical tests for never-created cleanup and transient-error retry.
 - [x] Run relevant tests and full quality gates.
 - [x] Run specialist review gates.
-- [ ] Verify on staging with real provisioning and cleanup where feasible.
+- [x] Provision and delete a real staging VM; confirm zero active staging nodes.
+- [ ] Exercise the exact rejected-create plus concurrent destroying state on
+      staging, or document why the live provider cannot safely induce it.
 
 ## Acceptance Criteria
 
 - A managed VM node already in `destroying` with no provider instance ID reaches
-  terminal cleanup, writes `runtime_termination_confirmed_at`, releases DNS, and
-  finalizes workspace records.
+  terminal cleanup only after exact-incarnation provider rejection proof exists;
+  it releases DNS and finalizes workspace records.
+- A providerless `destroying` row without that proof remains unfinalized.
 - A provider delete 404/not-found path remains terminal because the provider
   implementation treats it as idempotent absence.
 - Transient or ambiguous provider deletion errors still back off and retry.

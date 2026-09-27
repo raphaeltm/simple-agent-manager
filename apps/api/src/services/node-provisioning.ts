@@ -18,7 +18,11 @@ import { getCredentialEncryptionKey } from '../lib/secrets';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
 import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signNodeCallbackToken } from './jwt';
-import { type DurableNodeAllocation,NodeAllocationUncertainError, recoverNodeAllocation } from './node-allocation-recovery';
+import {
+  type DurableNodeAllocation,
+  NodeAllocationUncertainError,
+  recoverNodeAllocation,
+} from './node-allocation-recovery';
 import {
   assertNodeAllocationPlanCurrent,
   type NodeAllocationPlanRole,
@@ -172,7 +176,8 @@ async function deleteCreatedProviderVmDirectly(input: {
   providerContext?: ProviderRequestContext;
 }): Promise<void> {
   try {
-    if (input.providerContext) await input.provider.deleteVM(input.providerInstanceId, input.providerContext);
+    if (input.providerContext)
+      await input.provider.deleteVM(input.providerInstanceId, input.providerContext);
     else await input.provider.deleteVM(input.providerInstanceId);
   } catch (err) {
     log.error('node_provisioning.created_vm_direct_cleanup_failed', {
@@ -255,7 +260,10 @@ export async function provisionNode(
   const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
   let attemptedProvider = targetProvider;
   let provisioningRuntimeIncarnationId = node.runtimeIncarnationId;
+  let providerCreateRejected = false;
   let providerAllocationRejected = false;
+  let rejectedPlacementPredicate: ReturnType<typeof and>;
+  let providerRejectionProofAt: string | null = null;
   const attributionUserId = node.credentialAttributionUserId ?? node.userId;
   const attributionProjectId =
     node.credentialAttributionSource === 'project'
@@ -270,21 +278,28 @@ export async function provisionNode(
     : { nodeRole: 'workspace', workloadRole: 'workspace' };
 
   const durable = options?.durableAllocation;
-  const resuming = !!durable && node.runtimeIncarnationId === durable.incarnationId
-    && node.runtimeTerminationConfirmedAt === null;
-  if (durable && !resuming && (node.runtimeIncarnationId !== durable.initialIncarnationId
-    || node.runtimeTerminationConfirmedAt === null)) {
+  const resuming =
+    !!durable &&
+    node.runtimeIncarnationId === durable.incarnationId &&
+    node.runtimeTerminationConfirmedAt === null;
+  if (
+    durable &&
+    !resuming &&
+    (node.runtimeIncarnationId !== durable.initialIncarnationId ||
+      node.runtimeTerminationConfirmedAt === null)
+  ) {
     throw new NodeAllocationUncertainError('Node incarnation changed before durable allocation');
   }
 
   try {
-    if (!resuming) await assertNodeAllocationPlanCurrent(
-      env,
-      node.id,
-      node.userId,
-      authorityProjectId,
-      authorityRole
-    );
+    if (!resuming)
+      await assertNodeAllocationPlanCurrent(
+        env,
+        node.id,
+        node.userId,
+        authorityProjectId,
+        authorityRole
+      );
     const providerResult = await createProviderForUser(
       db,
       attributionUserId,
@@ -319,7 +334,8 @@ export async function provisionNode(
             providerResult.credentialSource === 'project' ? attributionProjectId : null,
           credentialAttributionSource: providerResult.credentialSource,
           placementCredentialSource:
-            providerResult.exactCredentialBinding?.credentialSource ?? node.placementCredentialSource,
+            providerResult.exactCredentialBinding?.credentialSource ??
+            node.placementCredentialSource,
           placementCredentialReference:
             providerResult.exactCredentialBinding?.credentialReference ??
             node.placementCredentialReference,
@@ -425,7 +441,13 @@ export async function provisionNode(
     // that races createVM is handled by the post-request check below, which can
     // strictly destroy the resource using the persisted provider identity.
     if (!resuming) {
-      await assertNodeAllocationPlanCurrent(env, node.id, node.userId, authorityProjectId, authorityRole);
+      await assertNodeAllocationPlanCurrent(
+        env,
+        node.id,
+        node.userId,
+        authorityProjectId,
+        authorityRole
+      );
       await options?.assertExternalMutationAuthority?.();
     }
     const vmConfig = applyNativePlanToVmConfig(
@@ -446,20 +468,68 @@ export async function provisionNode(
       },
       node
     );
-    const vm = await (resuming && durable
-      ? recoverNodeAllocation(provider, node, env, durable, providerContext)
-      : providerContext
-      ? provider.createVM(vmConfig, providerContext)
-      : provider.createVM(vmConfig)).catch((err: unknown) => {
+    const vm = await (
+      resuming && durable
+        ? recoverNodeAllocation(provider, node, env, durable, providerContext)
+        : providerContext
+          ? provider.createVM(vmConfig, providerContext)
+          : provider.createVM(vmConfig)
+    ).catch(async (err: unknown) => {
       if (err instanceof NodeAllocationUncertainError) throw err;
       // Hetzner's placement/capacity retries only repeat rejected creates. A
       // transport failure has no HTTP status and cannot prove absence. Keep
       // this at the create boundary: later failures and multi-step providers
       // can occur after allocation even when no VM identity reached the caller.
-      providerAllocationRejected = isProviderCreateRejectedBeforeVmIdentity(
+      providerCreateRejected = isProviderCreateRejectedBeforeVmIdentity(
         providerResult.providerName,
         err
       );
+      if (providerCreateRejected) {
+        // A provider rejection is explicit absence evidence. Persist it even if
+        // deletion claimed the row while the create request was in flight; a
+        // missing provider ID by itself cannot prove no VM was allocated.
+        const proofAt = new Date().toISOString();
+        rejectedPlacementPredicate = and(
+          // A rejected create proves absence only for the placement that
+          // issued it. A concurrent replan must not inherit that proof.
+          sql`${schema.nodes.cloudProvider} IS ${providerResult.providerName}`,
+          sql`${schema.nodes.nodeRole} IS ${node.nodeRole}`,
+          sql`${schema.nodes.workloadRole} IS ${node.workloadRole}`,
+          sql`${schema.nodes.vmSize} IS ${node.vmSize}`,
+          sql`${schema.nodes.vmLocation} IS ${node.vmLocation}`,
+          sql`${schema.nodes.providerInstanceType} IS ${node.providerInstanceType}`,
+          sql`${schema.nodes.capacityPoolId} IS ${node.capacityPoolId}`,
+          sql`${schema.nodes.capacityPoolScope} IS ${node.capacityPoolScope}`,
+          sql`${schema.nodes.capacityPoolProjectId} IS ${node.capacityPoolProjectId}`,
+          sql`${schema.nodes.capacityPoolRevision} IS ${node.capacityPoolRevision}`,
+          sql`${schema.nodes.capacitySourceId} IS ${node.capacitySourceId}`,
+          sql`${schema.nodes.capacitySourceGeneration} IS ${node.capacitySourceGeneration}`,
+          sql`${schema.nodes.capacityPoolCandidateId} IS ${node.capacityPoolCandidateId}`,
+          sql`${schema.nodes.placementCredentialSource} IS ${providerResult.exactCredentialBinding?.credentialSource ?? node.placementCredentialSource}`,
+          sql`${schema.nodes.placementCredentialReference} IS ${providerResult.exactCredentialBinding?.credentialReference ?? node.placementCredentialReference}`,
+          sql`${schema.nodes.placementCredentialVersion} IS ${providerResult.exactCredentialBinding?.credentialVersion ?? node.placementCredentialVersion}`,
+          sql`${schema.nodes.placementCredentialFingerprint} IS ${providerResult.exactCredentialBinding?.credentialFingerprint ?? node.placementCredentialFingerprint}`
+        );
+        const proofWrite = await db
+          .update(schema.nodes)
+          .set({ runtimeTerminationConfirmedAt: proofAt })
+          .where(
+            and(
+              eq(schema.nodes.id, node.id),
+              eq(schema.nodes.userId, node.userId),
+              eq(schema.nodes.runtime, 'vm'),
+              eq(schema.nodes.nodeClass, 'managed'),
+              sql`${schema.nodes.status} IN ('creating', 'destroying')`,
+              sql`${schema.nodes.providerInstanceId} IS NULL`,
+              sql`${schema.nodes.runtimeTerminationConfirmedAt} IS NULL`,
+              sql`${schema.nodes.runtimeIncarnationId} IS ${provisioningRuntimeIncarnationId}`,
+              rejectedPlacementPredicate
+            )
+          )
+          .run();
+        providerAllocationRejected = d1WriteChanged(proofWrite);
+        if (providerAllocationRejected) providerRejectionProofAt = proofAt;
+      }
       if (durable && !providerAllocationRejected) {
         throw new NodeAllocationUncertainError();
       }
@@ -473,7 +543,11 @@ export async function provisionNode(
       .update(schema.nodes)
       .set({
         providerInstanceId: vm.id,
-        ...(durable ? { status: sql`CASE WHEN ${schema.nodes.status} IN ('creating','running','recovery','error') THEN 'creating' ELSE ${schema.nodes.status} END` } : {}),
+        ...(durable
+          ? {
+              status: sql`CASE WHEN ${schema.nodes.status} IN ('creating','running','recovery','error') THEN 'creating' ELSE ${schema.nodes.status} END`,
+            }
+          : {}),
         ...observedHardwareDbValues(vm),
         ipAddress: vm.ip || null,
         runtimeTerminationConfirmedAt: null,
@@ -493,7 +567,8 @@ export async function provisionNode(
       throw new Error('Node lifecycle changed before provider identity could be recorded');
     }
     try {
-      if (['destroying', 'deleted', 'stopped'].includes(node.status)) throw new Error('Node allocation was cancelled');
+      if (['destroying', 'deleted', 'stopped'].includes(node.status))
+        throw new Error('Node allocation was cancelled');
       await assertNodeAllocationPlanCurrent(
         env,
         node.id,
@@ -683,11 +758,24 @@ export async function provisionNode(
     // Delete the failed node row when the create boundary proved the provider rejected
     // allocation before returning a VM identity; there is no runtime to tear down.
     if (options?.rethrowProviderError) {
-      if (isCapacityFailure || providerAllocationRejected) {
+      if ((isCapacityFailure && !providerCreateRejected) || providerAllocationRejected) {
+        if (providerAllocationRejected && (!providerRejectionProofAt || !rejectedPlacementPredicate)) {
+          throw new Error('Rejected allocation proof identity is unavailable');
+        }
         await options.beforeRejectedNodeDelete?.();
         await db
           .delete(schema.nodes)
-          .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
+          .where(
+            and(
+              creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId),
+              ...(providerAllocationRejected
+                ? [
+                    sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${providerRejectionProofAt}`,
+                    rejectedPlacementPredicate,
+                  ]
+                : [])
+            )
+          )
           .run();
       } else {
         const truncatedError = truncateNodeErrorMessage(errorMessage);
