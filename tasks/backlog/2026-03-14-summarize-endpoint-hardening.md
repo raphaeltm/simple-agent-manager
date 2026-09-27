@@ -25,7 +25,7 @@ The `/summarize` endpoint works correctly but has several hardening opportunitie
 
 ## Context
 
-- `apps/api/src/routes/chat.ts` (summarize route, lines 300-373)
+- `apps/api/src/routes/chat-fork.ts` (`summarize` route; moved from `routes/chat.ts` on 2026-09-27)
 - `apps/api/src/services/session-summarize.ts`
 - `apps/api/src/services/task-title.ts` (classifyError source)
 - Review report: Cloudflare specialist review of PR #376
@@ -34,8 +34,9 @@ The `/summarize` endpoint works correctly but has several hardening opportunitie
 
 The rate-limit item shipped with `tasks/active/2026-09-27-close-four-api-security-gaps.md`
 (branch `sam/close-four-pre-existing-wzcag1`): `summarize` and `fork-prepare` share one per-user
-bucket, `RATE_LIMIT_SESSION_SUMMARIZE` (default 30 per hour), and the `summarize` route moved from
-`routes/chat.ts` to `routes/chat-fork.ts`. This file stays in backlog for the remaining items:
+bucket, `RATE_LIMIT_SESSION_SUMMARIZE` (default 30 per `RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS`,
+default 3600), and the `summarize` route moved from `routes/chat.ts` to `routes/chat-fork.ts`. This
+file stays in backlog for the remaining items:
 
 - Item 1: role pre-filtering at the DO boundary (`getMessages` `roles` parameter) — both routes still
   fetch all 1,000 messages and filter in JS.

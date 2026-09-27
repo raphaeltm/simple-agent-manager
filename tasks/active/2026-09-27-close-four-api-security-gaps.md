@@ -8,8 +8,8 @@ security-auditor) + staging verification. An independent adversarial reviewer me
 
 Specs (treated as input, every claim re-verified against current code below):
 
-- `tasks/active/2026-08-18-setup-config-echoes-plaintext-secrets.md`
-- `tasks/active/2026-05-19-enforce-allowed-model-tiers-at-proxy.md`
+- `tasks/archive/2026-08-18-setup-config-echoes-plaintext-secrets.md`
+- `tasks/archive/2026-05-19-enforce-allowed-model-tiers-at-proxy.md`
 - `tasks/backlog/2026-03-14-summarize-endpoint-hardening.md` (rate-limit item only; stays in
   backlog because its other five items are out of scope)
 
@@ -177,6 +177,46 @@ API redactors and their `sk-` coverage:
 - [x] Docs: `.env.example`, `reference/configuration.md`, env-reference skill (`reference/api.md` does not
       document these endpoints)
 
+### 5. Specialist review round (9 reviewers on head 27c97ce2e; 0 CRITICAL, 1 HIGH)
+- [x] HIGH (security-auditor): the native Anthropic routes had no operator allowlist, so for every
+      unrestricted user (all of them today) any `claude-*` ID reached platform credentials, and
+      `AI_PROXY_ALLOWED_MODELS` did not apply to them. Pre-existing; fixed here:
+      `validateAnthropicAllowedModel` (`ai-proxy-anthropic-support.ts`) runs the same `getAllowedModels`
+      check as `validateAllowedModel` on both handlers, before the tier gate, with an Anthropic-format
+      `400 invalid_request_error` and a `model_not_allowed` warn log. Rollout evidence (read-only AI Gateway
+      logs): production Anthropic traffic (Apr 25 – May 1, the whole retained window) used only
+      `claude-haiku-4-5-20251001` and `claude-opus-4-6`; staging (Apr 21 – Sep 8) used catalogued IDs apart
+      from a retired `claude-sonnet-4-20250514` (May) and 401-ing typos. `AI_PROXY_ALLOWED_MODELS` is set in
+      neither GitHub Environment nor the staging Worker, so the default (the catalog) applies.
+      Revert proof: dropping the check from `/messages` reddens exactly 3 tests (that handler's coverage
+      row + the 2 new allowlist tests); from `/count_tokens`, the same 3 for that route.
+- [x] Coverage test now pairs gates per POST handler (test-engineer MEDIUM, architecture/TCV/CF LOW):
+      each handler must call the allowlist gate and the tier gate before its first platform-spend call;
+      comments are stripped first; the handler set is pinned to the 4 known handlers. Mutation: the
+      `/responses` tier gate replaced by a trailing `// enforceModelTier(…)` comment → exactly that row red.
+- [x] `RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS` (constitution MEDIUM), default
+      `DEFAULT_SESSION_SUMMARIZE_WINDOW_SECONDS = 3600`; env.ts + docs. Revert proof: dropping the override
+      reddens exactly "honours RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS…" (`expected '2700' to be '300'`).
+- [x] One regex pass for credential tokens (performance MEDIUM): 477 → 108 ns per realistic log string.
+      All three families are now case-insensitive (no `SAM_PAT_`/`SAM_WH_` identifier exists in the repo).
+      Boundary tests at 7 vs 8 body characters per family and a token spanning the whole string
+      (test-engineer MEDIUM + LOW).
+- [x] Session–idea routes moved from `chat.ts` (579 → 476 lines) to `chat-ideas.ts`, mounted at the same
+      position (architecture MEDIUM); new `chat-ideas.test.ts` through the real `chatRoutes` mount with real
+      SQLite. Revert proof: dropping the `project_id` predicate reddens exactly the cross-project attack
+      test; the same-project control stays green.
+- [x] Docs: `AI_PROXY_ALLOWED_MODELS` in `reference/configuration.md`, the allowlist and KV-propagation
+      delay in `reference/api.md` (CF + security LOW), `guides/agents.md`, `security.md` says where
+      `Bearer`/`Basic` values are handled (architecture MEDIUM: they stay per-redactor on purpose — English
+      words whose safe threshold differs between logs and user-visible text); stale summarize-route
+      reference in the backlog file (doc-sync LOW)
+- [x] Declined with reasons (recorded in the PR): per-isolate cache for the allowance read (adds
+      staleness to a security gate, KV already edge-caches); structured `code` in the Anthropic 403 (native
+      error envelope fidelity); unprefixed 40-hex GitHub PATs (that is the git SHA shape); limiter ordering
+      before the project-capability check (per-user bucket, and it bounds D1 work for abusive callers).
+      Follow-up ideas: duplicate `getUserBudgetSettings` KV read in `checkAiUsageGate`; rate bound for
+      automatic task-title Workers AI calls; central redaction in `persistError`; Go redactor SAM shapes.
+
 ### Wrap-up
 - [x] Docs sync: architecture/security.md (setup responses + redaction), reference/configuration.md,
       reference/api.md (admin AI allowances), guides/agents.md, apps/api/.env.example, env-reference + api-reference skills
@@ -189,6 +229,8 @@ API redactors and their `sk-` coverage:
       admin-platform-config.test.ts)
 - [x] A user whose allowance excludes a model's tier gets 403 on every platform-billed proxy route; null allows all
       (ai-proxy-model-tiers.test.ts, ai-proxy-model-tier-coverage.test.ts)
+- [x] Every platform-billed proxy route, the native Anthropic ones included, refuses a model outside the operator
+      allowlist for every caller (ai-proxy-model-tiers.test.ts, ai-proxy-model-tier-coverage.test.ts)
 - [x] OpenAI/Anthropic `sk-` keys are redacted by every API redactor, via one shared pattern
       (credential-token-redaction.test.ts incl. drift guard, logger, VM error intake, canary consumers)
 - [x] summarize/fork-prepare (and transcribe) return 429 past their limits and recover after the window
