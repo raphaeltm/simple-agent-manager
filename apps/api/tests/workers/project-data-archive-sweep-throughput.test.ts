@@ -35,6 +35,7 @@ import { runProjectDataArchiveSharding } from '../../src/scheduled/project-data-
 import * as projectDataService from '../../src/services/project-data';
 import {
   PREVIOUS_SWEEP_MESSAGE_BUDGET,
+  SHIPPED_DAILY_WRITE_BUDGET,
   SHIPPED_SWEEP_MESSAGE_BUDGET,
   SHIPPED_SWEEP_SESSIONS,
   SWEEP_CEILING_EXPERIMENT,
@@ -165,8 +166,8 @@ async function seedTerminalSession(
 
 /**
  * The shipped production shape, minus the budget under test. The grace period and cadence are
- * the deliberate divergences: production holds sessions for 7 days and sweeps hourly, and a
- * test cannot wait for either.
+ * the deliberate divergences: production holds sessions for 7 days and sweeps every 20 minutes,
+ * and a test cannot wait for either.
  */
 function sweepEnv(messageBudget: number) {
   return {
@@ -180,7 +181,7 @@ function sweepEnv(messageBudget: number) {
     PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: String(messageBudget),
     PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: '100',
     PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: '2',
-    PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '800000',
+    PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(SHIPPED_DAILY_WRITE_BUDGET),
     PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '500',
   };
 }

@@ -37,6 +37,13 @@ export const PREVIOUS_SWEEP_MESSAGE_BUDGET = 5_000;
 export const SHIPPED_SWEEP_SESSIONS = 8;
 
 /**
+ * The daily write allowance `apps/api/wrangler.toml` ships, which the `production` Environment
+ * pins in lockstep. Bound to the shipped value for the same fidelity reason as the slot count:
+ * the Worker test's `sweepEnv` stands in for the deployed configuration.
+ */
+export const SHIPPED_DAILY_WRITE_BUDGET = 2_400_000;
+
+/**
  * A candidate size beyond the shipped ceiling, run as an experiment rather than as a claim
  * about shipped config. It exists to measure whether the compact state machine stays
  * correct at 4x the largest session production has ever published (4,994), so a later

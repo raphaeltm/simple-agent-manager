@@ -170,11 +170,15 @@ PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES = "1"
 PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = "true"
 # Compact format stays off until the staged rollout and production mutation approval.
 PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
-# Sized to reclaim ~100k messages/day. 800k estimate-units/day keeps the account under the
-# 50M/month included rows-written allowance. The GitHub `production` Environment sets the
-# same 800000, so the two agree; the deploy log prints any override that differs
-# (.claude/rules/70).
-PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "800000"
+# Tripled with the sweep cadence on 2026-09-27 (was 800000): the same ~33k estimate units per
+# tick at 3x the ticks. Real candidates reserve ~21.5k units (six production samples, 17.8k-27.1k),
+# so 72 ticks/day use ~1.55M; 800000 would have stopped the drain at ~38/day. Cost
+# (`pnpm quality:cloudflare-cost`, rule 76): DO rows written were projected at 32.8M of the 50M/month
+# included allowance, and the extra ticks add ~0.4-0.6M billed rows/day, so the expected cost is
+# $0; spending the whole allowance at the worst measured ratio would be ~$13/month over it.
+# The GitHub `production` Environment pins this var and must be changed in lockstep; the deploy
+# log prints any override that differs (.claude/rules/70).
+PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "2400000"
 # Safety multiplier applied to the row inventory `estimateArchiveWrites` already counts, NOT
 # an independent amplification factor. MEASURED 2026-09-14 in production two ways:
 #   - `project_data_archive_write_budget` sampled an hour apart: 726,408 reserved across 11
@@ -187,8 +191,8 @@ PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "800000"
 # cadence allows 24 — so half the ticks ran and reclaimed nothing.
 #
 # 2 exceeds the worst observed ratio of 1.23 by ~63% and moves the ceiling to ~47/day, at
-# which point the per-tick bound (one ~4,849-message candidate per hourly tick) binds first
-# at 24/day. Two caveats before trusting this number further: n is small (2 budget samples,
+# which point the per-tick bound (one ~4,849-message candidate per tick, hourly at the time)
+# bound first at 24/day. Two caveats before trusting this number further: n is small (2 budget samples,
 # 4 telemetry buckets), and largest-first selection keeps pulling differently-shaped
 # candidates as the backlog drains, so the ratio can move. Re-measure before changing this
 # again — the condition it stands for is "rows this migration will actually write", and only
@@ -198,12 +202,16 @@ PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS = "10000"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS = "604800000"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT = "100"
 PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
-# One hour, not the daily code fallback: this keeps automatic root relief moving while
-# firebreaking the DO SQLite write cost seen during the 2026-09-08 billing spike check.
-# Per-tick copy work is bounded by PROJECT_DATA_ARCHIVE_WALL_TIME_MS, _SWEEP_SESSIONS and
-# _SWEEP_MESSAGE_BUDGET. Load review: tasks/archive/2026-09-06-archive-drain-enable-unfence-and-throughput.md
-# and the archive-sharding notes in apps/www/src/content/docs/docs/reference/configuration.md.
-PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "3600000"
+# This interval IS the drain rate: a tick archives exactly one session, because
+# PROJECT_DATA_ARCHIVE_WALL_TIME_MS is checked only between candidates and a real candidate takes
+# 43-83 s. 18 min (was one hour until 2026-09-27) triples it to one claim every 20 minutes. It is
+# deliberately short of 20: the */5 cron reaches the archive step 1m15s-3m30s into each invocation,
+# and at a whole-hour interval claims kept missing their tick by seconds (37 claims averaged 62.7 min
+# apart). 18 is always due on the fourth five-minute tick and never on the third. Per-tick copy work
+# stays bounded by _WALL_TIME_MS, _SWEEP_SESSIONS and _SWEEP_MESSAGE_BUDGET; daily volume by
+# _DAILY_WRITE_BUDGET. Load review: tasks/archive/2026-09-27-triple-archive-drain-speed.md and the
+# archive-sharding notes in apps/www/src/content/docs/docs/reference/configuration.md.
+PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "1080000"
 PROJECT_DATA_ARCHIVE_SHARD_COUNT = "128"
 PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS = "1"
 # Only `migrating` fences per tick; the real throughput bound is _DAILY_WRITE_BUDGET. Each
@@ -234,7 +242,7 @@ PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "8"
 # Two constraints to keep in mind when changing it:
 #   - Bigger candidates are the better buy per write (the fixed 1000-unit per-session
 #     reservation amortises further), but the allowance then admits fewer sessions per UTC
-#     window than the hourly cadence has ticks, so _DAILY_WRITE_BUDGET becomes the binding
+#     window than the cadence has ticks, so _DAILY_WRITE_BUDGET becomes the binding
 #     constraint and later ticks report `window_exhausted` — normal backpressure, not an alert.
 #   - Per-candidate risk scales with the candidate: chunk count, seal read-back, lease headroom
 #     against _LEASE_MS, and the cost of a failed attempt (copySourceChunks restarts at ordinal

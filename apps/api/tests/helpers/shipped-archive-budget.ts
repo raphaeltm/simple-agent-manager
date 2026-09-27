@@ -2,7 +2,8 @@
  * Read archive write-budget values from the `[vars]` table this repository actually SHIPS.
  *
  * Two test files need this (`write-budget-shipped-factor.test.ts` and
- * `sweep-message-budget-shipped.test.ts`), and both exist for the same reason: a test that
+ * `sweep-message-budget-shipped.test.ts`) — for the budget vars and for the sweep cadence the
+ * budget has to keep up with — and both exist for the same reason: a test that
  * pins a hand-copied constant stays green after someone edits `wrangler.toml`
  * (`.claude/rules/70`). Sharing one reader keeps the second file from drifting into a
  * different notion of "what ships" (`.claude/rules/24`).
@@ -17,15 +18,46 @@ import * as TOML from '@iarna/toml';
 
 const WRANGLER_PATH = resolve(import.meta.dirname, '../../wrangler.toml');
 
-export function readShippedVar(name: string): string {
-  const parsed = TOML.parse(readFileSync(WRANGLER_PATH, 'utf-8')) as {
+/** The trigger `scheduled/handler.ts` runs its sweep chain, archive sharding included, on. */
+const SWEEP_CRON = '*/5 * * * *';
+const SWEEP_CRON_PERIOD_MS = 5 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function readShippedConfig(): { vars?: Record<string, unknown>; triggers?: { crons?: unknown } } {
+  return TOML.parse(readFileSync(WRANGLER_PATH, 'utf-8')) as {
     vars?: Record<string, unknown>;
+    triggers?: { crons?: unknown };
   };
-  const value = parsed.vars?.[name];
+}
+
+export function readShippedVar(name: string): string {
+  const value = readShippedConfig().vars?.[name];
   if (typeof value !== 'string') {
     throw new Error(`${name} is not a string in the [vars] table of apps/api/wrangler.toml`);
   }
   return value;
+}
+
+/**
+ * Archive sweep ticks per UTC day at the shipped cadence — which is also the drain's
+ * sessions-per-day ceiling, because the wall-time gate is checked only between candidates and
+ * one real candidate outlasts it, so each tick archives one session.
+ *
+ * The cadence row falls due `interval` after the last claim, but only a five-minute cron tick
+ * can claim it, so the effective period rounds UP to a whole number of cron periods. This is
+ * the jitter-free period; the shipped interval sits short of a whole period so that the jitter
+ * in when the archive step runs cannot push a claim onto the following tick.
+ */
+export function shippedSweepTicksPerDay(): number {
+  const crons = readShippedConfig().triggers?.crons;
+  if (!Array.isArray(crons) || !crons.includes(SWEEP_CRON)) {
+    throw new Error(
+      `apps/api/wrangler.toml no longer ships the ${SWEEP_CRON} trigger the archive sweep runs on`
+    );
+  }
+  const intervalMs = Number(readShippedVar('PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS'));
+  const periodMs = Math.ceil(intervalMs / SWEEP_CRON_PERIOD_MS) * SWEEP_CRON_PERIOD_MS;
+  return Math.floor(DAY_MS / periodMs);
 }
 
 /** The env shape `archiveWriteBudgetConfig` reads, populated from the shipped config. */

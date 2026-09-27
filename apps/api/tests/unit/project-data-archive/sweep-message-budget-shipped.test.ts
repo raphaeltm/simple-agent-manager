@@ -22,11 +22,11 @@
  *   5000 could not see. `message_count` is the selector's own ranking column, not a byte
  *   measurement.
  *
- * Environment overrides checked the same day (`.claude/rules/70`): of the four vars these
- * cases read, `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` IS pinned as a `production` GitHub
- * Environment variable — at 800000, identical to the checked-in value, so there is no
- * divergence today but a future edit to `wrangler.toml` alone would NOT ship. The other three
- * (`_SWEEP_MESSAGE_BUDGET`, `_WRITE_ESTIMATE_FACTOR`, `_SWEEP_UNIT_OVERHEAD_PERCENT`) are
+ * Environment overrides (`.claude/rules/70`): of the vars these cases read,
+ * `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` IS pinned as a `production` GitHub Environment
+ * variable, so an edit to `wrangler.toml` alone would NOT ship; the two are changed in lockstep
+ * (2400000 since 2026-09-27, when the cadence was tripled). `_SWEEP_MESSAGE_BUDGET`,
+ * `_WRITE_ESTIMATE_FACTOR`, `_SWEEP_UNIT_OVERHEAD_PERCENT` and `_GLOBAL_SWEEP_INTERVAL_MS` are
  * absent from both the `production` and `staging` Environments, so for those the checked-in
  * value is the deployed value.
  *
@@ -44,10 +44,15 @@ import {
 } from '../../../src/project-data-archive/write-budget';
 import {
   PREVIOUS_SWEEP_MESSAGE_BUDGET,
+  SHIPPED_DAILY_WRITE_BUDGET,
   SHIPPED_SWEEP_MESSAGE_BUDGET,
   SHIPPED_SWEEP_SESSIONS,
 } from '../../helpers/archive-sweep-ceiling';
-import { readShippedVar, shippedBudgetEnv } from '../../helpers/shipped-archive-budget';
+import {
+  readShippedVar,
+  shippedBudgetEnv,
+  shippedSweepTicksPerDay,
+} from '../../helpers/shipped-archive-budget';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 /**
@@ -58,8 +63,6 @@ import { createSqliteD1 } from '../../helpers/sqlite-d1';
  */
 const MEASURED_UNITS_PER_MESSAGE = 2.17;
 
-/** Hourly cadence: `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` is 3600000. */
-const TICKS_PER_DAY = 24;
 const WINDOW_START = Date.UTC(2026, 8, 20, 0, 0, 0);
 
 const shippedOverheadPercent = () =>
@@ -123,6 +126,14 @@ describe('shipped archive sweep message budget', () => {
     );
   });
 
+  it('pins the daily write allowance the Worker tests reproduce', () => {
+    // Same gap, third value: `sweepEnv` hardcoded the old 800000 until the allowance was
+    // tripled with the cadence on 2026-09-27.
+    expect(Number(readShippedVar('PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET'))).toBe(
+      SHIPPED_DAILY_WRITE_BUDGET
+    );
+  });
+
   it('is the smaller of the two ceilings, so it is what actually selects', () => {
     const { allowance, factor } = archiveWriteBudgetConfig(shippedBudgetEnv());
 
@@ -155,6 +166,7 @@ describe('shipped archive sweep message budget', () => {
 
   it('raises the daily message ceiling, and moves which constraint binds', async () => {
     const { allowance, factor } = archiveWriteBudgetConfig(shippedBudgetEnv());
+    const ticksPerDay = shippedSweepTicksPerDay();
 
     const shippedSessions = await reserveUntilRefused(
       measuredEstimate(SHIPPED_SWEEP_MESSAGE_BUDGET, factor),
@@ -168,28 +180,28 @@ describe('shipped archive sweep message budget', () => {
 
     // A tick can only fence one budget's worth of messages, and a candidate at the ceiling
     // consumes nearly all of it, so the daily CEILING is
-    // min(affordable sessions, hourly ticks) x budget. This is an upper bound on what the
+    // min(affordable sessions, ticks per day) x budget. This is an upper bound on what the
     // sweep could move, not a forecast: selection is global and largest-first, so how much of
     // it any one project receives depends on the other projects competing for the same ticks
     // and the same allowance.
-    const shippedPerDay = Math.min(shippedSessions, TICKS_PER_DAY) * SHIPPED_SWEEP_MESSAGE_BUDGET;
-    const previousPerDay =
-      Math.min(previousSessions, TICKS_PER_DAY) * PREVIOUS_SWEEP_MESSAGE_BUDGET;
+    const shippedPerDay = Math.min(shippedSessions, ticksPerDay) * SHIPPED_SWEEP_MESSAGE_BUDGET;
+    const previousPerDay = Math.min(previousSessions, ticksPerDay) * PREVIOUS_SWEEP_MESSAGE_BUDGET;
 
     // The reason to raise the budget at all. Proven discriminating on 2026-09-20 by setting
-    // `SHIPPED_SWEEP_MESSAGE_BUDGET` back to 5000: this goes red with
-    // `expected 120000 to be greater than 120000`, alongside the ceiling case. Editing
-    // `wrangler.toml` alone instead reddens the drift guard above, which names both values.
+    // `SHIPPED_SWEEP_MESSAGE_BUDGET` back to 5000: this went red with
+    // `expected 120000 to be greater than 120000` (that day's hourly cadence and 800000
+    // allowance), alongside the ceiling case. Editing `wrangler.toml` alone instead reddens the
+    // drift guard above, which names both values.
     expect(shippedPerDay).toBeGreaterThan(previousPerDay);
 
     // The honest cost of that gain, asserted rather than left in a comment: the binding
-    // constraint MOVES. At the previous ceiling the hourly cadence bound throughput and the
+    // constraint MOVES. At the previous ceiling the cadence bound throughput and the
     // allowance was never exhausted; at the shipped ceiling the allowance runs out first, so
     // later ticks report `window_exhausted` — normal backpressure, not an alert
     // (`.claude/rules/72`). Bigger candidates are still the better buy per write, because the
     // fixed per-session charge amortises over more messages.
-    expect(previousSessions).toBeGreaterThan(TICKS_PER_DAY);
-    expect(shippedSessions).toBeLessThan(TICKS_PER_DAY);
+    expect(previousSessions).toBeGreaterThan(ticksPerDay);
+    expect(shippedSessions).toBeLessThan(ticksPerDay);
     // Loose lower bound: enough affordable sessions that a single bad candidate consuming
     // three attempts cannot spend the whole day's allowance.
     expect(shippedSessions).toBeGreaterThanOrEqual(12);
