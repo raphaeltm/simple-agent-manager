@@ -220,7 +220,7 @@ export function SessionHeader({
           // Focus target after an in-chat link opens another chat (session-focus-handoff).
           data-session-title
           tabIndex={-1}
-          className="text-sm font-semibold text-fg-primary min-w-0 leading-snug outline-none"
+          className="text-sm font-semibold text-fg-primary min-w-0 leading-snug rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
           title={sessionTitle}
           style={{
             display: '-webkit-box',
