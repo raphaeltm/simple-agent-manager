@@ -1,0 +1,119 @@
+import { ChevronDown } from 'lucide-react';
+import type { ReactNode, RefObject } from 'react';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+
+import { CHAT_LIST_COMPONENTS, type ChatListContext } from './MessageListScaffold';
+import type { DisplayItem } from './tool-call-groups';
+import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
+
+interface ConversationPaneProps {
+  lc: UseSessionLifecycleResult;
+  displayItems: DisplayItem[];
+  /** The floating session header, laid over the top of the pane. */
+  header: ReactNode;
+  headerHeight: number;
+  chatLogRef: RefObject<HTMLDivElement | null>;
+  virtuosoRef: RefObject<VirtuosoHandle | null>;
+  renderItem: (index: number, item: DisplayItem) => ReactNode;
+  listContext: ChatListContext;
+  /** Selected-text comment controls, positioned over the conversation. */
+  selectionControls: ReactNode;
+  /** Docked desktop comments rail, beside the conversation. */
+  commentRail: ReactNode;
+  /** Session tool rail on the pane's right edge. */
+  toolRail: ReactNode;
+}
+
+/** The conversation itself — virtualized, DO-only — or its empty state. */
+export function ConversationPane({
+  lc,
+  displayItems,
+  header,
+  headerHeight,
+  chatLogRef,
+  virtuosoRef,
+  renderItem,
+  listContext,
+  selectionControls,
+  commentRail,
+  toolRail,
+}: Readonly<ConversationPaneProps>) {
+  if (displayItems.length === 0) {
+    return (
+      <div className="relative flex flex-1 min-h-0 min-w-0 flex-row">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            {header}
+            <div
+              className="flex flex-1 items-center justify-center"
+              style={{ paddingTop: headerHeight }}
+            >
+              <span className="text-fg-muted text-sm">
+                {lc.sessionState === 'active'
+                  ? 'Waiting for messages...'
+                  : 'No messages in this session.'}
+              </span>
+            </div>
+          </div>
+          {commentRail}
+        </div>
+        {toolRail}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 min-h-0 min-w-0 relative flex flex-row">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+        <div
+          ref={chatLogRef}
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+          role="log"
+          aria-live="polite"
+          aria-label="Conversation"
+        >
+          {header}
+          <div className="flex-1 min-h-0">
+            <Virtuoso
+              ref={virtuosoRef}
+              style={{ height: '100%' }}
+              data={displayItems}
+              firstItemIndex={lc.firstItemIndex}
+              initialTopMostItemIndex={displayItems.length - 1}
+              followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
+              alignToBottom
+              atBottomThreshold={50}
+              atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
+              overscan={200}
+              itemContent={renderItem}
+              context={listContext}
+              components={CHAT_LIST_COMPONENTS}
+            />
+          </div>
+
+          {/* Scroll to bottom button */}
+          {lc.showScrollButton && (
+            <button
+              type="button"
+              onClick={() => {
+                virtuosoRef.current?.scrollToIndex({
+                  index: 'LAST',
+                  behavior: 'smooth',
+                });
+              }}
+              className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] shadow-md cursor-pointer hover:bg-page"
+              data-agent-active={lc.agentActivity !== 'idle'}
+              aria-label="Scroll to bottom"
+            >
+              <ChevronDown size={16} className="text-fg-muted" />
+            </button>
+          )}
+
+          {selectionControls}
+        </div>
+        {commentRail}
+      </div>
+      {toolRail}
+    </div>
+  );
+}

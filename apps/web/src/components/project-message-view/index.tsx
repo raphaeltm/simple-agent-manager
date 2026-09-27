@@ -6,14 +6,12 @@
  * TypewriterText animates the latest assistant message; historical messages
  * render instantly.
  */
-// FILE SIZE EXCEPTION: Pre-existing large chat surface; this production hotfix adds a narrow URL-driven jump entry point that must stay colocated with existing Virtuoso jump/highlight state. See .claude/rules/18-file-size-limits.md
 import type { SlashCommand, ToolCallContentItem } from '@simple-agent-manager/acp-client';
-import { mapToolCallContent, PlanModal } from '@simple-agent-manager/acp-client';
+import { mapToolCallContent } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
-import { ChevronDown } from 'lucide-react';
-import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import { type FC, useCallback, useMemo, useRef, useState } from 'react';
+import type { VirtuosoHandle } from 'react-virtuoso';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { getMessageToolContent } from '../../lib/api/sessions';
@@ -27,30 +25,23 @@ import { CommentableConversationItem } from './comments/CommentableConversationI
 import { DesktopCommentRail } from './comments/MessageCommentPanels';
 import { useMessageComments } from './comments/useMessageComments';
 import { useProjectMessageCommentUi } from './comments/useProjectMessageCommentUi';
-import { CompletionDock } from './CompletionDock';
+import { ConversationPane } from './ConversationPane';
 import { FloatingHeader } from './FloatingHeader';
-import { FollowUpInput, ReadOnlyFollowUp } from './FollowUpInput';
-import { ConnectionBanner } from './MessageBanners';
-import {
-  CHAT_LIST_COMPONENTS,
-  type ChatListContext,
-  useFloatingHeaderHeight,
-} from './MessageListScaffold';
+import { type ChatListContext, useFloatingHeaderHeight } from './MessageListScaffold';
 import { ProjectMessageViewDrawers } from './ProjectMessageViewDrawers';
-import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
+import { SessionFooter } from './SessionFooter';
 import { SessionHeaderCompletionDialog } from './SessionHeaderCompletionDialog';
+import { SessionStatusBanners } from './SessionStatusBanners';
 import { SessionToolRail } from './SessionToolRail';
-import { StaleActivityNotice } from './StaleActivityNotice';
-import { nearestItemId } from './timeline-jump';
-import type { TimelineJumpTarget } from './timeline-types';
-import type { DisplayItem, GroupedItem } from './tool-call-groups';
+import type { DisplayItem } from './tool-call-groups';
 import { groupToolCallItems } from './tool-call-groups';
 import { chatMessagesToConversationItems } from './types';
+import { useAnimatedUserMessages } from './useAnimatedUserMessages';
+import { useConversationJump } from './useConversationJump';
 import { useSessionLifecycle } from './useSessionLifecycle';
 import { useSessionTimeline } from './useSessionTimeline';
 import { useSessionTools } from './useSessionTools';
 import { useToolCallGroupRowState } from './useToolCallGroupRowState';
-import { WakeProgressBanner } from './WakeProgressBanner';
 
 // Re-export utilities used by external consumers
 export { chatMessagesToConversationItems } from './types';
@@ -121,7 +112,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatLogRef = useRef<HTMLDivElement>(null);
   const [floatingHeaderRef, floatingHeaderHeight] = useFloatingHeaderHeight();
-  const [showPlanModal, setShowPlanModal] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
@@ -131,6 +121,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   // Stable identity matters: this feeds `useSessionTools`' memoized action array, and an
   // inline arrow would rebuild it on every render (rule 64).
   const openTimeline = useCallback(() => setShowTimeline(true), []);
+  const closeTimeline = useCallback(() => setShowTimeline(false), []);
   const openResources = useCallback(() => setShowResources(true), []);
   const openEvents = useCallback(() => setShowEvents(true), []);
 
@@ -174,51 +165,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     return groupToolCallItems(chatMessagesToConversationItems(lc.messages));
   }, [lc.messages]);
 
-  // Build item-id → 0-based data index map for jump-to-message from the timeline.
-  // Includes EVERY conversation item so any timeline anchor resolves. The value is
-  // the ZERO-BASED index into `displayItems` — Virtuoso's `scrollToIndex`
-  // operates on the data-array coordinate, NOT the `firstItemIndex`-offset
-  // absolute coordinate used for `itemContent`'s `index` arg. Passing the offset
-  // value (VIRTUAL_START + i ≈ 100000) is out of range, so Virtuoso never scrolls
-  // and the highlighted row stays virtualized-out → a dead click on real
-  // (virtualized) sessions. jsdom renders all rows, which hid this locally.
-  // Absorbed tool/thinking ids map to their GROUP's row index, so a timeline
-  // jump to a tool message still lands on a row that exists.
-  //
-  // A merged tool call answers to MORE THAN ONE message id, and every one of them
-  // can be a jump target (`.claude/rules/44` — enumerate every consumer of the
-  // id). `chatMessagesToConversationItems` keeps the FIRST row's id as `item.id`
-  // and repoints `messageId` at whichever row carries the content, so a
-  // `tool_call_update` row id appears in neither place unless it is registered
-  // explicitly. Deep links and MCP-created comment threads can anchor on exactly
-  // that row, and an unresolvable anchor silently falls through to
-  // `nearestItemId(…, Date.now())` — i.e. the bottom of the conversation.
-  //
-  // Aliases are registered in a second pass and never overwrite a real item id,
-  // so a canonical row can't be shadowed by another row's alias.
-  const itemIndexById = useMemo(() => {
-    const map = new Map<string, number>();
-    const aliases: Array<[string, number]> = [];
-
-    const collect = (item: DisplayItem | GroupedItem, index: number) => {
-      map.set(item.id, index);
-      if (item.kind === 'tool_call' && item.messageId && item.messageId !== item.id) {
-        aliases.push([item.messageId, index]);
-      }
-    };
-
-    displayItems.forEach((item, i) => {
-      collect(item, i);
-      if (item.kind === 'tool_call_group') {
-        for (const inner of item.items) collect(inner, i);
-      }
-    });
-    for (const [alias, index] of aliases) {
-      if (!map.has(alias)) map.set(alias, index);
-    }
-    return map;
-  }, [displayItems]);
-
   const timeline = useSessionTimeline(
     projectId,
     sessionId,
@@ -227,99 +173,19 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     messageComments.comments
   );
 
-  // Jump-to-message from the timeline. A jump targets either an exact message
-  // (user message) or the nearest message to a timestamp (status/activity
-  // entries). Because the full conversation loads on open, the target is almost
-  // always already rendered. For the rare oversized/guard-trimmed session the
-  // target may predate the loaded window — we set a pending jump and load older
-  // pages until it resolves, so a jump never dead-clicks.
-  const [pendingJump, setPendingJump] = useState<TimelineJumpTarget | null>(null);
-  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
-  const consumedTargetMessageRef = useRef<string | null>(null);
-
-  const scrollAndHighlight = useCallback(
-    (itemId: string): boolean => {
-      const index = itemIndexById.get(itemId);
-      if (index === undefined) return false;
-      virtuosoRef.current?.scrollToIndex({ index, behavior: 'smooth', align: 'center' });
-      setHighlightedItemId(itemId);
-      return true;
-    },
-    [itemIndexById]
-  );
-
-  const handleTimelineJump = useCallback(
-    (target: TimelineJumpTarget) => {
-      setShowTimeline(false);
-      // Fast path: exact message already loaded.
-      if (target.messageId && itemIndexById.has(target.messageId)) {
-        scrollAndHighlight(target.messageId);
-        return;
-      }
-      // Otherwise resolve via the pending-jump effect, loading older pages toward
-      // the target timestamp first (no-op when the history is already fully loaded).
-      setPendingJump(target);
-      void lc.loadUntil(target.timestamp);
-    },
-    [itemIndexById, scrollAndHighlight, lc]
-  );
-
-  // Route-driven jump from the project Comments page. This deliberately reuses
-  // the same jump path as the timeline and session comments drawer so URL
-  // deep-links inherit the existing virtualized-list coordinate fix and
-  // fallback loading behavior.
-  useEffect(() => {
-    if (!targetMessageId) return;
-    const targetKey = `${sessionId}:${targetMessageId}`;
-    if (consumedTargetMessageRef.current === targetKey) return;
-    consumedTargetMessageRef.current = targetKey;
-    handleTimelineJump({
-      messageId: targetMessageId,
-      timestamp: targetMessageTimestamp ?? Date.now(),
-    });
-    onTargetMessageConsumed?.();
-  }, [
-    handleTimelineJump,
-    onTargetMessageConsumed,
+  const { jumpToMessage, highlightedRowId } = useConversationJump({
     sessionId,
+    displayItems,
+    virtuosoRef,
+    loadUntil: lc.loadUntil,
+    loadingMore: lc.loadingMore,
     targetMessageId,
     targetMessageTimestamp,
-  ]);
+    onTargetMessageConsumed,
+    onJump: closeTimeline,
+  });
 
-  // Resolve a pending jump once the target (or the nearest message, after
-  // loading settles) is available in the rendered list.
-  useEffect(() => {
-    if (!pendingJump) return;
-    let targetId: string | undefined;
-    if (pendingJump.messageId && itemIndexById.has(pendingJump.messageId)) {
-      targetId = pendingJump.messageId;
-    } else if (!lc.loadingMore) {
-      // No exact anchor, or the anchor never materialized after loading
-      // settled → jump to the nearest loaded message by timestamp.
-      targetId = nearestItemId(displayItems, pendingJump.timestamp);
-    }
-    if (targetId && scrollAndHighlight(targetId)) {
-      setPendingJump(null);
-    }
-  }, [pendingJump, itemIndexById, displayItems, lc.loadingMore, scrollAndHighlight]);
-
-  // Auto-clear the jump highlight after the flash animation. The 2200ms here is
-  // coupled to the `.sam-message-highlight` animation-duration (2.2s) in index.css
-  // — keep the two in sync. Re-jumping resets the timer via this effect's cleanup.
-  useEffect(() => {
-    if (!highlightedItemId) return;
-    const timer = setTimeout(() => setHighlightedItemId(null), 2200);
-    return () => clearTimeout(timer);
-  }, [highlightedItemId]);
-
-  // Close plan modal when agent transitions to idle
-  useEffect(() => {
-    if (lc.agentActivity === 'idle') setShowPlanModal(false);
-  }, [lc.agentActivity]);
-
-  // Track IDs of user messages that should animate (freshly submitted optimistic messages)
-  const [animatedUserMsgIds] = useState(() => new Set<string>());
-  const prevMsgCountRef = useRef(0);
+  const animatedUserMsgIds = useAnimatedUserMessages(lc.messages);
 
   /** Lazy-load tool content for a compact-mode tool call card. */
   const handleLoadToolContent = useCallback(
@@ -332,25 +198,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     [projectId, sessionId]
   );
 
-  // Detect newly added optimistic user messages for fade animation
-  useEffect(() => {
-    const currentCount = lc.messages.length;
-    if (currentCount > prevMsgCountRef.current) {
-      // Check for new optimistic messages in the delta
-      for (let i = prevMsgCountRef.current; i < currentCount; i++) {
-        const msg = lc.messages[i];
-        if (msg && msg.role === 'user' && msg.id.startsWith('optimistic-')) {
-          animatedUserMsgIds.add(msg.id);
-          // Remove from set after animation completes (max 1.5s + buffer)
-          setTimeout(() => {
-            animatedUserMsgIds.delete(msg.id);
-          }, 2000);
-        }
-      }
-    }
-    prevMsgCountRef.current = currentCount;
-  }, [lc.messages, animatedUserMsgIds]);
-
   // Identify the animation target: only animate if the very last item is an
   // agent_message. If a tool_call or thinking block is the latest item, the
   // previous agent_message should NOT be animated — its text is settled.
@@ -359,16 +206,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     if (lastIdx >= 0 && displayItems[lastIdx]?.kind === 'agent_message') return lastIdx;
     return -1;
   }, [displayItems]);
-
-  // A jump can target an absorbed tool id, which resolves to its GROUP's row.
-  // Resolve it to the row's own id (not an index): `itemContent`'s `index` is
-  // Virtuoso's firstItemIndex-offset coordinate, so comparing indices here would
-  // re-introduce the coordinate-space trap `itemIndexById` documents above.
-  const highlightedRowId = useMemo(() => {
-    if (highlightedItemId === null) return null;
-    const index = itemIndexById.get(highlightedItemId);
-    return index === undefined ? null : (displayItems[index]?.id ?? null);
-  }, [highlightedItemId, itemIndexById, displayItems]);
 
   /*
    * Expansion survives virtualization because it lives here, and the live-tail
@@ -434,7 +271,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
    * `index` is Virtuoso's `firstItemIndex`-OFFSET coordinate, which is why the
    * animation comparison subtracts `lc.firstItemIndex` to get back to the
    * zero-based data index. Do not "simplify" that away — see the coordinate-space
-   * note on `itemIndexById` above.
+   * note on `itemIndexById` in `useConversationJump`.
    */
   const renderConversationItem = useCallback(
     (index: number, item: DisplayItem) => {
@@ -487,34 +324,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     [floatingHeaderHeight, lc.hasMore, lc.loadingMore, lc.loadMore]
   );
 
-  const planItem = useMemo(
-    () =>
-      lc.currentPlan && lc.currentPlan.length > 0 ? currentPlanToPlanItem(lc.currentPlan) : null,
-    [lc.currentPlan]
-  );
-  const sessionOwnerLabel =
-    lc.session?.createdBy?.name?.trim() ||
-    lc.session?.createdBy?.email?.split('@')[0] ||
-    'the creator';
-  const isConversationLifecycleSession =
-    lc.taskEmbed?.taskMode === 'conversation' ||
-    (!lc.taskEmbed?.id && (lc.session?.status === 'active' || lc.session?.status === 'sleeping'));
-  const canSleepSession = Boolean(
-    onSleepConversation &&
-    lc.session?.workspaceId &&
-    lc.sessionState !== 'sleeping' &&
-    isConversationLifecycleSession
-  );
-  const canArchiveSession = Boolean(
-    onCloseConversation && lc.sessionState === 'sleeping' && isConversationLifecycleSession
-  );
-  const dockCenterAction =
-    lc.agentActivity !== 'idle'
-      ? 'interrupt'
-      : lc.sessionState === 'sleeping'
-        ? 'archive'
-        : 'sleep';
-
   // Initial load — only show full spinner when no data exists yet
   if (lc.loading && lc.messages.length === 0 && !lc.session) {
     return (
@@ -528,8 +337,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     return <div className="p-4 text-danger text-sm">{lc.error}</div>;
   }
 
-  const isActive =
-    lc.sessionState === 'active' || lc.sessionState === 'idle' || lc.sessionState === 'sleeping';
   const desktopCommentRail = showDockedCommentRail ? (
     <DesktopCommentRail
       comments={messageComments.comments}
@@ -546,270 +353,63 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       onClearDraft={commentUi.rowState.onClearDraft}
       onSelectMessage={(messageId, commentId) => {
         commentUi.rowState.onSelectMessageComments(messageId, commentId);
-        handleTimelineJump({ messageId, timestamp: Date.now() });
+        jumpToMessage({ messageId, timestamp: Date.now() });
       }}
       onClose={closeComments}
     />
   ) : null;
 
+  const floatingHeader = (
+    <FloatingHeader
+      projectId={projectId}
+      lc={lc}
+      onSessionMutated={onSessionMutated}
+      onOpenComments={openComments}
+      unresolvedCommentCount={unresolvedCommentCount}
+      needsAttentionCommentCount={commentCounts.needs_you}
+      sourceContext={sourceContext}
+      onShowHierarchy={onShowHierarchy}
+      containerRef={floatingHeaderRef}
+      expanded={sessionTools.detailsExpanded}
+      onExpandedChange={sessionTools.setDetailsExpanded}
+      flushRight={sessionTools.mode !== 'hidden'}
+      completeError={sessionTools.completeError}
+      onDismissCompleteError={sessionTools.dismissCompleteError}
+    />
+  );
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      {/* Inline error when session already loaded */}
-      {lc.error && lc.session && (
-        <div className="px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs">
-          {lc.error}
-        </div>
-      )}
+      <SessionStatusBanners lc={lc} />
 
-      {/* Connection indicator (DO WebSocket) */}
-      {lc.sessionState === 'active' &&
-        lc.connectionState !== 'connected' &&
-        lc.showConnectionBanner && (
-          <ConnectionBanner state={lc.connectionState} onRetry={lc.retryWs} />
-        )}
+      <ConversationPane
+        lc={lc}
+        displayItems={displayItems}
+        header={floatingHeader}
+        headerHeight={floatingHeaderHeight}
+        chatLogRef={chatLogRef}
+        virtuosoRef={virtuosoRef}
+        renderItem={renderConversationItem}
+        listContext={chatListContext}
+        selectionControls={commentUi.selectionControls}
+        commentRail={desktopCommentRail}
+        toolRail={sessionToolRail}
+      />
 
-      {/* Resuming agent banner */}
-      {lc.isResuming && (
-        <div
-          role="status"
-          aria-label="Agent resume status"
-          className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted"
-        >
-          <Spinner size="sm" />
-          <span>Waking and restoring Instant session...</span>
-          {lc.resumeStartedAt != null && <ElapsedTime startedAt={lc.resumeStartedAt} />}
-        </div>
-      )}
-
-      {/*
-        Wake progress. `isWaking` is the server-derived signal (D1 hydrate + socket
-        push). `agentActivity !== 'idle'` is retained as the pre-existing local
-        fallback so a wake still shows a banner when no phase signal is available —
-        e.g. an API that predates `wakePhase`, or a wake claimed before the
-        replacement runner has written its first execution step.
-      */}
-      {lc.sessionState === 'sleeping' && (lc.isWaking || lc.agentActivity !== 'idle') && (
-        <WakeProgressBanner
-          wakePhase={lc.wakePhase}
-          elapsed={
-            lc.promptStartedAt != null ? <ElapsedTime startedAt={lc.promptStartedAt} /> : null
-          }
-        />
-      )}
-
-      {/* Resume / delivery error banner with retry */}
-      {lc.resumeError && (
-        <div
-          role="alert"
-          className="flex items-center gap-2 px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs"
-        >
-          <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">
-            {lc.resumeError}
-          </span>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {lc.followUp.trim() && (
-              <button
-                type="button"
-                className="px-2 py-1 text-xs font-medium rounded border border-danger/30 bg-transparent cursor-pointer hover:bg-danger-tint text-danger-fg transition-colors"
-                onClick={() => {
-                  lc.clearResumeError();
-                  void lc.handleSendFollowUp();
-                }}
-              >
-                Retry
-              </button>
-            )}
-            <button
-              type="button"
-              className="px-2 py-1 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer hover:bg-surface-raised"
-              onClick={lc.clearResumeError}
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Messages area — virtualized, DO-only */}
-      {displayItems.length === 0 ? (
-        <div className="relative flex flex-1 min-h-0 min-w-0 flex-row">
-          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
-            <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-              <FloatingHeader
-                projectId={projectId}
-                lc={lc}
-                onSessionMutated={onSessionMutated}
-                onOpenComments={openComments}
-                unresolvedCommentCount={unresolvedCommentCount}
-                needsAttentionCommentCount={commentCounts.needs_you}
-                sourceContext={sourceContext}
-                onShowHierarchy={onShowHierarchy}
-                containerRef={floatingHeaderRef}
-                expanded={sessionTools.detailsExpanded}
-                onExpandedChange={sessionTools.setDetailsExpanded}
-                flushRight={sessionTools.mode !== 'hidden'}
-                completeError={sessionTools.completeError}
-                onDismissCompleteError={sessionTools.dismissCompleteError}
-              />
-              <div
-                className="flex flex-1 items-center justify-center"
-                style={{ paddingTop: floatingHeaderHeight }}
-              >
-                <span className="text-fg-muted text-sm">
-                  {lc.sessionState === 'active'
-                    ? 'Waiting for messages...'
-                    : 'No messages in this session.'}
-                </span>
-              </div>
-            </div>
-            {desktopCommentRail}
-          </div>
-          {sessionToolRail}
-        </div>
-      ) : (
-        <div className="flex-1 min-h-0 min-w-0 relative flex flex-row">
-          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
-            <div
-              ref={chatLogRef}
-              className="relative flex min-h-0 min-w-0 flex-1 flex-col"
-              role="log"
-              aria-live="polite"
-              aria-label="Conversation"
-            >
-              <FloatingHeader
-                projectId={projectId}
-                lc={lc}
-                onSessionMutated={onSessionMutated}
-                onOpenComments={openComments}
-                unresolvedCommentCount={unresolvedCommentCount}
-                needsAttentionCommentCount={commentCounts.needs_you}
-                sourceContext={sourceContext}
-                onShowHierarchy={onShowHierarchy}
-                containerRef={floatingHeaderRef}
-                expanded={sessionTools.detailsExpanded}
-                onExpandedChange={sessionTools.setDetailsExpanded}
-                flushRight={sessionTools.mode !== 'hidden'}
-                completeError={sessionTools.completeError}
-                onDismissCompleteError={sessionTools.dismissCompleteError}
-              />
-              <div className="flex-1 min-h-0">
-                <Virtuoso
-                  ref={virtuosoRef}
-                  style={{ height: '100%' }}
-                  data={displayItems}
-                  firstItemIndex={lc.firstItemIndex}
-                  initialTopMostItemIndex={displayItems.length - 1}
-                  followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
-                  alignToBottom
-                  atBottomThreshold={50}
-                  atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
-                  overscan={200}
-                  itemContent={renderConversationItem}
-                  context={chatListContext}
-                  components={CHAT_LIST_COMPONENTS}
-                />
-              </div>
-
-              {/* Scroll to bottom button */}
-              {lc.showScrollButton && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    virtuosoRef.current?.scrollToIndex({
-                      index: 'LAST',
-                      behavior: 'smooth',
-                    });
-                  }}
-                  className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] shadow-md cursor-pointer hover:bg-page"
-                  data-agent-active={lc.agentActivity !== 'idle'}
-                  aria-label="Scroll to bottom"
-                >
-                  <ChevronDown size={16} className="text-fg-muted" />
-                </button>
-              )}
-
-              {commentUi.selectionControls}
-            </div>
-            {desktopCommentRail}
-          </div>
-          {sessionToolRail}
-        </div>
-      )}
-
-      {/* Lifecycle control — a single always-mounted dock while the session is
-          active. Its center button morphs between Interrupt (working), Sleep
-          (awake idle), and Archive (already sleeping), so irreversible archive
-          is only the primary action after the reversible sleep boundary. */}
-      {isActive &&
-        canWriteSession &&
-        (lc.completionDockWorking || canSleepSession || canArchiveSession) && (
-          <CompletionDock
-            working={lc.completionDockWorking}
-            centerAction={dockCenterAction}
-            hasPlan={!!planItem}
-            onInterrupt={lc.handleCancelPrompt}
-            onSleep={() => onSleepConversation?.()}
-            onArchive={() => onCloseConversation?.()}
-            onOpenPlan={() => setShowPlanModal(true)}
-            sleeping={sleepingConversation}
-            archiving={closingConversation}
-            cancelling={lc.cancelling}
-            sleepError={sleepError}
-            archiveError={closeError}
-            cancelError={lc.cancelError}
-            elapsed={
-              lc.promptStartedAt ? <ElapsedTime startedAt={lc.promptStartedAt} /> : undefined
-            }
-          />
-        )}
-      {planItem && (
-        <PlanModal plan={planItem} isOpen={showPlanModal} onClose={() => setShowPlanModal(false)} />
-      )}
-
-      {/* Stale activity notice — shown once per verified-stale transition */}
-      {lc.staleNotice && <StaleActivityNotice onDismiss={lc.dismissStaleNotice} />}
-      {commentUi.selectedTextComposer}
-
-      {/* Input area */}
-      {isActive && canWriteSession && (
-        <FollowUpInput
-          value={lc.followUp}
-          onChange={lc.setFollowUp}
-          onSend={() => {
-            void lc.handleSendFollowUp();
-          }}
-          onUploadFiles={(files) => {
-            void lc.handleUploadFiles(files);
-          }}
-          sending={lc.sendingFollowUp}
-          uploading={lc.uploading}
-          placeholder={
-            // A wake already in flight must not be advertised as "send a message
-            // to wake" — that contradicts the banner directly above and is what
-            // invites the duplicate wake this feature exists to prevent.
-            lc.isWaking
-              ? 'Waking the agent — your message will be delivered...'
-              : lc.agentActivity === 'prompting' || lc.agentActivity === 'responding'
-                ? 'Agent is working...'
-                : lc.sessionState === 'idle'
-                  ? 'Send a message to resume the agent...'
-                  : lc.sessionState === 'sleeping'
-                    ? 'Send a message to wake the agent...'
-                    : 'Send a message...'
-          }
-          transcribeApiUrl={lc.transcribeApiUrl}
-          agentProfiles={agentProfiles}
-          slashCommands={slashCommands}
-        />
-      )}
-      {isActive && !canWriteSession && (
-        <ReadOnlyFollowUp ownerLabel={sessionOwnerLabel} onNewChat={onNewChat} />
-      )}
-      {lc.sessionState === 'terminated' && (
-        <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface text-center">
-          <span className="sam-type-secondary text-fg-muted">This session has ended.</span>
-        </div>
-      )}
+      <SessionFooter
+        lc={lc}
+        canWriteSession={canWriteSession}
+        selectedTextComposer={commentUi.selectedTextComposer}
+        onSleepConversation={onSleepConversation}
+        sleepingConversation={sleepingConversation}
+        sleepError={sleepError}
+        onCloseConversation={onCloseConversation}
+        closingConversation={closingConversation}
+        closeError={closeError}
+        agentProfiles={agentProfiles}
+        slashCommands={slashCommands}
+        onNewChat={onNewChat}
+      />
 
       {/* File viewer slide-over panel */}
       {lc.filePanel && lc.session && (
@@ -830,7 +430,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         timelineLoading={timeline.loading}
         showTimelineContext={timeline.showContext}
         onToggleTimelineContext={() => timeline.setShowContext(!timeline.showContext)}
-        onCloseTimeline={() => setShowTimeline(false)}
+        onCloseTimeline={closeTimeline}
         showResources={showResources}
         onCloseResources={() => setShowResources(false)}
         showComments={showMobileCommentsDrawer}
@@ -839,7 +439,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         viewerId={viewerId}
         canWriteSession={canWriteSession}
         onCloseComments={closeComments}
-        onJump={handleTimelineJump}
+        onJump={jumpToMessage}
         onReply={(threadId, body, action) =>
           messageComments.reply({ commentId: threadId, body, action })
         }
