@@ -24,7 +24,7 @@ function setup() {
     CREATE TABLE nodes (id TEXT PRIMARY KEY, agent_version TEXT);
     CREATE TABLE debug_diagnoses (id TEXT PRIMARY KEY, diagnosis TEXT NOT NULL);
     CREATE TABLE platform_feedback_triages (
-      signature TEXT PRIMARY KEY, source TEXT NOT NULL, summary TEXT NOT NULL,
+      signature TEXT PRIMARY KEY, canonical_signature TEXT, source TEXT NOT NULL, summary TEXT NOT NULL,
       first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, occurrence_count INTEGER NOT NULL,
       severity TEXT NOT NULL DEFAULT 'error', evidence_refs TEXT NOT NULL, diagnosis_id TEXT, idea_id TEXT, claim_token TEXT,
       claim_expires_at INTEGER, failure_count INTEGER NOT NULL DEFAULT 0,
@@ -40,6 +40,8 @@ function setup() {
       resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT,
       resolution_references TEXT, expired_at INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+    CREATE UNIQUE INDEX idx_platform_feedback_triages_canonical_signature
+      ON platform_feedback_triages(canonical_signature) WHERE canonical_signature IS NOT NULL;
     INSERT INTO projects VALUES ('feedback-project', 'owner-1');
   `);
   const observability = new Database(':memory:');
@@ -154,6 +156,228 @@ describe('platform feedback triage', () => {
       10
     );
     expect(second[0]?.signature).toBe(first[0]?.signature);
+  });
+
+  it.each([
+    {
+      name: 'storage measurements',
+      messages: [
+        'ProjectData storage usage is degraded (97.92%, 0 bytes/day, time to limit unavailable)',
+        'ProjectData storage usage is degraded (97.99%, 0 bytes/day, time to limit unavailable)',
+      ],
+    },
+    {
+      name: 'storage byte rates and day estimates',
+      messages: [
+        'ProjectData storage usage is degraded (97.71%, 145241674 bytes/day, 1.6 days to limit)',
+        'ProjectData storage usage is degraded (99.51%, 161113922 bytes/day, 0.3 days to limit)',
+      ],
+    },
+    {
+      name: 'max-lifetime node identifiers from production',
+      messages: [
+        'Failed to destroy max-lifetime node: Cannot confirm managed VM termination for node 01M3BB7WG1GK21RGVBY0EDGYWB: instance identity is missing',
+        'Failed to destroy max-lifetime node: Cannot confirm managed VM termination for node 01M3C74N1JC4QDPCF2G352ZG45: instance identity is missing',
+      ],
+    },
+    {
+      name: 'identifiers, hex, ports, timestamps, durations, and quoted values',
+      messages: [
+        'Worker 01M3BB7WG1GK21RGVBY0EDGYWB request 60f74d90-5e57-45d6-aa9f-6d53f48bcb6c hash deadbeefcafebabe on port 8080 at 2026-09-27T17:20:48.695Z took 12.5ms for "alpha"',
+        'Worker 01M3C74N1JC4QDPCF2G352ZG45 request 727be9d1-d817-44ab-a07f-f99dc9a3e307 hash 0123456789abcdef on port 9090 at 2026-09-28T18:21:49.123Z took 2.7s for "beta"',
+      ],
+    },
+    {
+      name: 'embedded JSON ordering and volatile fields',
+      messages: [
+        'callback failed: {"error":"INTERNAL_ERROR","message":"Internal server error","requestId":"60f74d90-5e57-45d6-aa9f-6d53f48bcb6c","attempt":1}',
+        'callback failed: { "attempt": 9, "requestId": "727be9d1-d817-44ab-a07f-f99dc9a3e307", "message": "Internal server error", "error": "INTERNAL_ERROR" }',
+      ],
+    },
+    {
+      name: 'embedded JSON arrays with reordered volatile entries',
+      messages: [
+        'batch failed: [{"error":"TIMEOUT","requestId":"60f74d90-5e57-45d6-aa9f-6d53f48bcb6c","durationMs":1200},{"port":8080}]',
+        'batch failed: [{"port":9090},{"durationMs":8700,"requestId":"727be9d1-d817-44ab-a07f-f99dc9a3e307","error":"TIMEOUT"}]',
+      ],
+    },
+  ])('collapses production-shaped $name variants', async ({ messages }) => {
+    const groups = await groupPlatformErrors(
+      messages.map((message, index) => ({
+        id: `123e4567-e89b-42d3-a456-${String(index).padStart(12, '0')}`,
+        source: 'api',
+        message,
+        timestamp: index + 1,
+      })),
+      10
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.count).toBe(2);
+  });
+
+  it('keeps distinct production error shapes and sources in separate groups', async () => {
+    const messages = [
+      [
+        'api',
+        'Failed to destroy max-lifetime node: Cannot confirm managed VM termination for node 01M3BB7WG1GK21RGVBY0EDGYWB: instance identity is missing',
+      ],
+      ['api', 'Destroyed managed node left in destroying handoff'],
+      ['api', 'Node provisioning failed: hetzner API error (412): error during placement'],
+      [
+        'vm-agent',
+        'snapshot control plane returned HTTP 410: {"error":"GONE","message":"Workspace is sleeping; callback resource is gone"}',
+      ],
+      [
+        'vm-agent',
+        'snapshot control plane returned HTTP 400: {"error":"BAD_REQUEST","message":"Snapshot request body is too large"}',
+      ],
+      ['client', 'Destroyed managed node left in destroying handoff'],
+    ] as const;
+    const groups = await groupPlatformErrors(
+      messages.map(([source, message], index) => ({
+        id: `123e4567-e89b-42d3-a456-${String(index).padStart(12, '0')}`,
+        source,
+        message,
+        timestamp: index + 1,
+      })),
+      10
+    );
+
+    expect(groups).toHaveLength(messages.length);
+    expect(new Set(groups.map((group) => group.signature)).size).toBe(messages.length);
+  });
+
+  it('reuses the linked legacy row across a disjoint window and converging old signatures', async () => {
+    const { main, observability } = setup();
+    const at = Date.parse('2026-09-27T14:48:40.999Z');
+    const legacyAt = at - 2 * 60 * 60_000;
+    const legacyMessage =
+      'ProjectData storage usage is degraded (97.92%, 0 bytes/day, time to limit unavailable)';
+    const secondLegacyMessage =
+      'ProjectData storage usage is degraded (97.99%, 0 bytes/day, time to limit unavailable)';
+    const currentMessage =
+      'ProjectData storage usage is degraded (98.07%, 0 bytes/day, time to limit unavailable)';
+    const [canonicalGroup] = await groupPlatformErrors(
+      [
+        {
+          id: 'afaa96ab-c811-436a-b933-42c79e2e0249',
+          source: 'api',
+          level: 'error',
+          message: legacyMessage,
+          timestamp: legacyAt,
+        },
+      ],
+      10
+    );
+    const legacySignature = canonicalGroup?.legacySignatures?.[0];
+    expect(canonicalGroup).toBeDefined();
+    expect(legacySignature).toBeDefined();
+    expect(legacySignature).not.toBe(canonicalGroup?.signature);
+    const [secondLegacyGroup] = await groupPlatformErrors(
+      [
+        {
+          id: 'b9be0307-a456-42b5-83fd-25623883b6e2',
+          source: 'api',
+          level: 'error',
+          message: secondLegacyMessage,
+          timestamp: legacyAt + 1,
+        },
+      ],
+      10
+    );
+    const secondLegacySignature = secondLegacyGroup?.legacySignatures?.[0];
+    expect(secondLegacySignature).toBeDefined();
+    expect(secondLegacySignature).not.toBe(legacySignature);
+
+    main
+      .prepare(
+        `INSERT INTO tasks
+       (id, project_id, user_id, title, description, status, priority, task_mode,
+        dispatch_depth, created_by, created_at, updated_at)
+       VALUES ('existing-idea', 'feedback-project', 'owner-1', 'Recurring api platform error',
+        'existing draft', 'draft', 0, 'task', 0, 'owner-1', ?, ?)`
+      )
+      .run(new Date(legacyAt).toISOString(), new Date(legacyAt).toISOString());
+    main
+      .prepare(
+        `INSERT INTO platform_feedback_triages
+       (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
+        severity, idea_id, queue_state, queued_at)
+       VALUES (?, 'api', 'Recurring api platform error', ?, ?, 1, ?, 'error',
+        'existing-idea', 'pending', ?)`
+      )
+      .run(
+        legacySignature,
+        legacyAt,
+        legacyAt,
+        JSON.stringify([{ errorId: 'afaa96ab-c811-436a-b933-42c79e2e0249', timestamp: legacyAt }]),
+        legacyAt
+      );
+    main
+      .prepare(
+        `INSERT INTO platform_feedback_triages
+       (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs,
+        severity, queue_state, queued_at)
+       VALUES (?, 'api', 'Recurring api platform error', ?, ?, 1, ?, 'error', 'pending', ?)`
+      )
+      .run(
+        secondLegacySignature,
+        legacyAt + 1,
+        legacyAt + 1,
+        JSON.stringify([
+          { errorId: 'b9be0307-a456-42b5-83fd-25623883b6e2', timestamp: legacyAt + 1 },
+        ]),
+        legacyAt + 1
+      );
+    const insertError = observability.prepare(
+      'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+    );
+    insertError.run(
+      'afaa96ab-c811-436a-b933-42c79e2e0249',
+      'api',
+      'error',
+      legacyMessage,
+      legacyAt
+    );
+    insertError.run(
+      'b9be0307-a456-42b5-83fd-25623883b6e2',
+      'api',
+      'error',
+      secondLegacyMessage,
+      legacyAt + 1
+    );
+    insertError.run('5110e31e-e1da-41df-ad8a-b7e092fc95f2', 'api', 'error', currentMessage, at);
+    const diagnose = vi.fn();
+
+    const result = await runPlatformFeedbackTriage(
+      {
+        DATABASE: createSqliteD1(main),
+        OBSERVABILITY_DATABASE: createSqliteD1(observability),
+        PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
+        PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES: '60',
+      } as Env,
+      'manual',
+      { now: () => at + 1, diagnose }
+    );
+
+    expect(result).toMatchObject({ ideasCreated: 0, ideasUpdated: 1 });
+    expect(diagnose).not.toHaveBeenCalled();
+    expect(main.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 1 });
+    expect(main.prepare('SELECT COUNT(*) AS count FROM platform_feedback_triages').get()).toEqual({
+      count: 2,
+    });
+    expect(
+      main
+        .prepare(
+          'SELECT signature, canonical_signature, occurrence_count FROM platform_feedback_triages WHERE canonical_signature IS NOT NULL'
+        )
+        .get()
+    ).toEqual({
+      signature: legacySignature,
+      canonical_signature: canonicalGroup?.signature,
+      occurrence_count: 1,
+    });
   });
 
   it('chunks feedback-project task exclusion below D1 parameter limits', async () => {

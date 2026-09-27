@@ -86,7 +86,13 @@ function createMockD1() {
       currentSql = sql;
       return stmt;
     }),
-    batch: vi.fn(),
+    batch: vi.fn(async (statements: unknown[]) =>
+      statements.map(() => ({
+        success: true,
+        results: [{ status: 'queued' }],
+        meta: { changes: 1 },
+      }))
+    ),
     _stmt: stmt,
     _currentSql: () => currentSql,
   };
@@ -210,8 +216,15 @@ function createStatefulTaskD1(task: StatefulTaskRow) {
         }),
         run: vi.fn(async () => {
           if (sql.includes('UPDATE tasks') && sql.includes("status = 'completed'")) {
-            const [completedAt, outputSummary, completionEvidence, updatedAt, taskId, projectId] =
-              statement.params;
+            const [
+              completedAt,
+              outputSummary,
+              outputPrUrl,
+              completionEvidence,
+              updatedAt,
+              taskId,
+              projectId,
+            ] = statement.params;
             const canComplete =
               task.id === taskId &&
               task.project_id === projectId &&
@@ -222,6 +235,7 @@ function createStatefulTaskD1(task: StatefulTaskRow) {
             task.status = 'completed';
             task.completed_at = completedAt as string;
             task.output_summary = (outputSummary as string | null) ?? task.output_summary;
+            task.output_pr_url = (outputPrUrl as string | null) ?? task.output_pr_url;
             task.completion_evidence =
               (completionEvidence as string | null) ?? task.completion_evidence;
             task.updated_at = updatedAt as string;
@@ -4271,6 +4285,7 @@ describe('MCP Routes', () => {
       expect(completeRes.status).toBe(200);
       expect(task.status).toBe('completed');
       expect(task.output_summary).toBe('Done with proof');
+      expect(task.output_pr_url).toBe(evidence.prUrl);
       expect(task.completion_evidence).toBe(JSON.stringify(evidence));
 
       const detailsRes = await mcpRequest(
@@ -4285,6 +4300,7 @@ describe('MCP Routes', () => {
       const detailsBody = await detailsRes.json();
       const details = JSON.parse(detailsBody.result.content[0].text);
       expect(details.completionEvidence).toEqual(evidence);
+      expect(details.outputPrUrl).toBe(evidence.prUrl);
       expect(details.outputSummary).toBe('Done with proof');
     });
 

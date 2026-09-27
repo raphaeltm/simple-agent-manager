@@ -107,7 +107,8 @@ describe('TDF-6 Fix 2: No fallback session IDs', () => {
   it('task-submit wraps session creation in try-catch that fails the task on error', () => {
     // Session creation failure should mark the task as failed (not orphan it)
     expect(taskSubmitSource).toContain('Session creation failed:');
-    expect(taskSubmitSource).toContain("status: 'failed'");
+    expect(taskSubmitSource).toContain('markTaskFailedIfNonTerminal(');
+    expect(taskSubmitSource).toContain("from '../../services/task-failure'");
   });
 
   it('session creation uses let with try-catch for error cleanup', () => {

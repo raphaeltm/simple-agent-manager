@@ -194,6 +194,11 @@ export function buildDispatchCtx(
       env: {
         DATABASE: {
           prepare: vi.fn(() => statement),
+          batch: vi.fn().mockResolvedValue([
+            { success: true, results: [{ status: 'queued' }], meta: { changes: 0 } },
+            { success: true, results: [], meta: { changes: 1 } },
+            { success: true, results: [], meta: { changes: 1 } },
+          ]),
         },
         PROJECT_DATA: {
           idFromName: vi.fn(() => 'project-data-id'),

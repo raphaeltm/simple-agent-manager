@@ -17,6 +17,7 @@ import { jsonValidator, StartChatSessionSchema } from '../schemas';
 import { acceptInstantSession, continueInstantSessionLaunch } from '../services/instant-session';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
 import { resolveSkillProfile } from '../services/skills';
+import { markTaskFailedIfNonTerminal } from '../services/task-failure';
 import { truncateTitle } from '../services/task-title';
 import { resolveWorkspaceRuntime } from '../services/workspace-runtime';
 import { requireRepositoryUserAccess } from './projects/_helpers';
@@ -229,26 +230,9 @@ chatStartRoutes.post(
     try {
       accepted = await acceptInstantSession(db, c.env, launchInput);
     } catch (err) {
-      const failedAt = new Date().toISOString();
       const errorMessage = err instanceof Error ? err.message : String(err);
-      await db
-        .update(schema.tasks)
-        .set({
-          status: 'failed',
-          executionStep: 'launch_failed',
-          errorMessage,
-          updatedAt: failedAt,
-        })
-        .where(eq(schema.tasks.id, taskId));
-      await db.insert(schema.taskStatusEvents).values({
-        id: ulid(),
-        taskId,
-        fromStatus: 'queued',
-        toStatus: 'failed',
-        actorType: 'system',
-        actorId: null,
-        reason: errorMessage,
-        createdAt: failedAt,
+      await markTaskFailedIfNonTerminal(c.env.DATABASE, taskId, errorMessage, undefined, {
+        executionStep: 'launch_failed',
       });
       throw err;
     }

@@ -9,6 +9,10 @@ import { persistError, redactSensitiveData } from '../../services/observability'
 import { recordTaskLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
 import { restoreSessionRecoveryHandoff } from '../../services/session-recovery-authority';
 import {
+  taskStatusIsNonTerminalSql,
+  TERMINAL_STATUS_VALUES,
+} from '../../services/task-status';
+import {
   createProjectEventTaskTerminalTransitionHook,
   createTaskWaitTerminalTransitionHook,
   runTaskTerminalTransitionHooks,
@@ -267,9 +271,9 @@ export async function failTask(
   // write — never clobber an already-terminal row (completed/failed/cancelled).
   const failureTransition = await rc.env.DATABASE.prepare(
     `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
-     WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled')`
+     WHERE id = ? AND ${taskStatusIsNonTerminalSql()}`
   )
-    .bind(errorMessage, now, now, state.taskId)
+    .bind(errorMessage, now, now, state.taskId, ...TERMINAL_STATUS_VALUES)
     .run();
 
   if (!failureTransition.meta.changes) {

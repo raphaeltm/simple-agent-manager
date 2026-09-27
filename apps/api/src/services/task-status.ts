@@ -13,6 +13,18 @@ export const TASK_STATUSES: TaskStatus[] = [
 
 export const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set(['completed', 'failed', 'cancelled']);
 
+/** Canonical bind values for raw SQL task terminal-state guards. */
+export const TERMINAL_STATUS_VALUES: readonly TaskStatus[] = Object.freeze([...TERMINAL_STATUSES]);
+
+/**
+ * Builds a raw-SQL predicate that keeps a task failure transition atomic.
+ * Callers must append `TERMINAL_STATUS_VALUES` to their statement bindings.
+ */
+export function taskStatusIsNonTerminalSql(column = 'status'): string {
+  const placeholders = TERMINAL_STATUS_VALUES.map(() => '?').join(', ');
+  return `${column} NOT IN (${placeholders})`;
+}
+
 export const TASK_EXECUTION_STATUSES: TaskStatus[] = ['queued', 'delegated', 'in_progress'];
 
 const TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {

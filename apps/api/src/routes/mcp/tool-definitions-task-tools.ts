@@ -35,7 +35,8 @@ export const TASK_LIFECYCLE_TOOLS = [
     name: 'complete_task',
     description:
       'Mark the current task as completed. Call this after all work is done and changes are pushed. ' +
-      'Optionally include structured evidence describing tests, staging checks, CI, manual verification, PR URL, or notes.',
+      'Optionally include structured evidence describing tests, staging checks, CI, manual verification, or notes. ' +
+      'When work has a pull request, pass its URL as evidence.prUrl so it is saved on the task.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -77,7 +78,11 @@ export const TASK_LIFECYCLE_TOOLS = [
                 additionalProperties: false,
               },
             },
-            prUrl: { type: 'string' },
+            prUrl: {
+              type: 'string',
+              description:
+                'Pull request URL for the completed work. This is persisted as the task output PR URL.',
+            },
             notes: { type: 'string' },
           },
           additionalProperties: false,

@@ -26,6 +26,7 @@ import {
   WorkspaceDeletionUnconfirmedError,
 } from '../../../services/replacement-deletion-fence';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
+import { markTaskFailedIfNonTerminal } from '../../../services/task-failure';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
@@ -303,11 +304,12 @@ export async function retrySubtask(
     );
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`
-    )
-      .bind(`Session creation failed: ${errorMsg}`, new Date().toISOString(), newTaskId)
-      .run();
+    await markTaskFailedIfNonTerminal(
+      env.DATABASE,
+      newTaskId,
+      `Session creation failed: ${errorMsg}`,
+      { env, projectId: original.projectId, source: 'sam.retry_subtask.session_creation' }
+    );
     return {
       error: 'Failed to create chat session for the retried task. The error has been logged.',
     };
@@ -376,11 +378,12 @@ export async function retrySubtask(
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`
-    )
-      .bind(`Task runner startup failed: ${errorMsg}`, new Date().toISOString(), newTaskId)
-      .run();
+    await markTaskFailedIfNonTerminal(
+      env.DATABASE,
+      newTaskId,
+      `Task runner startup failed: ${errorMsg}`,
+      { env, projectId: original.projectId, source: 'sam.retry_subtask.runner_startup', sessionId }
+    );
     return {
       error: 'Failed to start task runner for the retried task. The error has been logged.',
     };

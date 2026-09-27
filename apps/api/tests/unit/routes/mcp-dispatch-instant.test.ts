@@ -5,7 +5,7 @@ const instantSessionMocks = vi.hoisted(() => ({
 }));
 
 const taskFailureMocks = vi.hoisted(() => ({
-  markQueuedTaskFailed: vi.fn(),
+  markTaskFailedIfNonTerminal: vi.fn(),
 }));
 
 vi.mock('../../../src/services/instant-session', () => ({
@@ -13,7 +13,7 @@ vi.mock('../../../src/services/instant-session', () => ({
 }));
 
 vi.mock('../../../src/services/task-failure', () => ({
-  markQueuedTaskFailed: taskFailureMocks.markQueuedTaskFailed,
+  markTaskFailedIfNonTerminal: taskFailureMocks.markTaskFailedIfNonTerminal,
 }));
 
 import { log } from '../../../src/lib/logger';
@@ -35,11 +35,12 @@ function makeInput(): LaunchDispatchedInstantInput {
 }
 
 const fakeDb = { marker: 'db' } as never;
+const fakeEnv = { DATABASE: fakeDb } as never;
 
 describe('launchDispatchedInstantSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    taskFailureMocks.markQueuedTaskFailed.mockResolvedValue(true);
+    taskFailureMocks.markTaskFailedIfNonTerminal.mockResolvedValue(true);
   });
 
   it('offloads the launch to waitUntil and resolves before the launch settles', async () => {
@@ -58,14 +59,14 @@ describe('launchDispatchedInstantSession', () => {
 
     // Resolves immediately while the launch promise is still pending
     await expect(
-      launchDispatchedInstantSession(fakeDb, {} as never, makeInput(), execCtx)
+      launchDispatchedInstantSession(fakeDb, fakeEnv, makeInput(), execCtx)
     ).resolves.toBeUndefined();
     expect(waited).toHaveLength(1);
     expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
 
     resolveLaunch({ taskId: 'task-1', runtime: 'cf-container' });
     await expect(waited[0]).resolves.toBeUndefined();
-    expect(taskFailureMocks.markQueuedTaskFailed).not.toHaveBeenCalled();
+    expect(taskFailureMocks.markTaskFailedIfNonTerminal).not.toHaveBeenCalled();
   });
 
   it('marks the task failed and logs when a waitUntil-offloaded launch rejects', async () => {
@@ -81,7 +82,7 @@ describe('launchDispatchedInstantSession', () => {
     };
 
     await expect(
-      launchDispatchedInstantSession(fakeDb, {} as never, makeInput(), execCtx)
+      launchDispatchedInstantSession(fakeDb, fakeEnv, makeInput(), execCtx)
     ).resolves.toBeUndefined();
 
     // The rejection is captured: structured log + queued-guarded task failure
@@ -95,7 +96,7 @@ describe('launchDispatchedInstantSession', () => {
         error: 'container pool exhausted',
       })
     );
-    expect(taskFailureMocks.markQueuedTaskFailed).toHaveBeenCalledWith(
+    expect(taskFailureMocks.markTaskFailedIfNonTerminal).toHaveBeenCalledWith(
       fakeDb,
       'task-1',
       'Instant launch failed: container pool exhausted',
@@ -113,9 +114,9 @@ describe('launchDispatchedInstantSession', () => {
     vi.spyOn(log, 'error').mockImplementation(() => undefined);
 
     await expect(
-      launchDispatchedInstantSession(fakeDb, {} as never, makeInput(), undefined)
+      launchDispatchedInstantSession(fakeDb, fakeEnv, makeInput(), undefined)
     ).rejects.toThrow('container pool exhausted');
-    expect(taskFailureMocks.markQueuedTaskFailed).toHaveBeenCalledWith(
+    expect(taskFailureMocks.markTaskFailedIfNonTerminal).toHaveBeenCalledWith(
       fakeDb,
       'task-1',
       'Instant launch failed: container pool exhausted',
@@ -130,11 +131,11 @@ describe('launchDispatchedInstantSession', () => {
     instantSessionMocks.launchInstantSession.mockRejectedValueOnce(
       new Error('container pool exhausted')
     );
-    taskFailureMocks.markQueuedTaskFailed.mockRejectedValueOnce(new Error('D1 unavailable'));
+    taskFailureMocks.markTaskFailedIfNonTerminal.mockRejectedValueOnce(new Error('D1 unavailable'));
     const logSpy = vi.spyOn(log, 'error').mockImplementation(() => undefined);
 
     await expect(
-      launchDispatchedInstantSession(fakeDb, {} as never, makeInput(), undefined)
+      launchDispatchedInstantSession(fakeDb, fakeEnv, makeInput(), undefined)
     ).rejects.toThrow('container pool exhausted');
     expect(logSpy).toHaveBeenCalledWith(
       'mcp.dispatch_task.instant_failure_persist_failed',
@@ -149,9 +150,9 @@ describe('launchDispatchedInstantSession', () => {
     });
 
     await expect(
-      launchDispatchedInstantSession(fakeDb, {} as never, makeInput(), undefined)
+      launchDispatchedInstantSession(fakeDb, fakeEnv, makeInput(), undefined)
     ).resolves.toBeUndefined();
     expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
-    expect(taskFailureMocks.markQueuedTaskFailed).not.toHaveBeenCalled();
+    expect(taskFailureMocks.markTaskFailedIfNonTerminal).not.toHaveBeenCalled();
   });
 });

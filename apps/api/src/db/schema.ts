@@ -4074,6 +4074,7 @@ export const platformFeedbackTriages = sqliteTable(
   'platform_feedback_triages',
   {
     signature: text('signature').primaryKey(),
+    canonicalSignature: text('canonical_signature'),
     source: text('source').notNull(),
     summary: text('summary').notNull(),
     firstSeenAt: integer('first_seen_at').notNull(),
@@ -4130,6 +4131,9 @@ export const platformFeedbackTriages = sqliteTable(
   },
   (table) => ({
     ideaIdx: index('idx_platform_feedback_triages_idea').on(table.ideaId),
+    canonicalSignatureIdx: uniqueIndex('idx_platform_feedback_triages_canonical_signature')
+      .on(table.canonicalSignature)
+      .where(sql`${table.canonicalSignature} IS NOT NULL`),
     lastSeenIdx: index('idx_platform_feedback_triages_last_seen').on(table.lastSeenAt),
     rejectedIdx: index('idx_platform_feedback_triages_rejected').on(table.rejectedAt),
     queueStateIdx: index('idx_platform_feedback_triages_queue_state').on(

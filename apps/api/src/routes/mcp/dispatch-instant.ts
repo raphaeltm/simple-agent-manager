@@ -7,7 +7,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { launchInstantSession } from '../../services/instant-session';
 import type { AgentSessionOverrides } from '../../services/node-agent';
-import { markQueuedTaskFailed } from '../../services/task-failure';
+import { markTaskFailedIfNonTerminal } from '../../services/task-failure';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -93,14 +93,19 @@ export function launchDispatchedInstantSession(
     // Setup failures before launchInstantSession's own guarded window (node
     // record, chat session, message persist) would otherwise leave the task
     // 'queued' with no error until the stuck-task cron. Failures inside that
-    // window already mark the task failed; the queued-status guard makes this
-    // a no-op then.
+    // window already mark the task failed; the terminal-state guard makes a
+    // repeated write a no-op and preserves a concurrent completion/cancellation.
     try {
-      await markQueuedTaskFailed(db, input.taskId, `Instant launch failed: ${errorMsg}`, {
-        env,
-        projectId: input.project.id,
-        source: 'mcp.dispatch_task.instant_launch',
-      });
+      await markTaskFailedIfNonTerminal(
+        env.DATABASE,
+        input.taskId,
+        `Instant launch failed: ${errorMsg}`,
+        {
+          env,
+          projectId: input.project.id,
+          source: 'mcp.dispatch_task.instant_launch',
+        }
+      );
     } catch (persistErr) {
       log.error('mcp.dispatch_task.instant_failure_persist_failed', {
         taskId: input.taskId,
