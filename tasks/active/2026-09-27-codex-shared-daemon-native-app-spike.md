@@ -146,7 +146,7 @@ The managed-daemon path currently has an exact-version limitation. On 2026-09-27
 - CI and E2E smoke at `6bb4158b3` pass, including SonarCloud, secret scan, VM-agent test/integration/E2E, repository test, lint, typecheck, build, and quality surfaces.
 - Local final runtime validation passes full VM-agent tests/vet, full ACP race, focused ordering/overflow tests x100, and the credential-free private-relay daemon replacement/recovery smoke with a new empty Codex home.
 - Go, security, constitution, docs-sync, env, and test reviews pass after the final ordering and bounded-queue fixes. The final task-completion validation is recorded before task completion.
-- The `coderabbit-review` label is present, but GitHub reports that automatic review was skipped/disabled; no CodeRabbit findings exist to resolve. This is recorded as unavailable review evidence, not a passing review, and `needs-human-review` is applied.
+- The `coderabbit-review` label is present, but GitHub reports that automatic review was skipped/disabled; no CodeRabbit findings exist to resolve. This is recorded as unavailable review evidence, not a passing review. The repository `needs-human-review` label is reserved for incomplete local specialist review; all required local specialists completed and passed.
 - Staging temporary authentication state and scripts were deleted after cleanup. No production rollout or merge was performed.
 
 ### Task completion validation
