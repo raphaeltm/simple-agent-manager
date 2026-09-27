@@ -78,7 +78,11 @@ export async function markTaskFailedIfNonTerminal(
         ...TERMINAL_STATUS_VALUES
       ),
   ]);
-  const observedStatus = (results[0]?.results[0] as { status?: unknown } | undefined)?.status;
+  const observedRow: unknown = results[0]?.results[0];
+  const observedStatus =
+    typeof observedRow === 'object' && observedRow !== null && 'status' in observedRow
+      ? observedRow.status
+      : undefined;
   if (!isTaskStatus(observedStatus) || !(results[2]?.meta.changes ?? 0)) return false;
   if (eventContext) {
     await recordTaskLifecycleEventBestEffort(eventContext.env, {
