@@ -189,7 +189,15 @@ Build on PR #2159 (`2967a6cfa`, reopen-within-staleTime reconciliation). Do not 
 ### Visual + staging
 
 - [x] Playwright audit at 375x667 and 1280x800: long chat, empty chat, many sessions, long titles; switch flows; scroll paging; no overflow; screenshots opened and reviewed
-- [ ] Staging: switch between several real chats on app.sammy.party; immediate switch, newest visible, older pages in, zero console errors
+- [x] Staging: switched between several real chats on app.sammy.party (runs at eb178fe31 and at the
+      final build de85778ec, desktop and mobile). Cold open reads 500 rows, not 50,000, with no older
+      page on open. Older history pages in on real scroll-up. An uncached switch shows the chat's own
+      spinner, never the previous chat (baseline: 25–98 frames of it). A cached return shows the header
+      in 64–158 ms. A chat left 6.5 min, reopened with reads held back 2.5 s, paints from cache. A
+      timeline jump to the first of 3,691 rows lands on it. Console errors are only the pre-existing
+      404s for deleted workspaces and reaped tasks, identical on the pre-change build and tracked in
+      `tasks/backlog/2026-09-08-ended-chat-requests-deleted-workspace.md` and
+      `tasks/backlog/2026-09-09-chat-requests-reaped-task-404.md`.
 
 ### Review follow-ups (Phase 5) — `6ad8502ec`, `7e6836242`
 
