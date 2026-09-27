@@ -1,9 +1,9 @@
+import { redactCredentialTokens } from '../lib/credential-token-redaction';
+
 export const REDACTED = '[REDACTED]';
 
+/** Secret shapes beyond the shared credential tokens (`lib/credential-token-redaction.ts`). */
 const SECRET_PATTERNS = [
-  /sk-ant-[A-Za-z0-9_-]{16,}/g,
-  /(?:ghp|gho|ghu|ghs)_[A-Za-z0-9_]{10,}/g,
-  /github_pat_[A-Za-z0-9_]{10,}/g,
   /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
   /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
   /\bnpm_[A-Za-z0-9]{20,}\b/g,
@@ -20,5 +20,10 @@ const SECRET_PATTERNS = [
 ] as const;
 
 export function redactSecretPatterns(value: string): string {
-  return SECRET_PATTERNS.reduce((redacted, pattern) => redacted.replace(pattern, REDACTED), value);
+  // Credential tokens first, so a whole token is replaced before a generic shape (long base64,
+  // hex) can match only a fragment of it.
+  return SECRET_PATTERNS.reduce(
+    (redacted, pattern) => redacted.replace(pattern, REDACTED),
+    redactCredentialTokens(value, REDACTED)
+  );
 }

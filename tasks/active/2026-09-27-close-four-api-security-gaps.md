@@ -143,15 +143,19 @@ API redactors and their `sk-` coverage:
 - [ ] Revert gate once per route family → tests red; restore
 
 ### 3. Redaction
-- [ ] `lib/secret-patterns.ts`: one `redactProviderApiKeys` (OpenAI/Anthropic/OpenRouter `sk-` family)
-- [ ] Use it in: logger, secret-redaction, message-comments, report-issue (drop its private `sk` alt),
-      credential-setup-session, deployment-publish-jobs, workspace-deletion
-- [ ] Append OpenAI `sk-…` and `sk-proj-…` (+ realistic `sk-ant-api03-…`) canaries to the shared fixture
-- [ ] Tests through real entry points: `log.*` output, VM agent error intake (`POST /api/nodes/:id/errors`)
+- [x] `lib/credential-token-redaction.ts`: one `redactCredentialTokens` (provider `sk-`, GitHub, SAM token families)
+- [x] Use it in: logger, secret-redaction, message-comments, report-issue (drop its private `sk` alt),
+      credential-setup-session, deployment-publish-jobs. workspace-deletion deliberately unchanged:
+      only fixed templates reach `boundedDiagnostic` (`deletionFailureDiagnostic` drops the error message)
+- [x] Append OpenAI `sk-…` and `sk-proj-…` (+ realistic `sk-ant-api03-…`, `github_pat_`) canaries to the shared fixture
+- [x] Tests through real entry points: `log.*` output, VM agent error intake (`POST /api/nodes/:id/errors`)
       persisted rows, plus existing canary consumers; negative control (`task-runner-…` untouched)
-- [ ] Drift guard: no other API source file defines its own `sk-` regex
-- [ ] Revert the `secret-redaction.ts` fix once → tests red; restore
-- [ ] Go canary tests still pass with the extended fixture
+- [x] Drift guard: no other API source file defines its own `sk-`/GitHub/SAM token regex
+- [x] Revert the `secret-redaction.ts` fix once → tests red; restore (red: debug-agent-vm-incident
+      "returns only bounded redacted summary data…", workers/diagnostic-incidents "durably correlates the
+      error…", vm-agent-errors-secret-redaction "strips every canary…"). Logger revert → red: "log.* strips
+      every credential token…", "a SAM PAT is redacted whole…", drift guard
+- [x] Go canary tests still pass with the extended fixture (`go test ./internal/errorreport/...` ok)
 
 ### 4. Rate limits
 - [ ] Pure move: `/summarize` route from `chat.ts` into `chat-fork.ts` (separate commit)

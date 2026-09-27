@@ -11,6 +11,7 @@ import type {
 
 import { resolveDurableExecutionConfig } from '../durable-objects/project-data/durable-execution-config';
 import type { Env } from '../env';
+import { redactCredentialTokens } from '../lib/credential-token-redaction';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { sanitizeUserInput } from '../lib/sanitize-user-input';
 import * as projectDataService from './project-data';
@@ -489,12 +490,9 @@ function buildDirectivePrompt(
 }
 
 function redactSensitiveText(value: string): string {
-  return value
+  return redactCredentialTokens(value, '[redacted]')
     .replace(/\b(Bearer)\s+[A-Za-z0-9._~+/=-]{12,}/gi, '$1 [redacted]')
-    .replace(/\b(token|api[_-]?key|secret|password)\s*[:=]\s*[^\s'"`<>]{8,}/gi, '$1=[redacted]')
-    .replace(/\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b/g, '[redacted]')
-    .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, '[redacted]')
-    .replace(/\bsk-[A-Za-z0-9_-]{20,}\b/g, '[redacted]');
+    .replace(/\b(token|api[_-]?key|secret|password)\s*[:=]\s*[^\s'"`<>]{8,}/gi, '$1=[redacted]');
 }
 
 export function assertCommentStatus(value: string): MessageCommentThreadStatus | 'all' | null {

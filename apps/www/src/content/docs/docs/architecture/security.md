@@ -182,6 +182,10 @@ The preview starts as soon as a user opens the artifact (`apps/web/src/component
 
 The dedicated origin contains iframe-policy regressions; the CSP sandbox header protects direct-open links. Preview is deliberately absent from credentialed CORS and BetterAuth trusted origins, and responses never set cookies.
 
+## Secret Redaction in Logs and Diagnostics
+
+Credential tokens are stripped before text reaches a log line or a stored diagnostic: OpenAI and Anthropic `sk-…` keys (including `sk-proj-…` and `sk-ant-…`), GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), and SAM personal access and webhook tokens. Every API redactor takes these shapes from one definition, `redactCredentialTokens` in `apps/api/src/lib/credential-token-redaction.ts`: structured Worker logs (`apps/api/src/lib/logger.ts`), stored VM agent error reports and debug-agent evidence (`redactSensitiveData`), comment directives delivered to agents, deployment publish and apply events, Report Issue text, and agent sign-in helper diagnostics. Redaction is pattern-based and best-effort — a safety net, not a reason to paste secrets anywhere.
+
 ## Security Best Practices
 
 - **Rotate keys quarterly** — regenerate JWT and encryption keys

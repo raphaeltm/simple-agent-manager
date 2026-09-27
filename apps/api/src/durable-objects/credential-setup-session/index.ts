@@ -31,6 +31,7 @@ import { DurableObject } from 'cloudflare:workers';
 import * as v from 'valibot';
 
 import type { Env } from '../../env';
+import { redactCredentialTokens } from '../../lib/credential-token-redaction';
 import { log } from '../../lib/logger';
 import { saveAgentCredentialForUser } from '../../services/agent-credential-save';
 import {
@@ -139,8 +140,7 @@ interface DeviceAuthState {
  */
 function sanitizeDriverDetail(detail: string | null | undefined, maxLength: number): string | null {
   if (typeof detail !== 'string') return null;
-  const cleaned = detail
-    .replace(/sk-ant[A-Za-z0-9._-]*/gi, '[redacted]')
+  const cleaned = redactCredentialTokens(detail, '[redacted]')
     .replace(/[^\x20-\x7e]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()

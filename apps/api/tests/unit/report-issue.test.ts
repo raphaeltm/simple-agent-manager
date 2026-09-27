@@ -59,6 +59,10 @@ vi.mock('../../src/routes/mcp/_helpers', () => ({
 }));
 
 import { isReportEnabled, submitReport } from '../../src/services/report-issue';
+import {
+  allCredentialTokenCanaries,
+  expectCredentialTokensAbsent,
+} from '../helpers/credential-token-canaries';
 
 function makeEnv(overrides: Record<string, string | undefined> = {}): any {
   return {
@@ -263,6 +267,23 @@ describe('submitReport', () => {
     expect(input.description).not.toContain('reporter@example.com');
     expect(input.authorizedRefs).toEqual({ errorId: 'err-report-ref' });
     expect(input.authorizedKeys).toEqual(['errorId']);
+  });
+
+  it('redacts provider, GitHub and SAM credential tokens from report text', async () => {
+    mockGet.mockResolvedValueOnce({ id: 'feedback-project-1', userId: 'owner-1' });
+
+    await submitReport(
+      makeEnv(),
+      'user-1',
+      `Proxy rejects ${allCredentialTokenCanaries[0]}`,
+      `Tried these keys:\n${allCredentialTokenCanaries.join('\n')}`,
+      false
+    );
+
+    const input = lastUpsertInput();
+    expectCredentialTokensAbsent([input.title, input.description]);
+    expect(input.title).toBe('Proxy rejects [REDACTED]');
+    expect(input.description).toContain('Tried these keys:');
   });
 
   it('redacts JSON-style secret fields from report text before incident grouping', async () => {
