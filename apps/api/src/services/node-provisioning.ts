@@ -33,6 +33,7 @@ import {
   resolveInstallationId,
 } from './node-provider-labels';
 import { persistError } from './observability';
+import { recordRejectedAllocationAbsence } from './node-rejection-proof';
 import {
   createProviderForUser,
   exactProviderCredentialBindingFromPlacementSnapshot,
@@ -485,50 +486,15 @@ export async function provisionNode(
         err
       );
       if (providerCreateRejected) {
-        // A provider rejection is explicit absence evidence. Persist it even if
-        // deletion claimed the row while the create request was in flight; a
-        // missing provider ID by itself cannot prove no VM was allocated.
-        const proofAt = new Date().toISOString();
-        rejectedPlacementPredicate = and(
-          // A rejected create proves absence only for the placement that
-          // issued it. A concurrent replan must not inherit that proof.
-          sql`${schema.nodes.cloudProvider} IS ${providerResult.providerName}`,
-          sql`${schema.nodes.nodeRole} IS ${node.nodeRole}`,
-          sql`${schema.nodes.workloadRole} IS ${node.workloadRole}`,
-          sql`${schema.nodes.vmSize} IS ${node.vmSize}`,
-          sql`${schema.nodes.vmLocation} IS ${node.vmLocation}`,
-          sql`${schema.nodes.providerInstanceType} IS ${node.providerInstanceType}`,
-          sql`${schema.nodes.capacityPoolId} IS ${node.capacityPoolId}`,
-          sql`${schema.nodes.capacityPoolScope} IS ${node.capacityPoolScope}`,
-          sql`${schema.nodes.capacityPoolProjectId} IS ${node.capacityPoolProjectId}`,
-          sql`${schema.nodes.capacityPoolRevision} IS ${node.capacityPoolRevision}`,
-          sql`${schema.nodes.capacitySourceId} IS ${node.capacitySourceId}`,
-          sql`${schema.nodes.capacitySourceGeneration} IS ${node.capacitySourceGeneration}`,
-          sql`${schema.nodes.capacityPoolCandidateId} IS ${node.capacityPoolCandidateId}`,
-          sql`${schema.nodes.placementCredentialSource} IS ${providerResult.exactCredentialBinding?.credentialSource ?? node.placementCredentialSource}`,
-          sql`${schema.nodes.placementCredentialReference} IS ${providerResult.exactCredentialBinding?.credentialReference ?? node.placementCredentialReference}`,
-          sql`${schema.nodes.placementCredentialVersion} IS ${providerResult.exactCredentialBinding?.credentialVersion ?? node.placementCredentialVersion}`,
-          sql`${schema.nodes.placementCredentialFingerprint} IS ${providerResult.exactCredentialBinding?.credentialFingerprint ?? node.placementCredentialFingerprint}`
+        const proof = await recordRejectedAllocationAbsence(
+          db,
+          node,
+          providerResult,
+          provisioningRuntimeIncarnationId
         );
-        const proofWrite = await db
-          .update(schema.nodes)
-          .set({ runtimeTerminationConfirmedAt: proofAt })
-          .where(
-            and(
-              eq(schema.nodes.id, node.id),
-              eq(schema.nodes.userId, node.userId),
-              eq(schema.nodes.runtime, 'vm'),
-              eq(schema.nodes.nodeClass, 'managed'),
-              sql`${schema.nodes.status} IN ('creating', 'destroying')`,
-              sql`${schema.nodes.providerInstanceId} IS NULL`,
-              sql`${schema.nodes.runtimeTerminationConfirmedAt} IS NULL`,
-              sql`${schema.nodes.runtimeIncarnationId} IS ${provisioningRuntimeIncarnationId}`,
-              rejectedPlacementPredicate
-            )
-          )
-          .run();
-        providerAllocationRejected = d1WriteChanged(proofWrite);
-        if (providerAllocationRejected) providerRejectionProofAt = proofAt;
+        providerAllocationRejected = !!proof;
+        providerRejectionProofAt = proof?.proofAt ?? null;
+        rejectedPlacementPredicate = proof?.placementPredicate;
       }
       if (durable && !providerAllocationRejected) {
         throw new NodeAllocationUncertainError();
@@ -759,7 +725,10 @@ export async function provisionNode(
     // allocation before returning a VM identity; there is no runtime to tear down.
     if (options?.rethrowProviderError) {
       if ((isCapacityFailure && !providerCreateRejected) || providerAllocationRejected) {
-        if (providerAllocationRejected && (!providerRejectionProofAt || !rejectedPlacementPredicate)) {
+        if (
+          providerAllocationRejected &&
+          (!providerRejectionProofAt || !rejectedPlacementPredicate)
+        ) {
           throw new Error('Rejected allocation proof identity is unavailable');
         }
         await options.beforeRejectedNodeDelete?.();
