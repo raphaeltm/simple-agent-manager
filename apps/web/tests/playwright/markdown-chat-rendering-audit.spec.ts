@@ -309,14 +309,19 @@ async function assertMermaidRendering(page: Page, screenshotName: string) {
 
   const svgInfo = await svg.evaluate((node) => {
     const rect = node.getBoundingClientRect();
+    // Labels are SVG text; a wrapped label is one <tspan class="row"> per line.
+    const labels = Array.from(node.querySelectorAll('text'), (text) => {
+      const rows = Array.from(text.querySelectorAll('tspan.row'), (row) => row.textContent ?? '');
+      return rows.length > 0 ? rows.join(' ') : (text.textContent ?? '');
+    });
     return {
-      text: node.textContent ?? '',
+      text: labels.join(' ').replace(/\s+/g, ' '),
       width: rect.width,
       height: rect.height,
       viewBox: node.getAttribute('viewBox'),
     };
   });
-  expect(svgInfo.text).toContain('Render a Mermaid diagram');
+  expect(svgInfo.text).toContain('Render a Mermaid diagram inside the chat bubble');
   expect(svgInfo.width).toBeGreaterThan(40);
   expect(svgInfo.height).toBeGreaterThan(40);
   expect(svgInfo.viewBox).toBeTruthy();

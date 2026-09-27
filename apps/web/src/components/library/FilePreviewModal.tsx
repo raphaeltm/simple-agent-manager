@@ -351,10 +351,14 @@ export function FilePreviewModal({
                       </button>
                     </div>
                   ) : (
+                    // No `sandbox`: Chromium refuses to render a PDF inside any sandboxed
+                    // frame. The preview response keeps this frame inert instead: it is
+                    // served as application/pdf with nosniff, only after the bytes are
+                    // checked to be a PDF, under a CSP that forbids script
+                    // (apps/api/src/services/library-serving-policy.ts).
                     <iframe
                       src={previewUrl}
                       title={`Preview of ${file.filename}`}
-                      sandbox="allow-same-origin"
                       className="h-full min-h-[60vh] w-full border-none"
                       onLoad={() => setPdfLoading(false)}
                       onError={() => {

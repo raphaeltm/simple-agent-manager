@@ -261,7 +261,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
       className="my-2 min-w-0 overflow-hidden rounded-lg border border-gray-700 bg-gray-950 text-gray-100"
     >
       <div className="flex min-h-12 items-center justify-between gap-2 border-b border-gray-800 px-3 py-2">
-        <div className="min-w-0 text-sm font-medium">Diagram</div>
+        <div className="min-w-0 truncate text-sm font-medium">Diagram</div>
         <div className="flex shrink-0 items-center gap-1.5">{controls}</div>
       </div>
       {svg ? (
