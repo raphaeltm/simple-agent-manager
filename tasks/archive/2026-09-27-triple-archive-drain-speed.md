@@ -77,6 +77,10 @@ one session per hour, which only outpaces growth on quiet days.
       `next_eligible_at − last_started_at = 1080000`; archive publications ≈3/hour; no new
       storage-reset / RPC-cancellation burst on the SAM object
 
+The two unchecked items above and the two unchecked acceptance criteria below are merge-time and
+post-deploy production steps. They are completed after merge, and their evidence is recorded on
+this task's pull request.
+
 ## Acceptance Criteria
 
 - [ ] The deployed Worker runs with `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS=1080000` and
