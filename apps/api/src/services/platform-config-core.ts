@@ -43,11 +43,18 @@ import type {
  */
 const DEFAULT_PLATFORM_CONFIG_CACHE_MS = 60_000;
 
+/*
+ * The writers below return nothing ON PURPOSE. A `ResolvedPlatformConfig` carries every platform
+ * secret as plaintext `.value`, and `PUT /api/setup/config` once echoed a writer's result straight
+ * into its response body. Callers that need to report state use `getPlatformConfigStatus`, which
+ * projects to booleans and source labels.
+ */
+
 export async function savePlatformIntegrationConfig(
   env: Env,
   input: PlatformIntegrationInput,
   updatedBy?: string
-): Promise<ResolvedPlatformConfig> {
+): Promise<void> {
   const by = creatorId(env, updatedBy);
   const statements = await buildPlatformIntegrationStatements(
     env,
@@ -55,7 +62,7 @@ export async function savePlatformIntegrationConfig(
     by,
     new Date().toISOString()
   );
-  if (statements.length === 0) return resolvePlatformConfig(env);
+  if (statements.length === 0) return;
   try {
     if (typeof env.DATABASE.batch !== 'function') {
       if (input.googleInfrastructure) {
@@ -70,7 +77,6 @@ export async function savePlatformIntegrationConfig(
     // then throw, so a failed save may still have changed the store.
     invalidatePlatformConfigCache();
   }
-  return resolvePlatformConfig(env);
 }
 
 function settingStatement(
@@ -373,7 +379,7 @@ export async function completeSetupWithConfig(
   env: Env,
   input: PlatformIntegrationInput,
   updatedBy?: string
-): Promise<ResolvedPlatformConfig> {
+): Promise<void> {
   const by = creatorId(env, updatedBy);
   const now = new Date().toISOString();
   const statements = await buildPlatformIntegrationStatements(env, input, by, now);
@@ -385,13 +391,12 @@ export async function completeSetupWithConfig(
     } finally {
       invalidatePlatformConfigCache();
     }
-    return resolvePlatformConfig(env);
+    return;
   }
 
   // Compatibility for minimal D1 shims that do not implement batch(). Production D1 applies batch transactionally.
-  const resolved = await savePlatformIntegrationConfig(env, input, updatedBy);
+  await savePlatformIntegrationConfig(env, input, updatedBy);
   await setSetupCompleted(env, updatedBy);
-  return resolved;
 }
 
 interface PlatformConfigCacheEntry {

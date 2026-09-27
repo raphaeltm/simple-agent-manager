@@ -32,12 +32,12 @@ cache PR (generation compare-and-set), so this is left as the standalone respons
 
 ## Acceptance criteria
 
-- [ ] `PUT /api/setup/config` no longer returns plaintext secret `.value` fields
-- [ ] It returns a status/source projection equivalent to `getPlatformConfigStatus` instead
-- [ ] The setup wizard UI still renders correctly against the narrowed response (check
+- [x] `PUT /api/setup/config` no longer returns plaintext secret `.value` fields
+- [x] It returns a status/source projection equivalent to `getPlatformConfigStatus` instead
+- [x] The setup wizard UI still renders correctly against the narrowed response (check
       `apps/web` setup flow for any consumer reading `config.*.value`)
-- [ ] A regression test asserts no known secret value appears anywhere in the response body
-- [ ] Verify no other route serializes `ResolvedPlatformConfig` wholesale
+- [x] A regression test asserts no known secret value appears anywhere in the response body
+- [x] Verify no other route serializes `ResolvedPlatformConfig` wholesale
 
 ## References
 

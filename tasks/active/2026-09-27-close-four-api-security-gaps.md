@@ -119,12 +119,14 @@ API redactors and their `sk-` coverage:
 ## Implementation Checklist
 
 ### 1. Setup config echo
-- [ ] `PUT /api/setup/config` returns `{ status }` only
-- [ ] `savePlatformIntegrationConfig` / `completeSetupWithConfig` return `Promise<void>` (echo unrepresentable)
-- [ ] Route test: seed known secrets via env fallback AND request body; assert no secret appears in the
+- [x] `PUT /api/setup/config` returns `{ status }` only
+- [x] `savePlatformIntegrationConfig` / `completeSetupWithConfig` return `Promise<void>` (echo unrepresentable)
+- [x] Route test: seed known secrets via env fallback AND request body; assert no secret appears in the
       raw response text of `PUT /config`, `POST /verify`, `POST /complete`; liveness: status says configured
-- [ ] Admin platform-config GET/PUT canary test (the only other platform-config serializer)
-- [ ] Revert `config: resolved` once → test red; restore
+- [x] Admin platform-config GET/PUT canary test (the only other platform-config serializer)
+- [x] Revert `config: resolved` once → test red; restore (reverted to `config: await resolvePlatformConfig()`:
+      exactly `PUT /config returns only the status projection, never a secret value` went red — env GitHub
+      client secret found in the body)
 
 ### 2. Model-tier enforcement
 - [ ] `packages/shared`: `PLATFORM_AI_MODEL_TIERS` (exhaustive over the union), `isPlatformAIModelTier`,

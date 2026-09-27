@@ -440,6 +440,64 @@ describe('admin platform config routes', () => {
     });
   });
 
+  it('never returns a platform secret value from GET or PUT', async () => {
+    // Distinctive markers matched as substrings (a PEM would be JSON-escaped in the body).
+    const markers = {
+      envClientSecret: 'admin-env-github-client-secret-canary-3c9d',
+      envAppKey: 'admin-env-github-app-key-canary-6e2a',
+      envWebhookSecret: 'admin-env-github-webhook-canary-0f7b',
+      runtimeGitlabSecret: 'admin-runtime-gitlab-secret-canary-9b4e',
+    };
+    const env = createEnv({
+      GITHUB_CLIENT_ID: 'Iv1.adminenvclient',
+      GITHUB_CLIENT_SECRET: markers.envClientSecret,
+      GITHUB_APP_ID: '67890',
+      GITHUB_APP_PRIVATE_KEY: `-----BEGIN RSA PRIVATE KEY-----\n${markers.envAppKey}\n-----END RSA PRIVATE KEY-----`,
+      GITHUB_WEBHOOK_SECRET: markers.envWebhookSecret,
+    });
+    const app = createApp();
+
+    const put = await app.request(
+      '/api/admin/platform-config',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+        body: JSON.stringify({
+          config: {
+            gitlab: {
+              host: 'https://gitlab.admin.example.com',
+              clientId: 'gitlab-admin-client',
+              clientSecret: markers.runtimeGitlabSecret,
+            },
+          },
+        }),
+      },
+      env
+    );
+    const get = await app.request(
+      '/api/admin/platform-config',
+      { headers: { 'X-Test-Role': 'superadmin' } },
+      env
+    );
+
+    for (const res of [put, get]) {
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      for (const marker of Object.values(markers)) expect(text).not.toContain(marker);
+      // Liveness: the projection still reports every seeded secret as configured.
+      expect(JSON.parse(text)).toMatchObject({
+        status: {
+          integrations: {
+            githubOAuth: { configured: true },
+            githubApp: { configured: true },
+            githubWebhook: { configured: true },
+            gitlabOAuth: { configured: true, source: 'runtime' },
+          },
+        },
+      });
+    }
+  });
+
   it('rejects malformed platform config bodies before persistence', async () => {
     const res = await createApp().request(
       '/api/admin/platform-config',

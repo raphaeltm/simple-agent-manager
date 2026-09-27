@@ -460,6 +460,116 @@ describe('setup routes', () => {
     ).resolves.toBe('google-client-secret-2');
   });
 
+  describe('never echoes platform secrets', () => {
+    // Distinctive markers, matched as substrings: a whole PEM would be JSON-escaped (`\n`) in a
+    // response body, so `includes(pem)` could miss a real leak.
+    const ENV_SECRET_MARKERS = {
+      GITHUB_CLIENT_SECRET: 'env-github-client-secret-canary-7f3a',
+      GITHUB_APP_PRIVATE_KEY: 'env-github-app-key-canary-91c2',
+      GITHUB_WEBHOOK_SECRET: 'env-github-webhook-secret-canary-5d8e',
+      GOOGLE_CLIENT_SECRET: 'env-google-infra-secret-canary-2b6f',
+    };
+    const BODY_SECRET_MARKERS = {
+      google: 'body-google-login-secret-canary-4e1d',
+      gitlab: 'body-gitlab-client-secret-canary-8a0c',
+    };
+    const ALL_SECRET_MARKERS = [
+      ...Object.values(ENV_SECRET_MARKERS),
+      ...Object.values(BODY_SECRET_MARKERS),
+    ];
+
+    function envWithSecrets(): Env {
+      return createEnv({
+        GITHUB_CLIENT_ID: 'Iv1.envclientid',
+        GITHUB_CLIENT_SECRET: ENV_SECRET_MARKERS.GITHUB_CLIENT_SECRET,
+        GITHUB_APP_ID: '12345',
+        GITHUB_APP_PRIVATE_KEY: `-----BEGIN RSA PRIVATE KEY-----\n${ENV_SECRET_MARKERS.GITHUB_APP_PRIVATE_KEY}\n-----END RSA PRIVATE KEY-----`,
+        GITHUB_WEBHOOK_SECRET: ENV_SECRET_MARKERS.GITHUB_WEBHOOK_SECRET,
+        GOOGLE_CLIENT_ID: 'env-google-infra-client-id',
+        GOOGLE_CLIENT_SECRET: ENV_SECRET_MARKERS.GOOGLE_CLIENT_SECRET,
+      });
+    }
+
+    function setupRequest(method: 'POST' | 'PUT', ip: string, withConfig: boolean) {
+      return {
+        method,
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip },
+        body: JSON.stringify({
+          token: 'setup-token',
+          ...(withConfig
+            ? {
+                config: {
+                  google: {
+                    clientId: 'google-login-client-id',
+                    clientSecret: BODY_SECRET_MARKERS.google,
+                  },
+                  gitlab: {
+                    host: 'https://gitlab.example.com',
+                    clientId: 'gitlab-client-id',
+                    clientSecret: BODY_SECRET_MARKERS.gitlab,
+                  },
+                },
+              }
+            : {}),
+        }),
+      };
+    }
+
+    function expectNoSecretMarkers(body: string): void {
+      for (const marker of ALL_SECRET_MARKERS) expect(body).not.toContain(marker);
+    }
+
+    it('PUT /config returns only the status projection, never a secret value', async () => {
+      const res = await createApp().request(
+        '/api/setup/config',
+        setupRequest('PUT', '198.51.100.30', true),
+        envWithSecrets()
+      );
+
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expectNoSecretMarkers(text);
+
+      const json = JSON.parse(text) as { status: { integrations: Record<string, unknown> } };
+      expect(Object.keys(json)).toEqual(['status']);
+      // Liveness: the projection still reports every seeded secret, so an empty body cannot pass.
+      expect(json.status.integrations).toMatchObject({
+        githubOAuth: { configured: true, source: 'environment' },
+        githubApp: { configured: true, source: 'environment' },
+        githubWebhook: { configured: true, source: 'environment' },
+        googleInfrastructureOAuth: { configured: true, source: 'environment' },
+        googleOAuth: { configured: true, source: 'runtime' },
+        gitlabOAuth: { configured: true, source: 'runtime' },
+      });
+    });
+
+    it('POST /verify and POST /complete never return a secret value either', async () => {
+      const env = envWithSecrets();
+      const app = createApp();
+
+      const verify = await app.request(
+        '/api/setup/verify',
+        setupRequest('POST', '198.51.100.31', false),
+        env
+      );
+      expect(verify.status).toBe(200);
+      expectNoSecretMarkers(await verify.text());
+
+      const complete = await app.request(
+        '/api/setup/complete',
+        setupRequest('POST', '198.51.100.32', true),
+        env
+      );
+      expect(complete.status).toBe(200);
+      const text = await complete.text();
+      expectNoSecretMarkers(text);
+      expect(JSON.parse(text)).toMatchObject({
+        completed: true,
+        status: { integrations: { googleOAuth: { configured: true } } },
+      });
+    });
+  });
+
   it('treats replayed setup completion as closed without changing public response shape', async () => {
     const env = createEnv();
     const request = {

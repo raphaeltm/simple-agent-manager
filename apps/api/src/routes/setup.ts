@@ -144,8 +144,8 @@ setupRoutes.put('/config', async (c) => {
     throw errors.badRequest('Platform configuration is invalid', { errors: validation.errors });
   }
 
-  const resolved = await savePlatformIntegrationConfig(c.env, config);
-  return c.json({ status: await getPlatformConfigStatus(c.env), config: resolved });
+  await savePlatformIntegrationConfig(c.env, config);
+  return c.json({ status: await getPlatformConfigStatus(c.env) });
 });
 
 setupRoutes.post('/complete', async (c) => {
