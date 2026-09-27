@@ -32,8 +32,8 @@ import {
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
-import { persistError } from './observability';
 import { recordRejectedAllocationAbsence } from './node-rejection-proof';
+import { persistError } from './observability';
 import {
   createProviderForUser,
   exactProviderCredentialBindingFromPlacementSnapshot,
