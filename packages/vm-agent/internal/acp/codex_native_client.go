@@ -30,14 +30,20 @@ const (
 type codexNativeEventHandler func(codexNativeEnvelope)
 
 type codexNativeEnvelope struct {
-	ID     json.RawMessage `json:"id,omitempty"`
-	Method string          `json:"method,omitempty"`
-	Params json.RawMessage `json:"params,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  *struct {
+	Sequence uint64          `json:"-"`
+	ID       json.RawMessage `json:"id,omitempty"`
+	Method   string          `json:"method,omitempty"`
+	Params   json.RawMessage `json:"params,omitempty"`
+	Result   json.RawMessage `json:"result,omitempty"`
+	Error    *struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
+}
+
+type codexNativeSnapshot struct {
+	Thread   json.RawMessage
+	Sequence uint64
 }
 
 type codexNativeClient struct {
@@ -150,14 +156,15 @@ func (c *codexNativeClient) resumeThread(ctx context.Context, threadID string) e
 	return nil
 }
 
-func (c *codexNativeClient) readThread(ctx context.Context, threadID string) (json.RawMessage, error) {
+func (c *codexNativeClient) readThread(ctx context.Context, threadID string) (codexNativeSnapshot, error) {
 	var response struct {
 		Thread json.RawMessage `json:"thread"`
 	}
-	if err := c.call(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": true}, &response); err != nil {
-		return nil, err
+	sequence, err := c.callWithSequence(ctx, "thread/read", map[string]any{"threadId": threadID, "includeTurns": true}, &response)
+	if err != nil {
+		return codexNativeSnapshot{}, err
 	}
-	return response.Thread, nil
+	return codexNativeSnapshot{Thread: response.Thread, Sequence: sequence}, nil
 }
 
 func (c *codexNativeClient) interruptTurn(ctx context.Context, threadID, turnID string) error {
@@ -165,6 +172,11 @@ func (c *codexNativeClient) interruptTurn(ctx context.Context, threadID, turnID 
 }
 
 func (c *codexNativeClient) call(ctx context.Context, method string, params any, result any) error {
+	_, err := c.callWithSequence(ctx, method, params, result)
+	return err
+}
+
+func (c *codexNativeClient) callWithSequence(ctx context.Context, method string, params any, result any) (uint64, error) {
 	requestCtx := ctx
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
@@ -179,25 +191,25 @@ func (c *codexNativeClient) call(ctx context.Context, method string, params any,
 
 	if err := c.write(requestCtx, map[string]any{"id": id, "method": method, "params": params}); err != nil {
 		c.removePending(id)
-		return err
+		return 0, err
 	}
 
 	select {
 	case response := <-responseCh:
 		if response.Error != nil {
-			return fmt.Errorf("Codex app-server %s failed with code %d", method, response.Error.Code)
+			return response.Sequence, fmt.Errorf("Codex app-server %s failed with code %d", method, response.Error.Code)
 		}
 		if result != nil && len(response.Result) > 0 {
 			if err := json.Unmarshal(response.Result, result); err != nil {
-				return fmt.Errorf("decode Codex app-server %s response: %w", method, err)
+				return response.Sequence, fmt.Errorf("decode Codex app-server %s response: %w", method, err)
 			}
 		}
-		return nil
+		return response.Sequence, nil
 	case <-requestCtx.Done():
 		c.removePending(id)
-		return requestCtx.Err()
+		return 0, requestCtx.Err()
 	case <-c.closed:
-		return c.connectionError()
+		return 0, c.connectionError()
 	}
 }
 
@@ -223,6 +235,7 @@ func (c *codexNativeClient) write(ctx context.Context, message any) error {
 }
 
 func (c *codexNativeClient) readLoop() {
+	var sequence uint64
 	for {
 		_, payload, err := c.conn.ReadMessage()
 		if err != nil {
@@ -234,6 +247,8 @@ func (c *codexNativeClient) readLoop() {
 			c.finish(fmt.Errorf("decode Codex app-server message: %w", err))
 			return
 		}
+		sequence++
+		envelope.Sequence = sequence
 		if id, ok := numericJSONRPCID(envelope.ID); ok && envelope.Method == "" {
 			c.pendingMu.Lock()
 			responseCh := c.pending[id]

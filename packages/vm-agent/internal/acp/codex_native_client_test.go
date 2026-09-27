@@ -40,8 +40,8 @@ func TestCodexNativeClientJSONRPCLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	thread, err := client.readThread(ctx, "thread-1")
-	if err != nil || !strings.Contains(string(thread), `"id":"thread-1"`) {
-		t.Fatalf("thread/read = %s, %v", thread, err)
+	if err != nil || !strings.Contains(string(thread.Thread), `"id":"thread-1"`) || thread.Sequence == 0 {
+		t.Fatalf("thread/read = %#v, %v", thread, err)
 	}
 	if err := client.interruptTurn(ctx, "thread-1", "turn-1"); err != nil {
 		t.Fatal(err)

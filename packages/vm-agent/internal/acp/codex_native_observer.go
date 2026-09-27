@@ -15,7 +15,7 @@ const codexNativeConnectionWorkPrefix = "connection:"
 type codexNativeRPC interface {
 	initialize(context.Context) error
 	resumeThread(context.Context, string) error
-	readThread(context.Context, string) (json.RawMessage, error)
+	readThread(context.Context, string) (codexNativeSnapshot, error)
 	interruptTurn(context.Context, string, string) error
 	Done() <-chan struct{}
 	Err() error
@@ -30,14 +30,18 @@ type codexNativeObserver struct {
 	config   codexSharedDaemonConfig
 	connect  codexNativeConnectFunc
 
-	mu               sync.Mutex
-	events           sync.WaitGroup
-	client           codexNativeRPC
-	activeTurns      map[string]struct{}
-	approvals        map[string]struct{}
-	reconnecting     bool
-	pendingInterrupt bool
-	closed           bool
+	mu                   sync.Mutex
+	events               sync.WaitGroup
+	eventApplications    sync.WaitGroup
+	client               codexNativeRPC
+	activeTurns          map[string]struct{}
+	approvals            map[string]struct{}
+	reconnecting         bool
+	pendingInterrupt     bool
+	reconciling          bool
+	connectionGeneration uint64
+	queuedEvents         []codexNativeEnvelope
+	closed               bool
 }
 
 type codexNativeThread struct {
@@ -94,26 +98,31 @@ func (h *SessionHost) startCodexNativeObserver(ctx context.Context) error {
 		host: h, threadID: threadID, config: config, connect: connect,
 		activeTurns: make(map[string]struct{}), approvals: make(map[string]struct{}),
 	}
-	client, err := connect(h.lifecycleContext(), config, observer.handleEnvelope)
+	generation, ok := observer.beginConnectionGeneration()
+	if !ok {
+		return context.Canceled
+	}
+	client, err := connect(h.lifecycleContext(), config, observer.handlerForGeneration(generation))
 	if err != nil {
+		observer.close()
 		return fmt.Errorf("connect shared-daemon observer: %w", err)
 	}
 	observer.client = client
 	if err := client.initialize(ctx); err != nil {
-		_ = client.Close()
+		observer.close()
 		return fmt.Errorf("initialize shared-daemon observer: %w", err)
 	}
 	if err := client.resumeThread(ctx, threadID); err != nil {
-		_ = client.Close()
+		observer.close()
 		return fmt.Errorf("resume attributed Codex thread: %w", err)
 	}
-	thread, err := client.readThread(ctx, threadID)
+	snapshot, err := client.readThread(ctx, threadID)
 	if err != nil {
-		_ = client.Close()
+		observer.close()
 		return fmt.Errorf("read attributed Codex thread: %w", err)
 	}
-	if err := observer.reconcileGuarded(thread); err != nil {
-		_ = client.Close()
+	if err := observer.reconcileGeneration(snapshot, generation); err != nil {
+		observer.close()
 		return fmt.Errorf("reconcile attributed Codex thread: %w", err)
 	}
 
@@ -148,6 +157,9 @@ func (o *codexNativeObserver) close() {
 	o.closed = true
 	o.reconnecting = false
 	o.pendingInterrupt = false
+	o.reconciling = false
+	o.connectionGeneration++
+	o.queuedEvents = nil
 	client := o.client
 	workIDs := make([]string, 0, len(o.activeTurns)+len(o.approvals))
 	for id := range o.activeTurns {
@@ -171,6 +183,19 @@ func (o *codexNativeObserver) close() {
 }
 
 func (o *codexNativeObserver) handleEnvelope(envelope codexNativeEnvelope) {
+	o.mu.Lock()
+	generation := o.connectionGeneration
+	o.mu.Unlock()
+	o.handleEnvelopeForGeneration(generation, envelope)
+}
+
+func (o *codexNativeObserver) handlerForGeneration(generation uint64) codexNativeEventHandler {
+	return func(envelope codexNativeEnvelope) {
+		o.handleEnvelopeForGeneration(generation, envelope)
+	}
+}
+
+func (o *codexNativeObserver) handleEnvelopeForGeneration(generation uint64, envelope codexNativeEnvelope) {
 	if !o.beginOperation() {
 		return
 	}
@@ -183,6 +208,23 @@ func (o *codexNativeObserver) handleEnvelope(envelope codexNativeEnvelope) {
 	if params.ThreadID != o.threadID {
 		return
 	}
+	o.mu.Lock()
+	if o.closed || generation != o.connectionGeneration {
+		o.mu.Unlock()
+		return
+	}
+	if o.reconciling {
+		o.queuedEvents = append(o.queuedEvents, envelope)
+		o.mu.Unlock()
+		return
+	}
+	o.eventApplications.Add(1)
+	o.mu.Unlock()
+	defer o.eventApplications.Done()
+	o.applyEnvelope(envelope, params)
+}
+
+func (o *codexNativeObserver) applyEnvelope(envelope codexNativeEnvelope, params codexNativeNotification) {
 	switch envelope.Method {
 	case "turn/started":
 		o.setTurn(params.Turn.ID, true)
@@ -218,12 +260,70 @@ func (o *codexNativeObserver) endOperation() {
 	o.events.Done()
 }
 
-func (o *codexNativeObserver) reconcileGuarded(raw json.RawMessage) error {
+func (o *codexNativeObserver) beginConnectionGeneration() (uint64, bool) {
+	o.mu.Lock()
+	if o.closed {
+		o.mu.Unlock()
+		return 0, false
+	}
+	o.connectionGeneration++
+	generation := o.connectionGeneration
+	o.reconciling = true
+	o.queuedEvents = nil
+	o.mu.Unlock()
+
+	// The generation and reconciliation flag prevent any later Add while Wait
+	// drains applications already claimed by the previous connection.
+	o.eventApplications.Wait()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return generation, !o.closed && generation == o.connectionGeneration
+}
+
+func (o *codexNativeObserver) reconcileGeneration(snapshot codexNativeSnapshot, generation uint64) error {
 	if !o.beginOperation() {
 		return context.Canceled
 	}
 	defer o.endOperation()
-	return o.reconcile(raw)
+	if err := o.reconcile(snapshot.Thread); err != nil {
+		return err
+	}
+	for {
+		o.mu.Lock()
+		if o.closed || generation != o.connectionGeneration {
+			o.mu.Unlock()
+			return context.Canceled
+		}
+		queued := o.queuedEvents
+		o.queuedEvents = nil
+		if len(queued) == 0 {
+			o.reconciling = false
+			o.mu.Unlock()
+			return nil
+		}
+		o.mu.Unlock()
+		for _, envelope := range queued {
+			if envelope.Sequence != 0 && envelope.Sequence <= snapshot.Sequence && codexNativeSnapshotCovers(envelope.Method) {
+				continue
+			}
+			var params codexNativeNotification
+			if err := json.Unmarshal(envelope.Params, &params); err != nil || params.ThreadID != o.threadID {
+				continue
+			}
+			o.applyEnvelope(envelope, params)
+		}
+	}
+}
+
+func codexNativeSnapshotCovers(method string) bool {
+	switch method {
+	case "turn/started", "turn/completed", "item/completed":
+		return true
+	default:
+		// Pending approval requests are not represented by thread/read and must
+		// still be replayed even when they arrived before the snapshot response.
+		return false
+	}
 }
 
 func (o *codexNativeObserver) reconcile(raw json.RawMessage) error {
@@ -416,9 +516,13 @@ func (o *codexNativeObserver) reconnect(ctx context.Context, cause error) {
 		if o.isClosed() {
 			return
 		}
-		client, thread, err := o.connectAndReadThread(reconnectCtx)
+		generation, ok := o.beginConnectionGeneration()
+		if !ok {
+			return
+		}
+		client, snapshot, err := o.connectAndReadThread(reconnectCtx, generation)
 		if err == nil {
-			pendingInterrupt, adopted, adoptErr := o.adoptReconnectedClient(client, thread)
+			pendingInterrupt, adopted, adoptErr := o.adoptReconnectedClient(client, snapshot, generation)
 			if adopted {
 				o.finishReconnect(ctx, client, pendingInterrupt)
 				return
@@ -466,26 +570,26 @@ func (o *codexNativeObserver) isClosed() bool {
 	return o.closed
 }
 
-func (o *codexNativeObserver) connectAndReadThread(ctx context.Context) (codexNativeRPC, json.RawMessage, error) {
+func (o *codexNativeObserver) connectAndReadThread(ctx context.Context, generation uint64) (codexNativeRPC, codexNativeSnapshot, error) {
 	connect := o.connect
 	if connect == nil {
 		connect = defaultCodexNativeConnect
 	}
-	client, err := connect(ctx, o.config, o.handleEnvelope)
+	client, err := connect(ctx, o.config, o.handlerForGeneration(generation))
 	if err != nil {
-		return nil, nil, err
+		return nil, codexNativeSnapshot{}, err
 	}
 	if err := client.initialize(ctx); err != nil {
-		return client, nil, err
+		return client, codexNativeSnapshot{}, err
 	}
 	if err := client.resumeThread(ctx, o.threadID); err != nil {
-		return client, nil, err
+		return client, codexNativeSnapshot{}, err
 	}
-	thread, err := client.readThread(ctx, o.threadID)
-	return client, thread, err
+	snapshot, err := client.readThread(ctx, o.threadID)
+	return client, snapshot, err
 }
 
-func (o *codexNativeObserver) adoptReconnectedClient(client codexNativeRPC, thread json.RawMessage) (bool, bool, error) {
+func (o *codexNativeObserver) adoptReconnectedClient(client codexNativeRPC, snapshot codexNativeSnapshot, generation uint64) (bool, bool, error) {
 	o.mu.Lock()
 	if o.closed {
 		o.mu.Unlock()
@@ -494,7 +598,7 @@ func (o *codexNativeObserver) adoptReconnectedClient(client codexNativeRPC, thre
 	o.client = client
 	o.clearApprovalsLocked()
 	o.mu.Unlock()
-	if err := o.reconcileGuarded(thread); err != nil {
+	if err := o.reconcileGeneration(snapshot, generation); err != nil {
 		return false, false, err
 	}
 	o.mu.Lock()

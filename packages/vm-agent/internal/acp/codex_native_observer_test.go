@@ -21,6 +21,8 @@ type fakeCodexNativeRPC struct {
 	interruptedCh chan string
 	closed        bool
 	initializeErr error
+	readHook      func()
+	readSequence  uint64
 	done          chan struct{}
 	doneOnce      sync.Once
 	closeOnce     sync.Once
@@ -72,8 +74,11 @@ func (f *fakeCodexNativeRPC) resumeThread(_ context.Context, id string) error {
 	f.resumed = id
 	return nil
 }
-func (f *fakeCodexNativeRPC) readThread(context.Context, string) (json.RawMessage, error) {
-	return f.thread, nil
+func (f *fakeCodexNativeRPC) readThread(context.Context, string) (codexNativeSnapshot, error) {
+	if f.readHook != nil {
+		f.readHook()
+	}
+	return codexNativeSnapshot{Thread: f.thread, Sequence: f.readSequence}, nil
 }
 func (f *fakeCodexNativeRPC) interruptTurn(_ context.Context, _, turnID string) error {
 	f.interrupted = turnID
@@ -533,6 +538,138 @@ func TestCodexNativeObserverReconnectsAndReconciles(t *testing.T) {
 	if !connected {
 		t.Fatal("observer did not install the replacement client")
 	}
+}
+
+func TestCodexNativeObserverOrdersCompletionAfterInitialSnapshot(t *testing.T) {
+	t.Parallel()
+	host := NewSessionHost(SessionHostConfig{})
+	defer host.Stop()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("thread-1")
+	host.setCodexSharedDaemonConfig(codexSharedDaemonConfig{enabled: true, dedupeLimit: 8, requestTimeout: time.Second, reconnectDelay: time.Millisecond, reconnectTimeout: time.Second})
+	client := &fakeCodexNativeRPC{
+		thread:       json.RawMessage(`{"id":"thread-1","turns":[{"id":"turn-1","status":"inProgress","items":[]}]}`),
+		readSequence: 1,
+	}
+	host.codexNativeConnect = func(_ context.Context, _ codexSharedDaemonConfig, handler codexNativeEventHandler) (codexNativeRPC, error) {
+		client.readHook = func() {
+			envelope := nativeEnvelope(t, "turn/completed", `{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[]}}`)
+			envelope.Sequence = 2
+			handler(envelope)
+		}
+		return client, nil
+	}
+	if err := host.startCodexNativeObserver(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if work := host.harnessWorkSnapshot(); work.Count != 0 {
+		t.Fatalf("completion after initial snapshot left stale work: %#v", work)
+	}
+}
+
+func TestCodexNativeObserverPreservesApprovalOutsideSnapshot(t *testing.T) {
+	t.Parallel()
+	host := NewSessionHost(SessionHostConfig{})
+	defer host.Stop()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("thread-1")
+	host.setCodexSharedDaemonConfig(codexSharedDaemonConfig{enabled: true, dedupeLimit: 8, requestTimeout: time.Second, reconnectDelay: time.Millisecond, reconnectTimeout: time.Second})
+	client := &fakeCodexNativeRPC{thread: json.RawMessage(`{"id":"thread-1","turns":[]}`), readSequence: 2}
+	host.codexNativeConnect = func(_ context.Context, _ codexSharedDaemonConfig, handler codexNativeEventHandler) (codexNativeRPC, error) {
+		client.readHook = func() {
+			handler(codexNativeEnvelope{
+				Sequence: 1,
+				ID:       json.RawMessage(`7`),
+				Method:   "item/commandExecution/requestApproval",
+				Params:   json.RawMessage(`{"threadId":"thread-1","turnId":"turn-1"}`),
+			})
+		}
+		return client, nil
+	}
+	if err := host.startCodexNativeObserver(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if work := host.harnessWorkSnapshot(); work.Count != 1 {
+		t.Fatalf("pre-snapshot approval work = %#v, want one active request", work)
+	}
+}
+
+func TestCodexNativeObserverOrdersCompletionAfterReconnectSnapshot(t *testing.T) {
+	t.Parallel()
+	host := NewSessionHost(SessionHostConfig{})
+	defer host.Stop()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("thread-1")
+	host.setCodexSharedDaemonConfig(codexSharedDaemonConfig{enabled: true, dedupeLimit: 8, requestTimeout: time.Second, reconnectDelay: time.Millisecond, reconnectTimeout: time.Second})
+	first := &fakeCodexNativeRPC{thread: json.RawMessage(`{"id":"thread-1","turns":[]}`)}
+	second := &fakeCodexNativeRPC{
+		thread:       json.RawMessage(`{"id":"thread-1","turns":[{"id":"turn-1","status":"inProgress","items":[]}]}`),
+		readSequence: 1,
+	}
+	completionQueued := make(chan struct{})
+	connectCount := 0
+	host.codexNativeConnect = func(_ context.Context, _ codexSharedDaemonConfig, handler codexNativeEventHandler) (codexNativeRPC, error) {
+		connectCount++
+		if connectCount == 1 {
+			return first, nil
+		}
+		second.readHook = func() {
+			envelope := nativeEnvelope(t, "turn/completed", `{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[]}}`)
+			envelope.Sequence = 2
+			handler(envelope)
+			close(completionQueued)
+		}
+		return second, nil
+	}
+	if err := host.startCodexNativeObserver(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_ = first.Close()
+	select {
+	case <-completionQueued:
+	case <-time.After(time.Second):
+		t.Fatal("reconnect did not queue completion after snapshot")
+	}
+	waitForCodexNativeWorkCount(t, host, 0)
+}
+
+func TestCodexNativeObserverDiscardsFailedReconnectGeneration(t *testing.T) {
+	t.Parallel()
+	host := NewSessionHost(SessionHostConfig{})
+	defer host.Stop()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("thread-1")
+	host.setCodexSharedDaemonConfig(codexSharedDaemonConfig{enabled: true, dedupeLimit: 8, requestTimeout: time.Second, reconnectDelay: time.Millisecond, reconnectTimeout: time.Second})
+	first := &fakeCodexNativeRPC{thread: json.RawMessage(`{"id":"thread-1","turns":[]}`)}
+	failed := &fakeCodexNativeRPC{initializeErr: errors.New("failed attempt")}
+	final := &fakeCodexNativeRPC{thread: json.RawMessage(`{"id":"thread-1","turns":[{"id":"turn-1","status":"completed","items":[]}]}`)}
+	connected := make(chan struct{})
+	connectCount := 0
+	host.codexNativeConnect = func(_ context.Context, _ codexSharedDaemonConfig, handler codexNativeEventHandler) (codexNativeRPC, error) {
+		connectCount++
+		switch connectCount {
+		case 1:
+			return first, nil
+		case 2:
+			envelope := nativeEnvelope(t, "turn/started", `{"threadId":"thread-1","turn":{"id":"turn-1","status":"inProgress","items":[]}}`)
+			envelope.Sequence = 1
+			handler(envelope)
+			return failed, nil
+		default:
+			close(connected)
+			return final, nil
+		}
+	}
+	if err := host.startCodexNativeObserver(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_ = first.Close()
+	select {
+	case <-connected:
+	case <-time.After(time.Second):
+		t.Fatal("observer did not reach the successful reconnect generation")
+	}
+	waitForCodexNativeWorkCount(t, host, 0)
 }
 
 func TestCodexNativeObserverDeliversQueuedCancelAfterReconnect(t *testing.T) {
