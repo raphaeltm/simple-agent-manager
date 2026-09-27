@@ -461,8 +461,8 @@ describe('setup routes', () => {
   });
 
   describe('never echoes platform secrets', () => {
-    // Distinctive markers, matched as substrings: a whole PEM would be JSON-escaped (`\n`) in a
-    // response body, so `includes(pem)` could miss a real leak.
+    // Distinctive markers, matched as substrings: a multi-line value is JSON-escaped (`\n`) in a
+    // response body, so `includes(value)` could miss a real leak.
     const ENV_SECRET_MARKERS = {
       GITHUB_CLIENT_SECRET: 'env-github-client-secret-canary-7f3a',
       GITHUB_APP_PRIVATE_KEY: 'env-github-app-key-canary-91c2',
@@ -483,7 +483,8 @@ describe('setup routes', () => {
         GITHUB_CLIENT_ID: 'Iv1.envclientid',
         GITHUB_CLIENT_SECRET: ENV_SECRET_MARKERS.GITHUB_CLIENT_SECRET,
         GITHUB_APP_ID: '12345',
-        GITHUB_APP_PRIVATE_KEY: `-----BEGIN RSA PRIVATE KEY-----\n${ENV_SECRET_MARKERS.GITHUB_APP_PRIVATE_KEY}\n-----END RSA PRIVATE KEY-----`,
+        // Multi-line like a real PEM body, so the check also covers JSON's `\n` escaping.
+        GITHUB_APP_PRIVATE_KEY: `key-line-1\n${ENV_SECRET_MARKERS.GITHUB_APP_PRIVATE_KEY}\nkey-line-3`,
         GITHUB_WEBHOOK_SECRET: ENV_SECRET_MARKERS.GITHUB_WEBHOOK_SECRET,
         GOOGLE_CLIENT_ID: 'env-google-infra-client-id',
         GOOGLE_CLIENT_SECRET: ENV_SECRET_MARKERS.GOOGLE_CLIENT_SECRET,

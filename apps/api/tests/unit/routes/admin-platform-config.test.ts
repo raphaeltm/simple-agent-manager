@@ -441,7 +441,7 @@ describe('admin platform config routes', () => {
   });
 
   it('never returns a platform secret value from GET or PUT', async () => {
-    // Distinctive markers matched as substrings (a PEM would be JSON-escaped in the body).
+    // Distinctive markers matched as substrings (a multi-line value is JSON-escaped in the body).
     const markers = {
       envClientSecret: 'admin-env-github-client-secret-canary-3c9d',
       envAppKey: 'admin-env-github-app-key-canary-6e2a',
@@ -452,7 +452,7 @@ describe('admin platform config routes', () => {
       GITHUB_CLIENT_ID: 'Iv1.adminenvclient',
       GITHUB_CLIENT_SECRET: markers.envClientSecret,
       GITHUB_APP_ID: '67890',
-      GITHUB_APP_PRIVATE_KEY: `-----BEGIN RSA PRIVATE KEY-----\n${markers.envAppKey}\n-----END RSA PRIVATE KEY-----`,
+      GITHUB_APP_PRIVATE_KEY: `key-line-1\n${markers.envAppKey}\nkey-line-3`,
       GITHUB_WEBHOOK_SECRET: markers.envWebhookSecret,
     });
     const app = createApp();

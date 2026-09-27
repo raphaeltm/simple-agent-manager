@@ -178,15 +178,20 @@ API redactors and their `sk-` coverage:
       document these endpoints)
 
 ### Wrap-up
-- [ ] Docs sync (security.md / configuration.md / api.md as affected)
-- [ ] Update summarize backlog file with what shipped and what remains
+- [x] Docs sync: architecture/security.md (setup responses + redaction), reference/configuration.md,
+      reference/api.md (admin AI allowances), guides/agents.md, apps/api/.env.example, env-reference + api-reference skills
+- [x] Update summarize backlog file with what shipped and what remains
 - [ ] PR comment: each hardening, its test, revert evidence, bypass attempts
 
 ## Acceptance Criteria
 
-- [ ] No platform secret value appears in any setup/admin platform-config response body
-- [ ] A user whose allowance excludes a model's tier gets 403 on every platform-billed proxy route; null allows all
-- [ ] OpenAI/Anthropic `sk-` keys are redacted by every API redactor, via one shared pattern
-- [ ] summarize/fork-prepare (and transcribe) return 429 past their limits and recover after the window
-- [ ] Each guard proven discriminating by a recorded revert
+- [x] No platform secret value appears in any setup/admin platform-config response body (setup.test.ts,
+      admin-platform-config.test.ts)
+- [x] A user whose allowance excludes a model's tier gets 403 on every platform-billed proxy route; null allows all
+      (ai-proxy-model-tiers.test.ts, ai-proxy-model-tier-coverage.test.ts)
+- [x] OpenAI/Anthropic `sk-` keys are redacted by every API redactor, via one shared pattern
+      (credential-token-redaction.test.ts incl. drift guard, logger, VM error intake, canary consumers)
+- [x] summarize/fork-prepare (and transcribe) return 429 past their limits and recover after the window
+      (chat-fork.test.ts, transcribe.test.ts)
+- [x] Each guard proven discriminating by a recorded revert (see checklist notes above)
 - [ ] Staging: setup/admin surfaces load; SAM-mode proxy request for an allowed model succeeds; no console errors

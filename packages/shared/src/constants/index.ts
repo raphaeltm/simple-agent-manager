@@ -361,6 +361,11 @@ export {
 
 // AI Services (Task Title, Context Summary, TTS, AI Proxy)
 export {
+  getPlatformAIModelTier,
+  isPlatformAIModelTier,
+  PLATFORM_AI_MODEL_TIERS,
+} from './ai-model-tiers';
+export {
   AGENT_LOOP_MIN_TOOL_CALL_SUPPORT,
   AI_ADMIN_ALLOWANCE_KV_PREFIX,
   AI_BUDGET_SETTINGS_KV_PREFIX,
@@ -478,11 +483,6 @@ export {
   type ToolCallSupport,
   VALID_BILLING_MODES,
 } from './ai-services';
-export {
-  getPlatformAIModelTier,
-  isPlatformAIModelTier,
-  PLATFORM_AI_MODEL_TIERS,
-} from './ai-model-tiers';
 
 // Agent Settings
 export {
