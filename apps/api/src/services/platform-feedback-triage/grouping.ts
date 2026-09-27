@@ -58,10 +58,9 @@ function normalizeTextTokens(value: string, normalizeQuotedValues = true): strin
       '[id]'
     )
     .replace(/\b(?:0x)?[0-9a-f]{8,}\b/gi, '[id]')
-    .replace(
-      /\b\d+(?:\.\d+)?\s*(?:ns|us|µs|ms|s|sec(?:ond)?s?|m|min(?:ute)?s?|h|hours?|d|days?)\b/gi,
-      '[duration]'
-    )
+    .replace(/\b\d+(?:\.\d+)?\s*(?:ns|us|µs|ms|s|m|h|d)\b/gi, '[duration]')
+    .replace(/\b\d+(?:\.\d+)?\s*secs?\b/gi, '[duration]')
+    .replace(/\b\d+(?:\.\d+)?\s*(?:seconds?|minutes?|hours?|days?)\b/gi, '[duration]')
     .replace(/\b\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?\b/g, '[duration]')
     .replace(/(?<![a-z0-9_])[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?(?![a-z0-9_])/gi, '[n]');
   if (normalizeQuotedValues) {
@@ -75,7 +74,9 @@ function normalizeTextTokens(value: string, normalizeQuotedValues = true): strin
 function jsonShape(value: unknown, key?: string): string {
   if (value === null) return '[null]';
   if (Array.isArray(value)) {
-    const shapes = [...new Set(value.map((item) => jsonShape(item)))].sort();
+    const shapes = [...new Set(value.map((item) => jsonShape(item)))].sort((left, right) =>
+      left.localeCompare(right)
+    );
     return `[${shapes.join(',')}]`;
   }
   if (typeof value === 'object') {
@@ -97,45 +98,60 @@ function jsonShape(value: unknown, key?: string): string {
   return `[${typeof value}]`;
 }
 
+interface JsonStringScanState {
+  escaped: boolean;
+  inString: boolean;
+}
+
+function consumeJsonStringCharacter(character: string, state: JsonStringScanState): boolean {
+  if (!state.inString) {
+    if (character !== '"') return false;
+    state.inString = true;
+    return true;
+  }
+  if (state.escaped) state.escaped = false;
+  else if (character === '\\') state.escaped = true;
+  else if (character === '"') state.inString = false;
+  return true;
+}
+
+function findEmbeddedJsonEnd(value: string, start: number, opener: '{' | '['): number | null {
+  const closer = opener === '{' ? '}' : ']';
+  const stringState: JsonStringScanState = { escaped: false, inString: false };
+  let depth = 0;
+  for (let end = start; end < value.length; end += 1) {
+    const character = value[end];
+    if (consumeJsonStringCharacter(character, stringState)) continue;
+    if (character === opener) depth += 1;
+    if (character !== closer) continue;
+    depth -= 1;
+    if (depth === 0) return end;
+  }
+  return null;
+}
+
+function parsedJsonShape(candidate: string): string | null {
+  try {
+    return jsonShape(JSON.parse(candidate));
+  } catch {
+    return null;
+  }
+}
+
 function normalizeEmbeddedJson(value: string): string {
   let result = '';
-  for (let index = 0; index < value.length; index += 1) {
+  let index = 0;
+  while (index < value.length) {
     const opener = value[index];
     if (opener !== '{' && opener !== '[') {
       result += opener;
+      index += 1;
       continue;
     }
-    const closer = opener === '{' ? '}' : ']';
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    let end = index;
-    for (; end < value.length; end += 1) {
-      const character = value[end];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (character === '\\') escaped = true;
-        else if (character === '"') inString = false;
-        continue;
-      }
-      if (character === '"') inString = true;
-      else if (character === opener) depth += 1;
-      else if (character === closer) {
-        depth -= 1;
-        if (depth === 0) break;
-      }
-    }
-    if (depth !== 0) {
-      result += opener;
-      continue;
-    }
-    const candidate = value.slice(index, end + 1);
-    try {
-      result += jsonShape(JSON.parse(candidate));
-      index = end;
-    } catch {
-      result += opener;
-    }
+    const end = findEmbeddedJsonEnd(value, index, opener);
+    const shape = end === null ? null : parsedJsonShape(value.slice(index, end + 1));
+    result += shape ?? opener;
+    index = shape === null || end === null ? index + 1 : end + 1;
   }
   return result;
 }
