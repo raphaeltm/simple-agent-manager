@@ -68,6 +68,13 @@ describe('interactive preview response policy', () => {
     );
   });
 
+  it('admits no loopback frame for a real domain that merely contains "localhost"', () => {
+    const headers = getInteractivePreviewHeaders({ BASE_DOMAIN: 'localhost-labs.example.com' });
+    expect(headers.get('content-security-policy')).toMatch(
+      /; frame-ancestors https:\/\/app\.localhost-labs\.example\.com$/
+    );
+  });
+
   it('applies the CSP sandbox and all strict headers to friendly errors', async () => {
     const response = interactivePreviewErrorResponse({ BASE_DOMAIN: 'example.com' });
     expect(response.status).toBe(403);

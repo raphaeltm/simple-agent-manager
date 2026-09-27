@@ -196,7 +196,7 @@ Library files, repository files, workspace files, and chat messages can all be w
 
 **Downloads** (`/download`) are always `Content-Disposition: attachment` with `nosniff`. The stored type is sent only when it is exactly one well-formed media type that a browser cannot execute. Anything else is served as `application/octet-stream`, whatever parameters it carries: HTML, XML and `+xml` types, JavaScript, comma-separated lists, and malformed values.
 
-**Raw files** from the repository browser (`GET /api/projects/:id/repo/raw`) and from a chat session's workspace (`GET /api/projects/:id/sessions/:sessionId/files/raw`) carry `nosniff` and a CSP under which any document is inert: no script, no fetches, and an opaque origin. Images embedded with `<img>` are unaffected. The repository browser also downloads active types instead of showing them.
+**Raw files** from the repository browser (`GET /api/projects/:id/repo/raw`) and from a chat session's workspace (`GET /api/projects/:id/sessions/:sessionId/files/raw`) carry `nosniff` and a sandboxing CSP, so any document they render is inert: no script, no fetches, no automatic navigation, and an opaque origin. Opened directly, active types (HTML, SVG and other XML, JavaScript) download instead of rendering. Images embedded with `<img>` are unaffected.
 
 **Mermaid diagrams** in chat and in library markdown render through one pipeline (`renderMermaidSvg` in `packages/acp-client/src/mermaid.ts`):
 

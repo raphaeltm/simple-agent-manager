@@ -66,7 +66,7 @@ function openRawFile(path: string) {
 }
 
 describe('GET /api/projects/:id/sessions/:sessionId/files/raw', () => {
-  it('serves agent-written HTML as an inert document', async () => {
+  it('downloads agent-written HTML instead of rendering it, and keeps it inert', async () => {
     const html = '<html><body><script>fetch("/api/auth/api-tokens")</script></body></html>';
     const vmAgent = stubVmAgent('text/html; charset=utf-8', html, {
       // The proxy's policy is its own: a looser one from the VM agent is not kept.
@@ -76,6 +76,7 @@ describe('GET /api/projects/:id/sessions/:sessionId/files/raw', () => {
     const response = await openRawFile('/workspaces/repo/report.html');
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Disposition')).toBe('attachment; filename="report.html"');
     expect(response.headers.get('Content-Security-Policy')).toBe(INERT_DOCUMENT_CSP);
     expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(await response.text()).toBe(html);
@@ -84,16 +85,18 @@ describe('GET /api/projects/:id/sessions/:sessionId/files/raw', () => {
     expect(request?.searchParams.get('path')).toBe('/workspaces/repo/report.html');
   });
 
+  // An <img> ignores Content-Disposition, so an SVG still draws in the app.
   it.each([
-    ['an SVG', 'diagram.svg', 'image/svg+xml'],
-    ['a PNG', 'screenshot.png', 'image/png'],
-  ])('keeps %s embeddable as an image', async (_kind, name, contentType) => {
+    ['an SVG', 'diagram.svg', 'image/svg+xml', 'attachment; filename="diagram.svg"'],
+    ['a PNG', 'screenshot.png', 'image/png', null],
+  ])('keeps %s embeddable as an image', async (_kind, name, contentType, disposition) => {
     stubVmAgent(contentType, 'image bytes');
 
     const response = await openRawFile(`/workspaces/repo/${name}`);
 
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe(contentType);
+    expect(response.headers.get('Content-Disposition')).toBe(disposition);
     expect(response.headers.get('Content-Security-Policy')).toBe(INERT_DOCUMENT_CSP);
     expect(new TextDecoder().decode(await response.arrayBuffer())).toBe('image bytes');
   });

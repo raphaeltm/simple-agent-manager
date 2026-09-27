@@ -29,7 +29,9 @@ const MERMAID_TEXT_COLOR = '#e6f2ee';
 
 /**
  * Config keys a diagram may not change through its own `%%{init}%%` directive or
- * front matter. Mermaid deletes them from directives at every nesting level.
+ * front matter. Mermaid deletes them from directives at every nesting level, by
+ * exact key name only: other font and style keys (`taskFontFamily`, ...) stay
+ * settable, and it is the sanitizer's CSS check below that keeps them inert.
  * Keys outside Mermaid's config schema (`altFontFamily`, `dompurifyConfig`)
  * never survive a directive, so they need no entry.
  */

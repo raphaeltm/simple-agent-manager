@@ -52,6 +52,8 @@ Agent-controlled content reaches the browser on three paths with gaps:
 - **F19: Smaller gaps.** The interactive-preview CSP built `frame-ancestors` separately without the local-development origins; chat Mermaid loaded DOMPurify eagerly; journey labels fell back to 14px "Open Sans" as SVG text; the mindmap root label was dark grey on its blue circle (pre-existing).
 - **F20: A 4xx `/preview` shows raw JSON in the PDF frame**, because an iframe's `onerror` never fires for HTTP errors (ui-ux review, MEDIUM). Deferred: `01M3JDYQE7CYVM2MG0HNNBNFR7`.
 - **F21: The vm-agent's own raw endpoint on `ws-<id>.<domain>` has F14's shape** (Go; needs the infrastructure gate). Deferred: `01M3JDYYNMBE0W8W8YAD1QFNZG`.
+- **F22: A sandboxed document is inert but can still be clicked away.** The security re-review of the review fixes noted that the workspace raw proxy still rendered agent HTML (under the inert CSP) when opened directly. In Chromium the sandbox already blocks `<meta http-equiv="refresh">` (verified), but a clicked link still navigates. Active types now download instead of rendering; an `<img>` ignores `Content-Disposition`, so SVG still draws (verified in Chromium).
+- **F23: The local-development check matched a substring.** `isLocalDevelopmentBaseDomain` treated any `BASE_DOMAIN` containing "localhost" as local development, and it now also gates `frame-ancestors` on the script-running interactive preview. It now requires a loopback host (`localhost`, `127.0.0.1`, `*.localhost`; port ignored).
 
 ## Implementation checklist
 
@@ -102,7 +104,9 @@ Agent-controlled content reaches the browser on three paths with gaps:
 - [x] One `findActiveContent` oracle for the acp-client suites, the web suite and the Playwright audit (run in the browser); sequence-diagram math regression test (F18)
 - [x] `getAppOrigin` and `appFrameAncestors` in `lib/app-origin.ts`, used by library and interactive previews; DOMPurify loaded lazily in chat; journey labels in the diagram font; mindmap root label light (F19)
 - [x] Label legibility regression spec in a real browser (`mermaid-label-legibility-audit.spec.ts`): section labels light, mindmap root centred, journey font, wrapped label reads as words with rows centred
-- [x] Discrimination: R1, W2, M9, M10, P2a-P2e, A8 in `.do-state.md`
+- [x] Workspace raw proxy downloads active types (`Content-Disposition: attachment`) instead of rendering them (F22)
+- [x] `isLocalDevelopmentBaseDomain` requires an exact loopback host (F23)
+- [x] Discrimination: R1, W2, W3, M9, M10, P2a-P2e, A8, A9 in `.do-state.md`
 
 ### Found during implementation
 

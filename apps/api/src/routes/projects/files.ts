@@ -8,7 +8,11 @@ import { log } from '../../lib/logger';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectAccess } from '../../middleware/project-auth';
-import { INERT_DOCUMENT_CSP } from '../../services/file-serving-policy';
+import {
+  contentDispositionFilename,
+  INERT_DOCUMENT_CSP,
+  isActiveContentType,
+} from '../../services/file-serving-policy';
 import { signTerminalToken } from '../../services/jwt';
 import { fetchNodeAgent } from '../../services/node-agent';
 import * as projectDataService from '../../services/project-data';
@@ -423,10 +427,16 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
   }
 
   // Security headers are the proxy's own, whatever the VM agent sends. The file
-  // may be agent-written HTML or SVG; opened directly on the API origin, it must
-  // stay inert. The app only ever embeds these bytes as an <img>.
+  // may be agent-written HTML or SVG. The app only ever embeds these bytes as an
+  // <img>, which ignores Content-Disposition; opened directly on the API origin,
+  // active content downloads instead of rendering, and anything that does render
+  // stays inert.
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('Content-Security-Policy', INERT_DOCUMENT_CSP);
+  if (isActiveContentType(headers.get('Content-Type') ?? '')) {
+    const filename = contentDispositionFilename(path.split('/').pop() || 'file');
+    headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+  }
 
   return new Response(res.body, {
     status: res.status,

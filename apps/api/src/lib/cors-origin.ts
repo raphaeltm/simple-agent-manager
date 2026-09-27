@@ -7,10 +7,16 @@ function normalizeHostname(value: string): string {
 /** Hosts the app and the API run on during local development (`pnpm dev`). */
 export const LOCAL_DEVELOPMENT_HOSTS: readonly string[] = ['localhost', '127.0.0.1'];
 
-/** Local development leaves BASE_DOMAIN empty or pointed at localhost. */
+/**
+ * Local development leaves BASE_DOMAIN empty or points it at a loopback host, such
+ * as `localhost:8787`. The host must match exactly: a real domain that merely
+ * contains "localhost" is not local development.
+ */
 export function isLocalDevelopmentBaseDomain(baseDomainValue: string | undefined): boolean {
   const baseDomain = normalizeHostname(baseDomainValue || '');
-  return !baseDomain || baseDomain.includes('localhost');
+  if (!baseDomain) return true;
+  const host = baseDomain.replace(/:\d+$/, '');
+  return LOCAL_DEVELOPMENT_HOSTS.includes(host) || host.endsWith('.localhost');
 }
 
 function isLocalDevelopmentOrigin(hostname: string, baseDomain: string): boolean {
