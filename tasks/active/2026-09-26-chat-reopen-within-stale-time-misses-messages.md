@@ -21,16 +21,25 @@ Staging `hono` project, session `554d9f3c-1cb9-4d3c-b628-ffc4654cff44`, one brow
 
 ## Acceptance Criteria
 
-- [ ] Opening a chat always reconciles a cached transcript with the server through the forward refresh, however fresh the cache is. Cached content stays visible meanwhile (stale-while-revalidate, `apps/web/.claude/rules/48-stale-while-revalidate-ui.md`).
-- [ ] A WebSocket message that arrives while that refresh is in flight is still shown after the refresh resolves.
-- [ ] Hook tests enter through the real triggers (`.claude/rules/62-tests-must-observe-the-real-trigger.md`):
+- [x] Opening a chat always reconciles a cached transcript with the server through the forward refresh, however fresh the cache is. Cached content stays visible meanwhile (stale-while-revalidate, `apps/web/.claude/rules/48-stale-while-revalidate-ui.md`).
+- [x] A WebSocket message that arrives while that refresh is in flight is still shown after the refresh resolves.
+- [x] Hook tests enter through the real triggers (`.claude/rules/62-tests-must-observe-the-real-trigger.md`):
   - mounting with a fresh cached transcript;
   - a socket message delivered while a deferred refresh is still pending.
-- [ ] Each guard is reverted once and the intended test goes red.
+- [x] Each guard is reverted once and the intended test goes red.
 - [ ] On staging, the reopen-within-15-s reproduction above renders the reply.
 
 ## Context
 
 Found during staging verification of the transcript-boundary fix (`tasks/archive/2026-09-25-transcript-boundary-and-reporter-payloads.md`). The gap predates that branch: `useChatWebSocket.ts`, the query `staleTime` and the cache persistence are unchanged by it. What that branch changed is what the refresh does once it runs, and the control step above exercises exactly that.
 
-Related: `tasks/backlog/2026-09-26-chat-recent-window-merge-can-leave-gap.md`.
+Related: `tasks/active/2026-09-26-chat-recent-window-merge-can-leave-gap.md`.
+
+## Implementation Notes
+
+- `useSessionLifecycle` now sets `refetchOnMount: 'always'` for the session transcript query, so remounting a chat reconciles even when the persisted query cache is still fresh under the app-wide 15 s `staleTime`.
+- The mount refresh merges the resolved forward-refresh result against the latest query cache, not only the cache snapshot captured when the request started. A WebSocket message appended while the refresh is in flight therefore remains present after the query result lands.
+- Regression tests cover a fresh cached mount and a deferred refresh with a WebSocket message delivered through the hook's real `onMessage` callback.
+- Guard proofs performed locally:
+  - Removed `refetchOnMount: 'always'`; `refreshes a fresh cached transcript on mount within query staleTime` failed with only `cached` rendered.
+  - Returned `refreshed` directly instead of merging with the latest cache; `keeps a WebSocket message that arrives while the mount refresh is in flight` failed with `ws-during-refresh` missing.

@@ -28,6 +28,7 @@ import {
 import { mergeMessages } from '../../lib/merge-messages';
 import {
   fetchHistoryUntil,
+  mergeRecentWindowOrRefresh,
   oldestPersistedCursor,
   refreshCachedTranscript,
 } from '../../lib/message-paging';
@@ -81,14 +82,24 @@ export function useSessionLifecycle(
   const sessionQuery = useQuery({
     ...chatSessionMessagesQueryOptions(queryScope, projectId, sessionId),
     enabled: Boolean(queryScope && projectId && sessionId),
+    refetchOnMount: 'always',
     queryFn: async ({ signal }) => {
       const cached = queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey);
       const refreshed =
         cached && (await refreshCachedTranscript(projectId, sessionId, cached, signal));
-      return (
-        refreshed ||
-        getChatSession(projectId, sessionId, { signal, limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX })
-      );
+      if (refreshed) {
+        const latest =
+          queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey) ?? cached;
+        return {
+          ...refreshed,
+          messages: mergeMessages(latest.messages, refreshed.messages, 'append'),
+          hasMore: latest.hasMore,
+        };
+      }
+      return getChatSession(projectId, sessionId, {
+        signal,
+        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+      });
     },
   });
 
@@ -247,22 +258,45 @@ export function useSessionLifecycle(
         state?: SessionStateSnapshot | null
       ) => {
         setSession(catchUpSession);
-        setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
-        queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
-          sessionMessagesQueryKey,
-          (old) =>
-            old
-              ? {
-                  ...old,
-                  session: catchUpSession,
-                  messages: mergeMessages(old.messages, catchUpMessages, 'replace'),
-                  state: state ?? old.state,
-                }
-              : old
-        );
+        void (async () => {
+          try {
+            const recentDetail = {
+              session: catchUpSession,
+              messages: catchUpMessages,
+              hasMore: hasMoreRef.current,
+              state: state ?? null,
+            } as ChatSessionDetailResponse;
+            const current =
+              queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey) ??
+              ({
+                ...recentDetail,
+                messages: messagesRef.current,
+                hasMore: hasMoreRef.current,
+              } as ChatSessionDetailResponse);
+            const merged = await mergeRecentWindowOrRefresh(
+              projectId,
+              sessionId,
+              current,
+              recentDetail
+            );
+            setMessages(merged.messages);
+            setHasMore(merged.hasMore);
+            queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
+              sessionMessagesQueryKey,
+              (old) => ({
+                ...(old ?? merged),
+                ...merged,
+                state: state ?? old?.state ?? merged.state,
+              })
+            );
+          } catch {
+            // Best-effort catch-up: the socket remains connected, and the next
+            // explicit refresh/reconnect will retry from the current cache.
+          }
+        })();
         hydrateState(state);
       },
-      [hydrateState, queryClient, sessionMessagesQueryKey]
+      [hydrateState, projectId, queryClient, sessionId, sessionMessagesQueryKey]
     ),
     onAgentCompleted: useCallback(
       (agentCompletedAt: number) => {
@@ -444,16 +478,28 @@ export function useSessionLifecycle(
         if (fingerprint !== lastPollFingerprint) {
           lastPollFingerprint = fingerprint;
           setSession(data.session);
-          setMessages((prev) => mergeMessages(prev, data.messages, 'replace'));
+          const current =
+            queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey) ??
+            ({
+              ...data,
+              messages: messagesRef.current,
+              hasMore: hasMoreRef.current,
+            } as ChatSessionDetailResponse);
+          const merged = await mergeRecentWindowOrRefresh(
+            projectId,
+            sessionId,
+            current,
+            data,
+            abortController.signal
+          );
+          setMessages(merged.messages);
+          setHasMore(merged.hasMore);
           queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
             sessionMessagesQueryKey,
-            (old) =>
-              old
-                ? {
-                    ...data,
-                    messages: mergeMessages(old.messages, data.messages, 'replace'),
-                  }
-                : data
+            (old) => ({
+              ...(old ?? merged),
+              ...merged,
+            })
           );
           if (data.session.task) setTaskEmbed(data.session.task);
         }
