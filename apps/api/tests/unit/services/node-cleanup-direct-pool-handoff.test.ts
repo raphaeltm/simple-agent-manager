@@ -11,12 +11,14 @@ import {
 } from '../../../src/scheduled/node-cleanup/shared';
 import { clearCapacityCatalogCache } from '../../../src/services/default-capacity-source-credentials';
 import { encrypt } from '../../../src/services/encryption';
+import { provisionNode } from '../../../src/services/node-provisioning';
 import { fingerprintEncryptedProviderCredential } from '../../../src/services/provider-credential-exact';
 import { findRestorableOrInFlightSleepSnapshot } from '../../../src/services/session-snapshot-sleep-predicate';
 import { fixture, seedHost } from '../routes/node-pool-upgrade-test-helpers';
 
 const NOW = new Date('2026-09-08T12:00:00.000Z');
 const OLD = '2026-09-08T10:00:00.000Z';
+vi.mock('../../../src/services/jwt', () => ({ signNodeCallbackToken: async () => 'test-token' }));
 
 const protectedHandoffMutations = [
   ['future cleanup backoff', "UPDATE nodes SET cleanup_backoff_until = '2026-09-08T13:00:00.000Z'"],
@@ -69,6 +71,7 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
   const providerSignals: AbortSignal[] = [];
   const dnsRequests: string[] = [];
   let hangDns: 'request' | 'error-body' | undefined;
+  let rejectCreateDuringDestroy = false;
   function waitForAbort(signal: AbortSignal) {
     return new Promise<Response>((_resolve, reject) => {
       if (signal.aborted) reject(signal.reason);
@@ -117,6 +120,14 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
           );
         }
         return new Response(null, { status: 204 });
+      }
+      if (url.includes('api.hetzner.cloud/v1/servers') && init?.method === 'POST') {
+        if (!rejectCreateDuringDestroy) throw new Error('Unexpected provider create');
+        f.sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'host'").run();
+        return Response.json(
+          { error: { code: 'placement_error', message: 'Placement unavailable' } },
+          { status: 412 }
+        );
       }
       if (url.includes('api.cloudflare.com/client/v4/zones/')) {
         dnsRequests.push(url);
@@ -171,6 +182,9 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
     dnsRequests,
     setHangDns: (mode: 'request' | 'error-body') => {
       hangDns = mode;
+    },
+    rejectCreateDuringDestroy: () => {
+      rejectCreateDuringDestroy = true;
     },
     rejectedProviderIds,
     providerDeletes,
@@ -256,6 +270,41 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     expect(f.sqlite.prepare('SELECT * FROM session_snapshots').get()).toEqual(snapshot);
     expect(f.stopSession).not.toHaveBeenCalled();
     expect(f.cleanupWorkspaceActivity).toHaveBeenCalledOnce();
+  });
+
+  it('carries a rejected provider create through a concurrent destroy claim and cleanup', async () => {
+    const f = await handoffFixture();
+    f.sqlite
+      .prepare(
+        `UPDATE nodes SET status = 'creating', provider_instance_id = NULL,
+          runtime_termination_confirmed_at = NULL WHERE id = 'host'`
+      )
+      .run();
+    f.rejectCreateDuringDestroy();
+
+    await provisionNode('host', f.env);
+    expect(
+      f.sqlite
+        .prepare(
+          "SELECT status, provider_instance_id, runtime_termination_confirmed_at FROM nodes WHERE id = 'host'"
+        )
+        .get()
+    ).toEqual({
+      status: 'destroying',
+      provider_instance_id: null,
+      runtime_termination_confirmed_at: expect.any(String),
+    });
+
+    await f.sweepDestroying();
+
+    expect(f.result).toMatchObject({ lifetimeDestroyed: 1, errors: 0 });
+    expect(f.providerDeletes).toHaveLength(0);
+    expect(f.sqlite.prepare("SELECT status FROM nodes WHERE id = 'host'").get()).toEqual({
+      status: 'deleted',
+    });
+    expect(f.sqlite.prepare('SELECT runtime_deletion_confirmed_at FROM workspaces').get()).toEqual({
+      runtime_deletion_confirmed_at: expect.any(String),
+    });
   });
 
   it('keeps a destroying provider-ID row retryable when provider deletion is ambiguous', async () => {
