@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const codexNativeConnectionWorkID = "connection"
+const codexNativeConnectionWorkPrefix = "connection:"
 
 type codexNativeRPC interface {
 	initialize(context.Context) error
@@ -30,14 +30,14 @@ type codexNativeObserver struct {
 	config   codexSharedDaemonConfig
 	connect  codexNativeConnectFunc
 
-	mu          sync.Mutex
-	events      sync.WaitGroup
-	client      codexNativeRPC
-	activeTurns map[string]struct{}
-	approvals   map[string]struct{}
-	reconnecting   bool
+	mu               sync.Mutex
+	events           sync.WaitGroup
+	client           codexNativeRPC
+	activeTurns      map[string]struct{}
+	approvals        map[string]struct{}
+	reconnecting     bool
 	pendingInterrupt bool
-	closed         bool
+	closed           bool
 }
 
 type codexNativeThread struct {
@@ -112,7 +112,7 @@ func (h *SessionHost) startCodexNativeObserver(ctx context.Context) error {
 		_ = client.Close()
 		return fmt.Errorf("read attributed Codex thread: %w", err)
 	}
-	if err := observer.reconcile(thread); err != nil {
+	if err := observer.reconcileGuarded(thread); err != nil {
 		_ = client.Close()
 		return fmt.Errorf("reconcile attributed Codex thread: %w", err)
 	}
@@ -151,17 +151,17 @@ func (o *codexNativeObserver) close() {
 	client := o.client
 	workIDs := make([]string, 0, len(o.activeTurns)+len(o.approvals))
 	for id := range o.activeTurns {
-		workIDs = append(workIDs, "turn:"+id)
+		workIDs = append(workIDs, o.turnWorkID(id))
 	}
 	for id := range o.approvals {
-		workIDs = append(workIDs, "approval:"+id)
+		workIDs = append(workIDs, o.approvalWorkID(id))
 	}
 	o.activeTurns = make(map[string]struct{})
 	o.approvals = make(map[string]struct{})
 	for _, id := range workIDs {
 		o.host.applyCodexNativeWork(id, false)
 	}
-	o.host.applyCodexNativeWork(codexNativeConnectionWorkID, false)
+	o.host.applyCodexNativeWork(o.connectionWorkID(), false)
 	o.mu.Unlock()
 	o.host.nudgeHarnessActivityReport()
 	if client != nil {
@@ -171,14 +171,10 @@ func (o *codexNativeObserver) close() {
 }
 
 func (o *codexNativeObserver) handleEnvelope(envelope codexNativeEnvelope) {
-	o.mu.Lock()
-	if o.closed {
-		o.mu.Unlock()
+	if !o.beginOperation() {
 		return
 	}
-	o.events.Add(1)
-	o.mu.Unlock()
-	defer o.events.Done()
+	defer o.endOperation()
 	var params codexNativeNotification
 	if err := json.Unmarshal(envelope.Params, &params); err != nil {
 		slog.Warn("Codex shared-daemon observer ignored malformed event", "method", envelope.Method)
@@ -206,6 +202,28 @@ func (o *codexNativeObserver) handleEnvelope(envelope codexNativeEnvelope) {
 			o.setApproval(string(envelope.ID), true)
 		}
 	}
+}
+
+func (o *codexNativeObserver) beginOperation() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.closed {
+		return false
+	}
+	o.events.Add(1)
+	return true
+}
+
+func (o *codexNativeObserver) endOperation() {
+	o.events.Done()
+}
+
+func (o *codexNativeObserver) reconcileGuarded(raw json.RawMessage) error {
+	if !o.beginOperation() {
+		return context.Canceled
+	}
+	defer o.endOperation()
+	return o.reconcile(raw)
 }
 
 func (o *codexNativeObserver) reconcile(raw json.RawMessage) error {
@@ -244,7 +262,7 @@ func (o *codexNativeObserver) setTurn(turnID string, active bool) {
 		o.mu.Unlock()
 		return
 	}
-	changed := o.host.applyCodexNativeWork("turn:"+turnID, active)
+	changed := o.host.applyCodexNativeWork(o.turnWorkID(turnID), active)
 	o.mu.Unlock()
 	if changed {
 		o.host.nudgeHarnessActivityReport()
@@ -270,7 +288,7 @@ func (o *codexNativeObserver) setApproval(requestID string, active bool) {
 		o.mu.Unlock()
 		return
 	}
-	changed := o.host.applyCodexNativeWork("approval:"+requestID, active)
+	changed := o.host.applyCodexNativeWork(o.approvalWorkID(requestID), active)
 	o.mu.Unlock()
 	if changed {
 		o.host.nudgeHarnessActivityReport()
@@ -298,37 +316,47 @@ func (h *SessionHost) scheduleCodexNativeInterrupt() bool {
 	if observer == nil {
 		return false
 	}
-	observer.mu.Lock()
-	if observer.closed {
-		observer.mu.Unlock()
+	return observer.scheduleInterrupt()
+}
+
+func (o *codexNativeObserver) scheduleInterrupt() bool {
+	o.host.codexNativeMu.Lock()
+	current := o.host.codexNativeObserver == o
+	o.host.codexNativeMu.Unlock()
+	if !current {
+		return false
+	}
+	o.mu.Lock()
+	if o.closed {
+		o.mu.Unlock()
 		return false
 	}
 	var turnID string
-	for id := range observer.activeTurns {
+	for id := range o.activeTurns {
 		turnID = id
 		break
 	}
 	if turnID == "" {
-		observer.mu.Unlock()
+		o.mu.Unlock()
 		return false
 	}
-	if observer.reconnecting || observer.client == nil {
-		observer.pendingInterrupt = true
-		observer.mu.Unlock()
+	if o.reconnecting || o.client == nil {
+		o.pendingInterrupt = true
+		o.mu.Unlock()
 		return true
 	}
-	client := observer.client
-	observer.mu.Unlock()
+	client := o.client
+	o.mu.Unlock()
 	go func() {
-		ctx, cancel := context.WithTimeout(h.lifecycleContext(), observer.config.requestTimeout)
+		ctx, cancel := context.WithTimeout(o.host.lifecycleContext(), o.config.requestTimeout)
 		defer cancel()
-		if err := client.interruptTurn(ctx, observer.threadID, turnID); err != nil {
-			observer.mu.Lock()
-			if !observer.closed {
-				observer.pendingInterrupt = true
+		if err := client.interruptTurn(ctx, o.threadID, turnID); err != nil {
+			o.mu.Lock()
+			if !o.closed {
+				o.pendingInterrupt = true
 			}
-			observer.mu.Unlock()
-			h.reportLifecycle("warn", "Codex native turn interrupt failed", map[string]interface{}{"error": redactAgentDiagnosticText(err.Error())})
+			o.mu.Unlock()
+			o.host.reportLifecycle("warn", "Codex native turn interrupt failed", map[string]interface{}{"error": redactAgentDiagnosticText(err.Error())})
 			_ = client.Close()
 		}
 	}()
@@ -382,13 +410,13 @@ func (o *codexNativeObserver) reconnect(ctx context.Context, cause error) {
 		o.mu.Unlock()
 		return
 	}
-	changed := o.host.applyCodexNativeWork(codexNativeConnectionWorkID, true)
+	changed := o.host.applyCodexNativeWork(o.connectionWorkID(), true)
 	o.mu.Unlock()
 	if changed {
 		o.host.nudgeHarnessActivityReport()
 	}
 	defer func() {
-		if o.host.applyCodexNativeWork(codexNativeConnectionWorkID, false) {
+		if o.host.applyCodexNativeWork(o.connectionWorkID(), false) {
 			o.host.nudgeHarnessActivityReport()
 		}
 	}()
@@ -427,7 +455,7 @@ func (o *codexNativeObserver) reconnect(ctx context.Context, cause error) {
 			o.client = client
 			o.clearApprovalsLocked()
 			o.mu.Unlock()
-			if err = o.reconcile(thread); err == nil {
+			if err = o.reconcileGuarded(thread); err == nil {
 				o.mu.Lock()
 				if o.closed || o.client != client {
 					o.mu.Unlock()
@@ -438,12 +466,12 @@ func (o *codexNativeObserver) reconnect(ctx context.Context, cause error) {
 				pendingInterrupt := o.pendingInterrupt
 				o.pendingInterrupt = false
 				o.mu.Unlock()
-				o.host.applyCodexNativeWork(codexNativeConnectionWorkID, false)
+				o.host.applyCodexNativeWork(o.connectionWorkID(), false)
 				o.host.nudgeHarnessActivityReport()
 				o.host.reportLifecycle("info", "Codex shared-daemon observer reconnected", map[string]interface{}{"threadId": o.threadID})
 				go o.monitorClient(ctx, client)
 				if pendingInterrupt {
-					o.host.scheduleCodexNativeInterrupt()
+					o.scheduleInterrupt()
 				}
 				return
 			}
@@ -471,9 +499,21 @@ func (o *codexNativeObserver) reconnect(ctx context.Context, cause error) {
 	o.close()
 }
 
+func (o *codexNativeObserver) connectionWorkID() string {
+	return fmt.Sprintf("%s%p", codexNativeConnectionWorkPrefix, o)
+}
+
+func (o *codexNativeObserver) turnWorkID(turnID string) string {
+	return fmt.Sprintf("turn:%p:%s", o, turnID)
+}
+
+func (o *codexNativeObserver) approvalWorkID(requestID string) string {
+	return fmt.Sprintf("approval:%p:%s", o, requestID)
+}
+
 func (o *codexNativeObserver) clearApprovalsLocked() {
 	for id := range o.approvals {
-		o.host.applyCodexNativeWork("approval:"+id, false)
+		o.host.applyCodexNativeWork(o.approvalWorkID(id), false)
 	}
 	o.approvals = make(map[string]struct{})
 }

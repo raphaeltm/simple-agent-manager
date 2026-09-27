@@ -64,7 +64,36 @@ type codexSharedDaemonConfig struct {
 	pongTimeout         time.Duration
 }
 
-func resolveCodexSharedDaemonConfig(startup *agentStartup, containerUser, workDir string) (codexSharedDaemonConfig, error) {
+type codexSharedDaemonLimits struct {
+	duration            time.Duration
+	websocketBufferSize int
+	messageBytes        int64
+	dedupeLimit         int
+}
+
+func (h *SessionHost) codexSharedDaemonLimits() codexSharedDaemonLimits {
+	limits := codexSharedDaemonLimits{
+		duration:            h.config.CodexSharedDaemonMaxDuration,
+		websocketBufferSize: h.config.CodexSharedDaemonMaxWebSocketBufferSize,
+		messageBytes:        h.config.CodexSharedDaemonMaxMessageBytes,
+		dedupeLimit:         h.config.CodexSharedDaemonMaxDedupeLimit,
+	}
+	if limits.duration <= 0 {
+		limits.duration = maxCodexNativeDuration
+	}
+	if limits.websocketBufferSize <= 0 {
+		limits.websocketBufferSize = maxCodexNativeWebSocketBufferSize
+	}
+	if limits.messageBytes <= 0 {
+		limits.messageBytes = maxCodexNativeMessageBytes
+	}
+	if limits.dedupeLimit <= 0 {
+		limits.dedupeLimit = maxCodexNativeDedupeLimit
+	}
+	return limits
+}
+
+func resolveCodexSharedDaemonConfig(startup *agentStartup, containerUser, workDir string, limits codexSharedDaemonLimits) (codexSharedDaemonConfig, error) {
 	if startup == nil || !envFlag(startup.envVars, codexSharedDaemonEnabledEnv) {
 		return codexSharedDaemonConfig{}, nil
 	}
@@ -79,27 +108,27 @@ func resolveCodexSharedDaemonConfig(startup *agentStartup, containerUser, workDi
 	if !pathWithinRoot(socketPath, workDir) {
 		return codexSharedDaemonConfig{}, fmt.Errorf("%s must be inside this runtime's workspace", codexSharedDaemonSocketEnv)
 	}
-	dedupeLimit := defaultCodexNativeDedupeLimit
+	dedupeLimit := min(defaultCodexNativeDedupeLimit, limits.dedupeLimit)
 	if raw := strings.TrimSpace(envValue(startup.envVars, codexSharedDaemonDedupeLimitEnv)); raw != "" {
 		value, err := strconv.Atoi(raw)
-		if err != nil || value <= 0 || value > maxCodexNativeDedupeLimit {
-			return codexSharedDaemonConfig{}, fmt.Errorf("%s must be between 1 and %d", codexSharedDaemonDedupeLimitEnv, maxCodexNativeDedupeLimit)
+		if err != nil || value <= 0 || value > limits.dedupeLimit {
+			return codexSharedDaemonConfig{}, fmt.Errorf("%s must be between 1 and %d", codexSharedDaemonDedupeLimitEnv, limits.dedupeLimit)
 		}
 		dedupeLimit = value
 	}
-	handshakeTimeout, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonHandshakeEnv, defaultCodexNativeHandshakeTimeout)
+	handshakeTimeout, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonHandshakeEnv, defaultCodexNativeHandshakeTimeout, limits.duration)
 	if err != nil {
 		return codexSharedDaemonConfig{}, err
 	}
-	requestTimeout, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonRequestEnv, defaultCodexNativeRequestTimeout)
+	requestTimeout, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonRequestEnv, defaultCodexNativeRequestTimeout, limits.duration)
 	if err != nil {
 		return codexSharedDaemonConfig{}, err
 	}
-	websocketBufferSize := defaultCodexNativeWebSocketBufferSize
+	websocketBufferSize := min(defaultCodexNativeWebSocketBufferSize, limits.websocketBufferSize)
 	if raw := strings.TrimSpace(envValue(startup.envVars, codexSharedDaemonWSBufferEnv)); raw != "" {
 		value, parseErr := strconv.Atoi(raw)
-		if parseErr != nil || value <= 0 || value > maxCodexNativeWebSocketBufferSize {
-			return codexSharedDaemonConfig{}, fmt.Errorf("%s must be between 1 and %d", codexSharedDaemonWSBufferEnv, maxCodexNativeWebSocketBufferSize)
+		if parseErr != nil || value <= 0 || value > limits.websocketBufferSize {
+			return codexSharedDaemonConfig{}, fmt.Errorf("%s must be between 1 and %d", codexSharedDaemonWSBufferEnv, limits.websocketBufferSize)
 		}
 		websocketBufferSize = value
 	}
@@ -107,27 +136,27 @@ func resolveCodexSharedDaemonConfig(startup *agentStartup, containerUser, workDi
 	if cliPath == "" {
 		cliPath = "codex"
 	}
-	reconnectDelay, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonReconnectDelayEnv, defaultCodexNativeReconnectDelay)
+	reconnectDelay, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonReconnectDelayEnv, defaultCodexNativeReconnectDelay, limits.duration)
 	if err != nil {
 		return codexSharedDaemonConfig{}, err
 	}
-	reconnectTimeout, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonReconnectTimeoutEnv, defaultCodexNativeReconnectTimeout)
+	reconnectTimeout, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonReconnectTimeoutEnv, defaultCodexNativeReconnectTimeout, limits.duration)
 	if err != nil {
 		return codexSharedDaemonConfig{}, err
 	}
-	maxMessageBytes := int64(defaultCodexNativeMaxMessageBytes)
+	maxMessageBytes := min(int64(defaultCodexNativeMaxMessageBytes), limits.messageBytes)
 	if raw := strings.TrimSpace(envValue(startup.envVars, codexSharedDaemonMaxMessageEnv)); raw != "" {
 		value, parseErr := strconv.ParseInt(raw, 10, 64)
-		if parseErr != nil || value <= 0 || value > maxCodexNativeMessageBytes {
-			return codexSharedDaemonConfig{}, fmt.Errorf("%s must be between 1 and %d", codexSharedDaemonMaxMessageEnv, maxCodexNativeMessageBytes)
+		if parseErr != nil || value <= 0 || value > limits.messageBytes {
+			return codexSharedDaemonConfig{}, fmt.Errorf("%s must be between 1 and %d", codexSharedDaemonMaxMessageEnv, limits.messageBytes)
 		}
 		maxMessageBytes = value
 	}
-	pingInterval, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonPingIntervalEnv, defaultCodexNativePingInterval)
+	pingInterval, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonPingIntervalEnv, defaultCodexNativePingInterval, limits.duration)
 	if err != nil {
 		return codexSharedDaemonConfig{}, err
 	}
-	pongTimeout, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonPongTimeoutEnv, defaultCodexNativePongTimeout)
+	pongTimeout, err := codexSharedDaemonDuration(startup.envVars, codexSharedDaemonPongTimeoutEnv, defaultCodexNativePongTimeout, limits.duration)
 	if err != nil {
 		return codexSharedDaemonConfig{}, err
 	}
@@ -152,13 +181,13 @@ func resolveCodexSharedDaemonConfig(startup *agentStartup, containerUser, workDi
 	}, nil
 }
 
-func codexSharedDaemonDuration(envVars []string, key string, fallback time.Duration) (time.Duration, error) {
+func codexSharedDaemonDuration(envVars []string, key string, fallback, ceiling time.Duration) (time.Duration, error) {
 	raw := strings.TrimSpace(envValue(envVars, key))
 	if raw == "" {
-		return fallback, nil
+		return min(fallback, ceiling), nil
 	}
 	milliseconds, err := strconv.ParseInt(raw, 10, 64)
-	maxMilliseconds := maxCodexNativeDuration.Milliseconds()
+	maxMilliseconds := ceiling.Milliseconds()
 	if err != nil || milliseconds <= 0 || milliseconds > maxMilliseconds {
 		return 0, fmt.Errorf("%s must be between 1 and %d", key, maxMilliseconds)
 	}
@@ -193,7 +222,7 @@ func envValue(envVars []string, key string) string {
 }
 
 func (h *SessionHost) configureCodexSharedDaemon(ctx context.Context, startup *agentStartup) error {
-	config, err := resolveCodexSharedDaemonConfig(startup, h.config.ContainerUser, h.config.ContainerWorkDir)
+	config, err := resolveCodexSharedDaemonConfig(startup, h.config.ContainerUser, h.config.ContainerWorkDir, h.codexSharedDaemonLimits())
 	if err != nil {
 		return err
 	}

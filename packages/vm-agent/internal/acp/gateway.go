@@ -214,6 +214,12 @@ type GatewayConfig struct {
 	ClaudeHarnessLifecycleMaxBytes   int
 	ClaudeHarnessLifecycleMaxTasks   int
 	ClaudeHarnessLifecycleMaxIDBytes int
+	// CodexSharedDaemonMax* are trusted host ceilings for the experimental
+	// shared-daemon profile knobs. Zero uses the conservative package defaults.
+	CodexSharedDaemonMaxDuration            time.Duration
+	CodexSharedDaemonMaxWebSocketBufferSize int
+	CodexSharedDaemonMaxMessageBytes        int64
+	CodexSharedDaemonMaxDedupeLimit         int
 	// TerminalActivityReportAttempts is the retry budget for terminal/error
 	// activity reports. Zero uses the legacy cheap retry policy.
 	TerminalActivityReportAttempts int

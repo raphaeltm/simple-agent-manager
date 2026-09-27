@@ -97,17 +97,18 @@ func (f *fakeCodexNativeRPC) Close() error {
 func TestResolveCodexSharedDaemonConfigIsOptInAndFenced(t *testing.T) {
 	t.Parallel()
 	startup := &agentStartup{envVars: []string{"HOME=/tmp/test-home"}}
-	config, err := resolveCodexSharedDaemonConfig(startup, "sam", "/workspace")
+	limits := (&SessionHost{}).codexSharedDaemonLimits()
+	config, err := resolveCodexSharedDaemonConfig(startup, "sam", "/workspace", limits)
 	if err != nil || config.enabled {
 		t.Fatalf("default config = %#v, %v; want disabled", config, err)
 	}
 
 	startup.envVars = append(startup.envVars, codexSharedDaemonEnabledEnv+"=1", codexSharedDaemonSocketEnv+"=relative.sock")
-	if _, err := resolveCodexSharedDaemonConfig(startup, "sam", "/workspace"); err == nil {
+	if _, err := resolveCodexSharedDaemonConfig(startup, "sam", "/workspace", limits); err == nil {
 		t.Fatal("relative daemon socket was accepted")
 	}
 	startup.envVars[len(startup.envVars)-1] = codexSharedDaemonSocketEnv + "=/workspace/.sam/private.sock"
-	config, err = resolveCodexSharedDaemonConfig(startup, "sam", "/workspace")
+	config, err = resolveCodexSharedDaemonConfig(startup, "sam", "/workspace", limits)
 	if err != nil || !config.enabled || config.dedupeLimit != defaultCodexNativeDedupeLimit {
 		t.Fatalf("enabled config = %#v, %v", config, err)
 	}
@@ -135,10 +136,57 @@ func TestResolveCodexSharedDaemonConfigRejectsInvalidLimits(t *testing.T) {
 				codexSharedDaemonSocketEnv + "=/workspace/.sam/private.sock",
 				key + "=0",
 			}}
-			if _, err := resolveCodexSharedDaemonConfig(startup, "sam", "/workspace"); err == nil {
+			if _, err := resolveCodexSharedDaemonConfig(startup, "sam", "/workspace", (&SessionHost{}).codexSharedDaemonLimits()); err == nil {
 				t.Fatalf("%s accepted zero", key)
 			}
 		})
+	}
+}
+
+func TestResolveCodexSharedDaemonConfigHonorsTrustedHostCeilings(t *testing.T) {
+	t.Parallel()
+	startup := &agentStartup{envVars: []string{
+		codexSharedDaemonEnabledEnv + "=1",
+		codexSharedDaemonSocketEnv + "=/workspace/.sam/private.sock",
+		codexSharedDaemonWSBufferEnv + "=2048",
+	}}
+	limits := (&SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{
+		CodexSharedDaemonMaxWebSocketBufferSize: 1024,
+	}}}).codexSharedDaemonLimits()
+	if _, err := resolveCodexSharedDaemonConfig(startup, "sam", "/workspace", limits); err == nil {
+		t.Fatal("profile WebSocket buffer exceeded the trusted host ceiling")
+	}
+}
+
+func TestResolveCodexSharedDaemonConfigClampsDefaultsToTrustedHostCeilings(t *testing.T) {
+	t.Parallel()
+	startup := &agentStartup{envVars: []string{
+		codexSharedDaemonEnabledEnv + "=1",
+		codexSharedDaemonSocketEnv + "=/workspace/.sam/private.sock",
+	}}
+	limits := codexSharedDaemonLimits{
+		duration:            time.Millisecond,
+		websocketBufferSize: 1024,
+		messageBytes:        2048,
+		dedupeLimit:         2,
+	}
+	config, err := resolveCodexSharedDaemonConfig(startup, "sam", "/workspace", limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.handshakeTimeout != limits.duration || config.requestTimeout != limits.duration ||
+		config.reconnectDelay != limits.duration || config.reconnectTimeout != limits.duration ||
+		config.pingInterval != limits.duration || config.pongTimeout != limits.duration {
+		t.Fatalf("duration defaults were not clamped: %#v", config)
+	}
+	if config.websocketBufferSize != limits.websocketBufferSize {
+		t.Fatalf("websocket buffer = %d, want %d", config.websocketBufferSize, limits.websocketBufferSize)
+	}
+	if config.maxMessageBytes != limits.messageBytes {
+		t.Fatalf("message bytes = %d, want %d", config.maxMessageBytes, limits.messageBytes)
+	}
+	if config.dedupeLimit != limits.dedupeLimit {
+		t.Fatalf("dedupe limit = %d, want %d", config.dedupeLimit, limits.dedupeLimit)
 	}
 }
 
@@ -242,6 +290,36 @@ func TestCodexNativeObserverLeavesApprovalOwnershipAndCanInterrupt(t *testing.T)
 	}
 }
 
+func TestCodexNativeObserverReplacementRetainsGenerationScopedActivity(t *testing.T) {
+	t.Parallel()
+	host := NewSessionHost(SessionHostConfig{})
+	defer host.Stop()
+	newObserver := func() *codexNativeObserver {
+		return &codexNativeObserver{host: host, threadID: "thread-1", config: codexSharedDaemonConfig{dedupeLimit: 8}, activeTurns: map[string]struct{}{}, approvals: map[string]struct{}{}}
+	}
+	previous := newObserver()
+	replacement := newObserver()
+	thread := json.RawMessage(`{"id":"thread-1","turns":[{"id":"turn-1","status":"inProgress","items":[]}]}`)
+	for _, observer := range []*codexNativeObserver{previous, replacement} {
+		if err := observer.reconcile(thread); err != nil {
+			t.Fatal(err)
+		}
+		observer.setApproval("request-1", true)
+	}
+	if work := host.harnessWorkSnapshot(); work.Count != 4 {
+		t.Fatalf("overlapping observer activity = %#v, want four generation leases", work)
+	}
+
+	previous.close()
+	if work := host.harnessWorkSnapshot(); work.State != harnessWorkActive || work.Count != 2 {
+		t.Fatalf("replacement activity after previous close = %#v, want two leases", work)
+	}
+	replacement.close()
+	if work := host.harnessWorkSnapshot(); work.Count != 0 {
+		t.Fatalf("activity after both observers close = %#v", work)
+	}
+}
+
 func TestStartCodexNativeObserverFailsClosedOnWrongThread(t *testing.T) {
 	t.Parallel()
 	host := NewSessionHost(SessionHostConfig{})
@@ -337,6 +415,53 @@ func TestCodexNativeObserverReservesConcurrentPersistence(t *testing.T) {
 	}
 }
 
+func TestCodexNativeObserverCloseDrainsPersistenceWithoutLateBroadcast(t *testing.T) {
+	t.Parallel()
+	reporter := &blockingMessageReporter{started: make(chan struct{}, 1), release: make(chan struct{})}
+	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{MessageReporter: reporter}})
+	defer host.Stop()
+	observer := &codexNativeObserver{host: host, threadID: "thread-1", config: codexSharedDaemonConfig{dedupeLimit: 8}, activeTurns: map[string]struct{}{}, approvals: map[string]struct{}{}}
+	event := nativeEnvelope(t, "item/completed", `{"threadId":"thread-1","turnId":"turn-1","item":{"id":"user-1","type":"userMessage","content":[{"type":"text","text":"late"}]}}`)
+
+	eventDone := make(chan struct{})
+	go func() {
+		observer.handleEnvelope(event)
+		close(eventDone)
+	}()
+	<-reporter.started
+	closeDone := make(chan struct{})
+	go func() {
+		observer.close()
+		close(closeDone)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		observer.mu.Lock()
+		closed := observer.closed
+		observer.mu.Unlock()
+		if closed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("observer did not enter close")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(reporter.release)
+	<-eventDone
+	<-closeDone
+
+	reporter.mu.Lock()
+	durable := len(reporter.byID)
+	reporter.mu.Unlock()
+	if durable != 1 {
+		t.Fatalf("durable messages=%d, want committed message", durable)
+	}
+	if got := bufferedMessageCount(host); got != 0 {
+		t.Fatalf("post-close viewer messages=%d, want 0", got)
+	}
+}
+
 func TestCodexNativeObserverLargeReplayUsesDurableMessageIDs(t *testing.T) {
 	t.Parallel()
 	const limit = 2
@@ -410,6 +535,47 @@ func TestCodexNativeObserverReconnectsAndReconciles(t *testing.T) {
 	}
 }
 
+func TestCodexNativeObserverDeliversQueuedCancelAfterReconnect(t *testing.T) {
+	t.Parallel()
+	host := NewSessionHost(SessionHostConfig{})
+	defer host.Stop()
+	host.agentType = "openai-codex"
+	host.setSessionIDLocked("thread-1")
+	host.setCodexSharedDaemonConfig(codexSharedDaemonConfig{enabled: true, dedupeLimit: 8, requestTimeout: time.Second, reconnectDelay: time.Millisecond, reconnectTimeout: time.Second})
+	first := &fakeCodexNativeRPC{thread: json.RawMessage(`{"id":"thread-1","turns":[]}`)}
+	second := &fakeCodexNativeRPC{thread: json.RawMessage(`{"id":"thread-1","turns":[{"id":"turn-1","status":"inProgress","items":[]}]}`), interruptedCh: make(chan string, 1)}
+	reconnectStarted := make(chan struct{})
+	releaseReconnect := make(chan struct{})
+	connectCount := 0
+	host.codexNativeConnect = func(context.Context, codexSharedDaemonConfig, codexNativeEventHandler) (codexNativeRPC, error) {
+		connectCount++
+		if connectCount == 1 {
+			return first, nil
+		}
+		close(reconnectStarted)
+		<-releaseReconnect
+		return second, nil
+	}
+	if err := host.startCodexNativeObserver(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	host.codexNativeObserver.setTurn("turn-1", true)
+	_ = first.Close()
+	<-reconnectStarted
+	if !host.scheduleCodexNativeInterrupt() {
+		t.Fatal("cancel was not queued during reconnect")
+	}
+	close(releaseReconnect)
+	select {
+	case interrupted := <-second.interruptedCh:
+		if interrupted != "turn-1" {
+			t.Fatalf("interrupted=%q, want turn-1", interrupted)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued cancel was not delivered after reconnect")
+	}
+}
+
 func TestCodexNativeObserverReconnectReconcilesActiveWorkAndApprovals(t *testing.T) {
 	t.Parallel()
 	host := NewSessionHost(SessionHostConfig{})
@@ -459,6 +625,54 @@ func TestCodexNativeObserverReconnectExhaustionClearsActiveWork(t *testing.T) {
 	host.codexNativeObserver.setApproval("approval-1", true)
 	_ = first.Close()
 	waitForCodexNativeWorkCount(t, host, 0)
+}
+
+func TestClosedReconnectingObserverCannotAffectReplacement(t *testing.T) {
+	t.Parallel()
+	host := NewSessionHost(SessionHostConfig{})
+	defer host.Stop()
+	process, _, _ := newFakeAgentProcess(time.Now(), false)
+	host.process = process
+	oldClient := &fakeCodexNativeRPC{thread: json.RawMessage(`{"id":"thread-1","turns":[]}`)}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	old := &codexNativeObserver{
+		host: host, threadID: "thread-1",
+		config: codexSharedDaemonConfig{dedupeLimit: 8, reconnectDelay: time.Millisecond, reconnectTimeout: 50 * time.Millisecond},
+		client: oldClient, activeTurns: map[string]struct{}{"turn-1": {}}, approvals: map[string]struct{}{},
+		connect: func(context.Context, codexSharedDaemonConfig, codexNativeEventHandler) (codexNativeRPC, error) {
+			select {
+			case <-started:
+			default:
+				close(started)
+			}
+			<-release
+			return nil, errors.New("old connector released")
+		},
+	}
+	host.codexNativeObserver = old
+	go old.monitorClient(host.lifecycleContext(), oldClient)
+	_ = oldClient.Close()
+	<-started
+	replacement := &codexNativeObserver{host: host, threadID: "thread-2", config: codexSharedDaemonConfig{dedupeLimit: 8}, activeTurns: map[string]struct{}{}, approvals: map[string]struct{}{}}
+	host.codexNativeMu.Lock()
+	host.codexNativeObserver = replacement
+	host.codexNativeMu.Unlock()
+	old.close()
+	close(release)
+	time.Sleep(75 * time.Millisecond)
+	if got := process.stopCount.Load(); got != 0 {
+		t.Fatalf("replacement ACP process stop count=%d, want 0", got)
+	}
+	if work := host.harnessWorkSnapshot(); work.Count != 0 {
+		t.Fatalf("stale observer resurrected work: %#v", work)
+	}
+	host.codexNativeMu.Lock()
+	current := host.codexNativeObserver
+	host.codexNativeMu.Unlock()
+	if current != replacement {
+		t.Fatal("stale observer replaced current generation")
+	}
 }
 
 func TestCodexNativeObserverSuspendResumePreservesIdentityWorkspaceAndDedupe(t *testing.T) {

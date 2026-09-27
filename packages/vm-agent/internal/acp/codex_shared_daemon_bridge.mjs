@@ -98,7 +98,12 @@ function encodeClientFrame(opcode, payload = Buffer.alloc(0)) {
 }
 
 function sendFrame(opcode, payload) {
-  if (!proxy.stdin.destroyed) proxy.stdin.write(encodeClientFrame(opcode, payload));
+  if (proxy.stdin.destroyed || proxy.stdin.writableEnded || proxy.stdin.writableFinished) return;
+  try {
+    proxy.stdin.write(encodeClientFrame(opcode, payload));
+  } catch (error) {
+    if (error?.code !== "EPIPE" && error?.code !== "ERR_STREAM_WRITE_AFTER_END") throw error;
+  }
 }
 
 function emitMessage(payload) {
@@ -222,11 +227,6 @@ const heartbeat = setInterval(() => {
 }, pingIntervalMs);
 heartbeat.unref();
 
-proxy.stderr.on("data", () => {
-  // The bridge intentionally suppresses daemon/proxy stderr. It can include
-  // provider diagnostics and must not be copied into SAM logs.
-});
-
 createInterface({ input: process.stdin }).on("line", (line) => {
   if (line.trim() === "") return;
   const payload = Buffer.from(line, "utf8");
@@ -240,10 +240,15 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 
 process.stdin.on("end", () => {
   if (handshakeComplete) sendFrame(0x8);
-  proxy.stdin.end();
+  if (!proxy.stdin.destroyed && !proxy.stdin.writableEnded) proxy.stdin.end();
 });
 
 proxy.on("error", () => fail("could not start app-server proxy"));
+proxy.stdin.on("error", (error) => {
+  if (error?.code !== "EPIPE" && error?.code !== "ERR_STREAM_WRITE_AFTER_END") {
+    fail("app-server proxy input failed");
+  }
+});
 proxy.on("exit", (code, signal) => {
   if (code !== 0 && signal == null) fail("app-server proxy exited unexpectedly");
   process.exit(code ?? 0);

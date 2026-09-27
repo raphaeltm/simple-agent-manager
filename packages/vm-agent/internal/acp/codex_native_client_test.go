@@ -41,7 +41,7 @@ func TestCodexNativeClientJSONRPCLifecycle(t *testing.T) {
 			var result any = map[string]any{}
 			switch method {
 			case "initialize":
-				result = map[string]any{"userAgent": "test", "codexHome": "/test", "platformFamily": "unix", "platformOs": "linux"}
+				result = map[string]any{"userAgent": "codex-cli " + codexSharedDaemonVersion, "codexHome": "/test", "platformFamily": "unix", "platformOs": "linux"}
 			case "thread/resume":
 				result = map[string]any{"thread": map[string]any{"id": "thread-1"}}
 			case "thread/read":
@@ -96,5 +96,23 @@ func TestCodexNativeProxyEnvironmentIsMinimal(t *testing.T) {
 	joined := strings.Join(got, "\n")
 	if strings.Contains(joined, "SECRET") || !strings.Contains(joined, "CODEX_HOME=") {
 		t.Fatalf("proxy environment = %q", joined)
+	}
+}
+
+func TestCodexServerIdentityRequiresExactVersionToken(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		identity string
+		want     bool
+	}{
+		{identity: "codex_cli_rs/0.156.1 (linux)", want: true},
+		{identity: "codex-cli 0.156.1", want: true},
+		{identity: "codex_cli_rs/0.156.10 (linux)", want: false},
+		{identity: "codex_cli_rs/0.156.1-dev (linux)", want: false},
+		{identity: "forged-0.156.1", want: false},
+	} {
+		if got := hasExactVersionToken(test.identity, codexSharedDaemonVersion); got != test.want {
+			t.Errorf("hasExactVersionToken(%q)=%t, want %t", test.identity, got, test.want)
+		}
 	}
 }

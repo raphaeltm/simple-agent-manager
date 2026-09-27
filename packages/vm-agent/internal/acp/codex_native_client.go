@@ -112,10 +112,26 @@ func (c *codexNativeClient) initialize(ctx context.Context) error {
 	}, &response); err != nil {
 		return err
 	}
-	if !strings.Contains(response.UserAgent, codexSharedDaemonVersion) {
-		return fmt.Errorf("Codex app-server identity does not match the pinned version")
+	if !hasExactVersionToken(response.UserAgent, codexSharedDaemonVersion) {
+		return fmt.Errorf("Codex app-server reported server version does not match the pinned version")
 	}
 	return c.notify("initialized", map[string]any{})
+}
+
+func hasExactVersionToken(identity, version string) bool {
+	for _, token := range strings.FieldsFunc(identity, func(r rune) bool {
+		switch r {
+		case ' ', '\t', '\r', '\n', '/', '(', ')', ';':
+			return true
+		default:
+			return false
+		}
+	}) {
+		if token == version {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *codexNativeClient) resumeThread(ctx context.Context, threadID string) error {
