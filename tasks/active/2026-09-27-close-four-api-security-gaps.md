@@ -236,4 +236,50 @@ API redactors and their `sk-` coverage:
 - [x] summarize/fork-prepare (and transcribe) return 429 past their limits and recover after the window
       (chat-fork.test.ts, transcribe.test.ts)
 - [x] Each guard proven discriminating by a recorded revert (see checklist notes above)
-- [ ] Staging: setup/admin surfaces load; SAM-mode proxy request for an allowed model succeeds; no console errors
+- [x] Staging: setup/admin surfaces load; SAM-mode proxy request for an allowed model succeeds; no console errors
+      (see Staging Verification below; the tier 403 was verified by the route tests AND by a live staging
+      request — an admin restriction on a real user, refused on that user's real Claude Code traffic)
+
+## Staging Verification (2026-09-27, deploy run 36353322517, head c705f819c, Worker version 02fb06d2)
+
+- **Surfaces:** `/dashboard`, `/projects`, `/settings`, `/admin`, `/admin/ai-proxy`, `/admin/credentials` and
+  `/setup` at 1280 and 375 px, all with 0 console errors and 0 API 5xx. The one `networkidle` timeout on
+  `/admin/credentials` came from the harness: every API call returned 200, and the aborted `POST /api/t`
+  is the analytics beacon. Staging setup is open; `PUT /api/setup/config` with a wrong token returns
+  `401`, and `GET /api/admin/platform-config` returns only the key `status`.
+- **SAM-mode request for an allowed model succeeds:** used the secondary staging user (`claude-code`
+  `providerMode=sam` and no Claude credential of its own; the primary user has its own OAuth token and so
+  never uses the proxy). Instant session `d06c92cd…` replied `PONG`. The tail showed
+  `agent_key.ai_proxy_sam_provider`, 3 × `POST /ai/anthropic/v1/messages → 200` and
+  `ai_proxy_anthropic.forward` with `modelId: claude-sonnet-4-5-20250929`, `billingMode: unified`; the
+  AI Gateway `sam` logs show the same 3 calls with status 200.
+- **Operator allowlist (direct staging request from inside the SAM workspace, using its own proxy token):**
+  - `v1/messages` with the uncatalogued `claude-sonnet-4-20250514` → `400 invalid_request_error`
+    ("Model … is not available. Allowed models: claude-haiku-4-5-20251001, claude-sonnet-4-5-20250929, …");
+  - `count_tokens` with the same model → `400`;
+  - 2 × `ai_proxy_anthropic.model_not_allowed` logged.
+  - Control: `count_tokens` with a catalogued model passed both gates and then failed UPSTREAM with `401
+    "x-api-key header is required"`. That is a pre-existing unified-billing bug in code identical to
+    `main` (idea `01M3JFM6AG6H1XNYKEQD64W8E5`).
+- **Tier 403 (route test + live staging request):**
+  1. The superadmin wrote `['frontier']` → `400` ("allowedModelTiers must be null or an array of:
+     low-cost, standard, premium"), then `['low-cost']` → `200`.
+  2. 75 s later, a fresh session `64278215…` was refused: Claude Code's calls got `403`, the chat shows
+     "API Error: 403 Model 'claude-sonnet-4-5-20250929' is in the standard tier, which your account is not
+     allowed to use. Allowed tiers: low-cost." and 4 × `ai_proxy_anthropic.model_tier_denied`
+     (`tier_not_allowed`, `standard`, `[low-cost]`) were logged, with no upstream spend.
+  3. `DELETE` → `null`; 75 s later, a fresh session `1e6a4bd5…` replied `PONG`.
+- **Rate limits:** `summarize` → `200` with `X-RateLimit-Limit: 30`, `Remaining: 29`; `transcribe` (1 s of
+  silent WAV) → `200` with `30` / `29`. These are the deployed defaults; no override is set.
+- **Non-proxy path unaffected:** the primary user's Instant session `a6e17b79…` (own OAuth) replied `PONG`.
+- **Unrelated, pre-existing, filed:**
+  - An idle-slept Instant session cannot be woken, because the sleep transition marks the node
+    `unhealthy` and delivery refuses unhealthy nodes (idea `01M3JFFC8R6J1YE0HX0J3PS4TN`). This is why
+    each check above used a fresh session.
+  - Task-failure banner classification for proxy refusals (idea `01M3JG4JNJKQBYVWBC5Y5XR2EX`).
+  - Two `DELETE /api/admin/ai-allowance` requests stalled 30–45 s on I/O (1–2 ms CPU, client-canceled)
+    right after a burst of 4 session stops; three immediate retries succeeded in 0.7–1.7 s, and this
+    branch does not change that handler.
+- **Cleanup:** all 5 workspaces and nodes created are `deleted`; staging KV has 0 `ai-admin-allowance:*`
+  keys. Screenshots are in `.codex/tmp/playwright-screenshots/` (`staging-*`, `staging2-restricted-1280`,
+  `staging2-allowlist-1280`, `staging2-restored-375`).
