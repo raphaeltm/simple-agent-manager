@@ -469,13 +469,14 @@ export async function provisionNode(
       },
       node
     );
-    const vm = await (
-      resuming && durable
+    let vm: Awaited<ReturnType<typeof provider.createVM>>;
+    try {
+      vm = await (resuming && durable
         ? recoverNodeAllocation(provider, node, env, durable, providerContext)
         : providerContext
           ? provider.createVM(vmConfig, providerContext)
-          : provider.createVM(vmConfig)
-    ).catch(async (err: unknown) => {
+          : provider.createVM(vmConfig));
+    } catch (err) {
       if (err instanceof NodeAllocationUncertainError) throw err;
       // Hetzner's placement/capacity retries only repeat rejected creates. A
       // transport failure has no HTTP status and cannot prove absence. Keep
@@ -500,7 +501,7 @@ export async function provisionNode(
         throw new NodeAllocationUncertainError();
       }
       throw err;
-    });
+    }
     throwIfProviderRequestAborted(providerContext);
 
     // Persist the provider identity before the post-request authority check so
