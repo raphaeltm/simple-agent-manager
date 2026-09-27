@@ -11,6 +11,7 @@ import { crudRoutes } from '../../src/routes/workspaces/crud';
 import { claimSessionSnapshotRecovery } from '../../src/services/session-snapshot-recovery-lifecycle';
 import {
   seedInstallation,
+  seedManagedVmAbsenceProof,
   seedNode,
   seedProject,
   seedTask,
@@ -38,12 +39,7 @@ async function scenario(
   await seedInstallation(installationId, USER_ID);
   await seedProject(projectId, USER_ID, installationId);
   await seedNode(nodeId, USER_ID, { status: 'destroying' });
-  await env.DATABASE.prepare(
-    `UPDATE nodes SET runtime = 'vm', runtime_incarnation_id = 'original',
-    runtime_termination_confirmed_at = '2026-09-08T13:23:15.343113+00:00' WHERE id = ?`
-  )
-    .bind(nodeId)
-    .run();
+  await seedManagedVmAbsenceProof(nodeId, USER_ID);
   for (let i = 0; i < references; i++) {
     const taskId = `${nodeId}-task-${i}`;
     await seedTask(taskId, projectId, USER_ID, { status: 'failed' });

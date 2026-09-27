@@ -69,6 +69,24 @@ function mockPreparedStatement(results: unknown[] = []) {
   };
 }
 
+function mockPreparedStatementByFirstBind(responses: Map<string, unknown[]>) {
+  return {
+    bind: vi.fn((status: string) => {
+      const results = responses.get(`WHERE n.status = '${status}'`) ?? [];
+      return {
+        all: vi.fn().mockResolvedValue({ results }),
+        raw: vi.fn().mockResolvedValue([]),
+        first: vi.fn().mockResolvedValue(results[0] ?? null),
+        run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
+      };
+    }),
+    all: vi.fn().mockResolvedValue({ results: [] }),
+    raw: vi.fn().mockResolvedValue([]),
+    first: vi.fn().mockResolvedValue(null),
+    run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
+  };
+}
+
 /**
  * Create a minimal mock Env with D1 database stubs.
  * The `prepareResponses` map lets you configure SQL query responses by substring match.
@@ -79,6 +97,12 @@ function createMockEnv(
 ): Env {
   const mockDb = {
     prepare: vi.fn((sql: string) => {
+      if (sql.includes('WHERE n.status = ?')) {
+        return mockPreparedStatementByFirstBind(prepareResponses);
+      }
+      if (sql.includes("WHERE n.status = 'destroying'")) {
+        return mockPreparedStatement(prepareResponses.get("WHERE n.status = 'destroying'") ?? []);
+      }
       if (sql.includes("WHERE n.status = 'stopped'")) {
         return mockPreparedStatement(prepareResponses.get("WHERE n.status = 'stopped'") ?? []);
       }
@@ -253,7 +277,7 @@ describe('runNodeCleanupSweep', () => {
       .mocked(env.DATABASE.prepare)
       .mock.calls.map(([sql]) => sql)
       .filter((sql) => sql.includes('FROM nodes n'));
-    expect(nodeCandidateQueries).toHaveLength(6);
+    expect(nodeCandidateQueries).toHaveLength(7);
     expect(nodeCandidateQueries.every((sql) => sql.includes('cleanup_backoff_until'))).toBe(true);
   });
 

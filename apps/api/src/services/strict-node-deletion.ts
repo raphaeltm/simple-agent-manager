@@ -127,6 +127,31 @@ function getStrictNodeCredentialContext(node: NodeRow, userId: string) {
   const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
   return { targetProvider, attributionUserId, attributionProjectId, exactCredential };
 }
+function hasManagedWorkspaceVmPlacementProof(node: NodeRow): boolean {
+  const hasText = (value: string | null): boolean => !!value?.trim();
+  return (
+    node.nodeRole === 'workspace' &&
+    node.nodeClass === 'managed' &&
+    node.runtime === 'vm' &&
+    node.workloadRole === 'workspace' &&
+    ['user', 'project', 'installation'].includes(node.capacityPoolScope ?? '') &&
+    (node.capacityPoolScope !== 'project' || hasText(node.capacityPoolProjectId)) &&
+    (node.capacityPoolScope === 'project' || !node.capacityPoolProjectId) &&
+    (node.capacityPoolRevision ?? 0) > 0 &&
+    (node.capacitySourceGeneration ?? 0) > 0 &&
+    isExactCredentialSource(node.placementCredentialSource) &&
+    (node.placementCredentialVersion ?? 0) > 0 &&
+    (node.providerInstanceVcpuCount ?? 0) > 0 &&
+    (node.providerInstanceMemoryMb ?? 0) > 0 &&
+    hasText(node.capacityPoolId) &&
+    hasText(node.capacitySourceId) &&
+    hasText(node.capacityPoolCandidateId) &&
+    hasText(node.placementCredentialReference) &&
+    hasText(node.placementCredentialFingerprint) &&
+    hasText(node.cloudProvider) &&
+    hasText(node.providerInstanceType)
+  );
+}
 
 /**
  * Name the absent prerequisites without echoing their values. Credential references are
@@ -256,7 +281,8 @@ async function deleteStrictProviderInstance(
   const providerResult = await resolveStrictNodeProvider(db, node, userId, env);
 
   await requireSameNodeIncarnation(db, node, 'provider delete');
-  if (requestContext) await providerResult.provider.deleteVM(node.providerInstanceId, requestContext);
+  if (requestContext)
+    await providerResult.provider.deleteVM(node.providerInstanceId, requestContext);
   else await providerResult.provider.deleteVM(node.providerInstanceId);
   return 'deleted';
 }
@@ -291,19 +317,27 @@ async function persistStrictDnsCleanupError(
 }
 
 async function deleteStrictNodeDnsRecord(
-  node: NodeRow, userId: string, env: Env, requestDeadlineMs?: number, signal?: AbortSignal
+  node: NodeRow,
+  userId: string,
+  env: Env,
+  requestDeadlineMs?: number,
+  signal?: AbortSignal
 ): Promise<void> {
   if (!node.backendDnsRecordId) return;
 
   try {
-    const remainingMs = requestDeadlineMs === undefined ? undefined : requestDeadlineMs - Date.now();
+    const remainingMs =
+      requestDeadlineMs === undefined ? undefined : requestDeadlineMs - Date.now();
     if (remainingMs !== undefined && remainingMs <= 0) {
       throw new Error('Stopped node cleanup DNS deadline exceeded');
     }
-    const dnsEnv = remainingMs === undefined ? env : {
-      ...env,
-      CF_API_TIMEOUT_MS: String(Math.min(getTimeoutMs(env.CF_API_TIMEOUT_MS), remainingMs)),
-    };
+    const dnsEnv =
+      remainingMs === undefined
+        ? env
+        : {
+            ...env,
+            CF_API_TIMEOUT_MS: String(Math.min(getTimeoutMs(env.CF_API_TIMEOUT_MS), remainingMs)),
+          };
     if (signal) await deleteDNSRecord(node.backendDnsRecordId, dnsEnv, signal);
     else await deleteDNSRecord(node.backendDnsRecordId, dnsEnv);
   } catch (err) {
@@ -440,16 +474,27 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
-  const canUseProviderlessVmAbsenceProof =
-    initialNode.runtime === 'vm' &&
-    !initialNode.providerInstanceId &&
-    !!initialNode.runtimeTerminationConfirmedAt &&
-    (initialNode.status === 'destroying' || initialNode.status === 'error');
-
   const node = await claimManagedNodeDeletion(db, initialNode);
 
   if (node.runtimeTerminationConfirmedAt) {
+    if (
+      initialNode.status === 'destroying' &&
+      node.runtime === 'vm' &&
+      !node.providerInstanceId &&
+      !hasManagedWorkspaceVmPlacementProof(initialNode)
+    ) {
+      throw new Error(`Providerless VM termination proof lacks managed placement: node=${nodeId}`);
+    }
     await requireSameNodeIncarnation(db, node, 'existing termination proof use');
+    if (options.cleanupDns !== false) {
+      await deleteStrictNodeDnsRecord(
+        node,
+        userId,
+        env,
+        options.requestDeadlineMs,
+        options.providerRequestContext?.signal
+      );
+    }
     await markWorkspaceRuntimeTerminationConfirmed(db, node, node.runtimeTerminationConfirmedAt);
     return {
       providerVm: node.providerInstanceId ? 'already-absent' : 'no-instance',
@@ -462,20 +507,6 @@ export async function deleteNodeResourcesStrict(
   if (node.runtime === 'cf-container') {
     await requireSameNodeIncarnation(db, node, 'container teardown');
     await destroyVmAgentContainer(env, node.id);
-    const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
-    if (options.cleanupDns !== false) {
-      await deleteStrictNodeDnsRecord(node, userId, env, options.requestDeadlineMs, options.providerRequestContext?.signal);
-    }
-    return {
-      providerVm: 'no-instance',
-      runtimeTerminationConfirmedAt,
-      runtimeIncarnationId: node.runtimeIncarnationId,
-      providerInstanceId: node.providerInstanceId,
-    };
-  }
-
-  if (canUseProviderlessVmAbsenceProof && node.runtime === 'vm' && !node.providerInstanceId) {
-    await requireSameNodeIncarnation(db, node, 'providerless VM absence proof');
     const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
     if (options.cleanupDns !== false) {
       await deleteStrictNodeDnsRecord(
@@ -494,10 +525,22 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
-  const providerVm = await deleteStrictProviderInstance(db, node, userId, env, options.providerRequestContext);
+  const providerVm = await deleteStrictProviderInstance(
+    db,
+    node,
+    userId,
+    env,
+    options.providerRequestContext
+  );
   const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
   if (options.cleanupDns !== false) {
-    await deleteStrictNodeDnsRecord(node, userId, env, options.requestDeadlineMs, options.providerRequestContext?.signal);
+    await deleteStrictNodeDnsRecord(
+      node,
+      userId,
+      env,
+      options.requestDeadlineMs,
+      options.providerRequestContext?.signal
+    );
   }
   return {
     providerVm,

@@ -67,6 +67,9 @@ export function cleanupNodeProvenanceSql(
   alias: 'n' | 'nodes',
   allowManagedRunningProvenance = false
 ): string {
+  const managedPoolStatuses = allowManagedRunningProvenance
+    ? "'stopped', 'running', 'destroying'"
+    : "'stopped', 'destroying'";
   const present = [
     'capacity_pool_id',
     'capacity_source_id',
@@ -74,7 +77,6 @@ export function cleanupNodeProvenanceSql(
     'placement_credential_reference',
     'placement_credential_fingerprint',
     'cloud_provider',
-    'provider_instance_id',
     'provider_instance_type',
   ]
     .map((column) => `NULLIF(TRIM(${alias}.${column}), '') IS NOT NULL`)
@@ -83,7 +85,7 @@ export function cleanupNodeProvenanceSql(
     SELECT 1 FROM tasks auto_task
     WHERE auto_task.auto_provisioned_node_id = ${alias}.id
   ) OR (
-    ${alias}.status IN (${allowManagedRunningProvenance ? "'stopped', 'running'" : "'stopped'"})
+    ${alias}.status IN (${managedPoolStatuses})
     AND ${alias}.node_class = 'managed'
     AND ${alias}.runtime = 'vm'
     AND ${alias}.workload_role = 'workspace'
@@ -95,6 +97,8 @@ export function cleanupNodeProvenanceSql(
     AND ${alias}.capacity_source_generation > 0
     AND ${alias}.placement_credential_source IN ('user', 'project', 'platform')
     AND ${alias}.placement_credential_version > 0
+    AND (${alias}.provider_instance_id IS NOT NULL
+      OR (${alias}.status = 'destroying' AND ${alias}.runtime_termination_confirmed_at IS NOT NULL))
     AND ${alias}.provider_instance_vcpu_count > 0
     AND ${alias}.provider_instance_memory_mb > 0
     AND ${present}

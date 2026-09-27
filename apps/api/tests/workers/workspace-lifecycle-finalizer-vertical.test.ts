@@ -12,6 +12,7 @@ import {
   seedAgentSession,
   seedComputeUsage,
   seedInstallation,
+  seedManagedVmAbsenceProof,
   seedNode,
   seedProject,
   seedUser,
@@ -71,11 +72,7 @@ describe('workspace lifecycle finalizer vertical slices', () => {
   it('stopNodeResources closes running agent sessions for deleted node workspaces', async () => {
     const ids = await seedBase(`stop-node-${crypto.randomUUID()}`);
     await seedComputeUsage(`${ids.workspaceId}-usage`, ids.userId, ids.workspaceId, ids.nodeId);
-    await env.DATABASE.prepare(
-      `UPDATE nodes SET runtime_termination_confirmed_at = datetime('now') WHERE id = ?`
-    )
-      .bind(ids.nodeId)
-      .run();
+    await seedManagedVmAbsenceProof(ids.nodeId, ids.userId);
 
     await stopNodeResources(ids.nodeId, ids.userId, env as unknown as Env);
 

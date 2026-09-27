@@ -1684,6 +1684,7 @@ describe('ProjectData storage safety firebreak', () => {
         PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS: '60000',
       },
       async () => {
+        const alarmStartedAt = Date.now();
         const after = await runProjectDataAlarmWithTimerDeliveryPaused(stub, async (_instance, state) => {
           const sql = state.storage.sql;
           const activityRows = sql
@@ -1725,7 +1726,8 @@ describe('ProjectData storage safety firebreak', () => {
         expect(seeded.activeAcpEventIds.every((id) => acpEventIds.has(id))).toBe(true);
         expect(after.messageCount.count).toBe(3);
         expect(after.scheduledAlarm).toBeTypeOf('number');
-        expect(after.scheduledAlarm as number).toBeGreaterThan(Date.now());
+        // A short retry may already be due by the time the DO result is read.
+        expect(after.scheduledAlarm as number).toBeGreaterThan(alarmStartedAt);
       }
     );
   });

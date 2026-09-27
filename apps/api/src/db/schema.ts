@@ -1370,7 +1370,7 @@ export const nodes = sqliteTable(
     /** Cloudflare Tunnel display name for user-owned tunnel nodes. Null otherwise. */
     tunnelName: text('tunnel_name'),
     errorMessage: text('error_message'),
-    /** Written only after strict provider/container teardown confirms the runtime is absent. */
+    /** Durable runtime absence proof; cleared before any provider create request. */
     runtimeTerminationConfirmedAt: text('runtime_termination_confirmed_at'),
     /** Server-written identity rotated whenever the runtime behind this node row is replaced. */
     runtimeIncarnationId: text('runtime_incarnation_id'),
