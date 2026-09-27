@@ -143,6 +143,24 @@ export const platformSettings = sqliteTable('platform_settings', {
 });
 
 // =============================================================================
+// AI Spend Rate Limits
+// =============================================================================
+export const aiSpendRateLimits = sqliteTable(
+  'ai_spend_rate_limits',
+  {
+    bucket: text('bucket').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    windowStart: integer('window_start').notNull(),
+    count: integer('count').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.bucket, table.userId] }),
+  })
+);
+
+// =============================================================================
 // Sessions (BetterAuth)
 // =============================================================================
 export const sessions = sqliteTable(

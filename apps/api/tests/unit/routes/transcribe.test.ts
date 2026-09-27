@@ -1,10 +1,12 @@
+import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { DEFAULT_RATE_LIMITS } from '../../../src/middleware/rate-limit';
 import { transcribeRoutes } from '../../../src/routes/transcribe';
-import { createMemoryKv } from '../../helpers/sqlite-d1';
+import { createMemoryKv, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const authState = vi.hoisted(() => ({ userId: 'test-user-id' }));
 
@@ -46,9 +48,42 @@ describe('Transcribe Routes', () => {
   function createEnv(overrides: Partial<Env> = {}): Env {
     return {
       AI: mockAI as any,
+      DATABASE: createAiSpendRateLimitD1(),
       KV: createMemoryKv(),
       ...overrides,
     } as Env;
+  }
+
+  function createAiSpendRateLimitD1(): D1Database {
+    const sqlite = new Database(':memory:');
+    createSchemaTables(sqlite, [schema.aiSpendRateLimits]);
+    return createSqliteD1(sqlite);
+  }
+
+  function createRacyEmptyKv(expectedGets: number): KVNamespace {
+    let getCount = 0;
+    let releaseGets: (() => void) | undefined;
+    const allGetsStarted = new Promise<void>((resolve) => {
+      releaseGets = resolve;
+    });
+
+    return {
+      get: async () => {
+        getCount += 1;
+        if (getCount >= expectedGets) releaseGets?.();
+        await allGetsStarted;
+        return null;
+      },
+      put: vi.fn(async () => undefined),
+    } as unknown as KVNamespace;
+  }
+
+  function deferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    const promise = new Promise<T>((innerResolve) => {
+      resolve = innerResolve;
+    });
+    return { promise, resolve };
   }
 
   function postAudio(env: Env) {
@@ -285,6 +320,50 @@ describe('Transcribe Routes', () => {
 
       authState.userId = 'another-user';
       expect((await postAudio(env)).status).toBe(200);
+    });
+
+    it('admits exactly the configured limit under parallel same-user transcription requests', async () => {
+      const limit = 2;
+      const totalRequests = 10;
+      const aiGate = deferred<{ text: string }>();
+      const enteredLimit = deferred<void>();
+      let aiCallsStarted = 0;
+      mockAI.run.mockImplementation(async () => {
+        aiCallsStarted += 1;
+        if (aiCallsStarted === limit) enteredLimit.resolve();
+        return aiGate.promise;
+      });
+      const env = createEnv({
+        RATE_LIMIT_TRANSCRIBE: String(limit),
+        KV: createRacyEmptyKv(totalRequests),
+      });
+
+      const responses = Array.from({ length: totalRequests }, () => postAudio(env));
+      await enteredLimit.promise;
+      aiGate.resolve({ text: 'Hello world' });
+      const statuses = await Promise.all(responses).then((items) => items.map((res) => res.status));
+
+      expect(statuses.filter((status) => status === 200)).toHaveLength(limit);
+      expect(statuses.filter((status) => status === 429)).toHaveLength(totalRequests - limit);
+      expect(mockAI.run).toHaveBeenCalledTimes(limit);
+    });
+
+    it('fails closed without calling Whisper when the atomic counter is unavailable', async () => {
+      const env = createEnv({
+        DATABASE: {
+          prepare: () => {
+            throw new Error('D1 unavailable');
+          },
+        } as unknown as D1Database,
+      });
+
+      const res = await postAudio(env);
+
+      expect(res.status).toBe(503);
+      await expect(res.json()).resolves.toMatchObject({ error: 'RATE_LIMIT_UNAVAILABLE' });
+      expect(res.headers.get('X-RateLimit-Limit')).toBe('30');
+      expect(res.headers.get('X-RateLimit-Remaining')).toBe('0');
+      expect(mockAI.run).not.toHaveBeenCalled();
     });
   });
 });

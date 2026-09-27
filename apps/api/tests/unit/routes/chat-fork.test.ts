@@ -1,10 +1,12 @@
+import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { DEFAULT_RATE_LIMITS } from '../../../src/middleware/rate-limit';
-import { createMemoryKv } from '../../helpers/sqlite-d1';
+import { createMemoryKv, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
@@ -61,7 +63,39 @@ function makeApp() {
 }
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
-  return { DATABASE: {}, KV: createMemoryKv(), ...overrides } as Env;
+  return { DATABASE: createAiSpendRateLimitD1(), KV: createMemoryKv(), ...overrides } as Env;
+}
+
+function createAiSpendRateLimitD1(): D1Database {
+  const sqlite = new Database(':memory:');
+  createSchemaTables(sqlite, [schema.aiSpendRateLimits]);
+  return createSqliteD1(sqlite);
+}
+
+function createRacyEmptyKv(expectedGets: number): KVNamespace {
+  let getCount = 0;
+  let releaseGets: (() => void) | undefined;
+  const allGetsStarted = new Promise<void>((resolve) => {
+    releaseGets = resolve;
+  });
+
+  return {
+    get: async () => {
+      getCount += 1;
+      if (getCount >= expectedGets) releaseGets?.();
+      await allGetsStarted;
+      return null;
+    },
+    put: vi.fn(async () => undefined),
+  } as unknown as KVNamespace;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
 }
 
 describe('chatForkRoutes', () => {
@@ -255,5 +289,52 @@ describe('session summarization rate limit (fork-prepare + summarize)', () => {
     vi.setSystemTime(new Date('2026-09-27T10:20:01Z'));
     expect((await call(app, env, 'summarize')).status).toBe(200);
     expect(mocks.summarizeSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('admits exactly the configured limit under parallel same-user summarize requests', async () => {
+    const app = makeApp();
+    const limit = 2;
+    const totalRequests = 10;
+    const aiGate = deferred<void>();
+    const enteredLimit = deferred<void>();
+    let aiCallsStarted = 0;
+    mocks.summarizeSession.mockImplementation(async () => {
+      aiCallsStarted += 1;
+      if (aiCallsStarted === limit) enteredLimit.resolve();
+      await aiGate.promise;
+      return { summary: 'Source summary', messageCount: 1 };
+    });
+    const env = makeEnv({
+      RATE_LIMIT_SESSION_SUMMARIZE: String(limit),
+      KV: createRacyEmptyKv(totalRequests),
+    });
+
+    const responses = Array.from({ length: totalRequests }, () => call(app, env, 'summarize'));
+    await enteredLimit.promise;
+    aiGate.resolve();
+    const statuses = await Promise.all(responses).then((items) => items.map((res) => res.status));
+
+    expect(statuses.filter((status) => status === 200)).toHaveLength(limit);
+    expect(statuses.filter((status) => status === 429)).toHaveLength(totalRequests - limit);
+    expect(mocks.summarizeSession).toHaveBeenCalledTimes(limit);
+  });
+
+  it('fails closed without calling Workers AI when the atomic counter is unavailable', async () => {
+    const app = makeApp();
+    const env = makeEnv({
+      DATABASE: {
+        prepare: () => {
+          throw new Error('D1 unavailable');
+        },
+      } as unknown as D1Database,
+    });
+
+    const res = await call(app, env, 'summarize');
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toMatchObject({ error: 'RATE_LIMIT_UNAVAILABLE' });
+    expect(res.headers.get('X-RateLimit-Limit')).toBe('30');
+    expect(res.headers.get('X-RateLimit-Remaining')).toBe('0');
+    expect(mocks.summarizeSession).not.toHaveBeenCalled();
   });
 });
