@@ -17,16 +17,14 @@
 import {
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
-  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
-import { type Context, Hono } from 'hono';
+import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { parsePositiveInt } from '../lib/route-helpers';
-import { readRequestJsonRecord, RequestBodyTooLargeError } from '../lib/runtime-validation';
+import { readRequestJsonRecord } from '../lib/runtime-validation';
 import {
   checkRateLimit,
   createRateLimitKey,
@@ -40,7 +38,6 @@ import {
   buildAnthropicGatewayUrl,
   extractCallbackToken,
   isAnthropicModel,
-  updateAIProxyAgentCredentialAttribution,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../services/ai-token-budget';
@@ -49,125 +46,17 @@ import {
   estimateInputTokensFromMessages,
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
+import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
 import {
-  copyCredentialLimitHeaders,
-  recordProxyCredentialLimitObservationsFromHeaders,
-} from '../services/credential-limit-events';
+  anthropicBodyMaxBytes,
+  anthropicBodyParseError,
+  anthropicError,
+  anthropicProviderErrorHeaders,
+  anthropicUsageGateError,
+  scheduleAnthropicPlatformLimitHeaders,
+} from './ai-proxy-anthropic-support';
 
 const aiProxyAnthropicRoutes = new Hono<{ Bindings: Env }>();
-type AnthropicProxyContext = Context<{ Bindings: Env }>;
-type AnthropicProxyAuth = Awaited<ReturnType<typeof verifyAIProxyAuth>>;
-
-// =============================================================================
-// Anthropic Error Format
-// =============================================================================
-
-/** Return an Anthropic-format error response. */
-function anthropicError(
-  message: string,
-  type: string,
-  status: number,
-  headers?: HeadersInit
-): Response {
-  const responseHeaders = new Headers(headers);
-  if (!responseHeaders.has('Content-Type')) responseHeaders.set('Content-Type', 'application/json');
-  return new Response(JSON.stringify({ type: 'error', error: { type, message } }), {
-    status,
-    headers: responseHeaders,
-  });
-}
-
-function anthropicProviderErrorHeaders(upstreamHeaders: Headers): Headers {
-  const headers = new Headers({ 'Content-Type': 'application/json' });
-  copyCredentialLimitHeaders(upstreamHeaders, headers);
-  return headers;
-}
-
-function anthropicUsageGateError(reason: 'daily-token-budget' | 'monthly-cost-cap'): Response {
-  if (reason === 'daily-token-budget') {
-    return anthropicError(
-      'Daily token budget exceeded. Resets at midnight UTC.',
-      'rate_limit_error',
-      429
-    );
-  }
-
-  return anthropicError(
-    'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.',
-    'rate_limit_error',
-    429
-  );
-}
-
-function anthropicBodyMaxBytes(c: AnthropicProxyContext): number {
-  return parsePositiveInt(
-    c.env.AI_PROXY_REQUEST_BODY_MAX_BYTES,
-    DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES
-  );
-}
-
-function anthropicBodyParseError(error: unknown): Response {
-  if (error instanceof RequestBodyTooLargeError) {
-    return anthropicError(
-      `Request body exceeds ${error.maxBytes} bytes`,
-      'invalid_request_error',
-      413
-    );
-  }
-  return anthropicError('Invalid JSON in request body', 'invalid_request_error', 400);
-}
-
-async function recordAnthropicPlatformLimitHeaders(input: {
-  env: Env;
-  response: Response;
-  auth: AnthropicProxyAuth;
-  upstreamAuth: Awaited<ReturnType<typeof resolveUpstreamAuth>>;
-  source: string;
-}): Promise<void> {
-  try {
-    await updateAIProxyAgentCredentialAttribution(input.env, input.auth, input.upstreamAuth);
-  } catch (error) {
-    log.warn('ai_proxy_anthropic.credential_attribution_update_failed', {
-      userId: input.auth.userId,
-      workspaceId: input.auth.workspaceId,
-      agentSessionId: input.auth.agentSessionId ?? null,
-      source: input.source,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  await recordProxyCredentialLimitObservationsFromHeaders(input.env, input.response.headers, {
-    projectId: input.auth.projectId,
-    userId: input.auth.userId,
-    workspaceId: input.auth.workspaceId,
-    chatSessionId: input.auth.chatSessionId,
-    agentSessionId: input.auth.agentSessionId,
-    agentType: input.auth.agentType,
-    credentialReference: input.upstreamAuth.credentialReference,
-    credentialSource: input.upstreamAuth.credentialSource,
-    provider: 'anthropic',
-    providerMode: input.upstreamAuth.providerMode,
-    source: input.source,
-    responseStatus: input.response.status,
-  });
-}
-
-function scheduleAnthropicPlatformLimitHeaders(
-  c: AnthropicProxyContext,
-  input: Parameters<typeof recordAnthropicPlatformLimitHeaders>[0]
-): void {
-  const telemetry = recordAnthropicPlatformLimitHeaders(input).catch((error) => {
-    log.warn('ai_proxy_anthropic.credential_limit_telemetry_failed', {
-      userId: input.auth.userId,
-      workspaceId: input.auth.workspaceId,
-      agentSessionId: input.auth.agentSessionId ?? null,
-      source: input.source,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  });
-  optionalExecutionContext(() => c.executionCtx)?.waitUntil(telemetry);
-  void telemetry;
-}
 
 // =============================================================================
 // POST /messages — Native Anthropic Messages API pass-through
