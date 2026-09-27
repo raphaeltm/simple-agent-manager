@@ -120,7 +120,7 @@ function findEmbeddedJsonEnd(value: string, start: number, opener: '{' | '['): n
   const stringState: JsonStringScanState = { escaped: false, inString: false };
   let depth = 0;
   for (let end = start; end < value.length; end += 1) {
-    const character = value[end];
+    const character = value.charAt(end);
     if (consumeJsonStringCharacter(character, stringState)) continue;
     if (character === opener) depth += 1;
     if (character !== closer) continue;
