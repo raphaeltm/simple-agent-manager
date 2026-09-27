@@ -1,14 +1,17 @@
 /**
- * Test support for rendering real Mermaid under jsdom and judging the result.
+ * Test support for rendering real Mermaid and judging the result. The chat and
+ * library-markdown suites share it, and the Playwright audit runs the same
+ * `findActiveContent` inside a real browser.
  */
 
-const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
-const INLINE_RASTER_IMAGE = /^data:image\/(?:png|gif|jpe?g|webp);base64,/i;
-const EXTERNAL_CSS_REFERENCE = /url\s*\(\s*['"]?\s*(?!#)|image-set\s*\(|@import|\\/i;
+/** Width jsdom reports per character of SVG text, so long labels wrap as in a browser. */
+const CHARACTER_WIDTH = 8;
 
 /**
  * jsdom has no layout engine, so Mermaid's text measurement finds no SVG
- * geometry methods. Fixed sizes are enough: tests judge markup, not layout.
+ * geometry methods. Text is measured by its length, so Mermaid wraps a long
+ * label into rows; everything else has a fixed size. Tests judge markup, not
+ * layout.
  */
 export function installSvgLayoutStubs(): void {
   const proto = window.SVGElement.prototype as SVGElement & {
@@ -16,36 +19,40 @@ export function installSvgLayoutStubs(): void {
     getComputedTextLength?: () => number;
   };
   proto.getBBox ??= () => ({ x: 0, y: 0, width: 80, height: 20 }) as DOMRect;
-  proto.getComputedTextLength ??= () => 60;
-}
-
-function isAllowedReference(element: Element, href: string): boolean {
-  return element.localName === 'image' ? INLINE_RASTER_IMAGE.test(href) : href.startsWith('#');
+  proto.getComputedTextLength ??= function (this: SVGElement) {
+    return (this.textContent ?? '').length * CHARACTER_WIDTH;
+  };
 }
 
 /**
  * Everything under `root` a browser could execute or use to fetch a resource:
  * non-SVG elements, event handlers, references that leave the document, and CSS
  * that names a remote resource. An empty list means the markup is inert.
+ *
+ * Self-contained on purpose: Playwright serializes it to run in a real browser,
+ * so it may not refer to anything outside its own body.
  */
 export function findActiveContent(root: Element): string[] {
+  const svgNamespace = 'http://www.w3.org/2000/svg';
+  const inlineRasterImage = /^data:image\/(?:png|gif|jpe?g|webp);base64,/i;
+  const externalCssReference = /url\s*\(\s*['"]?\s*(?!#)|image-set\s*\(|@import|\\/i;
   const findings: string[] = [];
   for (const element of [root, ...Array.from(root.querySelectorAll('*'))]) {
     const tag = element.localName;
-    if (element.namespaceURI !== SVG_NAMESPACE) {
+    if (element.namespaceURI !== svgNamespace) {
       findings.push(`non-SVG element <${tag}> (${element.namespaceURI})`);
     }
     for (const { name, value } of Array.from(element.attributes)) {
       const isHref = name === 'href' || name === 'xlink:href';
+      const allowedHref =
+        tag === 'image' ? inlineRasterImage.test(value.trim()) : value.trim().startsWith('#');
       if (/^on/i.test(name)) findings.push(`<${tag} ${name}>`);
       else if (/javascript:/i.test(value)) findings.push(`<${tag} ${name}="${value}">`);
-      else if (isHref && !isAllowedReference(element, value.trim())) {
-        findings.push(`<${tag} ${name}="${value}">`);
-      } else if (!isHref && EXTERNAL_CSS_REFERENCE.test(value)) {
+      else if (isHref ? !allowedHref : externalCssReference.test(value)) {
         findings.push(`<${tag} ${name}="${value}">`);
       }
     }
-    if (tag === 'style' && EXTERNAL_CSS_REFERENCE.test(element.textContent ?? '')) {
+    if (tag === 'style' && externalCssReference.test(element.textContent ?? '')) {
       findings.push(`<style> ${element.textContent}`);
     }
   }

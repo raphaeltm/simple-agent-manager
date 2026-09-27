@@ -6,19 +6,19 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+// One judge of "inert" for every Mermaid path: the chat suites and the browser
+// audit use the same helper.
+import {
+  findActiveContent,
+  installSvgLayoutStubs,
+  svgTexts,
+} from '../../../../packages/acp-client/tests/unit/helpers/svg-inertness';
 import { RenderedMarkdown } from '../../src/components/MarkdownRenderer';
 
-const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const PWN = 'window.__pwned=1';
 
 beforeAll(() => {
-  // jsdom has no layout engine; Mermaid only needs these to measure text.
-  const proto = window.SVGElement.prototype as SVGElement & {
-    getBBox?: () => DOMRect;
-    getComputedTextLength?: () => number;
-  };
-  proto.getBBox ??= () => ({ x: 0, y: 0, width: 80, height: 20 }) as DOMRect;
-  proto.getComputedTextLength ??= () => 60;
+  installSvgLayoutStubs();
 });
 
 afterEach(() => {
@@ -38,26 +38,6 @@ async function renderLibraryDiagram(source: string): Promise<SVGSVGElement> {
   return svg as unknown as SVGSVGElement;
 }
 
-/** Elements outside SVG, event handlers, and anything that leaves the document. */
-function activeContent(svg: SVGSVGElement): string[] {
-  return [svg, ...Array.from(svg.querySelectorAll('*'))].flatMap((element) => {
-    const findings: string[] = [];
-    if (element.namespaceURI !== SVG_NAMESPACE) findings.push(`<${element.localName}>`);
-    for (const { name, value } of Array.from(element.attributes)) {
-      if (name.startsWith('xmlns')) continue; // namespace declarations, not references
-      if (/^on/i.test(name) || /javascript:|https?:|url\(\s*['"]?\s*(?!#)/i.test(value)) {
-        findings.push(`<${element.localName} ${name}="${value}">`);
-      }
-    }
-    return findings;
-  });
-}
-
-const svgTexts = (svg: SVGSVGElement) =>
-  Array.from(svg.querySelectorAll('text')).map((text) =>
-    (text.textContent ?? '').replace(/\s+/g, ' ').trim()
-  );
-
 describe('Mermaid in library markdown', () => {
   it('draws subgraph, edge and multi-line labels as SVG text', async () => {
     const svg = await renderLibraryDiagram(
@@ -71,14 +51,20 @@ describe('Mermaid in library markdown', () => {
 
     expect(svg.querySelector('foreignObject')).toBeNull();
     expect(svgTexts(svg)).toEqual(
-      expect.arrayContaining([
-        'Review stage',
-        'Draft',
-        'approve',
-        expect.stringMatching(/Line one\s*Line two/),
-      ])
+      expect.arrayContaining(['Review stage', 'Draft', 'approve', 'Line one Line two'])
     );
-    expect(activeContent(svg)).toEqual([]);
+    expect(findActiveContent(svg)).toEqual([]);
+  }, 30_000);
+
+  it('keeps a wrapped label readable as words', async () => {
+    const label = 'Render a Mermaid diagram inside the library preview without any HTML labels';
+    const svg = await renderLibraryDiagram(`flowchart LR\n  A[${label}] --> B[Short]`);
+
+    const text = Array.from(svg.querySelectorAll('text')).find((node) =>
+      node.textContent?.startsWith('Render')
+    );
+    expect(text?.querySelectorAll('tspan.row').length).toBeGreaterThan(1);
+    expect(svgTexts(svg)).toEqual(expect.arrayContaining([label, 'Short']));
   }, 30_000);
 
   it('ignores a directive that turns HTML labels back on', async () => {
@@ -88,7 +74,7 @@ describe('Mermaid in library markdown', () => {
 
     expect(svg.querySelector('foreignObject')).toBeNull();
     expect(svgTexts(svg)).toEqual(expect.arrayContaining(['Safe node']));
-    expect(activeContent(svg)).toEqual([]);
+    expect(findActiveContent(svg)).toEqual([]);
   }, 30_000);
 
   it.each([
@@ -114,7 +100,7 @@ describe('Mermaid in library markdown', () => {
 
       expect(svg.outerHTML).not.toContain('evil.example');
       expect(svgTexts(svg)).toEqual(expect.arrayContaining([stillDrawn]));
-      expect(activeContent(svg)).toEqual([]);
+      expect(findActiveContent(svg)).toEqual([]);
     },
     30_000
   );

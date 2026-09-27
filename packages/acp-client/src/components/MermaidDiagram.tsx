@@ -1,4 +1,3 @@
-import DOMPurify from 'dompurify';
 import { Copy, Maximize2, RotateCcw, X } from 'lucide-react';
 import {
   type CSSProperties,
@@ -25,8 +24,11 @@ function cleanupMermaidTempElements(diagramId: string) {
 }
 
 async function renderDiagram(code: string, diagramId: string): Promise<string> {
-  const { default: mermaid } = await import('mermaid');
-  return renderMermaidSvg({ mermaid, domPurify: DOMPurify }, diagramId, code);
+  const [{ default: mermaid }, { default: domPurify }] = await Promise.all([
+    import('mermaid'),
+    import('dompurify'),
+  ]);
+  return renderMermaidSvg({ mermaid, domPurify }, diagramId, code);
 }
 
 function copyToClipboard(text: string) {

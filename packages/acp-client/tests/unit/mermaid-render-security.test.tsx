@@ -50,7 +50,7 @@ describe('Mermaid diagrams keep their labels as SVG text', () => {
         'Start here',
         'edge label',
         'Is it ok?',
-        expect.stringMatching(/Line one\s*Line two/),
+        'Line one Line two',
       ])
     );
     // A multi-line label stays two rows, not one run of text.
@@ -59,6 +59,35 @@ describe('Mermaid diagrams keep their labels as SVG text', () => {
     );
     expect(multiLine?.querySelectorAll('tspan.row')).toHaveLength(2);
     expect(findActiveContent(svg)).toEqual([]);
+  }, 30_000);
+
+  it('keeps a wrapped label readable as words', async () => {
+    const label = 'Render a Mermaid diagram inside the chat bubble without any HTML labels';
+    const svg = await renderAgentDiagram(`flowchart LR\n  A[${label}] --> B[Short]`);
+
+    const text = Array.from(svg.querySelectorAll('text')).find((node) =>
+      node.textContent?.startsWith('Render')
+    );
+    // The label really wrapped, so there are row boundaries to lose words at.
+    expect(text?.querySelectorAll('tspan.row').length).toBeGreaterThan(1);
+    expect(svgTexts(svg)).toEqual(expect.arrayContaining([label, 'Short']));
+    // Each break is a zero-size space, so it adds no width to the row it ends.
+    const wordBreaks = Array.from(text?.querySelectorAll('tspan[font-size="0"]') ?? []);
+    expect(wordBreaks.length).toBe((text?.querySelectorAll('tspan.row').length ?? 0) - 1);
+    expect(wordBreaks.every((wordBreak) => wordBreak.textContent === ' ')).toBe(true);
+  }, 30_000);
+
+  it('drops math that Mermaid can only draw as HTML and keeps the rest', async () => {
+    const source = 'sequenceDiagram\n  participant A as $$x^2+y^2=z^2$$\n  A->>B: Plain message';
+    // Mermaid draws math inside a <foreignObject> even with HTML labels off.
+    const { default: mermaid } = await import('mermaid');
+    const svg = await renderAgentDiagram(source);
+    const { svg: unsanitized } = await mermaid.render('math-probe', source);
+    expect(unsanitized).toContain('<foreignObject');
+
+    expect(svg.querySelector('foreignObject')).toBeNull();
+    expect(findActiveContent(svg)).toEqual([]);
+    expect(svgTexts(svg)).toEqual(expect.arrayContaining(['Plain message']));
   }, 30_000);
 
   it('keeps markdown-string labels and a sequence diagram readable', async () => {

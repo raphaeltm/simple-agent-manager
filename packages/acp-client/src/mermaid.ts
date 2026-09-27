@@ -23,6 +23,7 @@ import type {
 } from 'dompurify';
 import type { Mermaid, MermaidConfig } from 'mermaid';
 
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const MERMAID_FONT = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 const MERMAID_TEXT_COLOR = '#e6f2ee';
 
@@ -41,7 +42,8 @@ const DIRECTIVE_LOCKED_KEYS = [
   'suppressErrorRendering',
   'maxEdges',
   // Would bring back HTML labels. `flowchart.htmlLabels` is covered too, and
-  // the top-level `htmlLabels: false` below outranks it anyway.
+  // Mermaid reads the top-level `htmlLabels` first (`htmlLabels ??
+  // flowchart.htmlLabels`), so the explicit `false` below decides anyway.
   'htmlLabels',
   // Raw CSS, and a font name that Mermaid pastes into CSS rules unvalidated.
   'themeCSS',
@@ -57,8 +59,9 @@ const DIRECTIVE_LOCKED_KEYS = [
 const SVG_LABEL_CSS = [
   // Journey section titles otherwise take the section's fill colour.
   `text.journey-section { fill: ${MERMAID_TEXT_COLOR}; }`,
-  // The mindmap root circle places its label from the centre.
-  '.mindmap-node.section-root text { text-anchor: middle; }',
+  // The mindmap root circle places its label from the centre, and the dark
+  // theme draws that label dark grey on the blue circle.
+  `.mindmap-node.section-root text { text-anchor: middle; fill: ${MERMAID_TEXT_COLOR}; }`,
 ].join(' ');
 
 const MERMAID_CONFIG: MermaidConfig = {
@@ -89,9 +92,12 @@ const MERMAID_CONFIG: MermaidConfig = {
     scaleLabelColor: MERMAID_TEXT_COLOR,
     fontFamily: MERMAID_FONT,
   },
+  // Features that can only draw text as HTML lose that text: Venn member lists,
+  // architecture text icons and KaTeX math.
   htmlLabels: false,
-  // Both default to drawing text inside a <foreignObject>.
-  journey: { textPlacement: 'tspan' },
+  // Both default to drawing text inside a <foreignObject>. As SVG text, journey
+  // labels would otherwise fall back to 14px "Open Sans".
+  journey: { textPlacement: 'tspan', taskFontFamily: MERMAID_FONT, taskFontSize: 16 },
   timeline: { textPlacement: 'tspan' },
   themeCSS: SVG_LABEL_CSS,
   secure: DIRECTIVE_LOCKED_KEYS,
@@ -104,7 +110,7 @@ const MERMAID_CONFIG: MermaidConfig = {
  * by DOMPurify's defaults.
  */
 const MERMAID_SVG_SANITIZE_CONFIG: DOMPurifyConfig = {
-  ALLOWED_NAMESPACES: ['http://www.w3.org/2000/svg'],
+  ALLOWED_NAMESPACES: [SVG_NAMESPACE],
   ALLOWED_TAGS: [
     'svg',
     'g',
@@ -268,6 +274,22 @@ function emptyStyleSheetsThatFetch(node: Node, data: UponSanitizeElementHookEven
   }
 }
 
+/**
+ * Mermaid wraps a long label into one `<tspan class="row">` per line with nothing
+ * between the lines, so screen readers, find-in-page and copy see "Mermaiddiagram".
+ * A zero-size space after every row but the last restores the word break without
+ * moving a glyph.
+ */
+function separateWrappedLabelRows(node: Node, data: UponSanitizeElementHookEvent) {
+  if (data.tagName !== 'tspan') return;
+  const row = node as Element;
+  if (!row.classList.contains('row') || !row.nextElementSibling?.classList.contains('row')) return;
+  const wordBreak = row.ownerDocument.createElementNS(SVG_NAMESPACE, 'tspan');
+  wordBreak.setAttribute('font-size', '0');
+  wordBreak.textContent = ' ';
+  row.append(wordBreak);
+}
+
 /** One hooked instance per DOMPurify, so the hooks never touch its other uses. */
 const mermaidPurifiers = new WeakMap<DOMPurify, DOMPurify>();
 
@@ -276,13 +298,17 @@ function mermaidPurifier(domPurify: DOMPurify): DOMPurify {
   if (!purifier) {
     purifier = domPurify();
     purifier.addHook('uponSanitizeElement', emptyStyleSheetsThatFetch);
+    purifier.addHook('uponSanitizeElement', separateWrappedLabelRows);
     purifier.addHook('uponSanitizeAttribute', keepReferencesInsideTheDocument);
     mermaidPurifiers.set(domPurify, purifier);
   }
   return purifier;
 }
 
-/** Reduce Mermaid output to inert, self-contained SVG markup. */
+/**
+ * Reduce Mermaid output to inert, self-contained SVG markup whose wrapped labels
+ * still read as words.
+ */
 export function sanitizeMermaidSvg(svg: string, domPurify: DOMPurify): string {
   return mermaidPurifier(domPurify).sanitize(svg, MERMAID_SVG_SANITIZE_CONFIG);
 }

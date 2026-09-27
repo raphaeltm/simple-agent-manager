@@ -1,5 +1,6 @@
 import { expect, type Page, test } from '@playwright/test';
 
+import { findActiveContent } from '../../../../packages/acp-client/tests/unit/helpers/svg-inertness';
 import { assertNoOverflow, screenshot, setupProjectChatMocks } from './audit-helpers';
 
 // Agent-written content in a real browser, through the real app: Mermaid in a chat
@@ -178,34 +179,15 @@ async function setupMocks(page: Page, messages: unknown[]): Promise<string[]> {
 
 /**
  * Everything inside the given diagrams a browser could execute or use to fetch a
- * resource. An empty list means every diagram is inert SVG.
+ * resource, judged in the browser by the same check the unit suites use. An
+ * empty list means every diagram is inert SVG.
  */
-function activeContentIn(page: Page, diagramSelector: string): Promise<string[]> {
-  return page.evaluate((selector) => {
-    const findings: string[] = [];
-    const externalCss = /url\s*\(\s*['"]?\s*(?!#)|image-set\s*\(|@import/i;
-    for (const svg of Array.from(document.querySelectorAll(selector))) {
-      for (const element of [svg, ...Array.from(svg.querySelectorAll('*'))]) {
-        const tag = element.localName;
-        if (element.namespaceURI !== 'http://www.w3.org/2000/svg') findings.push(`<${tag}>`);
-        for (const { name, value } of Array.from(element.attributes)) {
-          if (name.startsWith('xmlns')) continue;
-          const isHref = name === 'href' || name === 'xlink:href';
-          const allowedHref =
-            tag === 'image'
-              ? /^data:image\/(?:png|gif|jpe?g|webp);base64,/i.test(value)
-              : value.startsWith('#');
-          if (/^on/i.test(name) || /javascript:/i.test(value)) findings.push(`<${tag} ${name}>`);
-          else if (isHref ? !allowedHref : externalCss.test(value))
-            findings.push(`<${tag} ${name}="${value}">`);
-        }
-        if (tag === 'style' && externalCss.test(element.textContent ?? '')) {
-          findings.push(`<style> ${element.textContent}`);
-        }
-      }
-    }
-    return findings;
-  }, diagramSelector);
+async function activeContentIn(page: Page, diagramSelector: string): Promise<string[]> {
+  const diagrams = await page.locator(diagramSelector).all();
+  const findings = await Promise.all(
+    diagrams.map((diagram) => diagram.evaluate(findActiveContent))
+  );
+  return findings.flat();
 }
 
 async function expectDiagramsInertAndDrawn(page: Page, diagramSelector: string) {
