@@ -148,27 +148,45 @@ describe('repo-browse routes', () => {
     expect((await res.json()).rawUrl).toBe('/api/projects/p1/repo/raw?ref=main&path=big.txt');
   });
 
-  it('forces dangerous MIME types to an attachment download on /raw', async () => {
+  it.each([
+    'image/svg+xml',
+    'text/html',
+    'text/html; charset=utf-8',
+    'TEXT/HTML; Charset=UTF-8',
+    'application/xhtml+xml; charset=utf-8',
+    'application/javascript; charset=utf-8',
+    'text/xml; charset=utf-8',
+    'text/plain, text/html',
+    'text',
+    'text/plain\u0001',
+  ])('forces active content served as %j to an attachment download on /raw', async (contentType) => {
     mocks.resolveRepoBrowser.mockResolvedValue(
       browserStub({
-        getRawFile: vi.fn().mockResolvedValue({ bytes: new Uint8Array([60, 115]), contentType: 'image/svg+xml' }),
+        getRawFile: vi.fn().mockResolvedValue({ bytes: new Uint8Array([60, 115]), contentType }),
       })
     );
-    const res = await makeApp().request('/p1/repo/raw?ref=main&path=x.svg', {}, env);
+    const res = await makeApp().request('/p1/repo/raw?ref=main&path=x.html', {}, env);
+    expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('application/octet-stream');
-    expect(res.headers.get('content-disposition')).toContain('attachment');
+    expect(res.headers.get('content-disposition')).toBe('attachment; filename="x.html"');
+    expect(res.headers.get('content-security-policy')).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    );
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
   });
 
-  it('serves safe MIME types inline on /raw', async () => {
-    mocks.resolveRepoBrowser.mockResolvedValue(
-      browserStub({
-        getRawFile: vi.fn().mockResolvedValue({ bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png' }),
-      })
-    );
-    const res = await makeApp().request('/p1/repo/raw?ref=main&path=x.png', {}, env);
-    expect(res.headers.get('content-type')).toBe('image/png');
-    expect(res.headers.get('content-disposition')).toContain('inline');
-    expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual([1, 2, 3]);
-  });
+  it.each(['image/png', 'text/plain; charset=utf-8', 'application/json'])(
+    'serves passive content served as %j inline on /raw',
+    async (contentType) => {
+      mocks.resolveRepoBrowser.mockResolvedValue(
+        browserStub({
+          getRawFile: vi.fn().mockResolvedValue({ bytes: new Uint8Array([1, 2, 3]), contentType }),
+        })
+      );
+      const res = await makeApp().request('/p1/repo/raw?ref=main&path=x.png', {}, env);
+      expect(res.headers.get('content-type')).toBe(contentType);
+      expect(res.headers.get('content-disposition')).toBe('inline; filename="x.png"');
+      expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual([1, 2, 3]);
+    }
+  );
 });

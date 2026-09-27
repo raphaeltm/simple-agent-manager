@@ -8,6 +8,7 @@ import { log } from '../../lib/logger';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectAccess } from '../../middleware/project-auth';
+import { INERT_DOCUMENT_CSP } from '../../services/file-serving-policy';
 import { signTerminalToken } from '../../services/jwt';
 import { fetchNodeAgent } from '../../services/node-agent';
 import * as projectDataService from '../../services/project-data';
@@ -38,12 +39,6 @@ const FORWARDED_RESPONSE_HEADERS = [
   'Cache-Control',
   'ETag',
   'Last-Modified',
-];
-
-/** Additional headers forwarded for raw binary file responses (security headers set by VM agent). */
-const RAW_FILE_EXTRA_HEADERS = [
-  'Content-Security-Policy',
-  'X-Content-Type-Options',
 ];
 
 /**
@@ -418,9 +413,8 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
     throw errors.badRequest(`File too large for preview (${contentLength} bytes)`);
   }
 
-  // Forward safe response headers + security headers from VM agent
   const headers = new Headers();
-  for (const name of [...FORWARDED_RESPONSE_HEADERS, ...RAW_FILE_EXTRA_HEADERS]) {
+  for (const name of FORWARDED_RESPONSE_HEADERS) {
     const value = res.headers.get(name);
     if (value) headers.set(name, value);
   }
@@ -428,13 +422,11 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/raw', async (c) => {
     headers.set('Content-Type', 'application/octet-stream');
   }
 
-  // Enforce security headers independently at the proxy layer,
-  // regardless of what the VM agent sends.
+  // Security headers are the proxy's own, whatever the VM agent sends. The file
+  // may be agent-written HTML or SVG; opened directly on the API origin, it must
+  // stay inert. The app only ever embeds these bytes as an <img>.
   headers.set('X-Content-Type-Options', 'nosniff');
-  const ct = headers.get('Content-Type') ?? '';
-  if (ct.startsWith('image/svg')) {
-    headers.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
-  }
+  headers.set('Content-Security-Policy', INERT_DOCUMENT_CSP);
 
   return new Response(res.body, {
     status: res.status,

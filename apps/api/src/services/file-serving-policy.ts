@@ -1,15 +1,14 @@
 /**
- * How the project file library hands stored files to a browser.
+ * How the API hands a browser the bytes of a file that a user or an agent wrote:
+ * library files, repository files and workspace files.
  *
- * Library files are written by users and agents, so every response that carries
- * their bytes must keep the browser from treating them as active content on the
- * API origin.
+ * A browser must never run those bytes as script, or render them as an active
+ * document, on the API origin.
  */
 import { normalizeMimeType, OCTET_STREAM_MIME } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import { isLocalDevelopmentBaseDomain, LOCAL_DEVELOPMENT_HOSTS } from '../lib/cors-origin';
-import { getAppOrigin } from './interactive-preview';
+import { appFrameAncestors } from '../lib/app-origin';
 
 /** Replace characters that could break out of a quoted Content-Disposition filename. */
 export function contentDispositionFilename(filename: string): string {
@@ -20,7 +19,7 @@ export function contentDispositionFilename(filename: string): string {
  * Types a browser runs as script or renders as an active document. Every `+xml`
  * type (SVG, XHTML, RSS, ...) is one too.
  */
-const EXECUTABLE_MIME_TYPES = new Set([
+const ACTIVE_CONTENT_TYPES = new Set([
   'text/html',
   'text/xml',
   'application/xml',
@@ -33,16 +32,36 @@ const EXECUTABLE_MIME_TYPES = new Set([
 ]);
 
 /**
- * The Content-Type `/download` serves for a stored file: the stored type, unless
- * a browser could execute it. Parameters such as `; charset=utf-8` do not change
- * the verdict, and a comma-separated list is never echoed, because browsers pick
- * one of its entries.
+ * Exactly one media type with optional parameters (RFC 9110 §8.3.1). A quoted
+ * value is printable ASCII without `"`, `\` or `,`: no commas at all, because a
+ * browser picks one entry of a comma-separated list.
  */
-export function downloadContentType(storedMimeType: string): string {
-  const baseType = normalizeMimeType(storedMimeType);
-  const executable = EXECUTABLE_MIME_TYPES.has(baseType) || baseType.endsWith('+xml');
-  return executable || storedMimeType.includes(',') ? OCTET_STREAM_MIME : storedMimeType;
+const SINGLE_MEDIA_TYPE =
+  /^[\w!#$%&'*+.^`|~-]+\/[\w!#$%&'*+.^`|~-]+(?:[ \t]*;[ \t]*[\w!#$%&'*+.^`|~-]+=(?:[\w!#$%&'*+.^`|~-]+|"[\x20\x21\x23-\x2b\x2d-\x5b\x5d-\x7e]*"))*$/;
+
+/**
+ * Whether a browser could run a response of this type as script or render it as
+ * an active document. Parameters such as `; charset=utf-8` do not change the
+ * verdict. A value that is not exactly one well-formed media type counts too:
+ * what a browser makes of it is unknown, and it may not be echoed into a header.
+ */
+export function isActiveContentType(mimeType: string): boolean {
+  if (!SINGLE_MEDIA_TYPE.test(mimeType)) return true;
+  const baseType = normalizeMimeType(mimeType);
+  return ACTIVE_CONTENT_TYPES.has(baseType) || baseType.endsWith('+xml');
 }
+
+/** The Content-Type to download a stored file as: its own, unless a browser could run it. */
+export function downloadContentType(storedMimeType: string): string {
+  return isActiveContentType(storedMimeType) ? OCTET_STREAM_MIME : storedMimeType;
+}
+
+/**
+ * CSP for raw file bytes. Whatever the bytes turn out to be, a browser that opens
+ * them runs no script, fetches nothing, and gives the document an opaque origin.
+ * Images embedded with `<img>` are unaffected.
+ */
+export const INERT_DOCUMENT_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 
 /** MIME types safe to render inline in a browser (images, PDF, markdown, inert HTML text).
  *  Keep in sync with PREVIEWABLE_IMAGE_MIMES + PREVIEWABLE_MIMES in apps/web/src/lib/file-utils.ts */
@@ -78,20 +97,6 @@ export function hasPreviewableContent(effectiveMimeType: string, bytes: ArrayBuf
   return effectiveMimeType !== 'application/pdf' || startsWithPdfSignature(bytes);
 }
 
-/**
- * Only the app may frame a preview. The app lives on `app.<domain>` and previews
- * come from `api.<domain>`, a different origin, so `'self'` would block the app's
- * own PDF preview, and so would X-Frame-Options, which cannot name another
- * origin. Local development serves the app from a loopback port.
- */
-function frameAncestors(env: Pick<Env, 'BASE_DOMAIN'>): string {
-  const ancestors = [getAppOrigin(env)];
-  if (isLocalDevelopmentBaseDomain(env.BASE_DOMAIN)) {
-    ancestors.push(...LOCAL_DEVELOPMENT_HOSTS.map((host) => `http://${host}:*`));
-  }
-  return `frame-ancestors ${ancestors.join(' ')}`;
-}
-
 /** No preview runs script: they only ever render images, PDFs and text. */
 function previewSources(effectiveMimeType: string): string {
   switch (effectiveMimeType) {
@@ -112,7 +117,10 @@ export interface PreviewHeaders {
   readonly contentSecurityPolicy: string;
 }
 
-/** Content-Type and CSP for an inline preview of a file with the given effective type. */
+/**
+ * Content-Type and CSP for an inline library preview of a file with the given
+ * effective type. Only the app may frame it.
+ */
 export function previewHeaders(
   effectiveMimeType: string,
   env: Pick<Env, 'BASE_DOMAIN'>
@@ -120,6 +128,6 @@ export function previewHeaders(
   return {
     contentType:
       effectiveMimeType === 'text/html' ? 'text/plain; charset=utf-8' : effectiveMimeType,
-    contentSecurityPolicy: `${previewSources(effectiveMimeType)}; ${frameAncestors(env)}`,
+    contentSecurityPolicy: `${previewSources(effectiveMimeType)}; ${appFrameAncestors(env)}`,
   };
 }

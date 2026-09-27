@@ -355,7 +355,7 @@ export function FilePreviewModal({
                     // frame. The preview response keeps this frame inert instead: it is
                     // served as application/pdf with nosniff, only after the bytes are
                     // checked to be a PDF, under a CSP that forbids script
-                    // (apps/api/src/services/library-serving-policy.ts).
+                    // (apps/api/src/services/file-serving-policy.ts).
                     <iframe
                       src={previewUrl}
                       title={`Preview of ${file.filename}`}

@@ -4,11 +4,10 @@
  * the real upload route, so /preview and /download serve exactly what a user or an
  * agent stored.
  */
-import { makeSignature } from 'better-auth/crypto';
-import { env, SELF } from 'cloudflare:test';
+import { SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
+import { seedInstallation, seedProject, seedSignedInUser, seedUser } from './helpers/seed-d1';
 
 const API = 'https://api.test.example.com';
 /** vitest.workers.config.ts sets BASE_DOMAIN=test.example.com; previews come from api. */
@@ -35,17 +34,7 @@ beforeAll(async () => {
   await seedUser(userId);
   await seedInstallation(installationId, userId);
   await seedProject(projectId, userId, installationId);
-  await env.DATABASE.prepare("UPDATE users SET status = 'active' WHERE id = ?").bind(userId).run();
-
-  const token = `library-serving-session-${suffix}`;
-  await env.DATABASE.prepare(
-    `INSERT INTO sessions (id, expires_at, token, created_at, updated_at, user_id)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  )
-    .bind(`session-${suffix}`, Date.now() + 3_600_000, token, Date.now(), Date.now(), userId)
-    .run();
-  const signature = await makeSignature(token, env.BETTER_AUTH_SECRET || env.ENCRYPTION_KEY);
-  sessionCookie = `__Secure-better-auth.session_token=${token}.${signature}`;
+  sessionCookie = await seedSignedInUser(userId);
 });
 
 let uploadCount = 0;
@@ -171,7 +160,23 @@ describe('GET /library/:fileId/download', () => {
       'attachment; filename="agent-output.bin"'
     );
     expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
-    expect(await response.text()).toBe(HTML_PAYLOAD);
+    expect(new TextDecoder().decode(await response.arrayBuffer())).toBe(HTML_PAYLOAD);
+  });
+
+  it.each([
+    ['a header line break', 'text/plain\r\nX-Injected: 1'],
+    ['a control character', 'text/plain\u0001'],
+    ['no subtype', 'text'],
+    ['a quoted comma', 'text/plain; charset="utf-8,text/html"'],
+  ])('never echoes a stored type with %s', async (_how, mimeType) => {
+    const { id } = await storeFile('odd-type.bin', 'odd bytes', mimeType);
+
+    const response = await fetchFile(id, 'download');
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('application/octet-stream');
+    expect(response.headers.get('X-Injected')).toBeNull();
+    expect(new TextDecoder().decode(await response.arrayBuffer())).toBe('odd bytes');
   });
 
   it.each(['application/pdf', 'text/plain; charset=utf-8', 'image/png', 'application/json'])(

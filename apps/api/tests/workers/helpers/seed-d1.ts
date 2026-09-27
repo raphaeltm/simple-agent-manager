@@ -4,6 +4,7 @@
  * Centralizes user/project/installation seeding to avoid duplication
  * across DO test suites.
  */
+import { makeSignature } from 'better-auth/crypto';
 import { env } from 'cloudflare:test';
 
 /**
@@ -23,6 +24,24 @@ export async function seedUser(
   )
     .bind(userId, githubId, email, name)
     .run();
+}
+
+/**
+ * Approve a seeded user, sign them in, and return the Cookie header their browser
+ * would send, so a test can reach session-authenticated routes through the real
+ * worker.
+ */
+export async function seedSignedInUser(userId: string): Promise<string> {
+  await env.DATABASE.prepare("UPDATE users SET status = 'active' WHERE id = ?").bind(userId).run();
+  const token = `browser-session-${crypto.randomUUID()}`;
+  await env.DATABASE.prepare(
+    `INSERT INTO sessions (id, expires_at, token, created_at, updated_at, user_id)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  )
+    .bind(`session-${token}`, Date.now() + 3_600_000, token, Date.now(), Date.now(), userId)
+    .run();
+  const signature = await makeSignature(token, env.BETTER_AUTH_SECRET || env.ENCRYPTION_KEY);
+  return `__Secure-better-auth.session_token=${token}.${signature}`;
 }
 
 /**

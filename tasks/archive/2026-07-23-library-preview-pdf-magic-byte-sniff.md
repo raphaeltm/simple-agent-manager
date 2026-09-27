@@ -21,6 +21,10 @@ gate and serves it with the more permissive PDF CSP
 - The web PDF iframe uses `sandbox="allow-same-origin"` **without** `allow-scripts`
   (`FilePreviewModal.tsx`), so scripts do not execute regardless of the framed
   resource's declared CSP.
+  _Superseded 2026-09-27: Chromium refuses to render a PDF in any sandboxed frame,
+  so the sandbox was removed. The frame is now kept inert by the `/preview`
+  response alone (`script-src 'none'`, `nosniff`, the `%PDF-` check). See F10 in
+  `2026-09-27-harden-agent-content-rendering-and-serving.md`._
 
 ## Optional hardening
 
