@@ -191,6 +191,30 @@ Build on PR #2159 (`2967a6cfa`, reopen-within-staleTime reconciliation). Do not 
 - [x] Playwright audit at 375x667 and 1280x800: long chat, empty chat, many sessions, long titles; switch flows; scroll paging; no overflow; screenshots opened and reviewed
 - [ ] Staging: switch between several real chats on app.sammy.party; immediate switch, newest visible, older pages in, zero console errors
 
+### Review follow-ups (Phase 5) — `6ad8502ec`, `7e6836242`
+
+- [x] UI (HIGH): scroll-up paging only once the reader has left the bottom. Virtuoso fires
+      `startReached` whenever the first row renders, and a page of tool calls folds into a few
+      rows, so an ungated open paged a tool-heavy chat's whole history in (reproduced in
+      Playwright: two unrequested `before` loads)
+- [x] UI (MEDIUM): focus handoff to the next chat's title when an in-chat link opens another
+      chat (`session-focus-handoff.tsx`)
+- [x] UI (LOW): freshly sent messages detected by id, not position (prepends, remounts)
+- [x] Tests (HIGH): uncached-switch error state
+- [x] Tests (MEDIUM): drafts across an in-flight send (`sending` / `delivered` / `failed`); a
+      send that failed while away keeps its text
+- [x] Tests (MEDIUM): eviction runs when a chat opens; `loadMore` failure recovers; reconnect
+      catch-up keeps socket rows that land mid-drain (and a replace merge keeps rows newer
+      than the window)
+- [x] Performance (MEDIUM): per-transcript row cap on disk (`CHAT_TRANSCRIPT_PERSIST_MAX_ROWS`,
+      default the 500-row page)
+- [x] Security (LOW): an account switch discards drafts (test); precise draft docs wording
+- [x] Architecture: dead `mergeSessionDetailMessages` removed; `TimelineJumpTarget` aliases
+      `HistoryTarget`; explicit `SessionTranscript` interface; `WorkspaceChatView` duplication
+      filed as `tasks/backlog/2026-09-27-workspace-chat-view-transcript-cache.md`
+- [x] Docs: stale API clamp-test comment; deleted-workspace 404 source noted in
+      `tasks/backlog/2026-09-08-ended-chat-requests-deleted-workspace.md`
+
 ## Acceptance criteria
 
 - [x] A chat used within the last 24 h (configurable) opens from memory or IndexedDB without waiting for the network, and refreshes in the background.
@@ -226,25 +250,38 @@ Build on PR #2159 (`2967a6cfa`, reopen-within-staleTime reconciliation). Do not 
 Each guard was reverted on its own with the rest of the change in place, the web suite was run, and
 the guard was restored. Harness: `.tmp/guards/run_guards.py` (not committed).
 
-| Guard                                                       | Reverted in                         | Test(s) that went red                                                                                                                 |
-| ----------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| G1 per-session key                                          | `project-message-view/index.tsx`    | switching: cached switch paints in the switching commit; uncached switch never shows the previous chat; drafts per chat               |
-| G2 transcript `gcTime`                                      | `lib/query-options/chats.ts`        | switching: cached switch; Report tool not refetched                                                                                   |
-| G3 `refetchOnMount: 'always'` (#2159)                       | `useSessionTranscript.ts`           | switching: cached switch shows what arrived meanwhile; lifecycle: refreshes a fresh cached transcript within staleTime                |
-| G4 newest-page cold load                                    | `lib/message-paging.ts`             | switching: uncached switch; history: opens on the newest page; lifecycle: requests only the newest page                               |
-| G5 cached report config                                     | `useSessionTools.ts`                | switching: Report tool not refetched                                                                                                  |
-| G6 per-session drafts                                       | `session-drafts.tsx`                | switching: drafts per chat                                                                                                            |
-| G7 `startReached` paging                                    | `ConversationPane.tsx`              | history: pages older history in at the top                                                                                            |
-| G8 jump pages until message id                              | `lib/message-paging.ts`             | history: comment jump into unloaded history; message-paging: pages past the target time until the id loads; reads nothing when loaded |
-| G9 hydrate server snapshots only                            | `useSessionLifecycle.ts`            | lifecycle: keeps a working agent working after a streamed row                                                                         |
-| G10 dehydrate age filter                                    | `lib/query-persist-config.ts`       | retention: stops writing a transcript older than the window                                                                           |
-| G11a eviction cap                                           | `lib/query-options/chats.ts`        | retention: keeps the most recent, evicts the rest; never evicts on-screen/opening                                                     |
-| G11b eviction pins                                          | `lib/query-options/chats.ts`        | retention: never evicts a transcript on screen, or the one being opened                                                               |
-| G12 restored-query `gcTime`                                 | `hooks/useQueryCachePersistence.ts` | auth: persisted transcript only after the session check (gcTime of the unopened restored chat)                                        |
-| G13 derived prepend anchor                                  | `useSessionTranscript.ts`           | message view: decrements `firstItemIndex` by the row delta; history: newest page then older                                           |
-| G14 jump waits for mounted list                             | `useConversationJump.ts`            | message view: both deep-link GROUP-row jump tests                                                                                     |
-| G15 unloaded anchor role unknown                            | `SessionMessageView.tsx`            | history: comment jump into unloaded history                                                                                           |
-| Auth gate (`ProtectedRoute` renders children while pending) | `components/ProtectedRoute.tsx`     | auth: persisted transcript only after the session check                                                                               |
+| Guard                                                       | Reverted in                                       | Test(s) that went red                                                                                                                        |
+| ----------------------------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| G1 per-session key                                          | `project-message-view/index.tsx`                  | switching: cached switch paints in the switching commit; uncached switch never shows the previous chat; drafts per chat                      |
+| G2 transcript `gcTime`                                      | `lib/query-options/chats.ts`                      | switching: cached switch; Report tool not refetched                                                                                          |
+| G3 `refetchOnMount: 'always'` (#2159)                       | `useSessionTranscript.ts`                         | switching: cached switch shows what arrived meanwhile; lifecycle: refreshes a fresh cached transcript within staleTime                       |
+| G4 newest-page cold load                                    | `lib/message-paging.ts`                           | switching: uncached switch; history: opens on the newest page; lifecycle: requests only the newest page                                      |
+| G5 cached report config                                     | `useSessionTools.ts`                              | switching: Report tool not refetched                                                                                                         |
+| G6 per-session drafts                                       | `session-drafts.tsx`                              | switching: drafts per chat                                                                                                                   |
+| G7 `startReached` paging                                    | `ConversationPane.tsx`                            | history: pages older history in at the top                                                                                                   |
+| G8 jump pages until message id                              | `lib/message-paging.ts`                           | history: comment jump into unloaded history; message-paging: pages past the target time until the id loads; reads nothing when loaded        |
+| G9 hydrate server snapshots only                            | `useSessionLifecycle.ts`                          | lifecycle: keeps a working agent working after a streamed row                                                                                |
+| G10 dehydrate age filter                                    | `lib/query-persist-config.ts`                     | retention: stops writing a transcript older than the window                                                                                  |
+| G11a eviction cap                                           | `lib/query-options/chats.ts`                      | retention: keeps the most recent, evicts the rest; never evicts on-screen/opening                                                            |
+| G11b eviction pins                                          | `lib/query-options/chats.ts`                      | retention: never evicts a transcript on screen, or the one being opened                                                                      |
+| G12 restored-query `gcTime`                                 | `hooks/useQueryCachePersistence.ts`               | auth: persisted transcript only after the session check (gcTime of the unopened restored chat)                                               |
+| G13 derived prepend anchor                                  | `useSessionTranscript.ts`                         | message view: decrements `firstItemIndex` by the row delta; history: newest page then older                                                  |
+| G14 jump waits for mounted list                             | `useConversationJump.ts`                          | message view: both deep-link GROUP-row jump tests                                                                                            |
+| G15 unloaded anchor role unknown                            | `SessionMessageView.tsx`                          | history: comment jump into unloaded history                                                                                                  |
+| Auth gate (`ProtectedRoute` renders children while pending) | `components/ProtectedRoute.tsx`                   | auth: persisted transcript only after the session check                                                                                      |
+| G16 `startReached` only away from the bottom                | `ConversationPane.tsx`                            | history: newest page then older (unset at the bottom); Playwright: tool-heavy chat opens on one page (pre-fix run: two extra `before` loads) |
+| G17 focus handoff                                           | `SessionMessageView.tsx`                          | focus: in-chat link moves focus to the next chat's title (control: an outside switch keeps focus)                                            |
+| G18 draft `sending`                                         | `session-drafts.tsx`                              | switching: never offers a message still on its way again                                                                                     |
+| G19 draft `delivered` clears only unchanged text            | `session-drafts.tsx`                              | switching: delivery keeps a newer draft                                                                                                      |
+| G20 draft `failed` keeps the text                           | `session-drafts.tsx`                              | switching: a send failed while away is ready to retry                                                                                        |
+| G21 error branch of the load gate                           | `SessionMessageView.tsx`                          | switching: shows why an uncached chat failed to load                                                                                         |
+| G22 catch-up keeps rows written meanwhile                   | `useSessionTranscript.ts`                         | lifecycle: a socket row survives a catch-up draining a gap                                                                                   |
+| G23 replace keeps rows newer than the window                | `lib/merge-messages.ts`                           | merge-messages: preserves messages newer than the window                                                                                     |
+| G24 eviction on open                                        | `useSessionTranscript.ts`                         | lifecycle: trims cached transcripts when a chat opens                                                                                        |
+| G25 `loadMore` releases its in-flight guard                 | `useSessionTranscript.ts`                         | lifecycle: recovers from a failed older-page load                                                                                            |
+| G26 disk row cap                                            | `lib/query-persistence.ts`                        | retention: writes only the newest rows of a long transcript                                                                                  |
+| G27 drafts inside the signed-in subtree                     | test tree (provider hoisted above `AuthProvider`) | auth: an account switch discards drafts                                                                                                      |
+| G28 sent messages detected by id                            | `useAnimatedUserMessages.ts` (original hook)      | animated: no re-fade on reopen; prepends are not new                                                                                         |
 
 ## References
 
