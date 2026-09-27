@@ -26,15 +26,15 @@ export async function wakeVmAdmissionWaiters(
 ): Promise<number> {
   const config = getVmAdmissionConfig(env);
   const binds: unknown[] = [];
-  const filters = [`state IN ('queued', 'waiting')`];
+  const filters = [`vm_task_admissions.state IN ('queued', 'waiting')`];
   if (input.scopeKey) {
-    filters.push('scope_key = ?');
+    filters.push('vm_task_admissions.scope_key = ?');
     binds.push(input.scopeKey);
   } else if (input.providerDomainKey) {
-    filters.push('provider_domain_key = ?');
+    filters.push('vm_task_admissions.provider_domain_key = ?');
     binds.push(input.providerDomainKey);
   } else if (input.userId) {
-    filters.push('user_id = ?');
+    filters.push('vm_task_admissions.user_id = ?');
     binds.push(input.userId);
   }
   binds.push(config.wakeBatchSize);
@@ -70,7 +70,11 @@ export async function wakeVmAdmissionWaiters(
   return nudged;
 }
 
-async function cancelOrphanedAdmission(env: Env, taskId: string, wakeReason: string): Promise<void> {
+async function cancelOrphanedAdmission(
+  env: Env,
+  taskId: string,
+  wakeReason: string
+): Promise<void> {
   const now = new Date().toISOString();
   try {
     await env.DATABASE.batch([
@@ -84,7 +88,9 @@ async function cancelOrphanedAdmission(env: Env, taskId: string, wakeReason: str
          WHERE task_id = ?
            AND state IN ('queued', 'waiting')`
       ).bind(now, now, taskId),
-      env.DATABASE.prepare(`DELETE FROM vm_provisioning_leases WHERE owner_task_id = ?`).bind(taskId),
+      env.DATABASE.prepare(`DELETE FROM vm_provisioning_leases WHERE owner_task_id = ?`).bind(
+        taskId
+      ),
     ]);
     log.warn('vm_admission.orphaned_waiter_cancelled', { taskId, wakeReason });
   } catch (err) {
