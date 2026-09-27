@@ -22,8 +22,16 @@ describe('redactCredentialTokens', () => {
     ['underscore-joined name', (t: string) => `SECRET_${t}`, `SECRET_${R}`],
     ['JSON string', (t: string) => `{"apiKey":"${t}"}`, `{"apiKey":"${R}"}`],
     ['bearer header', (t: string) => `Authorization: Bearer ${t}`, `Authorization: Bearer ${R}`],
-    ['URL query', (t: string) => `https://x.test/v1?key=${t}&page=2`, `https://x.test/v1?key=${R}&page=2`],
-    ['quoted in an error', (t: string) => `upstream rejected '${t}' (401)`, `upstream rejected '${R}' (401)`],
+    [
+      'URL query',
+      (t: string) => `https://x.test/v1?key=${t}&page=2`,
+      `https://x.test/v1?key=${R}&page=2`,
+    ],
+    [
+      'quoted in an error',
+      (t: string) => `upstream rejected '${t}' (401)`,
+      `upstream rejected '${R}' (401)`,
+    ],
   ])('finds a token inside %s', (_context, wrap, expected) => {
     for (const token of Object.values(credentialTokenCanaries)) {
       expect(redactCredentialTokens(wrap(token), R)).toBe(expected);

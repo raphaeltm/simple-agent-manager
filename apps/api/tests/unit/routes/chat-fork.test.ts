@@ -163,7 +163,11 @@ describe('session summarization rate limit (fork-prepare + summarize)', () => {
     mocks.drizzle.mockReturnValue({});
     mocks.getUserId.mockReturnValue('user-a');
     mocks.requireProjectCapability.mockResolvedValue({ id: 'project-1' });
-    mocks.getSession.mockResolvedValue({ id: 'session-1', taskId: null, createdByUserId: 'user-a' });
+    mocks.getSession.mockResolvedValue({
+      id: 'session-1',
+      taskId: null,
+      createdByUserId: 'user-a',
+    });
     mocks.getMessages.mockResolvedValue({
       messages: [{ role: 'user', content: 'Original prompt', createdAt: 1 }],
     });

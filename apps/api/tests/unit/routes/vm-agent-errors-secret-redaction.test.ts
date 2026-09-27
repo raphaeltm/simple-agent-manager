@@ -36,9 +36,8 @@ vi.mock('../../../src/services/diagnostic-incidents', () => ({
   uploadDiagnosticArtifact: vi.fn(),
 }));
 
-const { nodeDiagnosticIncidentRoutes } = await import(
-  '../../../src/routes/node-diagnostic-incidents'
-);
+const { nodeDiagnosticIncidentRoutes } =
+  await import('../../../src/routes/node-diagnostic-incidents');
 
 const EVERY_CANARY = [...diagnosticSecretCanaries, ...allCredentialTokenCanaries];
 
@@ -110,14 +109,19 @@ describe('POST /api/nodes/:id/errors never persists or logs a credential', () =>
         context: {
           env: { OPENAI_API_KEY: credentialTokenCanaries.openaiProjectKey },
           stderr: `export ANTHROPIC_API_KEY=${credentialTokenCanaries.anthropicApiKey}`,
-          lines: [credentialTokenCanaries.openaiLegacyKey, credentialTokenCanaries.samPersonalAccessToken],
+          lines: [
+            credentialTokenCanaries.openaiLegacyKey,
+            credentialTokenCanaries.samPersonalAccessToken,
+          ],
         },
       },
     ]);
 
     expect(res.status).toBe(204);
     const rows = observability
-      .prepare('SELECT source, level, message, stack, context, node_id FROM platform_errors ORDER BY level')
+      .prepare(
+        'SELECT source, level, message, stack, context, node_id FROM platform_errors ORDER BY level'
+      )
       .all() as Array<Record<string, string | null>>;
 
     // Liveness: both reports were stored with their non-secret text intact.
