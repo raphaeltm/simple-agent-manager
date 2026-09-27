@@ -42,6 +42,7 @@ import {
   ResourceRequirementsValidationError,
 } from '../../../services/resource-requirements-input';
 import { resolveSkillProfile } from '../../../services/skills';
+import { markTaskFailedIfNonTerminal } from '../../../services/task-failure';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
@@ -462,11 +463,12 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
     );
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`
-    )
-      .bind(`Session creation failed: ${errorMsg}`, new Date().toISOString(), taskId)
-      .run();
+    await markTaskFailedIfNonTerminal(
+      env.DATABASE,
+      taskId,
+      `Session creation failed: ${errorMsg}`,
+      { env, projectId: input.projectId, source: 'sam.dispatch_task.session_creation' }
+    );
     log.error('sam.dispatch_task.session_failed', {
       taskId,
       projectId: input.projectId,
@@ -535,11 +537,12 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await env.DATABASE.prepare(
-      `UPDATE tasks SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`
-    )
-      .bind(`Task runner startup failed: ${errorMsg}`, new Date().toISOString(), taskId)
-      .run();
+    await markTaskFailedIfNonTerminal(
+      env.DATABASE,
+      taskId,
+      `Task runner startup failed: ${errorMsg}`,
+      { env, projectId: input.projectId, source: 'sam.dispatch_task.runner_startup', sessionId }
+    );
     log.error('sam.dispatch_task.do_startup_failed', {
       taskId,
       projectId: input.projectId,

@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from './task-status';
 
 const TERMINAL_TASK_STATUSES_SQL = "'completed', 'failed', 'cancelled'";
 const LIVE_TASK_STATUSES_SQL = "'queued', 'delegated', 'in_progress', 'awaiting_followup'";
@@ -333,12 +334,41 @@ export async function failAndRestoreSessionRecoveryHandoff(
   const results = await database.batch([
     database
       .prepare(
+        `INSERT INTO task_status_events
+           (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+         SELECT ?, task.id, task.status, 'failed', 'system', NULL, ?, ?
+           FROM tasks task
+          WHERE task.id = ?
+            AND task.recovery_source_task_id IS NOT NULL
+            AND ${taskStatusIsNonTerminalSql('task.status')}
+            AND EXISTS (
+              SELECT 1 FROM session_snapshots snapshot
+               WHERE snapshot.chat_session_id = ?
+                 AND snapshot.recovery_task_id = task.id
+                 AND snapshot.recovery_status = 'waking'
+            )`
+      )
+      .bind(
+        input.statusEventId,
+        input.error,
+        now,
+        input.recoveryTaskId,
+        ...TERMINAL_STATUS_VALUES,
+        input.chatSessionId
+      ),
+    database
+      .prepare(
         `UPDATE tasks
             SET status = 'failed', execution_step = NULL, chat_session_id = NULL,
                 error_message = ?, completed_at = ?, updated_at = ?
           WHERE id = ?
             AND recovery_source_task_id IS NOT NULL
-            AND status NOT IN ('completed', 'cancelled')
+            AND ${taskStatusIsNonTerminalSql()}
+            AND EXISTS (
+              SELECT 1 FROM task_status_events event
+               WHERE event.id = ? AND event.task_id = tasks.id
+                 AND event.to_status = 'failed'
+            )
             AND EXISTS (
               SELECT 1 FROM session_snapshots snapshot
                WHERE snapshot.chat_session_id = ?
@@ -346,7 +376,16 @@ export async function failAndRestoreSessionRecoveryHandoff(
                  AND snapshot.recovery_status = 'waking'
             )`
       )
-      .bind(input.error, now, now, input.recoveryTaskId, input.chatSessionId, input.recoveryTaskId),
+      .bind(
+        input.error,
+        now,
+        now,
+        input.recoveryTaskId,
+        ...TERMINAL_STATUS_VALUES,
+        input.statusEventId,
+        input.chatSessionId,
+        input.recoveryTaskId
+      ),
     database
       .prepare(
         `UPDATE tasks
@@ -355,6 +394,11 @@ export async function failAndRestoreSessionRecoveryHandoff(
                 updated_at = ?
           WHERE id = (SELECT recovery_source_task_id FROM tasks WHERE id = ?)
             AND chat_session_id IS NULL
+            AND EXISTS (
+              SELECT 1 FROM task_status_events event
+               WHERE event.id = ? AND event.task_id = ?
+                 AND event.to_status = 'failed'
+            )
             AND EXISTS (
               SELECT 1 FROM tasks recovery
                WHERE recovery.id = ?
@@ -368,6 +412,8 @@ export async function failAndRestoreSessionRecoveryHandoff(
       .bind(
         input.chatSessionId,
         now,
+        input.recoveryTaskId,
+        input.statusEventId,
         input.recoveryTaskId,
         input.recoveryTaskId,
         input.chatSessionId
@@ -384,6 +430,11 @@ export async function failAndRestoreSessionRecoveryHandoff(
           )
             AND chat_session_id IS NULL
             AND EXISTS (
+              SELECT 1 FROM task_status_events event
+               WHERE event.id = ? AND event.task_id = ?
+                 AND event.to_status = 'failed'
+            )
+            AND EXISTS (
               SELECT 1 FROM tasks recovery
                WHERE recovery.id = ?
                  AND recovery.status = 'failed'
@@ -397,6 +448,8 @@ export async function failAndRestoreSessionRecoveryHandoff(
         input.chatSessionId,
         now,
         input.chatSessionId,
+        input.recoveryTaskId,
+        input.statusEventId,
         input.recoveryTaskId,
         input.recoveryTaskId,
         input.chatSessionId
@@ -414,27 +467,23 @@ export async function failAndRestoreSessionRecoveryHandoff(
                 recovery_claimed_at = NULL, recovery_failed_at = ?, updated_at = ?
           WHERE chat_session_id = ?
             AND recovery_task_id = ?
+            AND EXISTS (
+              SELECT 1 FROM task_status_events event
+               WHERE event.id = ? AND event.task_id = recovery_task_id
+                 AND event.to_status = 'failed'
+            )
             AND recovery_status = 'waking'`
       )
-      .bind(input.error, now, now, input.chatSessionId, input.recoveryTaskId),
-    database
-      .prepare(
-        `INSERT INTO task_status_events
-           (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
-         SELECT ?, task.id, 'queued', 'failed', 'system', NULL, ?, ?
-           FROM tasks task
-          WHERE task.id = ?
-            AND task.status = 'failed'
-            AND NOT EXISTS (
-              SELECT 1 FROM task_status_events event
-               WHERE event.task_id = task.id
-                 AND event.to_status = 'failed'
-                 AND event.reason = ?
-            )`
-      )
-      .bind(input.statusEventId, input.error, now, input.recoveryTaskId, input.error),
+      .bind(
+        input.error,
+        now,
+        now,
+        input.chatSessionId,
+        input.recoveryTaskId,
+        input.statusEventId
+      ),
   ]);
-  if ((results[0]?.meta.changes ?? 0) === 0) {
+  if ((results[0]?.meta.changes ?? 0) === 0 || (results[1]?.meta.changes ?? 0) === 0) {
     throw new Error('Recovery start failure lost its authoritative snapshot claim');
   }
   log.warn('session_recovery.start_failure_restored', {

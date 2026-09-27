@@ -318,7 +318,7 @@ export async function handleGetInstructions(
           ]
         : [
             'Call the SAM MCP `update_task_status` tool to report progress as you complete significant milestones.',
-            'Call the SAM MCP `complete_task` tool with a summary when all work is done.',
+            'Call the SAM MCP `complete_task` tool with a summary when all work is done; when a pull request exists, pass its URL as `evidence.prUrl`.',
             'Push your changes to the output branch before calling the SAM MCP `complete_task` tool.',
             'If you encounter blockers, report them via the SAM MCP `update_task_status` tool with a clear description.',
           ]),

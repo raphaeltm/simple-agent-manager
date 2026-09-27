@@ -57,7 +57,7 @@ This connects to the SAM control plane. It's how you interact with tasks, projec
 **Task Lifecycle:**
 - \`get_instructions\` — **Call this first, always.** Returns your task details, project info, output branch, and mode-specific instructions (task mode vs. conversation mode). Nothing else makes sense until you've called this.
 - \`update_task_status\` — Report progress at significant milestones. The human sees these in the SAM dashboard in real time. Use them liberally — a human monitoring a long-running task has no other visibility into what you're doing.
-- \`complete_task\` — Call when ALL work is done and pushed. Include a clear summary. Only used in task mode — in conversation mode, the human ends the session.
+- \`complete_task\` — Call when ALL work is done and pushed. Include a clear summary and, when a pull request exists, pass its URL as \`evidence.prUrl\`. Only used in task mode — in conversation mode, the human ends the session.
 - \`dispatch_task\` — Spawn a new task for another agent. Use this when you discover work that's adjacent but outside your current scope. Describe the task clearly — the receiving agent gets only what you write here.
 - \`request_human_input\` — When you're genuinely blocked and need a human decision. Provide rich context and, when possible, a set of options to choose from. SAM records the request so the human can answer it.
 
@@ -115,7 +115,7 @@ These are patterns that work well across different types of tasks:
 - \`get_workspace_diff_summary\` to review everything you've done
 - \`gh run list\` to confirm CI is green
 - Push all changes to the output branch
-- \`complete_task\` with a clear summary of what was accomplished
+- \`complete_task\` with a clear summary of what was accomplished and the pull request URL in \`evidence.prUrl\` when one exists
 
 **Resource awareness:**
 - Don't leave long-running processes idle

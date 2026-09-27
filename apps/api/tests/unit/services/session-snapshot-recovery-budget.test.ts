@@ -302,6 +302,27 @@ describe('every writer of the failed status maintains the decay anchor', () => {
   function seedRecoveryTask(taskId: string): void {
     sqlite
       .prepare(
+        `INSERT OR IGNORE INTO tasks
+           (id, project_id, user_id, title, description, status, created_at, updated_at)
+         VALUES ('source-task', ?, ?, 'source', 'source', 'in_progress', ?, ?)`
+      )
+      .run(PROJECT_ID, USER_ID, NOW.toISOString(), NOW.toISOString());
+    sqlite
+      .prepare(
+        `UPDATE tasks SET chat_session_id = NULL, superseded_by_task_id = ?
+          WHERE id = 'source-task'`
+      )
+      .run(taskId);
+    sqlite
+      .prepare(
+        `INSERT OR IGNORE INTO workspaces
+           (id, user_id, project_id, status, created_at, updated_at)
+         VALUES (?, ?, ?, 'stopped', ?, ?)`
+      )
+      .run(WORKSPACE_ID, USER_ID, PROJECT_ID, NOW.toISOString(), NOW.toISOString());
+    sqlite.prepare('UPDATE workspaces SET chat_session_id = NULL WHERE id = ?').run(WORKSPACE_ID);
+    sqlite
+      .prepare(
         `INSERT INTO tasks (id, project_id, user_id, title, description, status,
                             chat_session_id, recovery_source_task_id, created_at, updated_at)
          VALUES (?, ?, ?, 'wake', 'wake', 'in_progress', ?, 'source-task', ?, ?)`
@@ -332,6 +353,93 @@ describe('every writer of the failed status maintains the decay anchor', () => {
     const row = readSnapshot();
     expect(row.recovery_status).toBe('failed');
     expect(row.recovery_failed_at).not.toBeNull();
+    expect(
+      sqlite.prepare('SELECT chat_session_id FROM tasks WHERE id = ?').get('task-kickoff')
+    ).toEqual({ chat_session_id: null });
+    expect(
+      sqlite.prepare('SELECT chat_session_id FROM tasks WHERE id = ?').get('source-task')
+    ).toEqual({ chat_session_id: CHAT_SESSION_ID });
+    expect(
+      sqlite.prepare('SELECT chat_session_id FROM workspaces WHERE id = ?').get(WORKSPACE_ID)
+    ).toEqual({ chat_session_id: CHAT_SESSION_ID });
+  });
+
+  it.each(['completed', 'cancelled', 'failed'])(
+    'failAndRestoreSessionRecoveryHandoff does not overwrite a %s task or release its claim',
+    async (status) => {
+      seedSleepingSnapshot({ recoveryAttempts: 0 });
+      seedRecoveryTask('task-terminal');
+      await wake('task-terminal');
+      sqlite.prepare('UPDATE tasks SET status = ? WHERE id = ?').run(status, 'task-terminal');
+
+      await expect(
+        failAndRestoreSessionRecoveryHandoff(createSqliteD1(sqlite), {
+          recoveryTaskId: 'task-terminal',
+          chatSessionId: CHAT_SESSION_ID,
+          error: 'late recovery failure',
+          statusEventId: 'event-terminal',
+        })
+      ).rejects.toThrow('lost its authoritative snapshot claim');
+
+      expect(sqlite.prepare('SELECT status FROM tasks WHERE id = ?').get('task-terminal')).toEqual({
+        status,
+      });
+      expect(
+        sqlite.prepare('SELECT chat_session_id FROM tasks WHERE id = ?').get('task-terminal')
+      ).toEqual({ chat_session_id: CHAT_SESSION_ID });
+      expect(
+        sqlite.prepare('SELECT chat_session_id FROM tasks WHERE id = ?').get('source-task')
+      ).toEqual({ chat_session_id: null });
+      expect(
+        sqlite.prepare('SELECT chat_session_id FROM workspaces WHERE id = ?').get(WORKSPACE_ID)
+      ).toEqual({ chat_session_id: null });
+      expect(readSnapshot().recovery_status).toBe('waking');
+      expect(sqlite.prepare('SELECT COUNT(*) AS count FROM task_status_events').get()).toEqual({
+        count: 0,
+      });
+    }
+  );
+
+  it('does not replay handoff mutations after the recovery task is already failed', async () => {
+    seedSleepingSnapshot({ recoveryAttempts: 0 });
+    seedRecoveryTask('task-replay');
+    await wake('task-replay');
+    const input = {
+      recoveryTaskId: 'task-replay',
+      chatSessionId: CHAT_SESSION_ID,
+      error: 'Session recovery failed: TaskRunner start threw',
+      statusEventId: 'event-replay',
+    };
+    await failAndRestoreSessionRecoveryHandoff(createSqliteD1(sqlite), input);
+    const readHandoffState = () => ({
+      snapshot: readSnapshot(),
+      recovery: sqlite
+        .prepare('SELECT status, chat_session_id FROM tasks WHERE id = ?')
+        .get('task-replay'),
+      source: sqlite
+        .prepare('SELECT chat_session_id, superseded_by_task_id FROM tasks WHERE id = ?')
+        .get('source-task'),
+      workspace: sqlite
+        .prepare('SELECT chat_session_id FROM workspaces WHERE id = ?')
+        .get(WORKSPACE_ID),
+      events: sqlite.prepare('SELECT COUNT(*) AS count FROM task_status_events').get(),
+    });
+    const firstState = readHandoffState();
+
+    await expect(
+      failAndRestoreSessionRecoveryHandoff(createSqliteD1(sqlite), {
+        ...input,
+        statusEventId: 'event-replay-2',
+      })
+    ).rejects.toThrow('lost its authoritative snapshot claim');
+
+    expect(readHandoffState()).toEqual(firstState);
+    expect(firstState).toMatchObject({
+      recovery: { status: 'failed', chat_session_id: null },
+      source: { chat_session_id: CHAT_SESSION_ID, superseded_by_task_id: null },
+      workspace: { chat_session_id: CHAT_SESSION_ID },
+      events: { count: 1 },
+    });
   });
 
   it('recovers after three kickoff failures through that writer', async () => {

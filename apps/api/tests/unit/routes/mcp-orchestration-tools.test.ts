@@ -247,7 +247,11 @@ function createMockD1() {
       lastQuery = sql;
       return stmt;
     }),
-    batch: vi.fn(),
+    batch: vi.fn().mockResolvedValue([
+      { success: true, results: [{ status: 'queued' }], meta: { changes: 0 } },
+      { success: true, results: [], meta: { changes: 1 } },
+      { success: true, results: [], meta: { changes: 1 } },
+    ]),
     _stmt: stmt,
     _handlers: handlers,
   };

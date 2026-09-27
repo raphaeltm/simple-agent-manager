@@ -47,6 +47,7 @@ import {
   readPersistedTaskResourcePlan,
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
+import { markTaskFailedIfNonTerminal } from '../../services/task-failure';
 import { isTaskBlocked } from '../../services/task-graph';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
@@ -395,26 +396,12 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       userId
     );
   } catch (err) {
-    const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db
-      .update(schema.tasks)
-      .set({
-        status: 'failed',
-        errorMessage: `Session creation failed: ${errorMsg}`,
-        updatedAt: failedAt,
-      })
-      .where(eq(schema.tasks.id, task.id));
-    await db.insert(schema.taskStatusEvents).values({
-      id: ulid(),
-      taskId: task.id,
-      fromStatus: 'queued',
-      toStatus: 'failed',
-      actorType: 'system',
-      actorId: null,
-      reason: `Session creation failed: ${errorMsg}`,
-      createdAt: failedAt,
-    });
+    await markTaskFailedIfNonTerminal(
+      c.env.DATABASE,
+      task.id,
+      `Session creation failed: ${errorMsg}`
+    );
     log.error('task_run.session_failed', { taskId: task.id, projectId, error: errorMsg });
     throw err;
   }
@@ -473,26 +460,12 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       vmSizeSource,
     });
   } catch (err) {
-    const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db
-      .update(schema.tasks)
-      .set({
-        status: 'failed',
-        errorMessage: `Task runner startup failed: ${errorMsg}`,
-        updatedAt: failedAt,
-      })
-      .where(eq(schema.tasks.id, task.id));
-    await db.insert(schema.taskStatusEvents).values({
-      id: ulid(),
-      taskId: task.id,
-      fromStatus: 'queued',
-      toStatus: 'failed',
-      actorType: 'system',
-      actorId: null,
-      reason: `Task runner startup failed: ${errorMsg}`,
-      createdAt: failedAt,
-    });
+    await markTaskFailedIfNonTerminal(
+      c.env.DATABASE,
+      task.id,
+      `Task runner startup failed: ${errorMsg}`
+    );
     log.error('task_run.do_startup_failed', { taskId: task.id, projectId, error: errorMsg });
     // Stop the orphaned session (best-effort — it has no workspace and will never be cleaned up otherwise)
     await projectDataService.stopSession(c.env, projectId, sessionId).catch((e) => {

@@ -13,6 +13,10 @@ import {
 import { NodeAllocationUncertainError } from '../services/node-allocation-recovery';
 import { provisionNode } from '../services/node-provisioning';
 import { persistError } from '../services/observability';
+import {
+  taskStatusIsNonTerminalSql,
+  TERMINAL_STATUS_VALUES,
+} from '../services/task-status';
 
 export const DIRECT_PROVISIONING_KEY = 'direct-provisioning:v1';
 export const DEFAULT_NODE_PROVISIONING_REQUEST_TIMEOUT_MS = 5_000;
@@ -394,7 +398,7 @@ export class NodeLifecycleProvisioning {
           .run();
         await this.env.DATABASE.prepare(
           `UPDATE tasks SET status='failed',error_message=?,updated_at=?
-            WHERE id=? AND workspace_id=? AND user_id=? AND status IN ('queued','in_progress')
+            WHERE id=? AND workspace_id=? AND user_id=? AND ${taskStatusIsNonTerminalSql()}
               AND EXISTS (${failureScope})`
         )
           .bind(
@@ -403,6 +407,7 @@ export class NodeLifecycleProvisioning {
             workspace.taskId,
             workspace.placement.id,
             intent.input.userId,
+            ...TERMINAL_STATUS_VALUES,
             ...scopeBindings
           )
           .run();

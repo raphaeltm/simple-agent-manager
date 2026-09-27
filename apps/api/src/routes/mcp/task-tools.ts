@@ -300,6 +300,7 @@ export async function handleCompleteTask(
     );
   }
   const evidenceJson = evidenceValidation?.ok ? JSON.stringify(evidenceValidation.value) : null;
+  const completionPrUrl = evidenceValidation?.ok ? (evidenceValidation.value.prUrl ?? null) : null;
 
   const now = new Date().toISOString();
 
@@ -328,12 +329,14 @@ export async function handleCompleteTask(
       `UPDATE tasks
        SET execution_step = 'awaiting_followup',
            output_summary = COALESCE(?, output_summary),
+           output_pr_url = COALESCE(?, output_pr_url),
            completion_evidence = COALESCE(?, completion_evidence),
            updated_at = ?
        WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`
     )
       .bind(
         summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
+        completionPrUrl,
         evidenceJson,
         now,
         tokenData.taskId,
@@ -417,6 +420,7 @@ export async function handleCompleteTask(
      SET status = 'completed',
          completed_at = ?,
          output_summary = COALESCE(?, output_summary),
+         output_pr_url = COALESCE(?, output_pr_url),
          completion_evidence = COALESCE(?, completion_evidence),
          updated_at = ?
      WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`
@@ -424,6 +428,7 @@ export async function handleCompleteTask(
     .bind(
       now,
       summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
+      completionPrUrl,
       evidenceJson,
       now,
       tokenData.taskId,
@@ -535,7 +540,7 @@ export async function handleCompleteTask(
         projectName,
         taskId: tokenData.taskId,
         taskTitle: taskRow.title,
-        outputPrUrl: taskRow.output_pr_url,
+        outputPrUrl: completionPrUrl ?? taskRow.output_pr_url,
         outputBranch: taskRow.output_branch,
         sessionId,
       });

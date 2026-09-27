@@ -52,6 +52,7 @@ import {
 } from '../../services/resource-requirements-input';
 import { resolveSkillProfile } from '../../services/skills';
 import { submitInstantTask } from '../../services/submit-instant-task';
+import { markTaskFailedIfNonTerminal } from '../../services/task-failure';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import type { TaskTitleConfig } from '../../services/task-title';
 import { generateTaskTitle, getTaskTitleConfig, truncateTitle } from '../../services/task-title';
@@ -612,26 +613,12 @@ submitRoutes.post(
     } catch (err) {
       // Session creation or message persistence failed — mark task as failed
       // to prevent orphaned 'queued' records that the task runner can't process.
-      const failedAt = new Date().toISOString();
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await db
-        .update(schema.tasks)
-        .set({
-          status: 'failed',
-          errorMessage: `Session creation failed: ${errorMsg}`,
-          updatedAt: failedAt,
-        })
-        .where(eq(schema.tasks.id, taskId));
-      await db.insert(schema.taskStatusEvents).values({
-        id: ulid(),
+      await markTaskFailedIfNonTerminal(
+        c.env.DATABASE,
         taskId,
-        fromStatus: 'queued',
-        toStatus: 'failed',
-        actorType: 'system',
-        actorId: null,
-        reason: `Session creation failed: ${errorMsg}`,
-        createdAt: failedAt,
-      });
+        `Session creation failed: ${errorMsg}`
+      );
       log.error('task_submit.session_failed', { taskId, projectId, error: errorMsg });
       throw err; // Re-throw to return 500 to the frontend
     }
@@ -729,26 +716,12 @@ submitRoutes.post(
       });
     } catch (err) {
       // TaskRunner DO startup failed — mark task as failed.
-      const failedAt = new Date().toISOString();
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await db
-        .update(schema.tasks)
-        .set({
-          status: 'failed',
-          errorMessage: `Task runner startup failed: ${errorMsg}`,
-          updatedAt: failedAt,
-        })
-        .where(eq(schema.tasks.id, taskId));
-      await db.insert(schema.taskStatusEvents).values({
-        id: ulid(),
+      await markTaskFailedIfNonTerminal(
+        c.env.DATABASE,
         taskId,
-        fromStatus: 'queued',
-        toStatus: 'failed',
-        actorType: 'system',
-        actorId: null,
-        reason: `Task runner startup failed: ${errorMsg}`,
-        createdAt: failedAt,
-      });
+        `Task runner startup failed: ${errorMsg}`
+      );
       log.error('task_submit.do_startup_failed', { taskId, projectId, error: errorMsg });
       // Stop the orphaned session (best-effort — it has no workspace and will never be cleaned up otherwise)
       await projectDataService.stopSession(c.env, projectId, sessionId).catch((e) => {

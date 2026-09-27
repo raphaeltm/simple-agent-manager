@@ -29,6 +29,7 @@ import {
   readPersistedTaskResourcePlan,
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
+import { markTaskFailedIfNonTerminal } from '../../services/task-failure';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import {
@@ -157,28 +158,21 @@ export async function handleRetrySubtask(
     stoppedChatSessionId = stopResult.chatSessionId;
 
     const now = new Date().toISOString();
-    await db
-      .update(schema.tasks)
-      .set({
-        status: 'failed',
-        errorMessage: 'Stopped by parent for retry',
-        completedAt: now,
-        updatedAt: now,
-      })
-      .where(eq(schema.tasks.id, childTaskId));
-
-    await db.insert(schema.taskStatusEvents).values({
-      id: ulid(),
-      taskId: childTaskId,
-      fromStatus: childTask.status,
-      toStatus: 'failed',
-      actorType: 'agent',
-      actorId: tokenData.workspaceId,
-      reason: 'Stopped by parent for retry',
-      createdAt: now,
-    });
-
-    stoppedStatus = 'failed';
+    const transitioned = await markTaskFailedIfNonTerminal(
+      env.DATABASE,
+      childTaskId,
+      'Stopped by parent for retry',
+      undefined,
+      { actorType: 'agent', actorId: tokenData.workspaceId, completedAt: now }
+    );
+    if (transitioned) {
+      stoppedStatus = 'failed';
+    } else {
+      const current = await env.DATABASE.prepare('SELECT status FROM tasks WHERE id = ?')
+        .bind(childTaskId)
+        .first<{ status: string }>();
+      stoppedStatus = current?.status ?? childTask.status;
+    }
 
     // Stop the durable chat session after the node agent is confirmed stopped.
     if (stoppedChatSessionId) {
@@ -427,15 +421,11 @@ export async function handleRetrySubtask(
     );
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    const failedAt = new Date().toISOString();
-    await db
-      .update(schema.tasks)
-      .set({
-        status: 'failed',
-        errorMessage: `Session creation failed: ${errorMsg}`,
-        updatedAt: failedAt,
-      })
-      .where(eq(schema.tasks.id, taskId));
+    await markTaskFailedIfNonTerminal(
+      env.DATABASE,
+      taskId,
+      `Session creation failed: ${errorMsg}`
+    );
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create chat session: ${errorMsg}`);
   }
 
@@ -492,15 +482,11 @@ export async function handleRetrySubtask(
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    const failedAt = new Date().toISOString();
-    await db
-      .update(schema.tasks)
-      .set({
-        status: 'failed',
-        errorMessage: `Task runner startup failed: ${errorMsg}`,
-        updatedAt: failedAt,
-      })
-      .where(eq(schema.tasks.id, taskId));
+    await markTaskFailedIfNonTerminal(
+      env.DATABASE,
+      taskId,
+      `Task runner startup failed: ${errorMsg}`
+    );
     log.error('orchestration.retry.do_startup_failed', { taskId, error: errorMsg });
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to start task runner: ${errorMsg}`);
   }

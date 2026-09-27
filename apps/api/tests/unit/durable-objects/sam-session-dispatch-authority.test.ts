@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { dispatchTask } from '../../../src/durable-objects/sam-session/tools/dispatch-task';
+import { retrySubtask } from '../../../src/durable-objects/sam-session/tools/retry-subtask';
 import type { ToolContext } from '../../../src/durable-objects/sam-session/types';
 import type { Env } from '../../../src/env';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
@@ -74,6 +75,152 @@ describe('SAM session dispatch_task current project authority', () => {
     mocks.generateTaskTitle.mockResolvedValue('Session dispatched task');
     mocks.projectDataFetch.mockResolvedValue(new Response('{}'));
   });
+
+  async function seedRunnableProject(sqlite: Database.Database, userId = 'owner-1'): Promise<Env> {
+    createAllSchemaTables(sqlite, schema);
+    seedUser(sqlite, userId);
+    seedProjectWithMember(sqlite, { projectId: 'project-1', userId, role: 'owner' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId,
+      projectId: 'project-1',
+    });
+    const env = createEnv(sqlite);
+    await ensureDefaultCapacityPoolsForExistingCredentials(drizzle(env.DATABASE, { schema }), {
+      userId,
+      projectId: 'project-1',
+      includeInstallation: false,
+    });
+    return env;
+  }
+
+  it.each([
+    ['completed', 'completed'],
+    ['cancelled', 'cancelled'],
+    ['in_progress', 'failed'],
+  ] as const)(
+    'dispatch_task session failure preserves/fails %s as %s through the real entry point',
+    async (winningStatus, expectedStatus) => {
+      const sqlite = new Database(':memory:');
+      try {
+        const env = await seedRunnableProject(sqlite);
+        mocks.createSession.mockImplementationOnce(async () => {
+          sqlite.prepare('UPDATE tasks SET status = ?').run(winningStatus);
+          throw new Error('session unavailable');
+        });
+
+        await dispatchTask(
+          { projectId: 'project-1', description: 'Dispatch failure guard' },
+          makeContext(env, 'owner-1')
+        );
+
+        expect(sqlite.prepare('SELECT status FROM tasks').get()).toEqual({
+          status: expectedStatus,
+        });
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it.each([
+    ['completed', 'completed'],
+    ['cancelled', 'cancelled'],
+    ['in_progress', 'failed'],
+  ] as const)(
+    'dispatch_task runner failure preserves/fails %s as %s through the real entry point',
+    async (winningStatus, expectedStatus) => {
+      const sqlite = new Database(':memory:');
+      try {
+        const env = await seedRunnableProject(sqlite);
+        mocks.startTaskRunnerDO.mockImplementationOnce(async () => {
+          sqlite.prepare('UPDATE tasks SET status = ?').run(winningStatus);
+          throw new Error('runner unavailable');
+        });
+
+        await dispatchTask(
+          { projectId: 'project-1', description: 'Runner failure guard' },
+          makeContext(env, 'owner-1')
+        );
+
+        expect(sqlite.prepare('SELECT status FROM tasks').get()).toEqual({
+          status: expectedStatus,
+        });
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it.each([
+    ['completed', 'completed'],
+    ['cancelled', 'cancelled'],
+    ['in_progress', 'failed'],
+  ] as const)(
+    'retry_subtask session failure preserves/fails %s as %s through the real entry point',
+    async (winningStatus, expectedStatus) => {
+      const sqlite = new Database(':memory:');
+      try {
+        const env = await seedRunnableProject(sqlite);
+        sqlite
+          .prepare(
+            `INSERT INTO tasks
+               (id, project_id, user_id, title, description, status, created_at, updated_at)
+             VALUES ('original-task', 'project-1', 'owner-1', 'Original', 'Retry me', 'failed', ?, ?)`
+          )
+          .run(new Date().toISOString(), new Date().toISOString());
+        mocks.createSession.mockImplementationOnce(async () => {
+          sqlite
+            .prepare("UPDATE tasks SET status = ? WHERE id != 'original-task'")
+            .run(winningStatus);
+          throw new Error('session unavailable');
+        });
+
+        await retrySubtask({ taskId: 'original-task' }, makeContext(env, 'owner-1'));
+
+        expect(
+          sqlite.prepare("SELECT status FROM tasks WHERE id != 'original-task'").get()
+        ).toEqual({ status: expectedStatus });
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it.each([
+    ['completed', 'completed'],
+    ['cancelled', 'cancelled'],
+    ['in_progress', 'failed'],
+  ] as const)(
+    'retry_subtask runner failure preserves/fails %s as %s through the real entry point',
+    async (winningStatus, expectedStatus) => {
+      const sqlite = new Database(':memory:');
+      try {
+        const env = await seedRunnableProject(sqlite);
+        sqlite
+          .prepare(
+            `INSERT INTO tasks
+               (id, project_id, user_id, title, description, status, created_at, updated_at)
+             VALUES ('original-task', 'project-1', 'owner-1', 'Original', 'Retry me', 'failed', ?, ?)`
+          )
+          .run(new Date().toISOString(), new Date().toISOString());
+        mocks.startTaskRunnerDO.mockImplementationOnce(async () => {
+          sqlite
+            .prepare("UPDATE tasks SET status = ? WHERE id != 'original-task'")
+            .run(winningStatus);
+          throw new Error('runner unavailable');
+        });
+
+        await retrySubtask({ taskId: 'original-task' }, makeContext(env, 'owner-1'));
+
+        expect(
+          sqlite.prepare("SELECT status FROM tasks WHERE id != 'original-task'").get()
+        ).toEqual({ status: expectedStatus });
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
 
   it('rejects removed project members before task/session/runner side effects', async () => {
     const sqlite = new Database(':memory:');

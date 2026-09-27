@@ -37,7 +37,7 @@ import {
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
 import { resolveSkillProfile } from '../../services/skills';
-import { markQueuedTaskFailed } from '../../services/task-failure';
+import { markTaskFailedIfNonTerminal } from '../../services/task-failure';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import { resolveWorkspaceRuntime } from '../../services/workspace-runtime';
@@ -569,7 +569,7 @@ export async function handleDispatchTask(
       await requireRepositoryOwnerAccess(env, db, project, tokenData.userId, 'mcp-dispatch');
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await markQueuedTaskFailed(db, taskId, `Repository access check failed: ${errorMsg}`, {
+      await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Repository access check failed: ${errorMsg}`, {
         env,
         projectId: tokenData.projectId,
         source: 'mcp.dispatch_task.instant_access_check',
@@ -635,7 +635,7 @@ export async function handleDispatchTask(
     } catch (err) {
       // Session creation failed — mark task as failed
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await markQueuedTaskFailed(db, taskId, `Session creation failed: ${errorMsg}`, {
+      await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Session creation failed: ${errorMsg}`, {
         env,
         projectId: tokenData.projectId,
         source: 'mcp.dispatch_task.session_creation',
@@ -720,7 +720,7 @@ export async function handleDispatchTask(
     } catch (err) {
       // TaskRunner DO startup failed — mark task as failed
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await markQueuedTaskFailed(db, taskId, `Task runner startup failed: ${errorMsg}`, {
+      await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Task runner startup failed: ${errorMsg}`, {
         env,
         projectId: tokenData.projectId,
         source: 'mcp.dispatch_task.task_runner_startup',
