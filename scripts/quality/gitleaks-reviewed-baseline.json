@@ -196,6 +196,16 @@
       "digests": [
         "15613fa56910bf18e53abb4161fda7fda6689b25010a23bd1e30d254ccc8ade5"
       ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Intermediate PR-range bytes only: commit 334588f93 wrapped the non-secret test marker env-github-app-key-canary-91c2 in a fake RSA PEM header in apps/api/tests/unit/routes/setup.test.ts; commit 749f5a945 replaced it with a plain multi-line value, so the bytes are absent from the tree. Exact finding only.",
+      "owner": "security",
+      "reviewedAt": "2026-09-27T00:00:00.000Z",
+      "expiresAt": "2026-12-26T00:00:00.000Z",
+      "digests": [
+        "6e7d007b454a727e2d53a1ccfb0b9b3bf6b38081674abc35260efe50410cbc21"
+      ]
     }
   ]
 }
