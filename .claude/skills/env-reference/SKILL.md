@@ -566,7 +566,12 @@ by the read-only cron-liveness check.
 - `WHISPER_MODEL_ID` — Workers AI model for transcription (default: `@cf/openai/whisper-large-v3-turbo`)
 - `MAX_AUDIO_SIZE_BYTES` — Maximum audio upload size (default: 10485760)
 - `MAX_AUDIO_DURATION_SECONDS` — Maximum recording duration (default: 60)
-- `RATE_LIMIT_TRANSCRIBE` — Rate limit for transcription requests
+- `RATE_LIMIT_TRANSCRIBE` — Transcriptions allowed per user per window (default: 30)
+- `RATE_LIMIT_TRANSCRIBE_WINDOW_SECONDS` — Transcription rate-limit window in seconds (default: 60)
+
+### Session Summarization (Fork / Retry)
+
+- `RATE_LIMIT_SESSION_SUMMARIZE` — Fork (`fork-prepare`) + Retry (`summarize`) summaries per user per hour, one shared bucket (default: 30)
 
 ### Client Error Reporting
 

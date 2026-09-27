@@ -158,14 +158,17 @@ API redactors and their `sk-` coverage:
 - [x] Go canary tests still pass with the extended fixture (`go test ./internal/errorreport/...` ok)
 
 ### 4. Rate limits
-- [ ] Pure move: `/summarize` route from `chat.ts` into `chat-fork.ts` (separate commit)
-- [ ] `DEFAULT_RATE_LIMITS.SESSION_SUMMARIZE` (one bucket shared by summarize + fork-prepare, per user per hour)
-- [ ] Apply to both routes; update existing chat-fork tests for KV/auth
-- [ ] Adjacent fix: enforce the documented-but-dead `RATE_LIMIT_TRANSCRIBE` (30 per minute, as documented)
-- [ ] Tests through real routes: at-limit 429 + Retry-After + no AI call, shared bucket, per-user isolation,
-      window rollover
-- [ ] Revert limiter once → tests red; restore
-- [ ] Docs: `.env.example`, `reference/configuration.md`, `reference/api.md`, env-reference skill
+- [x] Pure move: `/summarize` route from `chat.ts` into `chat-fork.ts` (separate commit 7721c9f4c)
+- [x] `DEFAULT_RATE_LIMITS.SESSION_SUMMARIZE` (one bucket shared by summarize + fork-prepare, per user per hour)
+- [x] Apply to both routes; update existing chat-fork tests for KV/auth
+- [x] Adjacent fix: enforce the documented-but-dead `RATE_LIMIT_TRANSCRIBE` (30 per minute, as documented;
+      window override `RATE_LIMIT_TRANSCRIBE_WINDOW_SECONDS`)
+- [x] Tests through real routes: at-limit 429 + Retry-After + no AI call, shared bucket, per-user isolation,
+      window rollover (default budget resolved through the real resolver, real `handleAppError`)
+- [x] Revert limiter once → tests red; restore (chat-fork.ts without limiter: exactly the 4 rate-limit tests
+      red, 3 behaviour tests green; transcribe.ts without limiter: exactly the 4 new tests red, 10 green)
+- [x] Docs: `.env.example`, `reference/configuration.md`, env-reference skill (`reference/api.md` does not
+      document these endpoints)
 
 ### Wrap-up
 - [ ] Docs sync (security.md / configuration.md / api.md as affected)

@@ -9,6 +9,7 @@ import type { Context, MiddlewareHandler, Next } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { AppError } from './error';
 
 /**
@@ -26,7 +27,7 @@ export interface RateLimitConfig {
 }
 
 /**
- * Default rate limits (per hour).
+ * Default rate limits, per clock hour unless an entry's limiter below passes its own window.
  * These values are used when environment variables are not set.
  */
 export const DEFAULT_RATE_LIMITS = {
@@ -47,6 +48,12 @@ export const DEFAULT_RATE_LIMITS = {
   TRIAL_CREATE: 10,
   // SSE events endpoint — short window to prevent connection storms.
   TRIAL_SSE: 30,
+  // Fork (`fork-prepare`) and Retry (`summarize`) each send up to 1,000 session messages to
+  // Workers AI. They spend the same budget, so they share one per-user bucket.
+  SESSION_SUMMARIZE: 30,
+  // Voice transcription runs Workers AI Whisper on every request. Per MINUTE, not per hour
+  // (`DEFAULT_TRANSCRIBE_WINDOW_SECONDS`): dictation is bursty, and the budget is for abuse.
+  TRANSCRIBE: 30,
 } as const;
 
 /** Default time window (1 hour in seconds) */
@@ -292,5 +299,34 @@ export function rateLimitReportIssuePost(env: Env): MiddlewareHandler<{ Bindings
   return rateLimit({
     limit: getRateLimit(env, 'REPORT_ISSUE_POST'),
     keyPrefix: 'report-issue-post',
+  });
+}
+
+/**
+ * Rate limit shared by the two session-summarization routes, `POST …/sessions/:id/fork-prepare`
+ * and `POST …/sessions/:id/summarize`. Default: 30 per hour per user, across both.
+ */
+export function rateLimitSessionSummarize(env: Env): MiddlewareHandler<{ Bindings: Env }> {
+  return rateLimit({
+    limit: getRateLimit(env, 'SESSION_SUMMARIZE'),
+    keyPrefix: 'session-summarize',
+  });
+}
+
+/** Voice transcription's window: per minute. Override via RATE_LIMIT_TRANSCRIBE_WINDOW_SECONDS. */
+export const DEFAULT_TRANSCRIBE_WINDOW_SECONDS = 60;
+
+/**
+ * Rate limit for voice transcription (`POST /api/transcribe`).
+ * Default: 30 per minute per user.
+ */
+export function rateLimitTranscribe(env: Env): MiddlewareHandler<{ Bindings: Env }> {
+  return rateLimit({
+    limit: getRateLimit(env, 'TRANSCRIBE'),
+    windowSeconds: parsePositiveInt(
+      env.RATE_LIMIT_TRANSCRIBE_WINDOW_SECONDS,
+      DEFAULT_TRANSCRIBE_WINDOW_SECONDS
+    ),
+    keyPrefix: 'transcribe',
   });
 }

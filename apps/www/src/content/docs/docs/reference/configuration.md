@@ -777,28 +777,30 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 
 ## Voice & Text-to-Speech
 
-| Variable                     | Default                             | Description                      |
-| ---------------------------- | ----------------------------------- | -------------------------------- |
-| `WHISPER_MODEL_ID`           | `@cf/openai/whisper-large-v3-turbo` | Transcription model              |
-| `MAX_AUDIO_SIZE_BYTES`       | `10485760` (10 MB)                  | Max upload audio size            |
-| `MAX_AUDIO_DURATION_SECONDS` | `60`                                | Max recording duration           |
-| `RATE_LIMIT_TRANSCRIBE`      | `30`                                | Max transcriptions per minute    |
-| `TTS_ENABLED`                | `true`                              | Enable/disable text-to-speech    |
-| `TTS_MODEL`                  | `@cf/deepgram/aura-2-en`            | TTS model                        |
-| `TTS_SPEAKER`                | `luna`                              | TTS voice selection              |
-| `TTS_ENCODING`               | `mp3`                               | Audio output format              |
-| `TTS_MAX_TEXT_LENGTH`        | `100000`                            | Max characters per TTS synthesis |
-| `TTS_TIMEOUT_MS`             | `60000`                             | TTS synthesis timeout            |
+| Variable                               | Default                             | Description                               |
+| -------------------------------------- | ----------------------------------- | ----------------------------------------- |
+| `WHISPER_MODEL_ID`                     | `@cf/openai/whisper-large-v3-turbo` | Transcription model                       |
+| `MAX_AUDIO_SIZE_BYTES`                 | `10485760` (10 MB)                  | Max upload audio size                     |
+| `MAX_AUDIO_DURATION_SECONDS`           | `60`                                | Max recording duration                    |
+| `RATE_LIMIT_TRANSCRIBE`                | `30`                                | Max transcriptions per user per window    |
+| `RATE_LIMIT_TRANSCRIBE_WINDOW_SECONDS` | `60`                                | Transcription rate-limit window (seconds) |
+| `TTS_ENABLED`                          | `true`                              | Enable/disable text-to-speech             |
+| `TTS_MODEL`                            | `@cf/deepgram/aura-2-en`            | TTS model                                 |
+| `TTS_SPEAKER`                          | `luna`                              | TTS voice selection                       |
+| `TTS_ENCODING`                         | `mp3`                               | Audio output format                       |
+| `TTS_MAX_TEXT_LENGTH`                  | `100000`                            | Max characters per TTS synthesis          |
+| `TTS_TIMEOUT_MS`                       | `60000`                             | TTS synthesis timeout                     |
 
 ## Context Summarization (Forking)
 
-| Variable                          | Default                         | Description                                  |
-| --------------------------------- | ------------------------------- | -------------------------------------------- |
-| `CONTEXT_SUMMARY_MODEL`           | `@cf/google/gemma-4-26b-a4b-it` | Model for conversation context summarization |
-| `CONTEXT_SUMMARY_MAX_LENGTH`      | `4000`                          | Max summary length in characters             |
-| `CONTEXT_SUMMARY_TIMEOUT_MS`      | `10000`                         | Summarization timeout                        |
-| `CONTEXT_SUMMARY_MAX_MESSAGES`    | `50`                            | Max messages to include in summary           |
-| `CONTEXT_SUMMARY_SHORT_THRESHOLD` | `5`                             | Skip AI for conversations this short         |
+| Variable                          | Default                         | Description                                                                              |
+| --------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------- |
+| `CONTEXT_SUMMARY_MODEL`           | `@cf/google/gemma-4-26b-a4b-it` | Model for conversation context summarization                                             |
+| `CONTEXT_SUMMARY_MAX_LENGTH`      | `4000`                          | Max summary length in characters                                                         |
+| `CONTEXT_SUMMARY_TIMEOUT_MS`      | `10000`                         | Summarization timeout                                                                    |
+| `CONTEXT_SUMMARY_MAX_MESSAGES`    | `50`                            | Max messages to include in summary                                                       |
+| `CONTEXT_SUMMARY_SHORT_THRESHOLD` | `5`                             | Skip AI for conversations this short                                                     |
+| `RATE_LIMIT_SESSION_SUMMARIZE`    | `30`                            | Fork + Retry summaries per user per hour (one shared bucket); exceeding it returns `429` |
 
 ## Idea Execution Timeouts
 

@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -8,6 +8,7 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
+import { rateLimitSessionSummarize } from '../middleware/rate-limit';
 import * as projectDataService from '../services/project-data';
 import {
   getSummarizeConfig,
@@ -18,11 +19,15 @@ import { ensureSessionTaskBacked } from '../services/session-task-repair';
 
 /**
  * Routes that derive a new session from an existing one: `fork-prepare` (Fork) and `summarize`
- * (Retry). Both summarize the source session's history with Workers AI.
+ * (Retry). Both summarize the source session's history with Workers AI, so both spend from one
+ * per-user rate-limit bucket.
  */
 const chatForkRoutes = new Hono<{ Bindings: Env }>();
 
-chatForkRoutes.post('/:sessionId/fork-prepare', async (c) => {
+const limitSessionSummarization: MiddlewareHandler<{ Bindings: Env }> = (c, next) =>
+  rateLimitSessionSummarize(c.env)(c, next);
+
+chatForkRoutes.post('/:sessionId/fork-prepare', limitSessionSummarization, async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const sessionId = requireRouteParam(c, 'sessionId');
@@ -83,10 +88,10 @@ chatForkRoutes.post('/:sessionId/fork-prepare', async (c) => {
 /**
  * POST /api/projects/:projectId/sessions/:sessionId/summarize
  * Generate a context summary from a session's message history.
- * Used for conversation forking — the UI calls this to get a summary,
- * shows it for review, then submits as contextSummary when creating a new task.
+ * Used by Retry — the UI pre-fills the new session with this summary for review before
+ * submitting it as contextSummary.
  */
-chatForkRoutes.post('/:sessionId/summarize', async (c) => {
+chatForkRoutes.post('/:sessionId/summarize', limitSessionSummarization, async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const sessionId = requireRouteParam(c, 'sessionId');
