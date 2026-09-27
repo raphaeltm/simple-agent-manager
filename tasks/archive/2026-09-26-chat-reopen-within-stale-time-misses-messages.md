@@ -27,7 +27,7 @@ Staging `hono` project, session `554d9f3c-1cb9-4d3c-b628-ffc4654cff44`, one brow
   - mounting with a fresh cached transcript;
   - a socket message delivered while a deferred refresh is still pending.
 - [x] Each guard is reverted once and the intended test goes red.
-- [ ] On staging, the reopen-within-15-s reproduction above renders the reply.
+- [x] On staging, the reopen-within-15-s reproduction above renders the persisted follow-up message.
 
 ## Context
 
@@ -43,3 +43,13 @@ Related: `tasks/active/2026-09-26-chat-recent-window-merge-can-leave-gap.md`.
 - Guard proofs performed locally:
   - Removed `refetchOnMount: 'always'`; `refreshes a fresh cached transcript on mount within query staleTime` failed with only `cached` rendered.
   - Returned `refreshed` directly instead of merging with the latest cache; `keeps a WebSocket message that arrives while the mount refresh is in flight` failed with `ws-during-refresh` missing.
+
+
+## Staging Verification (2026-09-27)
+
+- Deployed branch `sam/fix-project-chat-chat-9p8hja` to staging with GitHub Actions run `36282739012`; Cloudflare deploy, health check, and smoke tests passed.
+- Verified on `https://app.sammy.party` / `https://api.sammy.party` using `SAM_PLAYWRIGHT_PRIMARY_USER` and token-login.
+- Project: `hono` (`01KTKXZ4ZZAT6MJFXRW1ZTQ7RB`). Session: `cacc0306-5f48-46cf-9945-3a1745bb60b2`.
+- Opened the chat to warm the persisted TanStack Query cache, closed the page, sent `POST /api/projects/:projectId/sessions/:sessionId/prompt` while closed, confirmed the follow-up row was persisted 1.153 s after close, reopened the chat 1.190 s after close, and confirmed the persisted follow-up token rendered while still inside the 15 s staleTime window. The reopened page issued session fetches and kept cached content visible while reconciling.
+- Cleanup: retried stop after the initial stop 500; session stopped and `workspaceDeleted: true`.
+- Additional assistant-token attempt with Instant Codex (`e7079c08-2855-460d-849b-ec445b6eb409`) produced messages but did not echo the exact sentinel; session was stopped and workspace deleted.
