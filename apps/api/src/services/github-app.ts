@@ -41,7 +41,6 @@ const userInstallationSchema = v.object({
 });
 
 export const DEFAULT_GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS = 50 * 60;
-export const DEFAULT_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS = 5 * 60;
 
 async function installationTokenCacheKey(
   installationId: string,
@@ -53,16 +52,6 @@ async function installationTokenCacheKey(
     byte.toString(16).padStart(2, '0')
   ).join('');
   return `github-installation-token:v1:${installationId}:${hash}`;
-}
-
-function cachedInstallationTokenIsFresh(
-  cached: { token?: string; expiresAt?: string } | null | undefined,
-  refreshMarginSeconds: number
-): cached is { token: string; expiresAt: string } {
-  if (!cached?.token || !cached.expiresAt) return false;
-  const expiresAtMs = Date.parse(cached.expiresAt);
-  if (!Number.isFinite(expiresAtMs)) return false;
-  return expiresAtMs - Date.now() > refreshMarginSeconds * 1000;
 }
 
 const userInstallationsSchema = v.object({
@@ -292,6 +281,18 @@ function concatBytes(...arrays: Uint8Array[]): Uint8Array {
     offset += arr.length;
   }
   return result;
+}
+
+export const DEFAULT_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS = 5 * 60;
+
+function cachedInstallationTokenIsFresh(
+  cached: { token?: string; expiresAt?: string } | null | undefined,
+  refreshMarginSeconds: number
+): cached is { token: string; expiresAt: string } {
+  if (!cached?.token || !cached.expiresAt) return false;
+  const expiresAtMs = Date.parse(cached.expiresAt);
+  if (!Number.isFinite(expiresAtMs)) return false;
+  return expiresAtMs - Date.now() > refreshMarginSeconds * 1000;
 }
 
 /**
