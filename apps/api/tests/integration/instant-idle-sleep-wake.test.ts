@@ -34,6 +34,7 @@ import { VmAgentContainer } from '../../src/durable-objects/vm-agent-container';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { chatRoutes } from '../../src/routes/chat';
+import { agentSessionRoutes } from '../../src/routes/workspaces/agent-sessions';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep-execution';
 import {
   completeSessionSnapshot,
@@ -404,8 +405,7 @@ describe('Instant session wake after idle sleep', () => {
     };
   }
 
-  /** A chat action as the browser sends it, through the real chat routes. */
-  async function postChatAction(action: 'stop' | 'cancel'): Promise<Response> {
+  function routesApp(): Hono<{ Bindings: Env }> {
     const app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) =>
       err instanceof AppError
@@ -413,8 +413,23 @@ describe('Instant session wake after idle sleep', () => {
         : c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500)
     );
     app.route('/api/projects/:projectId/sessions', chatRoutes);
-    return app.request(
+    app.route('/api/workspaces', agentSessionRoutes);
+    return app;
+  }
+
+  /** A chat action as the browser sends it, through the real chat routes. */
+  async function postChatAction(action: 'stop' | 'cancel'): Promise<Response> {
+    return routesApp().request(
       `/api/projects/${PROJECT_ID}/sessions/${CHAT_SESSION_ID}/${action}`,
+      { method: 'POST' },
+      env
+    );
+  }
+
+  /** The workspace page's stop button for one agent session. */
+  async function postWorkspaceAgentStop(): Promise<Response> {
+    return routesApp().request(
+      `/api/workspaces/${WORKSPACE_ID}/agent-sessions/${AGENT_SESSION_ID}/stop`,
       { method: 'POST' },
       env
     );
@@ -673,6 +688,38 @@ describe('Instant session wake after idle sleep', () => {
 
       expect(response.status).toBe(200);
       expect(vmAgent.signals).toEqual([`${AGENT_PATH}/cancel`]);
+    });
+
+    it('leaves the container asleep when the workspace page stops the slept agent', async () => {
+      await sleepOnContainerIdleTimeout();
+
+      const response = await postWorkspaceAgentStop();
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: 'sleeping' });
+      expect(vmAgent.starts).toBe(0);
+      expect(vmAgent.signals).toEqual([]);
+      expect(runtimeRows()).toEqual(SLEPT_ROWS);
+    });
+
+    // Controls for the workspace page: a live agent is stopped, and an orphaned agent
+    // session that is merely not `running` still gets the stop its process may need.
+    it('still stops a live agent from the workspace page', async () => {
+      const response = await postWorkspaceAgentStop();
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: 'stopped' });
+      expect(vmAgent.signals).toEqual([`${AGENT_PATH}/stop`]);
+    });
+
+    it('still stops an orphaned agent that is not running from the workspace page', async () => {
+      d1.prepare(`UPDATE agent_sessions SET status = 'error' WHERE id = ?`).run(AGENT_SESSION_ID);
+
+      const response = await postWorkspaceAgentStop();
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: 'error' });
+      expect(vmAgent.signals).toEqual([`${AGENT_PATH}/stop`]);
     });
   });
 });

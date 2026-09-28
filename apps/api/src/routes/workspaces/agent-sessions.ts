@@ -302,8 +302,9 @@ agentSessionRoutes.post(
     }
 
     if (session.status !== 'running') {
-      // Still attempt VM stop for orphaned sessions whose process may be alive
-      if (workspace.nodeId) {
+      // Still attempt VM stop for orphaned sessions whose process may be alive. A sleeping
+      // session has none, and the request would restore a slept Instant container to stop it.
+      if (workspace.nodeId && session.status !== 'sleeping') {
         try {
           await stopAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
         } catch (e) {
