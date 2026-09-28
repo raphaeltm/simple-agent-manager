@@ -3,7 +3,9 @@
 - **SAM task:** 01M3KE6R6XM1G35W0QJBHFF15M
 - **Idea:** 01M3JFFC8R6J1YE0HX0J3PS4TN
 - **Branch:** `sam/fix-instant-cf-container-hff15m`
-- **Constraint:** open the PR as a DRAFT and leave it in draft. Do not merge, do not mark ready.
+- **Constraint (implementer task):** open the PR as a DRAFT and leave it in draft. Do not merge, do
+  not mark ready. Superseded by coordinator task 01M3M0X7TAD7DHPKJZHHJ6SC68, which reviews,
+  finishes and ships the PR.
 
 ## Problem
 
@@ -274,7 +276,7 @@ every fix was then removed once to prove the intended test goes red.
     resolver. The workspace stop skips its node call in both branches.
   - Discrimination: each guard's removal reddens only its own case.
   - Found in passing: SAM's `stop_subtask` accepts only `queued` among real task statuses; its list
-    names `provisioning`/`running`/`awaiting_followup`. Filed as an idea.
+    names `provisioning`/`running`/`awaiting_followup`. Filed as idea 01M3M3TR822Q1A0WN58HKA6ZW6.
 - [x] **MEDIUM: the session-activity probe woke slept containers, possibly in a cycle.**
   - The probe had no runtime check. A successful restore reports `recovering` from
     `selectAgent`, and nothing reports `idle` until the next prompt.
@@ -306,7 +308,39 @@ every fix was then removed once to prove the intended test goes red.
   - A `reconcile`-mode delivery that wakes a slept target for a receipt lookup.
   - The final hibernate capture over an already-asleep container.
   - A late `/ready` callback overwriting `sleeping`.
-- [ ] Local review agents on the new commits
+- [x] **Second round, from the local reviewers of the fixes above.** All five returned: security
+  PASS, architecture PASS, test-engineer PASS, task-completion PASS, Cloudflare one HIGH. Fixed:
+  - **HIGH (Cloudflare):** the DO committed the wake after its lifecycle lock released, so an
+    explicit stop could interleave with the commit. It now commits inside the same critical
+    section as the recovered transition (`f6144bba2`). A rule-45 test holds the commit open and
+    proves a queued stop waits; moving the commit back outside the lock reddens it.
+  - **Commit only a wake from sleep** (found while fixing the HIGH): a crash recovery of a
+    never-slept session would have called ProjectData `wakeSession`, which revives a `failed`
+    session. `commitContainerWakeFromSleep` commits only while the snapshot carries a sleep marker.
+    A slice control (a real crash via `onStop`, then `/resume`) and helper tests pin it; always
+    committing reddens exactly those.
+  - **Best-effort failure path untested (test-engineer):** helper unit tests on real SQLite now
+    cover task selection (newest, whatever its status: a failed task's preserved workspace wakes
+    under it), the caller's denial, no task, both sleep markers, a never-slept session, and a
+    logged rather than thrown failure.
+  - **Rule 18 (architecture, task-completion):** `vm-prompt-delivery-adapter.ts` (634 lines) split
+    as a pure move into `vm-prompt-delivery-runtime-queries.ts` (`8268309b0`); the adapter is now 448.
+  - **Two "asleep" predicates cross-referenced (architecture):** `221ffc01e`.
+  - **Shared ownership predicate on real SQL (security):** `ad4e7aeea`; dropping either the
+    workspace or the user predicate reddens its own cases.
+  - **Probe join (Cloudflare LOW):** it reads the node it would contact, documented and pinned in
+    `63d8231be`.
+  - **Turn-end modelling (test-engineer LOW):** the wake-commit slice now releases the prompt
+    keepalive the way the snapshot-complete route does, instead of a 1 ms keepalive (`9181aaa48`).
+  - Declined, with reasons:
+    - Adding `workspaces.user_id = ctx.userId` to SAM `stop_subtask` (security LOW). Task
+      workspaces can belong to another project member.
+    - A status filter on the wake-commit task lookup (task-completion MEDIUM). It would break
+      failed-task-preservation wakes.
+    - Removing the double commit for unguarded durable wakes (Cloudflare MEDIUM). It is idempotent
+      and costs about 3 I/O per wake, and the adapter's commit is the retry path when the DO's
+      commit fails.
+- [ ] Delta review of the second round
 - [ ] CodeRabbit through the trusted workflow
 - [ ] CI green on the final head
 - [ ] Staging on the final head: slept-session workspace-page stop (no wake), UI Archive (no
