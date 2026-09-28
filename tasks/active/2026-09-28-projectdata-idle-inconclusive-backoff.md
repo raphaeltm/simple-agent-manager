@@ -25,7 +25,7 @@ The ProjectData Durable Object can keep re-arming its alarm roughly every minute
 - [x] Add real-path tests for inconclusive backoff, growing backoff, success reset, and genuine idle cleanup.
 - [x] Temporarily remove the fix and confirm the loop regression test fails red, then restore the fix.
 - [x] Run focused tests and broader API validation.
-- [ ] Complete specialist reviews, staging verification, and draft PR creation.
+- [x] Complete specialist reviews, staging verification, and draft PR creation.
 
 ## Validation
 
@@ -56,3 +56,9 @@ The ProjectData Durable Object can keep re-arming its alarm roughly every minute
 - A genuinely idle workspace is still cleaned up on time.
 - The backoff delay is configurable through environment variables with `DEFAULT_*` constants.
 - The PR is opened as draft and not merged.
+
+## Staging verification
+
+- PASS: GitHub Actions `Deploy Staging` run 36397425870 on branch `sam/stop-projectdata-durable-object-22878v`: deployment completed, database migrations with safety gates passed, API worker deployed, health check passed, and smoke tests passed (`12 passed` in 1.2m). Run URL: https://github.com/raphaeltm/simple-agent-manager/actions/runs/36397425870
+- Draft PR opened as requested and not merged: https://github.com/raphaeltm/simple-agent-manager/pull/2170
+
