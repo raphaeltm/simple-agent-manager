@@ -5,6 +5,7 @@ import type { Env } from '../../src/env';
 import { handleSearchKnowledge } from '../../src/routes/mcp/knowledge-tools';
 import { handleSearchMessages } from '../../src/routes/mcp/session-tools';
 import type { McpTokenData } from '../../src/services/mcp-token';
+import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
 const SEARCH_TERMS = Array.from({ length: 20 }, (_, index) => `needle${index}`);
@@ -32,6 +33,54 @@ function tokenData(projectId: string): McpTokenData {
     workspaceId: 'workspace-search-limits',
     createdAt: new Date(0).toISOString(),
   };
+}
+
+async function createMcpProject(prefix: string): Promise<{ projectId: string; userId: string }> {
+  const suffix = crypto.randomUUID();
+  const projectId = `${prefix}-${suffix}`;
+  const userId = `${prefix}-user-${suffix}`;
+  const installationId = `${prefix}-installation-${suffix}`;
+  await seedUser(userId);
+  await seedInstallation(installationId, userId, { installationIdValue: suffix });
+  await seedProject(projectId, userId, installationId, {
+    name: `Search limits ${suffix}`,
+    repository: `owner/repo-${suffix}`,
+  });
+  return { projectId, userId };
+}
+
+async function seedMessages(
+  stub: DurableObjectStub<ProjectDataTestDouble>,
+  sessionId: string,
+  topic: string,
+  messages: Array<{ id: string; content: string; createdAtOffset?: number }>
+): Promise<void> {
+  await runInDurableObject(stub, async (_instance, state) => {
+    const now = Date.now();
+    state.storage.sql.exec(
+      `INSERT INTO chat_sessions
+         (id, topic, status, message_count, started_at, created_at, updated_at)
+       VALUES (?, ?, 'active', ?, ?, ?, ?)`,
+      sessionId,
+      topic,
+      messages.length,
+      now,
+      now,
+      now
+    );
+    messages.forEach((message, index) => {
+      state.storage.sql.exec(
+        `INSERT INTO chat_messages
+           (id, session_id, role, content, tool_metadata, created_at, sequence)
+         VALUES (?, ?, 'user', ?, NULL, ?, ?)`,
+        message.id,
+        sessionId,
+        message.content,
+        now + (message.createdAtOffset ?? 0),
+        index + 1
+      );
+    });
+  });
 }
 
 describe('ProjectData search query limits with real Durable Object SQLite', () => {
@@ -77,31 +126,10 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
 
   it('message search uses late terms in a long query and excludes prefix-only controls', async () => {
     const stub = freshStub();
-    await runInDurableObject(stub, async (_instance, state) => {
-      const now = Date.now();
-      state.storage.sql.exec(
-        `INSERT INTO chat_sessions
-           (id, topic, status, message_count, started_at, created_at, updated_at)
-         VALUES ('session-1', 'Search limits', 'active', 2, ?, ?, ?)`,
-        now,
-        now,
-        now
-      );
-      state.storage.sql.exec(
-        `INSERT INTO chat_messages
-           (id, session_id, role, content, tool_metadata, created_at, sequence)
-         VALUES ('message-control', 'session-1', 'user', ?, NULL, ?, 1)`,
-        PREFIX_ONLY_TEXT,
-        now
-      );
-      state.storage.sql.exec(
-        `INSERT INTO chat_messages
-           (id, session_id, role, content, tool_metadata, created_at, sequence)
-         VALUES ('message-match', 'session-1', 'user', ?, NULL, ?, 2)`,
-        ALL_TERMS_TEXT,
-        now
-      );
-    });
+    await seedMessages(stub, 'session-1', 'Search limits', [
+      { id: 'message-control', content: PREFIX_ONLY_TEXT },
+      { id: 'message-match', content: ALL_TERMS_TEXT },
+    ]);
 
     const search = await stub.searchMessagesWithCoverage(LONG_QUERY, 'session-1', ['user'], 10);
 
@@ -111,59 +139,15 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
   });
 
   it('runs a long query through the MCP message handler into real DO SQLite', async () => {
-    const suffix = crypto.randomUUID();
-    const projectId = `mcp-message-search-${suffix}`;
-    const userId = `mcp-message-user-${suffix}`;
-    const installationId = `mcp-message-installation-${suffix}`;
-    await env.DATABASE.batch([
-      env.DATABASE.prepare('INSERT INTO users (id, email) VALUES (?, ?)').bind(
-        userId,
-        `${userId}@example.test`
-      ),
-      env.DATABASE.prepare(
-        `INSERT INTO github_installations
-           (id, user_id, installation_id, account_type, account_name)
-         VALUES (?, ?, ?, 'User', ?)`
-      ).bind(installationId, userId, suffix, userId),
-      env.DATABASE.prepare(
-        `INSERT INTO projects
-           (id, user_id, name, normalized_name, installation_id, repository, created_by)
-         VALUES (?, ?, 'Search limits', 'search-limits', ?, ?, ?)`
-      ).bind(projectId, userId, installationId, `owner/repo-${suffix}`, userId),
-      env.DATABASE.prepare(
-        `INSERT INTO project_members (project_id, user_id, role, status)
-         VALUES (?, ?, 'owner', 'active')`
-      ).bind(projectId, userId),
-    ]);
+    const { projectId, userId } = await createMcpProject('mcp-message-search');
 
     const stub = env.PROJECT_DATA.get(
       env.PROJECT_DATA.idFromName(projectId)
     ) as DurableObjectStub<ProjectDataTestDouble>;
-    await runInDurableObject(stub, async (_instance, state) => {
-      const now = Date.now();
-      state.storage.sql.exec(
-        `INSERT INTO chat_sessions
-           (id, topic, status, message_count, started_at, created_at, updated_at)
-         VALUES ('session-1', 'MCP search limits', 'active', 2, ?, ?, ?)`,
-        now,
-        now,
-        now
-      );
-      state.storage.sql.exec(
-        `INSERT INTO chat_messages
-           (id, session_id, role, content, tool_metadata, created_at, sequence)
-         VALUES ('message-control', 'session-1', 'user', ?, NULL, ?, 1)`,
-        PREFIX_ONLY_TEXT,
-        now
-      );
-      state.storage.sql.exec(
-        `INSERT INTO chat_messages
-           (id, session_id, role, content, tool_metadata, created_at, sequence)
-         VALUES ('message-match', 'session-1', 'user', ?, NULL, ?, 2)`,
-        ALL_TERMS_TEXT,
-        now
-      );
-    });
+    await seedMessages(stub, 'session-1', 'MCP search limits', [
+      { id: 'message-control', content: PREFIX_ONLY_TEXT },
+      { id: 'message-match', content: ALL_TERMS_TEXT },
+    ]);
 
     const response = await handleSearchMessages(
       2,
@@ -186,52 +170,14 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
   });
 
   it('deduplicates roles before a max-term LIKE fallback reaches the bind ceiling', async () => {
-    const suffix = crypto.randomUUID();
-    const projectId = `mcp-message-bind-budget-${suffix}`;
-    const userId = `mcp-message-bind-user-${suffix}`;
-    const installationId = `mcp-message-bind-installation-${suffix}`;
-    await env.DATABASE.batch([
-      env.DATABASE.prepare('INSERT INTO users (id, email) VALUES (?, ?)').bind(
-        userId,
-        `${userId}@example.test`
-      ),
-      env.DATABASE.prepare(
-        `INSERT INTO github_installations
-           (id, user_id, installation_id, account_type, account_name)
-         VALUES (?, ?, ?, 'User', ?)`
-      ).bind(installationId, userId, suffix, userId),
-      env.DATABASE.prepare(
-        `INSERT INTO projects
-           (id, user_id, name, normalized_name, installation_id, repository, created_by)
-         VALUES (?, ?, 'Bind budget', 'bind-budget', ?, ?, ?)`
-      ).bind(projectId, userId, installationId, `owner/repo-${suffix}`, userId),
-      env.DATABASE.prepare(
-        `INSERT INTO project_members (project_id, user_id, role, status)
-         VALUES (?, ?, 'owner', 'active')`
-      ).bind(projectId, userId),
-    ]);
+    const { projectId, userId } = await createMcpProject('mcp-message-bind-budget');
 
     const stub = env.PROJECT_DATA.get(
       env.PROJECT_DATA.idFromName(projectId)
     ) as DurableObjectStub<ProjectDataTestDouble>;
-    await runInDurableObject(stub, async (_instance, state) => {
-      const now = Date.now();
-      state.storage.sql.exec(
-        `INSERT INTO chat_sessions
-           (id, topic, status, message_count, started_at, created_at, updated_at)
-         VALUES ('session-bind-budget', 'Bind budget', 'active', 1, ?, ?, ?)`,
-        now,
-        now,
-        now
-      );
-      state.storage.sql.exec(
-        `INSERT INTO chat_messages
-           (id, session_id, role, content, tool_metadata, created_at, sequence)
-         VALUES ('message-bind-budget', 'session-bind-budget', 'user', ?, NULL, ?, 1)`,
-        MAX_TERM_FALLBACK_QUERY,
-        now
-      );
-    });
+    await seedMessages(stub, 'session-bind-budget', 'Bind budget', [
+      { id: 'message-bind-budget', content: MAX_TERM_FALLBACK_QUERY },
+    ]);
 
     const response = await handleSearchMessages(
       3,
@@ -273,29 +219,10 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
 
   it('keeps normal short-query ranking and results unchanged', async () => {
     const stub = freshStub();
-    await runInDurableObject(stub, async (_instance, state) => {
-      const now = Date.now();
-      state.storage.sql.exec(
-        `INSERT INTO chat_sessions
-           (id, topic, status, message_count, started_at, created_at, updated_at)
-         VALUES ('session-1', 'Search limits', 'active', 2, ?, ?, ?)`,
-        now,
-        now,
-        now
-      );
-      state.storage.sql.exec(
-        `INSERT INTO chat_messages
-           (id, session_id, role, content, tool_metadata, created_at, sequence)
-         VALUES ('older', 'session-1', 'user', 'needle0 older', NULL, ?, 1)`,
-        now
-      );
-      state.storage.sql.exec(
-        `INSERT INTO chat_messages
-           (id, session_id, role, content, tool_metadata, created_at, sequence)
-         VALUES ('newer', 'session-1', 'user', 'needle0 newer', NULL, ?, 2)`,
-        now + 1
-      );
-    });
+    await seedMessages(stub, 'session-1', 'Search limits', [
+      { id: 'older', content: 'needle0 older' },
+      { id: 'newer', content: 'needle0 newer', createdAtOffset: 1 },
+    ]);
 
     const search = await stub.searchMessagesWithCoverage('needle0', 'session-1', ['user'], 10);
 

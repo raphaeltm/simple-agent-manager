@@ -30,6 +30,7 @@ import {
   acceptPromptDelivery,
   nudgePromptDeliveriesForTarget,
 } from '../../src/durable-objects/project-data/prompt-delivery';
+import { getSession } from '../../src/durable-objects/project-data/session-reads';
 import * as sessions from '../../src/durable-objects/project-data/sessions';
 import { VmAgentContainer } from '../../src/durable-objects/vm-agent-container';
 import type { Env } from '../../src/env';
@@ -61,7 +62,7 @@ function projectDataSql(): SqlStorage {
 // Only the ProjectData calls these flows make; any other call fails loudly.
 vi.mock('../../src/services/project-data', () => ({
   getSession: async (_env: unknown, _projectId: string, sessionId: string) =>
-    sessions.getSession(projectDataSql(), sessionId),
+    getSession(projectDataSql(), sessionId),
   sleepSession: async (_env: unknown, _projectId: string, sessionId: string) =>
     sessions.sleepSession(projectDataSql(), sessionId),
   wakeSession: async (
@@ -602,7 +603,7 @@ describe('Instant session wake after idle sleep', () => {
       expect(vmAgent.starts).toBe(1);
       expect(vmAgent.prompts).toEqual(['Pick up where you left off.']);
       expect(runtimeRows()).toEqual(AWAKE_ROWS);
-      expect(sessions.getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
+      expect(getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
         status: 'active',
       });
     });
@@ -626,7 +627,7 @@ describe('Instant session wake after idle sleep', () => {
       expect(vmAgent.starts).toBe(1);
       expect(vmAgent.prompts).toEqual(prompts);
       expect(runtimeRows()).toEqual(AWAKE_ROWS);
-      expect(sessions.getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
+      expect(getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
         status: 'active',
       });
 
@@ -660,7 +661,7 @@ describe('Instant session wake after idle sleep', () => {
     // Liveness: the crashed container did recover.
     expect(vmAgent.starts).toBe(1);
     expect(runtimeRows().node).toEqual(AWAKE_ROWS.node);
-    expect(sessions.getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
+    expect(getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
       status: 'failed',
     });
   });
@@ -803,7 +804,7 @@ describe('Instant session wake after idle sleep', () => {
       expect(vmAgent.signals).toEqual([]);
       // Liveness: the real teardown ran to the end.
       expect(runtimeRows()).toEqual(ARCHIVED_ROWS);
-      expect(sessions.getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
+      expect(getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
         status: 'stopped',
       });
     });
