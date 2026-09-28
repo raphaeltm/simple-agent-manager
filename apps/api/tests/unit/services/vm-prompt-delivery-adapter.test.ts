@@ -391,6 +391,21 @@ describe('VM prompt delivery adapter', () => {
     expect(mocks.reportSessionRecoveryRefusal).not.toHaveBeenCalled();
   });
 
+  // Control (`.claude/rules/61`): only the slept-container verdict stopped reading the health
+  // mirror. A live VM target on an unhealthy node is still refused before any probe.
+  it('still refuses a live VM target whose node is unhealthy, without probing it', async () => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({ ...targetRow, node_health_status: 'unhealthy' })
+    );
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'dead_target',
+    });
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+    expect(mocks.reportSessionRecoveryRefusal).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['deleted workspace', { workspace_status: 'deleted' }],
     ['deleted node', { node_status: 'deleted' }],

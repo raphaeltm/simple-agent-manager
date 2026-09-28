@@ -242,6 +242,77 @@ Neither. The combination is older:
 - Final validation: full API suite on `01ba447a6` 10,911/10,911; Workers subset 33/33;
   `check:fast` green.
 
+## Independent review and completion (coordinator task 01M3M0X7TAD7DHPKJZHHJ6SC68)
+
+An adversarial review of the head `f9c17497a`, with a full caller sweep of every path that can
+reach a slept container. Each finding below was reproduced by a test that fails without its fix;
+every fix was then removed once to prove the intended test goes red.
+
+- [x] **HIGH: wakes outside durable delivery never committed the wake, losing later work.**
+  - An attention answer, a prompt with durable delivery off, and the workspace page's `/resume`
+    woke the container but left ProjectData `sleeping` and the snapshot `sleeping_at` set.
+  - `prepareSessionSnapshot` then refuses every new capture generation, so each checkpoint the
+    woken agent takes fails with "Snapshot capture generation is no longer current".
+  - The next idle sleep takes `markRuntimeSleeping`'s already-asleep shortcut and skips
+    verification. The following wake restores the pre-wake snapshot, so that work is gone.
+  - On main these paths failed visibly; this branch had made them wake.
+  - Fix: the container DO commits every unguarded wake through `commitContainerWake`
+    (`services/container-wake-commit.ts`), which durable delivery also uses. A guarded wake is left
+    to the delivery that carries the guard, so a revoked guard re-sleeps onto intact markers.
+  - Tests: the slice wakes through the real attention-answer and `/resume` routes, then the woken
+    agent's checkpoint must survive the next idle sleep. The container DO unit tests cover an
+    unguarded wake committing and a guarded one not.
+  - Discrimination: removing the commit reddens both slice cases, and the checkpoint error is the
+    one production would hit. Committing even guarded wakes reddens only the guarded control.
+- [x] **MEDIUM: signal-only callers that checked only the agent session's status still woke a
+  slept container.**
+  - The session sleep (`completeSleepTeardown`) marks only the agent session it sleeps. An older
+    session on the same slept node therefore still reads `running`.
+  - Three callers woke the container to signal it: the workspace page's stop (its `running`
+    branch), suspend, and SAM's `stop_subtask`.
+  - Fix: one shared check, `services/sleeping-container-runtime.ts`, moved out of the chat route
+    resolver. The workspace stop skips its node call in both branches.
+  - Discrimination: each guard's removal reddens only its own case.
+  - Found in passing: SAM's `stop_subtask` accepts only `queued` among real task statuses; its list
+    names `provisioning`/`running`/`awaiting_followup`. Filed as an idea.
+- [x] **MEDIUM: the session-activity probe woke slept containers, possibly in a cycle.**
+  - The probe had no runtime check. A successful restore reports `recovering` from
+    `selectAgent`, and nothing reports `idle` until the next prompt.
+  - So a wake with no prompt leaves a stale working mirror. Where `CF_CONTAINER_SLEEP_AFTER` is
+    shorter than the 5-minute probe threshold (staging), probing and sleeping could alternate.
+  - Fix: a slept container is conclusive "no turn in flight". The probe ends the stale turn
+    without a request, and the tenant check still runs first.
+  - Rule 18: the probe entry point first moved into `session-activity-probe.ts` as a pure move
+    (`fe34352b1`), since `session-activity-reconciliation.ts` was 635 lines.
+  - Tests run on real SQLite. A slept container is reconciled with no request. An awake Instant
+    container and a VM are still asked. A foreign-project slept container is not trusted.
+- [x] **Gate: SonarCloud failed on 4.0% duplication on new code.** Stop, suspend and resume
+  repeated the owned workspace and agent-session lookup, and the move made it count as new. They
+  now share `getOwnedNodeAgentSession` / `getOwnedAgentSession`.
+- [x] **Rule 61 control added:** a live VM target on an unhealthy node is still refused as
+  `dead_target` without a probe. It goes red only when the live path stops reading health.
+- [x] **Verified, no change needed:**
+  - Rule 74: for slept containers, health is written only by the sleep, wake and exhaust writers.
+    The unhealthy-node sweep selects only `runtime='vm'` running nodes.
+  - A broken node cannot be woken forever. The DO stops after `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`
+    (2), marks the rows `error`, and the verdict then refuses.
+  - A delivery retried to its TTL on a sleeping session surfaces **Wake failed**
+    (`listExpiringWakeDeliveries`).
+  - The only `error` writers a slept container can meet are exhaustion paths. The ACP failure
+    callback requires workspace `creating`, `running` or `recovery`.
+- [x] **Deferred (LOW, pre-existing or narrow):** appended to idea 01M3KX6RV5KGFZVCC7VK6Z6QHK.
+  - Scheduled-sleep race: `completeSleepTeardown` sleeps the DO before its D1 write. A wake in
+    that window can leave the DO exhausted while D1 reads `sleeping`. The same race exists on main.
+  - A `reconcile`-mode delivery that wakes a slept target for a receipt lookup.
+  - The final hibernate capture over an already-asleep container.
+  - A late `/ready` callback overwriting `sleeping`.
+- [ ] Local review agents on the new commits
+- [ ] CodeRabbit through the trusted workflow
+- [ ] CI green on the final head
+- [ ] Staging on the final head: slept-session workspace-page stop (no wake), UI Archive (no
+      wake), one idle-sleep → follow-up → in-place wake → answer cycle, cleanup
+- [ ] Merge and monitor Deploy Production
+
 ## References
 
 - `.claude/rules/58-terminal-verdicts-must-match-the-resumer.md` (apps/api scoped copy)

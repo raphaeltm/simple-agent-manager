@@ -161,8 +161,18 @@ running agent session, and the container DO tests mocked `loadRuntimeRecoveryCon
   (`.claude/rules/67`). Enumerate those callers and give the ones that only signal a live runtime
   their own check. Here the stop route's pre-teardown signal woke a slept Instant container only
   for the same request's teardown to destroy it, and the wake raced that teardown into a 500 on
-  staging. Chat stop, chat cancel and the workspace page's per-session stop now share one check,
-  `isSleepingContainerRuntime`, and skip a sleeping runtime.
+  staging. Every signal-only caller (chat stop and cancel, the workspace page's stop and suspend,
+  SAM's `stop_subtask`) and the session-activity probe now share one check,
+  `services/sleeping-container-runtime.ts`, and skip a sleeping runtime. A check on the agent
+  session's status alone is not enough: the session sleep marks only the session it sleeps, so a
+  second session on the same slept node still reads `running`.
+- **A wake is finished only when every marker the sleeper wrote is cleared.** The container DO
+  restored the runtime and its D1 rows, but only durable delivery cleared ProjectData's `sleeping`
+  and the snapshot's `sleeping_at`. An attention answer or `/resume` left them, so
+  `prepareSessionSnapshot` discarded every checkpoint the woken agent took and the next sleep
+  reused the old snapshot as verified: the work was gone at the following wake. The resumer now
+  commits every unguarded wake itself (`services/container-wake-commit.ts`), so no caller can
+  forget.
 
 ## Quick Compliance Check
 
@@ -170,6 +180,7 @@ running agent session, and the container DO tests mocked `loadRuntimeRecoveryCon
 - [ ] No verdict reads a marker that only sleep/wake/recovery writers set
 - [ ] A changed resumer precondition has a round-trip test through the real sleep writers
 - [ ] Callers that reach a widened wake precondition only to signal have their own non-waking check
+- [ ] Every path that wakes the resource leaves every mirror the sleeper wrote awake, not only D1
 - [ ] A comment names the resumer function the predicate mirrors
 - [ ] Any extra strictness vs. the resumer is justified in that comment
 - [ ] Preserve verdicts are bounded by an env-configurable retention; absent bound → terminal
