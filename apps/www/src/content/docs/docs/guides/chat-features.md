@@ -251,11 +251,11 @@ box is a different thing: it filters the session list by topic, session ID, and 
 not look inside messages.
 
 Idea, task, knowledge, and message search all simplify oversized input before it reaches SQLite.
-They retain at most `SEARCH_QUERY_MAX_LENGTH` UTF-8 bytes and
+They retain at most `SEARCH_QUERY_MAX_LENGTH` LIKE-safe UTF-8 bytes and
 `SEARCH_QUERY_MAX_TERMS` whitespace-delimited terms (defaults: 48 and 12). Search responses return
 the effective `query`, a `queryTruncated` flag, and `queryLimits`, so callers can distinguish an exact
-search from a simplified one. Length overrides can lower the limit; values above SQLite's safe
-48-byte ceiling are clamped (`apps/api/src/lib/search-query-limits.ts`, verified).
+search from a simplified one. Length overrides are clamped to 4–48; the extra escape bytes for
+`%`, `_`, and `\` count toward that budget (`apps/api/src/lib/search-query-limits.ts`, verified).
 
 Project-wide search also traverses immutable archive owners. A bounded call can return provisional
 results plus `archiveSearch.continuation`; pass that continuation with the same query, roles, and

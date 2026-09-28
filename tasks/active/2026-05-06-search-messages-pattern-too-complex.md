@@ -29,6 +29,7 @@ The same unbounded input reaches SQLite from `search_ideas`, `search_tasks`, and
 - Message search runs FTS5 then a full-query LIKE fallback in `durable-objects/project-data/message-search.ts`; the MCP route, SAM-session tool, and chat-search APIs expose message search.
 - One shared normalizer can enforce configurable UTF-8 byte and term limits consistently while returning explicit truncation metadata. Defaults must be `DEFAULT_*` constants with Worker env overrides, wired through `env.ts`, Wrangler, deployment sync, examples, and public configuration docs.
 - Regression tests must execute SQLite statements through `better-sqlite3`/`sqlite-d1.ts` or the ProjectData DO harness. Mock-only SQL assertions cannot prove this failure.
+- Red-on-main verification recorded all four expected failures before implementation: `search_ideas bounds a query that exceeds SQLite's LIKE pattern limit`, `search_tasks bounds a query that exceeds SQLite's LIKE pattern limit`, `knowledge search truncates a SQLite-invalid long query and returns a match`, and `message search truncates a SQLite-invalid long query and returns a match` each failed with `LIKE or GLOB pattern too complex: SQLITE_ERROR`. Their paired short-query controls passed.
 - Relevant retained lessons: `tasks/archive/2026-09-25-projectdata-root-overload.md` requires bounded search work and honest coverage; `tasks/archive/2026-09-23-projectdata-archive-search-reliability-slice-b.md` requires the MCP-to-ProjectData contract and deployed configuration to stay synchronized.
 
 ## Implementation Checklist

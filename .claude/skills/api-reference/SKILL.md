@@ -90,7 +90,7 @@ Comment threads are scoped to the ProjectData Durable Object addressed by `proje
 
 ## Search Input Limits
 
-- The `search_ideas`, `search_tasks`, `search_knowledge`, and `search_messages` MCP tools retain at most `SEARCH_QUERY_MAX_LENGTH` UTF-8 bytes and `SEARCH_QUERY_MAX_TERMS` whitespace-delimited terms. Length settings above SQLite's safe 48-byte ceiling are clamped. They return the effective `query`, `queryTruncated`, and `queryLimits`.
+- The `search_ideas`, `search_tasks`, `search_knowledge`, and `search_messages` MCP tools retain at most `SEARCH_QUERY_MAX_LENGTH` LIKE-safe UTF-8 bytes and `SEARCH_QUERY_MAX_TERMS` whitespace-delimited terms. Length settings are clamped to `4..48`; LIKE escape bytes count toward that budget. They return the effective `query`, `queryTruncated`, and `queryLimits`.
 - `GET /api/projects/:projectId/knowledge/search?q=...`, `GET /api/sam/search?query=...`, and `GET /api/projects/:projectId/agent/search?query=...` apply the same limits and return the same metadata alongside their results.
 - Oversized queries are simplified before FTS5 or LIKE evaluation, preventing SQLite pattern/parser errors while keeping the retained prefix searchable.
 

@@ -5,7 +5,7 @@
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { normalizeSearchQuery } from '../../lib/search-query-limits';
+import { escapeSearchQueryForLike, normalizeSearchQuery } from '../../lib/search-query-limits';
 import { ulid } from '../../lib/ulid';
 import * as projectDataService from '../../services/project-data';
 import {
@@ -167,9 +167,9 @@ export async function handleFindRelatedIdeas(
   // Default to 'draft' status (ideas) when no explicit status filter is provided
   const statusFilter = typeof params.status === 'string' ? params.status.trim() : 'draft';
 
-  const searchPattern = `%${query}%`;
+  const searchPattern = `%${escapeSearchQueryForLike(query)}%`;
 
-  let queryStr = `SELECT id, title, description, status, priority, updated_at FROM tasks WHERE project_id = ? AND (title LIKE ? OR description LIKE ?)`;
+  let queryStr = `SELECT id, title, description, status, priority, updated_at FROM tasks WHERE project_id = ? AND (title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')`;
   const bindParams: unknown[] = [tokenData.projectId, searchPattern, searchPattern];
 
   queryStr += ' AND status = ?';
@@ -546,10 +546,10 @@ export async function handleSearchIdeas(
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.ideaSearchMax);
   const snippetLength = limits.taskDescriptionSnippetLength;
 
-  const searchPattern = `%${query}%`;
+  const searchPattern = `%${escapeSearchQueryForLike(query)}%`;
 
   const results = await env.DATABASE.prepare(
-    'SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? AND (title LIKE ? OR description LIKE ?) ORDER BY updated_at DESC LIMIT ?',
+    "SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? AND (title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\') ORDER BY updated_at DESC LIMIT ?",
   ).bind(tokenData.projectId, 'draft', searchPattern, searchPattern, limit).all<{
     id: string;
     title: string;

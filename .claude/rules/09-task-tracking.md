@@ -146,7 +146,7 @@ When a task asks you to review a previous session or recover context from recent
 
 - If the prompt names a parent/target session, task, PR, or branch, inspect that object directly first with the relevant SAM MCP or GitHub tool instead of starting with broad global searches.
 - Search tools bound query length and term count before SQLite and disclose simplification through `queryTruncated`, the effective `query`, and `queryLimits`. Callers that require exact coverage should refine an over-limit query or read known sessions directly via `get_session_messages`.
-- Do not create a duplicate robustness idea for that search failure; the existing follow-up is `tasks/backlog/2026-05-06-search-messages-pattern-too-complex.md`.
+- Do not create a duplicate robustness idea for historical SQLite pattern-complexity failures unless the bounded search path still reproduces the error.
 - Update the current or resumed session topic when it is stale and the available SAM tool supports it. Do not rewrite unrelated historical session titles unless the task explicitly includes durable state cleanup.
 - A context-resume review remains read-only by default. Only create task files, branches, commits, PRs, or dispatched work when the user asks for implementation, durable artifacts, or delegation.
 

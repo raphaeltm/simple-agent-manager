@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SEARCH_QUERY_MAX_LENGTH,
   DEFAULT_SEARCH_QUERY_MAX_TERMS,
+  escapeSearchQueryForLike,
   normalizeSearchQuery,
 } from '../../../src/lib/search-query-limits';
 
@@ -16,6 +17,37 @@ describe('search query limits', () => {
         maxTerms: DEFAULT_SEARCH_QUERY_MAX_TERMS,
       },
     });
+  });
+
+  it('keeps the configured byte budget safe after LIKE metacharacters are escaped', () => {
+    const normalized = normalizeSearchQuery('%'.repeat(100), {});
+
+    expect(normalized.query).toBe('%'.repeat(24));
+    expect(normalized.queryTruncated).toBe(true);
+    expect(new TextEncoder().encode(escapeSearchQueryForLike(normalized.query))).toHaveLength(48);
+  });
+
+  it('keeps at least one Unicode code point when an override is below the safe minimum', () => {
+    expect(
+      normalizeSearchQuery('😀 trailing', {
+        SEARCH_QUERY_MAX_LENGTH: '2',
+      })
+    ).toEqual({
+      query: '😀',
+      queryTruncated: true,
+      queryLimits: {
+        maxLength: 4,
+        maxTerms: DEFAULT_SEARCH_QUERY_MAX_TERMS,
+      },
+    });
+  });
+
+  it('does not wrap an extreme configured term count to an empty split result', () => {
+    expect(
+      normalizeSearchQuery('alpha beta', {
+        SEARCH_QUERY_MAX_TERMS: '4294967295',
+      }).query
+    ).toBe('alpha beta');
   });
 
   it('enforces env-overridden term and UTF-8 byte limits', () => {

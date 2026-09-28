@@ -99,7 +99,10 @@ app.get('/search', async (c) => {
   if (limit) params.set('limit', limit);
   const response = await stub.fetch(`https://sam-session/search?${params.toString()}`);
   const data = (await response.json()) as Record<string, unknown>;
-  return c.json({ ...data, ...normalizedQuery });
+  return new Response(JSON.stringify({ ...data, ...normalizedQuery }), {
+    status: response.status,
+    headers: { 'content-type': 'application/json' },
+  });
 });
 
 export const samRoutes = app;

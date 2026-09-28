@@ -756,7 +756,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT?: string;
   /** Newest raw messages the keyword search fallback scans (default 50000). */
   PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT?: string;
-  /** Max Unicode characters retained from idea/task/knowledge/message search input (default 48). */
+  /** Max UTF-8 bytes retained from idea/task/knowledge/message search input (default 48, min 4). */
   SEARCH_QUERY_MAX_LENGTH?: string;
   /** Max whitespace-delimited terms retained from search input (default 12). */
   SEARCH_QUERY_MAX_TERMS?: string;
