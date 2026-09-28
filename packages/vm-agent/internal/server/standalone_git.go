@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -167,10 +168,43 @@ func configureStandaloneGhWrapperWithLookup(lookup func() (string, error)) (stri
 	if err != nil {
 		return "", nil
 	}
-	if strings.TrimSpace(ghPath) == "" {
+	ghPath = strings.TrimSpace(ghPath)
+	if ghPath == "" {
 		return "", nil
 	}
+
+	wrapperPath, wrapsRealPath := standaloneGhWrapperPathFor(ghPath, os.Getenv("PATH"))
+	if wrapsRealPath {
+		return wrapperPath, writeStandaloneGhWrapper(wrapperPath, ghPath)
+	}
 	return ghPath, configureStandaloneGhWrapper(ghPath, ghPath+".real")
+}
+
+func standaloneGhWrapperPathFor(ghPath, pathEnv string) (string, bool) {
+	const localBinGh = "/usr/local/bin/gh"
+	if ghPath == localBinGh {
+		return ghPath, false
+	}
+	localBinIndex := -1
+	ghDirIndex := -1
+	ghDir := strings.TrimRight(filepath.Dir(ghPath), "/")
+	for index, dir := range filepath.SplitList(pathEnv) {
+		cleanDir := strings.TrimRight(filepath.Clean(dir), "/")
+		switch cleanDir {
+		case "/usr/local/bin":
+			if localBinIndex == -1 {
+				localBinIndex = index
+			}
+		case ghDir:
+			if ghDirIndex == -1 {
+				ghDirIndex = index
+			}
+		}
+	}
+	if localBinIndex >= 0 && ghDirIndex >= 0 && localBinIndex < ghDirIndex {
+		return localBinGh, true
+	}
+	return ghPath, false
 }
 
 func configureStandaloneGhWrapper(ghPath, realGhPath string) error {

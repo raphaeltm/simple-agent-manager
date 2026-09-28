@@ -97,6 +97,33 @@ printf '%s
 	}
 }
 
+func TestStandaloneGhWrapperPathForUsesLocalBinShimWhenItPrecedesRealGh(t *testing.T) {
+	t.Parallel()
+
+	wrapperPath, wrapsRealPath := standaloneGhWrapperPathFor(
+		"/usr/bin/gh",
+		"/var/lib/vm-agent/agents/bin:/usr/local/bin:/usr/bin:/bin",
+	)
+	if !wrapsRealPath {
+		t.Fatal("expected /usr/local/bin shim to wrap the real gh binary")
+	}
+	if wrapperPath != "/usr/local/bin/gh" {
+		t.Fatalf("wrapper path = %q, want /usr/local/bin/gh", wrapperPath)
+	}
+}
+
+func TestStandaloneGhWrapperPathForFallsBackWhenLocalBinDoesNotPrecedeRealGh(t *testing.T) {
+	t.Parallel()
+
+	wrapperPath, wrapsRealPath := standaloneGhWrapperPathFor("/usr/bin/gh", "/usr/bin:/usr/local/bin:/bin")
+	if wrapsRealPath {
+		t.Fatal("did not expect /usr/local/bin shim when it follows /usr/bin")
+	}
+	if wrapperPath != "/usr/bin/gh" {
+		t.Fatalf("wrapper path = %q, want /usr/bin/gh", wrapperPath)
+	}
+}
+
 func TestConfigureStandaloneGhWrapperUsesDiscoveredPath(t *testing.T) {
 	t.Parallel()
 
