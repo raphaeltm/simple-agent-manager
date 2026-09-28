@@ -43,6 +43,7 @@ import {
   prepareSessionSnapshot,
   type SessionSnapshotManifest,
 } from '../../src/services/session-snapshots';
+import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../src/services/vm-agent-container';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import {
   acceptedPromptResponse,
@@ -616,9 +617,6 @@ describe('Instant session wake after idle sleep', () => {
     ['the workspace page resume', postWorkspaceAgentResume, []],
   ])('when %s wakes the slept container', (_trigger, wake, prompts) => {
     it('commits the wake, so the next checkpoint survives the next sleep', async () => {
-      // A prompt keeps the container awake until its keepalive lapses; let it lapse at once so
-      // the idle timeout below finds the answered turn over.
-      Object.assign(env, { CF_CONTAINER_ACTIVE_WORK_MAX_MS: '1' });
       await sleepOnContainerIdleTimeout();
       const sleptGeneration = restorableGeneration();
 
@@ -632,8 +630,14 @@ describe('Instant session wake after idle sleep', () => {
         status: 'active',
       });
 
-      // The woken agent's turn-end checkpoint, then the container's next idle sleep.
+      // The woken agent's turn ends: its checkpoint completes, which releases the prompt's
+      // keepalive (the snapshot-complete route), and the container later idles into sleep.
       await captureSnapshot();
+      await markVmAgentContainerActiveWorkEndedBestEffort(
+        env,
+        NODE_ID,
+        'session_snapshot_complete'
+      );
       const checkpoint = restorableGeneration();
       expect(checkpoint).not.toBe(sleptGeneration);
       await sleepOnContainerIdleTimeout();
