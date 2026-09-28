@@ -134,12 +134,20 @@ describe('model-catalog', () => {
         true
       );
       expect(allModels.some((m) => m.id === 'opencode/ling-3.0-flash-fin-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/longcat-2.5-preview-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/qwen3.8-max')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.2-contributor-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode/x-preview-f-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode/ling-3.0-tiny-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/glm-5.2')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/glm-5.3')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/gpt-6-luna')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/grok-4.7')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/longcat-2.5-preview-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/qwen3.7-max')).toBe(false);
+      expect(allModels.some((m) => m.id === 'opencode-go/kimi-k2.6')).toBe(false);
+      expect(allModels.some((m) => m.id === 'opencode-go/glm-5.1')).toBe(false);
+      expect(allModels.some((m) => m.id === 'opencode-go/qwen3.6-plus')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/deepseek-v4-flash-vision-exp')).toBe(
         true
       );
