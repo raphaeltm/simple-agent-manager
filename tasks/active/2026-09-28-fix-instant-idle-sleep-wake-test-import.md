@@ -11,7 +11,7 @@ fail directly or through resulting HTTP 500 responses, blocking main CI and prod
 ## Research Findings
 
 - The focused integration file reproduces the reported result on current main: 11 failed and 9
-  passed, with `TypeError: getSession is not a function` at lines 64, 605, 629, and 663.
+  passed, with five stale reads in the ProjectData mock and session-state assertions.
 - Merge commit `964035544` from PR #2170 introduced `session-reads.ts` and removed `getSession`
   from `sessions.ts`, but did not update this integration test's four call sites.
 - Merge commit `397c6f2e5` from PR #2174 does not touch the affected test, the ProjectData modules,
@@ -24,10 +24,10 @@ fail directly or through resulting HTTP 500 responses, blocking main CI and prod
 ## Implementation Checklist
 
 - [x] Import `getSession` from `project-data/session-reads.ts` in the integration test.
-- [x] Replace all stale `sessions.getSession` call sites with the read-module helper.
+- [x] Replace all five stale `sessions.getSession` call sites with the read-module helper.
 - [x] Prove the focused test changes from 11 failures / 9 passes to 20 passes.
-- [ ] Run API typecheck, lint, build, the full API suite, and root coverage/main-CI-equivalent checks.
-- [ ] Complete local task, Cloudflare/API, and test-quality reviews; address every blocking finding.
+- [x] Run API typecheck, lint, build, the full API suite, and root coverage/main-CI-equivalent checks.
+- [x] Complete local task, Cloudflare/API, and test-quality reviews; address every blocking finding.
 - [ ] Open a PR, obtain green CI and CodeRabbit agreement, merge, and monitor production deploy.
 
 ## Acceptance Criteria
@@ -50,3 +50,9 @@ fail directly or through resulting HTTP 500 responses, blocking main CI and prod
 - Focused pre-fix reproduction on `397c6f2e5`: 11 failed / 9 passed with the reported
   `TypeError` and downstream 500 assertions.
 - Focused post-fix validation: 1 file passed, 20 tests passed.
+- API lint, typecheck, and build passed. API coverage passed 785 files / 10,976 tests.
+- Root `pnpm test:coverage`, the exact failing main-CI command, passed all 21 Turbo tasks.
+- Task-completion validation passed the implementation; the task remains active until its PR,
+  main-CI, merge, and production-deploy acceptance criterion is satisfied.
+- Cloudflare/API and test-quality specialist reviews passed with no blocking findings. The test
+  review confirmed all five stale reads were corrected and no additional cases are warranted.
