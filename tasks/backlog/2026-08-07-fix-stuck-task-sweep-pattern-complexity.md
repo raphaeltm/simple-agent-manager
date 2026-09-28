@@ -16,7 +16,7 @@ failing statement first.
 
 - Identify the exact D1 statement and input that produces the pattern-complexity error.
 - Determine whether the failure shares a cause with
-  `tasks/backlog/2026-05-06-search-messages-pattern-too-complex.md` or is an independent
+  the archived task “Fix SAM search input limits” or is an independent
   SQL construction bug.
 - Verify per-sweep error isolation still allows all later scheduled work to run.
 
