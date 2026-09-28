@@ -73,8 +73,13 @@ The ProjectData Durable Object can keep re-arming its alarm roughly every minute
 
 ## Staging verification
 
-- PASS: GitHub Actions `Deploy Staging` run 36397425870 on branch `sam/stop-projectdata-durable-object-22878v`: deployment completed, database migrations with safety gates passed, API worker deployed, health check passed, and smoke tests passed (`12 passed` in 1.2m). Run URL: https://github.com/raphaeltm/simple-agent-manager/actions/runs/36397425870
-- Draft PR opened as requested and not merged: https://github.com/raphaeltm/simple-agent-manager/pull/2170
+- Draft heads, superseded by the review fixes below: `Deploy Staging` runs
+  [36397425870](https://github.com/raphaeltm/simple-agent-manager/actions/runs/36397425870) and
+  [36403288549](https://github.com/raphaeltm/simple-agent-manager/actions/runs/36403288549) (`7c2c604`)
+  passed deploy, D1 migrations with safety gates, health check and smoke tests.
+- The final head's staging deploy and its read-only ProjectData alarm observation are recorded in the
+  PR #2170 body, the durable merge record (`.claude/rules/25`).
+- Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2170
 
 ## Independent adversarial review (2026-09-28, task `01M3KQ17PETQECG3QZBMVY0F4W`)
 
@@ -143,6 +148,25 @@ Reviewed PR head `7c2c60424` and reproduced each finding with scratch probes tha
 | doc-sync-validator | PASS | INFO: `WORKSPACE_IDLE_TIMEOUT_MS` row added. The rule-50 follow-up list still correctly names `idle-cleanup` (its schedule read is unchanged), and the new module isolates rows. |
 | performance-reviewer | PASS | LOW/MEDIUM per-isolate cache for the project timeout: declined. The read now happens only when a row is due, ProjectData instances are evicted between minute-spaced ticks so an isolate cache would rarely hit, and the setting is user-mutable rather than once-per-deploy (rule 60). Noted for the post-deploy read: the SAM object also has mailbox 30 s polls and heartbeat sections, so it will not drop to the quiet-object baseline. |
 | task-completion-validator | FAIL on process gates | Technical checks A/B/C/F passed. The remaining gates (staging on the final head, CI on the final head, CodeRabbit, the PR body's stale "must not be merged" line, final SHAs in this file) are the Phase 6/7 steps below. The validator is re-run before archive. |
+
+### Re-validation on the final code head (`14ca07964`)
+
+The round-1 fixes landed in `7a3901bd3` (checks re-read just before acting, per-row parse
+isolation, `created_at` COALESCE), `762eb0356` (unused index dropped from migration 060),
+`960d81ca3` (shared `parsePositiveInt`) and `14ca07964` (docs). `c2a95dbde` adds only the rule 47
+process fix and this file.
+
+| Reviewer | Result | Disposition |
+| --- | --- | --- |
+| task-completion-validator | PASS | Every technical check passes with no CRITICAL, HIGH or MEDIUM finding, and the validator independently reproduced the discrimination of the cross-row stale-snapshot fix. **LOW** the "wakes in place" test name: kept, because the test wakes the session in the same workspace, which is the in-place case. |
+
+## Ship gates (task `01M3M21TF9NC0DC2HHNT1HQW16`)
+
+The task file is archived before the final-head gates, so this commit is the head they run
+against. Their evidence goes in the PR #2170 body: CI on the final head, the `Deploy Staging` run
+with the read-only ProjectData alarm observation, the CodeRabbit request through the trusted
+workflow, merge, `Deploy Production`, and the post-deploy production alarm-rate comparison
+against the baseline below.
 
 ### Discrimination evidence
 
