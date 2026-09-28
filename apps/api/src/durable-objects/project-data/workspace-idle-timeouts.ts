@@ -235,7 +235,11 @@ function recordWorkspaceIdleDeadline(
   );
 }
 
-/** A check that could not retire an idle workspace is retried after a bounded, growing delay. */
+/**
+ * A check that could not retire an idle workspace is retried after a bounded, growing delay. The
+ * count keeps growing while the workspace stays idle; new activity, a wake, or a check that finds
+ * the workspace no longer idle starts it over.
+ */
 function recordWorkspaceIdleRetry(
   sql: SqlStorage,
   env: Env,

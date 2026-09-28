@@ -63,9 +63,99 @@ The ProjectData Durable Object can keep re-arming its alarm roughly every minute
 - The backoff counter resets after a successful workspace idle cleanup.
 - A genuinely idle workspace is still cleaned up on time.
 - The backoff delay is configurable through environment variables with `DEFAULT_*` constants.
-- The PR is opened as draft and not merged.
+- ~~The PR is opened as draft and not merged.~~ Superseded 2026-09-28 by task `01M3KQ17PETQECG3QZBMVY0F4W`: independently review, finish, and ship PR #2170.
+- A quiet active workspace (not idle yet) is checked once after its activity and then only at its idle deadline, never re-armed at the 60-second floor, for both the installation default and a project `workspace_idle_timeout_ms` override.
+- An idle workspace queued behind a full page of busy or permanently failing checks is still reached within a bounded number of alarms.
+- A throwing check leaves the candidate set with a backoff retry, and activity that lands mid-check clears that retry.
+- A session that wakes in place starts a new idle cycle, so a stale backoff cannot delay cleanup.
+- A failed project-timeout lookup records no destructive verdict.
+- `idle-cleanup.ts` and every other touched source file stay within the rule-18 500-line ceiling.
 
 ## Staging verification
 
 - PASS: GitHub Actions `Deploy Staging` run 36397425870 on branch `sam/stop-projectdata-durable-object-22878v`: deployment completed, database migrations with safety gates passed, API worker deployed, health check passed, and smoke tests passed (`12 passed` in 1.2m). Run URL: https://github.com/raphaeltm/simple-agent-manager/actions/runs/36397425870
 - Draft PR opened as requested and not merged: https://github.com/raphaeltm/simple-agent-manager/pull/2170
+
+## Independent adversarial review (2026-09-28, task `01M3KQ17PETQECG3QZBMVY0F4W`)
+
+Reviewed PR head `7c2c60424` and reproduced each finding with scratch probes that drove the real
+`computeProjectDataAlarmSectionTimes()` + `checkWorkspaceIdleTimeouts()` against real SQLite.
+
+### Findings
+
+- **HIGH — scheduler and sweep still disagreed.** The scheduler timed every active-session row at
+  `lastActivity + WORKSPACE_IDLE_CHECK_INTERVAL_MS` (5 min), but the sweep only acts at
+  `lastActivity + timeoutMs` (2 h default, 30 min–24 h per project). An active session quiet for
+  more than ~4 minutes re-armed the ProjectData alarm at the 60 s floor until the timeout: probe
+  measured **110 workspace-idle re-arms** for one session quiet 10 minutes. Same loop the PR set out
+  to stop, still present for every quiet active session.
+- **HIGH — starvation behind the page.** The sweep selected `ORDER BY workspace_id LIMIT 5` and never
+  wrote to a not-yet-idle row, so five busy active rows sorting first kept an idle workspace behind
+  them from ever being checked (probe: task stayed `in_progress`, alarm pinned at +60 s).
+- **MEDIUM — no escape on a throwing check.** The catch path logged and skipped with no deferral, so
+  a persistent D1 failure re-armed every 60 s (rule 47 escape path). Probe deltas `[60000, 60000, 60000]`.
+- **MEDIUM — stale backoff survives an in-place wake.** `wakeSession()` did not touch
+  `workspace_activity`; a cf-container session woken in place kept a six-hour backoff, delaying
+  cleanup by **230 minutes** in the probe.
+- **MEDIUM (pre-existing, same function) — destructive verdict on an unknown timeout.** A failed D1
+  read of `projects.workspace_idle_timeout_ms` fell back to the installation default, which can be
+  shorter than the project's setting and retire workspaces early (rule 58 requirement 4).
+- **LOW — two `lastActivity` definitions.** The scheduler's `max()` included `wa.created_at`, the
+  sweep's did not.
+- **LOW — deferral race.** The deferral was written after the D1 awaits, so activity arriving during
+  the check had its reset overwritten.
+- **Rule 18.** `idle-cleanup.ts` was 748 lines and `sessions.ts` 615 lines (500 ceiling), both touched.
+- Migration `060-workspace-idle-backoff` is additive only (two `ALTER TABLE ... ADD COLUMN`, one
+  `CREATE INDEX`); `pnpm quality:do-migration-safety` passes. It already ran on staging objects, so it
+  was left byte-for-byte unchanged.
+
+### Fix checklist
+
+- [x] Split the workspace idle sweep, backoff, and alarm time into `workspace-idle-timeouts.ts` as a
+      pure move (`idle-cleanup.ts` 748 → 455 lines); alarm-schedule computes each idle section
+      through the shared per-section isolation.
+- [x] One CTE (`WORKSPACE_IDLE_CHECKS_CTE`) defines tracked rows, `last_activity_at`, and
+      `next_check_at` for both the sweep and the scheduler.
+- [x] Not idle yet → record the idle deadline (retry count 0). Idle → record the backoff retry before
+      any await, then retire or keep it. A throw keeps the recorded retry.
+- [x] Due rows are taken most overdue first (`ORDER BY next_check_at, workspace_id`).
+- [x] A failed project-timeout read records retries only, no verdict.
+- [x] `wakeSession()` clears the recorded check (`activity.clearWorkspaceIdleCheck`).
+- [x] The sweep skips its D1 timeout read when no row is due.
+- [x] Split session reads into `session-reads.ts` as a pure move (`sessions.ts` 618 → 450 lines).
+- [x] Docs: `configuration.md`, `.env.example`, `$env-reference`, shared constant doc comments.
+- [x] Tests: 13 unit cases (`workspace idle timeouts` describe in
+      `tests/unit/conversation-idle-timeout.test.ts`) plus
+      `tests/workers/project-data-workspace-idle-alarm.test.ts` through the real `ProjectData.alarm()`.
+
+### Discrimination evidence
+
+- Against the PR head logic, 9 of the 13 unit cases and the workers test fail; the other 4 cover
+  behavior the PR already had (sleeping/stopped rows unarmed, inconclusive backoff, growth, cleanup).
+- Each guard was removed once and exactly its test went red:
+  deadline write → 5 tests (both deadline cases, full-page, backoff restart, in-place wake);
+  ordering → most-overdue test; retry after the await → mid-check race test (+ failing-page test
+  when the throw path also lost its retry); wake reset → in-place wake test; timeout fallback →
+  no-verdict test; deadline not resetting the count → backoff restart test.
+
+### Local validation
+
+- `pnpm --filter @simple-agent-manager/api test` — 780 files, 10,908 tests passed.
+- `vitest --config vitest.workers.config.ts tests/workers/project-data*` — 15 files, 387 tests passed.
+- `pnpm check:fast`, `pnpm quality:do-migration-safety`, API `tsc`, API build — passed.
+
+### Production baseline before merge
+
+Cloudflare GraphQL `durableObjectsInvocationsAdaptiveGroups`, namespace
+`fb36fe2173534537b0f0a9a0efb17777`, `type = alarm`, 2026-09-27T10:00Z–2026-09-28T10:00Z:
+**33,151 alarm invocations (1,381/h) across 25 objects**; SAM object 6,814; 19 objects at
+1,436–1,500/day (the 60 s floor); 6 objects at ~24/day.
+
+### Known bounded behavior (not a defect)
+
+- An idle workspace that stays unretirable (live runtime, no candidate task) is re-checked at most
+  every `WORKSPACE_IDLE_BACKOFF_MAX_MS` (6 h, ≤ 4 checks/day) until activity, a wake, sleep/stop, or
+  workspace finalization ends the cycle.
+- A lowered project workspace idle timeout applies from each workspace's next check (at most the
+  previous timeout later), since the sweep records deadlines instead of re-reading the setting every
+  minute.
