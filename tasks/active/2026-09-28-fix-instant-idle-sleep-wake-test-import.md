@@ -23,9 +23,9 @@ fail directly or through resulting HTTP 500 responses, blocking main CI and prod
 
 ## Implementation Checklist
 
-- [ ] Import `getSession` from `project-data/session-reads.ts` in the integration test.
-- [ ] Replace all stale `sessions.getSession` call sites with the read-module helper.
-- [ ] Prove the focused test changes from 11 failures / 9 passes to 20 passes.
+- [x] Import `getSession` from `project-data/session-reads.ts` in the integration test.
+- [x] Replace all stale `sessions.getSession` call sites with the read-module helper.
+- [x] Prove the focused test changes from 11 failures / 9 passes to 20 passes.
 - [ ] Run API typecheck, lint, build, the full API suite, and root coverage/main-CI-equivalent checks.
 - [ ] Complete local task, Cloudflare/API, and test-quality reviews; address every blocking finding.
 - [ ] Open a PR, obtain green CI and CodeRabbit agreement, merge, and monitor production deploy.
@@ -44,3 +44,9 @@ fail directly or through resulting HTTP 500 responses, blocking main CI and prod
 - PR #2174 / merge commit `397c6f2e58a26524043e6626f05ce5c7ad23e44d`
 - `apps/api/.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`
 - `tasks/archive/2026-09-28-instant-idle-sleep-wake.md`
+
+## Implementation Notes
+
+- Focused pre-fix reproduction on `397c6f2e5`: 11 failed / 9 passed with the reported
+  `TypeError` and downstream 500 assertions.
+- Focused post-fix validation: 1 file passed, 20 tests passed.
