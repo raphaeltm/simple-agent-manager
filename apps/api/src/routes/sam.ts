@@ -9,6 +9,7 @@
 import { Hono } from 'hono';
 
 import type { Env } from '../env';
+import { normalizeSearchQuery } from '../lib/search-query-limits';
 import { requireAuth } from '../middleware/auth';
 import { AgentChatRequestSchema, jsonValidator } from '../schemas';
 
@@ -87,17 +88,18 @@ app.get('/conversations/:id/messages', async (c) => {
 /** GET /search — full-text search across conversation history. */
 app.get('/search', async (c) => {
   const userId = c.get('auth').user.id;
-  const query = c.req.query('query') || '';
+  const inputQuery = c.req.query('query') || '';
   const limit = c.req.query('limit') || '';
-  if (!query.trim()) {
+  if (!inputQuery.trim()) {
     return c.json({ error: 'Query parameter is required' }, 400);
   }
+  const normalizedQuery = normalizeSearchQuery(inputQuery, c.env);
   const stub = getSamSession(c.env, userId);
-  const params = new URLSearchParams({ query });
+  const params = new URLSearchParams({ query: normalizedQuery.query });
   if (limit) params.set('limit', limit);
   const response = await stub.fetch(`https://sam-session/search?${params.toString()}`);
-  const data = await response.json();
-  return c.json(data);
+  const data = (await response.json()) as Record<string, unknown>;
+  return c.json({ ...data, ...normalizedQuery });
 });
 
 export const samRoutes = app;

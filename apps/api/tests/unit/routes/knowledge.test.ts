@@ -92,6 +92,40 @@ describe('knowledge routes', () => {
     app = makeApp();
   });
 
+  describe('GET /search', () => {
+    it('truncates over-limit input before the ProjectData call and discloses it', async () => {
+      mocks.searchKnowledgeObservations.mockResolvedValueOnce([{ id: 'obs-1' }]);
+      const env = {
+        ...makeEnv(),
+        SEARCH_QUERY_MAX_LENGTH: '20',
+        SEARCH_QUERY_MAX_TERMS: '3',
+      } as Env;
+
+      const res = await app.request(
+        `${BASE}/search?q=${encodeURIComponent('alpha beta gamma delta epsilon')}`,
+        undefined,
+        env
+      );
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({
+        results: [{ id: 'obs-1' }],
+        total: 1,
+        query: 'alpha beta gamma',
+        queryTruncated: true,
+        queryLimits: { maxLength: 20, maxTerms: 3 },
+      });
+      expect(mocks.searchKnowledgeObservations).toHaveBeenCalledWith(
+        env,
+        'project-1',
+        'alpha beta gamma',
+        null,
+        null,
+        20
+      );
+    });
+  });
+
   describe('POST / (create entity)', () => {
     it('creates an entity from a valid body', async () => {
       mocks.createKnowledgeEntity.mockResolvedValueOnce({ id: 'entity-1', createdAt: 123 });

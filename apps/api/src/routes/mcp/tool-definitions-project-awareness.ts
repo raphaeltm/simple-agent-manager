@@ -57,13 +57,14 @@ export const PROJECT_AWARENESS_TOOLS = [
   {
     name: 'search_tasks',
     description:
-      'Search tasks in your project by keyword. Searches both title and description fields.',
+      'Search tasks in your project by keyword. Searches both title and description fields. Queries beyond the server-configured byte or term limits are truncated; the response reports queryTruncated, the effective query, and queryLimits.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: {
           type: 'string',
-          description: 'Search keyword to find in task titles and descriptions',
+          description:
+            'Search text for task titles and descriptions. Over-limit input is truncated and disclosed in the response.',
         },
         status: {
           type: 'string',
@@ -198,13 +199,14 @@ export const PROJECT_AWARENESS_TOOLS = [
   {
     name: 'search_messages',
     description:
-      'Search messages across all chat sessions in your project by keyword using full-text search. Returns matching message snippets with session context. Useful for finding past discussions about specific topics, decisions, or code. Sessions are indexed incrementally each time they sleep or stop, so sleeping and stopped sessions are covered by FTS5 (matches messages containing all search words); only messages written since a session was last indexed fall back to keyword matching. To keep large projects responsive, relevance ranking considers the newest matches (a configured window) and the keyword fallback scans only the newest raw messages; when either bound was reached, the rootSearch field flags it and coverageNotes explains what was not searched, so an empty result then does not prove absence.',
+      'Search messages across all chat sessions in your project by keyword using full-text search. Returns matching message snippets with session context. Queries beyond the server-configured byte or term limits are truncated; the response reports queryTruncated, the effective query, and queryLimits. Sessions are indexed incrementally each time they sleep or stop, so sleeping and stopped sessions are covered by FTS5 (matches messages containing all retained search words); only messages written since a session was last indexed fall back to keyword matching. To keep large projects responsive, relevance ranking considers the newest matches (a configured window) and the keyword fallback scans only the newest raw messages; when either bound was reached, the rootSearch field flags it and coverageNotes explains what was not searched, so an empty result then does not prove absence.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: {
           type: 'string',
-          description: 'Search keyword to find in message content',
+          description:
+            'Search text for message content. Over-limit input is truncated and disclosed in the response.',
         },
         sessionId: {
           type: 'string',

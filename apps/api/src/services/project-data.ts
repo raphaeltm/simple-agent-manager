@@ -139,6 +139,7 @@ import type {
 import type { RegisterTaskWaitInput } from '../durable-objects/project-data/task-waits';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { type NormalizedSearchQuery, normalizeSearchQuery } from '../lib/search-query-limits';
 import {
   PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_CONCURRENCY,
   PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_MAX_OWNERS,
@@ -1016,6 +1017,7 @@ export type ProjectDataSearchMessagesWithArchiveMetadataResult = {
   results: ProjectDataMessageSearchResult[];
   archiveSearch: ProjectDataArchiveSearchMetadata;
   rootSearch: ProjectDataRootSearchCoverage | null;
+  query: NormalizedSearchQuery;
 };
 
 type ProjectDataArchiveSearchOwnerRow = {
@@ -1370,13 +1372,15 @@ async function mapWithConcurrency<T, R>(
 export async function searchMessagesWithArchiveMetadata(
   env: Env,
   projectId: string,
-  query: string,
+  inputQuery: string,
   sessionId: string | null = null,
   roles: string[] | null = null,
   limit: number = 10,
   continuation: string | null = null
 ): Promise<ProjectDataSearchMessagesWithArchiveMetadataResult> {
   const searchStartedAt = Date.now();
+  const normalizedQuery = normalizeSearchQuery(inputQuery, env);
+  const query = normalizedQuery.query;
   if (sessionId && continuation) {
     throw new Error('Archive search continuation cannot be combined with a session-scoped search');
   }
@@ -1400,6 +1404,7 @@ export async function searchMessagesWithArchiveMetadata(
     return {
       results,
       rootSearch,
+      query: normalizedQuery,
       archiveSearch: {
         partial: false,
         reason: 'session_scoped_exact_read',
@@ -1459,6 +1464,7 @@ export async function searchMessagesWithArchiveMetadata(
       return {
         results: rootResults,
         rootSearch,
+        query: normalizedQuery,
         archiveSearch: {
           partial: true,
           reason: 'archive_owner_inventory_unavailable',
@@ -1656,6 +1662,7 @@ export async function searchMessagesWithArchiveMetadata(
   const response: ProjectDataSearchMessagesWithArchiveMetadataResult = {
     results: sortAndLimitSearchResults(cursor.results, limit),
     rootSearch: cursor.rootSearch ?? null,
+    query: normalizedQuery,
     archiveSearch: {
       partial,
       reason: !complete ? 'continuation_required' : partial ? 'archive_search_errors' : null,

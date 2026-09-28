@@ -145,7 +145,7 @@ When Raphaël asks for status, open PRs, task history, deployment state, or a si
 When a task asks you to review a previous session or recover context from recent conversations, keep the search bounded and evidence-driven:
 
 - If the prompt names a parent/target session, task, PR, or branch, inspect that object directly first with the relevant SAM MCP or GitHub tool instead of starting with broad global searches.
-- Keep `search_messages` queries short and focused. If a broad query fails with `LIKE or GLOB pattern too complex`, retry with fewer terms or read known sessions directly via `get_session_messages`.
+- Search tools bound query length and term count before SQLite and disclose simplification through `queryTruncated`, the effective `query`, and `queryLimits`. Callers that require exact coverage should refine an over-limit query or read known sessions directly via `get_session_messages`.
 - Do not create a duplicate robustness idea for that search failure; the existing follow-up is `tasks/backlog/2026-05-06-search-messages-pattern-too-complex.md`.
 - Update the current or resumed session topic when it is stale and the available SAM tool supports it. Do not rewrite unrelated historical session titles unless the task explicitly includes durable state cleanup.
 - A context-resume review remains read-only by default. Only create task files, branches, commits, PRs, or dispatched work when the user asks for implementation, durable artifacts, or delegation.

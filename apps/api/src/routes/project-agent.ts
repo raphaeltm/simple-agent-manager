@@ -13,6 +13,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { normalizeSearchQuery } from '../lib/search-query-limits';
 import { requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
@@ -106,17 +107,18 @@ app.get('/search', requireAuth(), async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   await requireProjectAccess(db, projectId, auth.user.id);
 
-  const query = c.req.query('query') || '';
+  const inputQuery = c.req.query('query') || '';
   const limit = c.req.query('limit') || '';
-  if (!query.trim()) {
+  if (!inputQuery.trim()) {
     return c.json({ error: 'Query parameter is required' }, 400);
   }
+  const normalizedQuery = normalizeSearchQuery(inputQuery, c.env);
   const stub = getProjectAgent(c.env, projectId);
-  const params = new URLSearchParams({ query });
+  const params = new URLSearchParams({ query: normalizedQuery.query });
   if (limit) params.set('limit', limit);
   const response = await stub.fetch(`https://project-agent/search?${params.toString()}`);
-  const data = await response.json();
-  return c.json(data);
+  const data = (await response.json()) as Record<string, unknown>;
+  return c.json({ ...data, ...normalizedQuery });
 });
 
 export const projectAgentRoutes = app;

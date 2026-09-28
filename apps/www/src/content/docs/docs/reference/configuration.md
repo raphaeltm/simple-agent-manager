@@ -1457,6 +1457,8 @@ Applied via cloud-init on each node:
 | `MCP_IDEA_LIST_MAX`                    | `100`   | Max page size for `list_ideas`                          |
 | `MCP_IDEA_SEARCH_MAX`                  | `20`    | Max results from `search_ideas`                         |
 | `MCP_MESSAGE_SEARCH_MAX`               | `20`    | Max results from `search_messages`                      |
+| `SEARCH_QUERY_MAX_LENGTH`              | `48`    | Max UTF-8 bytes retained by idea, task, knowledge, and message search. Values above SQLite's safe 48-byte ceiling are clamped; responses disclose truncation |
+| `SEARCH_QUERY_MAX_TERMS`               | `12`    | Max whitespace-delimited terms retained by those search surfaces; responses disclose truncation |
 | `MCP_MESSAGE_LIST_LIMIT`               | `50`    | Default page size for `get_session_messages`            |
 | `MCP_MESSAGE_LIST_MAX`                 | `200`   | Max messages per `get_session_messages` request         |
 | `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT` | `10`    | Default page size for `get_archived_tool_payloads`      |

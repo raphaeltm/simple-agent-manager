@@ -34,6 +34,10 @@ import { buildFtsQuery, extractSnippet } from '../../../src/durable-objects/sam-
 import { executeTool } from '../../../src/durable-objects/sam-session/tools';
 import { searchConversationHistory } from '../../../src/durable-objects/sam-session/tools/search-conversation-history';
 import type { CollectedToolCall, MessageRow, ToolContext } from '../../../src/durable-objects/sam-session/types';
+import {
+  DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERMS,
+} from '../../../src/lib/search-query-limits';
 
 // Mock cloudflare:workers (vitest hoists vi.mock calls automatically)
 
@@ -347,7 +351,16 @@ describe('search_conversation_history tool', () => {
     };
     const result = await searchConversationHistory({ query: 'test', limit: 5 }, ctx);
     expect(ctx.searchMessages).toHaveBeenCalledWith('test', 5);
-    expect(result).toEqual({ results: mockResults, count: 1, query: 'test' });
+    expect(result).toEqual({
+      results: mockResults,
+      count: 1,
+      query: 'test',
+      queryTruncated: false,
+      queryLimits: {
+        maxLength: DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+        maxTerms: DEFAULT_SEARCH_QUERY_MAX_TERMS,
+      },
+    });
   });
 
   it('caps limit at DEFAULT_SAM_SEARCH_MAX_LIMIT', async () => {

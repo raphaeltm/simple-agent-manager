@@ -125,4 +125,22 @@ describe('sam chat route', () => {
     expect(body).toEqual({ error: 'Message is required' });
     expect(mocks.doFetch).not.toHaveBeenCalled();
   });
+
+  it('bounds search input before forwarding it and discloses the effective query', async () => {
+    mocks.doFetch.mockResolvedValueOnce(Response.json({ results: [] }));
+    const env = makeEnv();
+    env.SEARCH_QUERY_MAX_LENGTH = '12';
+    env.SEARCH_QUERY_MAX_TERMS = '2';
+
+    const res = await app.request(`${BASE}/search?query=archive+search+overflow`, {}, env);
+
+    expect(res.status).toBe(200);
+    expect(mocks.doFetch).toHaveBeenCalledWith('https://sam-session/search?query=archive+sear');
+    expect(await res.json()).toEqual({
+      results: [],
+      query: 'archive sear',
+      queryTruncated: true,
+      queryLimits: { maxLength: 12, maxTerms: 2 },
+    });
+  });
 });

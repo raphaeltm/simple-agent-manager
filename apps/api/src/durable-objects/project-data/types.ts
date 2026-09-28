@@ -187,6 +187,8 @@ export type Env = {
   PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT?: string;
   /** Newest raw messages the keyword search fallback scans (default 50000). */
   PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT?: string;
+  SEARCH_QUERY_MAX_LENGTH?: string;
+  SEARCH_QUERY_MAX_TERMS?: string;
   /** Run only due ProjectData alarm sections per tick (default true; false runs every section). */
   PROJECT_DATA_ALARM_SECTION_GATING_ENABLED?: string;
   /** Max interval between ProjectData alarm ticks that run every section (default 900000). */

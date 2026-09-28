@@ -5,6 +5,7 @@
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { normalizeSearchQuery } from '../../lib/search-query-limits';
 import { ulid } from '../../lib/ulid';
 import * as projectDataService from '../../services/project-data';
 import {
@@ -150,15 +151,17 @@ export async function handleFindRelatedIdeas(
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
-  const query = typeof params.query === 'string' ? params.query.trim() : '';
-  if (!query) {
+  const inputQuery = typeof params.query === 'string' ? params.query.trim() : '';
+  if (!inputQuery) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'query is required');
   }
-  if (query.length < 2) {
+  if (inputQuery.length < 2) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
   }
 
   const limits = getMcpLimits(env);
+  const normalizedQuery = normalizeSearchQuery(inputQuery, env);
+  const query = normalizedQuery.query;
   const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskSearchMax);
   // Default to 'draft' status (ideas) when no explicit status filter is provided
@@ -202,7 +205,7 @@ export async function handleFindRelatedIdeas(
           updatedAt: t.updated_at,
         })),
         count: results.results?.length ?? 0,
-        query,
+        ...normalizedQuery,
       }, null, 2),
     }],
   });
@@ -528,15 +531,17 @@ export async function handleSearchIdeas(
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
-  const query = typeof params.query === 'string' ? params.query.trim() : '';
-  if (!query) {
+  const inputQuery = typeof params.query === 'string' ? params.query.trim() : '';
+  if (!inputQuery) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'query is required');
   }
-  if (query.length < 2) {
+  if (inputQuery.length < 2) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
   }
 
   const limits = getMcpLimits(env);
+  const normalizedQuery = normalizeSearchQuery(inputQuery, env);
+  const query = normalizedQuery.query;
   const requestedLimit = typeof params.limit === 'number' ? params.limit : limits.ideaSearchMax;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.ideaSearchMax);
   const snippetLength = limits.taskDescriptionSnippetLength;
@@ -569,7 +574,7 @@ export async function handleSearchIdeas(
           updatedAt: idea.updated_at,
         })),
         count: results.results?.length ?? 0,
-        query,
+        ...normalizedQuery,
       }, null, 2),
     }],
   });

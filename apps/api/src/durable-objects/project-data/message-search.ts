@@ -26,6 +26,11 @@ import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import {
+  DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERMS,
+  normalizeSearchQueryWithLimits,
+} from '../../lib/search-query-limits';
+import {
   appendRoleCondition,
   buildFtsQuery,
   mapSearchRows,
@@ -49,12 +54,16 @@ export interface MessageSearchBounds {
   ftsCandidateLimit: number;
   ftsScanLimit: number;
   keywordScanRowLimit: number;
+  queryMaxLength?: number;
+  queryMaxTerms?: number;
 }
 
 export interface MessageSearchBoundsEnv {
   PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT?: string;
   PROJECT_DATA_SEARCH_FTS_SCAN_LIMIT?: string;
   PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT?: string;
+  SEARCH_QUERY_MAX_LENGTH?: string;
+  SEARCH_QUERY_MAX_TERMS?: string;
 }
 
 export function resolveMessageSearchBounds(env: MessageSearchBoundsEnv): MessageSearchBounds {
@@ -76,6 +85,8 @@ export function resolveMessageSearchBounds(env: MessageSearchBoundsEnv): Message
       env.PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT,
       DEFAULT_PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT
     ),
+    queryMaxLength: parsePositiveInt(env.SEARCH_QUERY_MAX_LENGTH, DEFAULT_SEARCH_QUERY_MAX_LENGTH),
+    queryMaxTerms: parsePositiveInt(env.SEARCH_QUERY_MAX_TERMS, DEFAULT_SEARCH_QUERY_MAX_TERMS),
   };
 }
 
@@ -97,6 +108,7 @@ export interface MessageSearchCoverage {
 export interface MessageSearchWithCoverage {
   results: SearchResult[];
   coverage: MessageSearchCoverage;
+  query: ReturnType<typeof normalizeSearchQueryWithLimits>;
 }
 
 export function searchMessagesWithCoverage(
@@ -107,7 +119,12 @@ export function searchMessagesWithCoverage(
   limit: number,
   bounds: MessageSearchBounds
 ): MessageSearchWithCoverage {
-  const fts = searchMessagesFts(sql, query, sessionId, roles, limit, bounds);
+  const queryInfo = normalizeSearchQueryWithLimits(query, {
+    maxLength: bounds.queryMaxLength ?? DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+    maxTerms: bounds.queryMaxTerms ?? DEFAULT_SEARCH_QUERY_MAX_TERMS,
+  });
+  const effectiveQuery = queryInfo.query;
+  const fts = searchMessagesFts(sql, effectiveQuery, sessionId, roles, limit, bounds);
   const results = [...fts.results];
   let keywordFallbackRan = false;
   let keywordScanTruncated = false;
@@ -116,7 +133,7 @@ export function searchMessagesWithCoverage(
     keywordFallbackRan = true;
     const keyword = searchMessagesLike(
       sql,
-      query,
+      effectiveQuery,
       sessionId,
       roles,
       limit - results.length,
@@ -129,6 +146,7 @@ export function searchMessagesWithCoverage(
   results.sort((a, b) => b.createdAt - a.createdAt);
   return {
     results: results.slice(0, limit),
+    query: queryInfo,
     coverage: {
       ftsCandidateLimit: bounds.ftsCandidateLimit,
       ftsCandidatesTruncated: fts.truncated,
