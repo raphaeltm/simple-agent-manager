@@ -12,6 +12,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
+import { parsePositiveInt } from '../../lib/route-helpers';
 import { recordActivityEventInternal } from './activity';
 import { createAttentionMarker } from './attention';
 import { terminalizeIdleTaskInD1 } from './idle-cleanup-terminalization';
@@ -30,11 +31,6 @@ const IDLE_CLEANUP_RETRY_EXHAUSTED_MESSAGE =
   'Idle cleanup failed after retries. Your work has been preserved — please check the workspace manually.';
 const IDLE_CLEANUP_MAX_RESIDENCE_MESSAGE =
   'Idle cleanup could not complete within its maximum residence time. Your work has been preserved — please check the workspace manually.';
-
-function positiveInt(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(value ?? '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
 
 type IdleCleanupEntry = ReturnType<typeof parseIdleCleanupSchedule>;
 
@@ -170,7 +166,7 @@ export function scheduleIdleCleanup(
   workspaceId: string,
   taskId: string | null
 ): { cleanupAt: number } {
-  const timeoutMinutes = positiveInt(
+  const timeoutMinutes = parsePositiveInt(
     env.SESSION_IDLE_TIMEOUT_MINUTES,
     DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES
   );
@@ -198,7 +194,7 @@ export function resetIdleCleanup(
   env: Env,
   sessionId: string
 ): { cleanupAt: number } {
-  const timeoutMinutes = positiveInt(
+  const timeoutMinutes = parsePositiveInt(
     env.SESSION_IDLE_TIMEOUT_MINUTES,
     DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES
   );
@@ -248,18 +244,23 @@ export async function processExpiredCleanups(
   scheduleSummarySync: () => void
 ): Promise<void> {
   const now = Date.now();
-  const maxRetries = positiveInt(env.IDLE_CLEANUP_MAX_RETRIES, DEFAULT_IDLE_CLEANUP_MAX_RETRIES);
-  const maxResidenceMs = positiveInt(
+  const maxRetries = parsePositiveInt(
+    env.IDLE_CLEANUP_MAX_RETRIES,
+    DEFAULT_IDLE_CLEANUP_MAX_RETRIES
+  );
+  const maxResidenceMs = parsePositiveInt(
     env.IDLE_CLEANUP_MAX_RESIDENCE_MS,
     DEFAULT_IDLE_CLEANUP_MAX_RESIDENCE_MS
   );
-  const retryDelay = positiveInt(
+  const retryDelay = parsePositiveInt(
     env.IDLE_CLEANUP_RETRY_DELAY_MS,
     DEFAULT_IDLE_CLEANUP_RETRY_DELAY_MS
   );
   const timeoutMs =
-    positiveInt(env.SESSION_IDLE_TIMEOUT_MINUTES, DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES) * 60 * 1000;
-  const candidateLimit = positiveInt(
+    parsePositiveInt(env.SESSION_IDLE_TIMEOUT_MINUTES, DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES) *
+    60 *
+    1000;
+  const candidateLimit = parsePositiveInt(
     env.IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP,
     DEFAULT_IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP
   );
