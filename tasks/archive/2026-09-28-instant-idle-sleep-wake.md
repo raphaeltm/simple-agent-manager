@@ -158,7 +158,7 @@ Neither. The combination is older:
 - [x] Staging: start an Instant session, let it idle-sleep (~75 s after the turn), send another
       prompt, confirm it wakes and answers. Clean up afterwards. (See "Staging" below. The final
       commit `a0d22b9fd` still needs its own deploy once staging is free.)
-- [ ] Draft PR opened, left in draft; idea updated with the PR link.
+- [x] Draft PR opened, left in draft; idea updated with the PR link. (#2173)
 
 ## Implementation Notes
 
@@ -227,7 +227,10 @@ Neither. The combination is older:
   as inconclusive.
 - Still to verify on staging, once another task's run frees it: the final head `01ba447a6`, i.e.
   the workspace-page stop of a slept session, plus UI Archive of a slept session on this branch.
-  Agreed order: task 01M3KTZQPKC2VZQEZ3VHZZDPBW, then PR #2170's task, then this branch.
+  Handed to the coordinator in PR #2173. Staging was queued behind task 01M3KTZQPKC2VZQEZ3VHZZDPBW
+  and PR #2170's task. The later code commits touch only the workspace agent-session routes and
+  are covered by the real-route slice.
+- Draft PR #2173 opened; CI all green. Every test session was cleaned up, with deletion confirmed.
 - UI Archive of a slept session never confirms deletion on main (workspace stuck `stopping`,
   "Workspace deletion unconfirmed: VM attempt 4"). Pre-existing and not changed here; filed as idea
   01M3KYP55W91YQHV2FN1A2NVBT.
