@@ -40,8 +40,8 @@ The same unbounded input reaches SQLite from `search_ideas`, `search_tasks`, and
 - [x] Add real-SQLite red/green regressions for all four search surfaces using a query that fails on current main.
 - [x] Add a short-query control proving existing ordering/ranking and matches are preserved.
 - [x] Update MCP tool descriptions, runtime env types, Wrangler/deploy sync, env examples, env reference, and public docs.
-- [ ] Run focused tests, lint, typecheck, full tests, build, and specialist review.
-- [ ] Deploy the pinned branch to staging and exercise every search tool through the real MCP/API path.
+- [x] Run focused tests, lint, typecheck, full tests, build, and specialist review.
+- [x] Deploy the pinned branch to staging and exercise every search tool through the real MCP/API path.
 - [ ] Open a draft PR and leave it draft for coordinating-session review.
 
 ## Acceptance Criteria
@@ -51,7 +51,7 @@ The same unbounded input reaches SQLite from `search_ideas`, `search_tasks`, and
 - [x] A real-SQLite regression for each surface is red on current main and returns results after the fix.
 - [x] A normal short query preserves existing ranking/order and results.
 - [x] MCP descriptions and public/configuration docs describe the limits and truncation metadata.
-- [ ] Staging probes through the real MCP/API paths succeed for all four long-query searches.
+- [x] Staging probes through the real MCP/API paths succeed for all four long-query searches.
 - [ ] The implementation PR remains draft and unmerged.
 
 ## Preflight
@@ -60,3 +60,12 @@ The same unbounded input reaches SQLite from `search_ideas`, `search_tasks`, and
 - Data flow: MCP/API query → shared normalization using Worker env → D1 task/idea LIKE or ProjectData knowledge/message FTS+LIKE → response with effective query and truncation metadata.
 - Constitution: Principle XI requires both limits to have exported defaults and env overrides; Principle XIII favors normalization before the SQLite boundary so invalidly large work never reaches storage.
 - Assumption verified: current branch equals current `origin/main` at `4d929c465`; merged PR #2136 is present as `aa354f983`.
+
+## Validation Evidence
+
+- Focused unit regressions: 8 tests passed for the shared normalizer plus real-SQLite idea/task MCP handlers.
+- Real Workers SQLite regressions: 22 tests passed for ProjectData knowledge/message, MCP-to-DO vertical slices, and SamSession LIKE fallback.
+- Full API suite: 782 files and 10,906 tests passed. API typecheck, lint, build, `git diff --check`, and the repository format ratchet passed.
+- Specialist review: Cloudflare/env, documentation/constitution, and completion/test findings were addressed; Cloudflare/env and documentation/constitution returned PASS before staging.
+- Staging deploy [run 36398630275](https://github.com/raphaeltm/simple-agent-manager/actions/runs/36398630275) succeeded for exact SHA `ddb404e0fb048435b4cc7640a136f36e0b424bf1`, including its Playwright smoke-test job.
+- Authenticated staging MCP calls seeded matching idea and knowledge records from session `6d26f236-b89a-45ed-9a2e-b1ed30104833`, then ran `search_ideas`, `search_tasks`, `search_knowledge`, and `search_messages` with the same 171-byte, 18-term query. All returned HTTP 200, at least one match, `queryTruncated: true`, `queryLimits.maxLength: 48`, `queryLimits.maxTerms: 12`, and effective query `stagealpha stagebeta stagegamma stagedelta stage`.
