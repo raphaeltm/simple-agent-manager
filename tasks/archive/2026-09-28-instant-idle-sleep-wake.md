@@ -225,8 +225,19 @@ Neither. The combination is older:
 - The UI Archive check (`/tasks/:id/close`) on session `e07b68c5…` ran after another task's deploy
   replaced the Worker (11:50:53). It therefore exercised main's code, not this branch, and counts
   as inconclusive.
-- Still to verify on staging, once another task's run frees it: the final commit `a0d22b9fd`, i.e.
+- Still to verify on staging, once another task's run frees it: the final head `01ba447a6`, i.e.
   the workspace-page stop of a slept session, plus UI Archive of a slept session on this branch.
+  Agreed order: task 01M3KTZQPKC2VZQEZ3VHZZDPBW, then PR #2170's task, then this branch.
+- UI Archive of a slept session never confirms deletion on main (workspace stuck `stopping`,
+  "Workspace deletion unconfirmed: VM attempt 4"). Pre-existing and not changed here; filed as idea
+  01M3KYP55W91YQHV2FN1A2NVBT.
+- Delta reviews (after staging):
+  - architecture-reviewer: ADDRESSED. MEDIUM-1 (the workspace route used a second "asleep"
+    signal) fixed in `01ba447a6`. MEDIUM-2 (no structural guard for future signal-only callers)
+    appended to idea 01M3KX6RV5KGFZVCC7VK6Z6QHK.
+  - test-engineer: PASS, LOWs noted.
+- Final validation: full API suite on `01ba447a6` 10,911/10,911; Workers subset 33/33;
+  `check:fast` green.
 
 ## References
 
