@@ -93,7 +93,13 @@ export function toRuntimeRecoveryTarget(
  * running. Deletion states stay out, so a wake can never revive a runtime that
  * deletion has quarantined.
  */
-const IN_PLACE_WAKEABLE_STATUSES = ['running', 'creating', 'recovery', 'error', 'sleeping'];
+export const IN_PLACE_WAKEABLE_STATUSES: readonly string[] = [
+  'running',
+  'creating',
+  'recovery',
+  'error',
+  'sleeping',
+];
 const IN_PLACE_WAKEABLE_STATUSES_SQL = IN_PLACE_WAKEABLE_STATUSES.map(
   (status) => `'${status}'`
 ).join(', ');
@@ -114,10 +120,10 @@ export async function loadRuntimeRecoveryContext(
     .where(
       and(
         eq(schema.workspaces.id, input.workspaceId),
-        inArray(schema.workspaces.status, IN_PLACE_WAKEABLE_STATUSES),
+        inArray(schema.workspaces.status, [...IN_PLACE_WAKEABLE_STATUSES]),
         isNull(schema.workspaces.runtimeDeletionConfirmedAt),
         eq(schema.nodes.runtime, 'cf-container'),
-        inArray(schema.nodes.status, IN_PLACE_WAKEABLE_STATUSES)
+        inArray(schema.nodes.status, [...IN_PLACE_WAKEABLE_STATUSES])
       )
     )
     .get();

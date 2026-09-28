@@ -510,14 +510,31 @@ describe('Instant session wake after idle sleep', () => {
   // Control: the wake must still be refused, visibly, when the runtime is really gone —
   // otherwise the suite passes with the refusal deleted outright.
   it.each([
-    ['its node row was removed', `DELETE FROM nodes WHERE id = ?`],
+    ['its node row was removed', () => d1.prepare(`DELETE FROM nodes WHERE id = ?`).run(NODE_ID)],
+    [
+      'node cleanup is tearing its container down',
+      () =>
+        d1
+          .prepare(`UPDATE nodes SET status = 'destroying', health_status = 'stale' WHERE id = ?`)
+          .run(NODE_ID),
+    ],
     [
       'node cleanup destroyed its container',
-      `UPDATE nodes SET status = 'deleted', health_status = 'stale' WHERE id = ?`,
+      () =>
+        d1
+          .prepare(`UPDATE nodes SET status = 'deleted', health_status = 'stale' WHERE id = ?`)
+          .run(NODE_ID),
+    ],
+    [
+      'its workspace deletion was confirmed',
+      () =>
+        d1
+          .prepare(`UPDATE workspaces SET runtime_deletion_confirmed_at = ? WHERE id = ?`)
+          .run(new Date().toISOString(), WORKSPACE_ID),
     ],
   ])('still reports a slept container as unavailable when %s', async (_gone, destroy) => {
     await sleepOnContainerIdleTimeout();
-    d1.prepare(destroy).run(NODE_ID);
+    destroy();
 
     const deliveryId = await sendFollowUp('Are you still there?');
 

@@ -4,6 +4,7 @@
  * (`.claude/rules/18-file-size-limits.md`), which re-exports these types.
  */
 import type { PromptDeliveryResult } from '../durable-objects/project-data/prompt-delivery';
+import { IN_PLACE_WAKEABLE_STATUSES } from '../durable-objects/vm-agent-container-recovery';
 import type { Env } from '../env';
 import {
   ensureSessionRecovery,
@@ -73,6 +74,7 @@ interface DeliveryTargetRow {
   workspace_id: string;
   user_id: string;
   workspace_status: string;
+  workspace_deletion_confirmed_at: string | null;
   node_id: string | null;
   node_status: string | null;
   node_health_status: string | null;
@@ -85,10 +87,18 @@ interface DeliveryTargetRow {
   snapshot_runtime: string | null;
 }
 
-/** Statuses a runtime cannot come back from, whichever runtime it is. */
+/** Statuses a live delivery target cannot come back from. */
 const TERMINAL_WORKSPACE_STATUSES = ['stopping', 'stopped', 'evicted', 'deleted', 'error'];
 const TERMINAL_NODE_STATUSES = ['stopping', 'stopped', 'deleted', 'error'];
 const TERMINAL_AGENT_SESSION_STATUSES = ['completed', 'failed', 'error', 'stopped'];
+
+/**
+ * The workspace and node statuses a sleeping container can still wake from: the
+ * container DO's own set, less `error` (see `resolveSleepingContainerTarget`).
+ */
+const SLEEPING_CONTAINER_WAKEABLE_STATUSES = IN_PLACE_WAKEABLE_STATUSES.filter(
+  (status) => status !== 'error'
+);
 
 function isSleepingContainer(runtime: string | null, sleepStatus: string | null): boolean {
   return runtime === 'cf-container' && sleepStatus === 'sleeping';
@@ -140,12 +150,13 @@ async function reportUnavailableContainer(
 
 /**
  * A sleeping Instant runtime wakes in place: the capability probe reaches its
- * container Durable Object, whose `ensureAwake` restores the snapshot. So refuse only
- * what that resumer would refuse — rows that are missing or terminal. Its precondition
- * (`loadRuntimeRecoveryContext`, `durable-objects/vm-agent-container-recovery.ts`)
- * reads row existence and lifecycle status, never `nodes.health_status` or the agent
- * session's status: the sleep writers and the wake itself mark a perfectly wakeable
- * runtime `unhealthy` and `sleeping`/`recovery` (`.claude/rules/58`).
+ * container Durable Object, whose `ensureAwake` restores the snapshot. So refuse
+ * exactly what that resumer would refuse. Its precondition (`loadRuntimeRecoveryContext`,
+ * `durable-objects/vm-agent-container-recovery.ts`) wants both rows present, their
+ * status in `IN_PLACE_WAKEABLE_STATUSES`, a `cf-container` node and no confirmed
+ * deletion. It never reads `nodes.health_status` or the agent session's status: the
+ * sleep writers and the wake itself mark a perfectly wakeable runtime `unhealthy` and
+ * `sleeping`/`recovery` (`.claude/rules/58`).
  *
  * Deliberately stricter than the resumer: it would accept `error` rows and any agent
  * session. A sleeping runtime reaches those terminal states only through an exhausted
@@ -162,11 +173,17 @@ async function resolveSleepingContainerTarget(
 ): Promise<TargetResolution> {
   const unavailable = (detail: string) =>
     reportUnavailableContainer(env, chatSessionId, detail, runSideEffectGuard);
-  if (TERMINAL_WORKSPACE_STATUSES.includes(row.workspace_status)) {
+  if (!SLEEPING_CONTAINER_WAKEABLE_STATUSES.includes(row.workspace_status)) {
     return unavailable(`Sleeping container workspace is ${row.workspace_status}`);
   }
+  if (row.workspace_deletion_confirmed_at) {
+    return unavailable('Sleeping container workspace deletion is confirmed');
+  }
   if (!row.node_id) return unavailable('Sleeping container has no assigned node');
-  if (!row.node_status || TERMINAL_NODE_STATUSES.includes(row.node_status)) {
+  if (
+    row.node_runtime !== 'cf-container' ||
+    !SLEEPING_CONTAINER_WAKEABLE_STATUSES.includes(row.node_status ?? '')
+  ) {
     return unavailable('Sleeping container node is unavailable');
   }
   if (!row.agent_session_id) return unavailable('Sleeping container has no agent session');
@@ -187,6 +204,7 @@ export async function resolveVmPromptDeliveryTarget(
     `SELECT w.id AS workspace_id,
             w.user_id AS user_id,
             w.status AS workspace_status,
+            w.runtime_deletion_confirmed_at AS workspace_deletion_confirmed_at,
             w.node_id AS node_id,
             n.status AS node_status,
             n.health_status AS node_health_status,

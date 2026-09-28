@@ -394,6 +394,7 @@ describe('VM prompt delivery adapter', () => {
   it.each([
     ['deleted workspace', { workspace_status: 'deleted' }],
     ['deleted node', { node_status: 'deleted' }],
+    ['node that is not a container', { node_runtime: 'vm' }],
     ['stopped agent session', { agent_session_status: 'stopped' }],
   ])('reports a failed wake for a sleeping container with a %s', async (_label, overrides) => {
     const adapter = new DefaultVmPromptDeliveryAdapter(
