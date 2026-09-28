@@ -1,12 +1,14 @@
 /**
  * The session-activity probe's network entry point: resolve each stale candidate's
  * owner, ask its vm-agent whether a turn is in flight, and fan a reconciled turn end
- * out to every consumer. Split out of `session-activity-reconciliation.ts`, which keeps
- * the SQL state machine (`.claude/rules/18-file-size-limits.md`).
+ * out to every consumer. A slept Instant container is not asked: it runs nothing, and
+ * the request would wake it. Split out of `session-activity-reconciliation.ts`, which
+ * keeps the SQL state machine (`.claude/rules/18-file-size-limits.md`).
  */
 import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { listAgentSessionsOnNode } from '../../services/node-agent';
+import { isSleepingContainerRuntime } from '../../services/sleeping-container-runtime';
 import { recordAcpActivityCallbackMetric } from '../../services/telemetry';
 import { recordActivityEventInternal } from './activity';
 import {
@@ -21,22 +23,35 @@ import {
   publishTurnEnd,
   selectStaleActivityProbeCandidates,
   type SessionActivityReconciliationHooks,
+  type StaleActivityCandidate,
 } from './session-activity-reconciliation';
 import type { Env as DOEnv } from './types';
 
 const log = createModuleLogger('session_activity_reconciliation');
 
-/** Resolve the workspace owner needed to authenticate the probe request. */
-async function resolveProbeUserId(
+/**
+ * Resolve the workspace owner needed to authenticate the probe request, and whether the
+ * probed runtime is a slept Instant container.
+ */
+async function resolveProbeTarget(
   env: WorkerEnv,
-  workspaceId: string,
+  candidate: StaleActivityCandidate,
   projectId: string | null
-): Promise<string | null> {
+): Promise<{ userId: string; runtimeAsleep: boolean } | null> {
   const row = await env.DATABASE.prepare(
-    `SELECT user_id, project_id FROM workspaces WHERE id = ? LIMIT 1`
+    `SELECT w.user_id, w.project_id, n.runtime AS node_runtime, n.status AS node_status
+       FROM workspaces w
+       LEFT JOIN nodes n ON n.id = ?
+      WHERE w.id = ?
+      LIMIT 1`
   )
-    .bind(workspaceId)
-    .first<{ user_id: string | null; project_id: string | null }>();
+    .bind(candidate.nodeId, candidate.workspaceId)
+    .first<{
+      user_id: string | null;
+      project_id: string | null;
+      node_runtime: string | null;
+      node_status: string | null;
+    }>();
 
   if (!row?.user_id) return null;
   // Never probe across tenants. Fail CLOSED (.claude/rules/51): an absent
@@ -45,14 +60,20 @@ async function resolveProbeUserId(
   // this probe mints a node-management token scoped to the workspace owner.
   if (!projectId || row.project_id !== projectId) {
     log.error('session_activity.workspace_project_mismatch', {
-      workspaceId,
+      workspaceId: candidate.workspaceId,
       expectedProjectId: projectId,
       actualProjectId: row.project_id,
       action: 'rejected',
     });
     return null;
   }
-  return row.user_id;
+  return {
+    userId: row.user_id,
+    runtimeAsleep: isSleepingContainerRuntime({
+      nodeRuntime: row.node_runtime ?? null,
+      nodeStatus: row.node_status ?? null,
+    }),
+  };
 }
 
 /**
@@ -86,15 +107,19 @@ export async function probeStaleSessionActivity(
   for (const candidate of candidates) {
     let outcome: ProbeOutcome;
     try {
-      const userId = await resolveProbeUserId(workerEnv, candidate.workspaceId, options.projectId);
-      if (!userId) {
+      const target = await resolveProbeTarget(workerEnv, candidate, options.projectId);
+      if (!target) {
         outcome = { kind: 'unreachable', error: 'workspace_owner_unresolved' };
+      } else if (target.runtimeAsleep) {
+        // A slept Instant container runs nothing, so no turn can be in flight; asking would
+        // restore it from its snapshot just to hear that.
+        outcome = { kind: 'not_working', hostStatus: null };
       } else {
         const payload = await listAgentSessionsOnNode(
           candidate.nodeId,
           candidate.workspaceId,
           workerEnv,
-          userId,
+          target.userId,
           { requestTimeoutMs }
         );
         outcome = classifyProbeResponse(payload, candidate.acpSessionId, candidate.workspaceId);
