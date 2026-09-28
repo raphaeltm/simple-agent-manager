@@ -17,9 +17,15 @@ import { getRuntimeLimits } from '../../services/limits';
 import { buildSessionMcpServers } from '../../services/mcp-connection-resolution';
 import { generateMcpToken, revokeMcpToken, storeMcpToken } from '../../services/mcp-token';
 import { createAgentSessionOnNode, stopAgentSessionOnNode } from '../../services/node-agent';
-import { isSleepingContainerRuntime } from '../chat-workspace-resolver';
+import { isSleepingContainerNode } from '../../services/sleeping-container-runtime';
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
-import { assertNodeOperational, getOwnedNode, getOwnedWorkspace } from './_helpers';
+import {
+  assertNodeOperational,
+  getOwnedAgentSession,
+  getOwnedNode,
+  getOwnedNodeAgentSession,
+  getOwnedWorkspace,
+} from './_helpers';
 
 const agentSessionRoutes = new Hono<{ Bindings: Env }>();
 
@@ -224,9 +230,6 @@ agentSessionRoutes.patch(
     const db = drizzle(c.env.DATABASE, { schema });
 
     const workspace = await getOwnedWorkspace(db, workspaceId, userId);
-    if (!workspace) {
-      throw errors.notFound('Workspace');
-    }
 
     const body = c.req.valid('json');
     const maxLabelLength = parsePositiveInt(c.env.MAX_AGENT_SESSION_LABEL_LENGTH, 50);
@@ -235,23 +238,7 @@ agentSessionRoutes.patch(
       throw errors.badRequest('Label is required and must be non-empty');
     }
 
-    const rows = await db
-      .select()
-      .from(schema.agentSessions)
-      .where(
-        and(
-          eq(schema.agentSessions.id, sessionId),
-          eq(schema.agentSessions.workspaceId, workspace.id),
-          eq(schema.agentSessions.userId, userId)
-        )
-      )
-      .limit(1);
-
-    const session = rows[0];
-    if (!session) {
-      throw errors.notFound('Agent session');
-    }
-
+    const session = await getOwnedAgentSession(db, workspace.id, sessionId, userId);
     if (session.status !== 'running') {
       throw errors.badRequest('Cannot rename a session that is not running');
     }
@@ -276,77 +263,41 @@ agentSessionRoutes.post(
   requireApproved(),
   async (c) => {
     const userId = getUserId(c);
-    const workspaceId = c.req.param('id');
-    const sessionId = c.req.param('sessionId');
     const db = drizzle(c.env.DATABASE, { schema });
+    const { workspace, session } = await getOwnedNodeAgentSession(
+      db,
+      c.req.param('id'),
+      c.req.param('sessionId'),
+      userId
+    );
+    const running = session.status === 'running';
 
-    const workspace = await getOwnedWorkspace(db, workspaceId, userId);
-    if (!workspace.nodeId) {
-      throw errors.badRequest('Workspace is not attached to a node');
-    }
-
-    const rows = await db
-      .select()
-      .from(schema.agentSessions)
-      .where(
-        and(
-          eq(schema.agentSessions.id, sessionId),
-          eq(schema.agentSessions.workspaceId, workspace.id),
-          eq(schema.agentSessions.userId, userId)
-        )
-      )
-      .limit(1);
-
-    const session = rows[0];
-    if (!session) {
-      throw errors.notFound('Agent session');
-    }
-
-    if (session.status !== 'running') {
-      // Still attempt VM stop for orphaned sessions whose process may be alive. A slept
-      // Instant runtime has none, and the request would restore it just to stop it.
-      const [node] = await db
-        .select({ runtime: schema.nodes.runtime, status: schema.nodes.status })
-        .from(schema.nodes)
-        .where(eq(schema.nodes.id, workspace.nodeId))
-        .limit(1);
-      const asleep =
-        !!node &&
-        isSleepingContainerRuntime({ nodeRuntime: node.runtime, nodeStatus: node.status });
-      if (!asleep) {
-        try {
-          await stopAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
-        } catch (e) {
-          log.error('agent_session.orphaned_stop_failed', {
+    // A session that is not running may still be an orphan whose process is alive, so it gets
+    // the stop too. A slept Instant runtime runs nothing, and the request would restore it just
+    // to stop it.
+    if (!(await isSleepingContainerNode(db, workspace.nodeId))) {
+      try {
+        await stopAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
+      } catch (e) {
+        log.error(
+          running ? 'agent_session.stop_on_node_failed' : 'agent_session.orphaned_stop_failed',
+          {
             sessionId: session.id,
             workspaceId: workspace.id,
             nodeId: workspace.nodeId,
             error: String(e),
-          });
-        }
+          }
+        );
       }
+    }
+    if (!running) {
       return c.json({ status: session.status });
     }
 
-    try {
-      await stopAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
-    } catch (e) {
-      log.error('agent_session.stop_on_node_failed', {
-        sessionId: session.id,
-        workspaceId: workspace.id,
-        nodeId: workspace.nodeId,
-        error: String(e),
-      });
-    }
-
+    const now = new Date().toISOString();
     await db
       .update(schema.agentSessions)
-      .set({
-        status: 'stopped',
-        stoppedAt: new Date().toISOString(),
-        errorMessage: null,
-        updatedAt: new Date().toISOString(),
-      })
+      .set({ status: 'stopped', stoppedAt: now, errorMessage: null, updatedAt: now })
       .where(eq(schema.agentSessions.id, session.id));
 
     return c.json({ status: 'stopped' });

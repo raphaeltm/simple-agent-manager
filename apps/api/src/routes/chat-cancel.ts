@@ -9,11 +9,9 @@ import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
+import { isSleepingContainerRuntime } from '../services/sleeping-container-runtime';
 import { requireSessionCreator } from './chat-session-ownership';
-import {
-  isSleepingContainerRuntime,
-  resolveLiveAgentSessionForChat,
-} from './chat-workspace-resolver';
+import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
 
 export function registerChatCancelRoute(chatRoutes: Hono<{ Bindings: Env }>): void {
   /**

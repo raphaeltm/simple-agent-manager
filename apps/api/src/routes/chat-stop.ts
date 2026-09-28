@@ -11,16 +11,14 @@ import { getUserId } from '../middleware/auth';
 import { requireProjectCapability } from '../middleware/project-auth';
 import * as chatPersistence from '../services/chat-persistence';
 import { ensureSessionTaskBacked } from '../services/session-task-repair';
+import { isSleepingContainerRuntime } from '../services/sleeping-container-runtime';
 import { isExecutableTaskStatus, isTaskStatus } from '../services/task-status';
 import {
   cleanupTerminalTaskResources,
   type TerminalTaskCleanupStatus,
 } from '../services/task-terminal-cleanup';
 import { requireSessionCreator } from './chat-session-ownership';
-import {
-  isSleepingContainerRuntime,
-  resolveLiveAgentSessionForChat,
-} from './chat-workspace-resolver';
+import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
 
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 

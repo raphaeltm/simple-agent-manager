@@ -182,6 +182,10 @@ class ContainerVmAgent {
       this.signals.push(pathname);
       return Response.json({ status: 'stopped' });
     }
+    if (pathname === `${AGENT_PATH}/suspend`) {
+      this.signals.push(pathname);
+      return Response.json({ status: 'suspended' });
+    }
     if (pathname === `${AGENT_PATH}/prompt`) {
       const body = (await request.json()) as { prompt: string; deliveryId: string };
       this.prompts.push(body.prompt);
@@ -459,13 +463,34 @@ describe('Instant session wake after idle sleep', () => {
     );
   }
 
-  /** The workspace page's stop button for one agent session. */
-  async function postWorkspaceAgentStop(): Promise<Response> {
+  /** The workspace page's stop or suspend button for one agent session. */
+  async function postWorkspaceAgentAction(
+    action: 'stop' | 'suspend',
+    agentSessionId = AGENT_SESSION_ID
+  ): Promise<Response> {
     return routesApp().request(
-      `/api/workspaces/${WORKSPACE_ID}/agent-sessions/${AGENT_SESSION_ID}/stop`,
+      `/api/workspaces/${WORKSPACE_ID}/agent-sessions/${agentSessionId}/${action}`,
       { method: 'POST' },
       env
     );
+  }
+
+  /**
+   * A second agent session, older than the chat's. The session sleep marks only the newest
+   * one `sleeping` (`completeSleepTeardown`), so this row stays `running` on a slept node.
+   */
+  function seedOlderRunningAgentSession(): string {
+    const id = 'agent-0';
+    const earlier = new Date(Date.now() - 60_000).toISOString();
+    d1.prepare(
+      `INSERT INTO agent_sessions (id, workspace_id, user_id, status, agent_type, created_at, updated_at)
+       VALUES (?, ?, ?, 'running', 'claude-code', ?, ?)`
+    ).run(id, WORKSPACE_ID, USER_ID, earlier, earlier);
+    return id;
+  }
+
+  function agentSessionStatus(id: string): unknown {
+    return d1.prepare(`SELECT status FROM agent_sessions WHERE id = ?`).pluck().get(id);
   }
 
   /** The agent asked a question before it slept; the user picks an answer in the chat. */
@@ -795,7 +820,7 @@ describe('Instant session wake after idle sleep', () => {
     it('leaves the container asleep when the workspace page stops the slept agent', async () => {
       await sleepOnContainerIdleTimeout();
 
-      const response = await postWorkspaceAgentStop();
+      const response = await postWorkspaceAgentAction('stop');
 
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ status: 'sleeping' });
@@ -807,17 +832,49 @@ describe('Instant session wake after idle sleep', () => {
     // Controls for the workspace page: a live agent is stopped, and an orphaned agent
     // session that is merely not `running` still gets the stop its process may need.
     it('still stops a live agent from the workspace page', async () => {
-      const response = await postWorkspaceAgentStop();
+      const response = await postWorkspaceAgentAction('stop');
 
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ status: 'stopped' });
       expect(vmAgent.signals).toEqual([`${AGENT_PATH}/stop`]);
     });
 
+    // The session sleep leaves an older agent session `running` on the slept node, so a check
+    // on the agent session's status alone would wake the container to stop or suspend it.
+    it.each([
+      ['stops', 'stop', 'stopped'],
+      ['suspends', 'suspend', 'suspended'],
+    ] as const)(
+      'leaves the container asleep when the workspace page %s a session the sleep left running',
+      async (_verb, action, status) => {
+        const leftRunning = seedOlderRunningAgentSession();
+        await sleepThroughSessionSleep();
+        expect(runtimeRows().node).toEqual(SLEPT_ROWS.node);
+        expect(agentSessionStatus(leftRunning)).toBe('running');
+
+        const response = await postWorkspaceAgentAction(action, leftRunning);
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ status });
+        expect(vmAgent.starts).toBe(0);
+        expect(vmAgent.signals).toEqual([]);
+        // Liveness: the route still recorded the transition it was asked for.
+        expect(agentSessionStatus(leftRunning)).toBe(status);
+      }
+    );
+
+    it('still suspends a live agent from the workspace page', async () => {
+      const response = await postWorkspaceAgentAction('suspend');
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ status: 'suspended' });
+      expect(vmAgent.signals).toEqual([`${AGENT_PATH}/suspend`]);
+    });
+
     it('still stops an orphaned agent that is not running from the workspace page', async () => {
       d1.prepare(`UPDATE agent_sessions SET status = 'error' WHERE id = ?`).run(AGENT_SESSION_ID);
 
-      const response = await postWorkspaceAgentStop();
+      const response = await postWorkspaceAgentAction('stop');
 
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ status: 'error' });

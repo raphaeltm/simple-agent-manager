@@ -12,6 +12,7 @@ import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
 import { stopAgentSessionOnNode } from '../../../services/node-agent';
+import { isSleepingContainerNode } from '../../../services/sleeping-container-runtime';
 import { cleanupTerminalTaskResources } from '../../../services/task-terminal-cleanup';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
@@ -99,7 +100,8 @@ export async function stopSubtask(
           .orderBy(desc(schema.agentSessions.createdAt))
           .limit(1);
 
-        if (agentSession) {
+        // A slept Instant runtime runs nothing, and the request would restore it just to stop it.
+        if (agentSession && !(await isSleepingContainerNode(db, workspace.nodeId))) {
           await stopAgentSessionOnNode(
             workspace.nodeId,
             workspace.id,

@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -9,11 +9,12 @@ import { toAgentSessionResponse } from '../../lib/mappers';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { AppError, errors } from '../../middleware/error';
 import { resumeAgentSessionOnNode, suspendAgentSessionOnNode } from '../../services/node-agent';
+import { isSleepingContainerNode } from '../../services/sleeping-container-runtime';
 import { resumeVmAgentContainer } from '../../services/vm-agent-container';
-import { getOwnedNode, getOwnedWorkspace } from './_helpers';
+import { getOwnedNode, getOwnedNodeAgentSession } from './_helpers';
 
-// Suspend and resume, moved verbatim out of agent-sessions.ts (.claude/rules/18). Auth is
-// applied per-route, as in agent-sessions.ts, so nothing leaks to routers sharing the base path.
+// Suspend and resume, split out of agent-sessions.ts (.claude/rules/18). Auth is applied
+// per-route, as in agent-sessions.ts, so nothing leaks to routers sharing the base path.
 const agentSessionSuspendResumeRoutes = new Hono<{ Bindings: Env }>();
 
 agentSessionSuspendResumeRoutes.post(
@@ -22,45 +23,30 @@ agentSessionSuspendResumeRoutes.post(
   requireApproved(),
   async (c) => {
     const userId = getUserId(c);
-    const workspaceId = c.req.param('id');
-    const sessionId = c.req.param('sessionId');
     const db = drizzle(c.env.DATABASE, { schema });
-
-    const workspace = await getOwnedWorkspace(db, workspaceId, userId);
-    if (!workspace.nodeId) {
-      throw errors.badRequest('Workspace is not attached to a node');
-    }
-
-    const rows = await db
-      .select()
-      .from(schema.agentSessions)
-      .where(
-        and(
-          eq(schema.agentSessions.id, sessionId),
-          eq(schema.agentSessions.workspaceId, workspace.id),
-          eq(schema.agentSessions.userId, userId)
-        )
-      )
-      .limit(1);
-
-    const session = rows[0];
-    if (!session) {
-      throw errors.notFound('Agent session');
-    }
+    const { workspace, session } = await getOwnedNodeAgentSession(
+      db,
+      c.req.param('id'),
+      c.req.param('sessionId'),
+      userId
+    );
 
     if (session.status !== 'running' && session.status !== 'error') {
       throw errors.badRequest(`Session cannot be suspended from status: ${session.status}`);
     }
 
-    try {
-      await suspendAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
-    } catch (e) {
-      log.warn('agent_session.suspend_on_node_failed', {
-        sessionId: session.id,
-        workspaceId: workspace.id,
-        nodeId: workspace.nodeId,
-        error: String(e),
-      });
+    // A slept Instant runtime runs nothing to suspend, and the request would restore it first.
+    if (!(await isSleepingContainerNode(db, workspace.nodeId))) {
+      try {
+        await suspendAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
+      } catch (e) {
+        log.warn('agent_session.suspend_on_node_failed', {
+          sessionId: session.id,
+          workspaceId: workspace.id,
+          nodeId: workspace.nodeId,
+          error: String(e),
+        });
+      }
     }
 
     const now = new Date().toISOString();
@@ -92,31 +78,13 @@ agentSessionSuspendResumeRoutes.post(
   requireApproved(),
   async (c) => {
     const userId = getUserId(c);
-    const workspaceId = c.req.param('id');
-    const sessionId = c.req.param('sessionId');
     const db = drizzle(c.env.DATABASE, { schema });
-
-    const workspace = await getOwnedWorkspace(db, workspaceId, userId);
-    if (!workspace.nodeId) {
-      throw errors.badRequest('Workspace is not attached to a node');
-    }
-
-    const rows = await db
-      .select()
-      .from(schema.agentSessions)
-      .where(
-        and(
-          eq(schema.agentSessions.id, sessionId),
-          eq(schema.agentSessions.workspaceId, workspace.id),
-          eq(schema.agentSessions.userId, userId)
-        )
-      )
-      .limit(1);
-
-    const session = rows[0];
-    if (!session) {
-      throw errors.notFound('Agent session');
-    }
+    const { workspace, session } = await getOwnedNodeAgentSession(
+      db,
+      c.req.param('id'),
+      c.req.param('sessionId'),
+      userId
+    );
 
     const node = await getOwnedNode(db, workspace.nodeId, userId);
     // Intentional WIDE gate: recovery must fire whenever EITHER the node or the

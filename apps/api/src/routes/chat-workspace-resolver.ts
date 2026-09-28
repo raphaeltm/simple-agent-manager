@@ -76,23 +76,6 @@ export async function resolveLiveWorkspaceForSession(
 }
 
 /**
- * A sleeping Instant runtime runs no agent, and any request proxied to its container
- * first restores it from its snapshot (`VmAgentContainer.prepareForRequest` →
- * `ensureAwake`). A prompt wants that wake. A caller that only signals a live agent
- * (cancel, the stop route's pre-teardown signal) must skip a sleeping runtime rather
- * than boot it just to stop it.
- *
- * Reads the node mirror that every sleep writer sets (`persistRuntimeSleeping`,
- * `completeSleepTeardown`) and the wake clears first (`persistRuntimeRecovering`).
- */
-export function isSleepingContainerRuntime(workspace: {
-  nodeRuntime: string;
-  nodeStatus: string;
-}): boolean {
-  return workspace.nodeRuntime === 'cf-container' && workspace.nodeStatus === 'sleeping';
-}
-
-/**
  * Resolve the workspace and resumable agent session for a chat action. A
  * cf-container Durable Object owns replacement classification, so recoverable
  * D1 states must reach it. Other runtimes still require a running node.
