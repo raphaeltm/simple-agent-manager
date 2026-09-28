@@ -25,7 +25,7 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 - [x] Query production logs for Instant git-token failures / 401s.
 - [x] Deploy to staging, start an Instant session, force or simulate expiry, prove git/gh operation succeeds, and clean up.
   - First staging pass proved `git credential fill` returned a redacted GitHub credential, but `gh auth status` still failed when `GH_TOKEN=<invalid GitHub-shaped test token>`; container inspection showed `PATH=/var/lib/vm-agent/agents/bin:/var/lib/vm-agent/agents/npm/bin:/usr/local/bin:/usr/bin:/bin`, `command -v gh=/usr/bin/gh`, no `/usr/local/bin/gh`, and no `.real` wrapper.
-  - Follow-up fix installs a `/usr/local/bin/gh` shim when that directory precedes the discovered real `gh` in `PATH`, leaving `/usr/bin/gh` untouched.
+  - Follow-up fix installs a `/usr/local/bin/gh` shim when that directory precedes the discovered real `gh` in `PATH`, leaving `/usr/bin/gh` untouched. (Superseded: that shim could never be written as `node`; see Independent Review.)
 - [x] Open a draft PR and leave it draft: https://github.com/raphaeltm/simple-agent-manager/pull/2174
 
 ## Acceptance Criteria
@@ -39,6 +39,8 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 - VM-agent rollout compatibility is considered; any API contract change is additive/backward compatible.
 
 ## Validation Evidence
+
+> Historical record of the first implementation. The shipped design and its evidence are in "Independent Review" below.
 
 - Red-before-fix regression: `go test ./internal/server -run TestStandaloneGitCredentialHelperDelegatesGitHubToLocalExchange -count=1` failed on the stale `GH_TOKEN` path, returning `<expired fixture token>` instead of the endpoint token.
 - Passing focused vm-agent credential and `gh` wrapper tests: `go test ./internal/server -run 'TestStandaloneGitCredentialHelper|TestStandaloneGhWrapper|TestConfigureStandaloneGhWrapper|TestHandleGitCredential|TestPerSessionGitTokenFetcher|TestTwoWorkspaceGitTokenIsolation|TestGitHubTokenFetcherForWorkspace' -count=1`.
@@ -54,6 +56,8 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 - Production observability D1 `platform_errors` returned no rows in the last 7 days for git-token/GitHub-installation failures or 401/unauthorized variants.
 
 ## Staging Verification Notes
+
+> Historical record of staging runs against superseded heads (up to `6aa2cc6ac`). Final-head staging evidence is in "Independent Review" below.
 
 - Deploy run `36417133346` for `da0f91153` passed deploy and smoke tests. Manual Instant verification showed `git credential fill` could return a redacted GitHub credential but `gh auth status` failed with the deliberately invalid inherited `GH_TOKEN`, proving `gh` still bypassed the wrapper.
 - Deploy run `36420384172` for `5e8c8c28c` passed deploy and smoke tests. Manual inspection in Instant workspace `01M3M01NM7FND9YHPBD7AC274H`, session `c719bad0-8ff9-40ee-a10f-ed734245fbbe`, showed `PATH=/var/lib/vm-agent/agents/bin:/var/lib/vm-agent/agents/npm/bin:/usr/local/bin:/usr/bin:/bin`, `command -v gh=/usr/bin/gh`, no `/usr/local/bin/gh`, no `/usr/bin/gh.real`, and `git credential fill` returned redacted credentials. This identified the need for a shadow shim in `/usr/local/bin`.
@@ -75,11 +79,17 @@ Adversarial second look before shipping. Findings and fixes, all on this branch:
 - [x] HIGH: the forced standalone ACP `PATH=/var/lib/vm-agent/agents/bin:/usr/local/bin:/usr/bin:/bin` dropped `/var/lib/vm-agent/agents/npm/bin`, the image's `NPM_CONFIG_PREFIX` bin directory, so every `npm install -g` tool vanished from agent shells. The override was also redundant: `apps/api/Dockerfile.vm-agent-container` already puts `/var/lib/vm-agent/agents/bin` first on PATH. Removed; `TestAgentEnvLeavesPATHToTheRuntime` pins both runtimes (red with the override re-added).
 - [x] HIGH: dead and duplicated `gh` wrapper code. The boot-time `/usr/local/bin/gh` wrapper can never be written because the vm-agent runs as `node` and `/usr/local/bin` is root-owned (staging runs showed no `/usr/local/bin/gh`); its rename-to-`gh.real` branch double-wraps on re-run; a second copy of the script (and `shellSingleQuote`) lived in the acp package and was rewritten on every agent start. Replaced by one boot-time shim, `standalone_gh_shim.go`, installed by `ConfigureStandaloneGitCredentialHelper` into the node-owned first-on-PATH directory. It also covers terminals, which inherit the image PATH.
 - [x] HIGH: unrelated SAM auto-commit (`chore: save agent work`) deleted `model_reasoning_effort` from `.codex/config.toml`. Reverted.
-- [x] MEDIUM: the shim fell back to the inherited, possibly stale `GH_TOKEN` when the exchange failed, and it depended on `git credential fill` (user git config such as `gh auth setup-git` resets the helper list and routes the refresh back to the stale `GH_TOKEN`; git could also prompt on a TTY). The shim now calls `/usr/local/bin/git-credential-sam get` directly and, when the exchange yields nothing, unsets the inherited `GH_TOKEN` with a one-line stderr diagnostic (policy: fail closed instead of insecure fallback). The VM wrapper (`bootstrap.go:installGhWrapper`) keeps its fallback; parity is tracked as a SAM idea.
+- [x] MEDIUM: the shim fell back to the inherited, possibly stale `GH_TOKEN` when the exchange failed, and it depended on `git credential fill` (user git config such as `gh auth setup-git` resets the helper list and routes the refresh back to the stale `GH_TOKEN`; git could also prompt on a TTY). The shim now calls `/usr/local/bin/git-credential-sam get` directly and, when the exchange yields nothing, unsets the inherited `GH_TOKEN` with a one-line stderr diagnostic (policy: fail closed instead of insecure fallback). The VM wrapper (`bootstrap.go:installGhWrapper`) keeps its fallback; parity is tracked in SAM idea `01KTXY97S095SKNGDXWYYWVB6T` (its Fix 2).
 - [x] MEDIUM: `GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS` was unbounded; a margin at or above GitHub's one-hour lifetime would mint on every credential exchange. Capped at 1800 s (half the lifetime) through `resolveInstallationTokenRefreshMarginSeconds`; divergence and convergence tests go through `getInstallationToken`.
 - [x] Rule 62: the helper regression used a fake endpoint and the gh test used a fake `git` that hand-fed the token. Replaced by capability tests that enter the way production does: real `git credential fill` → rendered helper → real `/git-credential` handler → fake control plane, and `gh` resolved by PATH → shim → helper → handler. Red-before-fix against main's helper: the git test, the gh test, and `TestStandaloneGitCredentialHelperNoWorkspaceNoOutput` all fail (they receive the stale session token); the GitLab control passes. Each shim guard was deleted once and its test went red.
 - [x] Test hermeticity: the standalone tests inherited the developer's `SAM_WORKSPACE_ID`, `GH_TOKEN`, and `GIT_CONFIG_COUNT`-injected helper. `hermeticEnv` now scrubs them.
 - [x] Docs: public `reference/configuration.md` gained the margin row; env reference, `.env.example`, and `env.ts` state the cap.
 - [x] Contract: `cf-container-runtime-contract.test.ts` ties the Go shim directory to the first image PATH entry.
 
-Pre-existing gap found, not caused by this PR (tracked as a SAM idea): the vm-agent's own git and `gh` calls in standalone mode (task-completion auto-push, `gh pr create`, lazy partial-clone blob fetches) run with the vm-agent environment, which has neither `SAM_WORKSPACE_ID` nor `GH_TOKEN`, so the helper yields no credential both before and after this PR. Terminals have the same gap.
+Pre-existing gap found, not caused by this PR (tracked in SAM idea `01M25BMJ7FCB3RWQSNE38GAYKX`, the idea this PR implements, under "Still open after #2174"): the vm-agent's own git and `gh` calls in standalone mode (task-completion auto-push, `gh pr create`, lazy partial-clone blob fetches) run with the vm-agent environment, which has neither `SAM_WORKSPACE_ID` nor `GH_TOKEN`, so the helper yields no credential both before and after this PR. Terminals have the same gap.
+
+Second review round (same task), all fixed on the branch:
+
+- [x] cloudflare-specialist HIGH (pre-existing, amplified here): the `/git-token` owner check called `assertRepositoryAccess` without `env`, so its user-access KV cache never engaged and every exchange paid a paginated GitHub repository listing on the owner's OAuth quota. Now forwards `env`; `workspace-git-token.test.ts` pins the forwarded env (red without the fix). Commit `1cdff5f8c`.
+- [x] go-specialist / task-completion-validator HIGH (test-only): parallel gh-shim subtests appended PATH into one shared env backing array (a real race, also causing flaky `gh: not found` without `-race`). `runGh` appends to a clipped slice and `hermeticEnv` returns a clipped slice; five races reproduced without the fix, none with it; full `go test -race ./...` green. Commit `05fed9bb5`.
+- Deferred with justification (pre-existing, unchanged lines, need corruption or a manual sub-60s TTL edit): KV cache hardening for malformed JSON and the 60 s `expirationTtl` floor, SAM idea `01M3MBHQPB0R1WQREWXTBX0TPG`.
