@@ -23,6 +23,7 @@ import { DurableObject } from 'cloudflare:workers';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
+import { normalizeSearchQuery } from '../../lib/search-query-limits';
 import { measureArchiveSql } from '../../project-data-archive/sql-metrics';
 import { estimateArchiveWrites } from '../../project-data-archive/write-budget';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
@@ -1015,10 +1016,11 @@ export class ProjectData extends DurableObject<Env> {
     roles: string[] | null = null,
     limit: number = 10
   ) {
+    const normalized = normalizeSearchQuery(query, this.env);
     return archiveSharding.archiveSourceSearchMessagesWithCoverage(
       this.sql,
       input,
-      query,
+      normalized.query,
       roles,
       limit,
       messages.resolveMessageSearchBounds(this.env)
@@ -1147,8 +1149,16 @@ export class ProjectData extends DurableObject<Env> {
     roles: string[] | null = null,
     limit: number = 10
   ) {
+    const normalized = normalizeSearchQuery(query, this.env);
     return this.withArchiveTranscriptLock(() =>
-      archiveSharding.archiveTargetSearchMessages(this.sql, this.env, input, query, roles, limit)
+      archiveSharding.archiveTargetSearchMessages(
+        this.sql,
+        this.env,
+        input,
+        normalized.query,
+        roles,
+        limit
+      )
     );
   }
 
@@ -1158,12 +1168,13 @@ export class ProjectData extends DurableObject<Env> {
     roles: string[] | null = null,
     limit: number = 10
   ) {
+    const normalized = normalizeSearchQuery(query, this.env);
     return this.withArchiveTranscriptLock(() =>
       archiveSharding.archiveTargetSearchProjectMessages(
         this.sql,
         this.env,
         input,
-        query,
+        normalized.query,
         roles,
         limit
       )
@@ -1211,14 +1222,16 @@ export class ProjectData extends DurableObject<Env> {
     roles: string[] | null = null,
     limit: number = 10
   ) {
-    return messages.searchMessagesWithCoverage(
+    const normalized = normalizeSearchQuery(query, this.env);
+    const search = messages.searchMessagesWithCoverage(
       this.sql,
-      query,
+      normalized.query,
       sessionId,
       roles,
       limit,
       messages.resolveMessageSearchBounds(this.env)
     );
+    return { ...search, query: normalized };
   }
 
   listCommentThreads(input: comments.ListCommentThreadsInput): comments.ListCommentThreadsResult {
@@ -2815,7 +2828,8 @@ export class ProjectData extends DurableObject<Env> {
     minConfidence: number | null,
     limit: number
   ) {
-    return knowledge.searchObservations(this.sql, query, entityType, minConfidence, limit);
+    const normalized = normalizeSearchQuery(query, this.env);
+    return knowledge.searchObservations(this.sql, normalized.query, entityType, minConfidence, limit);
   }
 
   async getRelevantKnowledge(context: string, limit: number) {

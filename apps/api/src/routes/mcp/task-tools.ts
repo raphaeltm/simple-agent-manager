@@ -11,13 +11,13 @@ import {
   type TaskTerminalTransitionEvent,
   validateCompletionEvidence,
 } from '@simple-agent-manager/shared';
-import type { SQL } from 'drizzle-orm';
-import { and, desc, eq, like, or } from 'drizzle-orm';
+import { and, desc, eq, type SQL, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { escapeSearchQueryForLike, normalizeSearchQuery } from '../../lib/search-query-limits';
 import { ulid } from '../../lib/ulid';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
@@ -727,35 +727,28 @@ export async function handleSearchTasks(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  const query = typeof params.query === 'string' ? params.query.trim() : '';
-  if (!query) {
+  const inputQuery = typeof params.query === 'string' ? params.query.trim() : '';
+  if (!inputQuery) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
       'query is required and must be a non-empty string'
     );
   }
-  if (query.length < 2) {
+  if (inputQuery.length < 2) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
   }
 
   const limits = getMcpLimits(env);
+  const normalizedQuery = normalizeSearchQuery(inputQuery, env);
+  const query = normalizedQuery.query;
   const status = typeof params.status === 'string' ? params.status : undefined;
   const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
   const searchLimit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskSearchMax);
 
   const db = drizzle(env.DATABASE, { schema });
-  const searchPattern = `%${query}%`;
-
-  const titleOrDescriptionMatch = or(
-    like(schema.tasks.title, searchPattern),
-    like(schema.tasks.description, searchPattern)
-  );
-  if (!titleOrDescriptionMatch) {
-    // or() only returns undefined when given zero defined conditions — both
-    // like() calls above always return a defined SQL expression.
-    throw new Error('Internal error: failed to build task search condition');
-  }
+  const searchPattern = `%${escapeSearchQueryForLike(query)}%`;
+  const titleOrDescriptionMatch = sql<boolean>`(${schema.tasks.title} LIKE ${searchPattern} ESCAPE '\\' OR ${schema.tasks.description} LIKE ${searchPattern} ESCAPE '\\')`;
 
   const conditions: SQL[] = [
     eq(schema.tasks.projectId, tokenData.projectId),
@@ -790,7 +783,7 @@ export async function handleSearchTasks(
     content: [
       {
         type: 'text',
-        text: JSON.stringify({ tasks: result, count: result.length, query }, null, 2),
+        text: JSON.stringify({ tasks: result, count: result.length, ...normalizedQuery }, null, 2),
       },
     ],
   });

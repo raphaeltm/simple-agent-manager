@@ -302,7 +302,7 @@ export async function handleSearchMessages(
               createdAt: r.createdAt,
             })),
             count: search.results.length,
-            query,
+            ...search.query,
             archiveSearch: search.archiveSearch,
             rootSearch: search.rootSearch,
             coverageNotes: describeRootSearchCoverage(search.rootSearch),

@@ -7,6 +7,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
+import { normalizeSearchQuery } from '../../../lib/search-query-limits';
 import * as projectDataService from '../../../services/project-data';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
@@ -18,13 +19,14 @@ export const searchKnowledgeDef: AnthropicToolDef = {
   description:
     'Search the knowledge graph for stored observations and facts. ' +
     'If projectId is omitted, searches across ALL of the user\'s projects. ' +
-    'Use this to recall preferences, context, expertise, and past decisions.',
+    'Use this to recall preferences, context, expertise, and past decisions. ' +
+    'Over-limit queries are truncated and disclosed in the response.',
   input_schema: {
     type: 'object',
     properties: {
       query: {
         type: 'string',
-        description: 'Search query — matches against entity names and observation content.',
+        description: 'Search query — matches against entity names and observation content. Over-limit input is truncated.',
       },
       projectId: {
         type: 'string',
@@ -48,17 +50,18 @@ export async function searchKnowledge(
   input: { query: string; projectId?: string; entityType?: string; limit?: number },
   ctx: ToolContext,
 ): Promise<unknown> {
-  const query = input.query?.trim();
-  if (!query) {
+  const inputQuery = input.query?.trim();
+  if (!inputQuery) {
     return { error: 'query is required.' };
   }
 
+  const env = ctx.env as unknown as Env;
+  const normalizedQuery = normalizeSearchQuery(inputQuery, env);
   const limit = Math.min(Math.max(1, input.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
   const entityType = input.entityType && KNOWLEDGE_ENTITY_TYPES.includes(input.entityType as (typeof KNOWLEDGE_ENTITY_TYPES)[number])
     ? input.entityType
     : null;
 
-  const env = ctx.env as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
 
   // Single-project search
@@ -79,13 +82,14 @@ export async function searchKnowledge(
     }
 
     const results = await projectDataService.searchKnowledgeObservations(
-      env, input.projectId, query, entityType, null, limit,
+      env, input.projectId, normalizedQuery.query, entityType, null, limit,
     );
 
     return {
       projectId: input.projectId,
       results,
       total: results.length,
+      ...normalizedQuery,
     };
   }
 
@@ -98,7 +102,7 @@ export async function searchKnowledge(
     .limit(MAX_CROSS_PROJECT);
 
   if (userProjects.length === 0) {
-    return { results: [], total: 0 };
+    return { results: [], total: 0, ...normalizedQuery };
   }
 
   // Search each project in parallel, collect results
@@ -106,7 +110,7 @@ export async function searchKnowledge(
   const searchPromises = userProjects.map(async (p) => {
     try {
       const results = await projectDataService.searchKnowledgeObservations(
-        env, p.id, query, entityType, null, perProjectLimit,
+        env, p.id, normalizedQuery.query, entityType, null, perProjectLimit,
       );
       return results.map((r: Record<string, unknown>) => ({
         ...r,
@@ -129,5 +133,6 @@ export async function searchKnowledge(
     results: trimmed,
     total: allResults.length,
     projectsSearched: userProjects.length,
+    ...normalizedQuery,
   };
 }

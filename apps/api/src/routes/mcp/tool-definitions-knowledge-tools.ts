@@ -72,11 +72,11 @@ export const KNOWLEDGE_TOOLS = [
   },
   {
     name: 'search_knowledge',
-    description: 'Full-text search across all observations in the project knowledge graph. Returns matching observations with their entities.',
+    description: 'Full-text search across all observations in the project knowledge graph. Returns matching observations with their entities. Queries beyond the server-configured byte or term limits are truncated; the response reports queryTruncated, the effective query, and queryLimits.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        query: { type: 'string', description: 'Search query text' },
+        query: { type: 'string', description: 'Search query text. Over-limit input is truncated and disclosed in the response.' },
         entityType: { type: 'string', description: 'Optional filter by entity type', enum: [...KNOWLEDGE_ENTITY_TYPES] },
         minConfidence: { type: 'number', description: 'Optional minimum confidence threshold (0.0-1.0)' },
         limit: { type: 'number', description: 'Max results to return (default: 20)' },

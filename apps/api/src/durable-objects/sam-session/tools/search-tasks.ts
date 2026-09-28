@@ -1,8 +1,9 @@
-import { and, desc, eq, like, or, type SQL } from 'drizzle-orm';
+import { and, desc, eq, type SQL, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
+import { escapeSearchQueryForLike, normalizeSearchQuery } from '../../../lib/search-query-limits';
 import { getMcpLimits } from '../../../routes/mcp/_helpers';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
@@ -33,13 +34,13 @@ function snippet(value: string | null, length: number): string | null {
 export const searchTasksDef: AnthropicToolDef = {
   name: 'search_tasks',
   description:
-    'Search tasks across all projects owned by the current user. Searches both title and description fields.',
+    'Search tasks across all projects owned by the current user. Searches both title and description fields. Over-limit queries are truncated and disclosed in the response.',
   input_schema: {
     type: 'object',
     properties: {
       query: {
         type: 'string',
-        description: 'Search keyword to find in task titles and descriptions.',
+        description: 'Search text for task titles and descriptions. Over-limit input is truncated.',
       },
       status: {
         type: 'string',
@@ -67,16 +68,16 @@ export async function searchTasks(
   input: { status?: string; projectId?: string; query?: string; keyword?: string; limit?: number },
   ctx: ToolContext
 ): Promise<unknown> {
-  const query =
+  const inputQuery =
     typeof input.query === 'string'
       ? input.query.trim()
       : typeof input.keyword === 'string'
         ? input.keyword.trim()
         : '';
-  if (!query) {
+  if (!inputQuery) {
     return { error: 'query is required and must be a non-empty string.' };
   }
-  if (query.length < 2) {
+  if (inputQuery.length < 2) {
     return { error: 'query must be at least 2 characters.' };
   }
 
@@ -85,23 +86,21 @@ export async function searchTasks(
     return { error: `status must be one of: ${TASK_STATUSES.join(', ')}` };
   }
 
-  const limits = getMcpLimits(ctx.env as unknown as Env);
+  const env = ctx.env as unknown as Env;
+  const limits = getMcpLimits(env);
+  const normalizedQuery = normalizeSearchQuery(inputQuery, env);
+  const query = normalizedQuery.query;
   const requestedLimit =
     typeof input.limit === 'number' && Number.isFinite(input.limit) ? input.limit : 10;
   const searchLimit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskSearchMax);
 
   const db = drizzle(ctx.env.DATABASE as D1Database, { schema });
-  const searchPattern = `%${query}%`;
+  const searchPattern = `%${escapeSearchQueryForLike(query)}%`;
 
   // Build conditions: always filter by user's projects
   const conditions: SQL[] = [eq(schema.projects.userId, ctx.userId)];
-  const titleOrDescriptionMatch = or(
-    like(schema.tasks.title, searchPattern),
-    like(schema.tasks.description, searchPattern)
-  );
-  if (titleOrDescriptionMatch) {
-    conditions.push(titleOrDescriptionMatch);
-  }
+  const titleOrDescriptionMatch = sql<boolean>`(${schema.tasks.title} LIKE ${searchPattern} ESCAPE '\\' OR ${schema.tasks.description} LIKE ${searchPattern} ESCAPE '\\')`;
+  conditions.push(titleOrDescriptionMatch);
 
   if (status) {
     conditions.push(eq(schema.tasks.status, status));
@@ -150,6 +149,6 @@ export async function searchTasks(
   return {
     tasks,
     count: tasks.length,
-    query,
+    ...normalizedQuery,
   };
 }

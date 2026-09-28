@@ -3,12 +3,13 @@ import {
   DEFAULT_SAM_SEARCH_MAX_LIMIT,
 } from '@simple-agent-manager/shared';
 
+import { normalizeSearchQuery } from '../../../lib/search-query-limits';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 export const searchConversationHistoryDef: AnthropicToolDef = {
   name: 'search_conversation_history',
   description:
-    'Search your conversation history with the user. Use this when the user references something from an earlier conversation that is not in the current context window, or when you need to recall a past discussion, decision, or preference.',
+    'Search your conversation history with the user. Long input is truncated to the configured search query length and term limits. The response reports the effective query and whether truncation occurred.',
   input_schema: {
     type: 'object',
     properties: {
@@ -27,7 +28,7 @@ export const searchConversationHistoryDef: AnthropicToolDef = {
 
 export async function searchConversationHistory(
   input: { query: string; limit?: number },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   if (!input.query?.trim()) {
     return { error: 'Query is required' };
@@ -38,11 +39,15 @@ export async function searchConversationHistory(
   }
 
   const limit = Math.min(input.limit || DEFAULT_SAM_SEARCH_LIMIT, DEFAULT_SAM_SEARCH_MAX_LIMIT);
-  const results = ctx.searchMessages(input.query, limit);
+  const normalizedQuery = normalizeSearchQuery(
+    input.query,
+    ctx.env as { SEARCH_QUERY_MAX_LENGTH?: string; SEARCH_QUERY_MAX_TERMS?: string }
+  );
+  const results = ctx.searchMessages(normalizedQuery.query, limit);
 
   return {
     results,
     count: results.length,
-    query: input.query,
+    ...normalizedQuery,
   };
 }

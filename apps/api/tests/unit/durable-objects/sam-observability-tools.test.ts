@@ -58,6 +58,11 @@ vi.mock('../../../src/services/project-data', () => ({
   getMessages: (...args: unknown[]) => mockGetMessages(...args),
   searchMessagesWithArchiveMetadata: async (...args: unknown[]) => ({
     results: await mockSearchMessages(...args),
+    query: {
+      query: String(args[2] ?? ''),
+      queryTruncated: false,
+      queryLimits: { maxLength: 48, maxTerms: 12 },
+    },
     rootSearch: mockRootSearch(),
     archiveSearch: {
       partial: false,

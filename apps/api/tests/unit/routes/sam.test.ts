@@ -125,4 +125,5 @@ describe('sam chat route', () => {
     expect(body).toEqual({ error: 'Message is required' });
     expect(mocks.doFetch).not.toHaveBeenCalled();
   });
+
 });

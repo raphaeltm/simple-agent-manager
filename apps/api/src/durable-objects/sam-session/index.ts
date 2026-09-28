@@ -17,6 +17,7 @@ import type { Env as AppEnv } from '../../env';
 import { buildSafeFtsQuery } from '../../lib/fts5';
 import { createModuleLogger } from '../../lib/logger';
 import { readRequestJsonRecord } from '../../lib/runtime-validation';
+import { normalizeSearchQuery } from '../../lib/search-query-limits';
 import {
   type ConversationSummaryRow,
   ConversationSummaryRowSchema,
@@ -528,9 +529,10 @@ export class SamSession extends DurableObject<AppEnv> {
 
     const config = resolveSamConfig(this.env as unknown as Record<string, string | undefined>);
     const limit = Math.min(requestedLimit || config.searchLimit, config.searchMaxLimit);
+    const normalizedQuery = normalizeSearchQuery(query, this.env);
 
-    const results = this.searchMessages(query, limit, config.ftsEnabled);
-    return new Response(JSON.stringify({ results }), {
+    const results = this.searchMessages(normalizedQuery.query, limit, config.ftsEnabled);
+    return new Response(JSON.stringify({ results, ...normalizedQuery }), {
       headers: { 'content-type': 'application/json' },
     });
   }
@@ -544,6 +546,7 @@ export class SamSession extends DurableObject<AppEnv> {
     limit: number,
     ftsEnabled: boolean = true
   ): Array<{ snippet: string; role: string; sequence: number; createdAt: string }> {
+    query = normalizeSearchQuery(query, this.env).query;
     const results: Array<{ snippet: string; role: string; sequence: number; createdAt: string }> =
       [];
 
