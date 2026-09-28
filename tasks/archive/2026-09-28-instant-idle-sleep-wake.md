@@ -343,11 +343,32 @@ every fix was then removed once to prove the intended test goes red.
 - [x] Delta review of the second round: Cloudflare PASS (the HIGH is resolved; no reentrancy,
   since `wakeSession` never calls the container DO; guarded wakes are unchanged). Architecture
   PASS (its LOW docstring fixed in `f285d4ee7`).
-- [ ] CodeRabbit through the trusted workflow
-- [ ] CI green on the final head
-- [ ] Staging on the final head: slept-session workspace-page stop (no wake), UI Archive (no
-      wake), one idle-sleep → follow-up → in-place wake → answer cycle, cleanup
-- [ ] Merge and monitor Deploy Production
+- [x] Staging on `539cffd04` (deploy run 36435501953; later commits touch only task files).
+  Every check read D1 before and after; "no wake" means the node stayed `sleeping` with an
+  unchanged heartbeat.
+  - **Attention answer (the HIGH):** answering a slept session's attention marker woke it in place
+    and committed the wake (sleep markers cleared). The agent's follow-on work was checkpointed as
+    a new generation, which the bug would have refused. After the next idle sleep, a UI follow-up
+    woke it durably from that generation and the agent confirmed the file it had written was
+    still there.
+  - **Probe:** after a `/resume` wake and a re-sleep, the probe reconciled the stale turn at the
+    5-minute mark (`session.activity_reconciled`, `not_working`, `hostStatus: null`). No wake.
+  - **Workspace page:** opening it made no workspace-host request and no WebSocket. Its stop
+    route with the agent session id returned `{"status":"sleeping"}`. No wake.
+  - **UI Archive:** twice, `POST .../close` returned 200. No wake.
+  - **Message to an archived slept session:** "Wake failed … (container_runtime_unavailable)",
+    marker reason `wake_refused`. No wake.
+  - **Cleanup:** `DELETE /api/nodes/:id` for every test node. All workspaces are `deleted` with a
+    confirmed deletion proof.
+  - Pre-existing on main, not changed here:
+    - Archive leaves the workspace `stopping` (idea 01M3KYP55W91YQHV2FN1A2NVBT).
+    - The workspace page's "Stop session Chat" sends the chat session id and gets a 404
+      (`tasks/backlog/2026-09-28-workspace-page-chat-stop-sends-chat-session-id.md`).
+    - A sleeping workspace's badge reads "Unknown"
+      (`tasks/backlog/2026-08-04-sleeping-status-renders-as-unknown.md`).
+- [ ] CodeRabbit through the trusted workflow (recorded in the PR #2173 body)
+- [ ] CI green on the final head (recorded in the PR #2173 body)
+- [ ] Merge and monitor Deploy Production (recorded in the PR #2173 body)
 
 ## References
 
