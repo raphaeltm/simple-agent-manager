@@ -89,16 +89,16 @@ Neither. The combination is older:
 
 ### Enumerated writers of the rows the verdict reads (rule 44 / 58)
 
-| Writer                                               | node                         | workspace                    | agent session | Verdict after fix |
-| ---------------------------------------------------- | ---------------------------- | ---------------------------- | ------------- | ----------------- |
-| `persistRuntimeSleeping` (container idle sleep)      | sleeping / unhealthy         | sleeping                     | sleeping      | wake              |
-| `completeSleepTeardown` (scheduled sleep)            | sleeping / unhealthy         | sleeping                     | sleeping      | wake              |
-| `persistRuntimeSleepingAfterRevokedWake`             | sleeping / unhealthy         | sleeping                     | sleeping      | wake              |
-| `persistRuntimeRecovering` (wake in flight)          | recovery / unhealthy         | recovery                     | recovery      | wake (joins)      |
-| `persistRuntimeRecovered` (woken, not yet committed) | running / healthy            | running                      | running       | wake (commits)    |
-| `persistRuntimeRecoveryFailed` (wake exhausted)      | error                        | error                        | error         | refuse            |
-| `persistRuntimeEnded` / finalizer (explicit stop)    | stopped                      | stopped                      | stopped       | refuse            |
-| deletion / cleanup                                   | deleted / stopping / missing | deleted / stopping / evicted | —             | refuse            |
+| Writer                                               | node                                      | workspace                    | agent session | Verdict after fix |
+| ---------------------------------------------------- | ----------------------------------------- | ---------------------------- | ------------- | ----------------- |
+| `persistRuntimeSleeping` (container idle sleep)      | sleeping / unhealthy                      | sleeping                     | sleeping      | wake              |
+| `completeSleepTeardown` (scheduled sleep)            | sleeping / unhealthy                      | sleeping                     | sleeping      | wake              |
+| `persistRuntimeSleepingAfterRevokedWake`             | sleeping / unhealthy                      | sleeping                     | sleeping      | wake              |
+| `persistRuntimeRecovering` (wake in flight)          | recovery / unhealthy                      | recovery                     | recovery      | wake (joins)      |
+| `persistRuntimeRecovered` (woken, not yet committed) | running / healthy                         | running                      | running       | wake (commits)    |
+| `persistRuntimeRecoveryFailed` (wake exhausted)      | error                                     | error                        | error         | refuse            |
+| `persistRuntimeEnded` / finalizer (explicit stop)    | stopped                                   | stopped                      | stopped       | refuse            |
+| deletion / cleanup                                   | destroying / deleted / stopping / missing | deleted / stopping / evicted | —             | refuse            |
 
 ### Known limitations (pre-existing, not changed here)
 
@@ -134,7 +134,8 @@ Neither. The combination is older:
       pre-existing `CF_CONTAINER_WAKE_TIMEOUT_MS` claim is noted in idea 01M0VZ205TN8A1JYHNJN77DS4F.)
 - [x] File SAM ideas for follow-ups found: live-container crash recovery `dead_target` →
       idea 01M3KH4NKPAY873F790RQY2XDN; wake-completion delivery nudge → appended to existing idea
-      01M0VZ205TN8A1JYHNJN77DS4F.
+      01M0VZ205TN8A1JYHNJN77DS4F; `sleepForUser` lifecycle-lock hardening → idea
+      01M3KJFYDXMABJDCK7GA864017.
 
 ## Acceptance Criteria
 
@@ -150,21 +151,44 @@ Neither. The combination is older:
 
 - The pure move of `persistRuntimeRecoveryFailed` into `vm-agent-container-recovery-failure.ts`
   (rule 18; the module was 572 lines) landed as its own commit before the fix.
-- Fails on main: against origin/main's `apps/api/src`, the new vertical slice reports 3 failed /
-  2 passed. Both sleep-writer cases fail with the incident's exact "Wake failed: The sleeping container
-  runtime is gone and cannot wake in place. (container_runtime_unavailable)"; the mid-wake case is
-  refused before any wake begins; both gone-container controls pass.
-- Surgical reverts on the branch (each alone):
-  - DO excludes `sleeping`, resolver reads health, resolver waits for a `running` agent session: each
-    reddens exactly the three wake tests.
-  - Refusing only `recovery`+`unhealthy`, or retrying only an agent session in `recovery`: each
-    reddens only the mid-wake test.
-  - Dropping the terminal-node / missing-node refusals: each reddens exactly its control.
+- Review follow-ups (commit `8589cb608`): the sleeping-container verdict now derives from the
+  container DO's own `IN_PLACE_WAKEABLE_STATUSES` (less the documented `error` strictness) instead
+  of a parallel terminal list. It also mirrors the resumer's cf-container-node and
+  `runtime_deletion_confirmed_at` predicates. Before this, a node mid-teardown (`destroying`) was
+  probed and retried until TTL instead of being reported.
+- Fails on main: against origin/main's `apps/api/src` the final vertical slice reports 4 failed /
+  3 passed.
+  - Both sleep-writer cases fail with the incident's exact "Wake failed: The sleeping container
+    runtime is gone and cannot wake in place. (container_runtime_unavailable)".
+  - The mid-wake case is refused before any wake begins.
+  - The `destroying` control fails there too: main retried a mid-teardown node until TTL.
+  - The other three gone-container controls pass.
+- Surgical reverts on the final code (each alone; slice + adapter unit tests):
+  - Container DO no longer wakes `sleeping` rows → the 3 wake tests.
+  - Verdict reads node health, or waits for a `running` agent session → the 3 wake tests plus the
+    adapter's positive probe case.
+  - Refuse only `recovery`+`unhealthy`, or retry only an agent session in `recovery` → only the
+    mid-wake test.
+  - Node status unchecked → the deleted-node unit control plus the `destroying` and `deleted`
+    slice controls.
+  - Node runtime unmirrored → only the non-container-node unit control.
+  - Confirmed deletion unrefused → only its slice control.
+  - Workspace status unchecked → only the deleted-workspace unit control.
   - Miniflare D1: removing the `sleeping` admission reddens the two wake cases; removing the
     deletion fence reddens only its control.
 - Harness lesson: the ProjectData substitute must not load the real module through
-  `importOriginal` — against main's module graph the container's dynamic import then reached the real
-  RPC. The substitute lists exactly the calls these flows make.
+  `importOriginal`. Against main's module graph, the container's dynamic import then reached the
+  real RPC. The substitute lists exactly the calls these flows make.
+- Local reviewers:
+  - task-completion-validator: PASS.
+  - cloudflare-specialist: ADDRESSED. MEDIUM-1 fixed; MEDIUM-2 → idea 01M3KJFYDXMABJDCK7GA864017.
+  - architecture-reviewer: ADDRESSED. HIGH fixed; MEDIUM → appended to idea
+    01M3KH4NKPAY873F790RQY2XDN.
+  - test-engineer: ADDRESSED. The mid-wake gate is now explicit, and third-writer coverage is
+    documented.
+- Validation: full API unit suite 10,901/10,901 (before the review fixes); resolver- and
+  container-related unit files, the Workers subset, the API build and `check:fast` re-run on the
+  final code.
 
 ## References
 
