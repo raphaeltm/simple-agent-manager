@@ -66,7 +66,7 @@ func TestStandaloneGhWrapperRefreshesTokenThroughGitCredentialFill(t *testing.T)
 if [ "$1" = "credential" ] && [ "$2" = "fill" ]; then
   cat >/dev/null
   printf 'username=x-access-token
-password=ghs_fresh_from_helper
+password=fresh-fixture-token
 '
   exit 0
 fi
@@ -87,12 +87,12 @@ printf '%s
 	}
 
 	cmd := exec.Command("/bin/sh", wrapperPath, "auth", "status")
-	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "GH_TOKEN=ghs_expired_boot_token")
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "GH_TOKEN=expired-fixture-token")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run gh wrapper: %v (out=%q)", err, out)
 	}
-	if got := strings.TrimSpace(string(out)); got != "ghs_fresh_from_helper" {
+	if got := strings.TrimSpace(string(out)); got != "fresh-fixture-token" {
 		t.Fatalf("wrapped gh GH_TOKEN = %q, want fresh helper token", got)
 	}
 }
@@ -228,17 +228,17 @@ func TestStandaloneGitCredentialHelperDelegatesGitHubToLocalExchange(t *testing.
 		gotHost = r.URL.Query().Get("host")
 		gotPath = r.URL.Query().Get("path")
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("username=x-access-token\npassword=ghs_fresh_token\n"))
+		_, _ = w.Write([]byte("username=x-access-token\npassword=fresh-endpoint-token\n"))
 	}))
 	t.Cleanup(server.Close)
 
 	out := runStandaloneCredScriptWithEnv(t, "get", "protocol=https\nhost=github.com\n\n", map[string]string{
 		"SAM_WORKSPACE_ID":            "ws-github",
 		"SAM_GIT_CREDENTIAL_ENDPOINT": server.URL + "/git-credential",
-		"GH_TOKEN":                    "ghs_expired_boot_token",
+		"GH_TOKEN":                    "expired-fixture-token",
 	})
 
-	if !strings.Contains(out, "username=x-access-token") || !strings.Contains(out, "password=ghs_fresh_token") {
+	if !strings.Contains(out, "username=x-access-token") || !strings.Contains(out, "password=fresh-endpoint-token") {
 		t.Fatalf("expected fresh delegated github creds, got %q", out)
 	}
 	if gotWorkspaceID != "ws-github" {

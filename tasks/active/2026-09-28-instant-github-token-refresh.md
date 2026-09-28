@@ -24,7 +24,7 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 - [x] Verify full-VM credential path is not regressed.
 - [x] Query production logs for Instant git-token failures / 401s.
 - [x] Deploy to staging, start an Instant session, force or simulate expiry, prove git/gh operation succeeds, and clean up.
-  - First staging pass proved `git credential fill` returned a redacted GitHub credential, but `gh auth status` still failed when `GH_TOKEN=ghs_stale_invalid_INITIAL`; container inspection showed `PATH=/var/lib/vm-agent/agents/bin:/var/lib/vm-agent/agents/npm/bin:/usr/local/bin:/usr/bin:/bin`, `command -v gh=/usr/bin/gh`, no `/usr/local/bin/gh`, and no `.real` wrapper.
+  - First staging pass proved `git credential fill` returned a redacted GitHub credential, but `gh auth status` still failed when `GH_TOKEN=<invalid GitHub-shaped test token>`; container inspection showed `PATH=/var/lib/vm-agent/agents/bin:/var/lib/vm-agent/agents/npm/bin:/usr/local/bin:/usr/bin:/bin`, `command -v gh=/usr/bin/gh`, no `/usr/local/bin/gh`, and no `.real` wrapper.
   - Follow-up fix installs a `/usr/local/bin/gh` shim when that directory precedes the discovered real `gh` in `PATH`, leaving `/usr/bin/gh` untouched.
 - [x] Open a draft PR and leave it draft: https://github.com/raphaeltm/simple-agent-manager/pull/2174
 
@@ -40,7 +40,7 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 
 ## Validation Evidence
 
-- Red-before-fix regression: `go test ./internal/server -run TestStandaloneGitCredentialHelperDelegatesGitHubToLocalExchange -count=1` failed on the stale `GH_TOKEN` path, returning `ghs_expired_boot_token` instead of the endpoint token.
+- Red-before-fix regression: `go test ./internal/server -run TestStandaloneGitCredentialHelperDelegatesGitHubToLocalExchange -count=1` failed on the stale `GH_TOKEN` path, returning `<expired fixture token>` instead of the endpoint token.
 - Passing focused vm-agent credential and `gh` wrapper tests: `go test ./internal/server -run 'TestStandaloneGitCredentialHelper|TestStandaloneGhWrapper|TestConfigureStandaloneGhWrapper|TestHandleGitCredential|TestPerSessionGitTokenFetcher|TestTwoWorkspaceGitTokenIsolation|TestGitHubTokenFetcherForWorkspace' -count=1`.
 - Passing full vm-agent control: `go test ./...` in `packages/vm-agent` before and after the staging-discovered `/usr/local/bin/gh` shim fix.
 - Passing API cache tests: `pnpm vitest run apps/api/tests/unit/services/github-installation-token-cache.test.ts`.
@@ -66,4 +66,4 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 
 - Added explicit standalone ACP `PATH=/var/lib/vm-agent/agents/bin:/usr/local/bin:/usr/bin:/bin` so the agent process resolves the managed `gh` shim before `/usr/bin/gh`.
 
-- Deploy run `36433161674` for `6aa2cc6ac` passed deploy and smoke tests. Final Instant verification in task `01M3M66T78MW6KK609YENG1AAT`, session `342721ad-867a-406c-8859-7e747475fcec`, workspace `01M3M66TXM7CNE0TCZSPD7FAF8`, showed `GH_PATH=/var/lib/vm-agent/agents/bin/gh`; with `GH_TOKEN=ghs_stale_invalid_INITIAL`, `git fetch --dry-run origin` succeeded, `gh auth status -h github.com` succeeded, and `git credential fill` returned `FINAL_CREDENTIAL_PREFIX_OK=ghs_`. Cleanup note: session stop route returned staging 500 requestId `68c50057-7ad6-4613-82ba-2faa2a956c21`, while workspace stop reported `Workspace is stopped` (already cleaned up).
+- Deploy run `36433161674` for `6aa2cc6ac` passed deploy and smoke tests. Final Instant verification in task `01M3M66T78MW6KK609YENG1AAT`, session `342721ad-867a-406c-8859-7e747475fcec`, workspace `01M3M66TXM7CNE0TCZSPD7FAF8`, showed `GH_PATH=/var/lib/vm-agent/agents/bin/gh`; with `GH_TOKEN=<invalid GitHub-shaped test token>`, `git fetch --dry-run origin` succeeded, `gh auth status -h github.com` succeeded, and `git credential fill` returned `FINAL_CREDENTIAL_PREFIX_OK=<redacted GitHub token prefix>`. Cleanup note: session stop route returned staging 500 requestId `68c50057-7ad6-4613-82ba-2faa2a956c21`, while workspace stop reported `Workspace is stopped` (already cleaned up).
