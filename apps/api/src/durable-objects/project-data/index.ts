@@ -107,6 +107,7 @@ import type {
 } from './tool-payload-cleanup-types';
 import * as toolPayloadManualCleanup from './tool-payload-manual-cleanup';
 import type { Env, SummaryData } from './types';
+import * as workspaceIdleTimeouts from './workspace-idle-timeouts';
 
 const log = createModuleLogger('project_data');
 
@@ -248,7 +249,7 @@ export class ProjectData extends DurableObject<Env> {
    * Consumers that read it with no RPC in flight (so the value cannot be threaded
    * in as an argument), all of which degrade to a no-op when it is absent:
    *   - `syncSummaryToD1()`             — debounced D1 write-back of project summary
-   *   - `alarm()` → `idleCleanup.checkWorkspaceIdleTimeouts` / `processExpiredCleanups`
+   *   - `alarm()` → `workspaceIdleTimeouts.checkWorkspaceIdleTimeouts` / `idleCleanup.processExpiredCleanups`
    *   - `alarm()` → `reconciliation.processReconciliationCandidates`
    *   - `alarm()` → `sessionActivityReconciliation.probeStaleSessionActivity`
    *   - `processTaskWaits` via the `getProjectId` hook
@@ -2453,7 +2454,7 @@ export class ProjectData extends DurableObject<Env> {
       await tick.run('storage_safety', () => this.runStorageSafetyAlarmLocked());
 
       await tick.run('workspace_idle_timeouts', () =>
-        idleCleanup.checkWorkspaceIdleTimeouts(
+        workspaceIdleTimeouts.checkWorkspaceIdleTimeouts(
           this.sql,
           this.env,
           this.getProjectId(),

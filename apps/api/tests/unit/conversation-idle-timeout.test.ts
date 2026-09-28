@@ -14,13 +14,11 @@ vi.mock('../../src/lib/logger', async (importOriginal) => ({
 
 import { runMigrations } from '../../src/durable-objects/migrations';
 import { computeProjectDataAlarmTime } from '../../src/durable-objects/project-data/alarm-schedule';
-import {
-  checkWorkspaceIdleTimeouts,
-  processExpiredCleanups,
-} from '../../src/durable-objects/project-data/idle-cleanup';
+import { processExpiredCleanups } from '../../src/durable-objects/project-data/idle-cleanup';
 import { terminalizeIdleTaskInD1 } from '../../src/durable-objects/project-data/idle-cleanup-terminalization';
 import { getLocalTaskRuntimeLiveness } from '../../src/durable-objects/project-data/task-runtime-liveness';
 import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
+import { checkWorkspaceIdleTimeouts } from '../../src/durable-objects/project-data/workspace-idle-timeouts';
 import type { Env } from '../../src/env';
 import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
 import { createSqliteD1 } from '../helpers/sqlite-d1';
