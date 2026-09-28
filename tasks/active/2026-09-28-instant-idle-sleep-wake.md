@@ -89,16 +89,16 @@ Neither. The combination is older:
 
 ### Enumerated writers of the rows the verdict reads (rule 44 / 58)
 
-| Writer | node | workspace | agent session | Verdict after fix |
-| --- | --- | --- | --- | --- |
-| `persistRuntimeSleeping` (container idle sleep) | sleeping / unhealthy | sleeping | sleeping | wake |
-| `completeSleepTeardown` (scheduled sleep) | sleeping / unhealthy | sleeping | sleeping | wake |
-| `persistRuntimeSleepingAfterRevokedWake` | sleeping / unhealthy | sleeping | sleeping | wake |
-| `persistRuntimeRecovering` (wake in flight) | recovery / unhealthy | recovery | recovery | wake (joins) |
-| `persistRuntimeRecovered` (woken, not yet committed) | running / healthy | running | running | wake (commits) |
-| `persistRuntimeRecoveryFailed` (wake exhausted) | error | error | error | refuse |
-| `persistRuntimeEnded` / finalizer (explicit stop) | stopped | stopped | stopped | refuse |
-| deletion / cleanup | deleted / stopping / missing | deleted / stopping / evicted | — | refuse |
+| Writer                                               | node                         | workspace                    | agent session | Verdict after fix |
+| ---------------------------------------------------- | ---------------------------- | ---------------------------- | ------------- | ----------------- |
+| `persistRuntimeSleeping` (container idle sleep)      | sleeping / unhealthy         | sleeping                     | sleeping      | wake              |
+| `completeSleepTeardown` (scheduled sleep)            | sleeping / unhealthy         | sleeping                     | sleeping      | wake              |
+| `persistRuntimeSleepingAfterRevokedWake`             | sleeping / unhealthy         | sleeping                     | sleeping      | wake              |
+| `persistRuntimeRecovering` (wake in flight)          | recovery / unhealthy         | recovery                     | recovery      | wake (joins)      |
+| `persistRuntimeRecovered` (woken, not yet committed) | running / healthy            | running                      | running       | wake (commits)    |
+| `persistRuntimeRecoveryFailed` (wake exhausted)      | error                        | error                        | error         | refuse            |
+| `persistRuntimeEnded` / finalizer (explicit stop)    | stopped                      | stopped                      | stopped       | refuse            |
+| deletion / cleanup                                   | deleted / stopping / missing | deleted / stopping / evicted | —             | refuse            |
 
 ### Known limitations (pre-existing, not changed here)
 
@@ -109,39 +109,62 @@ Neither. The combination is older:
 
 ## Implementation Checklist
 
-- [ ] Shared authority in `vm-agent-container-recovery.ts`: the runtime statuses the container DO
+- [x] Shared authority in `vm-agent-container-recovery.ts`: the runtime statuses the container DO
       can wake in place include `sleeping`; `loadRuntimeRecoveryContext` and
       `persistRuntimeRecovering` both use it. Deletion states stay excluded.
-- [ ] Resolver: a sleeping container gets its own verdict that refuses only missing or terminal
+- [x] Resolver: a sleeping container gets its own verdict that refuses only missing or terminal
       rows, mirrors the resumer (comment names `loadRuntimeRecoveryContext`), never reads
       `health_status`, and admits the agent session's `sleeping`/`recovery` markers. Justify the
       one deliberate strictness (`error` = exhausted wake) in the comment.
-- [ ] Extract the shared terminal-status lists and the `ready` target construction so the live
+- [x] Extract the shared terminal-status lists and the `ready` target construction so the live
       and sleeping paths do not duplicate them.
-- [ ] Vertical slice (real sleep trigger → real ProjectData runner → real adapter/resolver → real
+- [x] Vertical slice (real sleep trigger → real ProjectData runner → real adapter/resolver → real
       container DO wake → real recovery writers, all on real SQLite), for both sleep writers.
       Verify it fails on main and record which assertion goes red.
-- [ ] Discriminating control: a container that is really gone still reports
+- [x] Discriminating control: a container that is really gone still reports
       `container_runtime_unavailable` (visible wake failure) and is never started.
-- [ ] Controlled-ordering test: a retry landing while the in-place wake is restoring is not
+- [x] Controlled-ordering test: a retry landing while the in-place wake is restoring is not
       refused, and the delivery completes once the wake finishes.
-- [ ] Real Miniflare D1 test: rows left by the real sleep writer can be claimed for recovery;
+- [x] Real Miniflare D1 test: rows left by the real sleep writer can be claimed for recovery;
       deletion states still cannot.
-- [ ] Update existing sleeping-container unit fixtures to the realistic post-sleep shape.
-- [ ] Surgical reverts: each fix reverted alone reddens the intended tests; record in PR.
-- [ ] Docs: check public docs for Instant sleep/wake claims and update if stale.
-- [ ] File SAM ideas for follow-ups found (wake-completion nudge, live-container crash-recovery
-      `dead_target`, stale `wakeOldInstantFailure` hand-fed wake) if still relevant.
+- [x] Update existing sleeping-container unit fixtures to the realistic post-sleep shape.
+- [x] Surgical reverts: each fix reverted alone reddens the intended tests; record in PR.
+- [x] Docs: check public docs for Instant sleep/wake claims and update if stale. (No change:
+      `guides/instant-sessions.md` already documents send-to-wake, which is now true; the
+      pre-existing `CF_CONTAINER_WAKE_TIMEOUT_MS` claim is noted in idea 01M0VZ205TN8A1JYHNJN77DS4F.)
+- [x] File SAM ideas for follow-ups found: live-container crash recovery `dead_target` →
+      idea 01M3KH4NKPAY873F790RQY2XDN; wake-completion delivery nudge → appended to existing idea
+      01M0VZ205TN8A1JYHNJN77DS4F.
 
 ## Acceptance Criteria
 
-- [ ] An idle-slept Instant session with a completed snapshot receives a follow-up prompt and
+- [x] An idle-slept Instant session with a completed snapshot receives a follow-up prompt and
       wakes (vertical slice through the real sleep writer; fails on main).
-- [ ] A container that is genuinely gone still reports `container_runtime_unavailable`.
-- [ ] Production count of the same wake refusals since #2145/#2155 is in the PR.
+- [x] A container that is genuinely gone still reports `container_runtime_unavailable`.
+- [ ] Production count of the same wake refusals since #2145/#2155 is in the PR. (Measured: 0.)
 - [ ] Staging: start an Instant session, let it idle-sleep (~75 s after the turn), send another
       prompt, confirm it wakes and answers. Clean up afterwards.
 - [ ] Draft PR opened, left in draft; idea updated with the PR link.
+
+## Implementation Notes
+
+- The pure move of `persistRuntimeRecoveryFailed` into `vm-agent-container-recovery-failure.ts`
+  (rule 18; the module was 572 lines) landed as its own commit before the fix.
+- Fails on main: against origin/main's `apps/api/src`, the new vertical slice reports 3 failed /
+  2 passed. Both sleep-writer cases fail with the incident's exact "Wake failed: The sleeping container
+  runtime is gone and cannot wake in place. (container_runtime_unavailable)"; the mid-wake case is
+  refused before any wake begins; both gone-container controls pass.
+- Surgical reverts on the branch (each alone):
+  - DO excludes `sleeping`, resolver reads health, resolver waits for a `running` agent session: each
+    reddens exactly the three wake tests.
+  - Refusing only `recovery`+`unhealthy`, or retrying only an agent session in `recovery`: each
+    reddens only the mid-wake test.
+  - Dropping the terminal-node / missing-node refusals: each reddens exactly its control.
+  - Miniflare D1: removing the `sleeping` admission reddens the two wake cases; removing the
+    deletion fence reddens only its control.
+- Harness lesson: the ProjectData substitute must not load the real module through
+  `importOriginal` — against main's module graph the container's dynamic import then reached the real
+  RPC. The substitute lists exactly the calls these flows make.
 
 ## References
 

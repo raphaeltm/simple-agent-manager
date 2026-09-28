@@ -132,9 +132,37 @@ Tells:
   main teardown writers are covered through their real production entry points, not only by
   calling the shared finalizer directly.
 
+## The Round Trip: The Resumer Must Accept What The Sleeper Leaves
+
+Instant (cf-container) sessions could not wake from idle sleep for weeks, broken twice over while
+every test stayed green (idea `01M3JFFC8R6J1YE0HX0J3PS4TN`):
+
+1. The durable delivery verdict (`resolveVmPromptDeliveryTarget`) refused a sleeping container
+   whose node was `unhealthy` — a value both sleep writers and the wake itself
+   (`persistRuntimeRecovering`) write onto a perfectly wakeable runtime — and waited for its agent
+   session to be `running`, a state only the wake it was blocking could produce.
+2. #2019 narrowed the resumer's own precondition (`loadRuntimeRecoveryContext`,
+   `persistRuntimeRecovering`) to exclude `sleeping`, the state every sleep writer leaves, while
+   its task listed "legitimate sleep/restore behavior remains green" as an acceptance criterion.
+
+The two halves were never run against each other: delivery tests hand-fed a healthy node and a
+running agent session, and the container DO tests mocked `loadRuntimeRecoveryContext`.
+
+- **A marker a lifecycle writer puts on a wakeable runtime is not evidence it is gone.** Before a
+  verdict reads `health_status`, a `sleeping`/`recovery` status, or any similar mirror, name the
+  writer that sets it to mean "gone". If the only writers are the sleep, wake, or recovery paths,
+  the verdict must not read it.
+- **Changing a resumer's precondition requires a round-trip test**: run every real writer that
+  leaves the resource asleep, then the real precondition, on one real SQL engine. A test that
+  mocks the precondition cannot see it exclude the sleeper's state. See
+  `tests/integration/instant-idle-sleep-wake.test.ts` and the sleep-wake cases in
+  `tests/workers/instant-runtime-recovery-persistence.test.ts`.
+
 ## Quick Compliance Check
 
 - [ ] The terminal verdict reads the resumer's own record, not just a status enum
+- [ ] No verdict reads a marker that only sleep/wake/recovery writers set
+- [ ] A changed resumer precondition has a round-trip test through the real sleep writers
 - [ ] A comment names the resumer function the predicate mirrors
 - [ ] Any extra strictness vs. the resumer is justified in that comment
 - [ ] Preserve verdicts are bounded by an env-configurable retention; absent bound → terminal
