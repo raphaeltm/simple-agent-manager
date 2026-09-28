@@ -14,8 +14,6 @@ import (
 // helper script is installed inside the Cloudflare Container.
 const standaloneGitCredentialHelperPath = "/usr/local/bin/git-credential-sam"
 const standaloneGitBinaryPath = "/usr/bin/git"
-const standaloneGhBinaryPath = "/usr/bin/gh"
-const standaloneGhRealBinaryPath = "/usr/bin/gh.real"
 
 // standaloneGitCredentialHelperScript is a git credential helper for standalone
 // (cf-container) mode. Unlike the devcontainer helper, the agent runs in the
@@ -121,7 +119,7 @@ func ConfigureStandaloneGitCredentialHelper(timeout time.Duration) {
 		}
 	}
 
-	if err := configureStandaloneGhWrapper(standaloneGhBinaryPath, standaloneGhRealBinaryPath); err != nil {
+	if _, err := configureStandaloneGhWrapperOnPath(); err != nil {
 		slog.Warn("standalone git: gh wrapper install failed; gh may reuse stale GH_TOKEN", "error", err)
 	}
 
@@ -156,6 +154,23 @@ func renderStandaloneGhWrapperScript(realGhPath string) (string, error) {
 
 func shellSingleQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func configureStandaloneGhWrapperOnPath() (string, error) {
+	return configureStandaloneGhWrapperWithLookup(func() (string, error) {
+		return exec.LookPath("gh")
+	})
+}
+
+func configureStandaloneGhWrapperWithLookup(lookup func() (string, error)) (string, error) {
+	ghPath, err := lookup()
+	if err != nil {
+		return "", nil
+	}
+	if strings.TrimSpace(ghPath) == "" {
+		return "", nil
+	}
+	return ghPath, configureStandaloneGhWrapper(ghPath, ghPath+".real")
 }
 
 func configureStandaloneGhWrapper(ghPath, realGhPath string) error {

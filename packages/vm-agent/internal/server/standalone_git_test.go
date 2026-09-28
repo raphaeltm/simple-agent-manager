@@ -97,6 +97,38 @@ printf '%s
 	}
 }
 
+func TestConfigureStandaloneGhWrapperUsesDiscoveredPath(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	ghPath := filepath.Join(dir, "custom-gh")
+	if err := os.WriteFile(ghPath, []byte(`#!/bin/sh
+printf real-gh\n
+`), 0o755); err != nil {
+		t.Fatalf("seed custom gh: %v", err)
+	}
+
+	wrappedPath, err := configureStandaloneGhWrapperWithLookup(func() (string, error) {
+		return ghPath, nil
+	})
+	if err != nil {
+		t.Fatalf("configure discovered wrapper: %v", err)
+	}
+	if wrappedPath != ghPath {
+		t.Fatalf("wrapped path = %q, want %q", wrappedPath, ghPath)
+	}
+	if _, err := os.Stat(ghPath + ".real"); err != nil {
+		t.Fatalf("real gh not moved next to discovered path: %v", err)
+	}
+	wrapperData, err := os.ReadFile(ghPath)
+	if err != nil {
+		t.Fatalf("read wrapper: %v", err)
+	}
+	if !strings.Contains(string(wrapperData), shellSingleQuote(ghPath+".real")) {
+		t.Fatalf("wrapper does not exec discovered real path: %q", wrapperData)
+	}
+}
+
 func TestConfigureStandaloneGhWrapperMovesRealBinaryAndInstallsWrapper(t *testing.T) {
 	t.Parallel()
 
