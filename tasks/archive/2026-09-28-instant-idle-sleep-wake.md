@@ -136,15 +136,28 @@ Neither. The combination is older:
       idea 01M3KH4NKPAY873F790RQY2XDN; wake-completion delivery nudge → appended to existing idea
       01M0VZ205TN8A1JYHNJN77DS4F; `sleepForUser` lifecycle-lock hardening → idea
       01M3KJFYDXMABJDCK7GA864017.
+- [x] Staging regression (found in Phase 6): archiving a slept Instant session through
+      `POST /sessions/:id/stop` returned 500, because the stop's pre-teardown signal woke the
+      container. The chat stop and cancel routes now skip a sleeping runtime
+      (`isSleepingContainerRuntime`, `47037a749`).
+- [x] Enumerate every request that can reach a slept container (rule 67). Result: the table in the
+      PR. The workspace-page per-session stop needed the same guard (`a0d22b9fd`, after the pure
+      move `89a40c6b9`, rule 18). Non-durable wakes that skip the commit and the activity probe
+      went to idea 01M3KX6RV5KGFZVCC7VK6Z6QHK. The chat list's stale sleep icon went to idea
+      01M3KTV8E8NPAR1MD6ZY4Y53NK.
+- [x] Vertical-slice tests for chat stop, chat cancel and the workspace-page stop on a slept
+      session, through the real routes and the real teardown, with controls on both sides of each
+      guard. Each guard was reverted, and separately over-fired, and reddened only its own tests.
 
 ## Acceptance Criteria
 
 - [x] An idle-slept Instant session with a completed snapshot receives a follow-up prompt and
       wakes (vertical slice through the real sleep writer; fails on main).
 - [x] A container that is genuinely gone still reports `container_runtime_unavailable`.
-- [ ] Production count of the same wake refusals since #2145/#2155 is in the PR. (Measured: 0.)
-- [ ] Staging: start an Instant session, let it idle-sleep (~75 s after the turn), send another
-      prompt, confirm it wakes and answers. Clean up afterwards.
+- [x] Production count of the same wake refusals since #2145/#2155 is in the PR. (Measured: 0.)
+- [x] Staging: start an Instant session, let it idle-sleep (~75 s after the turn), send another
+      prompt, confirm it wakes and answers. Clean up afterwards. (See "Staging" below. The final
+      commit `a0d22b9fd` still needs its own deploy once staging is free.)
 - [ ] Draft PR opened, left in draft; idea updated with the PR link.
 
 ## Implementation Notes
@@ -189,6 +202,31 @@ Neither. The combination is older:
 - Validation: full API unit suite 10,901/10,901 (before the review fixes); resolver- and
   container-related unit files, the Workers subset, the API build and `check:fast` re-run on the
   final code.
+
+### Staging (2026-09-28, Potato project, profile `rollout-recovery-phase1-live` = `cf-container`)
+
+- Fix deployed (run 36407713214). Instant session `cbda0fae…`:
+  - Answered at 10:54:53, then idle-slept at 10:55:56. The rows took the incident's exact shape.
+  - The follow-up at 10:56:32 woke it in place; it answered "142" in 36 s.
+  - A second cycle answered "77" in 37 s.
+  - No "Wake failed" message, attention `null`, 0 console errors.
+- VM control `cbb7fed4…`: a recovery-task wake answered "142".
+- Regression: `POST /sessions/:id/stop` on the slept session returned 500. Reproduced under a full
+  `wrangler tail` (request `4fd93a4b…`):
+  - The stop's cancel signal started `vm_agent_container_recovery_started` (idle).
+  - The container booted and then fetched a snapshot the same request's teardown had already
+    deleted (404).
+  - `stopNodeResources` threw "Managed node changed before teardown could be claimed".
+  - No container leaked: the heartbeats stopped, and a later sweep confirmed the deletion.
+- Guards deployed (`47037a749`, run 36415494306; live from 11:32). Session `8e84fa9f…`:
+  - Cancel while asleep: `idle`, and the heartbeat did not move.
+  - The follow-up woke it; "142" in 21 s.
+  - Chat stop while asleep: 200 in about 16 s, no wake, workspace deletion confirmed.
+- The UI Archive check (`/tasks/:id/close`) on session `e07b68c5…` ran after another task's deploy
+  replaced the Worker (11:50:53). It therefore exercised main's code, not this branch, and counts
+  as inconclusive.
+- Still to verify on staging, once another task's run frees it: the final commit `a0d22b9fd`, i.e.
+  the workspace-page stop of a slept session, plus UI Archive of a slept session on this branch.
 
 ## References
 
