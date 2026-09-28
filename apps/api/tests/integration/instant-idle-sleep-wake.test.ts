@@ -51,8 +51,8 @@ function projectDataSql(): SqlStorage {
   return projectData.sql;
 }
 
-vi.mock('../../src/services/project-data', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../src/services/project-data')>()),
+// Only the ProjectData calls these flows make; any other call fails loudly.
+vi.mock('../../src/services/project-data', () => ({
   getSession: async (_env: unknown, _projectId: string, sessionId: string) =>
     sessions.getSession(projectDataSql(), sessionId),
   sleepSession: async (_env: unknown, _projectId: string, sessionId: string) =>
