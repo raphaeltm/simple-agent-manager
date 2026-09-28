@@ -643,6 +643,24 @@ describe('Instant session wake after idle sleep', () => {
     });
   });
 
+  // Control: only a wake from sleep is committed. A crash recovery of a session that never slept
+  // leaves the session's status alone, since `wakeSession` would also revive a failed one.
+  it('leaves a never-slept session alone when its crashed container recovers', async () => {
+    sessions.failSession(projectDataSql(), CHAT_SESSION_ID);
+    vmAgent.stop();
+    await container.onStop({ exitCode: 1, reason: 'exit' });
+
+    const response = await postWorkspaceAgentResume();
+
+    expect(response.status).toBe(200);
+    // Liveness: the crashed container did recover.
+    expect(vmAgent.starts).toBe(1);
+    expect(runtimeRows().node).toEqual(AWAKE_ROWS.node);
+    expect(sessions.getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
+      status: 'failed',
+    });
+  });
+
   it('does not refuse a follow-up that resolves its target while the wake is in flight', async () => {
     await sleepOnContainerIdleTimeout();
     let releaseRestore!: () => void;

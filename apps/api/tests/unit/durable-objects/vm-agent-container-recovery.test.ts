@@ -30,7 +30,7 @@ vi.mock('../../../src/durable-objects/vm-agent-container-recovery-failure', () =
 }));
 
 vi.mock('../../../src/services/container-wake-commit', () => ({
-  commitContainerWakeBestEffort: recoveryMocks.commitWake,
+  commitContainerWakeFromSleep: recoveryMocks.commitWake,
 }));
 
 vi.mock('../../../src/services/jwt', () => ({
@@ -499,6 +499,42 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     expect(recoveryMocks.persistRecovered).toHaveBeenCalledOnce();
     expect(values.get('lifecycleStatus')).toBe('running');
     expect(recoveryMocks.commitWake).not.toHaveBeenCalled();
+  });
+
+  // Rule 45: the commit writes session state, so an explicit stop must not interleave with it.
+  it('serializes an explicit stop behind the commit of the wake it crosses', async () => {
+    const { fake, values } = makeRecoveryFake();
+    let releaseCommit!: () => void;
+    let commitStarted!: () => void;
+    const commitRunning = new Promise<void>((resolve) => {
+      commitStarted = resolve;
+    });
+    recoveryMocks.commitWake.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseCommit = resolve;
+          commitStarted();
+        })
+    );
+    const stopForUser = (
+      VmAgentContainer.prototype as unknown as {
+        stopForUser: (this: unknown) => Promise<void>;
+      }
+    ).stopForUser;
+
+    const wake = callEnsureAwake(fake);
+    await commitRunning;
+    const stop = stopForUser.call(fake);
+    // Midpoint: let the stop run as far as it can while the commit is held open.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(values.get('lifecycleStatus')).not.toBe('stopping');
+    expect(fake.stop).not.toHaveBeenCalled();
+
+    releaseCommit();
+    await expect(wake).resolves.toEqual({ ok: true, status: 'running' });
+    await stop;
+    expect(values.get('lifecycleStatus')).toBe('stopping');
+    expect(fake.stop).toHaveBeenCalledOnce();
   });
 
   it('keeps missing snapshots degraded until the bounded attempt is exhausted', async () => {

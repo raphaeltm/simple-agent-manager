@@ -54,15 +54,21 @@ export async function commitContainerWake<Denial>(
 /**
  * The container DO's own commit, for a wake it performed on an unguarded request: an
  * attention answer, a prompt outside durable delivery, `/resume`, or anything else that
- * reached the slept container. The runtime is already awake, so a failed commit must not fail
- * that request. It is logged, and the next durable delivery commits again before its prompt.
+ * reached the slept container.
+ *
+ * Only a wake from sleep has markers to clear. A crash recovery of a session that never slept
+ * leaves the session alone, since `wakeSession` would also revive a `failed` session. Never
+ * throws: the runtime is already awake, so a failed commit must not fail the request. It is
+ * logged, and the next durable delivery commits again before its prompt.
  */
-export async function commitContainerWakeBestEffort(
+export async function commitContainerWakeFromSleep(
   env: Env,
   target: ContainerWakeTarget
 ): Promise<void> {
   try {
-    await commitContainerWake(env, target);
+    if (await sessionSnapshotSlept(env, target.chatSessionId)) {
+      await commitContainerWake(env, target);
+    }
   } catch (error) {
     log.warn('container_wake_commit.failed', {
       projectId: target.projectId,
@@ -71,4 +77,17 @@ export async function commitContainerWakeBestEffort(
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+/** Whether the session's snapshot still carries either sleep marker. */
+async function sessionSnapshotSlept(env: Env, chatSessionId: string): Promise<boolean> {
+  const row = await env.DATABASE.prepare(
+    `SELECT 1 AS slept
+       FROM session_snapshots
+      WHERE chat_session_id = ? AND (sleeping_at IS NOT NULL OR sleep_status = 'sleeping')
+      LIMIT 1`
+  )
+    .bind(chatSessionId)
+    .first<{ slept: number }>();
+  return row !== null;
 }
