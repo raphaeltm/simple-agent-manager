@@ -23,7 +23,8 @@ export const searchTaskMessagesDef: AnthropicToolDef = {
   description:
     "Search through chat messages in a project's task sessions. " +
     'Use this to find specific discussions, decisions, or outputs from past or current tasks. ' +
-    'Supports filtering by task ID, session ID, and message roles.',
+    'Supports filtering by task ID, session ID, and message roles. ' +
+    'Over-limit queries are truncated and disclosed in the response.',
   input_schema: {
     type: 'object',
     properties: {
@@ -33,7 +34,8 @@ export const searchTaskMessagesDef: AnthropicToolDef = {
       },
       query: {
         type: 'string',
-        description: 'Search query — keywords or phrases to find in messages.',
+        description:
+          'Search query — keywords or phrases to find in messages. Over-limit input is truncated.',
       },
       taskId: {
         type: 'string',
@@ -144,7 +146,7 @@ export async function searchTaskMessages(
       createdAt: r.createdAt,
     })),
     count: search.results.length,
-    query: input.query.trim(),
+    ...search.query,
     projectId: project.id,
     archiveSearch: search.archiveSearch,
     rootSearch: search.rootSearch,

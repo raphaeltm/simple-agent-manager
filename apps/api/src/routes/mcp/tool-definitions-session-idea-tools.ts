@@ -71,13 +71,13 @@ export const SESSION_IDEA_TOOLS = [
   {
     name: 'find_related_ideas',
     description:
-      'Search existing ideas in your project by keyword. Defaults to searching draft (idea) tasks only. Use this to find ideas that might relate to the current conversation before creating a new one.',
+      'Search existing ideas in your project by keyword. Defaults to searching draft (idea) tasks only. Over-limit input is truncated and disclosed in the response. Use this to find ideas that might relate to the current conversation before creating a new one.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: {
           type: 'string',
-          description: 'Search keyword to find in idea titles and descriptions',
+          description: 'Search keyword to find in idea titles and descriptions. Over-limit input is truncated.',
         },
         status: {
           type: 'string',
@@ -201,13 +201,14 @@ export const SESSION_IDEA_TOOLS = [
   {
     name: 'search_ideas',
     description:
-      'Search ideas in your project by keyword. Searches both title and content fields. Only returns ideas (draft tasks), not executed tasks.',
+      'Search ideas in your project by keyword. Searches both title and content fields. Only returns ideas (draft tasks), not executed tasks. Queries beyond the server-configured byte or term limits are truncated; the response reports queryTruncated, the effective query, and queryLimits.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: {
           type: 'string',
-          description: 'Search keyword to find in idea titles and content',
+          description:
+            'Search text for idea titles and content. Over-limit input is truncated and disclosed in the response.',
         },
         limit: {
           type: 'number',

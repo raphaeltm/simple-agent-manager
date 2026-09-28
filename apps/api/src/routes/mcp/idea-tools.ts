@@ -5,6 +5,11 @@
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import {
+  escapeSearchQueryForLike,
+  type NormalizedSearchQuery,
+  normalizeSearchQuery,
+} from '../../lib/search-query-limits';
 import { ulid } from '../../lib/ulid';
 import * as projectDataService from '../../services/project-data';
 import {
@@ -17,6 +22,19 @@ import {
   resolveSessionId,
   sanitizeUserInput,
 } from './_helpers';
+
+function parseIdeaSearchQuery(
+  requestId: string | number | null,
+  params: Record<string, unknown>,
+  env: Env,
+): NormalizedSearchQuery | JsonRpcResponse {
+  const query = typeof params.query === 'string' ? params.query.trim() : '';
+  if (!query) return jsonRpcError(requestId, INVALID_PARAMS, 'query is required');
+  if (query.length < 2) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
+  }
+  return normalizeSearchQuery(query, env);
+}
 
 export async function handleLinkIdea(
   requestId: string | number | null,
@@ -150,23 +168,19 @@ export async function handleFindRelatedIdeas(
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
-  const query = typeof params.query === 'string' ? params.query.trim() : '';
-  if (!query) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'query is required');
-  }
-  if (query.length < 2) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
-  }
+  const normalizedQuery = parseIdeaSearchQuery(requestId, params, env);
+  if ('jsonrpc' in normalizedQuery) return normalizedQuery;
 
   const limits = getMcpLimits(env);
+  const query = normalizedQuery.query;
   const requestedLimit = typeof params.limit === 'number' ? params.limit : 10;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskSearchMax);
   // Default to 'draft' status (ideas) when no explicit status filter is provided
   const statusFilter = typeof params.status === 'string' ? params.status.trim() : 'draft';
 
-  const searchPattern = `%${query}%`;
+  const searchPattern = `%${escapeSearchQueryForLike(query)}%`;
 
-  let queryStr = `SELECT id, title, description, status, priority, updated_at FROM tasks WHERE project_id = ? AND (title LIKE ? OR description LIKE ?)`;
+  let queryStr = String.raw`SELECT id, title, description, status, priority, updated_at FROM tasks WHERE project_id = ? AND (title LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\')`;
   const bindParams: unknown[] = [tokenData.projectId, searchPattern, searchPattern];
 
   queryStr += ' AND status = ?';
@@ -202,7 +216,7 @@ export async function handleFindRelatedIdeas(
           updatedAt: t.updated_at,
         })),
         count: results.results?.length ?? 0,
-        query,
+        ...normalizedQuery,
       }, null, 2),
     }],
   });
@@ -528,23 +542,19 @@ export async function handleSearchIdeas(
   tokenData: McpTokenData,
   env: Env,
 ): Promise<JsonRpcResponse> {
-  const query = typeof params.query === 'string' ? params.query.trim() : '';
-  if (!query) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'query is required');
-  }
-  if (query.length < 2) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
-  }
+  const normalizedQuery = parseIdeaSearchQuery(requestId, params, env);
+  if ('jsonrpc' in normalizedQuery) return normalizedQuery;
 
   const limits = getMcpLimits(env);
+  const query = normalizedQuery.query;
   const requestedLimit = typeof params.limit === 'number' ? params.limit : limits.ideaSearchMax;
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.ideaSearchMax);
   const snippetLength = limits.taskDescriptionSnippetLength;
 
-  const searchPattern = `%${query}%`;
+  const searchPattern = `%${escapeSearchQueryForLike(query)}%`;
 
   const results = await env.DATABASE.prepare(
-    'SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? AND (title LIKE ? OR description LIKE ?) ORDER BY updated_at DESC LIMIT ?',
+    String.raw`SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? AND (title LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\') ORDER BY updated_at DESC LIMIT ?`,
   ).bind(tokenData.projectId, 'draft', searchPattern, searchPattern, limit).all<{
     id: string;
     title: string;
@@ -569,7 +579,7 @@ export async function handleSearchIdeas(
           updatedAt: idea.updated_at,
         })),
         count: results.results?.length ?? 0,
-        query,
+        ...normalizedQuery,
       }, null, 2),
     }],
   });
