@@ -55,6 +55,23 @@ const WORKSPACE_IDLE_CHECKS_CTE = `
       FROM tracked
   )`;
 
+/**
+ * Due checks, most overdue first, so a bounded page always reaches the oldest work. Binds: check
+ * interval, now, limit. Both queries are composed once at module scope, as in `materialization.ts`:
+ * `sql.exec()` must receive a plain string, because the AST quality gate rejects a template
+ * expression inside the call and counts `?` placeholders in its literal parts only.
+ */
+const DUE_WORKSPACE_IDLE_CHECKS_SQL = `${WORKSPACE_IDLE_CHECKS_CTE}
+  SELECT workspace_id, session_id, idle_check_retry_count, last_activity_at
+    FROM checks
+   WHERE next_check_at <= ?
+   ORDER BY next_check_at ASC, workspace_id ASC
+   LIMIT ?`;
+
+/** The earliest next check of any tracked row. Binds: check interval. */
+const EARLIEST_WORKSPACE_IDLE_CHECK_SQL = `${WORKSPACE_IDLE_CHECKS_CTE}
+  SELECT MIN(next_check_at) AS earliest FROM checks`;
+
 type WorkspaceIdleCheck = ReturnType<typeof parseWorkspaceIdleCheck>;
 
 /** Why an idle workspace was kept for a later retry instead of retired. */
@@ -126,11 +143,7 @@ export function computeWorkspaceIdleAlarmTime(
   now: number = Date.now()
 ): number | null {
   const row = sql
-    .exec(
-      `${WORKSPACE_IDLE_CHECKS_CTE}
-       SELECT MIN(next_check_at) AS earliest FROM checks`,
-      WORKSPACE_IDLE_CHECK_INTERVAL_MS
-    )
+    .exec(EARLIEST_WORKSPACE_IDLE_CHECK_SQL, WORKSPACE_IDLE_CHECK_INTERVAL_MS)
     .toArray()[0];
   const earliest = row ? parseMinEarliest(row, 'workspace_idle_timeouts.min_next_check') : null;
   return earliest === null
@@ -138,24 +151,13 @@ export function computeWorkspaceIdleAlarmTime(
     : Math.max(earliest, now + DEFAULT_WORKSPACE_IDLE_MIN_ALARM_DELAY_MS);
 }
 
-/** Due checks, most overdue first, so a bounded page always reaches the oldest work. */
 function selectDueWorkspaceIdleChecks(
   sql: SqlStorage,
   now: number,
   limit: number
 ): WorkspaceIdleCheck[] {
   return sql
-    .exec(
-      `${WORKSPACE_IDLE_CHECKS_CTE}
-       SELECT workspace_id, session_id, idle_check_retry_count, last_activity_at
-         FROM checks
-        WHERE next_check_at <= ?
-        ORDER BY next_check_at ASC, workspace_id ASC
-        LIMIT ?`,
-      WORKSPACE_IDLE_CHECK_INTERVAL_MS,
-      now,
-      limit
-    )
+    .exec(DUE_WORKSPACE_IDLE_CHECKS_SQL, WORKSPACE_IDLE_CHECK_INTERVAL_MS, now, limit)
     .toArray()
     .map((row) => parseWorkspaceIdleCheck(row));
 }
