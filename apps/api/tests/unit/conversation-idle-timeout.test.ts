@@ -1,3 +1,4 @@
+import { WORKSPACE_IDLE_CHECK_INTERVAL_MS } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,9 +14,19 @@ vi.mock('../../src/lib/logger', async (importOriginal) => ({
 }));
 
 import { runMigrations } from '../../src/durable-objects/migrations';
-import { computeProjectDataAlarmTime } from '../../src/durable-objects/project-data/alarm-schedule';
+import { updateMessageActivity } from '../../src/durable-objects/project-data/activity';
+import {
+  computeProjectDataAlarmSectionTimes,
+  computeProjectDataAlarmTime,
+} from '../../src/durable-objects/project-data/alarm-schedule';
 import { processExpiredCleanups } from '../../src/durable-objects/project-data/idle-cleanup';
 import { terminalizeIdleTaskInD1 } from '../../src/durable-objects/project-data/idle-cleanup-terminalization';
+import {
+  sleepSession,
+  stopSessionInternal,
+  updateSessionTopic,
+  wakeSession,
+} from '../../src/durable-objects/project-data/sessions';
 import { getLocalTaskRuntimeLiveness } from '../../src/durable-objects/project-data/task-runtime-liveness';
 import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import { checkWorkspaceIdleTimeouts } from '../../src/durable-objects/project-data/workspace-idle-timeouts';
@@ -466,113 +477,330 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
     ]);
   });
 
-  it('backs off an overdue workspace with inconclusive candidates through the shared alarm path', async () => {
-    const seeded = seed();
-    d1Db.prepare('DELETE FROM tasks WHERE id = ?').run(seeded.taskId);
-    projectDb.prepare('DELETE FROM acp_sessions').run();
-    const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+  describe('workspace idle timeouts', () => {
+    const QUIET_ACTIVE_MS = 10 * 60_000;
 
-    await checkWorkspaceIdleTimeouts(sql, env, PROJECT_ID, deleteWorkspace, vi.fn(), vi.fn());
+    function workspaceIdleAlarmAt(): number | null {
+      return computeProjectDataAlarmSectionTimes(
+        sql,
+        { ...env, PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' },
+        Date.now()
+      ).workspace_idle_timeouts;
+    }
 
-    expect(deleteWorkspace).not.toHaveBeenCalled();
-    expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
-      idle_check_retry_count: 1,
-      next_idle_check_at: NOW + 600_000,
+    function sweepWorkspaceIdle(deleteWorkspace = vi.fn().mockResolvedValue(undefined)) {
+      return checkWorkspaceIdleTimeouts(sql, env, PROJECT_ID, deleteWorkspace, vi.fn(), vi.fn());
+    }
+
+    /** Fire the workspace idle section each time its own schedule says, as `ProjectData.alarm()` does. */
+    async function runWorkspaceIdleAlarms(
+      deleteWorkspace: ReturnType<typeof vi.fn>,
+      maxAlarms = 20
+    ): Promise<number[]> {
+      const firedAt: number[] = [];
+      for (let alarm = 0; alarm < maxAlarms; alarm += 1) {
+        const alarmAt = workspaceIdleAlarmAt();
+        if (alarmAt === null) break;
+        vi.setSystemTime(alarmAt);
+        firedAt.push(alarmAt);
+        await sweepWorkspaceIdle(deleteWorkspace);
+      }
+      return firedAt;
+    }
+
+    function seedDeadRuntime(options: SeedOptions = {}) {
+      const seeded = seed({ nodeStatus: 'stopped', ...options });
+      projectDb.prepare('DELETE FROM acp_sessions WHERE chat_session_id = ?').run(seeded.sessionId);
+      return seeded;
+    }
+
+    it.each([
+      { label: 'installation default', projectTimeoutMs: null, timeoutMs: 2 * TIMEOUT_MS },
+      { label: 'project override', projectTimeoutMs: 30 * 60_000, timeoutMs: 30 * 60_000 },
+    ])(
+      'checks a quiet active workspace once, then only at its $label idle deadline',
+      async ({ projectTimeoutMs, timeoutMs }) => {
+        d1Db
+          .prepare('UPDATE projects SET workspace_idle_timeout_ms = ? WHERE id = ?')
+          .run(projectTimeoutMs, PROJECT_ID);
+        const quietSince = NOW - QUIET_ACTIVE_MS;
+        const seeded = seedDeadRuntime({ lastActivityAt: quietSince });
+        const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+        const firedAt = await runWorkspaceIdleAlarms(deleteWorkspace);
+
+        expect(firedAt).toEqual([NOW + 60_000, quietSince + timeoutMs]);
+        expect(task(seeded.taskId).status).toBe('failed');
+        expect(deleteWorkspace).toHaveBeenCalledWith(seeded.workspaceId, PROJECT_ID);
+        expect(workspaceActivity(seeded.workspaceId)).toBeUndefined();
+      }
+    );
+
+    it('does not arm the alarm for activity whose session is sleeping or stopped', () => {
+      const sleeping = seed();
+      const stopped = seed({
+        taskId: 'task-stopped',
+        workspaceId: 'workspace-stopped',
+        sessionId: 'session-stopped',
+      });
+      expect(workspaceIdleAlarmAt()).toBe(NOW + 60_000);
+
+      expect(sleepSession(sql, sleeping.sessionId)).toBe(true);
+      stopSessionInternal(sql, stopped.sessionId);
+
+      expect(workspaceIdleAlarmAt()).toBeNull();
+      expect(workspaceActivity(sleeping.workspaceId)).toBeDefined();
+      expect(workspaceActivity(stopped.workspaceId)).toBeDefined();
     });
-    expect(
-      computeProjectDataAlarmTime(sql, { ...env, PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })
-    ).toBe(NOW + 600_000);
-  });
 
-  it('ignores non-active-session workspace activity until wake makes it processable again', async () => {
-    const seeded = seed({ nodeStatus: 'stopped' });
-    projectDb.prepare('DELETE FROM acp_sessions WHERE chat_session_id = ?').run(seeded.sessionId);
-    projectDb
-      .prepare('UPDATE chat_sessions SET status = ? WHERE id = ?')
-      .run('sleeping', seeded.sessionId);
-    const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+    it('checks the most overdue workspace first when a full page is due', async () => {
+      for (const n of [1, 2, 3, 4, 5]) {
+        seed({
+          taskId: `task-busy-${n}`,
+          workspaceId: `workspace-a-busy-${n}`,
+          sessionId: `session-busy-${n}`,
+          lastActivityAt: NOW - QUIET_ACTIVE_MS,
+        });
+      }
+      const idle = seedDeadRuntime({
+        taskId: 'task-idle',
+        workspaceId: 'workspace-z-idle',
+        sessionId: 'session-idle',
+      });
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
 
-    expect(
-      computeProjectDataAlarmTime(sql, { ...env, PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })
-    ).toBeNull();
-    expect(workspaceActivity(seeded.workspaceId)).toBeDefined();
+      await sweepWorkspaceIdle(deleteWorkspace);
 
-    projectDb
-      .prepare('UPDATE chat_sessions SET status = ? WHERE id = ?')
-      .run('stopped', seeded.sessionId);
-    expect(
-      computeProjectDataAlarmTime(sql, { ...env, PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })
-    ).toBeNull();
-    expect(workspaceActivity(seeded.workspaceId)).toBeDefined();
-
-    projectDb
-      .prepare('UPDATE chat_sessions SET status = ?, updated_at = ? WHERE id = ?')
-      .run('active', NOW - 3 * TIMEOUT_MS, seeded.sessionId);
-
-    expect(
-      computeProjectDataAlarmTime(sql, { ...env, PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })
-    ).toBe(NOW + 60_000);
-
-    await checkWorkspaceIdleTimeouts(sql, env, PROJECT_ID, deleteWorkspace, vi.fn(), vi.fn());
-
-    expect(task(seeded.taskId).status).toBe('failed');
-    expect(deleteWorkspace).toHaveBeenCalledWith(seeded.workspaceId, PROJECT_ID);
-    expect(workspaceActivity(seeded.workspaceId)).toBeUndefined();
-  });
-
-  it('grows workspace idle preservation backoff and clears the counter after successful cleanup', async () => {
-    env.WORKSPACE_IDLE_BACKOFF_BASE_MS = '300000';
-    env.WORKSPACE_IDLE_BACKOFF_MAX_MS = '900000';
-    const seeded = seed();
-    const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
-
-    await checkWorkspaceIdleTimeouts(sql, env, PROJECT_ID, deleteWorkspace, vi.fn(), vi.fn());
-    expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
-      idle_check_retry_count: 1,
-      next_idle_check_at: NOW + 300_000,
+      expect(task(idle.taskId).status).toBe('failed');
+      expect(deleteWorkspace).toHaveBeenCalledWith(idle.workspaceId, PROJECT_ID);
     });
 
-    vi.setSystemTime(NOW + 300_001);
-    await checkWorkspaceIdleTimeouts(sql, env, PROJECT_ID, deleteWorkspace, vi.fn(), vi.fn());
-    expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
-      idle_check_retry_count: 2,
-      next_idle_check_at: NOW + 300_001 + 600_000,
+    it('records the idle deadline of every busy workspace it checks, so a full page keeps moving', async () => {
+      const retryAt = NOW;
+      const idle = seedDeadRuntime({
+        taskId: 'task-idle',
+        workspaceId: 'workspace-z-idle',
+        sessionId: 'session-idle',
+      });
+      projectDb
+        .prepare(
+          'UPDATE workspace_activity SET idle_check_retry_count = 1, next_idle_check_at = ? WHERE workspace_id = ?'
+        )
+        .run(retryAt, idle.workspaceId);
+      for (const n of [1, 2, 3, 4, 5]) {
+        seed({
+          taskId: `task-busy-${n}`,
+          workspaceId: `workspace-a-busy-${n}`,
+          sessionId: `session-busy-${n}`,
+          lastActivityAt: NOW - QUIET_ACTIVE_MS,
+        });
+      }
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      const firedAt = await runWorkspaceIdleAlarms(deleteWorkspace, 2);
+
+      expect(firedAt).toEqual([NOW + 60_000, NOW + 120_000]);
+      expect(task(idle.taskId).status).toBe('failed');
+      for (const n of [1, 2, 3, 4, 5]) {
+        expect(task(`task-busy-${n}`).status).toBe('in_progress');
+        expect(workspaceActivity(`workspace-a-busy-${n}`)).toMatchObject({
+          idle_check_retry_count: 0,
+          next_idle_check_at: NOW - QUIET_ACTIVE_MS + 2 * TIMEOUT_MS,
+        });
+      }
     });
-    projectDb.prepare('DELETE FROM acp_sessions WHERE chat_session_id = ?').run(seeded.sessionId);
-    expect(
-      computeProjectDataAlarmTime(sql, { ...env, PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })
-    ).toBe(NOW + 300_001 + 600_000);
 
-    d1Db
-      .prepare(
-        `UPDATE nodes
-         SET status = 'stopped', health_status = 'unhealthy'
-         WHERE id = ?`
-      )
-      .run(`node-${seeded.workspaceId}`);
-    vi.setSystemTime(NOW + 900_002);
+    it('moves a page of permanently failing checks aside so the work behind them is reached', async () => {
+      for (const n of [1, 2, 3, 4, 5]) {
+        seedDeadRuntime({
+          taskId: `task-fail-${n}`,
+          workspaceId: `workspace-a-fail-${n}`,
+          sessionId: `session-fail-${n}`,
+        });
+      }
+      const reachable = seedDeadRuntime({
+        taskId: 'task-reachable',
+        workspaceId: 'workspace-z-reachable',
+        sessionId: 'session-reachable',
+      });
+      d1Db.exec(`
+        CREATE TRIGGER failing_task_writes BEFORE UPDATE ON tasks
+        WHEN OLD.id LIKE 'task-fail-%'
+        BEGIN SELECT RAISE(ABORT, 'D1_ERROR: overloaded'); END;
+      `);
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
 
-    await checkWorkspaceIdleTimeouts(sql, env, PROJECT_ID, deleteWorkspace, vi.fn(), vi.fn());
+      const firedAt = await runWorkspaceIdleAlarms(deleteWorkspace, 2);
 
-    expect(task(seeded.taskId).status).toBe('failed');
-    expect(deleteWorkspace).toHaveBeenCalledWith(seeded.workspaceId, PROJECT_ID);
-    expect(workspaceActivity(seeded.workspaceId)).toBeUndefined();
-  });
+      expect(task(reachable.taskId).status).toBe('failed');
+      expect(deleteWorkspace).toHaveBeenCalledWith(reachable.workspaceId, PROJECT_ID);
+      for (const n of [1, 2, 3, 4, 5]) {
+        expect(task(`task-fail-${n}`).status).toBe('in_progress');
+        expect(workspaceActivity(`workspace-a-fail-${n}`)).toMatchObject({
+          idle_check_retry_count: 1,
+          next_idle_check_at: firedAt[0]! + 600_000,
+        });
+      }
+      expect(workspaceIdleAlarmAt()).toBe(firedAt[0]! + 600_000);
+    });
 
-  it('still cleans up a genuinely idle workspace on its first due alarm', async () => {
-    const seeded = seed({ nodeStatus: 'stopped' });
-    projectDb.prepare('DELETE FROM acp_sessions WHERE chat_session_id = ?').run(seeded.sessionId);
-    const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+    it('backs off an overdue workspace with inconclusive candidates through the shared alarm path', async () => {
+      const seeded = seed();
+      d1Db.prepare('DELETE FROM tasks WHERE id = ?').run(seeded.taskId);
+      projectDb.prepare('DELETE FROM acp_sessions').run();
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
 
-    expect(
-      computeProjectDataAlarmTime(sql, { ...env, PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })
-    ).toBe(NOW + 60_000);
+      await sweepWorkspaceIdle(deleteWorkspace);
 
-    await checkWorkspaceIdleTimeouts(sql, env, PROJECT_ID, deleteWorkspace, vi.fn(), vi.fn());
+      expect(deleteWorkspace).not.toHaveBeenCalled();
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        idle_check_retry_count: 1,
+        next_idle_check_at: NOW + 600_000,
+      });
+      expect(
+        computeProjectDataAlarmTime(sql, {
+          ...env,
+          PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false',
+        })
+      ).toBe(NOW + 600_000);
+    });
 
-    expect(task(seeded.taskId).status).toBe('failed');
-    expect(deleteWorkspace).toHaveBeenCalledWith(seeded.workspaceId, PROJECT_ID);
-    expect(workspaceActivity(seeded.workspaceId)).toBeUndefined();
+    it('grows the retry delay while an idle runtime is preserved and forgets it after cleanup', async () => {
+      env.WORKSPACE_IDLE_BACKOFF_BASE_MS = '300000';
+      env.WORKSPACE_IDLE_BACKOFF_MAX_MS = '900000';
+      const seeded = seed();
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      await sweepWorkspaceIdle(deleteWorkspace);
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        idle_check_retry_count: 1,
+        next_idle_check_at: NOW + 300_000,
+      });
+
+      vi.setSystemTime(NOW + 300_001);
+      await sweepWorkspaceIdle(deleteWorkspace);
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        idle_check_retry_count: 2,
+        next_idle_check_at: NOW + 300_001 + 600_000,
+      });
+      projectDb.prepare('DELETE FROM acp_sessions WHERE chat_session_id = ?').run(seeded.sessionId);
+      expect(workspaceIdleAlarmAt()).toBe(NOW + 300_001 + 600_000);
+
+      d1Db
+        .prepare(`UPDATE nodes SET status = 'stopped', health_status = 'unhealthy' WHERE id = ?`)
+        .run(`node-${seeded.workspaceId}`);
+      vi.setSystemTime(NOW + 900_002);
+
+      await sweepWorkspaceIdle(deleteWorkspace);
+
+      expect(task(seeded.taskId).status).toBe('failed');
+      expect(deleteWorkspace).toHaveBeenCalledWith(seeded.workspaceId, PROJECT_ID);
+      expect(workspaceActivity(seeded.workspaceId)).toBeUndefined();
+    });
+
+    it('restarts the backoff once new activity ends an idle cycle', async () => {
+      const seeded = seed();
+      await sweepWorkspaceIdle();
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({ idle_check_retry_count: 1 });
+
+      vi.setSystemTime(NOW + 60_000);
+      expect(updateSessionTopic(sql, seeded.sessionId, 'Renamed while idle')).toBe(true);
+      vi.setSystemTime(NOW + 600_000);
+      await sweepWorkspaceIdle();
+
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        idle_check_retry_count: 0,
+        next_idle_check_at: NOW + 60_000 + 2 * TIMEOUT_MS,
+      });
+    });
+
+    it('still cleans up a genuinely idle workspace on its first due alarm', async () => {
+      const seeded = seedDeadRuntime();
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      expect(workspaceIdleAlarmAt()).toBe(NOW + 60_000);
+
+      await sweepWorkspaceIdle(deleteWorkspace);
+
+      expect(task(seeded.taskId).status).toBe('failed');
+      expect(deleteWorkspace).toHaveBeenCalledWith(seeded.workspaceId, PROJECT_ID);
+      expect(workspaceActivity(seeded.workspaceId)).toBeUndefined();
+    });
+
+    it('starts a new idle cycle when a sleeping session wakes in place', async () => {
+      env.WORKSPACE_IDLE_BACKOFF_BASE_MS = String(6 * TIMEOUT_MS);
+      env.WORKSPACE_IDLE_BACKOFF_MAX_MS = String(6 * TIMEOUT_MS);
+      const seeded = seed();
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+      await sweepWorkspaceIdle(deleteWorkspace);
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        idle_check_retry_count: 1,
+        next_idle_check_at: NOW + 6 * TIMEOUT_MS,
+      });
+
+      expect(sleepSession(sql, seeded.sessionId)).toBe(true);
+      expect(workspaceIdleAlarmAt()).toBeNull();
+      vi.setSystemTime(NOW + QUIET_ACTIVE_MS);
+      const wokeAt = Date.now();
+      expect(wakeSession(sql, seeded.sessionId, seeded.workspaceId, seeded.taskId)).toBe(true);
+      // The woken runtime then dies without doing any work.
+      projectDb.prepare('DELETE FROM acp_sessions WHERE chat_session_id = ?').run(seeded.sessionId);
+      d1Db
+        .prepare(`UPDATE nodes SET status = 'stopped', health_status = 'unhealthy' WHERE id = ?`)
+        .run(`node-${seeded.workspaceId}`);
+
+      const firedAt = await runWorkspaceIdleAlarms(deleteWorkspace);
+
+      expect(firedAt).toEqual([wokeAt + WORKSPACE_IDLE_CHECK_INTERVAL_MS, wokeAt + 2 * TIMEOUT_MS]);
+      expect(task(seeded.taskId).status).toBe('failed');
+      expect(deleteWorkspace).toHaveBeenCalledWith(seeded.workspaceId, PROJECT_ID);
+    });
+
+    it('lets activity that lands mid-check clear the retry the check recorded', async () => {
+      env.WORKSPACE_IDLE_BACKOFF_BASE_MS = String(6 * TIMEOUT_MS);
+      env.WORKSPACE_IDLE_BACKOFF_MAX_MS = String(6 * TIMEOUT_MS);
+      const seeded = seed();
+      const database = env.DATABASE;
+      let messageAt: number | null = null;
+      env.DATABASE = {
+        ...database,
+        prepare: (query: string) => {
+          // A message persisted while the check awaits its reporter-scoped task lookup.
+          if (messageAt === null && query.includes('FROM tasks t')) {
+            messageAt = Date.now();
+            updateMessageActivity(sql, seeded.workspaceId, seeded.sessionId);
+          }
+          return database.prepare(query);
+        },
+      };
+
+      await sweepWorkspaceIdle();
+
+      expect(messageAt).toBe(NOW);
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        idle_check_retry_count: 0,
+        next_idle_check_at: null,
+      });
+      expect(workspaceIdleAlarmAt()).toBe(NOW + WORKSPACE_IDLE_CHECK_INTERVAL_MS);
+    });
+
+    it('records no verdict when the project timeout cannot be read', async () => {
+      d1Db
+        .prepare('UPDATE projects SET workspace_idle_timeout_ms = ? WHERE id = ?')
+        .run(6 * TIMEOUT_MS, PROJECT_ID);
+      const seeded = seedDeadRuntime();
+      d1Db.exec('ALTER TABLE projects RENAME TO projects_unavailable');
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      await sweepWorkspaceIdle(deleteWorkspace);
+
+      expect(task(seeded.taskId).status).toBe('in_progress');
+      expect(deleteWorkspace).not.toHaveBeenCalled();
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        idle_check_retry_count: 1,
+        next_idle_check_at: NOW + 600_000,
+      });
+    });
   });
 
   it('Path B terminalizes a legacy NULL-linked reporter task through the workspace binding', async () => {

@@ -153,10 +153,10 @@ export const DEFAULT_IDLE_CLEANUP_MAX_RESIDENCE_MS = 2 * 60 * 60 * 1000; // 2 ho
 /** Minimum delay before rescheduling a workspace-idle alarm. */
 export const DEFAULT_WORKSPACE_IDLE_MIN_ALARM_DELAY_MS = 60 * 1000;
 
-/** Base delay before retrying an inconclusive workspace-idle check. */
+/** First retry delay after a workspace-idle check finds an idle workspace it cannot retire yet. */
 export const DEFAULT_WORKSPACE_IDLE_BACKOFF_BASE_MS = 10 * 60 * 1000; // 10 minutes
 
-/** Maximum delay before retrying an inconclusive workspace-idle check. */
+/** Maximum retry delay after repeated workspace-idle checks that cannot retire an idle workspace. */
 export const DEFAULT_WORKSPACE_IDLE_BACKOFF_MAX_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 /** Default workspace idle timeout (ms). Workspaces with no messages AND no terminal activity
@@ -176,7 +176,8 @@ export const MIN_NODE_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 /** Maximum node idle timeout (ms). */
 export const MAX_NODE_IDLE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-/** Interval (ms) at which the ProjectData DO checks workspace idle state. */
+/** Delay (ms) after a workspace's latest activity before the ProjectData DO first checks it and
+ * records when it will become idle. */
 export const WORKSPACE_IDLE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 /** Minimum interval (ms) between terminal activity updates to the DO to avoid write amplification.

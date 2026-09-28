@@ -2,6 +2,7 @@
  * Chat session CRUD, state machine, listing, and search.
  */
 import { log } from '../../lib/logger';
+import { clearWorkspaceIdleCheck } from './activity';
 import { getAttentionSummary } from './attention';
 import {
   parseChatSessionListRow,
@@ -355,7 +356,9 @@ export function wakeSession(
     workspaceId,
     options.allowStopped ? 1 : 0
   );
-  return cursor.rowsWritten > 0;
+  if (cursor.rowsWritten === 0) return false;
+  clearWorkspaceIdleCheck(sql, workspaceId, sessionId);
+  return true;
 }
 
 export function stopSession(

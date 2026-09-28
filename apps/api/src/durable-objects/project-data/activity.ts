@@ -96,6 +96,25 @@ export function updateTerminalActivity(
 }
 
 /**
+ * Forget the workspace idle sweep's recorded check for a session that just woke: it was a verdict
+ * about the runtime that slept, so the woken session starts a new idle cycle.
+ */
+export function clearWorkspaceIdleCheck(
+  sql: SqlStorage,
+  workspaceId: string,
+  sessionId: string
+): void {
+  sql.exec(
+    `UPDATE workspace_activity
+        SET idle_check_retry_count = 0,
+            next_idle_check_at = NULL
+      WHERE workspace_id = ? AND session_id = ?`,
+    workspaceId,
+    sessionId
+  );
+}
+
+/**
  * Clean up workspace activity tracking for a workspace.
  */
 export function cleanupWorkspaceActivity(sql: SqlStorage, workspaceId: string): void {

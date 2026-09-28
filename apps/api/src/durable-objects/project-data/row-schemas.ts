@@ -11,7 +11,7 @@ export {
   parseIdeaSessionDetail,
   parseIdleCleanupSchedule,
   parseSessionIdeaLink,
-  parseWorkspaceActivity,
+  parseWorkspaceIdleCheck,
 } from './row-schemas/activity';
 export {
   parseCleanupAt,

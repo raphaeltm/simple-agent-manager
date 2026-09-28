@@ -94,7 +94,7 @@ export function computeProjectDataAlarmSectionTimes(
     ),
     storage_safety: compute('storage_safety', () => computeStorageSafetyAlarmTime(sql, env)),
     workspace_idle_timeouts: compute('workspace_idle_timeouts', () =>
-      workspaceIdleTimeouts.computeWorkspaceIdleAlarmTime(sql)
+      workspaceIdleTimeouts.computeWorkspaceIdleAlarmTime(sql, now)
     ),
     expired_idle_cleanups: compute('expired_idle_cleanups', () =>
       idleCleanup.computeIdleCleanupAlarmTime(sql)
