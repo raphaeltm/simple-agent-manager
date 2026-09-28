@@ -42,7 +42,7 @@ The same unbounded input reaches SQLite from `search_ideas`, `search_tasks`, and
 - [x] Update MCP tool descriptions, runtime env types, Wrangler/deploy sync, env examples, env reference, and public docs.
 - [x] Run focused tests, lint, typecheck, full tests, build, and specialist review.
 - [x] Deploy the pinned branch to staging and exercise every search tool through the real MCP/API path.
-- [ ] Open a draft PR and leave it draft for coordinating-session review.
+- [x] Open a draft PR and leave it draft for coordinating-session review.
 
 ## Acceptance Criteria
 
@@ -52,7 +52,7 @@ The same unbounded input reaches SQLite from `search_ideas`, `search_tasks`, and
 - [x] A normal short query preserves existing ranking/order and results.
 - [x] MCP descriptions and public/configuration docs describe the limits and truncation metadata.
 - [x] Staging probes through the real MCP/API paths succeed for all four long-query searches.
-- [ ] The implementation PR remains draft and unmerged.
+- [x] The implementation PR remains draft and unmerged: [PR #2171](https://github.com/raphaeltm/simple-agent-manager/pull/2171).
 
 ## Preflight
 
