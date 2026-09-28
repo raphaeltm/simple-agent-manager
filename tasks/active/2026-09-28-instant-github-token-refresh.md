@@ -23,7 +23,7 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 - [x] Add an expiry refresh margin with a `DEFAULT_*` constant and env override.
 - [x] Verify full-VM credential path is not regressed.
 - [x] Query production logs for Instant git-token failures / 401s.
-- [ ] Deploy to staging, start an Instant session, force or simulate expiry, prove git/gh operation succeeds, and clean up.
+- [x] Deploy to staging, start an Instant session, force or simulate expiry, prove git/gh operation succeeds, and clean up.
   - First staging pass proved `git credential fill` returned a redacted GitHub credential, but `gh auth status` still failed when `GH_TOKEN=ghs_stale_invalid_INITIAL`; container inspection showed `PATH=/var/lib/vm-agent/agents/bin:/var/lib/vm-agent/agents/npm/bin:/usr/local/bin:/usr/bin:/bin`, `command -v gh=/usr/bin/gh`, no `/usr/local/bin/gh`, and no `.real` wrapper.
   - Follow-up fix installs a `/usr/local/bin/gh` shim when that directory precedes the discovered real `gh` in `PATH`, leaving `/usr/bin/gh` untouched.
 - [ ] Open a draft PR and leave it draft.
@@ -57,7 +57,7 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 
 - Deploy run `36417133346` for `da0f91153` passed deploy and smoke tests. Manual Instant verification showed `git credential fill` could return a redacted GitHub credential but `gh auth status` failed with the deliberately invalid inherited `GH_TOKEN`, proving `gh` still bypassed the wrapper.
 - Deploy run `36420384172` for `5e8c8c28c` passed deploy and smoke tests. Manual inspection in Instant workspace `01M3M01NM7FND9YHPBD7AC274H`, session `c719bad0-8ff9-40ee-a10f-ed734245fbbe`, showed `PATH=/var/lib/vm-agent/agents/bin:/var/lib/vm-agent/agents/npm/bin:/usr/local/bin:/usr/bin:/bin`, `command -v gh=/usr/bin/gh`, no `/usr/local/bin/gh`, no `/usr/bin/gh.real`, and `git credential fill` returned redacted credentials. This identified the need for a shadow shim in `/usr/local/bin`.
-- Deploy run `36422950111` for `e33a24860` is in progress for final manual Instant verification.
+- Deploy run `36422950111` for `e33a24860` passed deploy and smoke tests; follow-up manual verification showed the `/usr/local/bin` shim still was not present in the Instant agent shell, so the fix moved the agent-facing shim to `/var/lib/vm-agent/agents/bin` and forced that directory first in standalone ACP `PATH`.
 - Attempted staging KV invalidation for the GitHub installation-token key was blocked by Cloudflare auth error code 10000 with the available token; remote KV key listing worked, deletion did not.
 
 - Deploy run `36425315441` for `20b5302a5` passed deploy and smoke tests, but manual Instant workspace `01M3M2J7ZASWHJSZZ0DZGT9ZPF`, session `296540b9-225e-4fd0-a842-c10c8b6c959c`, still resolved `gh` to `/usr/bin/gh` with no `/usr/local/bin/gh`; this showed `exec.LookPath("gh")` in the vm-agent process can miss `gh` even when user shells find it. Added explicit `/usr/bin/gh` and `/bin/gh` fallback discovery.
@@ -65,3 +65,5 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 - Added ACP standalone startup shim in `/var/lib/vm-agent/agents/bin/gh` because staged Instant shells put that directory first in `PATH`; this directly covers the Claude/Codex process path where `/usr/local/bin/gh` was not present.
 
 - Added explicit standalone ACP `PATH=/var/lib/vm-agent/agents/bin:/usr/local/bin:/usr/bin:/bin` so the agent process resolves the managed `gh` shim before `/usr/bin/gh`.
+
+- Deploy run `36433161674` for `6aa2cc6ac` passed deploy and smoke tests. Final Instant verification in task `01M3M66T78MW6KK609YENG1AAT`, session `342721ad-867a-406c-8859-7e747475fcec`, workspace `01M3M66TXM7CNE0TCZSPD7FAF8`, showed `GH_PATH=/var/lib/vm-agent/agents/bin/gh`; with `GH_TOKEN=ghs_stale_invalid_INITIAL`, `git fetch --dry-run origin` succeeded, `gh auth status -h github.com` succeeded, and `git credential fill` returned `FINAL_CREDENTIAL_PREFIX_OK=ghs_`. Cleanup note: session stop route returned staging 500 requestId `68c50057-7ad6-4613-82ba-2faa2a956c21`, while workspace stop reported `Workspace is stopped` (already cleaned up).
