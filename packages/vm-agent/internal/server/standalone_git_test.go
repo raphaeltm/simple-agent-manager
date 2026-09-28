@@ -54,11 +54,116 @@ func TestRenderStandaloneGitCredentialHelperScriptUsesConfiguredTimeout(t *testi
 	}
 }
 
-func TestStandaloneGitCredentialHelperServesTokenForGitHub(t *testing.T) {
+func TestStandaloneGhWrapperRefreshesTokenThroughGitCredentialFill(t *testing.T) {
 	t.Parallel()
-	out := runStandaloneCredScript(t, "get", "protocol=https\nhost=github.com\n\n", "ghs_secret123")
-	if !strings.Contains(out, "username=x-access-token") || !strings.Contains(out, "password=ghs_secret123") {
-		t.Fatalf("expected github creds, got %q", out)
+
+	dir := t.TempDir()
+	gitPath := filepath.Join(dir, "git")
+	realGhPath := filepath.Join(dir, "gh.real")
+	wrapperPath := filepath.Join(dir, "gh")
+
+	gitScript := `#!/bin/sh
+if [ "$1" = "credential" ] && [ "$2" = "fill" ]; then
+  cat >/dev/null
+  printf 'username=x-access-token
+password=ghs_fresh_from_helper
+'
+  exit 0
+fi
+exit 1
+`
+	if err := os.WriteFile(gitPath, []byte(gitScript), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	realGhScript := `#!/bin/sh
+printf '%s
+' "$GH_TOKEN"
+`
+	if err := os.WriteFile(realGhPath, []byte(realGhScript), 0o755); err != nil {
+		t.Fatalf("write fake gh.real: %v", err)
+	}
+	if err := writeStandaloneGhWrapper(wrapperPath, realGhPath); err != nil {
+		t.Fatalf("write gh wrapper: %v", err)
+	}
+
+	cmd := exec.Command("/bin/sh", wrapperPath, "auth", "status")
+	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "GH_TOKEN=ghs_expired_boot_token")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run gh wrapper: %v (out=%q)", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "ghs_fresh_from_helper" {
+		t.Fatalf("wrapped gh GH_TOKEN = %q, want fresh helper token", got)
+	}
+}
+
+func TestConfigureStandaloneGhWrapperMovesRealBinaryAndInstallsWrapper(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	ghPath := filepath.Join(dir, "gh")
+	realGhPath := filepath.Join(dir, "gh.real")
+	if err := os.WriteFile(ghPath, []byte(`#!/bin/sh
+printf real-gh\n
+`), 0o755); err != nil {
+		t.Fatalf("seed gh: %v", err)
+	}
+
+	if err := configureStandaloneGhWrapper(ghPath, realGhPath); err != nil {
+		t.Fatalf("configure wrapper: %v", err)
+	}
+
+	realData, err := os.ReadFile(realGhPath)
+	if err != nil {
+		t.Fatalf("read moved real gh: %v", err)
+	}
+	if !strings.Contains(string(realData), "real-gh") {
+		t.Fatalf("real gh was not moved, got %q", realData)
+	}
+	wrapperData, err := os.ReadFile(ghPath)
+	if err != nil {
+		t.Fatalf("read wrapper: %v", err)
+	}
+	if !strings.Contains(string(wrapperData), "git credential fill") || !strings.Contains(string(wrapperData), shellSingleQuote(realGhPath)) {
+		t.Fatalf("wrapper missing refresh flow or real path: %q", wrapperData)
+	}
+}
+
+func TestStandaloneGitCredentialHelperDelegatesGitHubToLocalExchange(t *testing.T) {
+	t.Parallel()
+
+	var gotWorkspaceID string
+	var gotHost string
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/git-credential" {
+			t.Fatalf("request path = %q, want /git-credential", r.URL.Path)
+		}
+		gotWorkspaceID = r.URL.Query().Get("workspaceId")
+		gotHost = r.URL.Query().Get("host")
+		gotPath = r.URL.Query().Get("path")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("username=x-access-token\npassword=ghs_fresh_token\n"))
+	}))
+	t.Cleanup(server.Close)
+
+	out := runStandaloneCredScriptWithEnv(t, "get", "protocol=https\nhost=github.com\n\n", map[string]string{
+		"SAM_WORKSPACE_ID":            "ws-github",
+		"SAM_GIT_CREDENTIAL_ENDPOINT": server.URL + "/git-credential",
+		"GH_TOKEN":                    "ghs_expired_boot_token",
+	})
+
+	if !strings.Contains(out, "username=x-access-token") || !strings.Contains(out, "password=ghs_fresh_token") {
+		t.Fatalf("expected fresh delegated github creds, got %q", out)
+	}
+	if gotWorkspaceID != "ws-github" {
+		t.Fatalf("workspaceId query = %q, want ws-github", gotWorkspaceID)
+	}
+	if gotHost != "github.com" {
+		t.Fatalf("host query = %q, want github.com", gotHost)
+	}
+	if gotPath != "" {
+		t.Fatalf("path query = %q, want empty for github", gotPath)
 	}
 }
 
@@ -157,11 +262,11 @@ func TestStandaloneGitCredentialHelperRequiresPathForGitLab(t *testing.T) {
 	}
 }
 
-func TestStandaloneGitCredentialHelperNoTokenNoOutput(t *testing.T) {
+func TestStandaloneGitCredentialHelperNoWorkspaceNoOutput(t *testing.T) {
 	t.Parallel()
 	out := runStandaloneCredScript(t, "get", "protocol=https\nhost=github.com\n\n", "")
 	if out != "" {
-		t.Fatalf("expected no output without GH_TOKEN, got %q", out)
+		t.Fatalf("expected no output without workspace context, got %q", out)
 	}
 }
 

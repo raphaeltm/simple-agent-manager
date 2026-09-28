@@ -41,6 +41,7 @@ const userInstallationSchema = v.object({
 });
 
 export const DEFAULT_GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS = 50 * 60;
+export const DEFAULT_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS = 5 * 60;
 
 async function installationTokenCacheKey(
   installationId: string,
@@ -48,10 +49,20 @@ async function installationTokenCacheKey(
 ): Promise<string> {
   if (!body) return `github-installation-token:v1:${installationId}:default`;
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
-  const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join(
-    ''
-  );
+  const hash = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('');
   return `github-installation-token:v1:${installationId}:${hash}`;
+}
+
+function cachedInstallationTokenIsFresh(
+  cached: { token?: string; expiresAt?: string } | null | undefined,
+  refreshMarginSeconds: number
+): cached is { token: string; expiresAt: string } {
+  if (!cached?.token || !cached.expiresAt) return false;
+  const expiresAtMs = Date.parse(cached.expiresAt);
+  if (!Number.isFinite(expiresAtMs)) return false;
+  return expiresAtMs - Date.now() > refreshMarginSeconds * 1000;
 }
 
 const userInstallationsSchema = v.object({
@@ -336,7 +347,11 @@ export async function getInstallationToken(
     : undefined;
   const cacheKey = await installationTokenCacheKey(installationId, body);
   const cached = await env.KV?.get<{ token: string; expiresAt: string }>(cacheKey, 'json');
-  if (cached?.token && cached.expiresAt) {
+  const refreshMarginSeconds = parseCacheTtlSeconds(
+    env.GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS,
+    DEFAULT_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS
+  );
+  if (cachedInstallationTokenIsFresh(cached, refreshMarginSeconds)) {
     return cached;
   }
 

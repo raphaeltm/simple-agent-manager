@@ -14,18 +14,17 @@ import (
 // helper script is installed inside the Cloudflare Container.
 const standaloneGitCredentialHelperPath = "/usr/local/bin/git-credential-sam"
 const standaloneGitBinaryPath = "/usr/bin/git"
+const standaloneGhBinaryPath = "/usr/bin/gh"
+const standaloneGhRealBinaryPath = "/usr/bin/gh.real"
 
 // standaloneGitCredentialHelperScript is a git credential helper for standalone
 // (cf-container) mode. Unlike the devcontainer helper, the agent runs in the
 // SAME container as the vm-agent.
 //
-// GitHub keeps the fast path: the per-session GH_TOKEN is injected into the
-// agent process environment (see resolveAgentEnvVars), and git credential
-// helpers inherit that environment.
-//
-// GitLab cannot use GH_TOKEN. It needs a fresh, path-bound token exchange through
-// the local vm-agent /git-credential endpoint. The endpoint performs the
-// workspace/provider/path authorization checks before returning credentials.
+// GitHub and GitLab both exchange through the local vm-agent /git-credential
+// endpoint so long-running sessions never reuse the boot-time GH_TOKEN after the
+// underlying GitHub installation token expires. GitLab additionally requires a
+// path-bound request before the endpoint will release a broad user OAuth token.
 const standaloneGitCredentialHelperScriptTemplate = `#!/bin/sh
 [ "${1:-get}" = "get" ] || exit 0
 host=""
@@ -37,17 +36,15 @@ while IFS= read -r line; do
     path=*) path="${line#path=}" ;;
   esac
 done
+[ -n "$host" ] || exit 0
+[ -n "${SAM_WORKSPACE_ID:-}" ] || exit 0
 case "$host" in
   github.com|api.github.com)
-    [ -n "${GH_TOKEN:-}" ] || exit 0
-    printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"
-    exit 0
+    ;;
+  *)
+    [ -n "$path" ] || exit 0
     ;;
 esac
-
-[ -n "$host" ] || exit 0
-[ -n "$path" ] || exit 0
-[ -n "${SAM_WORKSPACE_ID:-}" ] || exit 0
 
 url_encode_query_value() {
   printf '%s' "$1" | sed 's/%/%25/g; s/&/%26/g; s/=/%3D/g; s/?/%3F/g; s/#/%23/g; s/+/%2B/g; s/ /%20/g'
@@ -61,10 +58,24 @@ fi
 
 workspace_id=$(url_encode_query_value "$SAM_WORKSPACE_ID")
 encoded_host=$(url_encode_query_value "$host")
-encoded_path=$(url_encode_query_value "$path")
+credential_query="workspaceId=${workspace_id}&host=${encoded_host}"
+if [ -n "$path" ]; then
+  encoded_path=$(url_encode_query_value "$path")
+  credential_query="${credential_query}&path=${encoded_path}"
+fi
 
 curl -fsS --max-time {{ credential_timeout_seconds }} \
-  "${endpoint}?workspaceId=${workspace_id}&host=${encoded_host}&path=${encoded_path}" 2>/dev/null || true
+  "${endpoint}?${credential_query}" 2>/dev/null || true
+`
+
+const standaloneGhWrapperScriptTemplate = `#!/bin/sh
+# Refresh GH_TOKEN before every gh invocation. GitHub App installation tokens
+# expire after one hour, so a token inherited at vm-agent boot is not durable.
+_token=$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill 2>/dev/null | sed -n 's/^password=//p' | head -n 1)
+if [ -n "$_token" ]; then
+  export GH_TOKEN="$_token"
+fi
+exec {{ gh_real_path }} "$@"
 `
 
 func renderStandaloneGitCredentialHelperScript(timeout time.Duration) (string, error) {
@@ -80,10 +91,10 @@ func renderStandaloneGitCredentialHelperScript(timeout time.Duration) (string, e
 }
 
 // ConfigureStandaloneGitCredentialHelper installs a git credential helper that
-// serves GitHub credentials from GH_TOKEN and delegates GitLab/non-GitHub
-// credentials to the local vm-agent exchange. This lets the agent's `git`
+// delegates credentials to the local vm-agent exchange. This lets the agent's `git`
 // commands (clone, ls-remote, fetch, push) authenticate in standalone mode.
-// Failures are non-fatal — the agent can still run without git access.
+// It also wraps gh so the CLI refreshes GH_TOKEN through the helper before each
+// invocation. Failures are non-fatal — the agent can still run without git access.
 func ConfigureStandaloneGitCredentialHelper(timeout time.Duration) {
 	if err := writeStandaloneGitCredentialHelper(standaloneGitCredentialHelperPath, timeout); err != nil {
 		slog.Warn("standalone git: failed to write credential helper; agent git auth unavailable", "error", err)
@@ -110,6 +121,10 @@ func ConfigureStandaloneGitCredentialHelper(timeout time.Duration) {
 		}
 	}
 
+	if err := configureStandaloneGhWrapper(standaloneGhBinaryPath, standaloneGhRealBinaryPath); err != nil {
+		slog.Warn("standalone git: gh wrapper install failed; gh may reuse stale GH_TOKEN", "error", err)
+	}
+
 	slog.Info("standalone git: credential helper configured", "path", standaloneGitCredentialHelperPath)
 }
 
@@ -127,6 +142,51 @@ func writeStandaloneGitCredentialHelper(path string, timeout time.Duration) erro
 	// access is sufficient and avoids exposing the credential exchange helper.
 	if err := os.Chmod(path, 0o700); err != nil {
 		return fmt.Errorf("chmod helper: %w", err)
+	}
+	return nil
+}
+
+func renderStandaloneGhWrapperScript(realGhPath string) (string, error) {
+	realGhPath = strings.TrimSpace(realGhPath)
+	if realGhPath == "" {
+		return "", fmt.Errorf("real gh path is required")
+	}
+	return strings.ReplaceAll(standaloneGhWrapperScriptTemplate, "{{ gh_real_path }}", shellSingleQuote(realGhPath)), nil
+}
+
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func configureStandaloneGhWrapper(ghPath, realGhPath string) error {
+	if _, err := os.Stat(realGhPath); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("stat real gh: %w", err)
+		}
+		if _, err := os.Stat(ghPath); err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return fmt.Errorf("stat gh: %w", err)
+		}
+		if err := os.Rename(ghPath, realGhPath); err != nil {
+			return fmt.Errorf("move gh binary: %w", err)
+		}
+	}
+
+	return writeStandaloneGhWrapper(ghPath, realGhPath)
+}
+
+func writeStandaloneGhWrapper(ghPath, realGhPath string) error {
+	script, err := renderStandaloneGhWrapperScript(realGhPath)
+	if err != nil {
+		return fmt.Errorf("render gh wrapper: %w", err)
+	}
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		return fmt.Errorf("write gh wrapper: %w", err)
+	}
+	if err := os.Chmod(ghPath, 0o755); err != nil {
+		return fmt.Errorf("chmod gh wrapper: %w", err)
 	}
 	return nil
 }
