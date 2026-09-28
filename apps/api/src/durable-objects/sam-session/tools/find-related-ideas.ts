@@ -6,7 +6,10 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
-import { normalizeSearchQuery } from '../../../lib/search-query-limits';
+import {
+  escapeSearchQueryForLike,
+  normalizeSearchQuery,
+} from '../../../lib/search-query-limits';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 const DEFAULT_LIMIT = 10;
@@ -77,7 +80,7 @@ export async function findRelatedIdeas(
 
   // LIKE search on title and description (draft ideas only)
   // Escape LIKE metacharacters to prevent semantic mismatch
-  const escaped = normalizedQuery.query.replace(/[%_\\]/g, '\\$&');
+  const escaped = escapeSearchQueryForLike(normalizedQuery.query);
   const searchPattern = `%${escaped}%`;
   const results = await env.DATABASE.prepare(
     `SELECT id, title, description, status, priority, updated_at

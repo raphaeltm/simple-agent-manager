@@ -87,5 +87,5 @@ export function normalizeSearchQueryWithLimits(
 }
 
 export function escapeSearchQueryForLike(query: string): string {
-  return query.replace(/[%_\\]/g, '\\$&');
+  return query.replace(/[%_\\]/g, String.raw`\$&`);
 }

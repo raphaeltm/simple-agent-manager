@@ -392,7 +392,7 @@ function searchObservationsLike(
   minConfidence: number | null,
   limit: number,
 ) {
-  const conditions: string[] = ['o.is_active = 1', "o.content LIKE ? ESCAPE '\\'"];
+  const conditions: string[] = ['o.is_active = 1', String.raw`o.content LIKE ? ESCAPE '\'`];
   const params: (string | number)[] = [`%${escapeSearchQueryForLike(query)}%`];
 
   if (entityType) {
