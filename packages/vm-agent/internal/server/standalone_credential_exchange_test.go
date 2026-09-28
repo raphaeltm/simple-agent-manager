@@ -104,5 +104,5 @@ func hermeticEnv(overrides ...string) []string {
 			env = append(env, entry)
 		}
 	}
-	return append(env, overrides...)
+	return slices.Clip(append(env, overrides...))
 }

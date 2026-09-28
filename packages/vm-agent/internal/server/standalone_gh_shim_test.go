@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -44,7 +45,8 @@ func runGh(t *testing.T, env []string, pathDirs string, args ...string) (stdout,
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = time.Second
-	cmd.Env = append(env, "PATH="+pathList(pathDirs, os.Getenv("PATH")))
+	// Clip so parallel callers sharing one env slice never append into it.
+	cmd.Env = append(slices.Clip(env), "PATH="+pathList(pathDirs, os.Getenv("PATH")))
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -166,6 +168,19 @@ func TestInstallStandaloneGhShimWrapsTheGhItShadows(t *testing.T) {
 			t.Fatalf("symlink: %v", err)
 		}
 		installShim(t, shimDir, "/nonexistent/git-credential-sam", pathList(linkDir, shimDir, systemBin))
+
+		if stdout, _ := runGh(t, noExchange, shimDir, "--version"); stdout != "system-gh GH_TOKEN= args=--version" {
+			t.Fatalf("shim reached %q, want system-gh", stdout)
+		}
+	})
+
+	t.Run("a directory named gh is skipped", func(t *testing.T) {
+		t.Parallel()
+		shimDir, systemBin, dirBin := t.TempDir(), writeFakeGh(t, "system-gh"), t.TempDir()
+		if err := os.Mkdir(filepath.Join(dirBin, "gh"), 0o755); err != nil {
+			t.Fatalf("create gh directory: %v", err)
+		}
+		installShim(t, shimDir, "/nonexistent/git-credential-sam", pathList(shimDir, dirBin, systemBin))
 
 		if stdout, _ := runGh(t, noExchange, shimDir, "--version"); stdout != "system-gh GH_TOKEN= args=--version" {
 			t.Fatalf("shim reached %q, want system-gh", stdout)
