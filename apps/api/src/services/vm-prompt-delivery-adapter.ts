@@ -15,9 +15,8 @@ import type {
 } from '../durable-objects/project-data/prompt-delivery';
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
+import { commitContainerWake } from './container-wake-commit';
 import { NodeAgentHttpError, nodeAgentRequest, sendPromptToAgentOnNode } from './node-agent';
-import * as projectDataService from './project-data';
-import { markSessionSnapshotAwakeInPlace } from './session-snapshots';
 import {
   CapabilitiesSchema,
   ReceiptSchema,
@@ -161,7 +160,9 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       };
     }
     if (target.runtime === 'cf-container') {
-      const guarded = await this.commitContainerWake(target, input);
+      const guarded = await commitContainerWake(this.env, target, () =>
+        this.runSideEffectGuard(input)
+      );
       if (guarded) return guarded;
     }
     if (!capabilities.promptReceipts.supported && !input.allowLegacyVm) {
@@ -431,31 +432,6 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     input: VmPromptDeliveryAdapterInput
   ): Promise<PromptDeliveryResult | null> {
     return input.beforeSideEffect ? input.beforeSideEffect() : null;
-  }
-
-  private async commitContainerWake(
-    target: VmPromptDeliveryTarget,
-    input: VmPromptDeliveryAdapterInput
-  ): Promise<PromptDeliveryResult | null> {
-    const task = await this.env.DATABASE.prepare(
-      `SELECT id FROM tasks WHERE workspace_id = ? ORDER BY updated_at DESC LIMIT 1`
-    )
-      .bind(target.workspaceId)
-      .first<{ id: string }>();
-    if (!task) return null;
-    const guarded = await this.runSideEffectGuard(input);
-    if (guarded) return guarded;
-    await Promise.all([
-      projectDataService.wakeSession(
-        this.env,
-        target.projectId,
-        target.chatSessionId,
-        target.workspaceId,
-        task.id
-      ),
-      markSessionSnapshotAwakeInPlace(this.env, target.chatSessionId, task.id, target.workspaceId),
-    ]);
-    return null;
   }
 
   private async getCapabilities(

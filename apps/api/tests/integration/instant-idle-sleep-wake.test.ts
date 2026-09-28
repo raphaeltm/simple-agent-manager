@@ -23,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import { runMigrations } from '../../src/durable-objects/migrations';
+import * as attention from '../../src/durable-objects/project-data/attention';
 import { processPromptDeliveryAlarm } from '../../src/durable-objects/project-data/durability-foundation';
 import * as mailbox from '../../src/durable-objects/project-data/mailbox';
 import {
@@ -34,6 +35,7 @@ import { VmAgentContainer } from '../../src/durable-objects/vm-agent-container';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { chatRoutes } from '../../src/routes/chat';
+import { agentSessionSuspendResumeRoutes } from '../../src/routes/workspaces/agent-session-suspend-resume';
 import { agentSessionRoutes } from '../../src/routes/workspaces/agent-sessions';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep-execution';
 import {
@@ -76,6 +78,28 @@ vi.mock('../../src/services/project-data', () => ({
     sessions.stopSession(projectDataSql(), sessionId) !== null,
   recordSessionTurnEnd: async () => {},
   cleanupWorkspaceActivity: async () => {},
+  // The attention-answer route.
+  prepareAttentionAnswer: async (
+    _env: unknown,
+    _projectId: string,
+    sessionId: string,
+    markerId: string,
+    answer: string
+  ) => attention.prepareAttentionAnswer(projectDataSql(), sessionId, markerId, answer),
+  releaseAttentionAnswer: async (
+    _env: unknown,
+    _projectId: string,
+    sessionId: string,
+    markerId: string,
+    answer: string
+  ) => attention.releaseAttentionAnswer(projectDataSql(), sessionId, markerId, answer),
+  completeAttentionAnswer: async (
+    _env: unknown,
+    _projectId: string,
+    sessionId: string,
+    markerId: string,
+    answer: string
+  ) => attention.completeAttentionAnswer(projectDataSql(), sessionId, markerId, answer),
 }));
 
 vi.mock('../../src/middleware/auth', () => ({
@@ -386,6 +410,14 @@ describe('Instant session wake after idle sleep', () => {
     snapshot: { sleep_status: 'sleeping', asleep: 1 },
   };
 
+  /** A committed in-place wake: the runtime rows are running and the snapshot is awake. */
+  const AWAKE_ROWS = {
+    node: { status: 'running', health_status: 'healthy' },
+    workspace: { status: 'running' },
+    agentSession: { status: 'running' },
+    snapshot: { sleep_status: null, asleep: 0 },
+  };
+
   function wakeFailures() {
     return {
       markers: projectDataSql()
@@ -414,6 +446,7 @@ describe('Instant session wake after idle sleep', () => {
     );
     app.route('/api/projects/:projectId/sessions', chatRoutes);
     app.route('/api/workspaces', agentSessionRoutes);
+    app.route('/api/workspaces', agentSessionSuspendResumeRoutes);
     return app;
   }
 
@@ -433,6 +466,44 @@ describe('Instant session wake after idle sleep', () => {
       { method: 'POST' },
       env
     );
+  }
+
+  /** The agent asked a question before it slept; the user picks an answer in the chat. */
+  async function answerAttentionRequest(): Promise<Response> {
+    const marker = attention.createAttentionMarker(projectDataSql(), {
+      sessionId: CHAT_SESSION_ID,
+      taskId: TASK_ID,
+      workspaceId: WORKSPACE_ID,
+      kind: 'needs_input',
+      source: 'agent',
+      metadata: JSON.stringify({ options: ['Ship it', 'Hold'] }),
+    });
+    return routesApp().request(
+      `/api/projects/${PROJECT_ID}/sessions/${CHAT_SESSION_ID}/attention/${marker.id}/resolve`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer: 'Ship it' }),
+      },
+      env
+    );
+  }
+
+  /** The workspace page's resume button for one agent session. */
+  async function postWorkspaceAgentResume(): Promise<Response> {
+    return routesApp().request(
+      `/api/workspaces/${WORKSPACE_ID}/agent-sessions/${AGENT_SESSION_ID}/resume`,
+      { method: 'POST' },
+      env
+    );
+  }
+
+  /** The snapshot generation the next wake would restore. */
+  function restorableGeneration(): unknown {
+    return d1
+      .prepare(`SELECT snapshot_generation FROM session_snapshots WHERE chat_session_id = ?`)
+      .pluck()
+      .get(CHAT_SESSION_ID);
   }
 
   /** The container's own idle timeout (`sleepAfter`) — the trigger in the incident. */
@@ -504,15 +575,46 @@ describe('Instant session wake after idle sleep', () => {
       });
       expect(vmAgent.starts).toBe(1);
       expect(vmAgent.prompts).toEqual(['Pick up where you left off.']);
-      expect(runtimeRows()).toEqual({
-        node: { status: 'running', health_status: 'healthy' },
-        workspace: { status: 'running' },
-        agentSession: { status: 'running' },
-        snapshot: { sleep_status: null, asleep: 0 },
-      });
+      expect(runtimeRows()).toEqual(AWAKE_ROWS);
       expect(sessions.getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
         status: 'active',
       });
+    });
+  });
+
+  // Durable delivery commits the wake it starts. These requests wake the container outside it,
+  // and until the session's sleep markers clear, every checkpoint the woken agent takes is
+  // discarded and the next sleep reuses the old snapshot: the work would be gone at the
+  // following wake.
+  describe.each([
+    ['an attention answer', answerAttentionRequest, ['Ship it']],
+    ['the workspace page resume', postWorkspaceAgentResume, []],
+  ])('when %s wakes the slept container', (_trigger, wake, prompts) => {
+    it('commits the wake, so the next checkpoint survives the next sleep', async () => {
+      // A prompt keeps the container awake until its keepalive lapses; let it lapse at once so
+      // the idle timeout below finds the answered turn over.
+      Object.assign(env, { CF_CONTAINER_ACTIVE_WORK_MAX_MS: '1' });
+      await sleepOnContainerIdleTimeout();
+      const sleptGeneration = restorableGeneration();
+
+      const response = await wake();
+
+      expect(response.status).toBe(200);
+      expect(vmAgent.starts).toBe(1);
+      expect(vmAgent.prompts).toEqual(prompts);
+      expect(runtimeRows()).toEqual(AWAKE_ROWS);
+      expect(sessions.getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
+        status: 'active',
+      });
+
+      // The woken agent's turn-end checkpoint, then the container's next idle sleep.
+      await captureSnapshot();
+      const checkpoint = restorableGeneration();
+      expect(checkpoint).not.toBe(sleptGeneration);
+      await sleepOnContainerIdleTimeout();
+
+      expect(runtimeRows()).toEqual(SLEPT_ROWS);
+      expect(restorableGeneration()).toBe(checkpoint);
     });
   });
 

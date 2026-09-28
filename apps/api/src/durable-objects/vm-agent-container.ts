@@ -5,6 +5,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
+import { commitContainerWakeBestEffort } from '../services/container-wake-commit';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 import {
   isSessionRecoverySourceTaskGuardFullyValidForEnv,
@@ -933,6 +934,9 @@ export class VmAgentContainer extends Container<Env> {
         await this.stop().catch(() => undefined);
         return stoppedRecoveryResult();
       }
+      // A guarded wake is committed by the durable delivery that carries the guard, after its
+      // own revalidation; a guard revoked before then re-sleeps the runtime onto intact markers.
+      if (!sourceTaskGuard) await commitContainerWakeBestEffort(this.env, target);
       log.info('vm_agent_container_recovery_completed', {
         nodeId: config.nodeId,
         workspaceId: config.workspaceId,
