@@ -15,7 +15,7 @@ SAM uses `packages/shared/src/model-catalog.ts` as a selector fallback. The supp
 - [x] Align OpenCode fallback with current non-deprecated Zen and Go entries.
 - [x] Update focused tests for added and removed IDs.
 - [x] Run package quality checks and review.
-- [ ] Verify staging and merge green PR.
+- [x] Verify staging catalog; merge green PR pending.
 
 ## Acceptance criteria
 The OpenCode fallback contains current non-deprecated source IDs; new and removed IDs are covered by tests. Other agents remain unchanged unless the official sources justify a change.
