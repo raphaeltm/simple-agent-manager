@@ -88,6 +88,7 @@ import * as reconciliation from './reconciliation';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
+import * as sessionReads from './session-reads';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessionWakeProgress from './session-wake-progress';
@@ -798,7 +799,7 @@ export class ProjectData extends DurableObject<Env> {
     taskId: string | null = null,
     createdByUserId: string | null = null
   ): Promise<{ sessions: Record<string, unknown>[]; total: number; hasMore: boolean }> {
-    const result = sessions.listSessions(this.sql, status, limit, offset, taskId, createdByUserId);
+    const result = sessionReads.listSessions(this.sql, status, limit, offset, taskId, createdByUserId);
     return {
       sessions: result.sessions.map((s) => this.addBaseDomain(s)),
       total: result.total,
@@ -807,11 +808,11 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async getSessionsByTaskIds(taskIds: string[]): Promise<Array<Record<string, unknown>>> {
-    return sessions.getSessionsByTaskIds(this.sql, taskIds).map((s) => this.addBaseDomain(s));
+    return sessionReads.getSessionsByTaskIds(this.sql, taskIds).map((s) => this.addBaseDomain(s));
   }
 
   async getSession(sessionId: string): Promise<Record<string, unknown> | null> {
-    const result = sessions.getSession(this.sql, sessionId);
+    const result = sessionReads.getSession(this.sql, sessionId);
     return result ? this.addBaseDomain(result) : null;
   }
 
