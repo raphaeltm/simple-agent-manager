@@ -283,7 +283,26 @@ function concatBytes(...arrays: Uint8Array[]): Uint8Array {
   return result;
 }
 
+/** GitHub App installation tokens expire one hour after they are minted. */
+const GITHUB_INSTALLATION_TOKEN_LIFETIME_SECONDS = 60 * 60;
+
 export const DEFAULT_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS = 5 * 60;
+
+/**
+ * A refresh margin may consume at most half a token's lifetime. A larger margin
+ * leaves the cache almost nothing to serve, so nearly every git credential
+ * exchange would mint a new installation token.
+ */
+export const MAX_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS =
+  GITHUB_INSTALLATION_TOKEN_LIFETIME_SECONDS / 2;
+
+function resolveInstallationTokenRefreshMarginSeconds(env: Env): number {
+  const margin = parseCacheTtlSeconds(
+    env.GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS,
+    DEFAULT_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS
+  );
+  return Math.min(margin, MAX_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS);
+}
 
 function cachedInstallationTokenIsFresh(
   cached: { token?: string; expiresAt?: string } | null | undefined,
@@ -348,11 +367,7 @@ export async function getInstallationToken(
     : undefined;
   const cacheKey = await installationTokenCacheKey(installationId, body);
   const cached = await env.KV?.get<{ token: string; expiresAt: string }>(cacheKey, 'json');
-  const refreshMarginSeconds = parseCacheTtlSeconds(
-    env.GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS,
-    DEFAULT_GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS
-  );
-  if (cachedInstallationTokenIsFresh(cached, refreshMarginSeconds)) {
+  if (cachedInstallationTokenIsFresh(cached, resolveInstallationTokenRefreshMarginSeconds(env))) {
     return cached;
   }
 

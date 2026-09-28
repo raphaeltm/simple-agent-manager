@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +23,8 @@ const standaloneGitBinaryPath = "/usr/bin/git"
 // endpoint so long-running sessions never reuse the boot-time GH_TOKEN after the
 // underlying GitHub installation token expires. GitLab additionally requires a
 // path-bound request before the endpoint will release a broad user OAuth token.
+// The endpoint performs the workspace/provider/path authorization checks before
+// returning credentials.
 const standaloneGitCredentialHelperScriptTemplate = `#!/bin/sh
 [ "${1:-get}" = "get" ] || exit 0
 host=""
@@ -67,16 +68,6 @@ curl -fsS --max-time {{ credential_timeout_seconds }} \
   "${endpoint}?${credential_query}" 2>/dev/null || true
 `
 
-const standaloneGhWrapperScriptTemplate = `#!/bin/sh
-# Refresh GH_TOKEN before every gh invocation. GitHub App installation tokens
-# expire after one hour, so a token inherited at vm-agent boot is not durable.
-_token=$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill 2>/dev/null | sed -n 's/^password=//p' | head -n 1)
-if [ -n "$_token" ]; then
-  export GH_TOKEN="$_token"
-fi
-exec {{ gh_real_path }} "$@"
-`
-
 func renderStandaloneGitCredentialHelperScript(timeout time.Duration) (string, error) {
 	if timeout <= 0 {
 		return "", fmt.Errorf("invalid git credential timeout: %s", timeout)
@@ -90,14 +81,27 @@ func renderStandaloneGitCredentialHelperScript(timeout time.Duration) (string, e
 }
 
 // ConfigureStandaloneGitCredentialHelper installs a git credential helper that
-// delegates credentials to the local vm-agent exchange. This lets the agent's `git`
-// commands (clone, ls-remote, fetch, push) authenticate in standalone mode.
-// It also wraps gh so the CLI refreshes GH_TOKEN through the helper before each
-// invocation. Failures are non-fatal — the agent can still run without git access.
+// delegates credentials to the local vm-agent exchange, plus a gh shim that
+// refreshes GH_TOKEN through the same helper. This lets the agent's `git`
+// commands (clone, ls-remote, fetch, push) and `gh` calls authenticate in
+// standalone mode for the whole session, not just the first token lifetime.
+// Failures are non-fatal — the agent can still run without git access.
 func ConfigureStandaloneGitCredentialHelper(timeout time.Duration) {
 	if err := writeStandaloneGitCredentialHelper(standaloneGitCredentialHelperPath, timeout); err != nil {
 		slog.Warn("standalone git: failed to write credential helper; agent git auth unavailable", "error", err)
 		return
+	}
+
+	// The shim calls the helper directly, so it does not depend on the git
+	// config below succeeding.
+	shimPath, err := installStandaloneGhShim(standaloneGhShimDir, standaloneGitCredentialHelperPath, os.Getenv("PATH"))
+	switch {
+	case err != nil:
+		slog.Warn("standalone git: gh shim install failed; gh may use a stale GH_TOKEN", "error", err)
+	case shimPath == "":
+		slog.Info("standalone git: gh is not installed; skipping gh shim")
+	default:
+		slog.Info("standalone git: gh shim installed", "path", shimPath)
 	}
 
 	// Prefer system config so the helper applies regardless of HOME/user. Fall
@@ -120,10 +124,6 @@ func ConfigureStandaloneGitCredentialHelper(timeout time.Duration) {
 		}
 	}
 
-	if _, err := configureStandaloneGhWrapperOnPath(); err != nil {
-		slog.Warn("standalone git: gh wrapper install failed; gh may reuse stale GH_TOKEN", "error", err)
-	}
-
 	slog.Info("standalone git: credential helper configured", "path", standaloneGitCredentialHelperPath)
 }
 
@@ -132,124 +132,21 @@ func writeStandaloneGitCredentialHelper(path string, timeout time.Duration) erro
 	if err != nil {
 		return fmt.Errorf("render helper: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+	if err := writeOwnerOnlyExecutable(path, script); err != nil {
 		return fmt.Errorf("write helper: %w", err)
 	}
-	// os.WriteFile only applies the mode when creating the file. A restored
-	// Cloudflare Container snapshot can already contain this helper with broader
-	// permissions. The vm-agent and agent run as the same node user, so owner-only
-	// access is sufficient and avoids exposing the credential exchange helper.
-	if err := os.Chmod(path, 0o700); err != nil {
-		return fmt.Errorf("chmod helper: %w", err)
-	}
 	return nil
 }
 
-func renderStandaloneGhWrapperScript(realGhPath string) (string, error) {
-	realGhPath = strings.TrimSpace(realGhPath)
-	if realGhPath == "" {
-		return "", fmt.Errorf("real gh path is required")
+// writeOwnerOnlyExecutable writes an executable script readable only by its
+// owner. os.WriteFile only applies the mode when creating the file, and a
+// restored Cloudflare Container snapshot can already contain the file with
+// broader permissions, so the mode is re-applied explicitly. The vm-agent and
+// the agent run as the same node user, so owner-only access is sufficient and
+// avoids exposing the credential exchange.
+func writeOwnerOnlyExecutable(path, script string) error {
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		return err
 	}
-	return strings.ReplaceAll(standaloneGhWrapperScriptTemplate, "{{ gh_real_path }}", shellSingleQuote(realGhPath)), nil
-}
-
-func shellSingleQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
-}
-
-func configureStandaloneGhWrapperOnPath() (string, error) {
-	return configureStandaloneGhWrapperWithLookup(func() (string, error) {
-		ghPath, err := exec.LookPath("gh")
-		if err == nil {
-			return ghPath, nil
-		}
-		for _, fallbackPath := range []string{"/usr/bin/gh", "/bin/gh"} {
-			if _, statErr := os.Stat(fallbackPath); statErr == nil {
-				return fallbackPath, nil
-			}
-		}
-		return "", err
-	})
-}
-
-func configureStandaloneGhWrapperWithLookup(lookup func() (string, error)) (string, error) {
-	ghPath, err := lookup()
-	if err != nil {
-		return "", nil
-	}
-	ghPath = strings.TrimSpace(ghPath)
-	if ghPath == "" {
-		return "", nil
-	}
-
-	wrapperPath, wrapsRealPath := standaloneGhWrapperPathFor(ghPath, os.Getenv("PATH"))
-	if wrapsRealPath {
-		return wrapperPath, writeStandaloneGhWrapper(wrapperPath, ghPath)
-	}
-	return ghPath, configureStandaloneGhWrapper(ghPath, ghPath+".real")
-}
-
-func standaloneGhWrapperPathFor(ghPath, pathEnv string) (string, bool) {
-	const localBinGh = "/usr/local/bin/gh"
-	if ghPath == localBinGh {
-		return ghPath, false
-	}
-	cleanGhPath := filepath.Clean(ghPath)
-	if cleanGhPath == "/usr/bin/gh" || cleanGhPath == "/bin/gh" {
-		return localBinGh, true
-	}
-
-	localBinIndex := -1
-	ghDirIndex := -1
-	ghDir := strings.TrimRight(filepath.Dir(ghPath), "/")
-	for index, dir := range filepath.SplitList(pathEnv) {
-		cleanDir := strings.TrimRight(filepath.Clean(dir), "/")
-		switch cleanDir {
-		case "/usr/local/bin":
-			if localBinIndex == -1 {
-				localBinIndex = index
-			}
-		case ghDir:
-			if ghDirIndex == -1 {
-				ghDirIndex = index
-			}
-		}
-	}
-	if localBinIndex >= 0 && ghDirIndex >= 0 && localBinIndex < ghDirIndex {
-		return localBinGh, true
-	}
-	return ghPath, false
-}
-
-func configureStandaloneGhWrapper(ghPath, realGhPath string) error {
-	if _, err := os.Stat(realGhPath); err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("stat real gh: %w", err)
-		}
-		if _, err := os.Stat(ghPath); err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return fmt.Errorf("stat gh: %w", err)
-		}
-		if err := os.Rename(ghPath, realGhPath); err != nil {
-			return fmt.Errorf("move gh binary: %w", err)
-		}
-	}
-
-	return writeStandaloneGhWrapper(ghPath, realGhPath)
-}
-
-func writeStandaloneGhWrapper(ghPath, realGhPath string) error {
-	script, err := renderStandaloneGhWrapperScript(realGhPath)
-	if err != nil {
-		return fmt.Errorf("render gh wrapper: %w", err)
-	}
-	if err := os.WriteFile(ghPath, []byte(script), 0o700); err != nil {
-		return fmt.Errorf("write gh wrapper: %w", err)
-	}
-	if err := os.Chmod(ghPath, 0o700); err != nil {
-		return fmt.Errorf("chmod gh wrapper: %w", err)
-	}
-	return nil
+	return os.Chmod(path, 0o700)
 }

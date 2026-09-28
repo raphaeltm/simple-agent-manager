@@ -97,12 +97,6 @@ func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string,
 	if err != nil {
 		return nil, err
 	}
-	if containerID == "" {
-		if err := ensureStandaloneGhWrapperInAgentBin(); err != nil {
-			slog.Warn("standalone gh wrapper install in agent PATH failed; gh may reuse stale GH_TOKEN", "error", err)
-		}
-	}
-
 	envVars, settings = h.applyModelAndExtraEnv(agentType, settings, envVars)
 	h.applyPermissionMode(settings)
 
@@ -113,43 +107,6 @@ func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string,
 		secretEnvKey: secretEnvKeys,
 		settings:     settings,
 	}, nil
-}
-
-const standaloneAgentBinDir = "/var/lib/vm-agent/agents/bin"
-
-func ensureStandaloneGhWrapperInAgentBin() error {
-	realGhPath := ""
-	for _, candidate := range []string{"/usr/bin/gh", "/bin/gh"} {
-		if _, err := os.Stat(candidate); err == nil {
-			realGhPath = candidate
-			break
-		}
-	}
-	if realGhPath == "" {
-		return nil
-	}
-	if err := os.MkdirAll(standaloneAgentBinDir, 0o755); err != nil {
-		return fmt.Errorf("create agent bin dir: %w", err)
-	}
-	wrapperPath := filepath.Join(standaloneAgentBinDir, "gh")
-	script := fmt.Sprintf(`#!/bin/sh
-_token=$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill 2>/dev/null | sed -n 's/^password=//p' | head -n 1)
-if [ -n "$_token" ]; then
-  export GH_TOKEN="$_token"
-fi
-exec %s "$@"
-`, shellSingleQuote(realGhPath))
-	if err := os.WriteFile(wrapperPath, []byte(script), 0o700); err != nil {
-		return fmt.Errorf("write gh wrapper: %w", err)
-	}
-	if err := os.Chmod(wrapperPath, 0o700); err != nil {
-		return fmt.Errorf("chmod gh wrapper: %w", err)
-	}
-	return nil
-}
-
-func shellSingleQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func (h *SessionHost) applyRuntimeAssets(ctx context.Context, containerID string, envVars []string, secretEnvKeys map[string]bool) ([]string, error) {
@@ -184,11 +141,6 @@ func (h *SessionHost) resolveAgentEnvVars(ctx context.Context, containerID strin
 		if ok && !hasEnvVar(envVars, key) {
 			envVars = append(envVars, fallback)
 		}
-	}
-
-	if containerID == "" {
-		envVars = removeEnvVar(envVars, "PATH")
-		envVars = append(envVars, "PATH="+standaloneAgentBinDir+":/usr/local/bin:/usr/bin:/bin")
 	}
 
 	if h.config.GitTokenFetcher != nil {

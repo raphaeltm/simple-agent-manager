@@ -31,10 +31,11 @@ func runStandaloneCredScriptWithEnv(t *testing.T, arg, stdin string, env map[str
 	}
 	cmd := exec.Command("/bin/sh", path, arg)
 	cmd.Stdin = strings.NewReader(stdin)
-	cmd.Env = os.Environ()
+	overrides := make([]string, 0, len(env))
 	for key, value := range env {
-		cmd.Env = append(cmd.Env, key+"="+value)
+		overrides = append(overrides, key+"="+value)
 	}
+	cmd.Env = hermeticEnv(overrides...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run script: %v (out=%q)", err, out)
@@ -54,201 +55,44 @@ func TestRenderStandaloneGitCredentialHelperScriptUsesConfiguredTimeout(t *testi
 	}
 }
 
-func TestStandaloneGhWrapperRefreshesTokenThroughGitCredentialFill(t *testing.T) {
+// TestStandaloneGitCredentialFillExchangesInsteadOfServingSessionGHToken drives
+// the credential lookup `git fetch` performs — git itself, configured the way
+// ConfigureStandaloneGitCredentialHelper configures it — through the rendered
+// helper and the real /git-credential handler. The session's GH_TOKEN is stale
+// by construction: a GitHub App installation token expires an hour after the
+// session starts, so git must get the freshly minted token instead.
+func TestStandaloneGitCredentialFillExchangesInsteadOfServingSessionGHToken(t *testing.T) {
 	t.Parallel()
+	exchange := newStandaloneCredentialExchange(t, "ws-instant", http.StatusOK, "fresh-exchange-token")
 
-	dir := t.TempDir()
-	gitPath := filepath.Join(dir, "git")
-	realGhPath := filepath.Join(dir, "gh.real")
-	wrapperPath := filepath.Join(dir, "gh")
-
-	gitScript := `#!/bin/sh
-if [ "$1" = "credential" ] && [ "$2" = "fill" ]; then
-  cat >/dev/null
-  printf 'username=x-access-token
-password=fresh-fixture-token
-'
-  exit 0
-fi
-exit 1
-`
-	if err := os.WriteFile(gitPath, []byte(gitScript), 0o755); err != nil {
-		t.Fatalf("write fake git: %v", err)
-	}
-	realGhScript := `#!/bin/sh
-printf '%s
-' "$GH_TOKEN"
-`
-	if err := os.WriteFile(realGhPath, []byte(realGhScript), 0o755); err != nil {
-		t.Fatalf("write fake gh.real: %v", err)
-	}
-	if err := writeStandaloneGhWrapper(wrapperPath, realGhPath); err != nil {
-		t.Fatalf("write gh wrapper: %v", err)
-	}
-
-	cmd := exec.Command("/bin/sh", wrapperPath, "auth", "status")
-	cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "GH_TOKEN=expired-fixture-token")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("run gh wrapper: %v (out=%q)", err, out)
-	}
-	if got := strings.TrimSpace(string(out)); got != "fresh-fixture-token" {
-		t.Fatalf("wrapped gh GH_TOKEN = %q, want fresh helper token", got)
-	}
-}
-
-func TestStandaloneGhWrapperPathForUsesLocalBinShimWhenItPrecedesRealGh(t *testing.T) {
-	t.Parallel()
-
-	wrapperPath, wrapsRealPath := standaloneGhWrapperPathFor(
-		"/usr/bin/gh",
-		"/var/lib/vm-agent/agents/bin:/usr/local/bin:/usr/bin:/bin",
+	cmd := exec.Command("git",
+		"-c", "credential.helper="+exchange.helperPath,
+		"-c", "credential.useHttpPath=true",
+		"credential", "fill")
+	cmd.Stdin = strings.NewReader("url=https://github.com/octo/repo.git\n\n")
+	cmd.Env = append(exchange.agentEnv("stale-session-token"),
+		"HOME="+t.TempDir(),
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_TERMINAL_PROMPT=0",
 	)
-	if !wrapsRealPath {
-		t.Fatal("expected /usr/local/bin shim to wrap the real gh binary")
-	}
-	if wrapperPath != "/usr/local/bin/gh" {
-		t.Fatalf("wrapper path = %q, want /usr/local/bin/gh", wrapperPath)
-	}
-}
-
-func TestStandaloneGhWrapperPathForUsesLocalBinShimForSystemGhEvenWhenProcessPathDiffers(t *testing.T) {
-	t.Parallel()
-
-	wrapperPath, wrapsRealPath := standaloneGhWrapperPathFor("/usr/bin/gh", "/var/lib/vm-agent/agents/bin")
-	if !wrapsRealPath {
-		t.Fatal("expected /usr/local/bin shim for system gh even when vm-agent PATH differs")
-	}
-	if wrapperPath != "/usr/local/bin/gh" {
-		t.Fatalf("wrapper path = %q, want /usr/local/bin/gh", wrapperPath)
-	}
-}
-
-func TestStandaloneGhWrapperPathForUsesLocalBinShimForSystemGhEvenWhenLocalBinFollows(t *testing.T) {
-	t.Parallel()
-
-	wrapperPath, wrapsRealPath := standaloneGhWrapperPathFor("/usr/bin/gh", "/usr/bin:/usr/local/bin:/bin")
-	if !wrapsRealPath {
-		t.Fatal("expected /usr/local/bin shim for system gh")
-	}
-	if wrapperPath != "/usr/local/bin/gh" {
-		t.Fatalf("wrapper path = %q, want /usr/local/bin/gh", wrapperPath)
-	}
-}
-
-func TestConfigureStandaloneGhWrapperUsesDiscoveredPath(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	ghPath := filepath.Join(dir, "custom-gh")
-	if err := os.WriteFile(ghPath, []byte(`#!/bin/sh
-printf real-gh\n
-`), 0o755); err != nil {
-		t.Fatalf("seed custom gh: %v", err)
-	}
-
-	wrappedPath, err := configureStandaloneGhWrapperWithLookup(func() (string, error) {
-		return ghPath, nil
-	})
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("configure discovered wrapper: %v", err)
-	}
-	if wrappedPath != ghPath {
-		t.Fatalf("wrapped path = %q, want %q", wrappedPath, ghPath)
-	}
-	if _, err := os.Stat(ghPath + ".real"); err != nil {
-		t.Fatalf("real gh not moved next to discovered path: %v", err)
-	}
-	wrapperData, err := os.ReadFile(ghPath)
-	if err != nil {
-		t.Fatalf("read wrapper: %v", err)
-	}
-	if !strings.Contains(string(wrapperData), shellSingleQuote(ghPath+".real")) {
-		t.Fatalf("wrapper does not exec discovered real path: %q", wrapperData)
-	}
-}
-
-func TestConfigureStandaloneGhWrapperMovesRealBinaryAndInstallsWrapper(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	ghPath := filepath.Join(dir, "gh")
-	realGhPath := filepath.Join(dir, "gh.real")
-	if err := os.WriteFile(ghPath, []byte(`#!/bin/sh
-printf real-gh\n
-`), 0o755); err != nil {
-		t.Fatalf("seed gh: %v", err)
+		t.Fatalf("git credential fill: %v (out=%q)", err, out)
 	}
 
-	if err := configureStandaloneGhWrapper(ghPath, realGhPath); err != nil {
-		t.Fatalf("configure wrapper: %v", err)
+	if !strings.Contains(string(out), "username=x-access-token\npassword=fresh-exchange-token\n") {
+		t.Fatalf("git credential fill = %q, want the freshly exchanged token", out)
 	}
-
-	realData, err := os.ReadFile(realGhPath)
-	if err != nil {
-		t.Fatalf("read moved real gh: %v", err)
+	if strings.Contains(string(out), "stale-session-token") {
+		t.Fatalf("git was served the stale session GH_TOKEN: %q", out)
 	}
-	if !strings.Contains(string(realData), "real-gh") {
-		t.Fatalf("real gh was not moved, got %q", realData)
+	if got := exchange.mintCalls.Load(); got != 1 {
+		t.Fatalf("control plane token mints = %d, want 1", got)
 	}
-	wrapperData, err := os.ReadFile(ghPath)
-	if err != nil {
-		t.Fatalf("read wrapper: %v", err)
-	}
-	if !strings.Contains(string(wrapperData), "git credential fill") || !strings.Contains(string(wrapperData), shellSingleQuote(realGhPath)) {
-		t.Fatalf("wrapper missing refresh flow or real path: %q", wrapperData)
-	}
-}
-
-func TestConfigureStandaloneGhWrapperIgnoresLookupErrorWhenNoFallback(t *testing.T) {
-	t.Parallel()
-
-	wrappedPath, err := configureStandaloneGhWrapperWithLookup(func() (string, error) {
-		return "", exec.ErrNotFound
-	})
-	if err != nil {
-		t.Fatalf("configure wrapper with missing gh returned error: %v", err)
-	}
-	if wrappedPath != "" {
-		t.Fatalf("wrapped path = %q, want empty", wrappedPath)
-	}
-}
-
-func TestStandaloneGitCredentialHelperDelegatesGitHubToLocalExchange(t *testing.T) {
-	t.Parallel()
-
-	var gotWorkspaceID string
-	var gotHost string
-	var gotPath string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/git-credential" {
-			t.Fatalf("request path = %q, want /git-credential", r.URL.Path)
-		}
-		gotWorkspaceID = r.URL.Query().Get("workspaceId")
-		gotHost = r.URL.Query().Get("host")
-		gotPath = r.URL.Query().Get("path")
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("username=x-access-token\npassword=fresh-endpoint-token\n"))
-	}))
-	t.Cleanup(server.Close)
-
-	out := runStandaloneCredScriptWithEnv(t, "get", "protocol=https\nhost=github.com\n\n", map[string]string{
-		"SAM_WORKSPACE_ID":            "ws-github",
-		"SAM_GIT_CREDENTIAL_ENDPOINT": server.URL + "/git-credential",
-		"GH_TOKEN":                    "expired-fixture-token",
-	})
-
-	if !strings.Contains(out, "username=x-access-token") || !strings.Contains(out, "password=fresh-endpoint-token") {
-		t.Fatalf("expected fresh delegated github creds, got %q", out)
-	}
-	if gotWorkspaceID != "ws-github" {
-		t.Fatalf("workspaceId query = %q, want ws-github", gotWorkspaceID)
-	}
-	if gotHost != "github.com" {
-		t.Fatalf("host query = %q, want github.com", gotHost)
-	}
-	if gotPath != "" {
-		t.Fatalf("path query = %q, want empty for github", gotPath)
+	query := exchange.lastRequestQuery()
+	if query.Get("workspaceId") != "ws-instant" || query.Get("host") != "github.com" || query.Get("path") != "octo/repo.git" {
+		t.Fatalf("exchange query = %v, want the workspace, host, and repository path", query)
 	}
 }
 
@@ -349,7 +193,7 @@ func TestStandaloneGitCredentialHelperRequiresPathForGitLab(t *testing.T) {
 
 func TestStandaloneGitCredentialHelperNoWorkspaceNoOutput(t *testing.T) {
 	t.Parallel()
-	out := runStandaloneCredScript(t, "get", "protocol=https\nhost=github.com\n\n", "")
+	out := runStandaloneCredScript(t, "get", "protocol=https\nhost=github.com\n\n", "session-token")
 	if out != "" {
 		t.Fatalf("expected no output without workspace context, got %q", out)
 	}

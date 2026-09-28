@@ -18,7 +18,7 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 - [x] Update standalone helper so GitHub credential requests use `/git-credential` instead of static `GH_TOKEN`.
 - [x] Preserve GitLab path-gated delegation and non-GitHub refusal behavior.
 - [x] Add regression coverage proving a GitHub helper call with stale `GH_TOKEN` receives the fresh endpoint token.
-- [x] Add standalone `gh` wrapper so `gh` refreshes through `git credential fill` instead of using stale inherited `GH_TOKEN`.
+- [x] Add standalone `gh` shim so `gh` refreshes through the SAM credential helper instead of using stale inherited `GH_TOKEN` (final design: one boot-time shim in `/var/lib/vm-agent/agents/bin`, see Independent Review).
 - [x] Add API cache tests proving expired cached installation tokens are ignored and unexpired cached tokens are reused.
 - [x] Add an expiry refresh margin with a `DEFAULT_*` constant and env override.
 - [x] Verify full-VM credential path is not regressed.
@@ -67,3 +67,19 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 - Added explicit standalone ACP `PATH=/var/lib/vm-agent/agents/bin:/usr/local/bin:/usr/bin:/bin` so the agent process resolves the managed `gh` shim before `/usr/bin/gh`.
 
 - Deploy run `36433161674` for `6aa2cc6ac` passed deploy and smoke tests. Final Instant verification in task `01M3M66T78MW6KK609YENG1AAT`, session `342721ad-867a-406c-8859-7e747475fcec`, workspace `01M3M66TXM7CNE0TCZSPD7FAF8`, showed `GH_PATH=/var/lib/vm-agent/agents/bin/gh`; with `GH_TOKEN=<invalid GitHub-shaped test token>`, `git fetch --dry-run origin` succeeded, `gh auth status -h github.com` succeeded, and `git credential fill` returned `FINAL_CREDENTIAL_PREFIX_OK=<redacted GitHub token prefix>`. Cleanup note: session stop route returned staging 500 requestId `68c50057-7ad6-4613-82ba-2faa2a956c21`, while workspace stop reported `Workspace is stopped` (already cleaned up).
+
+## Independent Review (task 01M3M8H10XQ426GNFQHRW1EZG7, 2026-09-28)
+
+Adversarial second look before shipping. Findings and fixes, all on this branch:
+
+- [x] HIGH: the forced standalone ACP `PATH=/var/lib/vm-agent/agents/bin:/usr/local/bin:/usr/bin:/bin` dropped `/var/lib/vm-agent/agents/npm/bin`, the image's `NPM_CONFIG_PREFIX` bin directory, so every `npm install -g` tool vanished from agent shells. The override was also redundant: `apps/api/Dockerfile.vm-agent-container` already puts `/var/lib/vm-agent/agents/bin` first on PATH. Removed; `TestAgentEnvLeavesPATHToTheRuntime` pins both runtimes (red with the override re-added).
+- [x] HIGH: dead and duplicated `gh` wrapper code. The boot-time `/usr/local/bin/gh` wrapper can never be written because the vm-agent runs as `node` and `/usr/local/bin` is root-owned (staging runs showed no `/usr/local/bin/gh`); its rename-to-`gh.real` branch double-wraps on re-run; a second copy of the script (and `shellSingleQuote`) lived in the acp package and was rewritten on every agent start. Replaced by one boot-time shim, `standalone_gh_shim.go`, installed by `ConfigureStandaloneGitCredentialHelper` into the node-owned first-on-PATH directory. It also covers terminals, which inherit the image PATH.
+- [x] HIGH: unrelated SAM auto-commit (`chore: save agent work`) deleted `model_reasoning_effort` from `.codex/config.toml`. Reverted.
+- [x] MEDIUM: the shim fell back to the inherited, possibly stale `GH_TOKEN` when the exchange failed, and it depended on `git credential fill` (user git config such as `gh auth setup-git` resets the helper list and routes the refresh back to the stale `GH_TOKEN`; git could also prompt on a TTY). The shim now calls `/usr/local/bin/git-credential-sam get` directly and, when the exchange yields nothing, unsets the inherited `GH_TOKEN` with a one-line stderr diagnostic (policy: fail closed instead of insecure fallback). The VM wrapper (`bootstrap.go:installGhWrapper`) keeps its fallback; parity is tracked as a SAM idea.
+- [x] MEDIUM: `GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS` was unbounded; a margin at or above GitHub's one-hour lifetime would mint on every credential exchange. Capped at 1800 s (half the lifetime) through `resolveInstallationTokenRefreshMarginSeconds`; divergence and convergence tests go through `getInstallationToken`.
+- [x] Rule 62: the helper regression used a fake endpoint and the gh test used a fake `git` that hand-fed the token. Replaced by capability tests that enter the way production does: real `git credential fill` → rendered helper → real `/git-credential` handler → fake control plane, and `gh` resolved by PATH → shim → helper → handler. Red-before-fix against main's helper: the git test, the gh test, and `TestStandaloneGitCredentialHelperNoWorkspaceNoOutput` all fail (they receive the stale session token); the GitLab control passes. Each shim guard was deleted once and its test went red.
+- [x] Test hermeticity: the standalone tests inherited the developer's `SAM_WORKSPACE_ID`, `GH_TOKEN`, and `GIT_CONFIG_COUNT`-injected helper. `hermeticEnv` now scrubs them.
+- [x] Docs: public `reference/configuration.md` gained the margin row; env reference, `.env.example`, and `env.ts` state the cap.
+- [x] Contract: `cf-container-runtime-contract.test.ts` ties the Go shim directory to the first image PATH entry.
+
+Pre-existing gap found, not caused by this PR (tracked as a SAM idea): the vm-agent's own git and `gh` calls in standalone mode (task-completion auto-push, `gh pr create`, lazy partial-clone blob fetches) run with the vm-agent environment, which has neither `SAM_WORKSPACE_ID` nor `GH_TOKEN`, so the helper yields no credential both before and after this PR. Terminals have the same gap.
