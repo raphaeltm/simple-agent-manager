@@ -164,7 +164,7 @@ Neither. The combination is older:
 
 - The pure move of `persistRuntimeRecoveryFailed` into `vm-agent-container-recovery-failure.ts`
   (rule 18; the module was 572 lines) landed as its own commit before the fix.
-- Review follow-ups (commit `8589cb608`): the sleeping-container verdict now derives from the
+- Review follow-ups (commit `382848bbf`): the sleeping-container verdict now derives from the
   container DO's own `IN_PLACE_WAKEABLE_STATUSES` (less the documented `error` strictness) instead
   of a parallel terminal list. It also mirrors the resumer's cf-container-node and
   `runtime_deletion_confirmed_at` predicates. Before this, a node mid-teardown (`destroying`) was
