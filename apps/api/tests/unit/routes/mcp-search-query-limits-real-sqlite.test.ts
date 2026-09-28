@@ -8,8 +8,10 @@ import { handleSearchIdeas } from '../../../src/routes/mcp/idea-tools';
 import { handleSearchTasks } from '../../../src/routes/mcp/task-tools';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-const SAFE_PREFIX = Array.from({ length: 6 }, (_, index) => `needle${index}`).join(' ');
-const OVER_LIMIT_QUERY = `${SAFE_PREFIX} ${'overflow '.repeat(8_000)}`;
+const SEARCH_TERMS = Array.from({ length: 20 }, (_, index) => `needle${index}`);
+const LONG_QUERY = SEARCH_TERMS.join(' ');
+const PREFIX_ONLY_TEXT = SEARCH_TERMS.slice(0, 10).join(' ');
+const ALL_TERMS_TEXT = SEARCH_TERMS.join(' ');
 
 const tokenData = {
   projectId: 'project-1',
@@ -41,19 +43,41 @@ describe('MCP task-backed search query limits with real SQLite', () => {
       'idea-new',
       tokenData.projectId,
       tokenData.userId,
-      'Newest bounded idea',
-      SAFE_PREFIX,
+      'Prefix-only idea control',
+      PREFIX_ONLY_TEXT,
+      'draft',
+      2,
+      '2026-01-04T00:00:00.000Z',
+      '2026-01-04T00:00:00.000Z'
+    );
+    insert.run(
+      'idea-match',
+      tokenData.projectId,
+      tokenData.userId,
+      'Late-term idea match',
+      ALL_TERMS_TEXT,
       'draft',
       2,
       '2026-01-02T00:00:00.000Z',
       '2026-01-02T00:00:00.000Z'
     );
     insert.run(
-      'task-new',
+      'task-control',
       tokenData.projectId,
       tokenData.userId,
-      'Newest bounded task',
-      SAFE_PREFIX,
+      'Prefix-only task control',
+      PREFIX_ONLY_TEXT,
+      'completed',
+      1,
+      '2026-01-05T00:00:00.000Z',
+      '2026-01-05T00:00:00.000Z'
+    );
+    insert.run(
+      'task-match',
+      tokenData.projectId,
+      tokenData.userId,
+      'Late-term task match',
+      ALL_TERMS_TEXT,
       'completed',
       1,
       '2026-01-03T00:00:00.000Z',
@@ -74,31 +98,31 @@ describe('MCP task-backed search query limits with real SQLite', () => {
 
   afterEach(() => sqlite.close());
 
-  it('search_ideas truncates a SQLite-invalid long query and returns a match', async () => {
-    const response = await handleSearchIdeas(1, { query: OVER_LIMIT_QUERY }, tokenData, env);
+  it('search_ideas searches late terms in a long query and excludes prefix-only controls', async () => {
+    const response = await handleSearchIdeas(1, { query: LONG_QUERY }, tokenData, env);
     const body = parseToolResult(response);
 
     expect((body.ideas as Array<{ ideaId: string }>).map((idea) => idea.ideaId)).toEqual([
-      'idea-new',
+      'idea-match',
     ]);
-    expect(body.queryTruncated).toBe(true);
-    expect(body.query).toBe(SAFE_PREFIX);
+    expect(body.queryTruncated).toBe(false);
+    expect(body.query).toBe(LONG_QUERY);
   });
 
-  it('search_tasks truncates a SQLite-invalid long query and returns a match', async () => {
+  it('search_tasks searches late terms in a long query and excludes prefix-only controls', async () => {
     const response = await handleSearchTasks(
       2,
-      { query: OVER_LIMIT_QUERY, status: 'completed' },
+      { query: LONG_QUERY, status: 'completed' },
       tokenData,
       env
     );
     const body = parseToolResult(response);
 
     expect((body.tasks as Array<{ id: string }>).map((task) => task.id)).toEqual([
-      'task-new',
+      'task-match',
     ]);
-    expect(body.queryTruncated).toBe(true);
-    expect(body.query).toBe(SAFE_PREFIX);
+    expect(body.queryTruncated).toBe(false);
+    expect(body.query).toBe(LONG_QUERY);
   });
 
   it('keeps normal short-query ordering and results unchanged', async () => {
@@ -106,8 +130,10 @@ describe('MCP task-backed search query limits with real SQLite', () => {
     const body = parseToolResult(response);
 
     expect((body.tasks as Array<{ id: string }>).map((task) => task.id)).toEqual([
-      'task-new',
+      'task-control',
       'idea-new',
+      'task-match',
+      'idea-match',
       'task-old',
     ]);
     expect(body.queryTruncated).toBe(false);

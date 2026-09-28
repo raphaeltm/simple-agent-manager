@@ -6,7 +6,7 @@
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import {
-  escapeSearchQueryForLike,
+  getSearchQueryLikePatterns,
   type NormalizedSearchQuery,
   normalizeSearchQuery,
 } from '../../lib/search-query-limits';
@@ -178,10 +178,16 @@ export async function handleFindRelatedIdeas(
   // Default to 'draft' status (ideas) when no explicit status filter is provided
   const statusFilter = typeof params.status === 'string' ? params.status.trim() : 'draft';
 
-  const searchPattern = `%${escapeSearchQueryForLike(query)}%`;
+  const likePatterns = getSearchQueryLikePatterns(query);
+  const termConditions = likePatterns
+    .map(() => String.raw`(title LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\')`)
+    .join(' AND ');
 
-  let queryStr = String.raw`SELECT id, title, description, status, priority, updated_at FROM tasks WHERE project_id = ? AND (title LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\')`;
-  const bindParams: unknown[] = [tokenData.projectId, searchPattern, searchPattern];
+  let queryStr = `SELECT id, title, description, status, priority, updated_at FROM tasks WHERE project_id = ? AND ${termConditions}`;
+  const bindParams: unknown[] = [
+    tokenData.projectId,
+    ...likePatterns.flatMap((pattern) => [pattern, pattern]),
+  ];
 
   queryStr += ' AND status = ?';
   bindParams.push(statusFilter);
@@ -551,11 +557,19 @@ export async function handleSearchIdeas(
   const limit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.ideaSearchMax);
   const snippetLength = limits.taskDescriptionSnippetLength;
 
-  const searchPattern = `%${escapeSearchQueryForLike(query)}%`;
+  const likePatterns = getSearchQueryLikePatterns(query);
+  const termConditions = likePatterns
+    .map(() => String.raw`(title LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\')`)
+    .join(' AND ');
 
   const results = await env.DATABASE.prepare(
-    String.raw`SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? AND (title LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\') ORDER BY updated_at DESC LIMIT ?`,
-  ).bind(tokenData.projectId, 'draft', searchPattern, searchPattern, limit).all<{
+    `SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? AND ${termConditions} ORDER BY updated_at DESC LIMIT ?`,
+  ).bind(
+    tokenData.projectId,
+    'draft',
+    ...likePatterns.flatMap((pattern) => [pattern, pattern]),
+    limit
+  ).all<{
     id: string;
     title: string;
     description: string | null;

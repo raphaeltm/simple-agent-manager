@@ -250,12 +250,13 @@ Agents search messages with the `search_messages` MCP tool. The project chat's o
 box is a different thing: it filters the session list by topic, session ID, and creator, and does
 not look inside messages.
 
-Idea, task, knowledge, and message search all simplify oversized input before it reaches SQLite.
-They retain at most `SEARCH_QUERY_MAX_LENGTH` LIKE-safe UTF-8 bytes and
-`SEARCH_QUERY_MAX_TERMS` whitespace-delimited terms (defaults: 48 and 12). Search responses return
-the effective `query`, a `queryTruncated` flag, and `queryLimits`, so callers can distinguish an exact
-search from a simplified one. Length overrides are clamped to 4–48; the extra escape bytes for
-`%`, `_`, and `\` count toward that budget (`apps/api/src/lib/search-query-limits.ts`, verified).
+Idea, task, knowledge, and message search all simplify only oversized input before it reaches
+SQLite. Long multi-word queries search every retained term, including late terms, through one short
+escaped LIKE predicate per term. `SEARCH_QUERY_MAX_LENGTH` and `SEARCH_QUERY_MAX_TERMS` are generous
+DoS guards (defaults: 4096 bytes and 40 terms), while `SEARCH_QUERY_MAX_TERM_LENGTH` keeps each
+individual LIKE term inside SQLite's pattern budget (default: 48 bytes, with higher overrides clamped to SQLite's safe pattern ceiling). Search responses return the
+effective `query`, a `queryTruncated` flag, and `queryLimits`, so callers can distinguish an exact
+search from one trimmed by a guardrail (`apps/api/src/lib/search-query-limits.ts`, verified).
 
 Project-wide search also traverses immutable archive owners. A bounded call can return provisional
 results plus `archiveSearch.continuation`; pass that continuation with the same query, roles, and

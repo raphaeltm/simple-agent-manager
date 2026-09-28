@@ -3973,22 +3973,20 @@ function searchArchiveProjection(
       )
       .toArray();
   } else {
-    rows = sql
-      .exec(
-        `SELECT d.document_id AS id, d.session_id, d.role, d.content, d.created_at,
-                s.topic AS session_topic, s.task_id AS session_task_id
-         FROM project_data_archive_search_documents d
-         JOIN chat_sessions s ON s.id = d.session_id
-         JOIN project_data_archive_target_sessions t ON t.session_id = d.session_id
-         WHERE d.content LIKE ? ESCAPE '\\'
-           AND ${whereClause}
-         ORDER BY d.created_at DESC, d.session_id ASC, d.document_id ASC
-         LIMIT ?`,
-        `%${query.replace(/[%_\\]/g, '\\$&')}%`,
-        ...params,
-        limit * 2
-      )
-      .toArray();
+    const likePatterns = messages.getSearchQueryLikePatterns(query);
+    const likeConditions = likePatterns.map(() => String.raw`d.content LIKE ? ESCAPE '\'`).join(' AND ');
+    const querySql = [
+      'SELECT d.document_id AS id, d.session_id, d.role, d.content, d.created_at,',
+      '       s.topic AS session_topic, s.task_id AS session_task_id',
+      'FROM project_data_archive_search_documents d',
+      'JOIN chat_sessions s ON s.id = d.session_id',
+      'JOIN project_data_archive_target_sessions t ON t.session_id = d.session_id',
+      `WHERE ${likeConditions}`,
+      `  AND ${whereClause}`,
+      'ORDER BY d.created_at DESC, d.session_id ASC, d.document_id ASC',
+      'LIMIT ?',
+    ].join('\n');
+    rows = sql.exec(querySql, ...likePatterns, ...params, limit * 2).toArray();
   }
   const deduped = new Map<string, ArchiveSearchResult>();
   for (const row of rows) {

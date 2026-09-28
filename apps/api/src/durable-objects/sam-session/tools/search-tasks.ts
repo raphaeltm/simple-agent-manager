@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
-import { escapeSearchQueryForLike, normalizeSearchQuery } from '../../../lib/search-query-limits';
+import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../../../lib/search-query-limits';
 import { getMcpLimits } from '../../../routes/mcp/_helpers';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
@@ -95,12 +95,15 @@ export async function searchTasks(
   const searchLimit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskSearchMax);
 
   const db = drizzle(ctx.env.DATABASE as D1Database, { schema });
-  const searchPattern = `%${escapeSearchQueryForLike(query)}%`;
 
   // Build conditions: always filter by user's projects
-  const conditions: SQL[] = [eq(schema.projects.userId, ctx.userId)];
-  const titleOrDescriptionMatch = sql<boolean>`(${schema.tasks.title} LIKE ${searchPattern} ESCAPE '\\' OR ${schema.tasks.description} LIKE ${searchPattern} ESCAPE '\\')`;
-  conditions.push(titleOrDescriptionMatch);
+  const conditions: SQL[] = [
+    eq(schema.projects.userId, ctx.userId),
+    ...getSearchQueryLikePatterns(query).map(
+      (pattern) =>
+        sql<boolean>`(${schema.tasks.title} LIKE ${pattern} ESCAPE '\\' OR ${schema.tasks.description} LIKE ${pattern} ESCAPE '\\')`
+    ),
+  ];
 
   if (status) {
     conditions.push(eq(schema.tasks.status, status));

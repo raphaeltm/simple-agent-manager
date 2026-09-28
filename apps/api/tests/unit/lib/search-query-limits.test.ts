@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
   DEFAULT_SEARCH_QUERY_MAX_TERMS,
   escapeSearchQueryForLike,
+  getSearchQueryLikePatterns,
   normalizeSearchQuery,
 } from '../../../src/lib/search-query-limits';
 
@@ -14,6 +16,7 @@ describe('search query limits', () => {
       queryTruncated: false,
       queryLimits: {
         maxLength: DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+        maxTermLength: DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
         maxTerms: DEFAULT_SEARCH_QUERY_MAX_TERMS,
       },
     });
@@ -37,6 +40,7 @@ describe('search query limits', () => {
       queryTruncated: true,
       queryLimits: {
         maxLength: 4,
+        maxTermLength: DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
         maxTerms: DEFAULT_SEARCH_QUERY_MAX_TERMS,
       },
     });
@@ -54,17 +58,19 @@ describe('search query limits', () => {
     expect(
       normalizeSearchQuery('alpha beta gamma delta', {
         SEARCH_QUERY_MAX_LENGTH: '8',
+        SEARCH_QUERY_MAX_TERM_LENGTH: '6',
         SEARCH_QUERY_MAX_TERMS: '3',
       })
     ).toEqual({
       query: 'alpha be',
       queryTruncated: true,
-      queryLimits: { maxLength: 8, maxTerms: 3 },
+      queryLimits: { maxLength: 8, maxTermLength: 6, maxTerms: 3 },
     });
 
     expect(
       normalizeSearchQuery('😀😀😀', {
         SEARCH_QUERY_MAX_LENGTH: '8',
+        SEARCH_QUERY_MAX_TERM_LENGTH: '8',
         SEARCH_QUERY_MAX_TERMS: '3',
       }).query
     ).toBe('😀😀');
@@ -72,15 +78,21 @@ describe('search query limits', () => {
     expect(
       normalizeSearchQuery('alpha beta gamma', {
         SEARCH_QUERY_MAX_LENGTH: '100',
+        SEARCH_QUERY_MAX_TERM_LENGTH: '1000',
         SEARCH_QUERY_MAX_TERMS: '100',
       })
     ).toEqual({
       query: 'alpha beta gamma',
       queryTruncated: false,
       queryLimits: {
-        maxLength: DEFAULT_SEARCH_QUERY_MAX_LENGTH,
-        maxTerms: 100,
+        maxLength: 100,
+        maxTermLength: DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
+        maxTerms: DEFAULT_SEARCH_QUERY_MAX_TERMS,
       },
     });
+  });
+
+  it('builds one escaped LIKE pattern per retained term', () => {
+    expect(getSearchQueryLikePatterns('alpha %_ beta')).toEqual(['%alpha%', '%\\%\\_%', '%beta%']);
   });
 });

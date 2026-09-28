@@ -113,7 +113,7 @@ describe('knowledge routes', () => {
         total: 1,
         query: 'alpha beta gamma',
         queryTruncated: true,
-        queryLimits: { maxLength: 20, maxTerms: 3 },
+        queryLimits: { maxLength: 20, maxTermLength: 48, maxTerms: 3 },
       });
       expect(mocks.searchKnowledgeObservations).toHaveBeenCalledWith(
         env,

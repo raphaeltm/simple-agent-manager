@@ -36,6 +36,7 @@ import { searchConversationHistory } from '../../../src/durable-objects/sam-sess
 import type { CollectedToolCall, MessageRow, ToolContext } from '../../../src/durable-objects/sam-session/types';
 import {
   DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
   DEFAULT_SEARCH_QUERY_MAX_TERMS,
 } from '../../../src/lib/search-query-limits';
 
@@ -358,6 +359,7 @@ describe('search_conversation_history tool', () => {
       queryTruncated: false,
       queryLimits: {
         maxLength: DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+        maxTermLength: DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
         maxTerms: DEFAULT_SEARCH_QUERY_MAX_TERMS,
       },
     });

@@ -7,8 +7,10 @@ import { handleSearchMessages } from '../../src/routes/mcp/session-tools';
 import type { McpTokenData } from '../../src/services/mcp-token';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
-const SAFE_PREFIX = Array.from({ length: 6 }, (_, index) => `needle${index}`).join(' ');
-const OVER_LIMIT_QUERY = `${SAFE_PREFIX} ${'overflow '.repeat(8_000)}`;
+const SEARCH_TERMS = Array.from({ length: 20 }, (_, index) => `needle${index}`);
+const LONG_QUERY = SEARCH_TERMS.join(' ');
+const PREFIX_ONLY_TEXT = SEARCH_TERMS.slice(0, 10).join(' ');
+const ALL_TERMS_TEXT = SEARCH_TERMS.join(' ');
 const LIKE_METACHARACTER_PREFIX = '%'.repeat(24);
 
 function freshStub(): DurableObjectStub<ProjectDataTestDouble> {
@@ -29,27 +31,29 @@ function tokenData(projectId: string): McpTokenData {
 }
 
 describe('ProjectData search query limits with real Durable Object SQLite', () => {
-  it('knowledge search truncates a SQLite-invalid long query and returns a match', async () => {
+  it('knowledge search uses late terms in a long query and excludes prefix-only controls', async () => {
     const stub = freshStub();
     const { id: entityId } = await stub.createKnowledgeEntity('Search limits', 'context', null);
-    await stub.addKnowledgeObservation(entityId, SAFE_PREFIX, 0.9, 'explicit', null);
+    await stub.addKnowledgeObservation(entityId, PREFIX_ONLY_TEXT, 0.9, 'explicit', null);
+    await stub.addKnowledgeObservation(entityId, ALL_TERMS_TEXT, 0.9, 'explicit', null);
 
-    const results = await stub.searchKnowledgeObservations(OVER_LIMIT_QUERY, null, null, 10);
+    const results = await stub.searchKnowledgeObservations(LONG_QUERY, null, null, 10);
 
-    expect(results.map((result) => result.content)).toEqual([SAFE_PREFIX]);
+    expect(results.map((result) => result.content)).toEqual([ALL_TERMS_TEXT]);
   });
 
-  it('runs an over-limit query through the MCP knowledge handler into real DO SQLite', async () => {
+  it('runs a long query through the MCP knowledge handler into real DO SQLite', async () => {
     const projectId = `mcp-knowledge-search-limits-${crypto.randomUUID()}`;
     const stub = env.PROJECT_DATA.get(
       env.PROJECT_DATA.idFromName(projectId)
     ) as DurableObjectStub<ProjectDataTestDouble>;
     const { id: entityId } = await stub.createKnowledgeEntity('MCP search limits', 'context', null);
-    await stub.addKnowledgeObservation(entityId, SAFE_PREFIX, 0.9, 'explicit', null);
+    await stub.addKnowledgeObservation(entityId, PREFIX_ONLY_TEXT, 0.9, 'explicit', null);
+    await stub.addKnowledgeObservation(entityId, ALL_TERMS_TEXT, 0.9, 'explicit', null);
 
     const response = await handleSearchKnowledge(
       1,
-      { query: OVER_LIMIT_QUERY },
+      { query: LONG_QUERY },
       tokenData(projectId),
       env as unknown as Env
     );
@@ -60,19 +64,19 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
       query: string;
       queryTruncated: boolean;
     };
-    expect(payload.results.map((item) => item.content)).toEqual([SAFE_PREFIX]);
-    expect(payload.query).toBe(SAFE_PREFIX);
-    expect(payload.queryTruncated).toBe(true);
+    expect(payload.results.map((item) => item.content)).toEqual([ALL_TERMS_TEXT]);
+    expect(payload.query).toBe(LONG_QUERY);
+    expect(payload.queryTruncated).toBe(false);
   });
 
-  it('message search truncates a SQLite-invalid long query and returns a match', async () => {
+  it('message search uses late terms in a long query and excludes prefix-only controls', async () => {
     const stub = freshStub();
     await runInDurableObject(stub, async (_instance, state) => {
       const now = Date.now();
       state.storage.sql.exec(
         `INSERT INTO chat_sessions
            (id, topic, status, message_count, started_at, created_at, updated_at)
-         VALUES ('session-1', 'Search limits', 'active', 1, ?, ?, ?)`,
+         VALUES ('session-1', 'Search limits', 'active', 2, ?, ?, ?)`,
         now,
         now,
         now
@@ -80,25 +84,32 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
       state.storage.sql.exec(
         `INSERT INTO chat_messages
            (id, session_id, role, content, tool_metadata, created_at, sequence)
-         VALUES ('message-1', 'session-1', 'user', ?, NULL, ?, 1)`,
-        SAFE_PREFIX,
+         VALUES ('message-control', 'session-1', 'user', ?, NULL, ?, 1)`,
+        PREFIX_ONLY_TEXT,
+        now
+      );
+      state.storage.sql.exec(
+        `INSERT INTO chat_messages
+           (id, session_id, role, content, tool_metadata, created_at, sequence)
+         VALUES ('message-match', 'session-1', 'user', ?, NULL, ?, 2)`,
+        ALL_TERMS_TEXT,
         now
       );
     });
 
     const search = await stub.searchMessagesWithCoverage(
-      OVER_LIMIT_QUERY,
+      LONG_QUERY,
       'session-1',
       ['user'],
       10
     );
 
-    expect(search.results.map((result) => result.id)).toEqual(['message-1']);
-    expect(search.query.queryTruncated).toBe(true);
-    expect(search.query.query).toBe(SAFE_PREFIX);
+    expect(search.results.map((result) => result.id)).toEqual(['message-match']);
+    expect(search.query.queryTruncated).toBe(false);
+    expect(search.query.query).toBe(LONG_QUERY);
   });
 
-  it('runs an over-limit query through the MCP message handler into real DO SQLite', async () => {
+  it('runs a long query through the MCP message handler into real DO SQLite', async () => {
     const suffix = crypto.randomUUID();
     const projectId = `mcp-message-search-${suffix}`;
     const userId = `mcp-message-user-${suffix}`;
@@ -132,7 +143,7 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
       state.storage.sql.exec(
         `INSERT INTO chat_sessions
            (id, topic, status, message_count, started_at, created_at, updated_at)
-         VALUES ('session-1', 'MCP search limits', 'active', 1, ?, ?, ?)`,
+         VALUES ('session-1', 'MCP search limits', 'active', 2, ?, ?, ?)`,
         now,
         now,
         now
@@ -140,15 +151,22 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
       state.storage.sql.exec(
         `INSERT INTO chat_messages
            (id, session_id, role, content, tool_metadata, created_at, sequence)
-         VALUES ('message-1', 'session-1', 'user', ?, NULL, ?, 1)`,
-        SAFE_PREFIX,
+         VALUES ('message-control', 'session-1', 'user', ?, NULL, ?, 1)`,
+        PREFIX_ONLY_TEXT,
+        now
+      );
+      state.storage.sql.exec(
+        `INSERT INTO chat_messages
+           (id, session_id, role, content, tool_metadata, created_at, sequence)
+         VALUES ('message-match', 'session-1', 'user', ?, NULL, ?, 2)`,
+        ALL_TERMS_TEXT,
         now
       );
     });
 
     const response = await handleSearchMessages(
       2,
-      { query: OVER_LIMIT_QUERY, sessionId: 'session-1', roles: ['user'] },
+      { query: LONG_QUERY, sessionId: 'session-1', roles: ['user'] },
       { ...tokenData(projectId), userId },
       env as unknown as Env
     );
@@ -159,9 +177,9 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
       query: string;
       queryTruncated: boolean;
     };
-    expect(payload.results.map((item) => item.messageId)).toEqual(['message-1']);
-    expect(payload.query).toBe(SAFE_PREFIX);
-    expect(payload.queryTruncated).toBe(true);
+    expect(payload.results.map((item) => item.messageId)).toEqual(['message-match']);
+    expect(payload.query).toBe(LONG_QUERY);
+    expect(payload.queryTruncated).toBe(false);
   });
 
   it('accounts for LIKE escape bytes before querying real SQLite', async () => {

@@ -27,7 +27,9 @@ import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import {
   DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
   DEFAULT_SEARCH_QUERY_MAX_TERMS,
+  getSearchQueryLikePatterns,
   normalizeSearchQueryWithLimits,
 } from '../../lib/search-query-limits';
 import {
@@ -38,6 +40,7 @@ import {
 } from './message-search-rows';
 
 export type { SearchResult } from './message-search-rows';
+export { getSearchQueryLikePatterns };
 export { buildFtsQuery, extractSnippet } from './message-search-rows';
 
 /** Newest full-text matches ranked by bm25. Older matches are not ranked. */
@@ -56,6 +59,7 @@ export interface MessageSearchBounds {
   keywordScanRowLimit: number;
   queryMaxLength?: number;
   queryMaxTerms?: number;
+  queryMaxTermLength?: number;
 }
 
 export interface MessageSearchBoundsEnv {
@@ -64,6 +68,7 @@ export interface MessageSearchBoundsEnv {
   PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT?: string;
   SEARCH_QUERY_MAX_LENGTH?: string;
   SEARCH_QUERY_MAX_TERMS?: string;
+  SEARCH_QUERY_MAX_TERM_LENGTH?: string;
 }
 
 export function resolveMessageSearchBounds(env: MessageSearchBoundsEnv): MessageSearchBounds {
@@ -87,6 +92,10 @@ export function resolveMessageSearchBounds(env: MessageSearchBoundsEnv): Message
     ),
     queryMaxLength: parsePositiveInt(env.SEARCH_QUERY_MAX_LENGTH, DEFAULT_SEARCH_QUERY_MAX_LENGTH),
     queryMaxTerms: parsePositiveInt(env.SEARCH_QUERY_MAX_TERMS, DEFAULT_SEARCH_QUERY_MAX_TERMS),
+    queryMaxTermLength: parsePositiveInt(
+      env.SEARCH_QUERY_MAX_TERM_LENGTH,
+      DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH
+    ),
   };
 }
 
@@ -122,6 +131,7 @@ export function searchMessagesWithCoverage(
   const queryInfo = normalizeSearchQueryWithLimits(query, {
     maxLength: bounds.queryMaxLength ?? DEFAULT_SEARCH_QUERY_MAX_LENGTH,
     maxTerms: bounds.queryMaxTerms ?? DEFAULT_SEARCH_QUERY_MAX_TERMS,
+    maxTermLength: bounds.queryMaxTermLength ?? DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
   });
   const effectiveQuery = queryInfo.query;
   const fts = searchMessagesFts(sql, effectiveQuery, sessionId, roles, limit, bounds);
@@ -366,7 +376,6 @@ function searchMessagesLike(
   limit: number,
   scanRowLimit: number
 ): BoundedSearchResults {
-  const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
   // The window predicate comes first so SQLite drives the scan from it (a rowid range, or the
   // session's `(session_id, created_at)` index) and never evaluates LIKE outside the window.
   const conditions: string[] = [];
@@ -391,8 +400,12 @@ function searchMessagesLike(
     truncated = window.truncated;
   }
 
-  conditions.push("m.content LIKE ? ESCAPE '\\'", "COALESCE(m.origin, 'user') != 'system'");
-  params.push(`%${escapedQuery}%`);
+  const likePatterns = getSearchQueryLikePatterns(query);
+  conditions.push(
+    ...likePatterns.map(() => String.raw`m.content LIKE ? ESCAPE '\'`),
+    "COALESCE(m.origin, 'user') != 'system'"
+  );
+  params.push(...likePatterns);
   appendRoleCondition(conditions, params, roles);
 
   // Materialization is incremental, so "this session has been indexed" is no

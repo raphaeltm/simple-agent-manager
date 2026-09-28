@@ -7,7 +7,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import {
-  escapeSearchQueryForLike,
+  getSearchQueryLikePatterns,
   normalizeSearchQuery,
 } from '../../../lib/search-query-limits';
 import type { AnthropicToolDef, ToolContext } from '../types';
@@ -78,18 +78,18 @@ export async function findRelatedIdeas(
     return { error: 'Project not found or not owned by you.' };
   }
 
-  // LIKE search on title and description (draft ideas only)
-  // Escape LIKE metacharacters to prevent semantic mismatch
-  const escaped = escapeSearchQueryForLike(normalizedQuery.query);
-  const searchPattern = `%${escaped}%`;
+  const likePatterns = getSearchQueryLikePatterns(normalizedQuery.query);
+  const termConditions = likePatterns
+    .map(() => String.raw`(title LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\')`)
+    .join(' AND ');
   const results = await env.DATABASE.prepare(
     `SELECT id, title, description, status, priority, updated_at
      FROM tasks
      WHERE project_id = ? AND status = 'draft'
-       AND (title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')
+       AND ${termConditions}
      ORDER BY updated_at DESC
      LIMIT ?`,
-  ).bind(project.id, searchPattern, searchPattern, limit)
+  ).bind(project.id, ...likePatterns.flatMap((pattern) => [pattern, pattern]), limit)
     .all<{
       id: string;
       title: string;

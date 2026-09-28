@@ -24,6 +24,11 @@ import type {
   CollectedToolCall,
   ToolContext,
 } from '../../../src/durable-objects/sam-session/types';
+import {
+  DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
+  DEFAULT_SEARCH_QUERY_MAX_TERMS,
+} from '../../../src/lib/search-query-limits';
 
 // Mock cloudflare:workers
 vi.mock('cloudflare:workers', () => ({
@@ -61,7 +66,11 @@ vi.mock('../../../src/services/project-data', () => ({
     query: {
       query: String(args[2] ?? ''),
       queryTruncated: false,
-      queryLimits: { maxLength: 48, maxTerms: 12 },
+      queryLimits: {
+        maxLength: DEFAULT_SEARCH_QUERY_MAX_LENGTH,
+        maxTermLength: DEFAULT_SEARCH_QUERY_MAX_TERM_LENGTH,
+        maxTerms: DEFAULT_SEARCH_QUERY_MAX_TERMS,
+      },
     },
     rootSearch: mockRootSearch(),
     archiveSearch: {

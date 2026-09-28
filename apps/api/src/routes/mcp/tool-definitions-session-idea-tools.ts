@@ -201,7 +201,7 @@ export const SESSION_IDEA_TOOLS = [
   {
     name: 'search_ideas',
     description:
-      'Search ideas in your project by keyword. Searches both title and content fields. Only returns ideas (draft tasks), not executed tasks. Queries beyond the server-configured byte or term limits are truncated; the response reports queryTruncated, the effective query, and queryLimits.',
+      'Search ideas in your project by keyword. Searches both title and content fields, requiring every retained term to match. Only returns ideas (draft tasks), not executed tasks. Queries beyond the server-configured guardrails are truncated; the response reports queryTruncated, the effective query, and queryLimits.',
     inputSchema: {
       type: 'object' as const,
       properties: {

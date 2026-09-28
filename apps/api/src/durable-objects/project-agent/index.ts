@@ -30,7 +30,7 @@ import {
   RateLimitRowSchema,
   RowidRowSchema,
 } from '../row-validation';
-import { buildFtsQuery, extractSnippet } from '../sam-session';
+import { appendMessageLikeSearchResults, buildFtsQuery, extractSnippet } from '../sam-session';
 import { runAgentLoop } from '../sam-session/agent-loop';
 import type { MessageRow, SamSseEvent } from '../sam-session/types';
 import { PROJECT_AGENT_SYSTEM_PROMPT } from './system-prompt';
@@ -539,32 +539,7 @@ export class ProjectAgent extends DurableObject<AppEnv> {
     }
 
     if (results.length < limit) {
-      const remaining = limit - results.length;
-      const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
-      const rows = this.sql
-        .exec(
-          `SELECT role, content, sequence, created_at
-         FROM messages
-         WHERE content LIKE ? ESCAPE '\\'
-         ORDER BY created_at DESC
-         LIMIT ?`,
-          `%${escapedQuery}%`,
-          remaining
-        )
-        .toArray();
-
-      const seenSequences = new Set(results.map((r) => r.sequence));
-      for (const row of rows) {
-        const seq = Number(row.sequence);
-        if (seenSequences.has(seq)) continue;
-        seenSequences.add(seq);
-        results.push({
-          snippet: extractSnippet(String(row.content), query),
-          role: String(row.role),
-          sequence: seq,
-          createdAt: String(row.created_at),
-        });
-      }
+      appendMessageLikeSearchResults(this.sql, query, limit - results.length, results);
     }
 
     return results;

@@ -41,7 +41,11 @@ export async function searchConversationHistory(
   const limit = Math.min(input.limit || DEFAULT_SAM_SEARCH_LIMIT, DEFAULT_SAM_SEARCH_MAX_LIMIT);
   const normalizedQuery = normalizeSearchQuery(
     input.query,
-    ctx.env as { SEARCH_QUERY_MAX_LENGTH?: string; SEARCH_QUERY_MAX_TERMS?: string }
+    ctx.env as {
+      SEARCH_QUERY_MAX_LENGTH?: string;
+      SEARCH_QUERY_MAX_TERMS?: string;
+      SEARCH_QUERY_MAX_TERM_LENGTH?: string;
+    }
   );
   const results = ctx.searchMessages(normalizedQuery.query, limit);
 

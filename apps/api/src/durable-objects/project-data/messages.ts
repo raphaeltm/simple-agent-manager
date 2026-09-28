@@ -34,6 +34,7 @@ export type { MessageSearchBounds, MessageSearchWithCoverage } from './message-s
 export {
   buildFtsQuery,
   extractSnippet,
+  getSearchQueryLikePatterns,
   resolveMessageSearchBounds,
   searchMessagesWithCoverage,
 } from './message-search';

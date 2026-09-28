@@ -72,7 +72,7 @@ export const KNOWLEDGE_TOOLS = [
   },
   {
     name: 'search_knowledge',
-    description: 'Full-text search across all observations in the project knowledge graph. Returns matching observations with their entities. Queries beyond the server-configured byte or term limits are truncated; the response reports queryTruncated, the effective query, and queryLimits.',
+    description: 'Full-text search across all observations in the project knowledge graph. Returns matching observations with their entities. Long multi-word input searches every retained term. Queries beyond the server-configured guardrails are truncated; the response reports queryTruncated, the effective query, and queryLimits.',
     inputSchema: {
       type: 'object' as const,
       properties: {

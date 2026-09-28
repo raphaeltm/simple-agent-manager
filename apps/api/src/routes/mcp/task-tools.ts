@@ -17,7 +17,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { escapeSearchQueryForLike, normalizeSearchQuery } from '../../lib/search-query-limits';
+import { getSearchQueryLikePatterns, normalizeSearchQuery } from '../../lib/search-query-limits';
 import { ulid } from '../../lib/ulid';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
@@ -747,12 +747,12 @@ export async function handleSearchTasks(
   const searchLimit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskSearchMax);
 
   const db = drizzle(env.DATABASE, { schema });
-  const searchPattern = `%${escapeSearchQueryForLike(query)}%`;
-  const titleOrDescriptionMatch = sql<boolean>`(${schema.tasks.title} LIKE ${searchPattern} ESCAPE '\\' OR ${schema.tasks.description} LIKE ${searchPattern} ESCAPE '\\')`;
-
   const conditions: SQL[] = [
     eq(schema.tasks.projectId, tokenData.projectId),
-    titleOrDescriptionMatch,
+    ...getSearchQueryLikePatterns(query).map(
+      (pattern) =>
+        sql<boolean>`(${schema.tasks.title} LIKE ${pattern} ESCAPE '\\' OR ${schema.tasks.description} LIKE ${pattern} ESCAPE '\\')`
+    ),
   ];
 
   if (status) {
