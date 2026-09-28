@@ -5,10 +5,10 @@ import {
   loadRuntimeRecoveryContext,
   persistRuntimeRecovered,
   persistRuntimeRecovering,
-  persistRuntimeRecoveryFailed,
   RUNTIME_RECOVERING_MESSAGE,
   RUNTIME_REQUEST_INTERRUPTED_MESSAGE,
 } from '../../src/durable-objects/vm-agent-container-recovery';
+import { persistRuntimeRecoveryFailed } from '../../src/durable-objects/vm-agent-container-recovery-failure';
 import type { Env } from '../../src/env';
 import {
   seedInstallation,

@@ -21,9 +21,12 @@ vi.mock('../../../src/durable-objects/vm-agent-container-recovery', async (impor
     loadRuntimeRecoveryContext: recoveryMocks.loadContext,
     persistRuntimeRecovering: recoveryMocks.persistRecovering,
     persistRuntimeRecovered: recoveryMocks.persistRecovered,
-    persistRuntimeRecoveryFailed: recoveryMocks.persistFailed,
   };
 });
+
+vi.mock('../../../src/durable-objects/vm-agent-container-recovery-failure', () => ({
+  persistRuntimeRecoveryFailed: recoveryMocks.persistFailed,
+}));
 
 vi.mock('../../../src/services/jwt', () => ({
   signNodeCallbackToken: recoveryMocks.signNodeCallbackToken,
