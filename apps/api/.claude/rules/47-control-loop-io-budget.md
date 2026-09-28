@@ -109,6 +109,19 @@ until the budget refreshes and must not silently drop the candidate.
    exhausts all safe candidates while still above its target, surface an explicit
    target-unreachable health state and emit an error-severity operator alert.
 
+10. **An alarm schedule must come from the record its sweep acts on.** Compute a
+    section's next alarm from the same query and per-row "next check" record the
+    sweep selects with. Never compute it from a nearby signal the sweep only partly
+    acts on (activity plus a check interval, when the sweep acts at activity plus a
+    timeout): every row the sweep skips then re-arms the alarm at its floor. Every
+    row the sweep examines must leave with a later next check or be deleted, and
+    that write must happen before any await, because other requests interleave
+    across awaits (`.claude/rules/45`). Incident: the ProjectData workspace idle
+    section scheduled rows at `lastActivity + 5 min` while its sweep acted at
+    `lastActivity + timeout` (2 h). One quiet active session re-armed the alarm 110
+    times at the 60 s floor, and 19 of 25 production objects fired ~1,450 alarms a
+    day (PR #2170, `project-data/workspace-idle-timeouts.ts`).
+
 ## Required Tests
 
 For every new or changed sweep/reconcile candidate class, include a zombie
@@ -140,6 +153,10 @@ prevention regression test:
 - For budgeted diagnosis/triage loops, prove budget exhaustion persists a
   retryable deferral, the candidate is skipped before refresh, retried after
   refresh, and is not counted against ordinary failure/rejection limits.
+- For an alarm section, drive the real section scheduler and the sweep together in
+  a loop, firing the sweep at each time the scheduler returns, and assert the exact
+  sequence of fire times. A row the sweep skips while the scheduler keeps re-arming
+  it then fails the test instead of passing every single-tick assertion.
 
 ## Reviewer Checklist
 
@@ -164,6 +181,8 @@ Before merging a PR that touches an alarm, cron, sweep, or reconcile loop:
       test prove that branch was not weakened?
 - [ ] Do warning-or-worse resource-safety states and target-unreachable remediation
       states reach an existing operator-visible alert channel with tests?
+- [ ] Is the section's alarm computed from the same query and per-row next-check
+      record its sweep uses, with every examined row pushed out before any await?
 
 ## References
 
