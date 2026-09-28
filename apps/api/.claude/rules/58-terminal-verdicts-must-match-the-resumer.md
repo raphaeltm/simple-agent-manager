@@ -176,6 +176,7 @@ running agent session, and the container DO tests mocked `loadRuntimeRecoveryCon
 ## References
 
 - Task: `tasks/archive/2026-08-17-fix-slept-session-classified-as-dead.md`
+- Task (the round trip): `tasks/archive/2026-09-28-instant-idle-sleep-wake.md`
 - `.claude/rules/02-quality-gates.md` — "sleep, wake, restore, replacement, probe failure,
   and unknown state are inconclusive"; one shared lifecycle classifier
 - `.claude/rules/47-control-loop-io-budget.md` — bounded escape paths, I/O budget
