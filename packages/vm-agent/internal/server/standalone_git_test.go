@@ -31,10 +31,11 @@ func runStandaloneCredScriptWithEnv(t *testing.T, arg, stdin string, env map[str
 	}
 	cmd := exec.Command("/bin/sh", path, arg)
 	cmd.Stdin = strings.NewReader(stdin)
-	cmd.Env = os.Environ()
+	overrides := make([]string, 0, len(env))
 	for key, value := range env {
-		cmd.Env = append(cmd.Env, key+"="+value)
+		overrides = append(overrides, key+"="+value)
 	}
+	cmd.Env = hermeticEnv(overrides...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run script: %v (out=%q)", err, out)
@@ -54,11 +55,44 @@ func TestRenderStandaloneGitCredentialHelperScriptUsesConfiguredTimeout(t *testi
 	}
 }
 
-func TestStandaloneGitCredentialHelperServesTokenForGitHub(t *testing.T) {
+// TestStandaloneGitCredentialFillExchangesInsteadOfServingSessionGHToken drives
+// the credential lookup `git fetch` performs — git itself, configured the way
+// ConfigureStandaloneGitCredentialHelper configures it — through the rendered
+// helper and the real /git-credential handler. The session's GH_TOKEN is stale
+// by construction: a GitHub App installation token expires an hour after the
+// session starts, so git must get the freshly minted token instead.
+func TestStandaloneGitCredentialFillExchangesInsteadOfServingSessionGHToken(t *testing.T) {
 	t.Parallel()
-	out := runStandaloneCredScript(t, "get", "protocol=https\nhost=github.com\n\n", "ghs_secret123")
-	if !strings.Contains(out, "username=x-access-token") || !strings.Contains(out, "password=ghs_secret123") {
-		t.Fatalf("expected github creds, got %q", out)
+	exchange := newStandaloneCredentialExchange(t, "ws-instant", http.StatusOK, "fresh-exchange-token")
+
+	cmd := exec.Command("git",
+		"-c", "credential.helper="+exchange.helperPath,
+		"-c", "credential.useHttpPath=true",
+		"credential", "fill")
+	cmd.Stdin = strings.NewReader("url=https://github.com/octo/repo.git\n\n")
+	cmd.Env = append(exchange.agentEnv("stale-session-token"),
+		"HOME="+t.TempDir(),
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_TERMINAL_PROMPT=0",
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git credential fill: %v (out=%q)", err, out)
+	}
+
+	if !strings.Contains(string(out), "username=x-access-token\npassword=fresh-exchange-token\n") {
+		t.Fatalf("git credential fill = %q, want the freshly exchanged token", out)
+	}
+	if strings.Contains(string(out), "stale-session-token") {
+		t.Fatalf("git was served the stale session GH_TOKEN: %q", out)
+	}
+	if got := exchange.mintCalls.Load(); got != 1 {
+		t.Fatalf("control plane token mints = %d, want 1", got)
+	}
+	query := exchange.lastRequestQuery()
+	if query.Get("workspaceId") != "ws-instant" || query.Get("host") != "github.com" || query.Get("path") != "octo/repo.git" {
+		t.Fatalf("exchange query = %v, want the workspace, host, and repository path", query)
 	}
 }
 
@@ -157,11 +191,11 @@ func TestStandaloneGitCredentialHelperRequiresPathForGitLab(t *testing.T) {
 	}
 }
 
-func TestStandaloneGitCredentialHelperNoTokenNoOutput(t *testing.T) {
+func TestStandaloneGitCredentialHelperNoWorkspaceNoOutput(t *testing.T) {
 	t.Parallel()
-	out := runStandaloneCredScript(t, "get", "protocol=https\nhost=github.com\n\n", "")
+	out := runStandaloneCredScript(t, "get", "protocol=https\nhost=github.com\n\n", "session-token")
 	if out != "" {
-		t.Fatalf("expected no output without GH_TOKEN, got %q", out)
+		t.Fatalf("expected no output without workspace context, got %q", out)
 	}
 }
 

@@ -132,9 +132,55 @@ Tells:
   main teardown writers are covered through their real production entry points, not only by
   calling the shared finalizer directly.
 
+## The Round Trip: The Resumer Must Accept What The Sleeper Leaves
+
+Instant (cf-container) sessions could not wake from idle sleep for weeks, broken twice over while
+every test stayed green (idea `01M3JFFC8R6J1YE0HX0J3PS4TN`):
+
+1. The durable delivery verdict (`resolveVmPromptDeliveryTarget`) refused a sleeping container
+   whose node was `unhealthy` — a value both sleep writers and the wake itself
+   (`persistRuntimeRecovering`) write onto a perfectly wakeable runtime — and waited for its agent
+   session to be `running`, a state only the wake it was blocking could produce.
+2. #2019 narrowed the resumer's own precondition (`loadRuntimeRecoveryContext`,
+   `persistRuntimeRecovering`) to exclude `sleeping`, the state every sleep writer leaves, while
+   its task listed "legitimate sleep/restore behavior remains green" as an acceptance criterion.
+
+The two halves were never run against each other: delivery tests hand-fed a healthy node and a
+running agent session, and the container DO tests mocked `loadRuntimeRecoveryContext`.
+
+- **A marker a lifecycle writer puts on a wakeable runtime is not evidence it is gone.** Before a
+  verdict reads `health_status`, a `sleeping`/`recovery` status, or any similar mirror, name the
+  writer that sets it to mean "gone". If the only writers are the sleep, wake, or recovery paths,
+  the verdict must not read it.
+- **Changing a resumer's precondition requires a round-trip test**: run every real writer that
+  leaves the resource asleep, then the real precondition, on one real SQL engine. A test that
+  mocks the precondition cannot see it exclude the sleeper's state. See
+  `tests/integration/instant-idle-sleep-wake.test.ts` and the sleep-wake cases in
+  `tests/workers/instant-runtime-recovery-persistence.test.ts`.
+- **Admitting a state to a wake precondition turns every request that reaches it into a wake**
+  (`.claude/rules/67`). Enumerate those callers and give the ones that only signal a live runtime
+  their own check. Here the stop route's pre-teardown signal woke a slept Instant container only
+  for the same request's teardown to destroy it, and the wake raced that teardown into a 500 on
+  staging. Every signal-only caller (chat stop and cancel, the workspace page's stop and suspend,
+  SAM's `stop_subtask`) and the session-activity probe now share one check,
+  `services/sleeping-container-runtime.ts`, and skip a sleeping runtime. A check on the agent
+  session's status alone is not enough: the session sleep marks only the session it sleeps, so a
+  second session on the same slept node still reads `running`.
+- **A wake is finished only when every marker the sleeper wrote is cleared.** The container DO
+  restored the runtime and its D1 rows, but only durable delivery cleared ProjectData's `sleeping`
+  and the snapshot's `sleeping_at`. An attention answer or `/resume` left them, so
+  `prepareSessionSnapshot` discarded every checkpoint the woken agent took and the next sleep
+  reused the old snapshot as verified: the work was gone at the following wake. The resumer now
+  commits every unguarded wake itself (`services/container-wake-commit.ts`), so no caller can
+  forget.
+
 ## Quick Compliance Check
 
 - [ ] The terminal verdict reads the resumer's own record, not just a status enum
+- [ ] No verdict reads a marker that only sleep/wake/recovery writers set
+- [ ] A changed resumer precondition has a round-trip test through the real sleep writers
+- [ ] Callers that reach a widened wake precondition only to signal have their own non-waking check
+- [ ] Every path that wakes the resource leaves every mirror the sleeper wrote awake, not only D1
 - [ ] A comment names the resumer function the predicate mirrors
 - [ ] Any extra strictness vs. the resumer is justified in that comment
 - [ ] Preserve verdicts are bounded by an env-configurable retention; absent bound → terminal
@@ -148,6 +194,7 @@ Tells:
 ## References
 
 - Task: `tasks/archive/2026-08-17-fix-slept-session-classified-as-dead.md`
+- Task (the round trip): `tasks/archive/2026-09-28-instant-idle-sleep-wake.md`
 - `.claude/rules/02-quality-gates.md` — "sleep, wake, restore, replacement, probe failure,
   and unknown state are inconclusive"; one shared lifecycle classifier
 - `.claude/rules/47-control-loop-io-budget.md` — bounded escape paths, I/O budget

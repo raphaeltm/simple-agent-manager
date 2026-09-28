@@ -11,6 +11,7 @@ import { getUserId } from '../middleware/auth';
 import { requireProjectCapability } from '../middleware/project-auth';
 import * as chatPersistence from '../services/chat-persistence';
 import { ensureSessionTaskBacked } from '../services/session-task-repair';
+import { isSleepingContainerRuntime } from '../services/sleeping-container-runtime';
 import { isExecutableTaskStatus, isTaskStatus } from '../services/task-status';
 import {
   cleanupTerminalTaskResources,
@@ -131,8 +132,9 @@ async function stopTaskBackedSession(
  * — and kept spending tokens — until teardown reaped it.
  *
  * Strictly best-effort, and deliberately so. The dominant UI path archives an
- * already-sleeping session, where there is no live workspace at all and
- * `resolveLiveAgentSessionForChat` throws a 404 by design. Archive must succeed
+ * already-sleeping session. A sleeping VM session has no live workspace at all, so
+ * `resolveLiveAgentSessionForChat` throws a 404 by design; a sleeping Instant
+ * session still resolves, and is skipped rather than woken. Archive must succeed
  * regardless of whether anything was there to signal, so every failure here is
  * logged and swallowed. Unlike `/cancel` (which keeps the session alive and
  * therefore must record a turn end), the teardown that follows is what
@@ -149,6 +151,17 @@ async function signalAgentStopBestEffort(
       sessionId: context.sessionId,
       userId: context.userId,
     });
+    if (isSleepingContainerRuntime(workspace)) {
+      // Nothing runs in a sleeping Instant container, and a request would wake it
+      // only for the teardown below to destroy it, racing that teardown's claim on
+      // the node row.
+      log.info('chat.stop_agent_signal_skipped', {
+        projectId: context.projectId,
+        sessionId: context.sessionId,
+        reason: 'runtime_sleeping',
+      });
+      return;
+    }
 
     const {
       cancelAgentSessionOnNode,

@@ -75,6 +75,18 @@ const targetRow = {
   snapshot_runtime: null as string | null,
 };
 
+/** The rows the sleep writers leave behind for an idle-slept Instant runtime. */
+const sleptContainerRow = {
+  ...targetRow,
+  workspace_status: 'sleeping',
+  node_status: 'sleeping',
+  node_health_status: 'unhealthy',
+  node_runtime: 'cf-container',
+  agent_session_status: 'sleeping',
+  snapshot_sleep_status: 'sleeping',
+  snapshot_runtime: 'cf-container',
+};
+
 function envWithTarget(row: typeof targetRow | null = targetRow): Env {
   return {
     DATABASE: {
@@ -367,18 +379,41 @@ describe('VM prompt delivery adapter', () => {
     }
   );
 
+  it('probes a slept container marked unhealthy, since the probe is what wakes it', async () => {
+    mocks.nodeAgentRequest.mockRejectedValue(new Error('connection timeout'));
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget(sleptContainerRow));
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'retry',
+      reason: 'not_ready',
+    });
+    expect(mocks.nodeAgentRequest).toHaveBeenCalledOnce();
+    expect(mocks.reportSessionRecoveryRefusal).not.toHaveBeenCalled();
+  });
+
+  // Control (`.claude/rules/61`): only the slept-container verdict stopped reading the health
+  // mirror. A live VM target on an unhealthy node is still refused before any probe.
+  it('still refuses a live VM target whose node is unhealthy, without probing it', async () => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({ ...targetRow, node_health_status: 'unhealthy' })
+    );
+
+    await expect(adapter.submit(input(false))).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'dead_target',
+    });
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+    expect(mocks.reportSessionRecoveryRefusal).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['deleted workspace', { workspace_status: 'deleted' }],
-    ['deleted node', { workspace_status: 'sleeping', node_status: 'deleted' }],
-    ['stopped agent session', { workspace_status: 'sleeping', agent_session_status: 'stopped' }],
+    ['deleted node', { node_status: 'deleted' }],
+    ['node that is not a container', { node_runtime: 'vm' }],
+    ['stopped agent session', { agent_session_status: 'stopped' }],
   ])('reports a failed wake for a sleeping container with a %s', async (_label, overrides) => {
     const adapter = new DefaultVmPromptDeliveryAdapter(
-      envWithTarget({
-        ...targetRow,
-        node_runtime: 'cf-container',
-        snapshot_sleep_status: 'sleeping',
-        ...overrides,
-      })
+      envWithTarget({ ...sleptContainerRow, ...overrides })
     );
 
     await expect(adapter.submit(input(false))).resolves.toMatchObject({

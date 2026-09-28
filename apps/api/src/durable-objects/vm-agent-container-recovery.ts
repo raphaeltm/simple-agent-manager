@@ -3,9 +3,6 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
-import { ulid } from '../lib/ulid';
-import * as projectDataService from '../services/project-data';
 
 export const RUNTIME_RECOVERING_MESSAGE =
   'Instant session interrupted; restoring the last safe checkpoint.';
@@ -88,7 +85,24 @@ export function toRuntimeRecoveryTarget(
   };
 }
 
-const ACTIVE_TASK_STATUSES = ['in_progress', 'delegated', 'awaiting_followup'] as const;
+/**
+ * Workspace and node statuses the container DO may wake a runtime from, in place.
+ * `sleeping` is what every sleep writer leaves behind (`persistRuntimeSleeping`,
+ * `persistRuntimeSleepingAfterRevokedWake`, the scheduled sleep in
+ * `services/session-sleep-execution.ts`); `error` is a container that failed while
+ * running. Deletion states stay out, so a wake can never revive a runtime that
+ * deletion has quarantined.
+ */
+export const IN_PLACE_WAKEABLE_STATUSES: readonly string[] = [
+  'running',
+  'creating',
+  'recovery',
+  'error',
+  'sleeping',
+];
+const IN_PLACE_WAKEABLE_STATUSES_SQL = IN_PLACE_WAKEABLE_STATUSES.map(
+  (status) => `'${status}'`
+).join(', ');
 
 export async function loadRuntimeRecoveryContext(
   env: Env,
@@ -106,10 +120,10 @@ export async function loadRuntimeRecoveryContext(
     .where(
       and(
         eq(schema.workspaces.id, input.workspaceId),
-        inArray(schema.workspaces.status, ['running', 'creating', 'recovery', 'error']),
+        inArray(schema.workspaces.status, [...IN_PLACE_WAKEABLE_STATUSES]),
         isNull(schema.workspaces.runtimeDeletionConfirmedAt),
         eq(schema.nodes.runtime, 'cf-container'),
-        inArray(schema.nodes.status, ['running', 'creating', 'recovery', 'error'])
+        inArray(schema.nodes.status, [...IN_PLACE_WAKEABLE_STATUSES])
       )
     )
     .get();
@@ -158,7 +172,7 @@ export async function persistRuntimeRecovering(
          AND user_id = ?
          AND runtime = 'cf-container'
          AND runtime_incarnation_id IS ?
-         AND status IN ('running', 'creating', 'recovery', 'error')
+         AND status IN (${IN_PLACE_WAKEABLE_STATUSES_SQL})
          AND EXISTS (
            SELECT 1 FROM workspaces w
            WHERE w.id = ?
@@ -166,7 +180,7 @@ export async function persistRuntimeRecovering(
              AND w.user_id = ?
              AND w.project_id IS ?
              AND w.chat_session_id IS ?
-             AND w.status IN ('running', 'creating', 'recovery', 'error')
+             AND w.status IN (${IN_PLACE_WAKEABLE_STATUSES_SQL})
              AND w.runtime_deletion_confirmed_at IS NULL
          )`
     ).bind(
@@ -189,7 +203,7 @@ export async function persistRuntimeRecovering(
          AND user_id = ?
          AND project_id IS ?
          AND chat_session_id IS ?
-         AND status IN ('running', 'creating', 'recovery', 'error')
+         AND status IN (${IN_PLACE_WAKEABLE_STATUSES_SQL})
          AND runtime_deletion_confirmed_at IS NULL
          AND EXISTS (
            SELECT 1 FROM nodes
@@ -362,211 +376,4 @@ export async function persistRuntimeRecovered(
     ),
   ]);
   return (nodeResult?.meta.changes ?? 0) === 1 && (workspaceResult?.meta.changes ?? 0) === 1;
-}
-
-export async function persistRuntimeRecoveryFailed(
-  env: Env,
-  target: RuntimeRecoveryTarget
-): Promise<boolean> {
-  const db = drizzle(env.DATABASE, { schema });
-  const now = new Date().toISOString();
-  const task = await db
-    .select({ id: schema.tasks.id })
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.workspaceId, target.workspaceId),
-        inArray(schema.tasks.status, [...ACTIVE_TASK_STATUSES])
-      )
-    )
-    .orderBy(desc(schema.tasks.updatedAt))
-    .get();
-
-  const statements: D1PreparedStatement[] = [
-    env.DATABASE.prepare(
-      `UPDATE nodes
-       SET status = 'error', health_status = 'unhealthy', error_message = ?, updated_at = ?
-       WHERE id = ?
-         AND user_id = ?
-         AND runtime = 'cf-container'
-         AND runtime_incarnation_id IS ?
-         AND status = 'recovery'
-         AND EXISTS (
-           SELECT 1 FROM workspaces w
-            WHERE w.id = ?
-              AND w.node_id = nodes.id
-              AND w.user_id = ?
-              AND w.project_id IS ?
-              AND w.chat_session_id IS ?
-              AND w.status = 'recovery'
-              AND w.runtime_deletion_confirmed_at IS NULL
-         )`
-    ).bind(
-      RUNTIME_RECOVERY_DEGRADED_MESSAGE,
-      now,
-      target.nodeId,
-      target.userId,
-      target.runtimeIncarnationId,
-      target.workspaceId,
-      target.userId,
-      target.projectId,
-      target.chatSessionId
-    ),
-    env.DATABASE.prepare(
-      `UPDATE workspaces
-          SET status = 'error', error_message = ?, updated_at = ?
-        WHERE id = ?
-          AND node_id = ?
-          AND user_id = ?
-          AND project_id IS ?
-          AND chat_session_id IS ?
-          AND status = 'recovery'
-          AND runtime_deletion_confirmed_at IS NULL
-          AND EXISTS (
-            SELECT 1 FROM nodes
-             WHERE id = ?
-               AND user_id = ?
-               AND runtime = 'cf-container'
-               AND runtime_incarnation_id IS ?
-               AND status = 'error'
-          )`
-    ).bind(
-      RUNTIME_RECOVERY_DEGRADED_MESSAGE,
-      now,
-      target.workspaceId,
-      target.nodeId,
-      target.userId,
-      target.projectId,
-      target.chatSessionId,
-      target.nodeId,
-      target.userId,
-      target.runtimeIncarnationId
-    ),
-    env.DATABASE.prepare(
-      `UPDATE agent_sessions
-       SET status = 'error', stopped_at = ?, error_message = ?, updated_at = ?
-       WHERE id = ?
-         AND workspace_id = ?
-         AND user_id = ?
-         AND EXISTS (
-           SELECT 1
-             FROM workspaces w
-             JOIN nodes n ON n.id = w.node_id
-            WHERE w.id = ?
-              AND w.node_id = ?
-              AND w.user_id = ?
-              AND w.project_id IS ?
-              AND w.chat_session_id IS ?
-              AND w.status = 'error'
-              AND w.runtime_deletion_confirmed_at IS NULL
-              AND n.user_id = ?
-              AND n.runtime = 'cf-container'
-              AND n.runtime_incarnation_id IS ?
-              AND n.status = 'error'
-         )`
-    ).bind(
-      now,
-      RUNTIME_RECOVERY_DEGRADED_MESSAGE,
-      now,
-      target.agentSessionId,
-      target.workspaceId,
-      target.userId,
-      target.workspaceId,
-      target.nodeId,
-      target.userId,
-      target.projectId,
-      target.chatSessionId,
-      target.userId,
-      target.runtimeIncarnationId
-    ),
-  ];
-
-  if (task) {
-    statements.push(
-      env.DATABASE.prepare(
-        `INSERT INTO task_status_events
-           (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
-         SELECT ?, id, status, 'failed', 'system', ?, ?, ?
-         FROM tasks
-         WHERE id = ?
-           AND status IN ('in_progress', 'delegated', 'awaiting_followup')
-           AND EXISTS (
-             SELECT 1 FROM workspaces w
-              WHERE w.id = ?
-                AND w.node_id = ?
-                AND w.user_id = ?
-                AND w.project_id IS ?
-                AND w.chat_session_id IS ?
-                AND w.status = 'error'
-           )`
-      ).bind(
-        ulid(),
-        target.nodeId,
-        'Instant runtime recovery exhausted',
-        now,
-        task.id,
-        target.workspaceId,
-        target.nodeId,
-        target.userId,
-        target.projectId,
-        target.chatSessionId
-      ),
-      env.DATABASE.prepare(
-        `UPDATE tasks
-         SET status = 'failed', execution_step = NULL, error_message = ?, updated_at = ?
-         WHERE id = ?
-           AND status IN ('in_progress', 'delegated', 'awaiting_followup')
-           AND EXISTS (
-             SELECT 1 FROM workspaces w
-              WHERE w.id = ?
-                AND w.node_id = ?
-                AND w.user_id = ?
-                AND w.project_id IS ?
-                AND w.chat_session_id IS ?
-                AND w.status = 'error'
-           )`
-      ).bind(
-        RUNTIME_RECOVERY_DEGRADED_MESSAGE,
-        now,
-        task.id,
-        target.workspaceId,
-        target.nodeId,
-        target.userId,
-        target.projectId,
-        target.chatSessionId
-      )
-    );
-  }
-
-  const [nodeResult, workspaceResult] = await env.DATABASE.batch(statements);
-  if ((nodeResult?.meta.changes ?? 0) !== 1 || (workspaceResult?.meta.changes ?? 0) !== 1) {
-    return false;
-  }
-
-  await projectDataService
-    .transitionAcpSession(env, target.projectId, target.agentSessionId, 'failed', {
-      actorType: 'system',
-      actorId: target.nodeId,
-      reason: 'Instant runtime recovery exhausted',
-      errorMessage: RUNTIME_RECOVERY_DEGRADED_MESSAGE,
-      workspaceId: target.workspaceId,
-      nodeId: target.nodeId,
-    })
-    .catch((error) => {
-      log.warn('vm_agent_container_recovery.acp_reconcile_failed', {
-        nodeId: target.nodeId,
-        workspaceId: target.workspaceId,
-        error,
-      });
-    });
-  await projectDataService
-    .failSession(env, target.projectId, target.chatSessionId, RUNTIME_RECOVERY_DEGRADED_MESSAGE)
-    .catch((error) => {
-      log.warn('vm_agent_container_recovery.chat_reconcile_failed', {
-        nodeId: target.nodeId,
-        workspaceId: target.workspaceId,
-        error,
-      });
-    });
-  return true;
 }

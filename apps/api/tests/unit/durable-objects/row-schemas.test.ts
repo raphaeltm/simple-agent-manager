@@ -44,8 +44,8 @@ import {
   parseSessionStatus,
   parseSessionStop,
   parseTrailingGroup,
-  parseWorkspaceActivity,
   parseWorkspaceId,
+  parseWorkspaceIdleCheck,
 } from '../../../src/durable-objects/project-data/row-schemas';
 
 // =============================================================================
@@ -550,32 +550,31 @@ describe('parseIdleCleanupSchedule', () => {
   });
 });
 
-describe('parseWorkspaceActivity', () => {
-  it('maps workspace activity with defaults for nulls', () => {
-    const result = parseWorkspaceActivity({
-      workspace_id: 'ws1',
-      session_id: null,
-      last_terminal_activity_at: null,
-      last_message_at: null,
-      session_updated_at: null,
-    });
-    expect(result.workspaceId).toBe('ws1');
-    expect(result.lastTerminalActivityAt).toBe(0);
-    expect(result.lastMessageAt).toBe(0);
-    expect(result.sessionUpdatedAt).toBe(0);
-  });
-
-  it('preserves actual values when non-null', () => {
-    const result = parseWorkspaceActivity({
+describe('parseWorkspaceIdleCheck', () => {
+  it('maps a workspace idle check row', () => {
+    const result = parseWorkspaceIdleCheck({
       workspace_id: 'ws1',
       session_id: 's1',
-      last_terminal_activity_at: 1000,
-      last_message_at: 2000,
-      session_updated_at: 3000,
+      idle_check_retry_count: 2,
+      last_activity_at: 3000,
     });
-    expect(result.lastTerminalActivityAt).toBe(1000);
-    expect(result.lastMessageAt).toBe(2000);
-    expect(result.sessionUpdatedAt).toBe(3000);
+    expect(result).toEqual({
+      workspaceId: 'ws1',
+      sessionId: 's1',
+      idleCheckRetryCount: 2,
+      lastActivityAt: 3000,
+    });
+  });
+
+  it('rejects a row without a session to report through', () => {
+    expect(() =>
+      parseWorkspaceIdleCheck({
+        workspace_id: 'ws1',
+        session_id: null,
+        idle_check_retry_count: 0,
+        last_activity_at: 3000,
+      })
+    ).toThrow(/workspace_idle_check/);
   });
 });
 

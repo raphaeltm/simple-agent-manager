@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
-import { agentSessionRoutes } from '../../../src/routes/workspaces/agent-sessions';
+import { agentSessionSuspendResumeRoutes } from '../../../src/routes/workspaces/agent-session-suspend-resume';
 
 // Must match RUNTIME_REQUEST_INTERRUPTED_MESSAGE in
 // src/durable-objects/vm-agent-container-recovery.ts (inlined to keep this unit
@@ -12,7 +12,7 @@ const RUNTIME_REQUEST_INTERRUPTED_MESSAGE =
   'Your message is saved, but delivery was interrupted and its execution outcome is unknown. It was not replayed automatically. After restore finishes, check the transcript and partial output before deciding whether to send it again.';
 
 const mocks = vi.hoisted(() => ({
-  getOwnedWorkspace: vi.fn(),
+  getOwnedNodeAgentSession: vi.fn(),
   getOwnedNode: vi.fn(),
   resumeVmAgentContainer: vi.fn(),
   resumeAgentSessionOnNode: vi.fn(),
@@ -54,8 +54,7 @@ vi.mock('../../../src/auth', () => ({
 }));
 
 vi.mock('../../../src/routes/workspaces/_helpers', () => ({
-  assertNodeOperational: vi.fn(),
-  getOwnedWorkspace: mocks.getOwnedWorkspace,
+  getOwnedNodeAgentSession: mocks.getOwnedNodeAgentSession,
   getOwnedNode: mocks.getOwnedNode,
 }));
 
@@ -70,11 +69,11 @@ vi.mock('../../../src/services/vm-agent-container', () => ({
   resumeVmAgentContainer: mocks.resumeVmAgentContainer,
 }));
 
-// The resume route reads the session via select().from().where().limit(1) both
-// BEFORE recovery (initial snapshot) and AFTER a successful cf-container recovery
-// (re-fetch). Returning a fresh COPY of mocks.session each call models D1: the
-// initial read captures the pre-recovery row, and the re-fetch reflects whatever
-// the DO's persistRuntimeRecovered wrote during resumeVmAgentContainer.
+// The route reads the session BEFORE recovery through getOwnedNodeAgentSession (mocked
+// above) and re-fetches it AFTER a successful cf-container recovery via
+// select().from().where().limit(1). Returning a fresh COPY of mocks.session each time
+// models D1: the first read captures the pre-recovery row, and the re-fetch reflects
+// whatever the DO's persistRuntimeRecovered wrote during resumeVmAgentContainer.
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     select: () => ({
@@ -97,9 +96,8 @@ vi.mock('drizzle-orm/d1', () => ({
 
 // Routes import during collection so cold compilation is outside the callback test deadline.
 function createTestApp() {
-
   const app = new Hono<{ Bindings: Env }>();
-  app.route('/api/workspaces', agentSessionRoutes);
+  app.route('/api/workspaces', agentSessionSuspendResumeRoutes);
   app.onError((error, c) => {
     if (error instanceof AppError) {
       return c.json(error.toJSON(), error.statusCode as 409);
@@ -124,11 +122,11 @@ describe('agent session Instant recovery route', () => {
     mocks.session.errorMessage = 'Runtime unavailable';
     mocks.session.suspendedAt = null;
     mocks.session.stoppedAt = null;
-    mocks.getOwnedWorkspace.mockResolvedValue({
-      id: 'workspace-1',
-      userId: 'user-1',
-      nodeId: 'node-1',
-    });
+    // The pre-recovery read; the route re-fetches the row after a successful recovery.
+    mocks.getOwnedNodeAgentSession.mockImplementation(async () => ({
+      workspace: { id: 'workspace-1', userId: 'user-1', nodeId: 'node-1' },
+      session: { ...mocks.session },
+    }));
     mocks.getOwnedNode.mockResolvedValue({
       id: 'node-1',
       userId: 'user-1',

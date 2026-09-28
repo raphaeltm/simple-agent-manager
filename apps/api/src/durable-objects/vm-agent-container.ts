@@ -1,10 +1,11 @@
-// FILE SIZE EXCEPTION: Durable Object recovery state machine — method groups are already extracted into vm-agent-container-{recovery,runtime,lifecycle,active-work}.ts; the remaining class body is the interlocking mutex-guarded lifecycle critical sections (rule 45), which must stay reviewable as one unit. See .claude/rules/18-file-size-limits.md
+// FILE SIZE EXCEPTION: Durable Object recovery state machine — method groups are already extracted into vm-agent-container-{recovery,recovery-failure,runtime,lifecycle,active-work}.ts; the remaining class body is the interlocking mutex-guarded lifecycle critical sections (rule 45), which must stay reviewable as one unit. See .claude/rules/18-file-size-limits.md
 import { Container, switchPort } from '@cloudflare/containers';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
+import { commitContainerWakeFromSleep } from '../services/container-wake-commit';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 import {
   isSessionRecoverySourceTaskGuardFullyValidForEnv,
@@ -28,7 +29,6 @@ import {
   loadRuntimeRecoveryContext,
   persistRuntimeRecovered,
   persistRuntimeRecovering,
-  persistRuntimeRecoveryFailed,
   RUNTIME_RECOVERING_MESSAGE,
   RUNTIME_RECOVERY_DEGRADED_MESSAGE,
   RUNTIME_REQUEST_INTERRUPTED_MESSAGE,
@@ -40,6 +40,7 @@ import {
   type RuntimeRecoveryTrigger,
   toRuntimeRecoveryTarget,
 } from './vm-agent-container-recovery';
+import { persistRuntimeRecoveryFailed } from './vm-agent-container-recovery-failure';
 import {
   interruptedRuntimeRequestResponse as interruptedRequestResponse,
   isMissingSessionHostResponse,
@@ -921,6 +922,10 @@ export class VmAgentContainer extends Container<Env> {
         );
         if (persisted === false) return false;
         await this.assertSourceTaskGuard(sourceTaskGuard);
+        // Under the lock, so an explicit stop queued behind this wake lands after the commit. A
+        // guarded wake is committed by the durable delivery that carries the guard, after its own
+        // revalidation; a guard revoked before then re-sleeps the runtime onto intact markers.
+        if (!sourceTaskGuard) await commitContainerWakeFromSleep(this.env, target);
         await this.ctx.storage.delete(RECOVERY_STATE_KEY);
         await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus);
         return true;

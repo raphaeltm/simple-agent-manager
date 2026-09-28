@@ -17,13 +17,14 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import { runMigrations } from '../../../src/durable-objects/migrations';
 import { nudgePromptDeliveriesForTarget } from '../../../src/durable-objects/project-data/prompt-delivery';
+import { probeStaleSessionActivity } from '../../../src/durable-objects/project-data/session-activity-probe';
 import {
   applyProbeOutcome,
   classifyProbeResponse,
   computeSessionActivityProbeAlarmTime,
-  probeStaleSessionActivity,
   publishTurnEnd,
   selectStaleActivityProbeCandidates,
   type StaleActivityCandidate,
@@ -34,6 +35,7 @@ import {
 } from '../../../src/durable-objects/project-data/session-state';
 import { listAgentSessionsOnNode } from '../../../src/services/node-agent';
 import { recordAcpActivityCallbackMetric } from '../../../src/services/telemetry';
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 vi.mock('../../../src/services/node-agent', () => ({
@@ -1168,6 +1170,101 @@ describe('session activity reconciliation', () => {
           )
           .toArray()[0]?.count
       ).toBe(1);
+    });
+  });
+
+  describe('probe entry point (slept Instant containers)', () => {
+    let d1: Database.Database;
+
+    const hooks = {
+      broadcastEvent: () => {},
+      nudgeDeliveries: () => 0,
+      armIdleCleanup: () => {},
+      recalculateAlarm: async () => {},
+    };
+
+    beforeEach(() => {
+      seedLiveSession();
+      // A wake with no prompt leaves the vm-agent's `recovering` report behind: agent
+      // selection reports it and a successful restore never reports `idle`.
+      upsertActivityState(sql, ACP_SESSION, {
+        activity: 'recovering',
+        now: now - 4 * 60 * 60 * 1000,
+      });
+      vi.mocked(listAgentSessionsOnNode).mockReset();
+      vi.mocked(listAgentSessionsOnNode).mockResolvedValue({
+        sessions: [listedSession('ready')],
+      });
+      d1 = new Database(':memory:');
+      createSchemaTables(d1, [schema.workspaces, schema.nodes]);
+      d1.prepare(
+        `INSERT INTO workspaces (id, user_id, project_id, node_id) VALUES (?, 'user-1', 'proj-1', ?)`
+      ).run(WORKSPACE, NODE);
+    });
+
+    afterEach(() => d1.close());
+
+    function seedNode(runtime: string, status: string, id = NODE): void {
+      d1.prepare(`INSERT INTO nodes (id, user_id, runtime, status) VALUES (?, 'user-1', ?, ?)`).run(
+        id,
+        runtime,
+        status
+      );
+    }
+
+    function probe() {
+      return probeStaleSessionActivity(
+        sql,
+        { DATABASE: createSqliteD1(d1) } as unknown as Parameters<
+          typeof probeStaleSessionActivity
+        >[1],
+        hooks,
+        { thresholdMs: FIVE_MINUTES, projectId: 'proj-1' }
+      );
+    }
+
+    it('ends the stale turn of a slept container without waking it to ask', async () => {
+      seedNode('cf-container', 'sleeping');
+
+      const result = await probe();
+
+      expect(listAgentSessionsOnNode).not.toHaveBeenCalled();
+      expect(result).toEqual({ probed: 1, reconciled: 1 });
+      expect(readState()?.activity).toBe('idle');
+    });
+
+    it.each([
+      ['an awake Instant container', 'cf-container', 'running'],
+      ['a VM', 'vm', 'running'],
+    ])('still asks %s', async (_label, runtime, status) => {
+      seedNode(runtime, status);
+
+      const result = await probe();
+
+      expect(listAgentSessionsOnNode).toHaveBeenCalledOnce();
+      expect(result).toEqual({ probed: 1, reconciled: 1 });
+    });
+
+    it('reads the node it would probe, not the workspace node', async () => {
+      d1.prepare(`UPDATE workspaces SET node_id = 'node-current'`).run();
+      seedNode('cf-container', 'running', 'node-current');
+      seedNode('cf-container', 'sleeping');
+
+      const result = await probe();
+
+      expect(listAgentSessionsOnNode).not.toHaveBeenCalled();
+      expect(result).toEqual({ probed: 1, reconciled: 1 });
+    });
+
+    it('checks the tenant before trusting a sleeping node', async () => {
+      d1.prepare(`UPDATE workspaces SET project_id = 'proj-other'`).run();
+      seedNode('cf-container', 'sleeping');
+
+      const result = await probe();
+
+      expect(result).toEqual({ probed: 1, reconciled: 0 });
+      expect(readState()?.activity).toBe('recovering');
+      expect(readState()?.activity_probe_attempts).toBe(1);
     });
   });
 

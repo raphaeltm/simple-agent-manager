@@ -2373,6 +2373,20 @@ export const MIGRATIONS: Migration[] = [
         USING fts5(content, content='project_data_archive_search_documents', content_rowid='rowid')`);
     },
   },
+  {
+    // The staging-only first version of this migration also created
+    // `idx_workspace_activity_next_idle_check`. No query can use it (the sweep filters on a
+    // computed next-check time), so it was dropped before release; objects that ran that version
+    // keep the unused index, so the index name may not be reused.
+    name: '060-workspace-idle-backoff',
+    run: (sql) => {
+      sql.exec(
+        `ALTER TABLE workspace_activity
+         ADD COLUMN idle_check_retry_count INTEGER NOT NULL DEFAULT 0`
+      );
+      sql.exec(`ALTER TABLE workspace_activity ADD COLUMN next_idle_check_at INTEGER`);
+    },
+  },
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.

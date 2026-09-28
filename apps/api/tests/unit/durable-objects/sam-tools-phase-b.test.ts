@@ -249,6 +249,34 @@ describe('stop_subtask', () => {
       logContext: { projectId: 'proj-1', source: 'sam.stop_subtask' },
     });
   });
+
+  // A request to a slept Instant container restores it first, so stopping one is skipped.
+  it.each([
+    ['leaves a slept Instant container asleep', 'sleeping', 0],
+    ['still stops the agent in an awake Instant container', 'running', 1],
+  ])('%s', async (_label, nodeStatus, stopCalls) => {
+    const { stopAgentSessionOnNode } = await import('../../../src/services/node-agent');
+    vi.mocked(stopAgentSessionOnNode).mockClear();
+    const ctx = buildCtx();
+    const stmt = ctx._db._statement;
+    queueD1Result(stmt, [
+      {
+        id: 'task-1',
+        status: 'queued',
+        workspace_id: 'ws-1',
+        project_id: 'proj-1',
+        title: 'Instant task',
+      },
+    ]);
+    queueD1Result(stmt, [{ id: 'ws-1', node_id: 'node-1' }]);
+    queueD1Result(stmt, [{ id: 'agent-1' }]);
+    queueD1Result(stmt, [{ runtime: 'cf-container', status: nodeStatus }]);
+
+    const result = (await stopSubtask({ taskId: 'task-1' }, ctx)) as Record<string, unknown>;
+
+    expect(result.stopped).toBe(true);
+    expect(stopAgentSessionOnNode).toHaveBeenCalledTimes(stopCalls);
+  });
 });
 
 // ─── retry_subtask ────────────────────────────────────────────────────────────

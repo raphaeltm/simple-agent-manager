@@ -5,10 +5,15 @@ import {
   loadRuntimeRecoveryContext,
   persistRuntimeRecovered,
   persistRuntimeRecovering,
-  persistRuntimeRecoveryFailed,
   RUNTIME_RECOVERING_MESSAGE,
   RUNTIME_REQUEST_INTERRUPTED_MESSAGE,
+  toRuntimeRecoveryTarget,
 } from '../../src/durable-objects/vm-agent-container-recovery';
+import { persistRuntimeRecoveryFailed } from '../../src/durable-objects/vm-agent-container-recovery-failure';
+import {
+  persistRuntimeSleeping,
+  persistRuntimeSleepingAfterRevokedWake,
+} from '../../src/durable-objects/vm-agent-container-runtime';
 import type { Env } from '../../src/env';
 import {
   seedInstallation,
@@ -293,5 +298,119 @@ describe('Instant runtime status reconciliation with Miniflare D1', () => {
         .bind(agentSessionId)
         .first()
     ).toEqual({ status: 'recovery' });
+  });
+});
+
+async function seedLiveInstantRuntime(prefix: string) {
+  const runtime = {
+    userId: `${prefix}-user`,
+    projectId: `${prefix}-project`,
+    nodeId: `${prefix}-node`,
+    workspaceId: `${prefix}-workspace`,
+    chatSessionId: `${prefix}-chat`,
+    agentSessionId: `${prefix}-agent`,
+  };
+  const installationId = `${prefix}-installation`;
+  await seedUser(runtime.userId);
+  await seedInstallation(installationId, runtime.userId, {
+    installationIdValue: `${prefix}-external`,
+  });
+  await seedProject(runtime.projectId, runtime.userId, installationId);
+  await seedNode(runtime.nodeId, runtime.userId, { status: 'running' });
+  await env.DATABASE.prepare(
+    `UPDATE nodes SET runtime = 'cf-container', runtime_incarnation_id = ? WHERE id = ?`
+  )
+    .bind(`${prefix}-incarnation`, runtime.nodeId)
+    .run();
+  await seedWorkspace(runtime.workspaceId, runtime.nodeId, runtime.userId, {
+    projectId: runtime.projectId,
+    status: 'running',
+    chatSessionId: runtime.chatSessionId,
+  });
+  await env.DATABASE.prepare(
+    `INSERT INTO agent_sessions
+       (id, workspace_id, user_id, status, agent_type, created_at, updated_at)
+     VALUES (?, ?, ?, 'running', 'claude-code', datetime('now'), datetime('now'))`
+  )
+    .bind(runtime.agentSessionId, runtime.workspaceId, runtime.userId)
+    .run();
+  return runtime;
+}
+
+async function runtimeStatuses(runtime: {
+  nodeId: string;
+  workspaceId: string;
+  agentSessionId: string;
+}) {
+  const read = (sql: string, id: string) =>
+    env.DATABASE.prepare(sql).bind(id).first<{ status: string }>();
+  return {
+    node: (await read('SELECT status FROM nodes WHERE id = ?', runtime.nodeId))?.status,
+    workspace: (await read('SELECT status FROM workspaces WHERE id = ?', runtime.workspaceId))
+      ?.status,
+    agentSession: (
+      await read('SELECT status FROM agent_sessions WHERE id = ?', runtime.agentSessionId)
+    )?.status,
+  };
+}
+
+describe('Instant runtime in-place wake from sleep with Miniflare D1', () => {
+  it.each([
+    ['the idle sleep', persistRuntimeSleeping],
+    ['a revoked wake', persistRuntimeSleepingAfterRevokedWake],
+  ])('claims a wake from the rows %s leaves behind', async (_writer, sleep) => {
+    const runtime = await seedLiveInstantRuntime(
+      `runtime-sleep-wake-${Date.now()}-${crypto.randomUUID()}`
+    );
+    const bindings = env as unknown as Env;
+    await sleep(bindings, runtime);
+    expect(await runtimeStatuses(runtime)).toEqual({
+      node: 'sleeping',
+      workspace: 'sleeping',
+      agentSession: 'sleeping',
+    });
+
+    const context = await loadRuntimeRecoveryContext(bindings, {
+      workspaceId: runtime.workspaceId,
+    });
+    if (!context) throw new Error('expected the slept runtime to be wakeable in place');
+    const recovering = await persistRuntimeRecovering(
+      bindings,
+      toRuntimeRecoveryTarget(runtime, context)
+    );
+
+    expect(recovering).toMatchObject({ agentSessionId: runtime.agentSessionId });
+    expect(await runtimeStatuses(runtime)).toEqual({
+      node: 'recovery',
+      workspace: 'recovery',
+      agentSession: 'recovery',
+    });
+  });
+
+  it('keeps a slept runtime whose deletion is confirmed out of reach', async () => {
+    const prefix = `runtime-sleep-deleted-${Date.now()}-${crypto.randomUUID()}`;
+    const runtime = await seedLiveInstantRuntime(prefix);
+    const bindings = env as unknown as Env;
+    await persistRuntimeSleeping(bindings, runtime);
+    await env.DATABASE.prepare(
+      `UPDATE workspaces SET runtime_deletion_confirmed_at = datetime('now') WHERE id = ?`
+    )
+      .bind(runtime.workspaceId)
+      .run();
+
+    await expect(
+      loadRuntimeRecoveryContext(bindings, { workspaceId: runtime.workspaceId })
+    ).resolves.toBeNull();
+    await expect(
+      persistRuntimeRecovering(bindings, {
+        ...runtime,
+        runtimeIncarnationId: `${prefix}-incarnation`,
+      })
+    ).resolves.toBeNull();
+    expect(await runtimeStatuses(runtime)).toEqual({
+      node: 'sleeping',
+      workspace: 'sleeping',
+      agentSession: 'sleeping',
+    });
   });
 });

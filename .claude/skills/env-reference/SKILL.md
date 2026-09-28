@@ -72,6 +72,8 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `WRANGLER_PORT` — Local dev port (default: 8787)
 - `BASE_DOMAIN` — Set automatically by sync scripts
 - `SAM_INSTALLATION_ID` — Pulumi-generated, non-secret exact installation identity injected by generated deployment config. Missing or malformed values disable destructive provider-side orphan reconciliation; operators do not set this manually.
+- `GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS` — KV cache TTL for GitHub App installation tokens minted for workspace git access (default: `3000`)
+- `GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS` — Cached GitHub App installation tokens at or inside this margin before `expiresAt` are ignored and refreshed (default: `300`; capped at `1800`, half the one-hour token lifetime)
 - `CF_CONTAINER_ENABLED` — Enables Cloudflare Container instant-session runtime in generated deployment envs (default: `true`; set `false` to force VM runtime)
 - `CF_CONTAINER_SLEEP_AFTER` — Container idle sleep duration for instant-session runtime (default: `1h`)
 - `CF_CONTAINER_ACTIVE_WORK_MAX_MS` — Defensive maximum active-work keepalive duration (default: `7200000`)
@@ -179,6 +181,10 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS` — Wall-clock budget for the stopped-node handoff phase; unstarted candidates remain eligible for the next sweep (default: `20000`)
 - `NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS` — Per-candidate provider/DNS deadline during stopped-node handoff, capped by remaining sweep time; provider failures enter cleanup backoff (default: `5000`)
 - `IDLE_CLEANUP_MAX_RESIDENCE_MS` — Maximum ProjectData idle-cleanup schedule residence before preserved/error outcomes stop re-arming and surface attention (default: `7200000`)
+- `IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP` — Maximum idle-cleanup schedules or workspace idle checks one ProjectData alarm pass takes, and maximum reporter-scoped task candidates inspected per check (default: `5`)
+- `WORKSPACE_IDLE_TIMEOUT_MS` — Installation default for how long an active chat session's workspace can go without messages or terminal activity before ProjectData retires it, once its runtime is conclusively dead; the project Workspace Idle Timeout setting overrides it (default: `7200000`)
+- `WORKSPACE_IDLE_BACKOFF_BASE_MS` — First retry delay after a ProjectData workspace-idle check finds an idle workspace it cannot retire yet: inconclusive task candidates, a live or unprovable runtime, a missing project identity, or a failed check (default: `600000`; `apps/api/src/durable-objects/project-data/workspace-idle-timeouts.ts`)
+- `WORKSPACE_IDLE_BACKOFF_MAX_MS` — Maximum workspace-idle retry delay; the delay doubles from the base and resets on new activity or when the session wakes (default: `21600000`)
 - `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` — Minimum re-arm delay for completed diagnosis steps (default: `1000`)
 - `ORCHESTRATOR_ZERO_TASK_GRACE_MS` — Grace before a zero-task mission terminalizes (default: `600000`)
 - `ORCHESTRATOR_MAX_MISSION_LIFETIME_MS` — Mission lifetime backstop (default: `86400000`)

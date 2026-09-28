@@ -61,10 +61,10 @@ func runStandaloneMode(cfg *config.Config) {
 		os.Exit(1)
 	}
 
-	// Configure git to authenticate GitHub operations using the per-session
-	// GH_TOKEN injected into the agent environment. Without this, the agent's
-	// `git` commands prompt for a username and fail in the non-interactive
-	// container. Non-fatal — the agent can still run without git access.
+	// Configure git and gh to authenticate by exchanging through the local
+	// vm-agent endpoint. Without this, the agent's `git` commands prompt for a username
+	// and fail in the non-interactive container. Non-fatal — the agent can still
+	// run without git access.
 	server.ConfigureStandaloneGitCredentialHelper(cfg.GitCredentialTimeout)
 
 	sigCh := make(chan os.Signal, 1)

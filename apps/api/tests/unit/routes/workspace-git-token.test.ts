@@ -667,7 +667,8 @@ describe('workspace git-token GitHub scoping', () => {
       '120081765',
       'raph/sam',
       'user-1',
-      'project-access'
+      'project-access',
+      mockEnv
     );
     expect(getInstallationToken).toHaveBeenCalledWith('120081765', mockEnv, {
       repositoryIds: [42],
@@ -857,7 +858,8 @@ describe('workspace git-token GitHub scoping', () => {
       '120081765',
       'raph/sam',
       'member-user',
-      'project-access'
+      'project-access',
+      mockEnv
     );
     expect(getInstallationToken).toHaveBeenCalledWith('120081765', mockEnv, {
       repositoryIds: [42],

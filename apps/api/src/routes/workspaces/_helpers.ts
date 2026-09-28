@@ -286,6 +286,46 @@ export async function getOwnedWorkspace(
   return workspace;
 }
 
+/** The caller's agent session on the given workspace, or a 404. */
+export async function getOwnedAgentSession(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspaceId: string,
+  sessionId: string,
+  userId: string
+): Promise<schema.AgentSession> {
+  const [session] = await db
+    .select()
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.id, sessionId),
+        eq(schema.agentSessions.workspaceId, workspaceId),
+        eq(schema.agentSessions.userId, userId)
+      )
+    )
+    .limit(1);
+  if (!session) {
+    throw errors.notFound('Agent session');
+  }
+  return session;
+}
+
+/** The caller's workspace, which must be attached to a node, and their agent session on it. */
+export async function getOwnedNodeAgentSession(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspaceId: string,
+  sessionId: string,
+  userId: string
+): Promise<{ workspace: schema.Workspace & { nodeId: string }; session: schema.AgentSession }> {
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  const { nodeId } = workspace;
+  if (!nodeId) {
+    throw errors.badRequest('Workspace is not attached to a node');
+  }
+  const session = await getOwnedAgentSession(db, workspace.id, sessionId, userId);
+  return { workspace: { ...workspace, nodeId }, session };
+}
+
 export async function getOwnedNode(
   db: ReturnType<typeof drizzle<typeof schema>>,
   nodeId: string,

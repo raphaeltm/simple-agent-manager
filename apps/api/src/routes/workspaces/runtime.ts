@@ -747,12 +747,16 @@ async function verifyWorkspaceGitHubOwnerAccess(input: {
     throw errors.forbidden('GitHub user token unavailable');
   }
 
+  // Every git and gh credential exchange lands here, so pass env to use the
+  // short user-access cache (GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS) instead of a
+  // paginated GitHub repository listing per operation.
   const verifiedRepo = await assertRepositoryAccess(
     accessToken,
     input.externalInstallationId,
     input.repository,
     input.userId,
-    'project-access'
+    'project-access',
+    input.env
   );
 
   if (input.githubRepoId !== null && verifiedRepo.id !== input.githubRepoId) {

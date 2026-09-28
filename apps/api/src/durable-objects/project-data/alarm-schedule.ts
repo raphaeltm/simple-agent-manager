@@ -24,6 +24,7 @@ import { computeSessionActivityProbeAlarmTime } from './session-activity-reconci
 import { computeStorageSafetyAlarmTime } from './storage-safety-alarm-time';
 import { computeTaskWaitAlarmTime } from './task-waits';
 import type { Env } from './types';
+import * as workspaceIdleTimeouts from './workspace-idle-timeouts';
 
 const log = createModuleLogger('project_data.alarm_schedule');
 
@@ -87,27 +88,17 @@ export function computeProjectDataAlarmSectionTimes(
       return failedRetryAt;
     }
   };
-  const idleTimes = (() => {
-    try {
-      return idleCleanup.computeIdleAlarmTimes(sql);
-    } catch (error) {
-      log.error('section_schedule_failed', {
-        projectId,
-        section: 'workspace_idle_timeouts+expired_idle_cleanups',
-        error: error instanceof Error ? error.message : String(error),
-        retryAt: failedRetryAt,
-      });
-      return { idleCleanupTime: failedRetryAt, workspaceIdleCheckTime: failedRetryAt };
-    }
-  })();
-
   return {
     runtime_heartbeat_timeouts: compute('runtime_heartbeat_timeouts', () =>
       acpSessions.computeHeartbeatAlarmTime(sql, env)
     ),
     storage_safety: compute('storage_safety', () => computeStorageSafetyAlarmTime(sql, env)),
-    workspace_idle_timeouts: idleTimes.workspaceIdleCheckTime,
-    expired_idle_cleanups: idleTimes.idleCleanupTime,
+    workspace_idle_timeouts: compute('workspace_idle_timeouts', () =>
+      workspaceIdleTimeouts.computeWorkspaceIdleAlarmTime(sql, now)
+    ),
+    expired_idle_cleanups: compute('expired_idle_cleanups', () =>
+      idleCleanup.computeIdleCleanupAlarmTime(sql)
+    ),
     task_reconciliation: compute('task_reconciliation', () =>
       reconciliation.computeReconciliationAlarmTime(sql, env)
     ),

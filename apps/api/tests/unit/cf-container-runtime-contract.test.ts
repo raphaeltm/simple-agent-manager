@@ -280,6 +280,24 @@ describe('cf-container runtime spike contracts', () => {
     expect(bootstrap).not.toContain('curl ');
   });
 
+  it('puts the vm-agent gh shim directory first on the instant image PATH', () => {
+    // The standalone vm-agent runs as `node` and installs its gh shim into this
+    // directory. The shim only shadows the system gh because the image lists
+    // the directory first on PATH and lets `node` write to it.
+    const dockerfile = readPackage('Dockerfile.vm-agent-container');
+    const shimSource = readFileSync(
+      join(apiPackageRoot, '../../packages/vm-agent/internal/server/standalone_gh_shim.go'),
+      'utf8'
+    );
+    const shimDir = shimSource.match(/const standaloneGhShimDir = "([^"]+)"/)?.[1];
+    const imagePath = dockerfile.match(/\bPATH=(\S+)/)?.[1];
+
+    expect(shimDir).toMatch(/^\/var\/lib\/vm-agent\//);
+    expect(imagePath?.split(':')[0]).toBe(shimDir);
+    expect(dockerfile).toMatch(new RegExp(`mkdir -p [^\\n]*${shimDir}(\\s|$)`));
+    expect(dockerfile).toContain('chown -R node:node /workspaces /var/lib/vm-agent');
+  });
+
   it('bakes no secrets into the container image (no ARG or secret-bearing ENV)', () => {
     const dockerfile = readPackage('Dockerfile.vm-agent-container');
 
