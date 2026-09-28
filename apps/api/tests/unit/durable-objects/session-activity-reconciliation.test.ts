@@ -19,11 +19,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
 import { nudgePromptDeliveriesForTarget } from '../../../src/durable-objects/project-data/prompt-delivery';
+import { probeStaleSessionActivity } from '../../../src/durable-objects/project-data/session-activity-probe';
 import {
   applyProbeOutcome,
   classifyProbeResponse,
   computeSessionActivityProbeAlarmTime,
-  probeStaleSessionActivity,
   publishTurnEnd,
   selectStaleActivityProbeCandidates,
   type StaleActivityCandidate,

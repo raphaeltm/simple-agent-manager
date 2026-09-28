@@ -87,6 +87,7 @@ import * as promptDelivery from './prompt-delivery';
 import * as reconciliation from './reconciliation';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
+import * as sessionActivityProbe from './session-activity-probe';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
@@ -250,7 +251,7 @@ export class ProjectData extends DurableObject<Env> {
    *   - `syncSummaryToD1()`             — debounced D1 write-back of project summary
    *   - `alarm()` → `idleCleanup.checkWorkspaceIdleTimeouts` / `processExpiredCleanups`
    *   - `alarm()` → `reconciliation.processReconciliationCandidates`
-   *   - `alarm()` → `sessionActivityReconciliation.probeStaleSessionActivity`
+   *   - `alarm()` → `sessionActivityProbe.probeStaleSessionActivity`
    *   - `processTaskWaits` via the `getProjectId` hook
    *   - `durabilityHooks().getProjectId` — durable-execution metrics, prompt delivery
    *
@@ -2512,7 +2513,7 @@ export class ProjectData extends DurableObject<Env> {
         );
         // Network I/O stays OFF the alarm's critical path — rule 47.
         this.ctx.waitUntil(
-          sessionActivityReconciliation
+          sessionActivityProbe
             .probeStaleSessionActivity(this.sql, this.env, this.sessionActivityHooks(), {
               thresholdMs: staleThresholdMs,
               projectId: this.getProjectId(),
