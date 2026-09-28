@@ -157,12 +157,18 @@ running agent session, and the container DO tests mocked `loadRuntimeRecoveryCon
   mocks the precondition cannot see it exclude the sleeper's state. See
   `tests/integration/instant-idle-sleep-wake.test.ts` and the sleep-wake cases in
   `tests/workers/instant-runtime-recovery-persistence.test.ts`.
+- **Admitting a state to a wake precondition turns every request that reaches it into a wake**
+  (`.claude/rules/67`). Enumerate those callers and give the ones that only signal a live runtime
+  their own check. Here the stop route's pre-teardown signal woke a slept Instant container only
+  for the same request's teardown to destroy it, and the wake raced that teardown into a 500 on
+  staging. The stop and cancel routes now skip a sleeping runtime (`isSleepingContainerRuntime`).
 
 ## Quick Compliance Check
 
 - [ ] The terminal verdict reads the resumer's own record, not just a status enum
 - [ ] No verdict reads a marker that only sleep/wake/recovery writers set
 - [ ] A changed resumer precondition has a round-trip test through the real sleep writers
+- [ ] Callers that reach a widened wake precondition only to signal have their own non-waking check
 - [ ] A comment names the resumer function the predicate mirrors
 - [ ] Any extra strictness vs. the resumer is justified in that comment
 - [ ] Preserve verdicts are bounded by an env-configurable retention; absent bound → terminal

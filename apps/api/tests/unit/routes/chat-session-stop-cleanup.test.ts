@@ -57,7 +57,8 @@ vi.mock('../../../src/services/session-task-repair', () => ({
 vi.mock('../../../src/services/task-terminal-cleanup', () => ({
   cleanupTerminalTaskResources: (...args: unknown[]) => mocks.cleanupTerminalTaskResources(...args),
 }));
-vi.mock('../../../src/routes/chat-workspace-resolver', () => ({
+vi.mock('../../../src/routes/chat-workspace-resolver', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/routes/chat-workspace-resolver')>()),
   resolveLiveWorkspaceForSession: vi.fn(),
   resolveLiveAgentSessionForChat: (...args: unknown[]) =>
     mocks.resolveLiveAgentSessionForChat(...args),

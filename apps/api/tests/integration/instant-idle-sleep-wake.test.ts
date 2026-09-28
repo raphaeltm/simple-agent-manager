@@ -18,6 +18,7 @@
 import { buildVmPromptDeliveryCapabilitiesPath } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
@@ -31,6 +32,8 @@ import {
 import * as sessions from '../../src/durable-objects/project-data/sessions';
 import { VmAgentContainer } from '../../src/durable-objects/vm-agent-container';
 import type { Env } from '../../src/env';
+import { AppError } from '../../src/middleware/error';
+import { chatRoutes } from '../../src/routes/chat';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep-execution';
 import {
   completeSessionSnapshot,
@@ -67,6 +70,17 @@ vi.mock('../../src/services/project-data', () => ({
   // The agent handed control back and nothing it started is still running.
   getSessionState: async () => ({ activity: 'idle', activityAt: projectData.idleSince }),
   getAcpSession: async () => null,
+  // The stop and cancel routes, and the teardown behind the stop route.
+  stopSession: async (_env: unknown, _projectId: string, sessionId: string) =>
+    sessions.stopSession(projectDataSql(), sessionId) !== null,
+  recordSessionTurnEnd: async () => {},
+  cleanupWorkspaceActivity: async () => {},
+}));
+
+vi.mock('../../src/middleware/auth', () => ({
+  requireAuth: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  requireApproved: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  getUserId: () => 'user-1',
 }));
 
 vi.mock('../../src/services/jwt', async (importOriginal) => ({
@@ -96,6 +110,8 @@ class ContainerVmAgent {
   running = true;
   starts = 0;
   readonly prompts: string[] = [];
+  /** Cancel/stop signals the agent received, by path. */
+  readonly signals: string[] = [];
   /** Holds a restore open so a test can observe the wake mid-flight. */
   restoreGate: Promise<void> | null = null;
   private notifyRestoreStarted: (() => void) | null = null;
@@ -132,6 +148,14 @@ class ContainerVmAgent {
     if (pathname === `${AGENT_PATH}/hibernate`) {
       await this.captureSnapshot();
       return Response.json({ status: 'pending', accepted: true });
+    }
+    if (pathname === `${AGENT_PATH}/cancel`) {
+      this.signals.push(pathname);
+      return Response.json({ error: 'no prompt in flight' }, { status: 409 });
+    }
+    if (pathname === `${AGENT_PATH}/stop`) {
+      this.signals.push(pathname);
+      return Response.json({ status: 'stopped' });
     }
     if (pathname === `${AGENT_PATH}/prompt`) {
       const body = (await request.json()) as { prompt: string; deliveryId: string };
@@ -239,6 +263,7 @@ describe('Instant session wake after idle sleep', () => {
     Object.assign(instance, {
       startAndWaitForPorts: async () => vmAgent.start(),
       stop: async () => vmAgent.stop(),
+      destroy: async () => vmAgent.stop(),
       getState: async () => ({ status: vmAgent.running ? 'running' : 'stopped' }),
       containerFetch: (request: Request) => vmAgent.fetch(request),
     });
@@ -251,6 +276,9 @@ describe('Instant session wake after idle sleep', () => {
       PROJECT_ID,
       USER_ID
     );
+    d1.prepare(
+      `INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, 'owner', 'active')`
+    ).run(PROJECT_ID, USER_ID);
     d1.prepare(
       `INSERT INTO nodes (id, user_id, name, status, health_status, runtime, node_role,
                           runtime_incarnation_id, created_at, updated_at)
@@ -278,11 +306,13 @@ describe('Instant session wake after idle sleep', () => {
     ).run(CHAT_SESSION_ID, PROJECT_ID, USER_ID, TASK_ID, WORKSPACE_ID, Date.now(), Date.now());
     projectDataSql().exec(
       `INSERT INTO chat_sessions
-         (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
-       VALUES (?, ?, ?, 'Instant', 'active', 2, ?, ?, ?)`,
+         (id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
+          started_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'Instant', 'active', 2, ?, ?, ?)`,
       CHAT_SESSION_ID,
       WORKSPACE_ID,
       TASK_ID,
+      USER_ID,
       Date.now(),
       Date.now(),
       Date.now()
@@ -372,6 +402,22 @@ describe('Instant session wake after idle sleep', () => {
         )
         .toArray(),
     };
+  }
+
+  /** A chat action as the browser sends it, through the real chat routes. */
+  async function postChatAction(action: 'stop' | 'cancel'): Promise<Response> {
+    const app = new Hono<{ Bindings: Env }>();
+    app.onError((err, c) =>
+      err instanceof AppError
+        ? c.json(err.toJSON(), err.statusCode as never)
+        : c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500)
+    );
+    app.route('/api/projects/:projectId/sessions', chatRoutes);
+    return app.request(
+      `/api/projects/${PROJECT_ID}/sessions/${CHAT_SESSION_ID}/${action}`,
+      { method: 'POST' },
+      env
+    );
   }
 
   /** The container's own idle timeout (`sleepAfter`) — the trigger in the incident. */
@@ -567,5 +613,66 @@ describe('Instant session wake after idle sleep', () => {
     });
     expect(vmAgent.starts).toBe(0);
     expect(vmAgent.prompts).toEqual([]);
+  });
+
+  // The stop and cancel routes only signal a live agent. A request to a slept container
+  // would restore it from its snapshot first: on staging, archiving a slept Instant session
+  // woke it, and the wake raced the stop's own teardown into a 500.
+  describe('stop and cancel on a slept session', () => {
+    /** What the stop route's teardown leaves; the snapshot row goes with the session. */
+    const ARCHIVED_ROWS = {
+      node: { status: 'deleted', health_status: 'stale' },
+      workspace: { status: 'deleted' },
+      agentSession: { status: 'stopped' },
+      snapshot: undefined,
+    };
+
+    it('archives the session without waking its container', async () => {
+      await sleepOnContainerIdleTimeout();
+      expect(runtimeRows()).toEqual(SLEPT_ROWS);
+
+      const response = await postChatAction('stop');
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: 'stopped', workspaceDeleted: true });
+      expect(vmAgent.starts).toBe(0);
+      expect(vmAgent.signals).toEqual([]);
+      // Liveness: the real teardown ran to the end.
+      expect(runtimeRows()).toEqual(ARCHIVED_ROWS);
+      expect(sessions.getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
+        status: 'stopped',
+      });
+    });
+
+    it('answers a cancel with nothing in flight without waking its container', async () => {
+      await sleepOnContainerIdleTimeout();
+
+      const response = await postChatAction('cancel');
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        status: 'idle',
+        message: 'No prompt in flight to cancel',
+      });
+      expect(vmAgent.starts).toBe(0);
+      expect(vmAgent.signals).toEqual([]);
+      expect(runtimeRows()).toEqual(SLEPT_ROWS);
+    });
+
+    // Controls: a live agent is still signalled, or these pass with the signals deleted.
+    it('still signals a live agent before archiving it', async () => {
+      const response = await postChatAction('stop');
+
+      expect(response.status).toBe(200);
+      expect(vmAgent.signals).toEqual([`${AGENT_PATH}/cancel`, `${AGENT_PATH}/stop`]);
+      expect(runtimeRows()).toEqual(ARCHIVED_ROWS);
+    });
+
+    it('still forwards a cancel to a live agent', async () => {
+      const response = await postChatAction('cancel');
+
+      expect(response.status).toBe(200);
+      expect(vmAgent.signals).toEqual([`${AGENT_PATH}/cancel`]);
+    });
   });
 });
