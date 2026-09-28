@@ -182,9 +182,32 @@ The preview starts as soon as a user opens the artifact (`apps/web/src/component
 
 The dedicated origin contains iframe-policy regressions; the CSP sandbox header protects direct-open links. Preview is deliberately absent from credentialed CORS and BetterAuth trusted origins, and responses never set cookies.
 
+## Agent-Written Files and Diagrams
+
+Library files, repository files, workspace files, and chat messages can all be written by agents, so everything the API hands a browser from them is treated as untrusted. The serving policy lives in `apps/api/src/services/file-serving-policy.ts`.
+
+**Inline previews** (`GET /api/projects/:id/library/:fileId/preview`):
+
+- Only images, PDFs, markdown, and HTML (served as inert `text/plain`) preview inline. Every response is `nosniff`, and no preview CSP allows script.
+- `frame-ancestors` names the app origin (`https://app.BASE_DOMAIN`, from `appFrameAncestors` in `apps/api/src/lib/app-origin.ts`). Previews come from the API origin, so `'self'` or `X-Frame-Options: SAMEORIGIN` would block the app's own PDF viewer.
+- Only a PDF gets the looser policy the browser's viewer needs (`object-src 'self'`, inline styles). It gets it only when its bytes start with the `%PDF-` signature; a file that merely claims to be a PDF is refused.
+- The app frames PDFs without an iframe `sandbox`, because Chromium refuses to render a PDF inside any sandboxed frame. The response headers above keep that frame inert (`apps/web/src/components/library/FilePreviewModal.tsx`).
+- A browser's PDF viewer runs a PDF's own scripts in its own engine, which no response header governs. In Chromium, such a script can show an alert, but its actions that open a URL, submit a form, or fetch one made no request in testing.
+
+**Downloads** (`/download`) are always `Content-Disposition: attachment` with `nosniff`. The stored type is sent only when it is exactly one well-formed media type that a browser cannot execute. Anything else is served as `application/octet-stream`, whatever parameters it carries: HTML, XML and `+xml` types, JavaScript, comma-separated lists, and malformed values.
+
+**Raw files** from the repository browser (`GET /api/projects/:id/repo/raw`) and from a chat session's workspace (`GET /api/projects/:id/sessions/:sessionId/files/raw`) carry `nosniff` and a sandboxing CSP, so any document they render is inert: no script, no fetches, no automatic navigation, and an opaque origin. Opened directly, active types (HTML, SVG and other XML, JavaScript) download instead of rendering. Images embedded with `<img>` are unaffected.
+
+**Mermaid diagrams** in chat and in library markdown render through one pipeline (`renderMermaidSvg` in `packages/acp-client/src/mermaid.ts`):
+
+- Mermaid draws labels as SVG text, so its output contains no `<foreignObject>` or HTML. A diagram's own directives cannot re-enable HTML labels, inject CSS (`themeCSS`, `fontFamily`), or make marker references absolute. Features that can only draw text as HTML lose that text: Venn member lists, architecture text icons, and KaTeX math.
+- The SVG is sanitized to an SVG-only allowlist in which every reference stays inside the document. An `href` must be a `#fragment`, or an inline raster image on `<image>`. CSS that names a remote resource is dropped.
+
+Mermaid lays a diagram out in the live page before it is sanitized, so a remote image named in diagram syntax can still be fetched once while the diagram renders. Markdown images (`![](…)`) are also shown as written. A platform-wide policy for remote resources in agent content, including scripts inside previewed PDFs, is tracked separately.
+
 ## Secret Redaction in Logs and Diagnostics
 
-Credential tokens are stripped before text reaches a log line or a stored diagnostic: OpenAI and Anthropic `sk-…` keys (including `sk-proj-…` and `sk-ant-…`), GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), and SAM personal access and webhook tokens. Every API redactor takes these token shapes from one definition, `redactCredentialTokens` in `apps/api/src/lib/credential-token-redaction.ts`: structured Worker logs (`apps/api/src/lib/logger.ts`), stored VM agent error reports and debug-agent evidence (`redactSensitiveData`), comment directives delivered to agents, deployment publish and apply events, Report Issue text, and agent sign-in helper diagnostics. `Bearer …` and `Basic …` values are matched by each redactor's own rule, because those are also ordinary words and a log line can afford to over-redact where text shown to a user cannot. Redaction is pattern-based and best-effort — a safety net, not a reason to paste secrets anywhere.
+Credential tokens are stripped before text reaches a log line or a stored diagnostic: OpenAI and Anthropic `sk-...` keys (including `sk-proj-...` and `sk-ant-...`), GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`), and SAM personal access and webhook tokens. Every API redactor takes these token shapes from one definition, `redactCredentialTokens` in `apps/api/src/lib/credential-token-redaction.ts`: structured Worker logs (`apps/api/src/lib/logger.ts`), stored VM agent error reports and debug-agent evidence (`redactSensitiveData`), comment directives delivered to agents, deployment publish and apply events, Report Issue text, and agent sign-in helper diagnostics. `Bearer ...` and `Basic ...` values are matched by each redactor's own rule, because those are also ordinary words and a log line can afford to over-redact where text shown to a user cannot. Redaction is pattern-based and best-effort - a safety net, not a reason to paste secrets anywhere.
 
 ## Security Best Practices
 

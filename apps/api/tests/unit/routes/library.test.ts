@@ -78,9 +78,13 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     DATABASE: {} as D1Database,
     R2: {} as R2Bucket,
     ENCRYPTION_KEY: 'dGVzdC1rZXktMTIzNDU2Nzg5MDEyMzQ1Ng==',
+    BASE_DOMAIN: 'test.example.com',
     ...overrides,
   } as Env;
 }
+
+/** The only origin allowed to frame a preview: the app, never the API itself. */
+const FRAME_ANCESTORS = 'frame-ancestors https://app.test.example.com';
 
 function makeApp(env: Env) {
   const app = new Hono<{ Bindings: Env }>();
@@ -281,6 +285,49 @@ describe('library routes', () => {
       );
       expect(res.headers.get('Cache-Control')).toBe('private, no-store');
     });
+
+    async function downloadedContentType(mimeType: string): Promise<Response> {
+      mockDownloadFile.mockResolvedValue({
+        data: new TextEncoder().encode('<script>alert(1)</script>').buffer,
+        file: { filename: 'agent-output', mimeType },
+        metadata: {},
+      });
+      const { app, env } = makeApp(makeEnv());
+      return app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/download`),
+        env
+      );
+    }
+
+    it.each([
+      'text/html',
+      'text/html; charset=utf-8',
+      'TEXT/HTML; Charset=UTF-8',
+      'text/xml; charset=utf-8',
+      'application/xml',
+      'image/svg+xml; charset=utf-8',
+      'application/xhtml+xml',
+      'text/javascript; charset=utf-8',
+      'application/javascript',
+      'text/plain, text/html',
+    ])('serves a file stored as %j as application/octet-stream', async (mimeType) => {
+      const res = await downloadedContentType(mimeType);
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('application/octet-stream');
+      expect(res.headers.get('Content-Disposition')).toMatch(/^attachment;/);
+      expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    });
+
+    it.each(['text/plain; charset=utf-8', 'image/png', 'application/json'])(
+      'keeps the stored type %j for passive content',
+      async (mimeType) => {
+        const res = await downloadedContentType(mimeType);
+
+        expect(res.headers.get('Content-Type')).toBe(mimeType);
+        expect(res.headers.get('Content-Disposition')).toMatch(/^attachment;/);
+      }
+    );
   });
 
   describe('POST /:fileId/interactive-preview-url', () => {
@@ -367,11 +414,14 @@ describe('library routes', () => {
       expect(res.headers.get('Content-Disposition')).toContain('photo.png');
       expect(res.headers.get('Cache-Control')).toBe('private, no-store');
       expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
-      expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
+      expect(res.headers.get('Content-Security-Policy')).toBe(
+        `default-src 'none'; style-src 'unsafe-inline'; ${FRAME_ANCESTORS}`
+      );
+      expect(res.headers.get('X-Frame-Options')).toBeNull();
     });
 
     it('returns inline headers for PDF', async () => {
-      const content = new TextEncoder().encode('fake pdf data');
+      const content = new TextEncoder().encode('%PDF-1.4\n%fake but well-formed header\n');
       mockGetFile.mockResolvedValue({
         file: { filename: 'report.pdf', mimeType: 'application/pdf', sizeBytes: 2048 },
         tags: [],
@@ -391,9 +441,60 @@ describe('library routes', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('application/pdf');
       expect(res.headers.get('Content-Disposition')).toContain('inline');
-      // PDF gets a more permissive CSP for browser-native rendering
-      expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'self'");
-      expect(res.headers.get('Content-Security-Policy')).toContain("script-src 'unsafe-inline'");
+      // The browser's PDF viewer needs the embedded object and inline styles, never script.
+      expect(res.headers.get('Content-Security-Policy')).toBe(
+        `default-src 'self'; script-src 'none'; style-src 'unsafe-inline'; object-src 'self'; ${FRAME_ANCESTORS}`
+      );
+    });
+
+    it('lets the local development app, served from a loopback port, frame previews', async () => {
+      const content = new TextEncoder().encode('fake png data');
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'photo.png', mimeType: 'image/png', sizeBytes: content.byteLength },
+        tags: [],
+      });
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename: 'photo.png', mimeType: 'image/png', sizeBytes: content.byteLength },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv({ BASE_DOMAIN: 'localhost:8787' }));
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Security-Policy')).toBe(
+        "default-src 'none'; style-src 'unsafe-inline'; " +
+          'frame-ancestors https://app.localhost:8787 http://localhost:* http://127.0.0.1:*'
+      );
+    });
+
+    it.each([
+      ['stored as application/pdf', 'report.pdf', 'application/pdf'],
+      ['typed from its .pdf name', 'report.pdf', 'application/octet-stream'],
+    ])('refuses a file %s whose bytes are not a PDF', async (_how, filename, mimeType) => {
+      const content = new TextEncoder().encode('<html><script>alert(1)</script></html>');
+      mockGetFile.mockResolvedValue({
+        file: { filename, mimeType, sizeBytes: content.byteLength },
+        tags: [],
+      });
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename, mimeType, sizeBytes: content.byteLength },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect(res.headers.get('Content-Security-Policy')).toBeNull();
     });
 
     it('serves HTML previews as inert plain text with strict CSP', async () => {
@@ -427,7 +528,9 @@ describe('library routes', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
       expect(res.headers.get('Content-Type')).not.toContain('text/html');
-      expect(res.headers.get('Content-Security-Policy')).toBe("default-src 'none'");
+      expect(res.headers.get('Content-Security-Policy')).toBe(
+        `default-src 'none'; ${FRAME_ANCESTORS}`
+      );
       expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
       expect(res.headers.get('Cache-Control')).toBe('private, no-store');
       expect(await res.text()).toContain('<script>');
@@ -574,7 +677,9 @@ describe('library routes', () => {
       // text/html file: inert text/plain + default-src 'none' — never executable.
       expect(res.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
       expect(res.headers.get('Content-Type')).not.toContain('text/html');
-      expect(res.headers.get('Content-Security-Policy')).toBe("default-src 'none'");
+      expect(res.headers.get('Content-Security-Policy')).toBe(
+        `default-src 'none'; ${FRAME_ANCESTORS}`
+      );
       expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
       expect(await res.text()).toContain('<script>');
     });

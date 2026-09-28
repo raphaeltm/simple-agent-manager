@@ -98,6 +98,15 @@ describe('CORS origin callback', () => {
     it('allows baseDomain origins in dev mode', () => {
       expect(corsOriginCallback('http://localhost', 'localhost')).toBe('http://localhost');
     });
+
+    it('treats only a loopback baseDomain as local development', () => {
+      expect(corsOriginCallback('http://localhost:5173', 'localhost:8787')).toBe(
+        'http://localhost:5173'
+      );
+      // Real domains that merely contain "localhost".
+      expect(corsOriginCallback('http://localhost:5173', 'mylocalhost.example.com')).toBeNull();
+      expect(corsOriginCallback('http://localhost:5173', 'localhost.example.com')).toBeNull();
+    });
   });
 
   it('never allows the isolated preview origin to make credentialed API requests', () => {
