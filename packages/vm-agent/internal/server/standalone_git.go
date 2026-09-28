@@ -185,6 +185,11 @@ func standaloneGhWrapperPathFor(ghPath, pathEnv string) (string, bool) {
 	if ghPath == localBinGh {
 		return ghPath, false
 	}
+	cleanGhPath := filepath.Clean(ghPath)
+	if cleanGhPath == "/usr/bin/gh" || cleanGhPath == "/bin/gh" {
+		return localBinGh, true
+	}
+
 	localBinIndex := -1
 	ghDirIndex := -1
 	ghDir := strings.TrimRight(filepath.Dir(ghPath), "/")

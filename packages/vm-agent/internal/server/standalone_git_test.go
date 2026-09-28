@@ -112,15 +112,27 @@ func TestStandaloneGhWrapperPathForUsesLocalBinShimWhenItPrecedesRealGh(t *testi
 	}
 }
 
-func TestStandaloneGhWrapperPathForFallsBackWhenLocalBinDoesNotPrecedeRealGh(t *testing.T) {
+func TestStandaloneGhWrapperPathForUsesLocalBinShimForSystemGhEvenWhenProcessPathDiffers(t *testing.T) {
+	t.Parallel()
+
+	wrapperPath, wrapsRealPath := standaloneGhWrapperPathFor("/usr/bin/gh", "/var/lib/vm-agent/agents/bin")
+	if !wrapsRealPath {
+		t.Fatal("expected /usr/local/bin shim for system gh even when vm-agent PATH differs")
+	}
+	if wrapperPath != "/usr/local/bin/gh" {
+		t.Fatalf("wrapper path = %q, want /usr/local/bin/gh", wrapperPath)
+	}
+}
+
+func TestStandaloneGhWrapperPathForUsesLocalBinShimForSystemGhEvenWhenLocalBinFollows(t *testing.T) {
 	t.Parallel()
 
 	wrapperPath, wrapsRealPath := standaloneGhWrapperPathFor("/usr/bin/gh", "/usr/bin:/usr/local/bin:/bin")
-	if wrapsRealPath {
-		t.Fatal("did not expect /usr/local/bin shim when it follows /usr/bin")
+	if !wrapsRealPath {
+		t.Fatal("expected /usr/local/bin shim for system gh")
 	}
-	if wrapperPath != "/usr/bin/gh" {
-		t.Fatalf("wrapper path = %q, want /usr/bin/gh", wrapperPath)
+	if wrapperPath != "/usr/local/bin/gh" {
+		t.Fatalf("wrapper path = %q, want /usr/local/bin/gh", wrapperPath)
 	}
 }
 

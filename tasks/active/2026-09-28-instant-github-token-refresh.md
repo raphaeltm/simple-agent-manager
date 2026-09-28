@@ -24,6 +24,8 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 - [x] Verify full-VM credential path is not regressed.
 - [x] Query production logs for Instant git-token failures / 401s.
 - [ ] Deploy to staging, start an Instant session, force or simulate expiry, prove git/gh operation succeeds, and clean up.
+  - First staging pass proved `git credential fill` returned a redacted GitHub credential, but `gh auth status` still failed when `GH_TOKEN=ghs_stale_invalid_INITIAL`; container inspection showed `PATH=/var/lib/vm-agent/agents/bin:/var/lib/vm-agent/agents/npm/bin:/usr/local/bin:/usr/bin:/bin`, `command -v gh=/usr/bin/gh`, no `/usr/local/bin/gh`, and no `.real` wrapper.
+  - Follow-up fix installs a `/usr/local/bin/gh` shim when that directory precedes the discovered real `gh` in `PATH`, leaving `/usr/bin/gh` untouched.
 - [ ] Open a draft PR and leave it draft.
 
 ## Acceptance Criteria
@@ -40,7 +42,7 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 
 - Red-before-fix regression: `go test ./internal/server -run TestStandaloneGitCredentialHelperDelegatesGitHubToLocalExchange -count=1` failed on the stale `GH_TOKEN` path, returning `ghs_expired_boot_token` instead of the endpoint token.
 - Passing focused vm-agent credential and `gh` wrapper tests: `go test ./internal/server -run 'TestStandaloneGitCredentialHelper|TestStandaloneGhWrapper|TestConfigureStandaloneGhWrapper|TestHandleGitCredential|TestPerSessionGitTokenFetcher|TestTwoWorkspaceGitTokenIsolation|TestGitHubTokenFetcherForWorkspace' -count=1`.
-- Passing full vm-agent control: `go test ./...` in `packages/vm-agent`.
+- Passing full vm-agent control: `go test ./...` in `packages/vm-agent` before and after the staging-discovered `/usr/local/bin/gh` shim fix.
 - Passing API cache tests: `pnpm vitest run apps/api/tests/unit/services/github-installation-token-cache.test.ts`.
 - Passing API checks: `pnpm --filter @simple-agent-manager/api typecheck` and `pnpm --filter @simple-agent-manager/api lint`.
 - Passing formatting/diff checks for touched files: Prettier ratchet and `git diff --check`.
@@ -50,3 +52,10 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 - Workers Observability SQL query endpoint returned 403 for the available production debugging token, so I used the supported telemetry query endpoint and the production observability D1 database.
 - Telemetry over the last 7 days found `git-token` traces, but no `workspace_git_token` or `Failed to fetch git token` traces. Path/status filtering in telemetry returned zero results even for all `/git-token` paths, so I did not treat it as complete request-status evidence.
 - Production observability D1 `platform_errors` returned no rows in the last 7 days for git-token/GitHub-installation failures or 401/unauthorized variants.
+
+## Staging Verification Notes
+
+- Deploy run `36417133346` for `da0f91153` passed deploy and smoke tests. Manual Instant verification showed `git credential fill` could return a redacted GitHub credential but `gh auth status` failed with the deliberately invalid inherited `GH_TOKEN`, proving `gh` still bypassed the wrapper.
+- Deploy run `36420384172` for `5e8c8c28c` passed deploy and smoke tests. Manual inspection in Instant workspace `01M3M01NM7FND9YHPBD7AC274H`, session `c719bad0-8ff9-40ee-a10f-ed734245fbbe`, showed `PATH=/var/lib/vm-agent/agents/bin:/var/lib/vm-agent/agents/npm/bin:/usr/local/bin:/usr/bin:/bin`, `command -v gh=/usr/bin/gh`, no `/usr/local/bin/gh`, no `/usr/bin/gh.real`, and `git credential fill` returned redacted credentials. This identified the need for a shadow shim in `/usr/local/bin`.
+- Deploy run `36422950111` for `e33a24860` is in progress for final manual Instant verification.
+- Attempted staging KV invalidation for the GitHub installation-token key was blocked by Cloudflare auth error code 10000 with the available token; remote KV key listing worked, deletion did not.
