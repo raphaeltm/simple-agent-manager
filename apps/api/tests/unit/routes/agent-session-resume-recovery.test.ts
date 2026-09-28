@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
-import { agentSessionRoutes } from '../../../src/routes/workspaces/agent-sessions';
+import { agentSessionSuspendResumeRoutes } from '../../../src/routes/workspaces/agent-session-suspend-resume';
 
 // Must match RUNTIME_REQUEST_INTERRUPTED_MESSAGE in
 // src/durable-objects/vm-agent-container-recovery.ts (inlined to keep this unit
@@ -97,9 +97,8 @@ vi.mock('drizzle-orm/d1', () => ({
 
 // Routes import during collection so cold compilation is outside the callback test deadline.
 function createTestApp() {
-
   const app = new Hono<{ Bindings: Env }>();
-  app.route('/api/workspaces', agentSessionRoutes);
+  app.route('/api/workspaces', agentSessionSuspendResumeRoutes);
   app.onError((error, c) => {
     if (error instanceof AppError) {
       return c.json(error.toJSON(), error.statusCode as 409);
