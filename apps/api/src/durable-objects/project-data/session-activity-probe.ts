@@ -31,7 +31,8 @@ const log = createModuleLogger('session_activity_reconciliation');
 
 /**
  * Resolve the workspace owner needed to authenticate the probe request, and whether the
- * probed runtime is a slept Instant container.
+ * probed runtime is a slept Instant container. The node read is the one the probe would
+ * contact (the ACP session's `node_id`), not necessarily the workspace's current node.
  */
 async function resolveProbeTarget(
   env: WorkerEnv,

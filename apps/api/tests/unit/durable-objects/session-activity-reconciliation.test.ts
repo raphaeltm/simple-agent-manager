@@ -1204,9 +1204,9 @@ describe('session activity reconciliation', () => {
 
     afterEach(() => d1.close());
 
-    function seedNode(runtime: string, status: string): void {
+    function seedNode(runtime: string, status: string, id = NODE): void {
       d1.prepare(`INSERT INTO nodes (id, user_id, runtime, status) VALUES (?, 'user-1', ?, ?)`).run(
-        NODE,
+        id,
         runtime,
         status
       );
@@ -1242,6 +1242,17 @@ describe('session activity reconciliation', () => {
       const result = await probe();
 
       expect(listAgentSessionsOnNode).toHaveBeenCalledOnce();
+      expect(result).toEqual({ probed: 1, reconciled: 1 });
+    });
+
+    it('reads the node it would probe, not the workspace node', async () => {
+      d1.prepare(`UPDATE workspaces SET node_id = 'node-current'`).run();
+      seedNode('cf-container', 'running', 'node-current');
+      seedNode('cf-container', 'sleeping');
+
+      const result = await probe();
+
+      expect(listAgentSessionsOnNode).not.toHaveBeenCalled();
       expect(result).toEqual({ probed: 1, reconciled: 1 });
     });
 
