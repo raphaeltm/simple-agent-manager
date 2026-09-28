@@ -1,10 +1,7 @@
 import {
-  buildVmPromptDeliveryCapabilitiesPath,
-  buildVmPromptDeliveryReceiptPath,
   isUrgentMessageClass,
   VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
   type VmPromptDeliveryCapabilities,
-  type VmPromptDeliveryReceipt,
   type VmPromptDeliveryResponse,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
@@ -16,17 +13,19 @@ import type {
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 import { commitContainerWake } from './container-wake-commit';
-import { NodeAgentHttpError, nodeAgentRequest, sendPromptToAgentOnNode } from './node-agent';
-import {
-  CapabilitiesSchema,
-  ReceiptSchema,
-  SubmitResponseSchema,
-} from './vm-prompt-delivery-adapter-schemas';
+import { NodeAgentHttpError, sendPromptToAgentOnNode } from './node-agent';
+import { SubmitResponseSchema } from './vm-prompt-delivery-adapter-schemas';
 import {
   checkpointVmPromptSubmission,
   prepareVmPromptDelivery,
   PromptDeliveryGuardError,
 } from './vm-prompt-delivery-preparation';
+import {
+  errorMessage,
+  getDeliveryCapabilities,
+  httpStatus,
+  lookupDeliveryReceipt,
+} from './vm-prompt-delivery-runtime-queries';
 import {
   resolveVmPromptDeliveryTarget,
   type TargetResolution,
@@ -71,39 +70,12 @@ export interface VmPromptDeliveryAdapter {
   reconcile(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
 }
 
-function httpStatus(error: unknown): number | null {
-  if (error instanceof NodeAgentHttpError) return error.statusCode;
-  const message = error instanceof Error ? error.message : String(error);
-  const match = message.match(/(?:failed:|request failed:)\s*(\d{3})/i);
-  return match?.[1] ? Number.parseInt(match[1], 10) : null;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function isMissingActiveAgentSession(error: unknown): boolean {
   return (
     error instanceof NodeAgentHttpError &&
     error.statusCode === 404 &&
     error.responseBody.toLowerCase().includes('no active agent session found')
   );
-}
-
-function legacyCapabilities(runtimeIdentity: string): VmPromptDeliveryCapabilities {
-  return {
-    protocolVersion: 0,
-    runtimeIdentity,
-    promptReceipts: { supported: false, lookup: false, states: [] },
-    checkpointRollover: {
-      supported: false,
-      automatic: false,
-      states: [],
-      defaultGraceMs: 0,
-      maxGraceMs: 0,
-      operationTimeoutMs: 0,
-    },
-  };
 }
 
 export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
@@ -145,7 +117,8 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     // before the later prompt/wake mutations.
     const guardedBeforeProbe = await this.runSideEffectGuard(input);
     if (guardedBeforeProbe) return guardedBeforeProbe;
-    const capabilities = await this.getCapabilities(
+    const capabilities = await getDeliveryCapabilities(
+      this.env,
       target,
       input.requestTimeoutMs,
       input.sourceTaskGuard
@@ -365,7 +338,8 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     const { target } = resolution;
     const guardedBeforeProbe = await this.runSideEffectGuard(input);
     if (guardedBeforeProbe) return guardedBeforeProbe;
-    const capabilities = await this.getCapabilities(
+    const capabilities = await getDeliveryCapabilities(
+      this.env,
       target,
       input.requestTimeoutMs,
       input.sourceTaskGuard
@@ -405,7 +379,8 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     }
     const guardedBeforeReceipt = await this.runSideEffectGuard(input);
     if (guardedBeforeReceipt) return guardedBeforeReceipt;
-    return this.lookupReceiptResult(
+    return lookupDeliveryReceipt(
+      this.env,
       target,
       input.claim,
       capabilities,
@@ -434,47 +409,6 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     return input.beforeSideEffect ? input.beforeSideEffect() : null;
   }
 
-  private async getCapabilities(
-    target: VmPromptDeliveryTarget,
-    requestTimeoutMs: number,
-    sourceTaskGuard?: VmPromptDeliverySourceTaskGuard
-  ): Promise<VmPromptDeliveryCapabilities | null> {
-    try {
-      const raw = await nodeAgentRequest(
-        target.nodeId,
-        this.env,
-        buildVmPromptDeliveryCapabilitiesPath(target.workspaceId),
-        {
-          method: 'GET',
-          userId: target.userId,
-          workspaceId: target.workspaceId,
-          requestTimeoutMs,
-          ...(sourceTaskGuard ? { sourceTaskGuard } : {}),
-        }
-      );
-      const capabilities = v.parse(CapabilitiesSchema, raw);
-      if (capabilities.protocolVersion !== VM_PROMPT_DELIVERY_PROTOCOL_VERSION) {
-        return {
-          ...capabilities,
-          promptReceipts: {
-            ...capabilities.promptReceipts,
-            supported: false,
-            lookup: false,
-          },
-        };
-      }
-      return capabilities;
-    } catch (error) {
-      if (httpStatus(error) === 404) return legacyCapabilities(target.runtimeIdentity);
-      log.warn('prompt_delivery.capability_probe_failed', {
-        workspaceId: target.workspaceId,
-        agentSessionId: target.agentSessionId,
-        error: errorMessage(error),
-      });
-      return null;
-    }
-  }
-
   private async reconcileAfterAmbiguousSubmit(
     target: VmPromptDeliveryTarget,
     input: VmPromptDeliveryAdapterInput,
@@ -493,7 +427,8 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     }
     const guarded = await this.runSideEffectGuard(input);
     if (guarded) return guarded;
-    return this.lookupReceiptResult(
+    return lookupDeliveryReceipt(
+      this.env,
       target,
       input.claim,
       capabilities,
@@ -502,131 +437,10 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     );
   }
 
-  private async lookupReceiptResult(
-    target: VmPromptDeliveryTarget,
-    claim: PromptDeliveryClaim,
-    capabilities: VmPromptDeliveryCapabilities,
-    requestTimeoutMs: number,
-    sourceTaskGuard?: VmPromptDeliverySourceTaskGuard
-  ): Promise<PromptDeliveryResult> {
-    try {
-      const raw = await nodeAgentRequest(
-        target.nodeId,
-        this.env,
-        buildVmPromptDeliveryReceiptPath(
-          target.workspaceId,
-          target.agentSessionId,
-          claim.message.id
-        ),
-        {
-          method: 'GET',
-          userId: target.userId,
-          workspaceId: target.workspaceId,
-          requestTimeoutMs,
-          ...(sourceTaskGuard ? { sourceTaskGuard } : {}),
-        }
-      );
-      const receipt: VmPromptDeliveryReceipt = v.parse(ReceiptSchema, raw);
-      if (receipt.deliveryId !== claim.message.id) {
-        return {
-          kind: 'ambiguous',
-          reason: 'receipt_unavailable',
-          error: 'Receipt belongs to a different delivery',
-          runtimeIdentity: capabilities.runtimeIdentity,
-          capabilities,
-          receipt,
-        };
-      }
-      if (receipt.runtimeIdentity !== capabilities.runtimeIdentity) {
-        return {
-          kind: 'ambiguous',
-          reason: 'runtime_changed',
-          error: 'Receipt belongs to a different runtime identity',
-          runtimeIdentity: capabilities.runtimeIdentity,
-          capabilities,
-          receipt,
-        };
-      }
-      if (receipt.state === 'not_found') {
-        return {
-          kind: 'ambiguous',
-          reason: 'receipt_unavailable',
-          error: 'Receipt lookup returned not_found without the canonical HTTP 404 proof',
-          runtimeIdentity: capabilities.runtimeIdentity,
-          capabilities,
-          receipt,
-        };
-      }
-      if (receipt.state === 'ambiguous') {
-        return {
-          kind: 'ambiguous',
-          reason: 'lost_response',
-          error: 'VM receipt reports ambiguous prompt acceptance',
-          runtimeIdentity: capabilities.runtimeIdentity,
-          capabilities,
-          receipt,
-        };
-      }
-      if (receipt.acceptedAt === null) {
-        return {
-          kind: 'ambiguous',
-          reason: 'receipt_unavailable',
-          error: 'Accepted VM receipt omitted acceptedAt',
-          runtimeIdentity: capabilities.runtimeIdentity,
-          capabilities,
-          receipt,
-        };
-      }
-      return {
-        kind: 'accepted',
-        acpSessionId: target.agentSessionId,
-        promptEpoch: receipt.acceptedAt,
-        runtimeIdentity: capabilities.runtimeIdentity,
-        capabilities,
-        receipt,
-      };
-    } catch (error) {
-      const notFound = this.parseNotFoundReceipt(error);
-      if (
-        httpStatus(error) === 404 &&
-        notFound?.state === 'not_found' &&
-        notFound.deliveryId === claim.message.id &&
-        notFound.runtimeIdentity === capabilities.runtimeIdentity &&
-        notFound.acceptedAt === null &&
-        notFound.completedAt === null
-      ) {
-        return {
-          kind: 'retry',
-          reason: 'receipt_not_found',
-          error: 'Same-runtime VM receipt lookup confirms the prompt was not accepted',
-          runtimeIdentity: capabilities.runtimeIdentity,
-          capabilities,
-        };
-      }
-      return {
-        kind: 'ambiguous',
-        reason: 'receipt_unavailable',
-        error: errorMessage(error),
-        runtimeIdentity: capabilities.runtimeIdentity,
-        capabilities,
-        receipt: null,
-      };
-    }
-  }
-
   private parseConflictResponse(error: unknown): VmPromptDeliveryResponse | null {
     if (!(error instanceof NodeAgentHttpError)) return null;
     try {
       return v.parse(SubmitResponseSchema, JSON.parse(error.responseBody));
-    } catch {
-      return null;
-    }
-  }
-
-  private parseNotFoundReceipt(error: unknown): VmPromptDeliveryReceipt | null {
-    if (!(error instanceof NodeAgentHttpError)) return null;
-    try {
-      return v.parse(ReceiptSchema, JSON.parse(error.responseBody));
     } catch {
       return null;
     }
