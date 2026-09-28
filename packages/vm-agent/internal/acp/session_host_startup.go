@@ -186,6 +186,11 @@ func (h *SessionHost) resolveAgentEnvVars(ctx context.Context, containerID strin
 		}
 	}
 
+	if containerID == "" {
+		envVars = removeEnvVar(envVars, "PATH")
+		envVars = append(envVars, "PATH="+standaloneAgentBinDir+":/usr/local/bin:/usr/bin:/bin")
+	}
+
 	if h.config.GitTokenFetcher != nil {
 		envVars = removeEnvVar(envVars, "GH_TOKEN")
 		if token, err := h.config.GitTokenFetcher(ctx); err == nil && token != "" {
