@@ -29,7 +29,7 @@ The ProjectData Durable Object can keep re-arming its alarm roughly every minute
 - [x] Add real-path tests for inconclusive backoff, sleeping-session alarm suppression, wake-back-to-active cleanup, growing backoff, success reset, and genuine idle cleanup.
 - [x] Temporarily remove the fix and confirm the loop regression test fails red, then restore the fix.
 - [x] Restore accidental `.codex/config.toml` churn so the PR does not touch it.
-- [x] Document that conclusive preserved/not-idle-yet checks deliberately do not reset the workspace idle retry counter; only terminal/message activity and successful cleanup reset it.
+- [x] Document when the workspace idle retry counter starts over: new terminal/message activity, a session wake, successful cleanup, or a check that finds the workspace no longer idle. A preserved runtime or inconclusive check keeps it growing (`recordWorkspaceIdleRetry` doc comment).
 - [x] Run focused tests and broader API validation.
 - [x] Complete specialist reviews, staging verification, and draft PR creation.
 
@@ -105,9 +105,11 @@ Reviewed PR head `7c2c60424` and reproduced each finding with scratch probes tha
 - **LOW — deferral race.** The deferral was written after the D1 awaits, so activity arriving during
   the check had its reset overwritten.
 - **Rule 18.** `idle-cleanup.ts` was 748 lines and `sessions.ts` 615 lines (500 ceiling), both touched.
-- Migration `060-workspace-idle-backoff` is additive only (two `ALTER TABLE ... ADD COLUMN`, one
-  `CREATE INDEX`); `pnpm quality:do-migration-safety` passes. It already ran on staging objects, so it
-  was left byte-for-byte unchanged.
+- Migration `060-workspace-idle-backoff` is additive only (two `ALTER TABLE ... ADD COLUMN`);
+  `pnpm quality:do-migration-safety` passes. Its first version also created
+  `idx_workspace_activity_next_idle_check`, which no query can use (review round 1, below); that
+  version ran on staging only, so the index was dropped from the migration with a retirement note,
+  following the `059` precedent. Staging objects that ran it keep the unused index.
 
 ### Fix checklist
 
@@ -124,19 +126,37 @@ Reviewed PR head `7c2c60424` and reproduced each finding with scratch probes tha
 - [x] The sweep skips its D1 timeout read when no row is due.
 - [x] Split session reads into `session-reads.ts` as a pure move (`sessions.ts` 618 → 450 lines).
 - [x] Docs: `configuration.md`, `.env.example`, `$env-reference`, shared constant doc comments.
-- [x] Tests: 13 unit cases (`workspace idle timeouts` describe in
+- [x] Tests: 18 unit cases (`workspace idle timeouts` describe in
       `tests/unit/conversation-idle-timeout.test.ts`) plus
       `tests/workers/project-data-workspace-idle-alarm.test.ts` through the real `ProjectData.alarm()`.
 
+### Local specialist review, round 1 (on `96e458a18` / `596b8abf0`)
+
+| Reviewer | Result | Disposition |
+| --- | --- | --- |
+| cloudflare-specialist | FAIL: 1 HIGH | **HIGH** cross-row stale snapshot: the sweep read every due row before its awaits, so activity landing during the project-timeout lookup or an earlier row's check was overwritten by a stale retry (up to 6 h of missed enforcement). Fixed: checks are taken one at a time and re-read just before acting (`forEachDueWorkspaceIdleCheck`), with regression tests for both windows. **MEDIUM** no per-row parse isolation: fixed; an unreadable row is set aside by `rowid` for the longest retry and logged. **LOW** `created_at` not COALESCEd in `max()`: fixed. **LOW** unused index: fixed. **LOW** dedicated batch-size knob: declined; `IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP` already bounds a pass and the backlog drains a page per alarm (tested). |
+| architecture-reviewer | 2 MEDIUM | Unused `idx_workspace_activity_next_idle_check`: dropped from migration 060 (staging-only) with a retirement note. `idle-cleanup.ts` local `positiveInt` duplicated `parsePositiveInt`: replaced at all 7 call sites. **LOW** capped exponential backoff is copied ~10 times across the repo (pre-existing): tracked as a follow-up idea. |
+| test-engineer | PASS, 3 MEDIUM | Backoff cap never exercised: the growth test now reaches the cap. Drain beyond one page of successful retirements untested: added. Parse isolation: fixed as above. **LOW** exponent safety cap untested: removed (overflow to `Infinity` is already clamped by `maxMs`). **LOW** skipped D1 read unasserted: added. |
+| constitution-validator | PASS | LOW items: exponent cap removed; `DEFAULT_WORKSPACE_IDLE_MIN_ALARM_DELAY_MS` now documents why it is deliberately not env-configurable; `WORKSPACE_IDLE_CHECK_INTERVAL_MS` has no env override on main either (kept). |
+| env-validator | PASS | LOW: docs now list the missing-project-identity cause; the pre-existing gaps are closed (`WORKSPACE_IDLE_TIMEOUT_MS` in `configuration.md` and `$env-reference`, `IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP` in `$env-reference`). |
+| doc-sync-validator | PASS | INFO: `WORKSPACE_IDLE_TIMEOUT_MS` row added. The rule-50 follow-up list still correctly names `idle-cleanup` (its schedule read is unchanged), and the new module isolates rows. |
+| performance-reviewer | PASS | LOW/MEDIUM per-isolate cache for the project timeout: declined. The read now happens only when a row is due, ProjectData instances are evicted between minute-spaced ticks so an isolate cache would rarely hit, and the setting is user-mutable rather than once-per-deploy (rule 60). Noted for the post-deploy read: the SAM object also has mailbox 30 s polls and heartbeat sections, so it will not drop to the quiet-object baseline. |
+| task-completion-validator | FAIL on process gates | Technical checks A/B/C/F passed. The remaining gates (staging on the final head, CI on the final head, CodeRabbit, the PR body's stale "must not be merged" line, final SHAs in this file) are the Phase 6/7 steps below. The validator is re-run before archive. |
+
 ### Discrimination evidence
 
-- Against the PR head logic, 9 of the 13 unit cases and the workers test fail; the other 4 cover
-  behavior the PR already had (sleeping/stopped rows unarmed, inconclusive backoff, growth, cleanup).
+- Against the draft head (`7c2c60424`) logic, 9 of the first 13 unit cases and the workers test
+  fail; the other 4 cover behavior the draft already had (sleeping/stopped rows unarmed,
+  inconclusive backoff, growth, cleanup). Against the round-1 head (`596b8abf0`), both stale-read
+  cases and the unreadable-row case fail.
 - Each guard was removed once and exactly its test went red:
   deadline write → 5 tests (both deadline cases, full-page, backoff restart, in-place wake);
   ordering → most-overdue test; retry after the await → mid-check race test (+ failing-page test
   when the throw path also lost its retry); wake reset → in-place wake test; timeout fallback →
-  no-verdict test; deadline not resetting the count → backoff restart test.
+  no-verdict test; deadline not resetting the count → backoff restart test; max clamp removed →
+  capped-growth test; early return removed → skipped-lookup test; one check per pass → drain,
+  full-page, failing-page and unreadable-row tests. On the final code the deadline-write mutation
+  reddens 6 tests (the skipped-lookup test's liveness step also depends on it).
 
 ### Local validation
 

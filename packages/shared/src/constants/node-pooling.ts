@@ -150,7 +150,8 @@ export const DEFAULT_IDLE_CLEANUP_MAX_RETRIES = 1;
 /** Default maximum age for an idle-cleanup schedule before it becomes attention-required. */
 export const DEFAULT_IDLE_CLEANUP_MAX_RESIDENCE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-/** Minimum delay before rescheduling a workspace-idle alarm. */
+/** Minimum delay before rescheduling a workspace-idle alarm for an overdue check. A hot-loop floor,
+ * deliberately not env-configurable, like `PROJECT_DATA_ALARM_FAILED_SECTION_RETRY_MS`. */
 export const DEFAULT_WORKSPACE_IDLE_MIN_ALARM_DELAY_MS = 60 * 1000;
 
 /** First retry delay after a workspace-idle check finds an idle workspace it cannot retire yet. */
