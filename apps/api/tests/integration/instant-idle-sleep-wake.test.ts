@@ -423,6 +423,9 @@ describe('Instant session wake after idle sleep', () => {
     projectDataDb.close();
   });
 
+  // The third sleep writer, `persistRuntimeSleepingAfterRevokedWake`, leaves the same rows;
+  // its round trip into the resumer runs on real D1 in
+  // `tests/workers/instant-runtime-recovery-persistence.test.ts`.
   describe.each([
     ['the container idle timeout', sleepOnContainerIdleTimeout],
     ['the session sleep', sleepThroughSessionSleep],
@@ -459,9 +462,14 @@ describe('Instant session wake after idle sleep', () => {
       releaseRestore = resolve;
     });
     let containerRequests = 0;
+    let secondRequestArrived!: () => void;
+    const secondRequest = new Promise<void>((resolve) => {
+      secondRequestArrived = resolve;
+    });
     const proxyHttp = container.proxyHttp.bind(container);
     container.proxyHttp = (request, port) => {
       containerRequests += 1;
+      if (containerRequests === 2) secondRequestArrived();
       return proxyHttp(request, port);
     };
 
@@ -490,10 +498,16 @@ describe('Instant session wake after idle sleep', () => {
     // wake at the container, rather than being refused before it gets there.
     const second = acceptFollowUp('Second follow-up');
     const secondAttempt = runDeliveryAlarm();
-    await vi.waitFor(() => {
-      expect(mailbox.getMessage(projectDataSql(), second)?.deliveryState).toBe('delivering');
-      expect(containerRequests).toBe(2);
-    });
+    await Promise.race([
+      secondRequest,
+      secondAttempt.then(() => {
+        throw new Error(
+          `The second follow-up ended before it reached the container: ${JSON.stringify(
+            mailbox.getMessage(projectDataSql(), second)
+          )}`
+        );
+      }),
+    ]);
     releaseRestore();
     await Promise.all([firstAttempt, secondAttempt]);
 
