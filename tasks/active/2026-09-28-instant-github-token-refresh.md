@@ -26,7 +26,7 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 - [x] Deploy to staging, start an Instant session, force or simulate expiry, prove git/gh operation succeeds, and clean up.
   - First staging pass proved `git credential fill` returned a redacted GitHub credential, but `gh auth status` still failed when `GH_TOKEN=ghs_stale_invalid_INITIAL`; container inspection showed `PATH=/var/lib/vm-agent/agents/bin:/var/lib/vm-agent/agents/npm/bin:/usr/local/bin:/usr/bin:/bin`, `command -v gh=/usr/bin/gh`, no `/usr/local/bin/gh`, and no `.real` wrapper.
   - Follow-up fix installs a `/usr/local/bin/gh` shim when that directory precedes the discovered real `gh` in `PATH`, leaving `/usr/bin/gh` untouched.
-- [ ] Open a draft PR and leave it draft.
+- [x] Open a draft PR and leave it draft: https://github.com/raphaeltm/simple-agent-manager/pull/2174
 
 ## Acceptance Criteria
 
