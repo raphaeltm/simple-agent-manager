@@ -61,3 +61,5 @@ Instant (`cf-container` / standalone vm-agent) sessions can lose GitHub access a
 - Attempted staging KV invalidation for the GitHub installation-token key was blocked by Cloudflare auth error code 10000 with the available token; remote KV key listing worked, deletion did not.
 
 - Deploy run `36425315441` for `20b5302a5` passed deploy and smoke tests, but manual Instant workspace `01M3M2J7ZASWHJSZZ0DZGT9ZPF`, session `296540b9-225e-4fd0-a842-c10c8b6c959c`, still resolved `gh` to `/usr/bin/gh` with no `/usr/local/bin/gh`; this showed `exec.LookPath("gh")` in the vm-agent process can miss `gh` even when user shells find it. Added explicit `/usr/bin/gh` and `/bin/gh` fallback discovery.
+
+- Added ACP standalone startup shim in `/var/lib/vm-agent/agents/bin/gh` because staged Instant shells put that directory first in `PATH`; this directly covers the Claude/Codex process path where `/usr/local/bin/gh` was not present.
