@@ -107,6 +107,7 @@ describe('MCP task-backed search query limits with real SQLite', () => {
     ]);
     expect(body.queryTruncated).toBe(false);
     expect(body.query).toBe(LONG_QUERY);
+    expect(body.queryLimits).toEqual({ maxLength: 4096, maxTermLength: 48, maxTerms: 40 });
   });
 
   it('search_tasks searches late terms in a long query and excludes prefix-only controls', async () => {
@@ -118,11 +119,10 @@ describe('MCP task-backed search query limits with real SQLite', () => {
     );
     const body = parseToolResult(response);
 
-    expect((body.tasks as Array<{ id: string }>).map((task) => task.id)).toEqual([
-      'task-match',
-    ]);
+    expect((body.tasks as Array<{ id: string }>).map((task) => task.id)).toEqual(['task-match']);
     expect(body.queryTruncated).toBe(false);
     expect(body.query).toBe(LONG_QUERY);
+    expect(body.queryLimits).toEqual({ maxLength: 4096, maxTermLength: 48, maxTerms: 40 });
   });
 
   it('keeps normal short-query ordering and results unchanged', async () => {

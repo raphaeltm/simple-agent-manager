@@ -400,6 +400,84 @@ async function copyAllChunks(
 }
 
 describe('ProjectData terminal archive sharding bridge', () => {
+  it('searches every retained term in the archive LIKE fallback', async () => {
+    const target = makeSql();
+    const terms = [
+      '😀',
+      '😃',
+      '😄',
+      '😁',
+      '😆',
+      '😅',
+      '😂',
+      '🤣',
+      '😊',
+      '😇',
+      '🙂',
+      '🙃',
+      '😉',
+      '😌',
+      '😍',
+      '🥰',
+      '😘',
+      '😗',
+      '😙',
+      '😚',
+    ];
+    const query = terms.join(' ');
+    try {
+      for (const [sessionId, content] of [
+        ['session-prefix-control', terms.slice(0, 10).join(' ')],
+        ['session-all-terms', query],
+      ] as const) {
+        target.sql.exec(
+          `INSERT INTO chat_sessions (id, status, started_at, created_at, updated_at)
+           VALUES (?, 'stopped', 1, 1, 1)`,
+          sessionId
+        );
+        target.sql.exec(
+          `INSERT INTO project_data_archive_target_sessions
+             (session_id, project_id, migration_id, owner_name, generation,
+              source_owner_name, source_intent_token, state, terminal_version_sha256,
+              search_index_version, search_index_state, created_at, updated_at, sealed_at)
+           VALUES (?, 'project-archive', ?, 'project-archive:archive:g1:s1', 1,
+                   'project-archive', ?, 'sealed', ?, 2, 'complete', 1, 1, 1)`,
+          sessionId,
+          `migration-${sessionId}`,
+          `intent-${sessionId}`,
+          `version-${sessionId}`
+        );
+        target.sql.exec(
+          `INSERT INTO project_data_archive_search_documents
+             (projection_id, document_id, session_id, role, content, created_at)
+           VALUES (?, ?, ?, 'user', ?, 1)`,
+          `projection-${sessionId}`,
+          `message-${sessionId}`,
+          sessionId,
+          content
+        );
+      }
+
+      const search = await archiveTargetSearchProjectMessages(
+        target.sql,
+        undefined,
+        {
+          kind: 'archive_shard',
+          projectId: 'project-archive',
+          ownerName: 'project-archive:archive:g1:s1',
+          generation: 1,
+        },
+        query,
+        ['user'],
+        10
+      );
+
+      expect(search.results.map((result) => result.sessionId)).toEqual(['session-all-terms']);
+    } finally {
+      target.db.close();
+    }
+  });
+
   it.each([
     { configured: '2', expectedRepairs: 2 },
     { configured: '0', expectedRepairs: 1 },

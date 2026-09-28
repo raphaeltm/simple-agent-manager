@@ -338,7 +338,10 @@ export function validateRoles(
   if (invalid.length > 0) {
     return { valid: false, invalid };
   }
-  const roles = strings.length > 0 ? (strings as MessageRole[]) : defaultRoles;
+  // Repeated roles do not change the filter semantics, but every retained value becomes a
+  // SQLite bind parameter. De-duplicate here so a valid duplicate-heavy request cannot exhaust
+  // the 100-parameter ceiling when search also expands one bind per retained query term.
+  const roles = strings.length > 0 ? ([...new Set(strings)] as MessageRole[]) : defaultRoles;
   return { valid: true, roles };
 }
 

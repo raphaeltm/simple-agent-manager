@@ -12,6 +12,10 @@ const LONG_QUERY = SEARCH_TERMS.join(' ');
 const PREFIX_ONLY_TEXT = SEARCH_TERMS.slice(0, 10).join(' ');
 const ALL_TERMS_TEXT = SEARCH_TERMS.join(' ');
 const LIKE_METACHARACTER_PREFIX = '%'.repeat(24);
+const MAX_TERM_FALLBACK_QUERY = Array.from(
+  { length: 40 },
+  (_, index) => ['AND', 'OR', 'NOT', 'NEAR'][index % 4]
+).join(' ');
 
 function freshStub(): DurableObjectStub<ProjectDataTestDouble> {
   const projectId = `search-query-limits-${crypto.randomUUID()}`;
@@ -63,10 +67,12 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
       results: Array<{ content: string }>;
       query: string;
       queryTruncated: boolean;
+      queryLimits: { maxLength: number; maxTermLength: number; maxTerms: number };
     };
     expect(payload.results.map((item) => item.content)).toEqual([ALL_TERMS_TEXT]);
     expect(payload.query).toBe(LONG_QUERY);
     expect(payload.queryTruncated).toBe(false);
+    expect(payload.queryLimits).toEqual({ maxLength: 4096, maxTermLength: 48, maxTerms: 40 });
   });
 
   it('message search uses late terms in a long query and excludes prefix-only controls', async () => {
@@ -97,12 +103,7 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
       );
     });
 
-    const search = await stub.searchMessagesWithCoverage(
-      LONG_QUERY,
-      'session-1',
-      ['user'],
-      10
-    );
+    const search = await stub.searchMessagesWithCoverage(LONG_QUERY, 'session-1', ['user'], 10);
 
     expect(search.results.map((result) => result.id)).toEqual(['message-match']);
     expect(search.query.queryTruncated).toBe(false);
@@ -176,9 +177,79 @@ describe('ProjectData search query limits with real Durable Object SQLite', () =
       results: Array<{ messageId: string }>;
       query: string;
       queryTruncated: boolean;
+      queryLimits: { maxLength: number; maxTermLength: number; maxTerms: number };
     };
     expect(payload.results.map((item) => item.messageId)).toEqual(['message-match']);
     expect(payload.query).toBe(LONG_QUERY);
+    expect(payload.queryTruncated).toBe(false);
+    expect(payload.queryLimits).toEqual({ maxLength: 4096, maxTermLength: 48, maxTerms: 40 });
+  });
+
+  it('deduplicates roles before a max-term LIKE fallback reaches the bind ceiling', async () => {
+    const suffix = crypto.randomUUID();
+    const projectId = `mcp-message-bind-budget-${suffix}`;
+    const userId = `mcp-message-bind-user-${suffix}`;
+    const installationId = `mcp-message-bind-installation-${suffix}`;
+    await env.DATABASE.batch([
+      env.DATABASE.prepare('INSERT INTO users (id, email) VALUES (?, ?)').bind(
+        userId,
+        `${userId}@example.test`
+      ),
+      env.DATABASE.prepare(
+        `INSERT INTO github_installations
+           (id, user_id, installation_id, account_type, account_name)
+         VALUES (?, ?, ?, 'User', ?)`
+      ).bind(installationId, userId, suffix, userId),
+      env.DATABASE.prepare(
+        `INSERT INTO projects
+           (id, user_id, name, normalized_name, installation_id, repository, created_by)
+         VALUES (?, ?, 'Bind budget', 'bind-budget', ?, ?, ?)`
+      ).bind(projectId, userId, installationId, `owner/repo-${suffix}`, userId),
+      env.DATABASE.prepare(
+        `INSERT INTO project_members (project_id, user_id, role, status)
+         VALUES (?, ?, 'owner', 'active')`
+      ).bind(projectId, userId),
+    ]);
+
+    const stub = env.PROJECT_DATA.get(
+      env.PROJECT_DATA.idFromName(projectId)
+    ) as DurableObjectStub<ProjectDataTestDouble>;
+    await runInDurableObject(stub, async (_instance, state) => {
+      const now = Date.now();
+      state.storage.sql.exec(
+        `INSERT INTO chat_sessions
+           (id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES ('session-bind-budget', 'Bind budget', 'active', 1, ?, ?, ?)`,
+        now,
+        now,
+        now
+      );
+      state.storage.sql.exec(
+        `INSERT INTO chat_messages
+           (id, session_id, role, content, tool_metadata, created_at, sequence)
+         VALUES ('message-bind-budget', 'session-bind-budget', 'user', ?, NULL, ?, 1)`,
+        MAX_TERM_FALLBACK_QUERY,
+        now
+      );
+    });
+
+    const response = await handleSearchMessages(
+      3,
+      {
+        query: MAX_TERM_FALLBACK_QUERY,
+        sessionId: 'session-bind-budget',
+        roles: Array.from({ length: 59 }, () => 'user'),
+      },
+      { ...tokenData(projectId), userId },
+      env as unknown as Env
+    );
+    expect(response.error).toBeUndefined();
+    const result = response.result as { content: Array<{ text: string }> };
+    const payload = JSON.parse(result.content[0]!.text) as {
+      results: Array<{ messageId: string }>;
+      queryTruncated: boolean;
+    };
+    expect(payload.results.map((item) => item.messageId)).toEqual(['message-bind-budget']);
     expect(payload.queryTruncated).toBe(false);
   });
 
