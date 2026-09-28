@@ -340,7 +340,9 @@ every fix was then removed once to prove the intended test goes red.
     - Removing the double commit for unguarded durable wakes (Cloudflare MEDIUM). It is idempotent
       and costs about 3 I/O per wake, and the adapter's commit is the retry path when the DO's
       commit fails.
-- [ ] Delta review of the second round
+- [x] Delta review of the second round: Cloudflare PASS (the HIGH is resolved; no reentrancy,
+  since `wakeSession` never calls the container DO; guarded wakes are unchanged). Architecture
+  PASS (its LOW docstring fixed in `f285d4ee7`).
 - [ ] CodeRabbit through the trusted workflow
 - [ ] CI green on the final head
 - [ ] Staging on the final head: slept-session workspace-page stop (no wake), UI Archive (no
