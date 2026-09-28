@@ -100,6 +100,11 @@ const SLEEPING_CONTAINER_WAKEABLE_STATUSES = IN_PLACE_WAKEABLE_STATUSES.filter(
   (status) => status !== 'error'
 );
 
+/**
+ * Whether the session slept as an Instant runtime, read from its snapshot: the marker that says
+ * "wake this in place". A signal-only caller asks something else (would a request start a wake?)
+ * and reads the node instead (`services/sleeping-container-runtime.ts`), which the wake clears first.
+ */
 function isSleepingContainer(runtime: string | null, sleepStatus: string | null): boolean {
   return runtime === 'cf-container' && sleepStatus === 'sleeping';
 }

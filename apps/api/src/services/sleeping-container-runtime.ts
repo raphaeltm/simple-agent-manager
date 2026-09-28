@@ -8,7 +8,13 @@
  *
  * Reads the node mirror that every sleep writer sets (`persistRuntimeSleeping`,
  * `persistRuntimeSleepingAfterRevokedWake`, `completeSleepTeardown`) and the wake clears
- * first (`persistRuntimeRecovering`).
+ * first (`persistRuntimeRecovering`). Each writer flips it only after the container DO has
+ * closed its request gate (`sleep-preparing` or `sleeping`, which `prepareForRequest` refuses
+ * to serve), so once the mirror reads `sleeping` no new turn can start in that container.
+ *
+ * Durable delivery asks a different question (did this session sleep, so wake it in place?)
+ * and reads the snapshot instead (`isSleepingContainer` in `vm-prompt-delivery-target.ts`);
+ * the snapshot stays `sleeping` until the wake is committed, so the two must not be merged.
  */
 import { eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
