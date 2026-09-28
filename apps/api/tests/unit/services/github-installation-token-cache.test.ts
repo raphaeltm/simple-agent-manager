@@ -55,146 +55,93 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const CACHE_KEY = 'github-installation-token:v1:inst-1:default';
+const MINTED_TOKEN = { token: 'fresh-token', expiresAt: '2026-08-19T01:00:00Z' };
+
+function stubGitHubMint(): void {
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ token: MINTED_TOKEN.token, expires_at: MINTED_TOKEN.expiresAt })
+      )
+  );
+}
+
 describe('getInstallationToken KV cache', () => {
-  it('returns cached installation tokens without minting a new token', async () => {
-    const env = makeEnv({ token: 'cached-token', expiresAt: '2026-08-19T01:00:00Z' });
-    vi.stubGlobal('fetch', vi.fn());
-
-    await expect(getInstallationToken('inst-1', env as Env)).resolves.toEqual({
-      token: 'cached-token',
+  // The clock is frozen at 00:00Z. GitHub installation tokens live for one hour;
+  // the default refresh margin is 5 minutes and any margin is capped at 30.
+  it.each([
+    {
+      name: 'reuses a cached token outside the default refresh margin',
       expiresAt: '2026-08-19T01:00:00Z',
-    });
-
-    expect(fetch).not.toHaveBeenCalled();
-    expect(jose.sign).not.toHaveBeenCalled();
-  });
-
-  it('ignores cached installation tokens that are already expired', async () => {
-    const env = makeEnv({ token: 'expired-token', expiresAt: '2026-08-18T23:59:00.000Z' });
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(
-          Response.json({ token: 'fresh-token', expires_at: '2026-08-19T01:00:00Z' })
-        )
-    );
-
-    await expect(getInstallationToken('inst-1', env as Env)).resolves.toEqual({
-      token: 'fresh-token',
-      expiresAt: '2026-08-19T01:00:00Z',
-    });
-
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(env.KV?.put).toHaveBeenCalledWith(
-      'github-installation-token:v1:inst-1:default',
-      JSON.stringify({ token: 'fresh-token', expiresAt: '2026-08-19T01:00:00Z' }),
-      { expirationTtl: 99 }
-    );
-  });
-
-  it('refreshes cached installation tokens inside the configured expiry margin', async () => {
-    const env = makeEnv({ token: 'nearly-expired-token', expiresAt: '2026-08-19T00:04:59.000Z' });
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(
-          Response.json({ token: 'fresh-token', expires_at: '2026-08-19T01:00:00Z' })
-        )
-    );
-
-    await expect(getInstallationToken('inst-1', env as Env)).resolves.toEqual({
-      token: 'fresh-token',
-      expiresAt: '2026-08-19T01:00:00Z',
-    });
-
-    expect(fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it('uses the configured expiry margin when deciding cache reuse', async () => {
-    const env = makeEnv({ token: 'cached-token', expiresAt: '2026-08-19T00:02:00.000Z' });
-    env.GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS = '60';
-    vi.stubGlobal('fetch', vi.fn());
-
-    await expect(getInstallationToken('inst-1', env as Env)).resolves.toEqual({
-      token: 'cached-token',
+      margin: undefined,
+      mints: false,
+    },
+    {
+      name: 'refreshes a cached token that has already expired',
+      expiresAt: '2026-08-18T23:59:00.000Z',
+      margin: undefined,
+      mints: true,
+    },
+    {
+      name: 'refreshes a cached token inside the default refresh margin',
+      expiresAt: '2026-08-19T00:04:59.000Z',
+      margin: undefined,
+      mints: true,
+    },
+    {
+      name: 'honours a configured refresh margin',
       expiresAt: '2026-08-19T00:02:00.000Z',
-    });
-
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('caps an oversized refresh margin so cached tokens are still reused', async () => {
-    // A margin at or above GitHub's one-hour token lifetime would treat every
-    // cached token as stale and mint on every credential exchange. Capped at
-    // half the lifetime (30 min), a token with 40 minutes left is reused.
-    const env = makeEnv({ token: 'cached-token', expiresAt: '2026-08-19T00:40:00.000Z' });
-    env.GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS = '3600';
-    vi.stubGlobal('fetch', vi.fn());
-
-    await expect(getInstallationToken('inst-1', env as Env)).resolves.toEqual({
-      token: 'cached-token',
+      margin: '60',
+      mints: false,
+    },
+    {
+      // Uncapped, a margin of the full lifetime would mint on every exchange.
+      name: 'caps an oversized refresh margin so cached tokens are still reused',
       expiresAt: '2026-08-19T00:40:00.000Z',
-    });
+      margin: '3600',
+      mints: false,
+    },
+    {
+      name: 'still refreshes inside the capped refresh margin',
+      expiresAt: '2026-08-19T00:29:00.000Z',
+      margin: '3600',
+      mints: true,
+    },
+  ])('$name', async ({ expiresAt, margin, mints }) => {
+    const cached = { token: 'cached-token', expiresAt };
+    const env = makeEnv(cached);
+    env.GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS = margin;
+    stubGitHubMint();
 
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('still refreshes inside the capped refresh margin', async () => {
-    const env = makeEnv({ token: 'cached-token', expiresAt: '2026-08-19T00:29:00.000Z' });
-    env.GITHUB_INSTALLATION_TOKEN_REFRESH_MARGIN_SECONDS = '3600';
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(
-          Response.json({ token: 'fresh-token', expires_at: '2026-08-19T01:00:00Z' })
-        )
+    await expect(getInstallationToken('inst-1', env as Env)).resolves.toEqual(
+      mints ? MINTED_TOKEN : cached
     );
 
-    await expect(getInstallationToken('inst-1', env as Env)).resolves.toEqual({
-      token: 'fresh-token',
-      expiresAt: '2026-08-19T01:00:00Z',
-    });
-
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(mints ? 1 : 0);
+    expect(jose.sign).toHaveBeenCalledTimes(mints ? 1 : 0);
+    expect(vi.mocked(env.KV!.put).mock.calls).toEqual(
+      mints ? [[CACHE_KEY, JSON.stringify(MINTED_TOKEN), { expirationTtl: 99 }]] : []
+    );
   });
 
   it('mints and caches installation tokens on cache miss with the configured TTL', async () => {
     const env = makeEnv();
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(
-          Response.json({ token: 'fresh-token', expires_at: '2026-08-19T01:00:00Z' })
-        )
-    );
+    stubGitHubMint();
 
-    await expect(getInstallationToken('inst-1', env as Env)).resolves.toEqual({
-      token: 'fresh-token',
-      expiresAt: '2026-08-19T01:00:00Z',
+    await expect(getInstallationToken('inst-1', env as Env)).resolves.toEqual(MINTED_TOKEN);
+
+    expect(env.KV?.put).toHaveBeenCalledWith(CACHE_KEY, JSON.stringify(MINTED_TOKEN), {
+      expirationTtl: 99,
     });
-
-    expect(env.KV?.put).toHaveBeenCalledWith(
-      'github-installation-token:v1:inst-1:default',
-      JSON.stringify({ token: 'fresh-token', expiresAt: '2026-08-19T01:00:00Z' }),
-      { expirationTtl: 99 }
-    );
   });
 
   it('does not write installation tokens when the configured cache TTL is zero', async () => {
     const env = makeEnv();
     env.GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS = '0';
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(
-          Response.json({ token: 'fresh-token', expires_at: '2026-08-19T01:00:00Z' })
-        )
-    );
+    stubGitHubMint();
 
     await getInstallationToken('inst-1', env as Env);
 
