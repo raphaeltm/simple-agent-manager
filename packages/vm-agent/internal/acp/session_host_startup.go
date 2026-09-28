@@ -139,10 +139,10 @@ if [ -n "$_token" ]; then
 fi
 exec %s "$@"
 `, shellSingleQuote(realGhPath))
-	if err := os.WriteFile(wrapperPath, []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(wrapperPath, []byte(script), 0o700); err != nil {
 		return fmt.Errorf("write gh wrapper: %w", err)
 	}
-	if err := os.Chmod(wrapperPath, 0o755); err != nil {
+	if err := os.Chmod(wrapperPath, 0o700); err != nil {
 		return fmt.Errorf("chmod gh wrapper: %w", err)
 	}
 	return nil

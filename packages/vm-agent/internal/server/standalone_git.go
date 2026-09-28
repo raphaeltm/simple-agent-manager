@@ -245,10 +245,10 @@ func writeStandaloneGhWrapper(ghPath, realGhPath string) error {
 	if err != nil {
 		return fmt.Errorf("render gh wrapper: %w", err)
 	}
-	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(ghPath, []byte(script), 0o700); err != nil {
 		return fmt.Errorf("write gh wrapper: %w", err)
 	}
-	if err := os.Chmod(ghPath, 0o755); err != nil {
+	if err := os.Chmod(ghPath, 0o700); err != nil {
 		return fmt.Errorf("chmod gh wrapper: %w", err)
 	}
 	return nil
