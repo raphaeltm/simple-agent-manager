@@ -7,6 +7,8 @@ import {
   DEFAULT_IDLE_CLEANUP_MAX_RETRIES,
   DEFAULT_IDLE_CLEANUP_RETRY_DELAY_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES,
+  DEFAULT_WORKSPACE_IDLE_BACKOFF_BASE_MS,
+  DEFAULT_WORKSPACE_IDLE_BACKOFF_MAX_MS,
   DEFAULT_WORKSPACE_IDLE_MIN_ALARM_DELAY_MS,
   DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
   WORKSPACE_IDLE_CHECK_INTERVAL_MS,
@@ -39,6 +41,7 @@ const IDLE_CLEANUP_RETRY_EXHAUSTED_MESSAGE =
   'Idle cleanup failed after retries. Your work has been preserved — please check the workspace manually.';
 const IDLE_CLEANUP_MAX_RESIDENCE_MESSAGE =
   'Idle cleanup could not complete within its maximum residence time. Your work has been preserved — please check the workspace manually.';
+const WORKSPACE_IDLE_BACKOFF_EXPONENT_SAFETY_CAP = 30;
 
 function positiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? '', 10);
@@ -53,6 +56,47 @@ function errorText(err: unknown): string {
 
 function maxResidenceExceeded(entry: IdleCleanupEntry, now: number, maxResidenceMs: number): boolean {
   return now - entry.createdAt >= maxResidenceMs;
+}
+
+function boundedWorkspaceIdleBackoffMs(env: Env, retryCount: number): number {
+  const baseMs = positiveInt(
+    env.WORKSPACE_IDLE_BACKOFF_BASE_MS,
+    DEFAULT_WORKSPACE_IDLE_BACKOFF_BASE_MS
+  );
+  const maxMs = Math.max(
+    baseMs,
+    positiveInt(env.WORKSPACE_IDLE_BACKOFF_MAX_MS, DEFAULT_WORKSPACE_IDLE_BACKOFF_MAX_MS)
+  );
+  const exponent = Math.min(Math.max(retryCount, 0), WORKSPACE_IDLE_BACKOFF_EXPONENT_SAFETY_CAP);
+  return Math.min(baseMs * 2 ** exponent, maxMs);
+}
+
+function deferWorkspaceIdleCheck(
+  sql: SqlStorage,
+  env: Env,
+  workspaceId: string,
+  now: number,
+  reason: string,
+  currentRetryCount: number
+): { retryCount: number; nextIdleCheckAt: number } {
+  const nextRetryCount = currentRetryCount + 1;
+  const nextIdleCheckAt = now + boundedWorkspaceIdleBackoffMs(env, currentRetryCount);
+  sql.exec(
+    `UPDATE workspace_activity
+     SET idle_check_retry_count = ?,
+         next_idle_check_at = ?
+     WHERE workspace_id = ?`,
+    nextRetryCount,
+    nextIdleCheckAt,
+    workspaceId
+  );
+  log.info('workspace_idle_check_deferred', {
+    workspaceId,
+    reason,
+    retryCount: nextRetryCount,
+    nextIdleCheckAt,
+  });
+  return { retryCount: nextRetryCount, nextIdleCheckAt };
 }
 
 function markIdleCleanupAttentionRequired(
@@ -489,12 +533,15 @@ export async function checkWorkspaceIdleTimeouts(
   const activeWorkspaces = sql
     .exec(
       `SELECT wa.workspace_id, wa.session_id, wa.last_terminal_activity_at, wa.last_message_at,
+            wa.idle_check_retry_count, wa.next_idle_check_at,
             cs.updated_at as session_updated_at
      FROM workspace_activity wa
      INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id
      WHERE cs.status = 'active'
+       AND (wa.next_idle_check_at IS NULL OR wa.next_idle_check_at <= ?)
      ORDER BY wa.workspace_id ASC
      LIMIT ?`,
+      now,
       candidateLimit
     )
     .toArray()
@@ -520,6 +567,14 @@ export async function checkWorkspaceIdleTimeouts(
             sessionId: ws.sessionId,
             action: 'preserved',
           });
+          deferWorkspaceIdleCheck(
+            sql,
+            env,
+            ws.workspaceId,
+            now,
+            'reporter_identity_incomplete',
+            ws.idleCheckRetryCount
+          );
           continue;
         }
         const reporterSessionId = ws.sessionId;
@@ -539,6 +594,14 @@ export async function checkWorkspaceIdleTimeouts(
             overflow: candidates.overflow,
             action: 'preserved',
           });
+          deferWorkspaceIdleCheck(
+            sql,
+            env,
+            ws.workspaceId,
+            now,
+            candidates.overflow ? 'candidate_overflow' : 'no_candidate_tasks',
+            ws.idleCheckRetryCount
+          );
           continue;
         }
 
@@ -565,6 +628,14 @@ export async function checkWorkspaceIdleTimeouts(
             reasons: transitions.map((transition) => transition.liveness?.reason ?? null),
             action: 'preserved',
           });
+          deferWorkspaceIdleCheck(
+            sql,
+            env,
+            ws.workspaceId,
+            now,
+            'runtime_preserved',
+            ws.idleCheckRetryCount
+          );
           continue;
         }
 
@@ -635,19 +706,40 @@ export function computeIdleAlarmTimes(sql: SqlStorage): {
   let workspaceIdleCheckTime: number | null = null;
   const earliestActivityRow = sql
     .exec(
-      `SELECT MIN(COALESCE(
-        CASE WHEN last_terminal_activity_at > last_message_at THEN last_terminal_activity_at ELSE last_message_at END,
-        last_message_at, created_at
-      )) as earliest FROM workspace_activity`
+      `SELECT MIN(
+        CASE
+          WHEN next_idle_check_at IS NOT NULL
+           AND next_idle_check_at > COALESCE(
+             CASE
+               WHEN last_terminal_activity_at > last_message_at
+               THEN last_terminal_activity_at
+               ELSE last_message_at
+             END,
+             last_message_at,
+             created_at
+           ) + ?
+          THEN next_idle_check_at
+          ELSE COALESCE(
+            CASE
+              WHEN last_terminal_activity_at > last_message_at
+              THEN last_terminal_activity_at
+              ELSE last_message_at
+            END,
+            last_message_at,
+            created_at
+          ) + ?
+        END
+      ) as earliest FROM workspace_activity`,
+      WORKSPACE_IDLE_CHECK_INTERVAL_MS,
+      WORKSPACE_IDLE_CHECK_INTERVAL_MS
     )
     .toArray()[0];
   const earliestActivity = earliestActivityRow
     ? parseMinEarliest(earliestActivityRow, 'idle_cleanup.min_activity')
     : null;
   if (earliestActivity !== null) {
-    const nextCheck = earliestActivity + WORKSPACE_IDLE_CHECK_INTERVAL_MS;
     workspaceIdleCheckTime = Math.max(
-      nextCheck,
+      earliestActivity,
       Date.now() + DEFAULT_WORKSPACE_IDLE_MIN_ALARM_DELAY_MS
     );
   }

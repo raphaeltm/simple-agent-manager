@@ -153,6 +153,12 @@ export const DEFAULT_IDLE_CLEANUP_MAX_RESIDENCE_MS = 2 * 60 * 60 * 1000; // 2 ho
 /** Minimum delay before rescheduling a workspace-idle alarm. */
 export const DEFAULT_WORKSPACE_IDLE_MIN_ALARM_DELAY_MS = 60 * 1000;
 
+/** Base delay before retrying an inconclusive workspace-idle check. */
+export const DEFAULT_WORKSPACE_IDLE_BACKOFF_BASE_MS = 10 * 60 * 1000; // 10 minutes
+
+/** Maximum delay before retrying an inconclusive workspace-idle check. */
+export const DEFAULT_WORKSPACE_IDLE_BACKOFF_MAX_MS = 6 * 60 * 60 * 1000; // 6 hours
+
 /** Default workspace idle timeout (ms). Workspaces with no messages AND no terminal activity
  * for this duration are auto-deleted. Override per-project via project settings or via
  * WORKSPACE_IDLE_TIMEOUT_MS env var. */

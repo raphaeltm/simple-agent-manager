@@ -60,6 +60,8 @@ const WorkspaceActivitySchema = v.object({
   last_terminal_activity_at: v.nullable(v.number()),
   last_message_at: v.nullable(v.number()),
   session_updated_at: v.nullable(v.number()),
+  idle_check_retry_count: v.optional(v.number(), 0),
+  next_idle_check_at: v.optional(v.nullable(v.number()), null),
 });
 
 export function parseWorkspaceActivity(row: unknown): {
@@ -68,6 +70,8 @@ export function parseWorkspaceActivity(row: unknown): {
   lastTerminalActivityAt: number;
   lastMessageAt: number;
   sessionUpdatedAt: number;
+  idleCheckRetryCount: number;
+  nextIdleCheckAt: number | null;
 } {
   const r = parseRow(WorkspaceActivitySchema, row, 'workspace_activity');
   return {
@@ -76,6 +80,8 @@ export function parseWorkspaceActivity(row: unknown): {
     lastTerminalActivityAt: r.last_terminal_activity_at ?? 0,
     lastMessageAt: r.last_message_at ?? 0,
     sessionUpdatedAt: r.session_updated_at ?? 0,
+    idleCheckRetryCount: r.idle_check_retry_count,
+    nextIdleCheckAt: r.next_idle_check_at,
   };
 }
 

@@ -883,6 +883,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   IDLE_CLEANUP_RETRY_DELAY_MS?: string;
   IDLE_CLEANUP_MAX_RETRIES?: string;
   IDLE_CLEANUP_MAX_RESIDENCE_MS?: string;
+  WORKSPACE_IDLE_BACKOFF_BASE_MS?: string;
+  WORKSPACE_IDLE_BACKOFF_MAX_MS?: string;
   // Heartbeat ACP sweep timeout (per-call timeout for DO heartbeat updates in waitUntil)
   HEARTBEAT_ACP_SWEEP_TIMEOUT_MS?: string;
   // Durable Object RPC retry configuration for transient reset/overload errors
