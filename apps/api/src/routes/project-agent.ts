@@ -13,6 +13,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { normalizeSearchQuery } from '../lib/search-query-limits';
 import { requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
@@ -117,7 +118,7 @@ app.get('/search', requireAuth(), async (c) => {
   const params = new URLSearchParams({ query: normalizedQuery.query });
   if (limit) params.set('limit', limit);
   const response = await stub.fetch(`https://project-agent/search?${params.toString()}`);
-  const data = (await response.json()) as Record<string, unknown>;
+  const data = expectJsonRecord(await response.json(), 'project_agent.search.response');
   return new Response(JSON.stringify({ ...data, ...normalizedQuery }), {
     status: response.status,
     headers: { 'content-type': 'application/json' },

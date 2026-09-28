@@ -9,6 +9,7 @@
 import { Hono } from 'hono';
 
 import type { Env } from '../env';
+import { expectJsonRecord } from '../lib/runtime-validation';
 import { normalizeSearchQuery } from '../lib/search-query-limits';
 import { requireAuth } from '../middleware/auth';
 import { AgentChatRequestSchema, jsonValidator } from '../schemas';
@@ -98,7 +99,7 @@ app.get('/search', async (c) => {
   const params = new URLSearchParams({ query: normalizedQuery.query });
   if (limit) params.set('limit', limit);
   const response = await stub.fetch(`https://sam-session/search?${params.toString()}`);
-  const data = (await response.json()) as Record<string, unknown>;
+  const data = expectJsonRecord(await response.json(), 'sam.search.response');
   return new Response(JSON.stringify({ ...data, ...normalizedQuery }), {
     status: response.status,
     headers: { 'content-type': 'application/json' },
