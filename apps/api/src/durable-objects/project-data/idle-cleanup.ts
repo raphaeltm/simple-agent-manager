@@ -628,6 +628,9 @@ export async function checkWorkspaceIdleTimeouts(
             reasons: transitions.map((transition) => transition.liveness?.reason ?? null),
             action: 'preserved',
           });
+          // Do not reset the retry counter for a conclusive "not idle yet" result here.
+          // Terminal and message activity reset it as positive new activity; repeated preserved
+          // runtime checks without new activity should continue widening the retry cadence.
           deferWorkspaceIdleCheck(
             sql,
             env,
@@ -708,28 +711,25 @@ export function computeIdleAlarmTimes(sql: SqlStorage): {
     .exec(
       `SELECT MIN(
         CASE
-          WHEN next_idle_check_at IS NOT NULL
-           AND next_idle_check_at > COALESCE(
-             CASE
-               WHEN last_terminal_activity_at > last_message_at
-               THEN last_terminal_activity_at
-               ELSE last_message_at
-             END,
-             last_message_at,
-             created_at
+          WHEN wa.next_idle_check_at IS NOT NULL
+           AND wa.next_idle_check_at > max(
+             COALESCE(wa.last_terminal_activity_at, 0),
+             COALESCE(wa.last_message_at, 0),
+             COALESCE(cs.updated_at, 0),
+             wa.created_at
            ) + ?
-          THEN next_idle_check_at
-          ELSE COALESCE(
-            CASE
-              WHEN last_terminal_activity_at > last_message_at
-              THEN last_terminal_activity_at
-              ELSE last_message_at
-            END,
-            last_message_at,
-            created_at
+          THEN wa.next_idle_check_at
+          ELSE max(
+            COALESCE(wa.last_terminal_activity_at, 0),
+            COALESCE(wa.last_message_at, 0),
+            COALESCE(cs.updated_at, 0),
+            wa.created_at
           ) + ?
         END
-      ) as earliest FROM workspace_activity`,
+      ) as earliest
+       FROM workspace_activity wa
+       INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id
+       WHERE cs.status = 'active'`,
       WORKSPACE_IDLE_CHECK_INTERVAL_MS,
       WORKSPACE_IDLE_CHECK_INTERVAL_MS
     )

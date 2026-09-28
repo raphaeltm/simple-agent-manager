@@ -10,8 +10,11 @@ The ProjectData Durable Object can keep re-arming its alarm roughly every minute
 - The `workspace_idle_candidates_inconclusive` branch fires when `listReporterScopedTaskCandidates()` overflows the bounded candidate page or returns zero tasks. It logs `action: 'preserved'` and `continue`s without updating or deleting the `workspace_activity` row.
 - The `workspace_idle_runtime_preserved` branch fires when at least one terminalization transition is not `failed`. It logs `action: 'preserved'` and `continue`s without updating or deleting the `workspace_activity` row.
 - `computeIdleAlarmTimes()` derives `workspaceIdleCheckTime` from the minimum workspace activity timestamp plus `WORKSPACE_IDLE_CHECK_INTERVAL_MS`, clamped to `Date.now() + DEFAULT_WORKSPACE_IDLE_MIN_ALARM_DELAY_MS`. Once that activity timestamp is overdue, the clamp produces a new alarm about 60 seconds out every time.
+- Coordinator review found the likely live 60-second loop was broader than the first fix: `computeIdleAlarmTimes()` scanned all `workspace_activity` rows, while `checkWorkspaceIdleTimeouts()` only processes rows whose `chat_sessions` row is still `active`. Sleeping or stopped sessions can legitimately retain `workspace_activity` until workspace finalization; those rows are not sweep candidates and must not schedule the workspace-idle alarm.
 - `computeProjectDataAlarmTime()` takes the earliest section time from `computeProjectDataAlarmSectionTimes()`, so the workspace-idle section keeps the whole ProjectData alarm scheduled.
+- Discriminating test proof on `origin/main` in `/workspaces/sam-main-idle-red`: adding the sleeping-session alarm-path test to `conversation-idle-timeout.test.ts` failed with `expected 1786017660000 not to be 1786017660000`, proving current main scheduled the ProjectData alarm at exactly `NOW + 60_000`.
 - Live log evidence checked on 2026-09-28: Cloudflare Observability exact searches for `workspace_idle_candidates_inconclusive` and `workspace_idle_runtime_preserved` over the prior seven days returned zero exact matches on both `sam-api-prod` and `sam-api-staging`. No current repeated live workspace was found; the loop is still present by code path and will recur for the next inconclusive/preserved due workspace.
+- Production Durable Object telemetry checked on 2026-09-28 09:19Z: Worker binding settings map namespace `fb36fe2173534537b0f0a9a0efb17777` to `PROJECT_DATA`. In the previous 24 hours (`2026-09-27T09:19:56Z` to `2026-09-28T09:19:56Z`), `sam-api-prod` ProjectData alarm invocations totaled 32,910 across 25 objects; 19 objects had at least 1,200 alarm invocations, consistent with near-minute cadence, and the SAM project object `01KHRJGANBBWGDY1NZ0KVF0D4J` had 6,579 invocations.
 - Required rules read before editing: `apps/api/.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`, `apps/api/.claude/rules/47-control-loop-io-budget.md`, and `apps/api/.claude/rules/61-per-cycle-budget-counters.md`.
 
 ## Checklist
@@ -22,8 +25,11 @@ The ProjectData Durable Object can keep re-arming its alarm roughly every minute
 - [x] On preserved runtime outcome, push the next workspace idle check into the future and increment the consecutive backoff count.
 - [x] Ensure a successful idle cleanup still deletes the workspace activity row, resetting the counter.
 - [x] Ensure the alarm scheduler honors the persisted next-check time instead of the unchanged activity timestamp.
-- [x] Add real-path tests for inconclusive backoff, growing backoff, success reset, and genuine idle cleanup.
+- [x] Ensure the alarm scheduler only considers active chat-session rows that the workspace idle sweep can process.
+- [x] Add real-path tests for inconclusive backoff, sleeping-session alarm suppression, wake-back-to-active cleanup, growing backoff, success reset, and genuine idle cleanup.
 - [x] Temporarily remove the fix and confirm the loop regression test fails red, then restore the fix.
+- [x] Restore accidental `.codex/config.toml` churn so the PR does not touch it.
+- [x] Document that conclusive preserved/not-idle-yet checks deliberately do not reset the workspace idle retry counter; only terminal/message activity and successful cleanup reset it.
 - [x] Run focused tests and broader API validation.
 - [x] Complete specialist reviews, staging verification, and draft PR creation.
 
@@ -51,6 +57,8 @@ The ProjectData Durable Object can keep re-arming its alarm roughly every minute
 ## Acceptance Criteria
 
 - An overdue workspace whose idle check is inconclusive does not schedule the next ProjectData alarm about 60 seconds out.
+- A `workspace_activity` row for a sleeping or stopped chat session does not schedule the next ProjectData alarm about 60 seconds out.
+- Waking that session back to `active` resumes workspace idle scheduling, and a genuinely idle workspace is still cleaned up on time.
 - Repeated inconclusive or preserved workspace idle outcomes use bounded growing backoff.
 - The backoff counter resets after a successful workspace idle cleanup.
 - A genuinely idle workspace is still cleaned up on time.
@@ -61,4 +69,3 @@ The ProjectData Durable Object can keep re-arming its alarm roughly every minute
 
 - PASS: GitHub Actions `Deploy Staging` run 36397425870 on branch `sam/stop-projectdata-durable-object-22878v`: deployment completed, database migrations with safety gates passed, API worker deployed, health check passed, and smoke tests passed (`12 passed` in 1.2m). Run URL: https://github.com/raphaeltm/simple-agent-manager/actions/runs/36397425870
 - Draft PR opened as requested and not merged: https://github.com/raphaeltm/simple-agent-manager/pull/2170
-

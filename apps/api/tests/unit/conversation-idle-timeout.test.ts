@@ -486,6 +486,42 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
     ).toBe(NOW + 600_000);
   });
 
+  it('ignores non-active-session workspace activity until wake makes it processable again', async () => {
+    const seeded = seed({ nodeStatus: 'stopped' });
+    projectDb.prepare('DELETE FROM acp_sessions WHERE chat_session_id = ?').run(seeded.sessionId);
+    projectDb
+      .prepare('UPDATE chat_sessions SET status = ? WHERE id = ?')
+      .run('sleeping', seeded.sessionId);
+    const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+    expect(
+      computeProjectDataAlarmTime(sql, { ...env, PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })
+    ).toBeNull();
+    expect(workspaceActivity(seeded.workspaceId)).toBeDefined();
+
+    projectDb
+      .prepare('UPDATE chat_sessions SET status = ? WHERE id = ?')
+      .run('stopped', seeded.sessionId);
+    expect(
+      computeProjectDataAlarmTime(sql, { ...env, PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })
+    ).toBeNull();
+    expect(workspaceActivity(seeded.workspaceId)).toBeDefined();
+
+    projectDb
+      .prepare('UPDATE chat_sessions SET status = ?, updated_at = ? WHERE id = ?')
+      .run('active', NOW - 3 * TIMEOUT_MS, seeded.sessionId);
+
+    expect(
+      computeProjectDataAlarmTime(sql, { ...env, PROJECT_DATA_STORAGE_TELEMETRY_ENABLED: 'false' })
+    ).toBe(NOW + 60_000);
+
+    await checkWorkspaceIdleTimeouts(sql, env, PROJECT_ID, deleteWorkspace, vi.fn(), vi.fn());
+
+    expect(task(seeded.taskId).status).toBe('failed');
+    expect(deleteWorkspace).toHaveBeenCalledWith(seeded.workspaceId, PROJECT_ID);
+    expect(workspaceActivity(seeded.workspaceId)).toBeUndefined();
+  });
+
   it('grows workspace idle preservation backoff and clears the counter after successful cleanup', async () => {
     env.WORKSPACE_IDLE_BACKOFF_BASE_MS = '300000';
     env.WORKSPACE_IDLE_BACKOFF_MAX_MS = '900000';
