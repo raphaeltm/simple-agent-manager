@@ -665,33 +665,26 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
       ).toBe(NOW + 600_000);
     });
 
-    it('grows the retry delay while an idle runtime is preserved and forgets it after cleanup', async () => {
+    it('grows the retry delay up to its cap while an idle runtime is preserved, and forgets it after cleanup', async () => {
       env.WORKSPACE_IDLE_BACKOFF_BASE_MS = '300000';
       env.WORKSPACE_IDLE_BACKOFF_MAX_MS = '900000';
       const seeded = seed();
       const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
 
-      await sweepWorkspaceIdle(deleteWorkspace);
+      const firedAt = await runWorkspaceIdleAlarms(deleteWorkspace, 4);
+
+      const delays = firedAt.slice(1).map((at, index) => at - firedAt[index]!);
+      expect(delays).toEqual([300_000, 600_000, 900_000]);
       expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
-        idle_check_retry_count: 1,
-        next_idle_check_at: NOW + 300_000,
+        idle_check_retry_count: 4,
+        next_idle_check_at: firedAt[3]! + 900_000,
       });
 
-      vi.setSystemTime(NOW + 300_001);
-      await sweepWorkspaceIdle(deleteWorkspace);
-      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
-        idle_check_retry_count: 2,
-        next_idle_check_at: NOW + 300_001 + 600_000,
-      });
       projectDb.prepare('DELETE FROM acp_sessions WHERE chat_session_id = ?').run(seeded.sessionId);
-      expect(workspaceIdleAlarmAt()).toBe(NOW + 300_001 + 600_000);
-
       d1Db
         .prepare(`UPDATE nodes SET status = 'stopped', health_status = 'unhealthy' WHERE id = ?`)
         .run(`node-${seeded.workspaceId}`);
-      vi.setSystemTime(NOW + 900_002);
-
-      await sweepWorkspaceIdle(deleteWorkspace);
+      await runWorkspaceIdleAlarms(deleteWorkspace, 1);
 
       expect(task(seeded.taskId).status).toBe('failed');
       expect(deleteWorkspace).toHaveBeenCalledWith(seeded.workspaceId, PROJECT_ID);
@@ -799,6 +792,123 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
       expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
         idle_check_retry_count: 1,
         next_idle_check_at: NOW + 600_000,
+      });
+    });
+
+    it('drains more idle workspaces than one pass takes, a page per alarm', async () => {
+      const seeded = [1, 2, 3, 4, 5, 6, 7].map((n) =>
+        seedDeadRuntime({
+          taskId: `task-idle-${n}`,
+          workspaceId: `workspace-idle-${n}`,
+          sessionId: `session-idle-${n}`,
+        })
+      );
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      const firedAt = await runWorkspaceIdleAlarms(deleteWorkspace);
+
+      expect(firedAt).toEqual([NOW + 60_000, NOW + 120_000]);
+      for (const { taskId } of seeded) expect(task(taskId).status).toBe('failed');
+      expect(deleteWorkspace).toHaveBeenCalledTimes(seeded.length);
+      expect(workspaceIdleAlarmAt()).toBeNull();
+    });
+
+    it.each([
+      {
+        window: 'during the project timeout lookup',
+        hookedQuery: 'FROM projects',
+        activeWorkspaceId: 'workspace-a',
+        checkedWorkspaceId: 'workspace-b',
+      },
+      {
+        window: 'while an earlier workspace is being checked',
+        hookedQuery: 'FROM tasks t',
+        activeWorkspaceId: 'workspace-b',
+        checkedWorkspaceId: 'workspace-a',
+      },
+    ])(
+      'does not act on a stale read of a workspace whose activity landed $window',
+      async ({ hookedQuery, activeWorkspaceId, checkedWorkspaceId }) => {
+        const workspaces = ['a', 'b'].map((id) =>
+          seed({ taskId: `task-${id}`, workspaceId: `workspace-${id}`, sessionId: `session-${id}` })
+        );
+        const active = workspaces.find(({ workspaceId }) => workspaceId === activeWorkspaceId)!;
+        const database = env.DATABASE;
+        let activityLanded = false;
+        env.DATABASE = {
+          ...database,
+          prepare: (query: string) => {
+            if (!activityLanded && query.includes(hookedQuery)) {
+              activityLanded = true;
+              updateMessageActivity(sql, active.workspaceId, active.sessionId);
+            }
+            return database.prepare(query);
+          },
+        };
+
+        await sweepWorkspaceIdle();
+
+        expect(activityLanded).toBe(true);
+        expect(workspaceActivity(activeWorkspaceId)).toMatchObject({
+          idle_check_retry_count: 0,
+          next_idle_check_at: null,
+        });
+        expect(workspaceActivity(checkedWorkspaceId)).toMatchObject({ idle_check_retry_count: 1 });
+      }
+    );
+
+    it('sets an unreadable check aside instead of letting it wedge the pass', async () => {
+      const unreadable = seedDeadRuntime({
+        taskId: 'task-unreadable',
+        workspaceId: 'workspace-a-unreadable',
+        sessionId: 'session-unreadable',
+      });
+      projectDb
+        .prepare(
+          `UPDATE workspace_activity SET last_message_at = 'not a timestamp' WHERE workspace_id = ?`
+        )
+        .run(unreadable.workspaceId);
+      const readable = seedDeadRuntime({
+        taskId: 'task-readable',
+        workspaceId: 'workspace-z-readable',
+        sessionId: 'session-readable',
+      });
+      const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+      await sweepWorkspaceIdle(deleteWorkspace);
+
+      expect(task(readable.taskId).status).toBe('failed');
+      expect(task(unreadable.taskId).status).toBe('in_progress');
+      expect(workspaceActivity(unreadable.workspaceId)).toMatchObject({
+        next_idle_check_at: NOW + 1_800_000,
+      });
+      expect(loggerMocks.error).toHaveBeenCalledWith(
+        'workspace_idle_check_unreadable',
+        expect.objectContaining({ workspaceId: unreadable.workspaceId })
+      );
+      expect(workspaceIdleAlarmAt()).toBe(NOW + 1_800_000);
+    });
+
+    it('skips the project timeout lookup until a check is due', async () => {
+      const seeded = seed({ lastActivityAt: NOW });
+      const queries: string[] = [];
+      const database = env.DATABASE;
+      env.DATABASE = {
+        ...database,
+        prepare: (query: string) => {
+          queries.push(query);
+          return database.prepare(query);
+        },
+      };
+
+      await sweepWorkspaceIdle();
+      expect(queries).toEqual([]);
+
+      vi.setSystemTime(NOW + WORKSPACE_IDLE_CHECK_INTERVAL_MS);
+      await sweepWorkspaceIdle();
+      expect(queries).toEqual([expect.stringContaining('FROM projects')]);
+      expect(workspaceActivity(seeded.workspaceId)).toMatchObject({
+        next_idle_check_at: NOW + 2 * TIMEOUT_MS,
       });
     });
   });

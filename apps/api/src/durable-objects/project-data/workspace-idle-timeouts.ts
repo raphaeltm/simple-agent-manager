@@ -34,7 +34,6 @@ import type { Env } from './types';
 
 // Shares the `idle_cleanup` log namespace so the existing event names are unchanged.
 const log = createModuleLogger('idle_cleanup');
-const WORKSPACE_IDLE_BACKOFF_EXPONENT_SAFETY_CAP = 30;
 
 /**
  * The rows the sweep owns — activity for a workspace's current session while that session is
@@ -42,31 +41,32 @@ const WORKSPACE_IDLE_BACKOFF_EXPONENT_SAFETY_CAP = 30;
  */
 const WORKSPACE_IDLE_CHECKS_CTE = `
   WITH tracked AS (
-    SELECT wa.workspace_id, wa.session_id, wa.idle_check_retry_count, wa.next_idle_check_at,
+    SELECT wa.rowid AS row_id, wa.workspace_id, wa.session_id, wa.idle_check_retry_count,
+           wa.next_idle_check_at,
            max(COALESCE(wa.last_terminal_activity_at, 0), COALESCE(wa.last_message_at, 0),
-               COALESCE(cs.updated_at, 0), wa.created_at) AS last_activity_at
+               COALESCE(cs.updated_at, 0), COALESCE(wa.created_at, 0)) AS last_activity_at
       FROM workspace_activity wa
      INNER JOIN chat_sessions cs ON cs.id = wa.session_id AND cs.workspace_id = wa.workspace_id
      WHERE cs.status = 'active'
   ),
   checks AS (
-    SELECT workspace_id, session_id, idle_check_retry_count, last_activity_at,
+    SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at,
            COALESCE(next_idle_check_at, last_activity_at + ?) AS next_check_at
       FROM tracked
   )`;
 
 /**
- * Due checks, most overdue first, so a bounded page always reaches the oldest work. Binds: check
- * interval, now, limit. Both queries are composed once at module scope, as in `materialization.ts`:
- * `sql.exec()` must receive a plain string, because the AST quality gate rejects a template
- * expression inside the call and counts `?` placeholders in its literal parts only.
+ * The most overdue due check. Binds: check interval, now. Both queries are composed once at module
+ * scope, as in `materialization.ts`: `sql.exec()` must receive a plain string, because the AST
+ * quality gate rejects a template expression inside the call and counts `?` placeholders in its
+ * literal parts only.
  */
-const DUE_WORKSPACE_IDLE_CHECKS_SQL = `${WORKSPACE_IDLE_CHECKS_CTE}
-  SELECT workspace_id, session_id, idle_check_retry_count, last_activity_at
+const NEXT_DUE_WORKSPACE_IDLE_CHECK_SQL = `${WORKSPACE_IDLE_CHECKS_CTE}
+  SELECT row_id, workspace_id, session_id, idle_check_retry_count, last_activity_at
     FROM checks
    WHERE next_check_at <= ?
    ORDER BY next_check_at ASC, workspace_id ASC
-   LIMIT ?`;
+   LIMIT 1`;
 
 /** The earliest next check of any tracked row. Binds: check interval. */
 const EARLIEST_WORKSPACE_IDLE_CHECK_SQL = `${WORKSPACE_IDLE_CHECKS_CTE}
@@ -85,7 +85,6 @@ interface WorkspaceIdleSweep {
   sql: SqlStorage;
   env: Env;
   projectId: string | null;
-  now: number;
   timeoutMs: number;
   candidateLimit: number;
   deleteWorkspaceInD1: (workspaceId: string, projectId: string) => Promise<void>;
@@ -105,33 +104,32 @@ export async function checkWorkspaceIdleTimeouts(
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void,
   scheduleSummarySync: () => void
 ): Promise<void> {
-  const now = Date.now();
+  if (!nextDueWorkspaceIdleRow(sql, Date.now())) return;
+
   const candidateLimit = parsePositiveInt(
     env.IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP,
     DEFAULT_IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP
   );
-  const dueChecks = selectDueWorkspaceIdleChecks(sql, now, candidateLimit);
-  if (dueChecks.length === 0) return;
-
   const timeoutMs = await resolveWorkspaceIdleTimeoutMs(env, projectId);
   if (timeoutMs === null) {
-    for (const check of dueChecks) recordWorkspaceIdleRetry(sql, env, now, check);
+    await forEachDueWorkspaceIdleCheck(sql, env, candidateLimit, (check, now) => {
+      recordWorkspaceIdleRetry(sql, env, now, check);
+    });
     return;
   }
   const sweep: WorkspaceIdleSweep = {
     sql,
     env,
     projectId,
-    now,
     timeoutMs,
     candidateLimit,
     deleteWorkspaceInD1,
     broadcastEvent,
     scheduleSummarySync,
   };
-  for (const check of dueChecks) {
-    await runWorkspaceIdleCheck(sweep, check);
-  }
+  await forEachDueWorkspaceIdleCheck(sql, env, candidateLimit, (check, now) =>
+    runWorkspaceIdleCheck(sweep, check, now)
+  );
 }
 
 /**
@@ -151,15 +149,62 @@ export function computeWorkspaceIdleAlarmTime(
     : Math.max(earliest, now + DEFAULT_WORKSPACE_IDLE_MIN_ALARM_DELAY_MS);
 }
 
-function selectDueWorkspaceIdleChecks(
+function nextDueWorkspaceIdleRow(
   sql: SqlStorage,
-  now: number,
-  limit: number
-): WorkspaceIdleCheck[] {
+  now: number
+): Record<string, SqlStorageValue> | undefined {
   return sql
-    .exec(DUE_WORKSPACE_IDLE_CHECKS_SQL, WORKSPACE_IDLE_CHECK_INTERVAL_MS, now, limit)
-    .toArray()
-    .map((row) => parseWorkspaceIdleCheck(row));
+    .exec(NEXT_DUE_WORKSPACE_IDLE_CHECK_SQL, WORKSPACE_IDLE_CHECK_INTERVAL_MS, now)
+    .toArray()[0];
+}
+
+/**
+ * Act on up to `limit` due checks, most overdue first, re-reading each just before acting on it:
+ * every await lets other requests write activity, so a row read before one may no longer be due.
+ * Each action moves its row out of the due set before its first await.
+ */
+async function forEachDueWorkspaceIdleCheck(
+  sql: SqlStorage,
+  env: Env,
+  limit: number,
+  act: (check: WorkspaceIdleCheck, now: number) => Promise<void> | void
+): Promise<void> {
+  for (let taken = 0; taken < limit; taken += 1) {
+    const now = Date.now();
+    const row = nextDueWorkspaceIdleRow(sql, now);
+    if (!row) return;
+    const check = readWorkspaceIdleCheck(sql, env, row, now);
+    if (check) await act(check, now);
+  }
+}
+
+/**
+ * Parse a due row, or set an unreadable one aside for the longest retry so it cannot hold the queue
+ * or the alarm (`.claude/rules/50`). `row_id` is always readable: it is SQLite's own rowid.
+ */
+function readWorkspaceIdleCheck(
+  sql: SqlStorage,
+  env: Env,
+  row: Record<string, SqlStorageValue>,
+  now: number
+): WorkspaceIdleCheck | null {
+  try {
+    return parseWorkspaceIdleCheck(row);
+  } catch (err) {
+    const nextIdleCheckAt = now + workspaceIdleRetryBoundsMs(env).maxMs;
+    sql.exec(
+      'UPDATE workspace_activity SET next_idle_check_at = ? WHERE rowid = ?',
+      nextIdleCheckAt,
+      row.row_id
+    );
+    log.error('workspace_idle_check_unreadable', {
+      rowId: row.row_id,
+      workspaceId: typeof row.workspace_id === 'string' ? row.workspace_id : null,
+      nextIdleCheckAt,
+      ...serializeError(err),
+    });
+    return null;
+  }
 }
 
 /**
@@ -192,19 +237,20 @@ async function resolveWorkspaceIdleTimeoutMs(
 
 async function runWorkspaceIdleCheck(
   sweep: WorkspaceIdleSweep,
-  check: WorkspaceIdleCheck
+  check: WorkspaceIdleCheck,
+  now: number
 ): Promise<void> {
   const idleDeadline = check.lastActivityAt + sweep.timeoutMs;
-  if (idleDeadline > sweep.now) {
+  if (idleDeadline > now) {
     recordWorkspaceIdleDeadline(sweep.sql, check.workspaceId, idleDeadline);
     return;
   }
 
   // The retry is recorded before any await: it holds even if retiring throws or the object is
   // evicted mid-check, and activity arriving meanwhile clears it rather than being overwritten.
-  const retry = recordWorkspaceIdleRetry(sweep.sql, sweep.env, sweep.now, check);
+  const retry = recordWorkspaceIdleRetry(sweep.sql, sweep.env, now, check);
   try {
-    const outcome = await retireIdleWorkspace(sweep, check);
+    const outcome = await retireIdleWorkspace(sweep, check, now);
     if (outcome !== 'retired') {
       log.info('workspace_idle_check_deferred', {
         workspaceId: check.workspaceId,
@@ -263,19 +309,21 @@ function recordWorkspaceIdleRetry(
 }
 
 function workspaceIdleRetryDelayMs(env: Env, previousRetries: number): number {
+  const { baseMs, maxMs } = workspaceIdleRetryBoundsMs(env);
+  // A large exponent overflows to Infinity, which the cap turns back into `maxMs`.
+  return Math.min(baseMs * 2 ** Math.max(previousRetries, 0), maxMs);
+}
+
+function workspaceIdleRetryBoundsMs(env: Env): { baseMs: number; maxMs: number } {
   const baseMs = parsePositiveInt(
     env.WORKSPACE_IDLE_BACKOFF_BASE_MS,
     DEFAULT_WORKSPACE_IDLE_BACKOFF_BASE_MS
   );
-  const maxMs = Math.max(
-    baseMs,
-    parsePositiveInt(env.WORKSPACE_IDLE_BACKOFF_MAX_MS, DEFAULT_WORKSPACE_IDLE_BACKOFF_MAX_MS)
+  const maxMs = parsePositiveInt(
+    env.WORKSPACE_IDLE_BACKOFF_MAX_MS,
+    DEFAULT_WORKSPACE_IDLE_BACKOFF_MAX_MS
   );
-  const exponent = Math.min(
-    Math.max(previousRetries, 0),
-    WORKSPACE_IDLE_BACKOFF_EXPONENT_SAFETY_CAP
-  );
-  return Math.min(baseMs * 2 ** exponent, maxMs);
+  return { baseMs, maxMs: Math.max(baseMs, maxMs) };
 }
 
 /**
@@ -284,11 +332,12 @@ function workspaceIdleRetryDelayMs(env: Env, previousRetries: number): number {
  */
 async function retireIdleWorkspace(
   sweep: WorkspaceIdleSweep,
-  check: WorkspaceIdleCheck
+  check: WorkspaceIdleCheck,
+  now: number
 ): Promise<'retired' | WorkspaceIdleDeferral> {
   const { projectId, timeoutMs } = sweep;
   const { workspaceId, sessionId } = check;
-  const idleDurationMs = sweep.now - check.lastActivityAt;
+  const idleDurationMs = now - check.lastActivityAt;
   log.info('workspace_idle_timeout', {
     workspaceId,
     sessionId,
@@ -351,12 +400,8 @@ async function retireIdleWorkspace(
     return 'runtime_preserved';
   }
 
-  await closeIdleWorkspace(
-    sweep,
-    check,
-    projectId,
-    transitions.map((transition) => transition.taskId)
-  );
+  const failedTaskIds = transitions.map((transition) => transition.taskId);
+  await closeIdleWorkspace(sweep, check, projectId, idleDurationMs, failedTaskIds);
   return 'retired';
 }
 
@@ -364,6 +409,7 @@ async function closeIdleWorkspace(
   sweep: WorkspaceIdleSweep,
   check: WorkspaceIdleCheck,
   projectId: string,
+  idleDurationMs: number,
   failedTaskIds: string[]
 ): Promise<void> {
   const { sql } = sweep;
@@ -380,7 +426,6 @@ async function closeIdleWorkspace(
   sql.exec('DELETE FROM workspace_activity WHERE workspace_id = ?', workspaceId);
 
   const reporterTaskId = failedTaskIds[0] ?? null;
-  const idleDurationMs = sweep.now - check.lastActivityAt;
   recordActivityEventInternal(
     sql,
     'workspace.idle_timeout',
