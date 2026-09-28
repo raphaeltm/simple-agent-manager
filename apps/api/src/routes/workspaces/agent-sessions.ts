@@ -17,6 +17,7 @@ import { getRuntimeLimits } from '../../services/limits';
 import { buildSessionMcpServers } from '../../services/mcp-connection-resolution';
 import { generateMcpToken, revokeMcpToken, storeMcpToken } from '../../services/mcp-token';
 import { createAgentSessionOnNode, stopAgentSessionOnNode } from '../../services/node-agent';
+import { isSleepingContainerRuntime } from '../chat-workspace-resolver';
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import { assertNodeOperational, getOwnedNode, getOwnedWorkspace } from './_helpers';
 
@@ -302,9 +303,17 @@ agentSessionRoutes.post(
     }
 
     if (session.status !== 'running') {
-      // Still attempt VM stop for orphaned sessions whose process may be alive. A sleeping
-      // session has none, and the request would restore a slept Instant container to stop it.
-      if (workspace.nodeId && session.status !== 'sleeping') {
+      // Still attempt VM stop for orphaned sessions whose process may be alive. A slept
+      // Instant runtime has none, and the request would restore it just to stop it.
+      const [node] = await db
+        .select({ runtime: schema.nodes.runtime, status: schema.nodes.status })
+        .from(schema.nodes)
+        .where(eq(schema.nodes.id, workspace.nodeId))
+        .limit(1);
+      const asleep =
+        !!node &&
+        isSleepingContainerRuntime({ nodeRuntime: node.runtime, nodeStatus: node.status });
+      if (!asleep) {
         try {
           await stopAgentSessionOnNode(workspace.nodeId, workspace.id, session.id, c.env, userId);
         } catch (e) {

@@ -161,7 +161,8 @@ running agent session, and the container DO tests mocked `loadRuntimeRecoveryCon
   (`.claude/rules/67`). Enumerate those callers and give the ones that only signal a live runtime
   their own check. Here the stop route's pre-teardown signal woke a slept Instant container only
   for the same request's teardown to destroy it, and the wake raced that teardown into a 500 on
-  staging. The stop and cancel routes now skip a sleeping runtime (`isSleepingContainerRuntime`).
+  staging. Chat stop, chat cancel and the workspace page's per-session stop now share one check,
+  `isSleepingContainerRuntime`, and skip a sleeping runtime.
 
 ## Quick Compliance Check
 
