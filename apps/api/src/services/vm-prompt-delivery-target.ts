@@ -69,8 +69,56 @@ function recoveryResolution(
   };
 }
 
+interface DeliveryTargetRow {
+  workspace_id: string;
+  user_id: string;
+  workspace_status: string;
+  node_id: string | null;
+  node_status: string | null;
+  node_health_status: string | null;
+  agent_version: string | null;
+  node_runtime: string | null;
+  agent_session_id: string | null;
+  agent_session_status: string | null;
+  agent_session_updated_at: string | null;
+  snapshot_sleep_status: string | null;
+  snapshot_runtime: string | null;
+}
+
+/** Statuses a runtime cannot come back from, whichever runtime it is. */
+const TERMINAL_WORKSPACE_STATUSES = ['stopping', 'stopped', 'evicted', 'deleted', 'error'];
+const TERMINAL_NODE_STATUSES = ['stopping', 'stopped', 'deleted', 'error'];
+const TERMINAL_AGENT_SESSION_STATUSES = ['completed', 'failed', 'error', 'stopped'];
+
 function isSleepingContainer(runtime: string | null, sleepStatus: string | null): boolean {
   return runtime === 'cf-container' && sleepStatus === 'sleeping';
+}
+
+function readyTarget(
+  projectId: string,
+  chatSessionId: string,
+  row: DeliveryTargetRow,
+  nodeId: string,
+  agentSessionId: string
+): TargetResolution {
+  return {
+    kind: 'ready',
+    target: {
+      projectId,
+      chatSessionId,
+      workspaceId: row.workspace_id,
+      nodeId,
+      agentSessionId,
+      userId: row.user_id,
+      runtimeIdentity: [
+        nodeId,
+        agentSessionId,
+        row.agent_version ?? 'legacy',
+        row.agent_session_updated_at ?? 'unknown',
+      ].join(':'),
+      runtime: row.node_runtime ?? row.snapshot_runtime ?? 'vm',
+    },
+  };
 }
 
 async function reportUnavailableContainer(
@@ -88,6 +136,44 @@ async function reportUnavailableContainer(
     detail
   );
   return recoveryResolution(refusal, detail);
+}
+
+/**
+ * A sleeping Instant runtime wakes in place: the capability probe reaches its
+ * container Durable Object, whose `ensureAwake` restores the snapshot. So refuse only
+ * what that resumer would refuse — rows that are missing or terminal. Its precondition
+ * (`loadRuntimeRecoveryContext`, `durable-objects/vm-agent-container-recovery.ts`)
+ * reads row existence and lifecycle status, never `nodes.health_status` or the agent
+ * session's status: the sleep writers and the wake itself mark a perfectly wakeable
+ * runtime `unhealthy` and `sleeping`/`recovery` (`.claude/rules/58`).
+ *
+ * Deliberately stricter than the resumer: it would accept `error` rows and any agent
+ * session. A sleeping runtime reaches those terminal states only through an exhausted
+ * wake (`persistRuntimeRecoveryFailed`) or an explicit stop, and after either the
+ * container DO refuses to restart — so reporting now beats retrying until the delivery
+ * expires.
+ */
+async function resolveSleepingContainerTarget(
+  env: Env,
+  projectId: string,
+  chatSessionId: string,
+  row: DeliveryTargetRow,
+  runSideEffectGuard: () => Promise<PromptDeliveryResult | null>
+): Promise<TargetResolution> {
+  const unavailable = (detail: string) =>
+    reportUnavailableContainer(env, chatSessionId, detail, runSideEffectGuard);
+  if (TERMINAL_WORKSPACE_STATUSES.includes(row.workspace_status)) {
+    return unavailable(`Sleeping container workspace is ${row.workspace_status}`);
+  }
+  if (!row.node_id) return unavailable('Sleeping container has no assigned node');
+  if (!row.node_status || TERMINAL_NODE_STATUSES.includes(row.node_status)) {
+    return unavailable('Sleeping container node is unavailable');
+  }
+  if (!row.agent_session_id) return unavailable('Sleeping container has no agent session');
+  if (TERMINAL_AGENT_SESSION_STATUSES.includes(row.agent_session_status ?? '')) {
+    return unavailable(`Sleeping container agent session is ${row.agent_session_status}`);
+  }
+  return readyTarget(projectId, chatSessionId, row, row.node_id, row.agent_session_id);
 }
 
 export async function resolveVmPromptDeliveryTarget(
@@ -120,21 +206,7 @@ export async function resolveVmPromptDeliveryTarget(
      LIMIT 1`
   )
     .bind(projectId, chatSessionId)
-    .first<{
-      workspace_id: string;
-      user_id: string;
-      workspace_status: string;
-      node_id: string | null;
-      node_status: string | null;
-      node_health_status: string | null;
-      agent_version: string | null;
-      node_runtime: string | null;
-      agent_session_id: string | null;
-      agent_session_status: string | null;
-      agent_session_updated_at: string | null;
-      snapshot_sleep_status: string | null;
-      snapshot_runtime: string | null;
-    }>();
+    .first<DeliveryTargetRow>();
 
   if (!row) {
     const snapshot = await env.DATABASE.prepare(
@@ -164,19 +236,10 @@ export async function resolveVmPromptDeliveryTarget(
     const recovery = await ensureSessionRecovery(env, projectId, chatSessionId, sourceTaskGuard);
     return recoveryResolution(recovery, `Target workspace is ${row.workspace_status}`);
   }
-  const sleepingContainer = isSleepingContainer(
-    row.snapshot_runtime ?? row.node_runtime,
-    row.snapshot_sleep_status
-  );
-  if (['stopping', 'stopped', 'evicted', 'deleted', 'error'].includes(row.workspace_status)) {
-    if (sleepingContainer) {
-      return reportUnavailableContainer(
-        env,
-        chatSessionId,
-        `Sleeping container workspace is ${row.workspace_status}`,
-        runSideEffectGuard
-      );
-    }
+  if (isSleepingContainer(row.snapshot_runtime ?? row.node_runtime, row.snapshot_sleep_status)) {
+    return resolveSleepingContainerTarget(env, projectId, chatSessionId, row, runSideEffectGuard);
+  }
+  if (TERMINAL_WORKSPACE_STATUSES.includes(row.workspace_status)) {
     return {
       kind: 'failed',
       reason: 'terminal_target',
@@ -184,29 +247,12 @@ export async function resolveVmPromptDeliveryTarget(
     };
   }
   if (!row.node_id) {
-    if (sleepingContainer) {
-      return reportUnavailableContainer(
-        env,
-        chatSessionId,
-        'Sleeping container has no assigned node',
-        runSideEffectGuard
-      );
-    }
     return { kind: 'retry', reason: 'Target workspace has no assigned node yet' };
   }
   if (
-    (sleepingContainer && !row.node_status) ||
-    ['stopping', 'stopped', 'deleted', 'error'].includes(row.node_status ?? '') ||
+    TERMINAL_NODE_STATUSES.includes(row.node_status ?? '') ||
     row.node_health_status === 'unhealthy'
   ) {
-    if (sleepingContainer) {
-      return reportUnavailableContainer(
-        env,
-        chatSessionId,
-        'Sleeping container node is unavailable',
-        runSideEffectGuard
-      );
-    }
     return {
       kind: 'failed',
       reason: 'dead_target',
@@ -224,26 +270,10 @@ export async function resolveVmPromptDeliveryTarget(
     };
   }
   if (!row.agent_session_id) {
-    if (sleepingContainer) {
-      return reportUnavailableContainer(
-        env,
-        chatSessionId,
-        'Sleeping container has no agent session',
-        runSideEffectGuard
-      );
-    }
     return { kind: 'retry', reason: 'Target agent session has not started yet' };
   }
   if (row.agent_session_status !== 'running') {
-    if (['completed', 'failed', 'error', 'stopped'].includes(row.agent_session_status ?? '')) {
-      if (sleepingContainer) {
-        return reportUnavailableContainer(
-          env,
-          chatSessionId,
-          `Sleeping container agent session is ${row.agent_session_status}`,
-          runSideEffectGuard
-        );
-      }
+    if (TERMINAL_AGENT_SESSION_STATUSES.includes(row.agent_session_status ?? '')) {
       return {
         kind: 'failed',
         reason: 'terminal_target',
@@ -253,22 +283,5 @@ export async function resolveVmPromptDeliveryTarget(
     return { kind: 'retry', reason: `Target agent session is ${row.agent_session_status}` };
   }
 
-  return {
-    kind: 'ready',
-    target: {
-      projectId,
-      chatSessionId,
-      workspaceId: row.workspace_id,
-      nodeId: row.node_id,
-      agentSessionId: row.agent_session_id,
-      userId: row.user_id,
-      runtimeIdentity: [
-        row.node_id,
-        row.agent_session_id,
-        row.agent_version ?? 'legacy',
-        row.agent_session_updated_at ?? 'unknown',
-      ].join(':'),
-      runtime: row.node_runtime ?? row.snapshot_runtime ?? 'vm',
-    },
-  };
+  return readyTarget(projectId, chatSessionId, row, row.node_id, row.agent_session_id);
 }

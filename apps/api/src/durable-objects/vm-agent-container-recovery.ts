@@ -85,6 +85,19 @@ export function toRuntimeRecoveryTarget(
   };
 }
 
+/**
+ * Workspace and node statuses the container DO may wake a runtime from, in place.
+ * `sleeping` is what every sleep writer leaves behind (`persistRuntimeSleeping`,
+ * `persistRuntimeSleepingAfterRevokedWake`, the scheduled sleep in
+ * `services/session-sleep-execution.ts`); `error` is a container that failed while
+ * running. Deletion states stay out, so a wake can never revive a runtime that
+ * deletion has quarantined.
+ */
+const IN_PLACE_WAKEABLE_STATUSES = ['running', 'creating', 'recovery', 'error', 'sleeping'];
+const IN_PLACE_WAKEABLE_STATUSES_SQL = IN_PLACE_WAKEABLE_STATUSES.map(
+  (status) => `'${status}'`
+).join(', ');
+
 export async function loadRuntimeRecoveryContext(
   env: Env,
   input: { workspaceId: string; preferredAgentSessionId?: string | null }
@@ -101,10 +114,10 @@ export async function loadRuntimeRecoveryContext(
     .where(
       and(
         eq(schema.workspaces.id, input.workspaceId),
-        inArray(schema.workspaces.status, ['running', 'creating', 'recovery', 'error']),
+        inArray(schema.workspaces.status, IN_PLACE_WAKEABLE_STATUSES),
         isNull(schema.workspaces.runtimeDeletionConfirmedAt),
         eq(schema.nodes.runtime, 'cf-container'),
-        inArray(schema.nodes.status, ['running', 'creating', 'recovery', 'error'])
+        inArray(schema.nodes.status, IN_PLACE_WAKEABLE_STATUSES)
       )
     )
     .get();
@@ -153,7 +166,7 @@ export async function persistRuntimeRecovering(
          AND user_id = ?
          AND runtime = 'cf-container'
          AND runtime_incarnation_id IS ?
-         AND status IN ('running', 'creating', 'recovery', 'error')
+         AND status IN (${IN_PLACE_WAKEABLE_STATUSES_SQL})
          AND EXISTS (
            SELECT 1 FROM workspaces w
            WHERE w.id = ?
@@ -161,7 +174,7 @@ export async function persistRuntimeRecovering(
              AND w.user_id = ?
              AND w.project_id IS ?
              AND w.chat_session_id IS ?
-             AND w.status IN ('running', 'creating', 'recovery', 'error')
+             AND w.status IN (${IN_PLACE_WAKEABLE_STATUSES_SQL})
              AND w.runtime_deletion_confirmed_at IS NULL
          )`
     ).bind(
@@ -184,7 +197,7 @@ export async function persistRuntimeRecovering(
          AND user_id = ?
          AND project_id IS ?
          AND chat_session_id IS ?
-         AND status IN ('running', 'creating', 'recovery', 'error')
+         AND status IN (${IN_PLACE_WAKEABLE_STATUSES_SQL})
          AND runtime_deletion_confirmed_at IS NULL
          AND EXISTS (
            SELECT 1 FROM nodes
