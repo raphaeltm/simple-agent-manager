@@ -1,6 +1,7 @@
 /**
  * The delivery adapter's two read-only questions to its target runtime: what it supports
- * (capabilities) and what became of one delivery (receipt). Split out of
+ * (capabilities) and what became of one delivery (receipt), plus the transport-error readers
+ * (`httpStatus`, `errorMessage`) they share with the adapter's submit. Split out of
  * `vm-prompt-delivery-adapter.ts` (`.claude/rules/18-file-size-limits.md`).
  */
 import {
