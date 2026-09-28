@@ -159,7 +159,16 @@ func shellSingleQuote(value string) string {
 
 func configureStandaloneGhWrapperOnPath() (string, error) {
 	return configureStandaloneGhWrapperWithLookup(func() (string, error) {
-		return exec.LookPath("gh")
+		ghPath, err := exec.LookPath("gh")
+		if err == nil {
+			return ghPath, nil
+		}
+		for _, fallbackPath := range []string{"/usr/bin/gh", "/bin/gh"} {
+			if _, statErr := os.Stat(fallbackPath); statErr == nil {
+				return fallbackPath, nil
+			}
+		}
+		return "", err
 	})
 }
 

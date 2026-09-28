@@ -200,6 +200,20 @@ printf real-gh\n
 	}
 }
 
+func TestConfigureStandaloneGhWrapperIgnoresLookupErrorWhenNoFallback(t *testing.T) {
+	t.Parallel()
+
+	wrappedPath, err := configureStandaloneGhWrapperWithLookup(func() (string, error) {
+		return "", exec.ErrNotFound
+	})
+	if err != nil {
+		t.Fatalf("configure wrapper with missing gh returned error: %v", err)
+	}
+	if wrappedPath != "" {
+		t.Fatalf("wrapped path = %q, want empty", wrappedPath)
+	}
+}
+
 func TestStandaloneGitCredentialHelperDelegatesGitHubToLocalExchange(t *testing.T) {
 	t.Parallel()
 
