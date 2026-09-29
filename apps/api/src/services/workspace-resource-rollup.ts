@@ -128,7 +128,9 @@ export function computeWorkspaceResourceRollup(
 
   for (const sample of payload.samples ?? []) {
     if (sample.gap || sample.unsupported) continue;
-    const bucket = bucketFor(sample.t);
+    // A sample's timestamp closes the interval it measures, (t - interval, t]; a
+    // sample stamped exactly on a minute boundary belongs to the minute it ends.
+    const bucket = bucketFor(sample.t - 1);
     bucket.samples += 1;
 
     const intervalMs = finiteNonNegative(sample.intervalMillis);
@@ -164,7 +166,8 @@ export function computeWorkspaceResourceRollup(
     if (ioWrite != null) bucket.ioWrite = (bucket.ioWrite ?? 0) + ioWrite;
 
     // Same accounting as the collector's chunk summary: oom + oom_kill deltas.
-    bucket.oomKills += (finiteNonNegative(sample.oom) ?? 0) + (finiteNonNegative(sample.oomKill) ?? 0);
+    bucket.oomKills +=
+      (finiteNonNegative(sample.oom) ?? 0) + (finiteNonNegative(sample.oomKill) ?? 0);
   }
 
   for (const span of payload.toolSpans ?? []) {
@@ -236,7 +239,11 @@ export function parseWorkspaceResourceRollup(raw: string | null): WorkspaceResou
   for (const column of ROLLUP_COLUMNS) {
     const entries = record[column];
     if (!Array.isArray(entries) || entries.length !== starts.length) return null;
-    if (!entries.every((entry) => entry === null || (typeof entry === 'number' && Number.isFinite(entry)))) {
+    if (
+      !entries.every(
+        (entry) => entry === null || (typeof entry === 'number' && Number.isFinite(entry))
+      )
+    ) {
       return null;
     }
   }

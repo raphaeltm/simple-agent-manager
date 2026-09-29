@@ -104,7 +104,9 @@ interface RunWorkspaceRow {
 function reservationOf(row: RunWorkspaceRow): ResourceTimelineRun['reservation'] {
   try {
     const reservation = parseStoredResolvedReservationJson(row.resolved_reservation_json);
-    return reservation ? { cpuMillis: reservation.cpuMillis, memoryMb: reservation.memoryMb } : null;
+    return reservation
+      ? { cpuMillis: reservation.cpuMillis, memoryMb: reservation.memoryMb }
+      : null;
   } catch (error) {
     // A malformed reservation hides the reservation line for that run; it must not fail the index.
     log.warn('workspace_resource_timeline.reservation_skipped', {
@@ -198,12 +200,18 @@ export async function getSessionResourceTimeline(
     .select()
     .from(schema.workspaceResourceChunks)
     .where(scope)
-    .orderBy(desc(schema.workspaceResourceChunks.startedAt), desc(schema.workspaceResourceChunks.id))
+    .orderBy(
+      desc(schema.workspaceResourceChunks.startedAt),
+      desc(schema.workspaceResourceChunks.id)
+    )
     .limit(maxChunks);
 
   let totalChunkCount = rows.length;
   if (rows.length >= maxChunks) {
-    const [total] = await db.select({ value: count() }).from(schema.workspaceResourceChunks).where(scope);
+    const [total] = await db
+      .select({ value: count() })
+      .from(schema.workspaceResourceChunks)
+      .where(scope);
     totalChunkCount = total?.value ?? rows.length;
   }
 
