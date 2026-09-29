@@ -451,6 +451,10 @@ describe('workspace resource history', () => {
     const sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
       schema.workspaces,
+      schema.tasks,
+      schema.agentSessions,
+      schema.agentProfiles,
+      schema.skills,
       schema.workspaceResourceSummaries,
       schema.workspaceResourceChunks,
     ]);
@@ -584,6 +588,10 @@ describe('workspace resource history', () => {
     const sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
       schema.workspaces,
+      schema.tasks,
+      schema.agentSessions,
+      schema.agentProfiles,
+      schema.skills,
       schema.workspaceResourceSummaries,
       schema.workspaceResourceChunks,
     ]);
