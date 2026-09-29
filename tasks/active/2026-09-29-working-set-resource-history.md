@@ -24,7 +24,8 @@ Session resource history records cgroup v2 `memory.current` and `memory.peak`. B
 - [x] Update the drawer cards and timeline labels to distinguish memory needed from cache-inclusive memory.
 - [x] Cover new/old-agent uploads and cross-chunk aggregation in API tests.
 - [x] Update the public guide and API reference.
-- [ ] Run focused tests, full quality gates, visual audit, specialist review, staging VM verification, CI, and CodeRabbit.
+- [x] Run focused tests, full quality gates, visual audit, specialist review, and staging VM verification.
+- [ ] Run CI and CodeRabbit review on the pull request.
 
 ## Acceptance criteria
 
@@ -35,6 +36,15 @@ Session resource history records cgroup v2 `memory.current` and `memory.peak`. B
 - HTTP and MCP reads expose the nullable fields, and the UI calls working set the needed figure while labelling totals as cache-inclusive.
 - Unit tests cover realistic `memory.stat`, large page cache, missing file, malformed value, and mixed-version aggregation.
 - A fresh staging VM reports a populated, plausible working set; heartbeat and workspace access are verified; staging resources are cleaned up.
+
+## Staging verification
+
+- Exact-head staging deploy run `36550714488` succeeded for commit `8f07e3712`.
+- Fresh node `01M3P9M7KHACV1420HJEKEV82P` ran a 128 MiB file-cache workload in session `82e505de-1fd4-487d-830f-d981b9ac2d1c` and completed a final resource-history flush.
+- The collector uploaded 53 samples, including 24 known working-set samples. Every known value satisfied `0 <= working set <= memory.current`.
+- Working-set mean was 293,991,082 bytes (280 MB) and peak was 447,438,848 bytes (427 MB), versus a cache-inclusive sampled peak of 1,293,877,248 bytes (1.2 GB).
+- The deployed drawer rendered the real summary correctly at desktop and mobile sizes. Dashboard, projects, and settings smoke routes remained healthy.
+- The test session, workspace, and node were deleted after capture; the staging node list was empty at handoff.
 
 ## References
 
