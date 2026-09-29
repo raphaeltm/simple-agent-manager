@@ -16,6 +16,12 @@ const mocks = vi.hoisted(() => ({
   enrichMessageWithMentions: vi.fn(),
   parseOptionalBody: vi.fn(),
   cancelScheduledSessionSleep: vi.fn(),
+  answerInteraction: vi.fn(),
+  deliverAcpInteractionAnswer: vi.fn(),
+  getInteractionDetail: vi.fn(),
+  recordInteractionDelivery: vi.fn(),
+  resolveAcpInteractionDeliveryTarget: vi.fn(),
+  snapshotInteractions: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -100,6 +106,18 @@ vi.mock('../../../src/services/session-snapshots', () => ({
   cancelScheduledSessionSleep: (...args: unknown[]) => mocks.cancelScheduledSessionSleep(...args),
 }));
 
+vi.mock('../../../src/services/acp-interaction-store', () => ({
+  answerInteraction: mocks.answerInteraction,
+  getInteractionDetail: mocks.getInteractionDetail,
+  recordInteractionDelivery: mocks.recordInteractionDelivery,
+  snapshotInteractions: mocks.snapshotInteractions,
+}));
+
+vi.mock('../../../src/services/acp-interaction-delivery', () => ({
+  deliverAcpInteractionAnswer: mocks.deliverAcpInteractionAnswer,
+  resolveAcpInteractionDeliveryTarget: mocks.resolveAcpInteractionDeliveryTarget,
+}));
+
 /** Helper to build a drizzle mock that returns workspace + agent session rows. */
 function setupDrizzle(opts: {
   workspace?: {
@@ -156,6 +174,34 @@ beforeEach(() => {
     createdByUserId: 'user-1',
     status: 'active',
   });
+  mocks.snapshotInteractions.mockResolvedValue({
+    pending: [
+      {
+        interactionId: '11111111-1111-4111-8111-111111111111',
+        kind: 'permission',
+        state: 'pending',
+        createdAt: 1,
+        deadlineAt: 2,
+        safeSummary: { toolCallId: 'tool-1' },
+      },
+    ],
+    settled: [],
+    cursor: null,
+  });
+  mocks.getInteractionDetail.mockResolvedValue({
+    interactionId: '11111111-1111-4111-8111-111111111111',
+    kind: 'permission',
+    state: 'pending',
+    detail: { permissionName: 'SECRET_CANARY_PERMISSION' },
+  });
+  mocks.answerInteraction.mockResolvedValue({
+    status: 'answered',
+    summary: { state: 'answered' },
+    delivery: { generation: '22222222-2222-4222-8222-222222222222', runtimeIdentity: 'runtime-1' },
+  });
+  mocks.resolveAcpInteractionDeliveryTarget.mockResolvedValue({ status: 'interrupted', reason: 'no runtime' });
+  mocks.deliverAcpInteractionAnswer.mockResolvedValue({ outcome: 'confirmed', runtimeStatus: 'consumed' });
+  mocks.recordInteractionDelivery.mockResolvedValue(undefined);
 
   app = new Hono<{ Bindings: Env }>();
   app.onError((err, c) => {
@@ -883,5 +929,131 @@ describe('POST /sessions/:sessionId/cancel', () => {
 
     expect(response.status).toBe(404);
     expect(mocks.cancelAgentSessionOnNode).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('ACP interaction browser routes', () => {
+  const interactionId = '11111111-1111-4111-8111-111111111111';
+  const answerBody = {
+    answerKey: 'answer-key-1',
+    decision: { kind: 'accepted', answerHash: 'a'.repeat(64) },
+  };
+  const env = { DATABASE: {} as D1Database, BASE_DOMAIN: 'example.test' } as Env;
+
+  it('requires exact configured browser Origin before accepting a human answer', async () => {
+    const response = await app.request(
+      `/api/projects/proj-1/sessions/chat-1/interactions/${interactionId}/answer`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example.test' },
+        body: JSON.stringify(answerBody),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.answerInteraction).not.toHaveBeenCalled();
+  });
+
+  it('answers only through task:write plus session-creator authorization', async () => {
+    const response = await app.request(
+      `/api/projects/proj-1/sessions/chat-1/interactions/${interactionId}/answer`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://app.example.test' },
+        body: JSON.stringify(answerBody),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.requireProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'user-1',
+      'task:write'
+    );
+    expect(projectDataService.getSession).toHaveBeenCalledWith(expect.anything(), 'proj-1', 'chat-1');
+    expect(mocks.answerInteraction).toHaveBeenCalledWith(expect.anything(), {
+      projectId: 'proj-1',
+      chatSessionId: 'chat-1',
+      interactionId,
+      answerKey: 'answer-key-1',
+      answerBodyHash: 'a'.repeat(64),
+      decision: answerBody.decision,
+    });
+  });
+
+  it('rejects a project writer who did not create the session', async () => {
+    vi.mocked(projectDataService.getSession).mockResolvedValueOnce({
+      id: 'chat-1',
+      createdByUserId: 'other-user',
+      status: 'active',
+    });
+
+    const response = await app.request(
+      `/api/projects/proj-1/sessions/chat-1/interactions/${interactionId}/answer`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://app.example.test' },
+        body: JSON.stringify(answerBody),
+      },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.answerInteraction).not.toHaveBeenCalled();
+  });
+
+  it('returns decrypted detail only to the creator with no-store caching', async () => {
+    const response = await app.request(
+      `/api/projects/proj-1/sessions/chat-1/interactions/${interactionId}`,
+      { method: 'GET' },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(mocks.requireProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'user-1',
+      'task:read'
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      detail: { permissionName: 'SECRET_CANARY_PERMISSION' },
+    });
+  });
+
+  it('keeps noncreator snapshots generic and omits settled history', async () => {
+    vi.mocked(projectDataService.getSession).mockResolvedValueOnce({
+      id: 'chat-1',
+      createdByUserId: 'other-user',
+      status: 'active',
+    });
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1/interactions',
+      { method: 'GET' },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({
+      pending: [
+        {
+          interactionId,
+          kind: 'permission',
+          state: 'pending',
+          createdAt: 1,
+          deadlineAt: 2,
+        },
+      ],
+      settled: [],
+      cursor: null,
+    });
+    expect(JSON.stringify(body)).not.toContain('tool-1');
   });
 });
