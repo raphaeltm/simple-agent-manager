@@ -188,8 +188,12 @@ Authorization:Bearer ${SAM_MCP_TOKEN}`, with the token in the stdio server env r
       (mcp-connection-headers.test.ts rejection table; mcp-connection-headers-injection.test.ts fault isolation)
 - [x] Existing connections without headers behave exactly as before
       (no-header resolution test; node-agent wire fixture; TestMigrationV18KeepsExistingMcpServerRows)
-- [ ] Staging: an agent session reaches a real MCP server that requires a custom header, and
+- [x] Staging: an agent session reaches a real MCP server that requires a custom header, and
       successfully calls a tool
+      (2026-09-29, deploy run 36558820009 at c1c9084a4: a Claude Code VM session and an Instant
+      Codex session each called a header-gated probe server, which answered only with the right
+      `x-api-key`, and got its nonce back. The Codex call came after an Edit that added
+      `x-probe-mode` and kept the stored key. See the PR's Staging Verification Evidence)
 
 ## References
 
