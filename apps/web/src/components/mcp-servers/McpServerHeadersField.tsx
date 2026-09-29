@@ -1,4 +1,7 @@
-import { MCP_CONNECTION_HEADER_NAME_MAX_LENGTH } from '@simple-agent-manager/shared';
+import {
+  MCP_CONNECTION_HEADER_NAME_MAX_LENGTH,
+  MCP_CONNECTION_HEADER_NAME_RULE,
+} from '@simple-agent-manager/shared';
 import { Button, Input } from '@simple-agent-manager/ui';
 import { Plus, X } from 'lucide-react';
 import type { FC } from 'react';
@@ -30,8 +33,14 @@ export const McpServerHeadersField: FC<McpServerHeadersFieldProps> = ({ headers,
       <legend className="block text-xs font-medium text-fg-muted">Headers</legend>
       <p className="text-xs text-fg-muted break-words">
         Sent with every request, for example <code className="font-mono">x-api-key</code> for
-        Composio. Values are stored encrypted and never shown again.
+        Composio. Values are stored encrypted and never shown again;{' '}
+        {MCP_CONNECTION_HEADER_NAME_RULE}.
       </p>
+      {headers.some((row) => row.stored) && (
+        <p className="text-xs text-fg-muted break-words">
+          A saved header keeps its value unless you type a new one.
+        </p>
+      )}
 
       {headers.length > 0 && (
         <ul className="space-y-2">

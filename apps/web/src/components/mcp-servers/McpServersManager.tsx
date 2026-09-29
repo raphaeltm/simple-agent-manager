@@ -138,7 +138,7 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
           */}
           {title !== null && (
             <>
-              <h3 className="text-sm font-medium text-fg-primary">{title}</h3>
+              <h3 className="sam-type-card-title m-0 text-fg-primary">{title}</h3>
               <p className="mt-1 text-xs text-fg-muted break-words">
                 {projectId === null
                   ? 'Available to every session you start, in any project.'
