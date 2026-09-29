@@ -109,6 +109,11 @@
       "registryUrl": "https://www.npmjs.com/package/typescript-eslint",
       "necessity": "Provides supported ESLint flat TypeScript configuration."
     },
+    "uplot": {
+      "registryUrl": "https://www.npmjs.com/package/uplot",
+      "homepageUrl": "https://github.com/leeoniya/uPlot",
+      "necessity": "Canvas time-series charts for the session resource timeline; handles tens of thousands of points with zoom and synced cursors in ~23 KB gzipped, loaded only when Resources opens."
+    },
     "vite": {
       "registryUrl": "https://www.npmjs.com/package/vite",
       "necessity": "Bundles browser-facing Storybook test assets."
