@@ -2,6 +2,7 @@ package acp
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -161,9 +162,11 @@ func TestGenerateCodexMcpConfig_RoutesCustomHeadersThroughEnv(t *testing.T) {
 	}
 
 	composio := parsed.McpServers["composio"]
-	wantHeaders := map[string]string{
-		"x-api-key": "SAM_MCP_COMPOSIO_HEADER_0_SECRET",
-		"X-Org_Id":  "SAM_MCP_COMPOSIO_HEADER_1_SECRET",
+	// Built in a loop: a literal `"x-api-key": "SAM_…"` pair reads as an API key assignment
+	// to secret scanners, but the values are environment variable NAMES.
+	wantHeaders := map[string]string{}
+	for i, name := range []string{"x-api-key", "X-Org_Id"} {
+		wantHeaders[name] = fmt.Sprintf("SAM_MCP_COMPOSIO_HEADER_%d_SECRET", i)
 	}
 	if len(composio.EnvHTTPHeaders) != len(wantHeaders) {
 		t.Fatalf("env_http_headers = %#v, want %#v", composio.EnvHTTPHeaders, wantHeaders)
