@@ -32,8 +32,7 @@ WITH attribution AS (
                AND candidate.chat_session_id = summary.session_id
              )
            )
-         ORDER BY CASE WHEN candidate.id = summary.task_id THEN 0 ELSE 1 END,
-                  candidate.started_at DESC,
+         ORDER BY candidate.started_at DESC,
                   candidate.id DESC
          LIMIT 1
       )
