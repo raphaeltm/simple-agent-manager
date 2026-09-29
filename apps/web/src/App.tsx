@@ -145,6 +145,10 @@ const ProjectTriggerDetail = lazyNamed(
 );
 const ProjectTriggers = lazyNamed(() => import('./pages/ProjectTriggers'), 'ProjectTriggers');
 const ProjectEvents = lazyNamed(() => import('./pages/ProjectEvents'), 'ProjectEvents');
+const ResourceTimelinePrototype = lazyNamed(
+  () => import('./pages/resource-timeline-prototype'),
+  'ResourceTimelinePrototype'
+);
 const SamPrototype = lazyNamed(() => import('./pages/SamPrototype'), 'SamPrototype');
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
@@ -229,6 +233,7 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
 
 export const DEV_ONLY_ROUTE_PATHS = [
   '/sam',
+  '/prototype/resource-timeline',
   '/__test/trial-chat-gate',
   '/__test/error-boundary',
   '/ui-standards',
@@ -269,6 +274,11 @@ export default function App() {
                       <>
                         {/* SAM prototype — local/test only, no auth */}
                         <Route path="/sam" element={page(<SamPrototype />)} />
+                        {/* Resource timeline prototype — mock sessions, never shipped */}
+                        <Route
+                          path="/prototype/resource-timeline"
+                          element={page(<ResourceTimelinePrototype />)}
+                        />
                         {/* Harness for Playwright audits — mounts trial components with mock data */}
                         <Route
                           path="/__test/trial-chat-gate"
