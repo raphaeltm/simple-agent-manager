@@ -52,8 +52,8 @@ Phase 1: Research & Task Creation
 
 ## Phase 7: CodeRabbit Review Tracker
 
-<populated when CodeRabbit review is requested — include `coderabbit-review` label application, unresolved findings, fix commits, incremental review status, and final no-unresolved-feedback status>
-<Phase 7 is NOT merge-ready until the latest CodeRabbit review has no unresolved feedback and the agent agrees the PR is ready>
+<populated when CodeRabbit review is requested — record the request time and method, then either the review's findings, fix commits, and incremental review status, or what you observed when no review arrived (silence after ~15 minutes, `Review skipped`, rate limit)>
+<If CodeRabbit reviewed, Phase 7 is NOT merge-ready until no CodeRabbit feedback is unresolved. If no review arrived within the wait, record that and continue: a silent CodeRabbit never blocks merge (rule 25)>
 
 ## Implementation Progress
 
@@ -117,13 +117,13 @@ fallback bounded and record it in the workflow state file.
 | Repeating already-done work                           | Checked items + notes show what's been accomplished                                                          |
 | Jumping to PR creation early                          | Phase checklist enforces ordering                                                                            |
 | Merging before reviewers finish                       | Review Tracker blocks Phase 5 completion until all reviewers report back                                     |
-| Forgetting unresolved CodeRabbit feedback             | Phase 7 CodeRabbit Review Tracker records label trigger, fix commits, incremental reviews, and final agreement |
+| Forgetting unresolved CodeRabbit feedback             | Phase 7 CodeRabbit Review Tracker records the request, the wait outcome, and any findings with fix commits   |
 | Silently failing production deploy                    | Phase 7 checklist includes deploy monitoring — task is not complete until deploy succeeds or user is alerted |
 | Harness poller disappears after ACP prompt completion | Durable wait subscription wakes the parent through SAM-owned delivery                                        |
 
 ## Cleanup
 
-Delete `.do-state.md` at the end of Phase 7 (after CodeRabbit review completion, PR merge, deploy monitoring, and worktree cleanup). It's gitignored, so even if you forget, it won't pollute the repo.
+Delete `.do-state.md` at the end of Phase 7 (after the CodeRabbit request-and-wait step, PR merge, deploy monitoring, and worktree cleanup). It's gitignored, so even if you forget, it won't pollute the repo.
 
 ## Phase 5 → Phase 6 Transition Guard
 

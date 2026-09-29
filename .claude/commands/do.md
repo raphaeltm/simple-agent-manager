@@ -25,7 +25,7 @@ TodoWrite([
   { content: "Phase 4: Pre-PR validation (lint, typecheck, test, build)", status: "pending", activeForm: "Running full quality suite" },
   { content: "Phase 5: Review (local specialist subagents)", status: "pending", activeForm: "Running local reviewer subagents" },
   { content: "Phase 6: Staging verification (deploy + Playwright)", status: "pending", activeForm: "Verifying on staging" },
-  { content: "Phase 7: Create PR, wait for CI and CodeRabbit, merge", status: "pending", activeForm: "Creating PR and completing review gates" },
+  { content: "Phase 7: Create PR, wait for CI, request CodeRabbit and wait, merge", status: "pending", activeForm: "Creating PR and completing review gates" },
 ])
 ```
 
@@ -274,13 +274,13 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
 
 3. **If CI fails:** inspect logs, fix issues, commit, push, repeat.
 
-4. **Once CI is fully green and every non-CodeRabbit gate is satisfied**, request CodeRabbit review through the repository's trusted GitHub Actions path, not by posting `@coderabbitai review` yourself. Apply the opt-in label first:
+4. **Once CI is fully green, every other gate is satisfied, and the PR is not a draft**, request CodeRabbit review through the repository's trusted GitHub Actions path, not by posting `@coderabbitai review` yourself. Apply the opt-in label first:
 
    ```
    gh pr edit <pr-number> --add-label coderabbit-review
    ```
 
-   If the label-triggered run needs an explicit retry for the current ready state, dispatch the same workflow from `main`:
+   If the label-triggered run did not fire (the label path never fires on a draft PR), dispatch the same workflow from `main`:
 
    ```
    gh workflow run coderabbit-bot-review.yml --ref main -f pr_number=<pr-number>
@@ -288,16 +288,13 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
 
    Agents MUST NOT post `@coderabbitai review` directly with their own GitHub App token; CodeRabbit ignores bot-authored review commands. The workflow is the human-identity bridge.
 
-5. **Complete the iterative CodeRabbit review loop before merge.** The PR is NOT good to go until the agent and CodeRabbit are in agreement:
-   - Read every CodeRabbit review comment, thread, and summary.
-   - Implement valid feedback, push fixes, and re-run the affected validation/CI checks.
-   - For feedback you believe is not applicable, explicitly review it, document the reason, and close/resolve the thread when GitHub supports that state.
-   - Keep the `coderabbit-review` label on the PR so CodeRabbit performs incremental reviews for subsequent commits.
-   - Repeat this loop until the latest CodeRabbit review after the final pushed fixes has no unresolved feedback and you independently agree the PR is ready.
+5. **Wait about 15 minutes for CodeRabbit, then follow whichever case applies.** A CodeRabbit review is not required; requesting one and waiting is. See `.claude/rules/25-review-merge-gate.md`.
+   - **A review arrived: it blocks merge until its feedback is resolved.** Read every CodeRabbit review comment, thread, and summary. Implement valid feedback, push fixes, and re-run the affected validation/CI checks. For feedback you believe is not applicable, explicitly review it, document the reason, and resolve the thread. Keep the `coderabbit-review` label on the PR so pushed fixes get incremental reviews, and give each one the same wait. You are done when no CodeRabbit feedback is unresolved and you independently agree the PR is ready. CodeRabbit not re-reviewing your fixes within the wait does not block.
+   - **No review arrived: skip CodeRabbit and continue.** This covers silence after the wait, a `Review skipped` status (for example `bot user not eligible for review`), a rate-limit or quota notice, and a failed request workflow. Record what you observed in the PR's "CodeRabbit Review Evidence" section. **Do NOT add `needs-human-review`, call `request_human_input`, or wait for a waiver because CodeRabbit is silent.**
 
-   **If CodeRabbit is unavailable, does not respond, or its feedback state cannot be inspected, the PR is not self-mergeable. Add `needs-human-review`, document the blocker, and do NOT merge.**
+   Do not re-trigger CodeRabbit in a loop; request again only for a materially new ready state. A review that lands after you stopped waiting but before merge is binding. One that lands after merge goes through a follow-up PR.
 
-6. **Once CI is fully green and the CodeRabbit loop is complete**, merge the PR:
+6. **Once CI is fully green and the CodeRabbit step is complete** (its feedback resolved, or no review arrived within the wait), merge the PR:
 
    ```
    gh pr merge <pr-number> --squash --delete-branch
