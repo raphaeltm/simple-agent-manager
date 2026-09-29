@@ -8,6 +8,7 @@ import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { parseJsonRecord } from '../lib/runtime-validation';
 import { AppError, errors } from '../middleware/error';
+import { computeWorkspaceResourceRollup, getRollupConfig } from './workspace-resource-rollup';
 
 export const WORKSPACE_RESOURCE_STORAGE_FORMAT = 'resource-history-gzip-json-v1';
 const R2_PREFIX = 'resource-history/v1';
@@ -629,6 +630,7 @@ async function validateWorkspaceResourceChunkBytes(
   actualSha: string;
   compressedBytes: number;
   uncompressedBytes: number;
+  payload: WorkspaceResourceChunkPayload;
 }> {
   const bytes = decodeBase64(body.compressedBase64);
   if (bytes.byteLength !== body.compressedBytes) {
@@ -671,7 +673,33 @@ async function validateWorkspaceResourceChunkBytes(
     actualSha: await sha256Hex(sanitized.bytes),
     compressedBytes: sanitized.bytes.byteLength,
     uncompressedBytes: sanitized.uncompressedBytes,
+    payload: decodedChunk.value,
   };
+}
+
+/** The rollup is an optimisation for the timeline; failing to build one must not reject the chunk. */
+function buildRollupJson(
+  env: Env,
+  payload: WorkspaceResourceChunkPayload,
+  body: WorkspaceResourceUploadBody,
+  context: { projectId: string; workspaceId: string }
+): string | null {
+  try {
+    return JSON.stringify(
+      computeWorkspaceResourceRollup(
+        payload,
+        { startedAt: body.startedAt, endedAt: body.endedAt },
+        getRollupConfig(env)
+      )
+    );
+  } catch (error) {
+    log.warn('workspace_resource_history.rollup_failed', {
+      ...context,
+      chunkSequence: body.chunkSequence,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }
 
 export async function storeWorkspaceResourceChunk(
@@ -694,7 +722,7 @@ export async function storeWorkspaceResourceChunk(
   );
   const nodeId = validateWorkspaceUploadIdentity(workspace, body, uploadedByNodeId);
   assertWorkspaceResourceUploadMetadata(body);
-  const { bytes, actualSha, compressedBytes, uncompressedBytes } =
+  const { bytes, actualSha, compressedBytes, uncompressedBytes, payload } =
     await validateWorkspaceResourceChunkBytes(env, body);
 
   const db = drizzle(env.DATABASE, { schema });
@@ -911,6 +939,7 @@ export async function storeWorkspaceResourceChunk(
       toolSpanCount: body.toolSpanCount ?? 0,
       completenessJson,
       summaryJson,
+      rollupJson: buildRollupJson(env, payload, body, { projectId, workspaceId }),
       createdAt: now,
       expiresAt,
       uploadedByNodeId,
@@ -1031,7 +1060,7 @@ export function downsamplePreservingSpikes(
   return { samples: selected, downsampled: true };
 }
 
-async function readChunkPayload(env: Env, chunk: schema.WorkspaceResourceChunkRow) {
+export async function readChunkPayload(env: Env, chunk: schema.WorkspaceResourceChunkRow) {
   const object = await env.PROJECT_DATA_ARCHIVE_R2.get(chunk.r2Key);
   if (!object) throw errors.notFound('Resource history chunk');
   const compressedBytes = new Uint8Array(await object.arrayBuffer());
