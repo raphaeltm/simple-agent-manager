@@ -123,7 +123,7 @@ Authorization:Bearer ${SAM_MCP_TOKEN}`, with the token in the stdio server env r
 
 ### API
 
-- [x] Migration `0175_mcp_connection_headers.sql` (ADD COLUMN ×3, additive) + `schema.ts` columns
+- [x] Migration `0177_mcp_connection_headers.sql` (ADD COLUMN ×3, additive) + `schema.ts` columns
 - [x] `services/mcp-connection-headers.ts`: validate, merge-for-update, seal/open, display names
 - [x] `services/mcp-connections.ts`: create/update/response use the header module
 - [x] `schemas/mcp-connections.ts`: structural `headers` for create/update
@@ -240,3 +240,8 @@ Authorization:Bearer ${SAM_MCP_TOKEN}`, with the token in the stdio server env r
   keeps its value unless retyped, and server names use the card-title type style.
 - Full API suite under load (load average ~18 on 8 cores) showed 8 cold-import timeouts in
   unrelated files; all 40 affected tests pass when rerun with longer timeouts.
+- Migration renumbered `0175` → `0177` before its first staging deploy. Main claimed `0175` in #2181
+  (`0175_backfill_workspace_resource_attribution.sql`), and a sibling branch's
+  `0176_workspace_resource_working_set.sql` is already recorded in staging's D1 ledger.
+  `check-migration-ordering.ts` rejects duplicate prefixes but allows gaps, and renaming a file
+  staging has already applied would replay it. This file had never been applied anywhere.
