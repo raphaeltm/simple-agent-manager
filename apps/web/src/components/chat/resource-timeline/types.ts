@@ -7,8 +7,20 @@
  * provisions a fresh workspace) separated by the gaps where the session slept.
  */
 
-/** ACP tool-call kinds, plus `other` for anything an agent reports that we do not know. */
-export type ToolKind = 'execute' | 'edit' | 'read' | 'search' | 'fetch' | 'think' | 'other';
+/** The ACP tool-call kinds (`other` also covers anything an agent reports that we do not know). */
+export const TOOL_KINDS = [
+  'read',
+  'edit',
+  'delete',
+  'move',
+  'search',
+  'execute',
+  'think',
+  'fetch',
+  'switch_mode',
+  'other',
+] as const;
+export type ToolKind = (typeof TOOL_KINDS)[number];
 
 /**
  * Resource usage over a closed time window `[start, end)`.
@@ -48,6 +60,8 @@ export interface ResourceRun {
   endedAt: number;
   /** Why the collector could not observe this run (for example the container never started). */
   unsupportedReason: string | null;
+  /** What this workspace reserved; each wake can land on a different size. */
+  reservation: ResourceReservation | null;
 }
 
 /** A stored chunk, described well enough to draw an overview without downloading it. */
@@ -85,8 +99,11 @@ export interface ResourceTimelineIndex {
   /** How often the VM uploads a chunk — data is never newer than one upload interval. */
   uploadIntervalMs: number;
   completeness: HistoryCompleteness;
-  /** What the workspace reserved, when known; usage is judged against this. */
-  reservation: ResourceReservation | null;
+  /**
+   * Whether history is recorded at all: `unsupported` for runtimes that collect
+   * none (Instant sessions), `pending` before the first upload.
+   */
+  collection: 'collected' | 'pending' | 'unsupported';
 }
 
 export interface ResourceToolSpan {

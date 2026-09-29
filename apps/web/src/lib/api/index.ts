@@ -465,11 +465,6 @@ export type {
   SessionSummaryResponse,
   StartInstantChatSessionRequest,
   StartInstantChatSessionResponse,
-  WorkspaceResourceChunk,
-  WorkspaceResourceHistoryResponse,
-  WorkspaceResourceSample,
-  WorkspaceResourceSummary,
-  WorkspaceResourceToolSpan,
 } from './sessions';
 export {
   cancelAgentPrompt,
@@ -478,7 +473,6 @@ export {
   getChatSession,
   getChatSessionState,
   getRecentChats,
-  getSessionResourceHistory,
   listActivityEvents,
   listChatMessages,
   listChatSessions,
@@ -565,3 +559,13 @@ export {
   updateWorkspace,
   updateWorkspacePortsPublic,
 } from './workspaces';
+export type {
+  ResourceTimelineChunkEntry,
+  ResourceTimelineChunkResponse,
+  ResourceTimelineIndexResponse,
+  ResourceTimelineRollup,
+  ResourceTimelineRunEntry,
+  WorkspaceResourceSample,
+  WorkspaceResourceToolSpan,
+} from './resource-timeline';
+export { getSessionResourceTimeline, getSessionResourceTimelineChunk } from './resource-timeline';

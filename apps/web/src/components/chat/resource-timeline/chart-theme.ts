@@ -81,10 +81,13 @@ function resolveChartTheme(theme: ResolvedTheme): ChartTheme {
     tools: {
       execute: ioWrite,
       edit: cpu,
+      delete: readToken(TOKENS.danger, theme),
+      move: withAlpha(cpu, 0.7),
       read: ioRead,
       search: memory,
       fetch: readToken(TOKENS.cyan, theme),
       think: withAlpha(muted, 0.7),
+      switch_mode: withAlpha(muted, 0.5),
       other: withAlpha(muted, 0.9),
     },
   };

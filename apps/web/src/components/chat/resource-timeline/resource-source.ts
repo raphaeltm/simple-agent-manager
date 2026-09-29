@@ -8,21 +8,26 @@
  */
 
 import {
-  getSessionResourceHistory,
-  type WorkspaceResourceChunk,
-  type WorkspaceResourceHistoryResponse,
+  getSessionResourceTimeline,
+  getSessionResourceTimelineChunk,
+  type ResourceTimelineChunkEntry,
+  type ResourceTimelineChunkResponse,
+  type ResourceTimelineIndexResponse,
+  type ResourceTimelineRollup,
+  type ResourceTimelineRunEntry,
   type WorkspaceResourceSample,
   type WorkspaceResourceToolSpan,
 } from '../../../lib/api';
-import type {
-  HistoryCompleteness,
-  ResourceAggregate,
-  ResourceChunkDetail,
-  ResourceChunkRef,
-  ResourceRun,
-  ResourceTimelineIndex,
-  ResourceToolSpan,
-  ToolKind,
+import {
+  type ResourceAggregate,
+  type ResourceChunkDetail,
+  type ResourceChunkRef,
+  type ResourceReservation,
+  type ResourceRun,
+  type ResourceTimelineIndex,
+  type ResourceToolSpan,
+  TOOL_KINDS,
+  type ToolKind,
 } from './types';
 
 export interface ResourceHistorySource {
@@ -35,17 +40,10 @@ export interface ResourceHistorySource {
 const DEFAULT_SAMPLE_INTERVAL_MS = 5_000;
 const DEFAULT_UPLOAD_INTERVAL_MS = 15 * 60_000;
 
-const TOOL_KINDS: ReadonlySet<string> = new Set([
-  'execute',
-  'edit',
-  'read',
-  'search',
-  'fetch',
-  'think',
-]);
+const KNOWN_TOOL_KINDS: ReadonlySet<string> = new Set(TOOL_KINDS);
 
 function toolKind(raw: string | undefined): ToolKind {
-  return raw && TOOL_KINDS.has(raw) ? (raw as ToolKind) : 'other';
+  return raw && KNOWN_TOOL_KINDS.has(raw) ? (raw as ToolKind) : 'other';
 }
 
 function numberField(record: unknown, key: string): number | null {
@@ -66,7 +64,7 @@ export function sampleToAggregate(sample: WorkspaceResourceSample): ResourceAggr
   const measured = intervalMs > 0 && !sample.unsupported;
   const cores = measured && sample.cpuMillis != null ? sample.cpuMillis / intervalMs : null;
   const memory = sample.unsupported ? null : (sample.memoryBytes ?? null);
-  const workingSet = numberField(sample, 'workingSetBytes');
+  const workingSet = sample.unsupported ? null : (sample.memoryWorkingSetBytes ?? null);
   return {
     start: sample.t - (intervalMs || DEFAULT_SAMPLE_INTERVAL_MS),
     end: sample.t,
@@ -106,7 +104,7 @@ export function withToolStarts(
 function toolSpanFromApi(span: WorkspaceResourceToolSpan): ResourceToolSpan {
   return {
     id: span.id,
-    kind: toolKind(stringField(span, 'toolKind') ?? span.kind),
+    kind: toolKind(span.kind),
     name: stringField(span, 'toolName'),
     startedAt: span.startedAt,
     endedAt: span.endedAt ?? span.startedAt,
@@ -114,8 +112,8 @@ function toolSpanFromApi(span: WorkspaceResourceToolSpan): ResourceToolSpan {
   };
 }
 
-/** The per-chunk summary the current API stores, as one aggregate spanning the chunk. */
-function chunkOverview(chunk: WorkspaceResourceChunk): ResourceAggregate {
+/** Older chunks carry no rollup: their stored summary becomes one aggregate spanning the chunk. */
+function summaryOverview(chunk: ResourceTimelineChunkEntry): ResourceAggregate {
   const summary = chunk.summary;
   const intervalMs = numberField(summary, 'sampleIntervalMillis') ?? DEFAULT_SAMPLE_INTERVAL_MS;
   const cpuMean = numberField(summary, 'cpuMeanMillis');
@@ -127,8 +125,8 @@ function chunkOverview(chunk: WorkspaceResourceChunk): ResourceAggregate {
     cpuMaxCores: cpuPeak == null ? null : cpuPeak / intervalMs,
     memoryMeanBytes: numberField(summary, 'memoryMeanBytes'),
     memoryMaxBytes: numberField(summary, 'memoryPeakBytes'),
-    workingSetMeanBytes: numberField(summary, 'workingSetMeanBytes'),
-    workingSetMaxBytes: numberField(summary, 'workingSetPeakBytes'),
+    workingSetMeanBytes: numberField(summary, 'memoryWorkingSetMeanBytes'),
+    workingSetMaxBytes: numberField(summary, 'memoryWorkingSetPeakBytes'),
     ioReadBytes: numberField(summary, 'ioReadBytes'),
     ioWriteBytes: numberField(summary, 'ioWriteBytes'),
     oomKills: numberField(summary, 'oomCount') ?? 0,
@@ -137,42 +135,50 @@ function chunkOverview(chunk: WorkspaceResourceChunk): ResourceAggregate {
   };
 }
 
-function runsFromChunks(chunks: readonly WorkspaceResourceChunk[]): ResourceRun[] {
-  const runs = new Map<string, ResourceRun>();
-  for (const chunk of chunks) {
-    const unsupported = stringField(chunk.completeness, 'unsupported');
-    const existing = runs.get(chunk.workspaceId);
-    if (existing) {
-      existing.startedAt = Math.min(existing.startedAt, chunk.startedAt);
-      existing.endedAt = Math.max(existing.endedAt, chunk.endedAt);
-      existing.unsupportedReason ??= unsupported;
-    } else {
-      runs.set(chunk.workspaceId, {
-        id: chunk.workspaceId,
-        nodeId: chunk.nodeId,
-        startedAt: chunk.startedAt,
-        endedAt: chunk.endedAt,
-        unsupportedReason: unsupported,
-      });
-    }
-  }
-  return [...runs.values()].sort((a, b) => a.startedAt - b.startedAt);
+export function rollupOverview(rollup: ResourceTimelineRollup): ResourceAggregate[] {
+  return rollup.start.map((start, i) => ({
+    start,
+    end: rollup.end[i] ?? start + rollup.bucketMs,
+    cpuMeanCores: rollup.cpuMeanCores[i] ?? null,
+    cpuMaxCores: rollup.cpuMaxCores[i] ?? null,
+    memoryMeanBytes: rollup.memoryMeanBytes[i] ?? null,
+    memoryMaxBytes: rollup.memoryMaxBytes[i] ?? null,
+    workingSetMeanBytes: rollup.workingSetMeanBytes[i] ?? null,
+    workingSetMaxBytes: rollup.workingSetMaxBytes[i] ?? null,
+    ioReadBytes: rollup.ioReadBytes[i] ?? null,
+    ioWriteBytes: rollup.ioWriteBytes[i] ?? null,
+    oomKills: rollup.oomKills[i] ?? 0,
+    toolCallStarts: rollup.toolCallStarts[i] ?? 0,
+    exact: false,
+  }));
 }
 
-/**
- * The current list endpoint returns only the newest chunks, without a total. The
- * one certain signal is the latest workspace's own first chunk missing from the
- * page: then older history exists and was not returned.
- */
-function completenessOf(response: WorkspaceResourceHistoryResponse): HistoryCompleteness {
-  const firstChunkId = response.summary?.firstChunkId;
-  if (firstChunkId && !response.chunks.some((chunk) => chunk.id === firstChunkId)) {
-    return { kind: 'truncated', omitted: null };
-  }
-  return { kind: 'complete' };
+function reservationFromApi(run: ResourceTimelineRunEntry): ResourceReservation | null {
+  if (!run.reservation) return null;
+  return {
+    cpuCores: run.reservation.cpuMillis > 0 ? run.reservation.cpuMillis / 1000 : null,
+    memoryBytes: run.reservation.memoryMb > 0 ? run.reservation.memoryMb * 1024 * 1024 : null,
+  };
 }
 
-export function indexFromApi(response: WorkspaceResourceHistoryResponse): ResourceTimelineIndex {
+function runsFromApi(response: ResourceTimelineIndexResponse): ResourceRun[] {
+  return response.runs
+    .map((run) => ({
+      id: run.workspaceId,
+      nodeId: run.nodeId,
+      startedAt: run.startedAt,
+      endedAt: run.endedAt,
+      unsupportedReason:
+        response.chunks
+          .filter((chunk) => chunk.workspaceId === run.workspaceId)
+          .map((chunk) => stringField(chunk.completeness, 'unsupported'))
+          .find((reason) => reason != null) ?? null,
+      reservation: reservationFromApi(run),
+    }))
+    .sort((a, b) => a.startedAt - b.startedAt);
+}
+
+export function indexFromApi(response: ResourceTimelineIndexResponse): ResourceTimelineIndex {
   const chunks: ResourceChunkRef[] = [...response.chunks]
     .sort((a, b) => a.startedAt - b.startedAt)
     .map((chunk) => ({
@@ -181,17 +187,20 @@ export function indexFromApi(response: WorkspaceResourceHistoryResponse): Resour
       startedAt: chunk.startedAt,
       endedAt: chunk.endedAt,
       sampleCount: chunk.sampleCount,
-      overview: [chunkOverview(chunk)],
+      overview: chunk.rollup && chunk.rollup.start.length > 0 ? rollupOverview(chunk.rollup) : [summaryOverview(chunk)],
       memoryHighWaterBytes: numberField(chunk.summary, 'memoryKernelPeakBytes'),
     }));
   return {
-    runs: runsFromChunks(response.chunks),
+    runs: runsFromApi(response),
     chunks,
     sampleIntervalMs:
-      numberField(response.summary?.summary, 'sampleIntervalMillis') ?? DEFAULT_SAMPLE_INTERVAL_MS,
+      numberField(response.chunks[0]?.summary, 'sampleIntervalMillis') ?? DEFAULT_SAMPLE_INTERVAL_MS,
     uploadIntervalMs: DEFAULT_UPLOAD_INTERVAL_MS,
-    completeness: completenessOf(response),
-    reservation: null,
+    completeness:
+      response.omittedChunkCount > 0
+        ? { kind: 'truncated', omitted: response.omittedChunkCount }
+        : { kind: 'complete' },
+    collection: response.collection,
   };
 }
 
@@ -210,10 +219,7 @@ function coverThinnedSamples(samples: ResourceAggregate[], raw: readonly Workspa
   });
 }
 
-export function chunkDetailFromApi(
-  chunkId: string,
-  detail: NonNullable<WorkspaceResourceHistoryResponse['detail']>
-): ResourceChunkDetail {
+export function chunkDetailFromApi(chunkId: string, detail: ResourceTimelineChunkResponse): ResourceChunkDetail {
   const toolSpans = detail.toolSpans.map(toolSpanFromApi);
   const raw = [...detail.samples].sort((a, b) => a.t - b.t);
   const samples = raw.map(sampleToAggregate);
@@ -227,19 +233,19 @@ export function chunkDetailFromApi(
   };
 }
 
-/** Reads a session's history through today's `/resource-history` endpoint. */
+/** Reads a session's whole resource timeline. */
 export function apiResourceHistorySource(projectId: string, sessionId: string): ResourceHistorySource {
   return {
-    cacheKey: ['session-resource-history', projectId, sessionId],
+    cacheKey: ['session-resource-timeline', projectId, sessionId],
     async loadIndex() {
-      return indexFromApi(await getSessionResourceHistory(projectId, sessionId));
+      return indexFromApi(await getSessionResourceTimeline(projectId, sessionId));
     },
     async loadChunk(chunkId) {
-      const response = await getSessionResourceHistory(projectId, sessionId, { chunkId });
-      if (!response.detail || response.detail.chunkId !== chunkId) {
+      const response = await getSessionResourceTimelineChunk(projectId, sessionId, chunkId);
+      if (response.chunkId !== chunkId) {
         throw new Error(`Resource history chunk ${chunkId} was not returned`);
       }
-      return chunkDetailFromApi(chunkId, response.detail);
+      return chunkDetailFromApi(chunkId, response);
     },
   };
 }

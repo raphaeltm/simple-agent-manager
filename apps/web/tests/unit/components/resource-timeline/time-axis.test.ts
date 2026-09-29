@@ -16,7 +16,7 @@ const HOUR = 60 * MINUTE;
 const T0 = new Date(2026, 8, 28, 19, 0, 0).getTime();
 
 function run(id: string, startedAt: number, endedAt: number): ResourceRun {
-  return { id, nodeId: null, startedAt, endedAt, unsupportedReason: null };
+  return { id, nodeId: null, startedAt, endedAt, unsupportedReason: null, reservation: null };
 }
 
 /** An hour of work, a nine-hour night, another hour of work. */

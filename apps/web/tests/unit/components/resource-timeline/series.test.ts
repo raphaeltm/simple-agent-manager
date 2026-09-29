@@ -37,7 +37,7 @@ function samples(from: number, count: number, cores = 0.1): ResourceAggregate[] 
 }
 
 function run(startedAt: number, endedAt: number): ResourceRun {
-  return { id: `run-${startedAt}`, nodeId: null, startedAt, endedAt, unsupportedReason: null };
+  return { id: `run-${startedAt}`, nodeId: null, startedAt, endedAt, unsupportedReason: null, reservation: null };
 }
 
 describe('buildSeries', () => {
