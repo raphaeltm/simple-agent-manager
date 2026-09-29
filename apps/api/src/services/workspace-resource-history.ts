@@ -333,7 +333,7 @@ async function readBoundedGzipJson(
   }
   try {
     const record = parseJsonRecord(
-      new TextDecoder('utf-8', { fatal: true }).decode(merged),
+      new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(merged),
       'workspace_resource_history.chunk'
     );
     return {
