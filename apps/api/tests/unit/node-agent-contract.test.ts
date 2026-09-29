@@ -6,6 +6,8 @@
  * parsing follows the documented contract.
  */
 
+import { readFileSync } from 'node:fs';
+
 import {
   AgentSessionResponseSchema,
   CallbackTokenClaimsSchema,
@@ -1015,6 +1017,61 @@ describe('Node Agent client functions send correct payloads', () => {
       { url: 'https://presigned.example/mcp', token: '', name: 'composio' },
       { url: 'https://legacy.example/mcp', token: 'legacy-token' },
     ]);
+  });
+
+  it('createAgentSessionOnNode sends custom headers exactly as the shared wire fixture', async () => {
+    // The same fixture is posted to the real vm-agent handler in
+    // packages/vm-agent/internal/server/mcp_servers_wire_test.go, so the two sides cannot drift.
+    const wire = JSON.parse(
+      readFileSync(
+        new URL('../../../../packages/shared/src/fixtures/mcp-server-entry-wire.json', import.meta.url),
+        'utf8'
+      )
+    ) as { mcpServers: unknown[] };
+    fetchWithTimeoutMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'sess-headers',
+          workspaceId: 'ws-test',
+          status: 'running',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+        }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+
+    await createAgentSessionOnNode(
+      'node-abc',
+      'ws-test',
+      'sess-headers',
+      null,
+      makeNodeAgentTestEnv(),
+      'user-123',
+      'chat-123',
+      'proj-123',
+      [
+        { url: 'https://api.example.com/mcp', token: 'sam-token', name: 'sam-mcp' },
+        {
+          url: 'https://backend.composio.dev/v3/mcp/server-1',
+          token: '',
+          name: 'composio',
+          headers: [
+            { name: 'x-api-key', value: 'ak_fixture_key' },
+            { name: 'X-Org_Id', value: 'org-42' },
+          ],
+        },
+        // An empty list is omitted, so the entry stays byte-identical to an older control plane's.
+        { url: 'https://mcp.zapier.com/x', token: 'zap-token', name: 'zapier', headers: [] },
+      ]
+    );
+
+    const [, capturedInit] = fetchWithTimeoutMock.mock.calls[0] as [string, RequestInit];
+    const parsedBody = JSON.parse(capturedInit.body as string);
+    expect(CreateAgentSessionAgentRequestSchema.safeParse(parsedBody).success).toBe(true);
+    expect(parsedBody.mcpServers).toEqual(wire.mcpServers);
+    expect(parsedBody.mcpServers[0]).not.toHaveProperty('headers');
+    expect(parsedBody.mcpServers[2]).not.toHaveProperty('headers');
   });
 
   it('node agent request throws on non-ok response', async () => {

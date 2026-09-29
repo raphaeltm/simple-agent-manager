@@ -1,0 +1,39 @@
+{
+  "$comment": [
+    "Cross-language wire fixture for the MCP server list the control plane sends the vm-agent",
+    "(POST /workspaces/:id/agent-sessions and .../start). Both sides consume THIS file (rule 23):",
+    "apps/api/tests/unit/node-agent-contract.test.ts asserts serializeMcpServers produces exactly",
+    "`mcpServers`, and packages/vm-agent/internal/server/mcp_servers_wire_test.go posts it to the real",
+    "create-agent-session handler and asserts every field arrives.",
+    "",
+    "Optional fields appear only when set, so an entry without them is byte-identical to what an",
+    "older control plane sent: no `headers` key on a server without custom headers."
+  ],
+  "mcpServers": [
+    {
+      "url": "https://api.example.com/mcp",
+      "token": "sam-token",
+      "name": "sam-mcp"
+    },
+    {
+      "url": "https://backend.composio.dev/v3/mcp/server-1",
+      "token": "",
+      "name": "composio",
+      "headers": [
+        {
+          "name": "x-api-key",
+          "value": "ak_fixture_key"
+        },
+        {
+          "name": "X-Org_Id",
+          "value": "org-42"
+        }
+      ]
+    },
+    {
+      "url": "https://mcp.zapier.com/x",
+      "token": "zap-token",
+      "name": "zapier"
+    }
+  ]
+}
