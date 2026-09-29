@@ -32,12 +32,16 @@ interface RunPlan {
   oomAtMin?: number;
 }
 
+/** A coordinator mostly waits and dispatches; a builder compiles and tests all day. */
+type Workload = 'coordinator' | 'builder';
+
 export interface ScenarioPlan {
   id: string;
   label: string;
   description: string;
   startedAt: number;
   seed: number;
+  workload: Workload;
   runs: RunPlan[];
   reservation: { cpuCores: number; memoryBytes: number } | null;
   /** VM agents that predate working-set memory and tool labels report neither. */
@@ -75,19 +79,30 @@ interface Phase {
   memoryLift: number;
 }
 
-const PHASE_WEIGHTS: Array<[PhaseKind, number]> = [
-  ['idle', 3],
-  ['agent', 5],
-  ['build', 2],
-  ['install', 1],
-  ['test', 1.5],
-  ['fetch', 1],
-];
+const PHASE_WEIGHTS: Record<Workload, Array<[PhaseKind, number]>> = {
+  coordinator: [
+    ['idle', 5],
+    ['agent', 6],
+    ['build', 0.7],
+    ['install', 0.3],
+    ['test', 0.5],
+    ['fetch', 1.5],
+  ],
+  builder: [
+    ['idle', 3],
+    ['agent', 5],
+    ['build', 2],
+    ['install', 1],
+    ['test', 1.5],
+    ['fetch', 1],
+  ],
+};
 
-function pickPhase(random: () => number): PhaseKind {
-  const total = PHASE_WEIGHTS.reduce((sum, [, weight]) => sum + weight, 0);
+function pickPhase(random: () => number, workload: Workload): PhaseKind {
+  const weights = PHASE_WEIGHTS[workload];
+  const total = weights.reduce((sum, [, weight]) => sum + weight, 0);
   let roll = random() * total;
-  for (const [kind, weight] of PHASE_WEIGHTS) {
+  for (const [kind, weight] of weights) {
     roll -= weight;
     if (roll <= 0) return kind;
   }
@@ -111,12 +126,12 @@ function phaseShape(kind: PhaseKind, random: () => number): Omit<Phase, 'start' 
   }
 }
 
-function planPhases(start: number, end: number, random: () => number): Phase[] {
+function planPhases(start: number, end: number, random: () => number, workload: Workload): Phase[] {
   const phases: Phase[] = [];
   let cursor = start;
   let previous: PhaseKind = 'idle';
   while (cursor < end) {
-    let kind = pickPhase(random);
+    let kind = pickPhase(random, workload);
     if (kind === previous && kind !== 'agent') kind = 'agent';
     const shape = phaseShape(kind, random);
     const phaseEnd = Math.min(end, cursor + shape.minutes * MINUTE);
@@ -197,7 +212,7 @@ export function generateRun(plan: RunPlan, scenario: ScenarioPlan, index: number
   };
   if (plan.unsupported) return { run, samples: [], toolSpans: [], samplerGaps: [], memoryHighWater: [] };
 
-  const phases = planPhases(startedAt, endedAt, random);
+  const phases = planPhases(startedAt, endedAt, random, scenario.workload);
   let spanCounter = 0;
   const nextId = () => `span-${scenario.id}-${index}-${(spanCounter += 1)}`;
   const toolSpans = phases.flatMap((phase) =>
@@ -309,6 +324,7 @@ id: 'overnight',
   description: 'Modelled on session 449d73f8: many wake cycles on three nodes, a 9-hour overnight sleep, an OOM kill and a wake whose container never started.',
   startedAt: EVENING,
   seed: 7,
+  workload: 'coordinator',
   reservation: { cpuCores: 2, memoryBytes: 4 * GB },
   agentReportsWorkingSet: true,
   agentReportsToolNames: true,
@@ -334,6 +350,7 @@ export const SCENARIOS: ScenarioPlan[] = [
     description: 'Modelled on session 98ac3e40: a single four-hour run with frequent builds and hundreds of tool calls.',
     startedAt: Date.parse('2026-09-28T09:05:00'),
     seed: 21,
+    workload: 'builder',
     reservation: { cpuCores: 4, memoryBytes: 8 * GB },
     agentReportsWorkingSet: true,
     agentReportsToolNames: true,
@@ -345,6 +362,7 @@ export const SCENARIOS: ScenarioPlan[] = [
     description: 'One run shorter than a single upload interval: one partial chunk.',
     startedAt: Date.parse('2026-09-29T07:12:00'),
     seed: 3,
+    workload: 'builder',
     reservation: { cpuCores: 2, memoryBytes: 4 * GB },
     agentReportsWorkingSet: true,
     agentReportsToolNames: true,
@@ -356,6 +374,7 @@ export const SCENARIOS: ScenarioPlan[] = [
     description: 'The overnight session as reported by agents that predate tool labels and working-set memory.',
     startedAt: EVENING,
     seed: 7,
+    workload: 'coordinator',
     reservation: null,
     agentReportsWorkingSet: false,
     agentReportsToolNames: false,
@@ -371,6 +390,7 @@ export const SCENARIOS: ScenarioPlan[] = [
     description: 'Samples upload every 15 minutes; a new session has none yet.',
     startedAt: Date.parse('2026-09-29T07:40:00'),
     seed: 1,
+    workload: 'coordinator',
     reservation: null,
     agentReportsWorkingSet: true,
     agentReportsToolNames: true,

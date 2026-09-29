@@ -22,7 +22,7 @@ const CHUNK_GC_TIME_MS = 30 * 60_000;
  */
 const MAX_DETAIL_CHUNKS = 32;
 
-export interface TimelineWindow {
+export interface TimelineViewport {
   /** Visible range, axis units. */
   min: number;
   max: number;
@@ -35,8 +35,10 @@ export interface ResourceTimelineData {
   axis: TimeAxis;
   /** Best available data for the window: raw samples where downloaded, overview elsewhere. */
   aggregates: ResourceAggregate[];
-  /** Whole-session overview, for the navigator, peaks and session totals. */
+  /** Whole-session overview (stable while zooming), for peaks and session totals. */
   overview: ResourceAggregate[];
+  /** The whole session at the best detail loaded so far: raw samples where fetched, overview elsewhere. */
+  sessionAggregates: ResourceAggregate[];
   /** Tool spans from downloaded chunks overlapping the window. */
   toolSpans: ResourceToolSpan[];
   /** Chunks the window needs that are still downloading. */
@@ -99,11 +101,11 @@ export function useResourceTimelineData(
   source: ResourceHistorySource,
   index: ResourceTimelineIndex,
   axis: TimeAxis,
-  window: TimelineWindow
+  viewport: TimelineViewport
 ): ResourceTimelineData {
-  const from = toReal(axis, window.min);
-  const to = toReal(axis, window.max);
-  const msPerPx = (window.max - window.min) / Math.max(1, window.widthPx);
+  const from = toReal(axis, viewport.min);
+  const to = toReal(axis, viewport.max);
+  const msPerPx = (viewport.max - viewport.min) / Math.max(1, viewport.widthPx);
 
   const visibleChunks = useMemo(() => chunksAround(index.chunks, from, to), [index.chunks, from, to]);
   const wantDetail =
@@ -135,11 +137,17 @@ export function useResourceTimelineData(
     return { aggregates: merged, toolSpans: spans };
   }, [visibleChunks, details]);
 
+  const sessionAggregates = useMemo(() => {
+    const loaded = new Map(visibleChunks.map((chunk, position) => [chunk.id, details[position]]));
+    return index.chunks.flatMap((chunk) => loaded.get(chunk.id)?.samples ?? chunk.overview);
+  }, [index.chunks, visibleChunks, details]);
+
   return {
     index,
     axis,
     aggregates,
     overview,
+    sessionAggregates,
     toolSpans,
     pendingChunks: pending,
     failedChunks: failed,

@@ -30,8 +30,12 @@ export interface PanelState {
 }
 
 export interface PanelCallbacks {
-  /** Axis position under the cursor, or null when the cursor leaves. */
-  onCursor: (x: number | null) => void;
+  /**
+   * uPlot moved its cursor: the axis position under it, or null when it left the
+   * plot. uPlot also fires this on redraws with the old pixel position, so the
+   * receiver must only trust it while a mouse is actually hovering.
+   */
+  onHover: (x: number | null) => void;
   /** A mouse drag selected `[min, max]` (axis units). */
   onSelectRange: (min: number, max: number) => void;
   onResetZoom: () => void;
@@ -40,7 +44,10 @@ export interface PanelCallbacks {
 /** Left gutter (y-axis labels) and right padding shared by every panel and the navigator. */
 export const PLOT_LEFT_GUTTER_PX = 44;
 export const PLOT_RIGHT_PADDING_PX = 6;
-const TICK_MIN_SPACING_PX = 64;
+/** Clock labels ("09:55 PM") need about this much room each… */
+const TICK_MIN_SPACING_PX = 58;
+/** …and half of it to the right of their tick, which the right edge cannot give. */
+const TICK_RIGHT_EDGE_CLEARANCE_PX = 22;
 const TOOL_LANE_ROWS = 3;
 
 function px(value: number): number {
@@ -205,8 +212,14 @@ function xAxis(stateRef: RefObject<PanelState>, theme: ChartTheme, showLabels: b
       stepMs = tickStepMs((max - min) / Math.max(1, widthPx), TICK_MIN_SPACING_PX);
       return axisTicks(state.axis, min, max, stepMs).map((tick) => tick.x);
     },
-    values: (_u, splits) =>
-      splits.map((x) => (showLabels ? formatClock(toReal(stateRef.current.axis, x), stepMs) : '')),
+    values: (u, splits) => {
+      const widthPx = u.bbox.width / uPlot.pxRatio;
+      return splits.map((x) =>
+        showLabels && u.valToPos(x, 'x') <= widthPx - TICK_RIGHT_EDGE_CLEARANCE_PX
+          ? formatClock(toReal(stateRef.current.axis, x), stepMs)
+          : ''
+      );
+    },
   };
 }
 
@@ -291,7 +304,7 @@ export function panelOptions(
           setCursor: [
             (u) => {
               const left = u.cursor.left ?? -1;
-              callbacks.current.onCursor(left >= 0 ? u.posToVal(left, 'x') : null);
+              callbacks.current.onHover(left >= 0 ? u.posToVal(left, 'x') : null);
             },
           ],
           draw: [

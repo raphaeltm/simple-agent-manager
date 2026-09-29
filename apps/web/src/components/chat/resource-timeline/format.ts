@@ -31,9 +31,10 @@ export function formatRate(bytesPerSecond: number | null | undefined): string {
   return `${formatFileSize(Math.round(bytesPerSecond))}/s`;
 }
 
-/** Elapsed time with seconds precision below two minutes ("35s", "4m 10s", "2h 5m", "3d 4h"). */
+/** Elapsed time, as precise as its size warrants ("12ms", "35s", "4m 10s", "2h 5m", "3d 4h"). */
 export function formatElapsed(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+  const seconds = Math.round(ms / 1000);
   if (seconds < 120) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 10) return seconds % 60 ? `${minutes}m ${seconds % 60}s` : `${minutes}m`;
@@ -73,4 +74,22 @@ export function formatRange(start: number, end: number, precisionMs: number): st
     return `${formatClock(start, precisionMs)} – ${formatClock(end, precisionMs)}`;
   }
   return `${formatDayTime(start)} – ${formatDayTime(end)}`;
+}
+
+/** "mcp__sam-mcp__update_task_status" reads as "update_task_status (sam-mcp)"; built-in tools keep their name. */
+export function formatToolName(name: string | null): string {
+  if (!name) return 'Tool call';
+  const [prefix, server, ...rest] = name.split('__');
+  return prefix === 'mcp' && server && rest.length > 0 ? `${rest.join('__')} (${server})` : name;
+}
+
+/** Tight label for small spaces: whole hours from an hour up ("9h"), else minutes ("37m"). */
+export function formatCompactDuration(ms: number): string {
+  return ms >= 3_600_000 ? `${Math.round(ms / 3_600_000)}h` : `${Math.max(1, Math.round(ms / 60_000))}m`;
+}
+
+/** Whole minutes for running prose ("every 15 minutes"). */
+export function formatMinutes(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
 }
