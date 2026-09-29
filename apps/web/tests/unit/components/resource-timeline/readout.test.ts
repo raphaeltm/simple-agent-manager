@@ -112,6 +112,14 @@ describe('readoutForRange', () => {
     expect(readout.context).toBe('All 2h of active time');
     expect(readout.memory).toBe('peak 2.0 GB (3.0 GB w/ cache)');
   });
+
+  it('does not call a truncated history the whole session', () => {
+    const axis = buildTimeAxis(RUNS, 'active');
+    const readout = readoutForRange(axis.min, axis.max, axis, SAMPLES, true);
+
+    expect(readout.time).toBe('Everything shown');
+    expect(readout.context).toBe('All 2h of shown active time');
+  });
 });
 
 describe('formatToolName', () => {

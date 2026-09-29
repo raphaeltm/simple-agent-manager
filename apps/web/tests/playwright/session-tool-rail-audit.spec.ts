@@ -996,6 +996,8 @@ test.describe('Session resource timeline scenarios', () => {
   test('a session past the server cap says how much older history is not shown', async ({ page }) => {
     const dialog = await openResources(page, 'truncated');
     await expect(dialog.getByText(/612 older 15-minute segments are not shown/)).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('Everything shown', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Whole session', { exact: true })).toHaveCount(0);
     // Liveness: the part that is shown still draws.
     await expect(dialog.getByRole('slider', { name: /Session timeline/ })).toBeVisible();
     await capture(page, `resource-timeline-truncated-${page.viewportSize()?.width ?? 'viewport'}`);

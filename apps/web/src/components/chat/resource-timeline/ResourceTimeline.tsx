@@ -149,7 +149,7 @@ function TimelineBody({ source, index }: Readonly<{ source: ResourceHistorySourc
   const cursorInView = cursorX != null && cursorX >= view.min && cursorX <= view.max;
   const readout = cursorInView
     ? readoutAtCursor(cursorX, series, axis, index.runs, data.toolSpans, index.sampleIntervalMs)
-    : readoutForRange(view.min, view.max, axis, data.aggregates);
+    : readoutForRange(view.min, view.max, axis, data.aggregates, index.completeness.kind === 'truncated');
 
   const peaks = useMemo(
     () =>
