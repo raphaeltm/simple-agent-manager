@@ -4,6 +4,7 @@ import {
   type AcpInteractionAnswerDecision,
   AcpInteractionAnswerDecisionSchema,
   type AcpInteractionSafeSummary,
+  isJsonRecord,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 import * as v from 'valibot';
@@ -48,13 +49,6 @@ type EncryptedNullablePayload = {
   ciphertext: string | null;
   iv: string | null;
 };
-
-type StoredJsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | object;
 
 export type {
   InteractionStoreAnswerInput,
@@ -338,10 +332,10 @@ export class InteractionStore extends DurableObject<Env> {
 
   async detail(
     interactionId: string
-  ): Promise<{ summary: AcpInteractionSafeSummary; detail: StoredJsonValue } | null> {
+  ): Promise<{ summary: AcpInteractionSafeSummary; detail: Record<string, unknown> | null } | null> {
     const row = this.read(interactionId);
     if (!row) return null;
-    let detail: StoredJsonValue = null;
+    let detail: Record<string, unknown> | null = null;
     if (row.encrypted_detail?.length && row.detail_iv?.length) {
       const plaintext = await decrypt(
         row.encrypted_detail,
@@ -349,7 +343,7 @@ export class InteractionStore extends DurableObject<Env> {
         getCredentialEncryptionKey(this.env)
       );
       const parsedDetail = JSON.parse(plaintext) as unknown;
-      detail = parsedDetail as StoredJsonValue;
+      detail = isJsonRecord(parsedDetail) ? parsedDetail : null;
     }
     return { summary: parseSummary(row), detail };
   }
