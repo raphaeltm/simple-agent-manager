@@ -1040,3 +1040,91 @@ test.describe('Session resource timeline scenarios', () => {
     await capture(page, `resource-timeline-instant-${page.viewportSize()?.width ?? 'viewport'}`);
   });
 });
+
+/** The chart's time slider, which also owns the pointer and touch gestures. */
+async function openOvernightTimeline(page: Page) {
+  const dialog = await openResources(page, 'overnight');
+  await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({ timeout: 10_000 });
+  const timeline = dialog.getByRole('slider', { name: /Session timeline/ });
+  const box = await timeline.boundingBox();
+  if (!box) throw new Error('timeline has no layout box');
+  return { dialog, timeline, box };
+}
+
+test.describe('Session resource timeline pointer interaction', () => {
+  test('hovering reads one moment and dragging across a panel zooms to that range', async ({
+    page,
+  }) => {
+    const { dialog, box } = await openOvernightTimeline(page);
+    const y = box.y + 40; // inside the CPU panel
+    await page.mouse.move(box.x + box.width * 0.5, y);
+    await expect(dialog.getByRole('button', { name: 'Clear the selected instant' })).toBeVisible();
+
+    await page.mouse.move(box.x + box.width * 0.3, y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.45, y, { steps: 8 });
+    await page.mouse.up();
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height + 200);
+
+    await expect(dialog.getByText('Whole session', { exact: true })).toHaveCount(0);
+    await expect(dialog.getByText(/active time in view/)).toBeVisible();
+  });
+
+  test('a busiest moment zooms to itself and loads its detail', async ({ page }) => {
+    const chunkRequests: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/resource-timeline/chunks/')) chunkRequests.push(request.url());
+    });
+    const { dialog } = await openOvernightTimeline(page);
+    const before = chunkRequests.length;
+
+    await dialog
+      .getByRole('button', { name: /Zoom to/ })
+      .first()
+      .click();
+
+    // The peak becomes the selected moment; clearing it shows the zoomed range it left behind.
+    await dialog.getByRole('button', { name: 'Clear the selected instant' }).click();
+    await expect(dialog.getByText(/^10m of .* active time in view$/)).toBeVisible();
+    await expect.poll(() => chunkRequests.length, { timeout: 10_000 }).toBeGreaterThan(before);
+  });
+});
+
+test.describe('Session resource timeline touch interaction', () => {
+  test.use({ hasTouch: true });
+
+  test('a tap reads one moment and a pinch zooms in', async ({ page }) => {
+    const { dialog, box } = await openOvernightTimeline(page);
+    const cdp = await page.context().newCDPSession(page);
+    const y = Math.round(box.y + 40);
+    const at = (fraction: number) => Math.round(box.x + box.width * fraction);
+    const touch = (type: string, points: Array<{ x: number; id: number }>) =>
+      cdp.send('Input.dispatchTouchEvent', {
+        type,
+        touchPoints: points.map((point) => ({ x: point.x, y, id: point.id })),
+      });
+
+    await touch('touchStart', [{ x: at(0.5), id: 0 }]);
+    await touch('touchEnd', []);
+    const clear = dialog.getByRole('button', { name: 'Clear the selected instant' });
+    await expect(clear).toBeVisible();
+    await clear.click();
+    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible();
+
+    await touch('touchStart', [
+      { x: at(0.45), id: 0 },
+      { x: at(0.55), id: 1 },
+    ]);
+    for (let step = 1; step <= 6; step += 1) {
+      const spread = 0.05 + step * 0.05;
+      await touch('touchMove', [
+        { x: at(0.5 - spread), id: 0 },
+        { x: at(0.5 + spread), id: 1 },
+      ]);
+    }
+    await touch('touchEnd', []);
+
+    await expect(dialog.getByText('Whole session', { exact: true })).toHaveCount(0);
+    await expect(dialog.getByText(/active time in view/)).toBeVisible();
+  });
+});
