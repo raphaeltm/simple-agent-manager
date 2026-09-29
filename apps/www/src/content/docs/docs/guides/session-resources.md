@@ -242,8 +242,8 @@ an agent.
 
 Agents connected to SAM's MCP server read the same data with the `get_resource_history` tool.
 **Called with no arguments it returns the agent's own session** — which is the useful case, because
-an agent can check whether it is heading for the same wall that killed the last attempt. Pass
-The returned summary includes the server-resolved profile, skill, and agent type when available. Pass
+an agent can check whether it is heading for the same wall that killed the last attempt. The returned
+summary includes the server-resolved profile, skill, and agent type when available. Pass
 `sessionId`, `taskId`, or `workspaceId` to look at a different scope — any one of them replaces the
 agent's own scope rather than narrowing it — and `chunkId` to pull one slice's samples. Without `chunkId` it returns only the summary and chunk index, so a casual lookup
 stays cheap. There is no `projectId` parameter — the project comes from the agent's connection.
