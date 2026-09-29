@@ -8,14 +8,15 @@ label in the session list. Find what you are seeing below. The section it points
 your work is safe and what to do next. Everything here applies to both
 [Instant and VM sessions](/docs/guides/instant-sessions/) unless it says otherwise.
 
-- **A strip with a spinner and an elapsed time**, such as **Waking and restoring Instant
-  session...** or, on a VM, a step like **Finding a server...** or **Waiting for server
-  capacity...**. A wake or a recovery is in progress. → [Wait](#recovery-is-in-progress)
+- **A strip with a spinner and an elapsed time**, such as **Waking and restoring session...** or,
+  on a VM, a step like **Finding a server...** or **Waiting for server capacity...**. A wake or a
+  recovery is in progress. → [Wait](#recovery-is-in-progress)
 - **"…delivery was interrupted and its execution outcome is unknown"** (Instant). Your prompt may
   or may not have run. → [Check, then decide](#your-prompt-may-or-may-not-have-run)
-- **"…could not restore its last safe checkpoint"** (Instant), or **"SAM restored this sleeping
-  conversation from a degraded snapshot…"** (VM). The chat is back, but some unpushed work may not
-  be. → [Check what's missing](#some-work-in-progress-was-not-restored)
+- **"…could not restore its last safe checkpoint"** (Instant). SAM stopped the container; your
+  transcript is safe. → [Send a message to try again](#a-snapshot-could-not-be-fully-restored)
+- **"SAM restored this sleeping conversation from a degraded snapshot…"** (VM). The chat is back,
+  but some unpushed work may not be. → [Check what's missing](#a-snapshot-could-not-be-fully-restored)
 - **A system message starting "Wake failed:"**, and **Wake failed** in the session list. SAM could
   not wake the sleeping chat. → [Read the reason, then act on it](#wake-failed)
 - **A failure card under the chat header.** The task failed; its work may have been kept.
@@ -38,18 +39,23 @@ an Instant profile has no branch of its own, and pushes only what you ask the ag
 ## Recovery is in progress
 
 A strip with a spinner and an elapsed-time counter means SAM is waking the session or rebuilding it
-from its snapshot. **Do nothing.** When it finishes, the chat carries on. While a sleeping chat
-wakes, the composer reads **Waking the agent — your message will be delivered...**
+from its snapshot. **Do nothing.** When it finishes, the chat carries on.
 
 On Instant this finishes within two minutes. On a VM, the strip names the step it has reached —
-**Finding a server...**, **Provisioning a server...**, **Restoring your files...**, **Starting the
-agent...** — because a VM wake provisions a replacement machine, which takes a few minutes.
-Meanwhile the **Nodes** page may briefly show the chat's old workspace deleted and a new one being
+**Finding a server...**, **Provisioning a server...**, **Restoring your session...**, **Starting
+the agent...** — because a VM wake often provisions a replacement machine, which takes a few
+minutes. The composer reads **Waking the agent — your message will be delivered...** while it
+works, and the **Nodes** page may briefly show the chat's old workspace deleted and a new one being
 created. That is normal.
 
-If a VM wake sits on **Waiting for server capacity...**, your cloud provider has no room for the
-machine yet, and SAM keeps trying. A message you sent is held for an hour: if the wake is still
-waiting then, the chat reports **Wake failed: Session is waking** (see [Wake failed](#wake-failed)).
+If a VM wake sits on **Waiting for server capacity...**, SAM can't get a machine for it yet. Your
+provider may be out of that machine type, your cloud account may be at its server or quota limit,
+or you may already have as many machines as SAM allows you (10 by default) or your
+[compute pool](/docs/guides/compute-pools/) permits. SAM keeps trying; if the wait drags on,
+delete machines you no longer need from the **Nodes** page. A message you sent is held for an
+hour: if the wake is still waiting then, the chat reports **Wake failed: Session is waking** (see
+[Wake failed](#wake-failed)). If the strip disappears and the chat is still **Sleeping**, the wake
+gave up; send your message again.
 
 :::note[The Recovery container label]
 The chat header's **Recovery container** label means different things on the two runtimes. On a VM
@@ -82,28 +88,28 @@ So, once restore finishes:
 Your text stays in the composer, so resending is one click if that's the call. **Dismiss** clears
 the banner without sending anything.
 
-## Some work in progress was not restored
+## A snapshot could not be fully restored
 
-The chat is back, but not everything it had saved came back with it. **Your transcript and any
-partial output are still there** — that history lives in SAM, not in the workspace. What may be
-gone is unpushed work inside the workspace: uncommitted edits, the git index, anything the agent
-hadn't pushed.
+**Your transcript and any partial output are safe** — that history lives in SAM, not in the
+workspace. What happens next depends on the runtime.
 
-- On **Instant**, the chat says the session **could not restore its last safe checkpoint**: the
-  container came back, but its snapshot could not be applied.
-- On a **VM**, the chat says SAM **restored this sleeping conversation from a degraded snapshot**,
-  so the agent is starting fresh. It has lost its own memory of the session and re-reads the
-  transcript, and some uncommitted changes may be missing.
+**On Instant**, the chat says the session **could not restore its last safe checkpoint**. SAM
+couldn't apply the container's snapshot, so it stopped the container, and nothing is running. The
+next time the chat needs the container — usually when you send a message — SAM tries the restore
+once more (`CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`, two attempts in all):
 
-Either way, treat it like a fresh workspace:
+- If it works, the chat carries on with its files.
+- If it fails again, SAM marks the session and its task **failed** rather than leaving you watching
+  a spinner, and the session ends. Check GitHub for anything the agent pushed, then start a new
+  chat, or [fork](/docs/guides/chat-features/#conversation-forking) this one to keep its context.
+
+**On a VM**, the chat says SAM **restored this sleeping conversation from a degraded snapshot**, so
+the agent is starting fresh. The chat is back, but the agent has lost its own memory of the session
+and re-reads the transcript, and some uncommitted changes may be missing. Treat it like a fresh
+workspace:
 
 1. Check GitHub for anything the agent already pushed, and assume other changes may be gone.
 2. Re-state what still needs doing in the same chat — the agent can read the transcript.
-
-On Instant, if restore fails repeatedly (`CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`, twice by default), SAM
-gives up: it marks the session and its task **failed** rather than leaving you watching a spinner.
-At that point the session is closed like a stopped one — start a new chat, or
-[fork](/docs/guides/chat-features/#conversation-forking) this one to keep its context.
 
 ## Wake failed
 
