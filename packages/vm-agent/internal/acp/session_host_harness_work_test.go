@@ -259,6 +259,36 @@ func TestACPToolCallResourceHistoryUploadUsesMetadataWithoutTitleOrInput(t *test
 	}
 	now = now.Add(35 * time.Second)
 	notifyACPToolCallUpdate(t, client, "acp-session", "tool-1", toolStatus(acpsdk.ToolCallStatusCompleted))
+
+	// Exercise late metadata on a real ACP patch and the reconciliation path
+	// used when a session ends while a tool call remains active.
+	now = now.Add(time.Second)
+	err = client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+		SessionId: "acp-session",
+		Update: acpsdk.SessionUpdate{ToolCall: &acpsdk.SessionUpdateToolCall{
+			ToolCallId: "tool-2",
+			Title:      "Search workspace",
+			Kind:       acpsdk.ToolKindSearch,
+			Status:     acpsdk.ToolCallStatusInProgress,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("second ACP tool call: %v", err)
+	}
+	err = client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+		SessionId: "acp-session",
+		Update: acpsdk.SessionUpdate{ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
+			ToolCallId: "tool-2",
+			Meta: map[string]any{
+				"claudeCode": map[string]any{"toolName": "Grep"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("second ACP tool metadata patch: %v", err)
+	}
+	now = now.Add(5 * time.Second)
+	collector.ReconcileACPToolCalls(now)
 	collector.Stop(context.Background())
 
 	if len(uploaded) == 0 {
@@ -291,17 +321,25 @@ func TestACPToolCallResourceHistoryUploadUsesMetadataWithoutTitleOrInput(t *test
 	if bytes.Contains(decoded, []byte(commandCanary)) {
 		t.Fatalf("resource-history payload leaked the Bash title/input: %s", decoded)
 	}
+	if bytes.Contains(decoded, []byte("tool-1")) || bytes.Contains(decoded, []byte("tool-2")) {
+		t.Fatalf("resource-history payload leaked a raw tool-call ID: %s", decoded)
+	}
 	var payload struct {
 		ToolSpans []struct {
-			Kind     string `json:"kind"`
-			ToolName string `json:"toolName"`
+			ID          string `json:"id"`
+			Kind        string `json:"kind"`
+			ToolName    string `json:"toolName"`
+			Approximate bool   `json:"approximate"`
 		} `json:"toolSpans"`
 	}
 	if err := json.Unmarshal(decoded, &payload); err != nil {
 		t.Fatalf("decode resource-history payload: %v", err)
 	}
-	if len(payload.ToolSpans) != 1 || payload.ToolSpans[0].Kind != "execute" || payload.ToolSpans[0].ToolName != "Bash" {
+	if len(payload.ToolSpans) != 2 || payload.ToolSpans[0].ID == "" || payload.ToolSpans[0].Kind != "execute" || payload.ToolSpans[0].ToolName != "Bash" {
 		t.Fatalf("unexpected resource-history tool span: %#v", payload.ToolSpans)
+	}
+	if payload.ToolSpans[1].ID == "" || payload.ToolSpans[1].Kind != "search" || payload.ToolSpans[1].ToolName != "Grep" || !payload.ToolSpans[1].Approximate {
+		t.Fatalf("unexpected reconciled resource-history tool span: %#v", payload.ToolSpans[1])
 	}
 }
 

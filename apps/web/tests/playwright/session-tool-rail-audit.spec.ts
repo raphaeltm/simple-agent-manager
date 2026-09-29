@@ -1086,6 +1086,10 @@ test.describe('Session resource history drawer', () => {
     ).toBeVisible();
     await expect(dialog.locator('img[src="x"]')).toHaveCount(0);
     await expect(dialog.locator('[title^="mcp__sam-mcp__"]')).toHaveCount(1);
+    const toolWindows = page.getByText('Tool windows', { exact: true }).locator('..');
+    expect(
+      await toolWindows.evaluate((element) => element.scrollWidth <= element.clientWidth)
+    ).toBe(true);
 
     // Correlation disclaimer is contextual — only visible after chart loads
     await expect(page.getByText('Correlation is based on concurrent tool windows')).toBeVisible();

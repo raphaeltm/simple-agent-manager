@@ -635,7 +635,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   WORKSPACE_RESOURCE_UPLOAD_MAX_BYTES?: string; // Max compressed resource chunk upload body bytes (default: 2097152)
   WORKSPACE_RESOURCE_UNCOMPRESSED_MAX_BYTES?: string; // Max decoded resource chunk JSON bytes (default: 8388608)
   WORKSPACE_RESOURCE_METADATA_MAX_BYTES?: string; // Max summary/completeness JSON bytes stored in D1 per field (default: 8192)
-  WORKSPACE_RESOURCE_TOOL_NAME_MAX_BYTES?: string; // Max UTF-8 bytes returned for one resource-history tool name (default: 256)
+  WORKSPACE_RESOURCE_TOOL_NAME_MAX_BYTES?: string; // Max UTF-8 bytes retained and returned for one resource-history tool name (default: 256)
   WORKSPACE_RESOURCE_DETAIL_MAX_POINTS?: string; // Max points returned from a detail chunk read (default: 720)
   WORKSPACE_RESOURCE_LIST_LIMIT?: string; // Max chunk indexes returned by detail list (default: 24)
   WORKSPACE_RESOURCE_CLEANUP_BATCH_SIZE?: string; // Max expired chunks/summaries cleaned per sweep (default: 50)

@@ -572,7 +572,7 @@ by the read-only cron-liveness check.
 
 ### Workspace Resource History
 
-- `WORKSPACE_RESOURCE_TOOL_NAME_MAX_BYTES` — Maximum UTF-8 bytes returned for one resource-history tool name; truncation keeps complete Unicode characters (default: `256`).
+- `WORKSPACE_RESOURCE_TOOL_NAME_MAX_BYTES` — Maximum UTF-8 bytes retained and returned for one resource-history tool name; truncation keeps complete Unicode characters (default: `256`).
 
 ### Audio/Transcription
 
