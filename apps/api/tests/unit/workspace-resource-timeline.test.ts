@@ -122,6 +122,10 @@ function setup(envOverrides: Record<string, string> = {}) {
   createSchemaTables(sqlite, [
     schema.nodes,
     schema.workspaces,
+    schema.tasks,
+    schema.agentSessions,
+    schema.agentProfiles,
+    schema.skills,
     schema.workspaceResourceSummaries,
     schema.workspaceResourceChunks,
   ]);
