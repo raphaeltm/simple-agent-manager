@@ -2,7 +2,7 @@ import { Button, Spinner } from '@simple-agent-manager/ui';
 import { AlertTriangle } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import { formatBytes, formatDayTime, formatElapsed } from './format';
+import { formatBytes, formatDayTime, formatElapsed, formatMinutes } from './format';
 import { type PanelState,PLOT_LEFT_GUTTER_PX, PLOT_RIGHT_PADDING_PX } from './panels';
 import { readoutAtCursor, readoutForRange } from './readout';
 import type { ResourceHistorySource } from './resource-source';
@@ -58,7 +58,7 @@ function EmptyTimeline({ uploadIntervalMs }: Readonly<{ uploadIntervalMs: number
       <p className="font-medium text-fg-primary">No resource samples yet</p>
       <p className="mt-1">
         The workspace samples CPU, memory and disk every few seconds and uploads them every{' '}
-        {formatElapsed(uploadIntervalMs)}, so the first data appears about {formatElapsed(uploadIntervalMs)} after the
+        {formatMinutes(uploadIntervalMs)}, so the first data appears about {formatMinutes(uploadIntervalMs)} after the
         session starts.
       </p>
     </div>
@@ -79,7 +79,7 @@ function SessionSummary({ index, activeMs }: Readonly<{ index: ResourceTimelineI
         {nodes > 1 && ` on ${nodes} nodes`}
       </p>
       <p>
-        Data until {formatDayTime(last)} · uploaded every {formatElapsed(index.uploadIntervalMs)}
+        Data until {formatDayTime(last)} · uploaded every {formatMinutes(index.uploadIntervalMs)}
         {highWater > 0 && ` · kernel memory peak ${formatBytes(highWater)}`}
       </p>
       {index.completeness.kind === 'truncated' && (
@@ -179,7 +179,7 @@ function TimelineBody({ source, index }: Readonly<{ source: ResourceHistorySourc
         />
         <TimelineNavigator
           axis={axis}
-          overview={data.overview}
+          overview={data.sessionAggregates}
           view={view}
           sessionStart={index.runs[0]?.startedAt ?? null}
           sessionEnd={index.chunks.at(-1)?.endedAt ?? null}

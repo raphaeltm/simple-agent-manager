@@ -11,9 +11,10 @@ import {
   formatElapsed,
   formatRange,
   formatRate,
+  formatToolName,
 } from './format';
 import { summarizeUsage, type TimelineSeries } from './series';
-import { sleepAt, type TimeAxis, toReal } from './time-axis';
+import { activeMsInView, sleepAt, type TimeAxis, toReal } from './time-axis';
 import type { ResourceAggregate, ResourceRun, ResourceToolSpan } from './types';
 
 export interface Readout {
@@ -56,10 +57,11 @@ function runLabel(runs: readonly ResourceRun[], t: number): string {
   return runs.length > 1 ? `Run ${index + 1} of ${runs.length}${node}${problem}` : `Workspace${node}${problem}`;
 }
 
+/** Kept short enough to sit beside the panel's title and legend on a phone. */
 function memoryText(used: number | null, total: number | null): string {
-  if (used == null) return total == null ? DASH : `${formatBytes(total)} (incl. cache)`;
+  if (used == null) return total == null ? DASH : `${formatBytes(total)} incl. cache`;
   const cache = total == null ? null : Math.max(0, total - used);
-  return cache == null ? `${formatBytes(used)} used` : `${formatBytes(used)} used + ${formatBytes(cache)} cache`;
+  return cache == null ? `${formatBytes(used)} used` : `${formatBytes(used)} + ${formatBytes(cache)} cache`;
 }
 
 function activeToolsText(spans: readonly ResourceToolSpan[], from: number, to: number, instant: number): string | null {
@@ -68,7 +70,7 @@ function activeToolsText(spans: readonly ResourceToolSpan[], from: number, to: n
   if (inWindow.length === 0) return null;
   const longest = [...inWindow].sort((a, b) => b.endedAt - b.startedAt - (a.endedAt - a.startedAt))[0];
   if (!longest) return null;
-  const label = longest.name ?? 'tool call';
+  const label = formatToolName(longest.name);
   const more = inWindow.length > 1 ? ` +${inWindow.length - 1} more` : '';
   const verb = running.length ? 'running' : 'ran';
   return `${label} ${verb} ${formatElapsed(longest.endedAt - longest.startedAt)}${more}`;
@@ -110,7 +112,8 @@ export function readoutAtCursor(
 
   return {
     mode: 'cursor',
-    time: measured ? formatClock(t, 1_000) : `${formatClock(from, series.bucketMs)} · ${formatElapsed(to - from)} avg`,
+    // The instant under the cursor stays put while zooming; the averaging window says how wide the reading is.
+    time: measured ? formatClock(t, 1_000) : `${formatClock(t, series.bucketMs)} · ${formatElapsed(to - from)} avg`,
     context: runLabel(runs, t),
     cpu: measured || cpuMax == null ? formatCores(cpuMean) : `${formatCores(cpuMean)} · peak ${formatCores(cpuMax)}`,
     memory: memoryText(used, total),
@@ -133,17 +136,20 @@ export function readoutForRange(
   const usage = summarizeUsage(aggregates, from, to);
   const whole = viewMin <= axis.min && viewMax >= axis.max;
   const scope = whole ? 'Whole session' : formatRange(from, to, viewMax - viewMin < 30 * 60_000 ? 1_000 : 60_000);
+  const activeTotal = formatElapsed(axis.activeMs);
   return {
     mode: 'range',
     time: scope,
-    context: `${formatElapsed(usage.coveredMs)} of ${formatElapsed(axis.activeMs)} active time in view`,
+    context: whole
+      ? `All ${activeTotal} of active time`
+      : `${formatElapsed(activeMsInView(axis, viewMin, viewMax))} of ${activeTotal} active time in view`,
     cpu: usage.cpuMaxCores == null ? DASH : `avg ${formatCores(usage.cpuMeanCores)} · peak ${formatCores(usage.cpuMaxCores)}`,
     memory:
       usage.workingSetMaxBytes != null
-        ? `peak ${formatBytes(usage.workingSetMaxBytes)} used · ${formatBytes(usage.memoryMaxBytes)} incl. cache`
+        ? `peak ${formatBytes(usage.workingSetMaxBytes)} (${formatBytes(usage.memoryMaxBytes)} w/ cache)`
         : usage.memoryMaxBytes == null
           ? DASH
-          : `peak ${formatBytes(usage.memoryMaxBytes)} (incl. cache)`,
+          : `peak ${formatBytes(usage.memoryMaxBytes)} incl. cache`,
     disk: `${formatBytes(usage.ioWriteBytes)} written · ${formatBytes(usage.ioReadBytes)} read`,
     tools: `${usage.toolCallStarts} tool call${usage.toolCallStarts === 1 ? '' : 's'}`,
     oomKills: usage.oomKills,

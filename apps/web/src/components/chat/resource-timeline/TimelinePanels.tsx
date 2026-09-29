@@ -13,6 +13,8 @@ interface PanelSpec {
   title: string;
   height: number;
   value: (readout: Readout) => string;
+  /** Tool names can be long; this panel lets its value wrap instead of truncating. */
+  wrapValue?: boolean;
   legend: (theme: ChartTheme, hasWorkingSet: boolean) => Array<{ color: string; label: string; dashed?: boolean }>;
 }
 
@@ -33,7 +35,7 @@ const PANELS: PanelSpec[] = [
       hasWorkingSet
         ? [
             { color: theme.memory, label: 'used' },
-            { color: theme.memory, label: 'incl. cache', dashed: true },
+            { color: theme.memory, label: '+ cache', dashed: true },
           ]
         : [{ color: theme.memory, label: 'incl. cache' }],
   },
@@ -52,6 +54,7 @@ const PANELS: PanelSpec[] = [
     title: 'Tool calls',
     height: 48,
     value: (readout) => readout.tools,
+    wrapValue: true,
     legend: () => [],
   },
 ];
@@ -84,7 +87,12 @@ export function TimelinePanels({
   const plots = useRef(new Map<PanelKind, RefObject<uPlot | null>>());
 
   const stateRef = useRef(state);
-  const callbacksRef = useRef<PanelCallbacks>({ onCursor, onSelectRange: onRange, onResetZoom });
+  /** True while a mouse (not a finger) is over the panels: only then does uPlot's hover drive the cursor. */
+  const mouseOverRef = useRef(false);
+  const hover = (x: number | null) => {
+    if (mouseOverRef.current) onCursor(x);
+  };
+  const callbacksRef = useRef<PanelCallbacks>({ onHover: hover, onSelectRange: onRange, onResetZoom });
   const gestureRef = useRef<GestureHandlers>({
     plotRect: () => null,
     view: () => ({ min: state.viewMin, max: state.viewMax }),
@@ -94,7 +102,7 @@ export function TimelinePanels({
   });
   useLayoutEffect(() => {
     stateRef.current = state;
-    callbacksRef.current = { onCursor, onSelectRange: onRange, onResetZoom };
+    callbacksRef.current = { onHover: hover, onSelectRange: onRange, onResetZoom };
     gestureRef.current = {
       plotRect: () => plots.current.get('cpu')?.current?.over.getBoundingClientRect() ?? null,
       view: (): ViewRange => ({ min: state.viewMin, max: state.viewMax }),
@@ -160,6 +168,18 @@ export function TimelinePanels({
       aria-valuenow={Math.round(cursorX ?? state.viewMin)}
       aria-valuetext={`${readout.time}. CPU ${readout.cpu}. Memory ${readout.memory}. Disk ${readout.disk}. ${readout.tools}.`}
       onKeyDown={onKeyDown}
+      onPointerEnter={(event) => {
+        if (event.pointerType === 'mouse') mouseOverRef.current = true;
+      }}
+      onPointerDown={(event) => {
+        // A finger takes over from any mouse left resting over the chart (touch laptops).
+        if (event.pointerType === 'touch') mouseOverRef.current = false;
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType !== 'mouse') return;
+        mouseOverRef.current = false;
+        onCursor(null);
+      }}
       className="touch-pan-y select-none rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [&_.u-cursor-x]:border-r-fg-muted [&_.u-select]:bg-accent/15"
     >
       {PANELS.map((panel) => (
@@ -209,7 +229,7 @@ function Panel({
 
   return (
     <section aria-label={`${spec.title}: ${value}`} className="mt-1 first:mt-0">
-      <div className="flex min-w-0 items-baseline justify-between gap-2 px-0.5 text-xs">
+      <div className="flex min-w-0 items-baseline gap-2 px-0.5 text-xs">
         <span className="flex shrink-0 items-center gap-2 font-medium text-fg-primary">
           {spec.title}
           {spec.legend(theme, state.hasWorkingSet).map((item) => (
@@ -223,7 +243,10 @@ function Panel({
             </span>
           ))}
         </span>
-        <span className="min-w-0 truncate text-right tabular-nums text-fg-primary" title={value}>
+        <span
+          className={`ml-auto min-w-0 text-right tabular-nums text-fg-primary ${spec.wrapValue ? 'line-clamp-2 break-words' : 'truncate'}`}
+          title={value}
+        >
           {value}
         </span>
       </div>

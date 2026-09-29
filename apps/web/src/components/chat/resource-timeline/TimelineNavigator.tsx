@@ -1,8 +1,8 @@
 import { type PointerEvent, useLayoutEffect, useMemo, useRef } from 'react';
-import type uPlot from 'uplot';
+import uPlot from 'uplot';
 
 import { type ChartTheme, useChartTheme, withAlpha } from './chart-theme';
-import { formatDayTime } from './format';
+import { formatCompactDuration, formatDayTime } from './format';
 import { PLOT_LEFT_GUTTER_PX, PLOT_RIGHT_PADDING_PX } from './panels';
 import { buildSeries } from './series';
 import { sleeps, type TimeAxis } from './time-axis';
@@ -12,6 +12,8 @@ import { useElementWidth } from './useElementWidth';
 import { useUplot } from './useUplot';
 
 const HEIGHT = 40;
+/** Sleeps at least this long get their length written on the strip. */
+const LABELLED_SLEEP_MS = 60 * 60_000;
 /** Grips are thin to look at but wide to touch. */
 const GRIP_HIT_PX = 44;
 
@@ -54,12 +56,21 @@ function navigatorOptions(theme: ChartTheme, axisRef: { current: TimeAxis }): Om
       drawClear: [
         (u) => {
           const { ctx, bbox } = u;
+          const px = uPlot.pxRatio;
           ctx.save();
-          ctx.fillStyle = theme.sleep;
+          ctx.font = `${10 * px}px system-ui, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
           for (const sleep of sleeps(axisRef.current)) {
             const x0 = u.valToPos(sleep.axisStart, 'x', true);
             const x1 = u.valToPos(sleep.axisEnd, 'x', true);
-            ctx.fillRect(x0, bbox.top, Math.max(1, x1 - x0), bbox.height);
+            ctx.fillStyle = theme.sleep;
+            ctx.fillRect(x0, bbox.top, Math.max(px, x1 - x0), bbox.height);
+            const label = formatCompactDuration(sleep.realEnd - sleep.realStart);
+            if (sleep.realEnd - sleep.realStart >= LABELLED_SLEEP_MS && x1 - x0 >= ctx.measureText(label).width + 4 * px) {
+              ctx.fillStyle = theme.mutedText;
+              ctx.fillText(label, (x0 + x1) / 2, bbox.top + 2 * px);
+            }
           }
           ctx.restore();
         },

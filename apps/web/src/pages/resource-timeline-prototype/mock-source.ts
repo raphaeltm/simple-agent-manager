@@ -88,6 +88,24 @@ function rollup(
   return buckets;
 }
 
+/** Each run trimmed to the chunks that were actually returned for it. */
+function runsCoveredBy(
+  runs: ResourceTimelineIndex['runs'],
+  chunks: readonly ResourceChunkRef[]
+): ResourceTimelineIndex['runs'] {
+  return runs.flatMap((run) => {
+    const own = chunks.filter((chunk) => chunk.runId === run.id);
+    if (own.length === 0) return [];
+    return [
+      {
+        ...run,
+        startedAt: Math.min(...own.map((chunk) => chunk.startedAt)),
+        endedAt: Math.max(...own.map((chunk) => chunk.endedAt)),
+      },
+    ];
+  });
+}
+
 interface BuiltScenario {
   plan: ScenarioPlan;
   refs: ResourceChunkRef[];
@@ -140,9 +158,9 @@ export function createMockSource(
       const scenario = buildScenario(plan, backend);
       const truncated = backend === 'current' && scenario.refs.length > CURRENT_API_CHUNK_LIMIT;
       const chunks = truncated ? scenario.refs.slice(-CURRENT_API_CHUNK_LIMIT) : scenario.refs;
-      const listedRuns = new Set(chunks.map((chunk) => chunk.runId));
       return {
-        runs: scenario.runs.filter((run) => backend === 'proposed' || listedRuns.has(run.id)),
+        // Like the real adapter, the current API only knows the runs its returned chunks cover.
+        runs: backend === 'proposed' ? scenario.runs : runsCoveredBy(scenario.runs, chunks),
         chunks,
         sampleIntervalMs: SAMPLE_INTERVAL_MS,
         uploadIntervalMs: CHUNK_INTERVAL_MS,
