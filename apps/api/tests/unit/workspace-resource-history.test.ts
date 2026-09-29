@@ -193,6 +193,10 @@ describe('workspace resource history', () => {
     const sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
       schema.workspaces,
+      schema.tasks,
+      schema.agentSessions,
+      schema.agentProfiles,
+      schema.skills,
       schema.workspaceResourceSummaries,
       schema.workspaceResourceChunks,
     ]);
@@ -289,10 +293,133 @@ describe('workspace resource history', () => {
     ]);
   });
 
+  it('resolves distinct server attribution per session without leaking a foreign-project task', async () => {
+    const sqlite = new Database(':memory:');
+    createSchemaTables(sqlite, [
+      schema.workspaces,
+      schema.tasks,
+      schema.agentSessions,
+      schema.agentProfiles,
+      schema.skills,
+      schema.workspaceResourceSummaries,
+      schema.workspaceResourceChunks,
+    ]);
+    sqlite.exec(`
+      INSERT INTO agent_profiles (id, project_id, agent_type) VALUES
+        ('profile-a', 'proj-1', 'openai-codex'),
+        ('profile-b', 'proj-1', 'claude-code'),
+        ('profile-foreign', 'proj-2', 'foreign-agent');
+      INSERT INTO skills (id, project_id, agent_type) VALUES
+        ('skill-a', 'proj-1', 'openai-codex'),
+        ('skill-b', 'proj-1', 'claude-code'),
+        ('skill-foreign', 'proj-2', 'foreign-agent');
+      INSERT INTO workspaces (id, project_id, node_id, chat_session_id) VALUES
+        ('ws-a', 'proj-1', 'node-a', 'session-a'),
+        ('ws-b', 'proj-1', 'node-b', 'session-b'),
+        ('ws-foreign-guard', 'proj-1', 'node-c', 'session-c');
+      INSERT INTO agent_sessions
+        (id, workspace_id, status, agent_type, agent_profile_id, skill_id, created_at, updated_at)
+      VALUES
+        ('agent-session-a', 'ws-a', 'running', 'openai-codex', 'profile-a', 'skill-a',
+         '2026-09-29T00:00:00.000Z', '2026-09-29T00:00:00.000Z');
+      INSERT INTO tasks
+        (id, project_id, workspace_id, chat_session_id, agent_profile_hint, skill_id, started_at)
+      VALUES
+        ('task-b', 'proj-1', 'ws-b', 'session-b', 'profile-b', 'skill-b',
+         '2026-09-29T00:00:00.000Z'),
+        ('task-foreign', 'proj-2', 'ws-foreign-guard', 'session-c',
+         'profile-foreign', 'skill-foreign', '2026-09-29T00:00:00.000Z');
+    `);
+    const r2 = makeR2();
+    const env = makeEnv(sqlite, r2.binding);
+
+    await storeWorkspaceResourceChunk(
+      env,
+      'proj-1',
+      await uploadBody({
+        workspaceId: 'ws-a',
+        nodeId: 'node-a',
+        sessionId: 'session-a',
+        agentProfileId: 'profile-foreign',
+        skillId: 'skill-foreign',
+        agentType: 'foreign-agent',
+      }),
+      'node-a'
+    );
+    await storeWorkspaceResourceChunk(
+      env,
+      'proj-1',
+      await uploadBody({
+        workspaceId: 'ws-b',
+        nodeId: 'node-b',
+        sessionId: 'session-b',
+        taskId: 'task-b',
+        agentProfileId: 'profile-foreign',
+        skillId: 'skill-foreign',
+        agentType: 'foreign-agent',
+      }),
+      'node-b'
+    );
+    await expect(
+      storeWorkspaceResourceChunk(
+        env,
+        'proj-1',
+        await uploadBody({
+          workspaceId: 'ws-foreign-guard',
+          nodeId: 'node-c',
+          sessionId: 'session-c',
+          taskId: 'task-foreign',
+        }),
+        'node-c'
+      )
+    ).rejects.toThrow(/Task identity does not match workspace session/i);
+    await storeWorkspaceResourceChunk(
+      env,
+      'proj-1',
+      await uploadBody({
+        workspaceId: 'ws-foreign-guard',
+        nodeId: 'node-c',
+        sessionId: 'session-c',
+        taskId: null,
+        agentProfileId: 'profile-foreign',
+        skillId: 'skill-foreign',
+        agentType: 'foreign-agent',
+      }),
+      'node-c'
+    );
+
+    const [historyA, historyB, guardedHistory] = await Promise.all([
+      getWorkspaceResourceHistory(env, { projectId: 'proj-1', sessionId: 'session-a' }),
+      getWorkspaceResourceHistory(env, { projectId: 'proj-1', sessionId: 'session-b' }),
+      getWorkspaceResourceHistory(env, { projectId: 'proj-1', sessionId: 'session-c' }),
+    ]);
+    expect(historyA.summary).toMatchObject({
+      agentProfileId: 'profile-a',
+      skillId: 'skill-a',
+      agentType: 'openai-codex',
+    });
+    expect(historyB.summary).toMatchObject({
+      taskId: 'task-b',
+      agentProfileId: 'profile-b',
+      skillId: 'skill-b',
+      agentType: 'claude-code',
+    });
+    expect(guardedHistory.summary).toMatchObject({
+      taskId: null,
+      agentProfileId: null,
+      skillId: null,
+      agentType: null,
+    });
+  });
+
   it('rejects mismatched decoded size and oversized D1 metadata before indexing', async () => {
     const sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
       schema.workspaces,
+      schema.tasks,
+      schema.agentSessions,
+      schema.agentProfiles,
+      schema.skills,
       schema.workspaceResourceSummaries,
       schema.workspaceResourceChunks,
     ]);
@@ -333,6 +460,10 @@ describe('workspace resource history', () => {
     const sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
       schema.workspaces,
+      schema.tasks,
+      schema.agentSessions,
+      schema.agentProfiles,
+      schema.skills,
       schema.workspaceResourceSummaries,
       schema.workspaceResourceChunks,
     ]);
@@ -378,7 +509,14 @@ describe('workspace resource history', () => {
 
   it('deletes the uploaded R2 object when D1 indexing fails', async () => {
     const sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [schema.workspaces, schema.workspaceResourceChunks]);
+    createSchemaTables(sqlite, [
+      schema.workspaces,
+      schema.tasks,
+      schema.agentSessions,
+      schema.agentProfiles,
+      schema.skills,
+      schema.workspaceResourceChunks,
+    ]);
     sqlite
       .prepare(
         `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)

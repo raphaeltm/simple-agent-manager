@@ -17,13 +17,13 @@ VM resource-history uploads currently persist blank profile, skill, and agent-ty
 
 ## Implementation Checklist
 
-- [ ] Replace upload-body attribution with one server-side lookup that resolves the workspace, current agent session, and matching task within the requested project/workspace.
-- [ ] Prefer agent-session attribution, fill missing values from the matching task/workspace profile, and derive agent type from authoritative profile/skill records when necessary.
-- [ ] Reject a client-supplied task ID that is not bound to the same project, workspace, and session.
-- [ ] Add a safe WHERE-scoped D1 migration that backfills only blank summary attribution from scoped server records.
-- [ ] Preserve and prove profile, skill, and agent type in HTTP resource-history responses and native/MCP `get_resource_history` output.
-- [ ] Add real-SQL multi-variant coverage for two same-project sessions with different attribution and a foreign-project row that cannot contribute attribution.
-- [ ] Add migration regression coverage and run migration-safety checks.
+- [x] Replace upload-body attribution with one server-side lookup that resolves the workspace, current agent session, and matching task within the requested project/workspace.
+- [x] Prefer agent-session attribution, fill missing values from the matching task/workspace profile, and derive agent type from authoritative profile/skill records when necessary.
+- [x] Reject a client-supplied task ID that is not bound to the same project, workspace, and session.
+- [x] Add a safe WHERE-scoped D1 migration that backfills only blank summary attribution from scoped server records.
+- [x] Preserve and prove profile, skill, and agent type in HTTP resource-history responses and native/MCP `get_resource_history` output.
+- [x] Add real-SQL multi-variant coverage for two same-project sessions with different attribution and a foreign-project row that cannot contribute attribution.
+- [x] Add migration regression coverage and run migration-safety checks.
 - [ ] Run focused and full validation, local specialist reviews, staging verification, PR/CodeRabbit review, merge, and production deploy monitoring.
 
 ## Acceptance Criteria

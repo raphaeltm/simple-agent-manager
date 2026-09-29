@@ -1,9 +1,10 @@
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { McpTokenData } from '../../src/services/mcp-token';
 
 const mockGetWorkspaceResourceHistory = vi.fn();
 const mockResolveProjectWithOwnership = vi.fn();
+const TOOL_MODULE_IMPORT_TIMEOUT_MS = 15_000;
 
 vi.mock('../../src/services/workspace-resource-history', () => ({
   getWorkspaceResourceHistory: (...args: unknown[]) => mockGetWorkspaceResourceHistory(...args),
@@ -37,38 +38,53 @@ describe('resource history MCP tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetWorkspaceResourceHistory.mockResolvedValue({
-      summary: { id: 'summary-1', sampleCount: 12 },
+      summary: {
+        id: 'summary-1',
+        sampleCount: 12,
+        agentProfileId: 'profile-1',
+        skillId: 'skill-1',
+        agentType: 'openai-codex',
+      },
       chunks: [{ id: 'wrchunk:1', sampleCount: 12 }],
     });
   });
 
-  it('defaults to the MCP caller session, task, and workspace when no explicit scope is supplied', async () => {
-    const { handleGetResourceHistory } = await import('../../src/routes/mcp/session-tools');
-    const tokenData: McpTokenData = {
-      projectId: 'proj-1',
-      taskId: 'task-1',
-      userId: 'user-1',
-      workspaceId: 'ws-1',
-      chatSessionId: 'sess-1',
-      agentSessionId: 'agent-session-1',
-      createdAt: new Date().toISOString(),
-    };
+  it(
+    'defaults to the MCP caller session, task, and workspace when no explicit scope is supplied',
+    async () => {
+      const { handleGetResourceHistory } = await import('../../src/routes/mcp/session-tools');
+      const tokenData: McpTokenData = {
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        userId: 'user-1',
+        workspaceId: 'ws-1',
+        chatSessionId: 'sess-1',
+        agentSessionId: 'agent-session-1',
+        createdAt: new Date().toISOString(),
+      };
 
-    const response = await handleGetResourceHistory(1, {}, tokenData, {} as never);
+      const response = await handleGetResourceHistory(1, {}, tokenData, {} as never);
 
-    expect(mockGetWorkspaceResourceHistory).toHaveBeenCalledWith(expect.anything(), {
-      projectId: 'proj-1',
-      sessionId: 'sess-1',
-      taskId: 'task-1',
-      workspaceId: 'ws-1',
-      detailChunkId: null,
-    });
-    const text = (response.result as { content: Array<{ text: string }> }).content[0]!.text;
-    expect(JSON.parse(text)).toMatchObject({
-      scope: { projectId: 'proj-1', sessionId: 'sess-1', taskId: 'task-1', workspaceId: 'ws-1' },
-      summary: { id: 'summary-1' },
-    });
-  });
+      expect(mockGetWorkspaceResourceHistory).toHaveBeenCalledWith(expect.anything(), {
+        projectId: 'proj-1',
+        sessionId: 'sess-1',
+        taskId: 'task-1',
+        workspaceId: 'ws-1',
+        detailChunkId: null,
+      });
+      const text = (response.result as { content: Array<{ text: string }> }).content[0]!.text;
+      expect(JSON.parse(text)).toMatchObject({
+        scope: { projectId: 'proj-1', sessionId: 'sess-1', taskId: 'task-1', workspaceId: 'ws-1' },
+        summary: {
+          id: 'summary-1',
+          agentProfileId: 'profile-1',
+          skillId: 'skill-1',
+          agentType: 'openai-codex',
+        },
+      });
+    },
+    TOOL_MODULE_IMPORT_TIMEOUT_MS
+  );
 
   it('uses explicit scope without silently intersecting the current workspace', async () => {
     const { handleGetResourceHistory } = await import('../../src/routes/mcp/session-tools');
@@ -119,37 +135,53 @@ describe('SAM native get_resource_history tool', () => {
     vi.clearAllMocks();
     mockResolveProjectWithOwnership.mockResolvedValue(ownedProject);
     mockGetWorkspaceResourceHistory.mockResolvedValue({
-      summary: { id: 'summary-1', sampleCount: 7 },
+      summary: {
+        id: 'summary-1',
+        sampleCount: 7,
+        agentProfileId: 'profile-1',
+        skillId: 'skill-1',
+        agentType: 'openai-codex',
+      },
       chunks: [{ id: 'wrchunk:1', sampleCount: 7 }],
     });
   });
 
-  it('is registered and dispatched through the SAM native tool registry', async () => {
-    const { executeTool, SAM_TOOLS } = await import('../../src/durable-objects/sam-session/tools');
+  it(
+    'is registered and dispatched through the SAM native tool registry',
+    async () => {
+      const { executeTool, SAM_TOOLS } =
+        await import('../../src/durable-objects/sam-session/tools');
 
-    expect(SAM_TOOLS.map((tool) => tool.name)).toContain('get_resource_history');
+      expect(SAM_TOOLS.map((tool) => tool.name)).toContain('get_resource_history');
 
-    const result = await executeTool(
-      {
-        id: 'call-resource-history',
-        name: 'get_resource_history',
-        input: { projectId: 'proj-1', sessionId: 'sess-1', chunkId: 'wrchunk:1' },
-      },
-      { env: { DATABASE: mockD1() }, userId: 'user-1' }
-    );
+      const result = await executeTool(
+        {
+          id: 'call-resource-history',
+          name: 'get_resource_history',
+          input: { projectId: 'proj-1', sessionId: 'sess-1', chunkId: 'wrchunk:1' },
+        },
+        { env: { DATABASE: mockD1() }, userId: 'user-1' }
+      );
 
-    expect(mockGetWorkspaceResourceHistory).toHaveBeenCalledWith(expect.anything(), {
-      projectId: 'proj-1',
-      sessionId: 'sess-1',
-      taskId: null,
-      workspaceId: null,
-      detailChunkId: 'wrchunk:1',
-    });
-    expect(result).toMatchObject({
-      scope: { projectId: 'proj-1', sessionId: 'sess-1', taskId: null, workspaceId: null },
-      summary: { id: 'summary-1' },
-    });
-  });
+      expect(mockGetWorkspaceResourceHistory).toHaveBeenCalledWith(expect.anything(), {
+        projectId: 'proj-1',
+        sessionId: 'sess-1',
+        taskId: null,
+        workspaceId: null,
+        detailChunkId: 'wrchunk:1',
+      });
+      expect(result).toMatchObject({
+        scope: { projectId: 'proj-1', sessionId: 'sess-1', taskId: null, workspaceId: null },
+        summary: {
+          id: 'summary-1',
+          agentProfileId: 'profile-1',
+          skillId: 'skill-1',
+          agentType: 'openai-codex',
+        },
+      });
+    },
+    TOOL_MODULE_IMPORT_TIMEOUT_MS
+  );
 
   it('enforces project ownership before reading resource history', async () => {
     const { getResourceHistory } =

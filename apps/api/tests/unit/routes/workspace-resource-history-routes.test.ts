@@ -36,7 +36,12 @@ describe('workspace resource history project routes', () => {
     vi.clearAllMocks();
     mocks.requireProjectAccess.mockResolvedValue(undefined);
     mocks.getWorkspaceResourceHistory.mockResolvedValue({
-      summary: { id: 'summary-1' },
+      summary: {
+        id: 'summary-1',
+        agentProfileId: 'profile-1',
+        skillId: 'skill-1',
+        agentType: 'openai-codex',
+      },
       chunks: [{ id: 'wrchunk:1' }],
     });
     app = new Hono<{ Bindings: Env }>();
@@ -66,7 +71,12 @@ describe('workspace resource history project routes', () => {
       detailChunkId: 'wrchunk:1',
     });
     expect(await res.json()).toEqual({
-      summary: { id: 'summary-1' },
+      summary: {
+        id: 'summary-1',
+        agentProfileId: 'profile-1',
+        skillId: 'skill-1',
+        agentType: 'openai-codex',
+      },
       chunks: [{ id: 'wrchunk:1' }],
     });
   });

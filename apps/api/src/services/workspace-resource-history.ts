@@ -385,27 +385,95 @@ interface WorkspaceUploadRow {
   project_id: string | null;
   node_id: string | null;
   chat_session_id: string | null;
-  agent_profile_hint: string | null;
+  resolved_task_id: string | null;
+  agent_profile_id: string | null;
+  skill_id: string | null;
+  agent_type: string | null;
 }
+
+const WORKSPACE_UPLOAD_CONTEXT_QUERY = `WITH target_workspace AS (
+  SELECT id, project_id, node_id, chat_session_id, agent_profile_hint
+    FROM workspaces
+   WHERE id = ? AND project_id = ?
+   LIMIT 1
+),
+resolved_task AS (
+  SELECT t.id, t.agent_profile_hint, t.skill_id
+    FROM tasks t
+    JOIN target_workspace w
+      ON t.project_id = w.project_id
+     AND t.workspace_id = w.id
+   WHERE (
+     (? IS NOT NULL AND t.id = ?)
+     OR (? IS NULL AND t.chat_session_id = COALESCE(?, w.chat_session_id))
+   )
+     AND (
+       COALESCE(?, w.chat_session_id) IS NULL
+       OR t.chat_session_id IS NULL
+       OR t.chat_session_id = COALESCE(?, w.chat_session_id)
+     )
+   ORDER BY CASE WHEN t.id = ? THEN 0 ELSE 1 END,
+            t.started_at DESC,
+            t.id DESC
+   LIMIT 1
+)
+SELECT w.id,
+       w.project_id,
+       w.node_id,
+       w.chat_session_id,
+       t.id AS resolved_task_id,
+       COALESCE(
+         NULLIF(a.agent_profile_id, ''),
+         NULLIF(t.agent_profile_hint, ''),
+         NULLIF(w.agent_profile_hint, '')
+       ) AS agent_profile_id,
+       COALESCE(NULLIF(a.skill_id, ''), NULLIF(t.skill_id, '')) AS skill_id,
+       COALESCE(
+         NULLIF(a.agent_type, ''),
+         NULLIF(p.agent_type, ''),
+         NULLIF(s.agent_type, '')
+       ) AS agent_type
+  FROM target_workspace w
+  LEFT JOIN resolved_task t ON 1 = 1
+  LEFT JOIN agent_sessions a
+    ON a.id = (
+      SELECT candidate.id
+        FROM agent_sessions candidate
+       WHERE candidate.workspace_id = w.id
+       ORDER BY CASE WHEN candidate.status = 'running' THEN 0 ELSE 1 END,
+                candidate.updated_at DESC,
+                candidate.created_at DESC,
+                candidate.id DESC
+       LIMIT 1
+    )
+  LEFT JOIN agent_profiles p
+    ON p.id = COALESCE(
+      NULLIF(a.agent_profile_id, ''),
+      NULLIF(t.agent_profile_hint, ''),
+      NULLIF(w.agent_profile_hint, '')
+    )
+  LEFT JOIN skills s
+    ON s.id = COALESCE(NULLIF(a.skill_id, ''), NULLIF(t.skill_id, ''))
+ LIMIT 1`;
 
 async function loadWorkspaceForUpload(
   env: Env,
   projectId: string,
-  workspaceId: string
+  workspaceId: string,
+  sessionId: string | null,
+  taskId: string | null
 ): Promise<WorkspaceUploadRow> {
-  const row = await env.DATABASE.prepare(
-    `SELECT id, project_id, node_id, chat_session_id, agent_profile_hint
-       FROM workspaces
-      WHERE id = ? AND project_id = ?
-      LIMIT 1`
-  )
-    .bind(workspaceId, projectId)
+  const row = await env.DATABASE.prepare(WORKSPACE_UPLOAD_CONTEXT_QUERY)
+    .bind(workspaceId, projectId, taskId, taskId, taskId, sessionId, sessionId, sessionId, taskId)
     .first<WorkspaceUploadRow>();
   if (!row) {
     throw errors.notFound('Workspace');
   }
   if (row.id !== workspaceId || row.project_id !== projectId) {
     throw errors.notFound('Workspace');
+  }
+  if (taskId && row.resolved_task_id !== taskId) {
+    throw errors.forbidden('Task identity does not match workspace session');
   }
   return row;
 }
@@ -490,7 +558,15 @@ export async function storeWorkspaceResourceChunk(
   const workspaceId = body.workspaceId.trim();
   if (!workspaceId) throw errors.badRequest('workspaceId is required');
 
-  const workspace = await loadWorkspaceForUpload(env, projectId, workspaceId);
+  const requestedSessionId = normalizeNullable(body.sessionId);
+  const requestedTaskId = normalizeNullable(body.taskId);
+  const workspace = await loadWorkspaceForUpload(
+    env,
+    projectId,
+    workspaceId,
+    requestedSessionId,
+    requestedTaskId
+  );
   const nodeId = validateWorkspaceUploadIdentity(workspace, body, uploadedByNodeId);
   assertWorkspaceResourceUploadMetadata(body);
   const { bytes, actualSha } = await validateWorkspaceResourceChunkBytes(env, body);
@@ -498,8 +574,8 @@ export async function storeWorkspaceResourceChunk(
   const db = drizzle(env.DATABASE, { schema });
   const now = Date.now();
   const expiresAt = now + retentionDays(env, 'raw') * MS_PER_DAY;
-  const sessionId = normalizeNullable(body.sessionId) ?? workspace.chat_session_id;
-  const taskId = normalizeNullable(body.taskId);
+  const sessionId = requestedSessionId ?? workspace.chat_session_id;
+  const taskId = workspace.resolved_task_id;
   const scopeKey = resourceScopeKey({ sessionId, taskId });
   const summaryId = summaryIdFor({ projectId, workspaceId, sessionId, taskId });
   const chunkScope = scopeKey.replaceAll('/', ':');
@@ -552,9 +628,9 @@ export async function storeWorkspaceResourceChunk(
       maxMetadataBytes
     );
     const summaryJson = boundedJsonStringify(body.summary ?? {}, 'summary', maxMetadataBytes);
-    const agentProfileId = normalizeNullable(body.agentProfileId) ?? workspace.agent_profile_hint;
-    const skillId = normalizeNullable(body.skillId);
-    const agentType = normalizeNullable(body.agentType);
+    const agentProfileId = workspace.agent_profile_id;
+    const skillId = workspace.skill_id;
+    const agentType = workspace.agent_type;
     const runtime = normalizeNullable(body.runtime) ?? 'vm';
     const values = {
       id: summaryId,

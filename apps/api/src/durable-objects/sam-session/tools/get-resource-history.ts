@@ -10,7 +10,7 @@ export const getResourceHistoryDef: AnthropicToolDef = {
   name: 'get_resource_history',
   description:
     'Inspect bounded workspace resource history for a project session, task, or workspace. ' +
-    'Returns a cheap summary and chunk index by default. Pass chunkId to load bounded downsampled samples and tool-span correlation for one chunk. ' +
+    'Returns a cheap summary with server-resolved agentProfileId, skillId, and agentType plus a chunk index by default. Pass chunkId to load bounded downsampled samples and tool-span correlation for one chunk. ' +
     'Tool spans are correlation windows, not causal per-process attribution, and stored payloads omit prompts, commands, tool args/output, file paths, env, and secrets.',
   input_schema: {
     type: 'object',
