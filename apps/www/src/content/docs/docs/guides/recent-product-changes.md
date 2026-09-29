@@ -9,23 +9,44 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ### For everyone
 
-| Change                                   | What users notice                                                                                                                                                                      | Where to use it                                                                                            |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **A failed task keeps its work**         | When a task fails while its workspace is still running, SAM snapshots the workspace and puts the chat to sleep instead of deleting it. Reply to carry on with the files restored.      | Any failed task; [A failed task kept its work](/docs/guides/instant-sessions/#a-failed-task-kept-its-work) |
-| **Wake failures tell you why**           | A chat that can't wake is marked **Wake failed** in the session list, with a system message giving the reason — so you know whether to fix something and resend, or fork.              | [Wake failed](/docs/guides/instant-sessions/#wake-failed)                                                  |
-| **Switching chats is instant**           | A chat you opened in the last day opens at once from a browser cache, loads its newest messages first, and keeps your unsent draft while you visit other chats.                        | Project chat; [Switching Between Chats](/docs/guides/chat-features/#switching-between-chats)               |
-| **The dashboard shows what's live**      | **Active Tasks** shows your six most recently active tasks, instead of every conversation that is still asleep.                                                                        | Dashboard; [Come back later](/docs/quickstart/#6-come-back-later)                                          |
-| **Silent machines are cleaned up**       | A VM that stops responding gets a notice in its chats after about 10 minutes and is deleted after about 30, instead of sitting unhealthy — and billed — for hours.                     | [SAM lost contact with the machine](/docs/guides/instant-sessions/#sam-lost-contact-with-the-machine)      |
-| **Diagrams and PDFs render properly**    | Mermaid diagrams are drawn as safe, static pictures, and labels that used to be invisible in kanban, mindmap, and timeline diagrams now show. Library PDFs preview in Chrome and Edge. | Chat and library; [Diagrams](/docs/guides/chat-features/#diagrams)                                         |
-| **Agent search finds more**              | Long searches match every word you give them, project-wide search can work through all archived history, and results say when they are partial.                                        | Ask an agent; [Finding Past Conversations](/docs/guides/chat-features/#finding-past-conversations)         |
-| **New models**                           | Claude Opus 5.5; OpenAI GPT-6 Astra, Sol, and Luna; Gemini 3.8 Flash; current Mistral Vibe aliases; a refreshed OpenCode list.                                                         | Agent profile model picker; [Choosing a model](/docs/guides/agents/#choosing-a-model)                      |
-| **Long Instant sessions can still push** | `git` and `gh` stay signed in to GitHub past the first hour of an Instant session.                                                                                                     | [Instant Sessions](/docs/guides/instant-sessions/)                                                         |
+- **A failed task keeps its work.** When a task fails while its workspace is still running, SAM
+  snapshots the workspace and puts the chat to sleep instead of deleting it. Reply in the same chat
+  to carry on with the files restored.
+  → [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)
+- **Wake failures tell you why.** A chat that can't wake is marked **Wake failed** in the session
+  list, with a system message giving the reason.
+  → [Wake failed](/docs/guides/session-troubleshooting/#wake-failed)
+- **One page for when things go wrong.** [Session Troubleshooting](/docs/guides/session-troubleshooting/)
+  covers wake failures, failed tasks, machines that stop responding, and interrupted messages, on
+  Instant and VM sessions alike.
+- **Switching chats is instant.** Up to 20 recently opened chats open at once from a browser cache,
+  load their newest messages first, and keep your unsent draft while you visit other chats.
+  → [Switching Between Chats](/docs/guides/chat-features/#switching-between-chats)
+- **The dashboard shows what's live.** **Active Tasks** shows your six most recently active tasks,
+  instead of every conversation that is still asleep. → [Come back later](/docs/quickstart/#6-come-back-later)
+- **Silent machines are cleaned up.** A VM that stops responding gets a notice in its chats after
+  about 10 minutes and is deleted within about 30, instead of sitting unhealthy — and billed — for
+  hours. → [SAM lost contact with the machine](/docs/guides/session-troubleshooting/#sam-lost-contact-with-the-machine)
+- **Diagrams and PDFs render properly.** Mermaid diagrams are drawn as safe, static pictures;
+  labels that used to be invisible in kanban, mindmap, and timeline diagrams now show; and library
+  PDFs preview in Chrome and Edge. → [Diagrams](/docs/guides/chat-features/#diagrams)
+- **Agent search finds more.** Searches match every word you give them, project-wide search can work
+  through all archived history, and results say when they are partial.
+  → [Finding Past Conversations](/docs/guides/chat-features/#finding-past-conversations)
+- **New models.** Claude Opus 5.5; OpenAI GPT-6 Astra, Sol, and Luna, and GPT-5.2; Gemini 3.8
+  Flash; current Mistral Vibe aliases; and a refreshed OpenCode list.
+  → [Choosing a model](/docs/guides/agents/#choosing-a-model)
+- **Long Instant sessions can still push.** `git` and `gh` stay signed in to GitHub past the first
+  hour of an [Instant session](/docs/guides/instant-sessions/).
 
-Also fixed this week:
+Also changed this week:
 
-- Waking an Instant session that fell asleep on its own no longer fails with _"The sleeping
-  container runtime is gone and cannot wake in place"_, and archiving a sleeping Instant chat no
-  longer errors.
+- **npm-based agents need Node.js 22 in VM workspaces.** Claude Code, Codex, Gemini CLI, OpenCode,
+  and Amp now need Node 22 or newer (up from 20). If a devcontainer has an older Node, SAM installs
+  Node 22 over it before starting the agent, which can change the `node` your project uses there.
+  → [Choosing an environment size and profile](/docs/guides/creating-workspaces/#choosing-an-environment-size-and-profile)
+- Waking a sleeping Instant session — whether it fell asleep on its own or you put it to sleep — no
+  longer fails with _"The sleeping container runtime is gone and cannot wake in place"_.
 - Messages no longer go missing from very long chats, and a chat you reopen within seconds shows
   the messages that arrived while it was closed.
 - A task that finished or was cancelled can no longer be flipped to **failed** by a late report
@@ -50,30 +71,48 @@ and disk alone — see [Compute Pools](/docs/guides/compute-pools/).
 
 ### For self-hosters & admins
 
-| Change                                     | What it enables                                                                                                                                                       | Where to configure it                                                                                           |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| **Clear a stuck archive migration**        | **Admin → Storage** lists failed, poisoned, and frozen migrations with an **Abandon** button that works from a phone.                                                 | [Storage and archive circuit breakers](/docs/guides/self-hosting/#storage-and-archive-circuit-breakers)         |
-| **Unresponsive VMs are released**          | Silent SAM-provisioned workspace VMs are drained after 10 minutes and deleted after 30; fleet-wide silence holds the deletions instead.                               | `NODE_UNHEALTHY_*`; [Self-Hosting](/docs/guides/self-hosting/#unresponsive-machines-are-released-automatically) |
-| **Model-tier limits are enforced**         | A per-user `allowedModelTiers` restriction now actually blocks SAM-mode models outside those tiers, and the native Anthropic route honours `AI_PROXY_ALLOWED_MODELS`. | [Admin AI Allowances](/docs/reference/api/#admin-ai-allowances)                                                 |
-| **Spending on summaries and voice capped** | Fork/Retry summaries (30 per hour) and voice transcription (30 per minute) are rate-limited per user.                                                                 | `RATE_LIMIT_SESSION_SUMMARIZE`, `RATE_LIMIT_TRANSCRIBE`                                                         |
-| **Setup stops echoing secrets**            | Saving the `/setup` wizard no longer returns the platform secrets in its response.                                                                                    | Nothing to configure                                                                                            |
-| **Fewer duplicate error drafts**           | Automated triage groups recurring errors that differ only in numbers, IDs, or timings into one draft Idea.                                                            | Nothing to configure                                                                                            |
-| **Archive drain three times faster**       | The ProjectData archive sweep claims a session every 20 minutes instead of hourly.                                                                                    | `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS`, `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET`                      |
-| **Quieter idle checks**                    | Projects no longer wake every minute to re-check idle workspaces; inconclusive checks back off to six hours.                                                          | `WORKSPACE_IDLE_BACKOFF_BASE_MS`, `WORKSPACE_IDLE_BACKOFF_MAX_MS`                                               |
+- **Clear a stuck archive migration.** **Admin → Storage** lists failed, poisoned, and frozen
+  migrations, with an **Abandon** button that works from a phone.
+  → [Storage and archive circuit breakers](/docs/guides/self-hosting/#storage-and-archive-circuit-breakers)
+- **Unresponsive VMs are released.** Silent workspace VMs are drained after 10 minutes and deleted
+  within 30; fleet-wide silence holds everything instead. Settings: `NODE_UNHEALTHY_*`.
+  → [Self-Hosting](/docs/guides/self-hosting/#unresponsive-machines-are-released-automatically)
+- **Model-tier limits are enforced.** A per-user `allowedModelTiers` restriction now actually blocks
+  SAM-mode models outside those tiers, and the native Anthropic route honours
+  `AI_PROXY_ALLOWED_MODELS`. → [Admin AI Allowances](/docs/reference/api/#admin-ai-allowances)
+- **Spending on summaries and voice is capped.** Fork/Retry summaries (30 per hour) and voice
+  transcription (30 per minute) are rate-limited per user: `RATE_LIMIT_SESSION_SUMMARIZE`,
+  `RATE_LIMIT_TRANSCRIBE`.
+- **Setup stops echoing secrets.** Saving the `/setup` wizard no longer returns the platform secrets
+  in its response.
+- **Fewer duplicate error drafts.** Automated triage groups recurring errors that differ only in
+  numbers, IDs, or timings into one draft Idea.
+- **Archive drain three times faster.** The ProjectData archive sweep claims a session every 20
+  minutes instead of hourly: `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS`,
+  `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET`.
+- **Quieter idle checks.** Projects no longer wake every minute to re-check idle workspaces;
+  inconclusive checks back off to six hours: `WORKSPACE_IDLE_BACKOFF_BASE_MS`,
+  `WORKSPACE_IDLE_BACKOFF_MAX_MS`.
+
+**Updating to this release needs no action.** There are no new secrets or bindings, and the new
+database migrations run in the deploy pipeline. Two things in your GitHub Environment are worth a
+look: a `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` or `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET`
+variable there overrides the faster archive defaults, and a leftover `MAX_WORKSPACES_PER_NODE` is no
+longer read and can be deleted.
 
 ### A failed task no longer throws its work away
 
 A task can fail for reasons that have nothing to do with the work itself: the provider's usage
-limit ran out, a question the agent asked you expired, or the agent went quiet after a SAM
-check-in. Until now SAM deleted the workspace on the spot, taking uncommitted changes with it.
+limit ran out, or a question the agent asked you expired. Until now SAM deleted the workspace on
+the spot, taking uncommitted changes with it.
 
 Now the failure goes through the same sleep path as a finished task. SAM lets the agent's current
-turn end, snapshots the workspace, and puts the chat to sleep. The red failure card stays, but so
-does the composer: reply, and the same chat wakes with its files restored. Only an agent that
-crashed or timed out mid-turn, or a turn that never ends, still loses its workspace, and the chat
-says so when that happens.
+turn end, snapshots the workspace, and puts the chat to sleep. The failure card stays, but so does
+the composer: reply, and the same chat wakes with its files restored. Reply rather than using
+**Retry**, which starts a new chat without them. When SAM can't keep the workspace, the chat says
+so and why.
 
-See [A failed task kept its work](/docs/guides/instant-sessions/#a-failed-task-kept-its-work).
+See [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails).
 
 ### When a chat can't wake, it says why
 
@@ -81,20 +120,19 @@ A wake that failed used to disappear into retry state: you sent a message to a s
 nothing happened. Now the chat gets a system message starting **Wake failed:** with the reason,
 and the session list marks it **Wake failed** in red until you reply.
 
-The reason decides what to do next. Some causes you can fix and then simply send your message
-again — a removed cloud credential, a compute pool that no longer allows a big enough machine, a
-provider outage. Others mean the saved session is gone — an expired or missing snapshot, an archived
-chat — and the answer is to fork the chat. The
-[Wake failed table](/docs/guides/instant-sessions/#wake-failed) sorts every reason into one of the
-two.
+The reason decides what to do next. Most causes you can fix, then send your message again: a
+removed cloud credential, a compute pool that no longer allows a matching machine, a provider out
+of capacity, or a burst of failed attempts that clears after 15 minutes. A few mean the saved
+session can't be restored, such as an expired snapshot, and then the answer is to fork the chat.
+The [Wake failed table](/docs/guides/session-troubleshooting/#wake-failed) covers each reason.
 
 ### Switching chats no longer waits on the network
 
 Moving between chats in a project used to leave the previous chat on screen while the next one
 loaded, and a chat you had left for five minutes was fetched from scratch — up to 50,000 messages.
 
-Now a chat you opened in the last 24 hours paints immediately from a cache in your browser and
-refreshes in the background. Every chat opens on its newest 500 messages; scroll up, or select
+Now up to 20 chats you opened in the last 24 hours paint immediately from a cache in your browser
+and refresh in the background. Every chat opens on its newest 500 messages; scroll up, or select
 **Load earlier messages**, for older history, and jumping to a comment or timeline entry loads
 what it needs. An unsent message stays with its chat while you look at others. The cache belongs to
 your account and is deleted when you sign out.
@@ -119,12 +157,13 @@ agents could not report back, and it still counted against your provider quota u
 deleted it by hand.
 
 Now SAM acts on the silence. After about 10 minutes every chat on the machine gets a message
-starting **"SAM lost contact with node"** and SAM asks those sessions to sleep; after about 30
-minutes it deletes the machine and fails any task still running there, naming the lost node. A node
-you delete yourself cancels its tasks instead of failing them. This applies only to machines SAM
-provisioned for workspaces.
+starting **"SAM lost contact with node"** and SAM asks those sessions to sleep. It deletes the
+machine once they are all asleep, or after about 30 minutes at the latest, and fails any task still
+running there, naming the lost node. A node you delete yourself cancels its tasks instead of failing
+them. This covers the cloud VMs SAM runs for workspaces, including ones created from the **Nodes**
+page; machines you enrolled yourself are left alone.
 
-See [SAM lost contact with the machine](/docs/guides/instant-sessions/#sam-lost-contact-with-the-machine).
+See [SAM lost contact with the machine](/docs/guides/session-troubleshooting/#sam-lost-contact-with-the-machine).
 
 ### Diagrams render safely, and PDFs preview in Chrome
 
@@ -144,21 +183,22 @@ See [Diagrams](/docs/guides/chat-features/#diagrams) and
 
 ### Search handles long questions and the whole archive
 
-Ask an agent to find an old discussion and it now searches for every word you give it, however
-long the question — before, a long query could fail outright. Project-wide search can work through
-every archived conversation in pages
-instead of stopping at a fixed number, and each result says when it is partial, so "nothing found"
-in a very large project is no longer mistaken for proof.
+Ask an agent to find an old discussion and it now searches for every word you give it. A long
+question used to fail outright; now it works, though a few distinctive words still find more.
+Project-wide search can work through every archived conversation in pages instead of stopping at a
+fixed number, and each result says when it is partial, so "nothing found" in a very large project
+is no longer mistaken for proof.
 
 See [Finding Past Conversations](/docs/guides/chat-features/#finding-past-conversations).
 
 ### New models in the picker
 
-Profiles can now use **Claude Opus 5.5** (1M-token context), OpenAI's **GPT-6 Astra**, **Sol**, and
-**Luna** with Codex, **Gemini 3.8 Flash** with Gemini CLI, and Mistral's current `-latest` aliases
-with Vibe. SAM also updated the agents it installs so Opus 5.5 runs instead of being rejected by
-an older Claude Code. Several older OpenAI models, such as `o3`, `o4-mini`, and GPT-4.1, are no
-longer listed for Codex; a profile already set to one keeps its setting, shown as a custom model.
+Profiles can now use **Claude Opus 5.5** (1M-token context); OpenAI's **GPT-6 Astra**, **Sol**, and
+**Luna**, and **GPT-5.2**, with Codex; **Gemini 3.8 Flash** with Gemini CLI; and Mistral's current
+`-latest` aliases with Vibe. SAM also updated the agents it installs so Opus 5.5 runs instead of
+being rejected by an older Claude Code. Several older OpenAI models are no longer listed for Codex —
+`o3`, `o4-mini`, GPT-4.1 and 4.1 mini, GPT-5 mini, GPT-5.3 Codex, GPT-5.4 Pro and Nano, and GPT-5.5
+Pro. A profile already set to one keeps its setting, shown as a custom model.
 
 If a model you want isn't in the list yet, type its ID — see
 [Choosing a model](/docs/guides/agents/#choosing-a-model).

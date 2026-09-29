@@ -37,9 +37,9 @@ Open your project and type what you want done in the chat — for example, "add 
 
 You don't have to watch the chat while the agent works. The **Dashboard** keeps an **Active Tasks** list across all your projects: your six most recently active tasks — ranked by their latest message, or by when they started if they have none yet — refreshed automatically.
 
-Each card shows the task's status, the project it belongs to, when you submitted it, and when its last message arrived. A dot says what the agent is doing: **Active** (working, with a message in the last 15 minutes), **Working** (working, but quiet for longer), **Idle**, or **Sleeping**. Select a card to open its chat.
+Each card shows the task's status, the project it belongs to, when you submitted it, and when its last message arrived. A dot shows where the task stands: **Active** or **Working** means it is starting up or its machine is running (Active if there was a message in the last 15 minutes), **Sleeping** means it is asleep and can be woken, and **Idle** means nothing is running for it right now. A running task isn't necessarily busy — the line under the title shows its current step, such as **Waiting for follow-up...** when it's your turn. Select a card to open its chat.
 
-A sleeping conversation still counts as active — you can wake it for up to a week — which is why the list is ranked by recent messages rather than by start time: whatever you touched most recently stays on top, and dormant work drops off. To hear when a task finishes or needs you, see [Notifications](/docs/guides/notifications/).
+A sleeping conversation still counts as active — you can wake it for up to a week — which is why the list is ranked by recent messages rather than by start time: whatever you touched most recently stays on top, and dormant work drops off. The list only includes your own tasks that are queued or in progress: finished, cancelled, and failed tasks are left out (even a failed task whose chat you can still wake), and so are teammates' tasks in a shared project. Find those in the project's chat list. To hear when a task finishes or needs you, see [Notifications](/docs/guides/notifications/).
 
 That's the whole loop: **import → chat → review the PR.** No terminal or server setup required.
 

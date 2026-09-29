@@ -127,8 +127,9 @@ When work starts, the agent is resolved in this order:
 
 ### Choosing a model
 
-The profile's model picker lists the models SAM knows each agent supports, and that list is
-updated as providers release new ones. If a model you want isn't listed yet, type its exact ID and
+The profile's model picker lists the models SAM knows each agent supports. The list is updated
+with SAM releases, except OpenCode's, which SAM loads live from Models.dev. If a model you want
+isn't listed yet, type its exact ID and
 press **Enter** to use it as a custom model. SAM does not check a custom ID against any list, so it
 has to be a model your provider accepts and your agent's version can run. The exception is the
 **SAM** provider mode: the platform proxy only serves models in its catalog, so there an unlisted
@@ -149,14 +150,10 @@ Agent output streams to your browser in real-time via WebSocket. You see code be
 
 ### Conversation Forking
 
-You can fork a conversation from any message to explore an alternative approach:
-
-1. Hover over a message in the chat
-2. Click the **Fork** button
-3. SAM generates an AI context summary of the conversation up to that point
-4. A new session starts with the context and awareness of the previous conversation
-
-Fork depth is limited to 10 levels (configurable via `ACP_SESSION_MAX_FORK_DEPTH`).
+**Fork** in the session tool rail starts a new session that carries an AI-written summary of the
+current one, so you can try an alternative without losing the original thread. A fork covers the
+whole session, not a single message. See
+[Conversation Forking](/docs/guides/chat-features/#conversation-forking) for the steps and limits.
 
 ### Voice Input
 

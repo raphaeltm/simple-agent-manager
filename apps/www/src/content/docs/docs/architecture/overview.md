@@ -347,6 +347,56 @@ or time range without receiving raw R2 keys.
 - Session forking with parent lineage tracking
 - Debounced D1 summary sync for dashboard data
 
+#### Message search
+
+This is the detail behind the user-facing guidance in
+[Finding Past Conversations](/docs/guides/chat-features/#finding-past-conversations): what an agent
+calling `search_messages` gets back, and what a self-hoster can tune.
+
+Each `chat_messages` row is a single streaming token, so no row holds a whole word. SAM therefore
+concatenates consecutive same-role tokens into logical messages and indexes those with SQLite FTS5
+(`materializeSession()` in `apps/api/src/durable-objects/project-data/materialization.ts`), using the
+`unicode61` tokenizer, which folds case and diacritics but does not stem. Indexing is incremental:
+it runs every time a session sleeps and again when it stops, fails, or is cleaned up after going
+idle, and each pass covers only the messages written since the last one.
+
+- **Everything indexed so far**: word search. The query's words are ANDed, and everything outside
+  ASCII letters, digits, `_`, and whitespace is stripped first (`buildSafeFtsQuery()` in
+  `apps/api/src/lib/fts5.ts`). That removes punctuation, quotes, and FTS5 operators, but also
+  accented and non-Latin letters: `déploiement` becomes `d ploiement`. Because the index folds
+  diacritics, the unaccented form (`deploiement`) matches indexed text; words in non-Latin scripts
+  cannot be searched.
+- **Messages written since a session was last indexed**: keyword (substring) fallback. This rescues
+  whole user messages; streaming agent output is split across too many rows for a keyword match, so
+  agent text becomes searchable only once the next pass runs.
+- **Sessions whose index was pruned for storage**: keyword fallback only, permanently. Under storage
+  pressure SAM deletes the grouped rows and index entries for terminal sessions older than a week to
+  reclaim space, and deliberately never re-indexes them, because re-indexing would undo the reclaimed
+  bytes.
+
+Search work is bounded by configured windows rather than by how much history the project holds
+(`searchMessagesWithCoverage()` in `apps/api/src/durable-objects/project-data/message-search.ts`).
+Full-text ranking scores and reads only the newest `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` matches
+(2,000 by default), and the keyword fallback scans the newest
+`PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT` raw messages (50,000 by default). Small projects never
+reach either limit. A search that reached one says so: the `rootSearch` field flags it and
+`coverageNotes` explains what was not searched.
+
+Idea, task, knowledge, and message search all trim only oversized input before it reaches SQLite.
+Long multi-word queries search every retained term, including late ones: LIKE-based paths use one
+short escaped predicate per term, and indexed search uses the equivalent bounded FTS query.
+`SEARCH_QUERY_MAX_LENGTH` and `SEARCH_QUERY_MAX_TERMS` are generous abuse guards (defaults: 4096 bytes
+and 40 terms); `SEARCH_QUERY_MAX_TERM_LENGTH` keeps each LIKE term inside SQLite's pattern budget
+(default 48 bytes; higher overrides are clamped). Responses return the effective `query`, a
+`queryTruncated` flag, and `queryLimits`, so a caller can tell an exact search from one a guardrail
+trimmed (`apps/api/src/lib/search-query-limits.ts`).
+
+Project-wide `search_messages` also traverses the project's archived history. A call can return
+provisional results plus `archiveSearch.continuation`; pass that continuation back with the same
+query, roles, and limit until `archiveSearch.complete` is true. `ownerCoverage`, `indexCoverage`,
+`rootError`, and `executionErrors` distinguish pending traversal, one-time index repair, and
+execution failures. A search scoped to one session reads that session directly.
+
 ### Notification DO
 
 Each user gets one `Notification` Durable Object instance, accessed via

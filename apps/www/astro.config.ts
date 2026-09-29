@@ -46,6 +46,7 @@ export default defineConfig({
             { slug: 'docs/guides/compute-pools' },
             { slug: 'docs/guides/session-resources' },
             { slug: 'docs/guides/instant-sessions' },
+            { slug: 'docs/guides/session-troubleshooting' },
             { slug: 'docs/guides/reporting-issues' },
             { slug: 'docs/guides/recent-product-changes' },
             { slug: 'docs/guides/notifications' },

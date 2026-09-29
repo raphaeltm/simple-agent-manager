@@ -385,19 +385,26 @@ The sentinel user id defaults to `system_anonymous_trials`. If your deployment u
 
 **Admin → Storage** (`/admin/storage`) shows per-project ProjectData storage telemetry and the archive-sharding circuit breakers. When a project's archive drain fails repeatedly, its breaker opens and the scheduled sweep stops archiving that project until a superadmin closes the breaker. Use the **Close breaker** button on that page (it works from a phone) once the underlying failure is fixed; it calls `POST /api/admin/project-data/storage/:projectId/archive-sharding/circuit-breaker` with `state: "closed"` and the reason you enter. Closing a breaker does not thaw migrations that were already frozen.
 
-Below the breakers, **Problem migrations** lists the individual session migrations that need attention, each with its error, attempt count, and timestamps:
+Below the breakers, **Problem migrations** lists the individual session migrations that need attention, each with its error code, attempt count, and timestamps:
 
-| Badge        | Meaning                                                                                                                                            |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Failed**   | An attempt failed. The sweep retries it after `PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS` (an hour by default).                                   |
-| **Poisoned** | It failed `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS` times (3 by default), which is what opens the project's breaker.                            |
-| **Frozen**   | The sweep is holding it back — for example, the session was still active when the sweep tried to copy it. Closing the breaker does not release it. |
+| Badge        | Meaning                                                                                                                 |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| **Failed**   | An attempt failed. The sweep retries it after `PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS` (an hour by default).        |
+| **Poisoned** | It failed `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS` times (3 by default), which is what opens the project's breaker. |
+| **Frozen**   | The sweep has stopped trying it. The **Error code** says why, and whether you need to do anything (below).              |
 
-**Abandon** is how you clear a migration that never got as far as deleting the session from the project's live storage. It discards the partial archive copy, returns the session to live storage so it reads normally, and makes it eligible for a later sweep; you have to enter a reason. SAM refuses, and the page shows its reason verbatim, when the migration is still running (its lease has not expired) or has already deleted its source. That second case needs a copy-back instead, which has no button yet: `POST /api/admin/project-data/storage/:projectId/archive-sharding/migrations/:migrationId/copy-back` with a `reason`.
+What to do, by what the card shows:
+
+- **Frozen, error code `precopy_refused`**: nothing. The session was still in use when the sweep tried to copy it, so nothing was copied and it reads normally; the sweep tries it again after `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS` (a week). The list shows these last.
+- **Frozen, error code `operator_abandoned`**: nothing. Someone already abandoned it, and the card stays in the list as a record.
+- **Failed**: nothing yet. If it keeps failing it turns Poisoned.
+- **Poisoned, or Frozen with any other error code**: read the error and fix its cause first. Then clear the migration with **Abandon** (or a copy-back, if it already deleted its source — see below), and finally **Close breaker** for the project, because abandoning a migration does not close the breaker.
+
+**Abandon** clears a migration that never got as far as deleting the session from the project's live storage. It discards the partial archive copy, returns the session to live storage so it reads normally, and makes it eligible for a later sweep; you have to enter a reason. (The dialog calls these the partial _shard copy_ and _root_, and records the result as `operator_abandoned`.) SAM refuses, and the page shows its reason verbatim, when the migration is still running (its lease has not expired) or has already deleted its source. That second case needs a copy-back instead, which has no button yet: `POST /api/admin/project-data/storage/:projectId/archive-sharding/migrations/:migrationId/copy-back` with a `reason`.
 
 <img
   src="/images/docs/admin-storage-abandon-dialog-mobile.png"
-  alt="The Abandon migration dialog on a phone: it explains that abandoning drops the partial shard copy and returns the session to root, lists the project, migration, and session IDs, and has a filled-in Reason field above a red Abandon migration button and a Cancel button."
+  alt="The Abandon migration dialog on a phone for a poisoned migration: it explains that abandoning drops the partial shard copy, returns the session to root, and freezes the journal as operator_abandoned; lists the project, migration, and session IDs; and has a filled-in Reason field above a red Abandon migration button and a Cancel button."
   width="375"
 />
 
@@ -483,12 +490,12 @@ UpCloud billing is usage-based. SAM verifies the configured simple plan and zone
 
 ### Unresponsive machines are released automatically
 
-A workspace VM that SAM provisioned and that stops sending heartbeats is released rather than left running up a bill and holding provider quota:
+A workspace VM that stops sending heartbeats is released rather than left running up a bill and holding provider quota. That covers every cloud VM SAM manages for workspaces — the ones it provisioned automatically and the ones users created from the **Nodes** page:
 
-1. After `NODE_UNHEALTHY_DRAIN_AFTER_MS` (10 minutes) of silence, SAM posts a notice in each chat on the VM and asks those sessions to sleep, so idle ones can be woken on another machine later.
-2. After `NODE_UNHEALTHY_RELEASE_AFTER_MS` (30 minutes), SAM deletes the VM through the provider and fails any task still running on it, with a message naming the lost node.
+1. After `NODE_UNHEALTHY_DRAIN_AFTER_MS` (10 minutes) of silence, SAM posts a notice in each chat on the VM and asks those sessions to sleep, so idle ones can be woken on another machine later. Once every session on the VM is asleep, or if it had none, SAM deletes the VM right away.
+2. Otherwise, after `NODE_UNHEALTHY_RELEASE_AFTER_MS` (30 minutes), SAM deletes the VM through the provider and fails any task still running on it, with a message naming the lost node.
 
-Only SAM-provisioned workspace VMs are released this way. Nodes a user created by hand, app-deployment nodes, and Instant containers are left alone. If half or more of the running workspace VMs go silent at once (`NODE_UNHEALTHY_FLEET_MAX_FRACTION`, applied once there are at least `NODE_UNHEALTHY_FLEET_MIN_NODES`, default 3), SAM assumes it has stopped _receiving_ heartbeats rather than that every machine died: it holds the deletions and, once the silence outlasts the two windows combined (40 minutes by default), logs `node_cleanup.fleet_heartbeat_intake_escalation_required` for you to investigate. Each health decision is recorded in the `node_health_events` table, which keeps its rows after the node itself is deleted. The settings are in [Idle & Orphan Node Reaping](/docs/reference/configuration/#idle--orphan-node-reaping).
+Machines users enrolled themselves (bring-your-own nodes), app-deployment nodes, and Instant containers are left alone. If half or more of the running workspace VMs go silent at once (`NODE_UNHEALTHY_FLEET_MAX_FRACTION`, applied once there are at least `NODE_UNHEALTHY_FLEET_MIN_NODES`, default 3), SAM assumes it has stopped _receiving_ heartbeats rather than that every machine died. It then holds everything — no chat notices, no sleep requests, no deletions — and, once the silence outlasts the two windows combined (40 minutes by default), logs `node_cleanup.fleet_heartbeat_intake_escalation_required` for you to investigate. Each health decision is recorded in the `node_health_events` table, which keeps its rows after the node itself is deleted. The settings are in [Idle & Orphan Node Reaping](/docs/reference/configuration/#idle--orphan-node-reaping).
 
 ## Troubleshooting
 

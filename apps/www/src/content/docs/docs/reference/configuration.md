@@ -181,7 +181,8 @@ Sleeping and reclaimed Instant and VM sessions are restored from a snapshot of t
 | `SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT`           | `5s`                      | VM-agent timeout for each best-effort snapshot progress callback. This uses Go duration syntax and is passed to newly provisioned VMs and Instant containers.                                                                                                                                                                                                                                                     |
 | `SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES`               | `262144` (256 KB)         | Maximum snapshot coordination request size accepted by the Worker.                                                                                                                                                                                                                                                                                                                                                |
 | `SESSION_SNAPSHOT_R2_PREFIX`                         | `session-snapshots`       | Private object prefix. Session objects are deleted by the Worker from D1 lifecycle state, not by object age.                                                                                                                                                                                                                                                                                                      |
-| `SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS`             | `3`                       | Maximum replacement-VM wake attempts before the sleeping session becomes unavailable.                                                                                                                                                                                                                                                                                                                             |
+| `SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS`             | `3`                       | Replacement-VM wake attempts allowed in a burst. Once spent, further wakes are refused (`recovery_attempts_exhausted`) until `SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS` has passed since the last failed attempt; the snapshot's own expiry remains the hard limit.                                                                                                                                             |
+| `SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS` | `900000` (15 min) | How long a spent wake-attempt burst stays spent before a new wake may be tried |
 | `SESSION_RECOVERY_LINEAGE_MAX_DEPTH`                 | `256`                     | How many wake-to-wake links a wake follows back to the conversation's first run to decide whether that run explicitly pinned its region. A wake without such a request only prefers the region it slept in.                                                                                                                                                                                                       |
 | `SESSION_SLEEP_AFTER_MS`                             | `900000` (15 min)         | ProjectData-recorded idle interval before SAM automatically sleeps a VM session. Runtime heartbeats do not extend this clock. Completed and failed tasks queue sleep immediately. Their still-active final prompt becomes eligible after this interval from its later activity or the task's end, so a working agent is not slept mid-turn. Ledger cleanup also uses it to protect the final response.            |
 | `SESSION_SLEEP_SWEEP_BATCH_SIZE`                     | `10`                      | Maximum due session sleep candidates selected and individually claimed by one scheduled sweep.                                                                                                                                                                                                                                                                                                                    |
@@ -503,15 +504,15 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 ## Dashboard
 
 The dashboard's **Active Tasks** list (`GET /api/dashboard/active-tasks`, `apps/api/src/routes/dashboard.ts`)
-ranks every active task by its newest message, or by when it started if it has none yet, and only
-then applies the display limit.
+reads up to `DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT` of the user's most recently started active tasks,
+ranks them by newest message (or by when they started, if they have none yet), and only then applies
+the display limit. The open dashboard refreshes the list every 15 seconds while its tab is visible.
 
 | Variable                                | Default           | Description                                                                                                                                    |
 | --------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DASHBOARD_ACTIVE_TASK_LIMIT`           | `6`               | Most recently active tasks the list shows                                                                                                      |
 | `DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT` | `100`             | Active tasks read and ranked before the display limit applies (also the maximum; each project's candidates share one SQL statement's binds)    |
 | `DASHBOARD_INACTIVE_THRESHOLD_MS`       | `900000` (15 min) | A working task whose last message is newer than this shows **Active**; older shows **Working**                                                 |
-| `VITE_ACTIVE_TASKS_POLL_MS`             | `15000`           | Build-time web setting: how often the open dashboard refreshes the list; polling pauses while the tab is hidden                                |
 
 ## HTTP Response Caching
 
@@ -1191,7 +1192,7 @@ enabled, each `cron.completed` log carries `projectDataArchiveShardingSkipReason
 tick with a `frozen`/`precopy_refused` journal and is skipped by the sweep for
 `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS`.
 
-The shipped cadence (`900000`) and wall budget (`30000`) were sized against the SAM root object
+The shipped cadence (`1080000`, 18 minutes) and wall budget (`10000`) were sized against the SAM root object
 (~3,350 backlog sessions plus 4-233 newly terminal sessions per day): one tick moves one
 non-trivial session because the wall-time break fires between candidates, so a daily tick can
 never keep up. Idle ticks cost two D1 statements, per-tick copy work is bounded by the wall
@@ -1206,9 +1207,11 @@ project's D1 journal/location/breaker state and run a scoped dry-run canary for 
 and optional session. Dry-runs work while both rollout switches are false and never call source deletion RPCs.
 Non-dry scoped canaries fail closed unless exact archive routing is active, because publishing or
 deleting source rows while exact reads still resolve to root can render conversations empty. Failed,
-poisoned, or frozen rows are inspected through the frozen-intent route and recovered through the
-copy-back helper with exact archive routing enabled and an explicit operator reason before any broader
-rollout.
+poisoned, or frozen rows are inspected through the frozen-intent route (and listed under **Admin →
+Storage → Problem migrations**). A migration that never reached source deletion is cleared with
+Abandon (the page's button, or `POST .../migrations/:migrationId/abandon`); one past source deletion
+is recovered through the copy-back helper with exact archive routing enabled. Both take an explicit
+operator reason, and neither closes the project's circuit breaker.
 
 Safe operator sequence for ProjectData storage relief:
 

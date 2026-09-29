@@ -172,8 +172,9 @@ see the source. You can write one in your own messages too.
 ![An agent's chat reply containing a rendered Mermaid flowchart: a checkout request goes from the browser to a rate limiter, which either answers 429 or passes it on to payments and then the ledger. The diagram sits under a Diagram header with copy, reset and expand buttons.](/images/docs/chat-mermaid-diagram.png)
 
 In chat, each diagram has three buttons: **Copy Mermaid source**, **Reset diagram view**, and
-**Expand Mermaid diagram**, which opens it full-screen. Drag to pan, and scroll or pinch to zoom —
-scrolling with the pointer over a diagram zooms the diagram, not the chat.
+**Expand Mermaid diagram**, which opens it full-screen. Drag to pan, and scroll or pinch to zoom. On
+a phone, a swipe that starts on a diagram pans the diagram, so start the swipe beside it to scroll
+the chat.
 
 Markdown files show diagrams too, in the project library and the **Files** tab, as a plain picture
 without those controls.
@@ -181,8 +182,8 @@ without those controls.
 If a diagram has a syntax error you get a **Mermaid diagram error** card with the parser's message
 instead; in chat it also has **Copy source** and **View source**. Ask the agent to fix the syntax.
 
-Because agents write these diagrams, SAM draws them as static pictures: no scripts, links that stay
-inside the diagram, and no HTML (the details are in
+Because agents write these diagrams, SAM draws them as static pictures: no scripts, no HTML, and
+no links out of the diagram (the details are in
 [Security](/docs/architecture/security/#agent-written-files-and-diagrams)). Two things follow for the diagrams
 you ask for:
 
@@ -199,9 +200,9 @@ Click the microphone button to speak your message instead of typing. SAM transcr
 **Limits:**
 
 - Maximum audio file size: 10 MB
-- 30 transcriptions per minute per user (`RATE_LIMIT_TRANSCRIBE`). Past that, the microphone shows
-  _"Too many requests. Please try again later."_ and that recording is not transcribed, so record
-  it again after a short wait.
+- 30 transcriptions per minute per user (`RATE_LIMIT_TRANSCRIBE`). Past that, the microphone
+  briefly shows an error state (hover it on a desktop to read _"Too many requests. Please try again
+  later."_) and that recording is not transcribed, so record it again after a short wait.
 
 ## Text-to-Speech Playback
 
@@ -257,16 +258,19 @@ For short conversations (5 or fewer messages), the messages are passed directly 
 - Each fork creates a new session with its own branch and workspace
 - **Fork** and **Retry** both ask SAM for a summary of the conversation, and together they allow 30
   summaries per hour per user (`RATE_LIMIT_SESSION_SUMMARIZE`), however short the conversation.
-  Past the limit, Fork stops with _"Too many requests. Please try again later."_ Retry still opens
-  the new chat, but without a summary of the previous one — wait, or paste the context you need
-  into your message yourself.
+  - Past the limit, **Fork** shows _"Too many requests. Please try again later."_, and its
+    "Forking from" banner stays on _Loading context..._ with **Send** disabled. Close the banner with
+    its **✕** and fork again later.
+  - **Retry** still opens the new chat, but without a summary of the previous one. Wait, or paste the
+    context you need into your message yourself.
 
 ## Finding Past Conversations
 
 Two different tools answer two different questions:
 
 - **"Which chat was that?"** Type in the **Search chats** box above the session list. It matches
-  chat titles, session IDs, and who started the chat. It does not read messages.
+  chat titles, session IDs, and who started the chat, among the chats loaded in the list (the 100
+  most recently active). It does not read messages, so for anything older, ask an agent.
 - **"Where did we talk about…?"** Ask an agent in the project, for example: _"Search this
   project's chats for where we chose the retry limit, and tell me what we decided."_ Agents can
   search the text of every chat in the project — sleeping, stopped, and archived ones included.
@@ -277,6 +281,9 @@ Two different tools answer two different questions:
 - **Use a few distinctive words.** A search returns messages that contain _all_ of its words.
   Indexed chats match whole words, ignoring case, so `retry` does not find `retries` — ask for the
   forms you expect. Punctuation and quotation marks are ignored, so there is no exact-phrase search.
+- **Leave out accents.** Accented letters in a search are dropped, but indexed chats are stored
+  without accents, so `deploiement` finds "déploiement". Words in non-Latin scripts can't be
+  searched yet.
 - **The agent's latest replies may not be searchable yet.** SAM indexes a chat each time it goes to
   sleep, and again when it stops. Your own messages can be found straight away; the agent's replies
   become searchable at the next indexing pass.
@@ -287,49 +294,9 @@ Two different tools answer two different questions:
   history comes back in pages the agent works through until the search reports that it is complete.
   If an answer looks incomplete, ask the agent whether its search covered everything.
 
-### How search works
-
-This is the detail an agent — or a self-hoster tuning search — needs.
-
-Each `chat_messages` row is a single streaming token, so no row holds a whole word. SAM therefore
-concatenates consecutive same-role tokens into logical messages and indexes those with SQLite FTS5
-(`materializeSession()` in `apps/api/src/durable-objects/project-data/materialization.ts`), using the
-`unicode61` tokenizer, which folds case and diacritics but does not stem. Indexing is incremental:
-it runs every time a session sleeps and again when it stops, fails, or is cleaned up after going
-idle, and each pass covers only the messages written since the last one.
-
-- **Everything indexed so far**: word search. The query's words are ANDed; punctuation, quotes, and
-  FTS5 operators are stripped first (`buildSafeFtsQuery()` in `apps/api/src/lib/fts5.ts`).
-- **Messages written since a session was last indexed**: keyword (substring) fallback. This rescues
-  whole user messages; streaming agent output is split across too many rows for a keyword match, so
-  agent text becomes searchable only once the next pass runs.
-- **Sessions whose index was pruned for storage**: keyword fallback only, permanently. Under storage
-  pressure SAM deletes the grouped rows and index entries for terminal sessions older than a week to
-  reclaim space, and deliberately never re-indexes them, because re-indexing would undo the reclaimed
-  bytes.
-
-Search work is bounded by configured windows rather than by how much history the project holds
-(`searchMessagesWithCoverage()` in `apps/api/src/durable-objects/project-data/message-search.ts`).
-Full-text ranking scores and reads only the newest `PROJECT_DATA_SEARCH_FTS_CANDIDATE_LIMIT` matches
-(2,000 by default), and the keyword fallback scans the newest
-`PROJECT_DATA_SEARCH_KEYWORD_SCAN_ROW_LIMIT` raw messages (50,000 by default). Small projects never
-reach either limit. A search that reached one says so: the `rootSearch` field flags it and
-`coverageNotes` explains what was not searched.
-
-Idea, task, knowledge, and message search all trim only oversized input before it reaches SQLite.
-Long multi-word queries search every retained term, including late ones: LIKE-based paths use one
-short escaped predicate per term, and indexed search uses the equivalent bounded FTS query.
-`SEARCH_QUERY_MAX_LENGTH` and `SEARCH_QUERY_MAX_TERMS` are generous abuse guards (defaults: 4096 bytes
-and 40 terms); `SEARCH_QUERY_MAX_TERM_LENGTH` keeps each LIKE term inside SQLite's pattern budget
-(default 48 bytes; higher overrides are clamped). Responses return the effective `query`, a
-`queryTruncated` flag, and `queryLimits`, so a caller can tell an exact search from one a guardrail
-trimmed (`apps/api/src/lib/search-query-limits.ts`).
-
-Project-wide `search_messages` also traverses the project's archived history. A call can return
-provisional results plus `archiveSearch.continuation`; pass that continuation back with the same
-query, roles, and limit until `archiveSearch.complete` is true. `ownerCoverage`, `indexCoverage`,
-`rootError`, and `executionErrors` distinguish pending traversal, one-time index repair, and
-execution failures. A search scoped to one session reads that session directly.
+For how indexing, search windows, query limits, and archive paging work — the detail an agent or a
+self-hoster tuning search needs — see
+[Architecture → Message search](/docs/architecture/overview/#message-search).
 
 ## Session Lifecycle
 
@@ -350,10 +317,10 @@ Persistent chat sessions can sleep and recover on both [Instant and VM-backed ru
 
 - **Sleeping.** The session went idle or you manually chose **Sleep** for an awake idle conversation-mode session with a workspace. SAM writes a checkpoint, releases compute, and keeps the composer visible so sending a message wakes the same chat. A message sent in the first minutes after it slept waits (up to an hour) until the old workspace has finished shutting down, then wakes it, usually within a minute or two of the shutdown.
 - **Recovery.** SAM is rebuilding the session's runtime and restoring its saved state. Wait for it to finish instead of resending.
-- **Wake failed.** SAM could not safely wake the sleeping session or the queued wake prompt expired before delivery. The session is marked **Wake failed** in the list and a system message in the chat explains the reason, so the failure is visible instead of hidden in retry state. [Wake failed](/docs/guides/instant-sessions/#wake-failed) lists the reasons and what to do about each.
-- **Failed tasks.** When a task fails while its workspace is still running, SAM snapshots the workspace and puts the conversation to sleep instead of deleting it. That covers a provider usage limit, an expired request for your input, and an agent that went quiet after a SAM check-in. If the agent is still working when the task fails, SAM waits for its turn to end first (up to 8 hours by default). The failure banner stays, and sending a message wakes the same chat with its files restored. If SAM could not save the workspace, or the snapshot is incomplete, the chat says so. An agent that crashed, timed out, or hung mid-turn has no session SAM can safely snapshot, so its uncommitted changes are lost and the chat says that too. **Archive** still deletes it right away.
+- **Wake failed.** SAM could not safely wake the sleeping session or the queued wake prompt expired before delivery. The session is marked **Wake failed** in the list and a system message in the chat explains the reason, so the failure is visible instead of hidden in retry state. [Wake failed](/docs/guides/session-troubleshooting/#wake-failed) lists the reasons and what to do about each.
+- **Failed tasks.** When a task fails while its workspace is still running, SAM snapshots the workspace and puts the conversation to sleep instead of deleting it. That covers a provider usage limit, an expired request for your input, and an agent that went quiet after a SAM check-in. If the agent is still working when the task fails, SAM waits for its turn to end first (up to 8 hours by default). The failure banner stays, and sending a message wakes the same chat with its files restored. If SAM could not save the workspace, or the snapshot is incomplete, the chat says so. An agent that crashed, timed out, or hung mid-turn has no session SAM can safely snapshot, so its uncommitted changes are lost and the chat says that too. **Archive** still deletes it right away. [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails) shows how to tell which happened.
 
-You may also see a banner telling you a message was saved but its delivery was interrupted. **That one needs a decision from you** — SAM will not replay the message automatically, because replaying a prompt that already half-ran duplicates commits and pull requests. See [what to do when a session is interrupted](/docs/guides/instant-sessions/#what-to-do-when-a-session-is-interrupted).
+You may also see a banner telling you a message was saved but its delivery was interrupted. **That one needs a decision from you** — SAM will not replay the message automatically, because replaying a prompt that already half-ran duplicates commits and pull requests. See [Your prompt may or may not have run](/docs/guides/session-troubleshooting/#your-prompt-may-or-may-not-have-run).
 
 ## Starting a New Chat
 

@@ -33,12 +33,13 @@ const NOW = Date.now();
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
-const PROJECT_ID = '01KDOCSCHECKOUTSERVICE00001';
+/** A well-formed ULID, like a real project ID. */
+const PROJECT_ID = '01KDXC7M2Q9V4T8R6N3B5W1Y0Z';
 
 const PROBLEM_MIGRATIONS = {
   migrations: [
     {
-      migrationId: '9c41e2d7',
+      migrationId: '9c41e2d7-5b3a-4f6e-8d21-7a0c4e9b1f35',
       projectId: PROJECT_ID,
       sessionId: 'b7f3c2a1-5e8d-4c6b-9a0f-2d1e3c4b5a69',
       state: 'poisoned',
@@ -54,7 +55,7 @@ const PROBLEM_MIGRATIONS = {
       updatedAt: NOW - 6 * HOUR,
     },
     {
-      migrationId: '3f0a8b55',
+      migrationId: '3f0a8b55-2c7d-4e19-9b4a-6d8e1f0c3a72',
       projectId: PROJECT_ID,
       sessionId: 'e2c9a4f0-1b7d-4e3a-8c5f-6d0b9a1e2f38',
       state: 'frozen',
@@ -70,7 +71,7 @@ const PROBLEM_MIGRATIONS = {
       updatedAt: NOW - 2 * DAY,
     },
     {
-      migrationId: 'a17d6c90',
+      migrationId: 'a17d6c90-8e4f-4b2a-a5c3-1d9f7e6b0c48',
       projectId: PROJECT_ID,
       sessionId: '4d8e1f2a-9b3c-4a5d-8e6f-0a1b2c3d4e5f',
       state: 'failed',
@@ -161,9 +162,9 @@ async function openStoragePage(page: Page) {
   // One card per state the guide's badge table explains, each wearing its own badge.
   // (`span`: the card's "Poisoned"/"Frozen" timestamp labels repeat the word as a `dt`.)
   const badges: Record<string, string> = {
-    '9c41e2d7': 'Poisoned',
-    '3f0a8b55': 'Frozen',
-    a17d6c90: 'Failed',
+    '9c41e2d7-5b3a-4f6e-8d21-7a0c4e9b1f35': 'Poisoned',
+    '3f0a8b55-2c7d-4e19-9b4a-6d8e1f0c3a72': 'Frozen',
+    'a17d6c90-8e4f-4b2a-a5c3-1d9f7e6b0c48': 'Failed',
   };
   for (const [migrationId, badge] of Object.entries(badges)) {
     await expect(
@@ -185,18 +186,22 @@ test('docs: admin storage abandon dialog on mobile', async ({ page }) => {
   test.skip(!isMobile(page), 'mobile capture');
   const section = await openStoragePage(page);
 
-  // Open the dialog from the frozen migration's own button, as an operator would.
-  await section.getByTestId('migration-3f0a8b55').getByRole('button', { name: 'Abandon' }).click();
+  // Open the dialog from the poisoned migration's own button, as an operator would: it is
+  // the case the guide says needs action (a `precopy_refused` Frozen row heals itself).
+  await section
+    .getByTestId('migration-9c41e2d7-5b3a-4f6e-8d21-7a0c4e9b1f35')
+    .getByRole('button', { name: 'Abandon' })
+    .click();
 
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('heading', { name: 'Abandon migration' })).toBeVisible();
-  await expect(dialog).toContainText('3f0a8b55');
+  await expect(dialog).toContainText('9c41e2d7-5b3a-4f6e-8d21-7a0c4e9b1f35');
   // The guide says a reason is required: the submit is disabled until one is typed.
   const submit = dialog.getByRole('button', { name: 'Abandon migration' });
   await expect(submit).toBeDisabled();
   await dialog
     .getByPlaceholder('Why is this migration being abandoned?')
-    .fill('Session ended before any copy');
+    .fill('R2 timeouts fixed; start over');
   await expect(submit).toBeEnabled();
 
   // The page behind the dialog would otherwise bleed through its translucent backdrop.

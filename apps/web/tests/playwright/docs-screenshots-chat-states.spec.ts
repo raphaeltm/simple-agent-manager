@@ -173,14 +173,14 @@ function wakeFailedMessages() {
       id,
       'wf-1',
       'user',
-      'Add a per-customer rate limit to POST /checkout: 20 requests a minute, with tests.',
+      'Rate-limit POST /checkout to 20 requests a minute per customer.',
       NOW - 3 * HOUR
     ),
     message(
       id,
       'wf-2',
       'assistant',
-      'Done. `CheckoutRateLimiter` in `src/middleware/rate-limit.ts` keys the limit on the customer ID and answers 429 with a `Retry-After` header. The new tests cover the 20th and 21st request in a window, and the full suite passes.',
+      'Done: `CheckoutRateLimiter` now returns 429 past the limit, and the new tests pass.',
       NOW - 3 * HOUR + 6 * MINUTE
     ),
     message(
@@ -328,6 +328,9 @@ function isMobile(page: Page): boolean {
 
 test('docs: wake failed in the session list and the chat', async ({ page }) => {
   test.skip(isMobile(page), 'desktop capture');
+  // Narrowest desktop layout (lg starts at 1024px): the docs column scales this image down,
+  // and a narrower capture keeps the red list label legible there.
+  await page.setViewportSize({ width: 1060, height: 720 });
   await openChat(page, WAKE_FAILED.id);
 
   // The two things the guide tells the reader to look for, asserted where they render.
