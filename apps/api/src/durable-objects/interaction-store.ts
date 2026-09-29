@@ -687,7 +687,8 @@ export class InteractionStore extends DurableObject<Env> {
          UNION ALL
          SELECT deadline_at AS due_at FROM interactions WHERE state = 'pending'
          UNION ALL
-         SELECT purge_at AS due_at FROM interactions WHERE purge_at IS NOT NULL
+         SELECT purge_at AS due_at FROM interactions
+         WHERE purge_at IS NOT NULL AND detail_purged_at IS NULL
          ORDER BY due_at ASC
          LIMIT 1`
       )

@@ -2,7 +2,6 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { InteractionStore } from '../../src/durable-objects/interaction-store';
-import type { ProjectData } from '../../src/durable-objects/project-data';
 import type { Env } from '../../src/env';
 
 const PROJECT_ID = 'project-acp-interactions';
@@ -20,12 +19,8 @@ function stub(name: string): DurableObjectStub<InteractionStore> {
   return api.INTERACTION_STORE.get(api.INTERACTION_STORE.idFromName(name));
 }
 
-async function createChatSession(projectId = PROJECT_ID): Promise<string> {
-  const api = apiEnv();
-  const projectData = api.PROJECT_DATA.get(
-    api.PROJECT_DATA.idFromName(projectId)
-  ) as DurableObjectStub<ProjectData>;
-  return projectData.createSession(null, 'ACP interaction test');
+function createChatSession(): string {
+  return `chat-${crypto.randomUUID()}`;
 }
 
 async function withInteractionsEnabled<T>(fn: () => Promise<T>): Promise<T> {
@@ -62,10 +57,17 @@ function createInput(overrides: Partial<Parameters<InteractionStore['create']>[0
   };
 }
 
+async function clearDueWork(store: DurableObjectStub<InteractionStore>): Promise<void> {
+  await runInDurableObject(store, async (_instance, state) => {
+    state.storage.sql.exec(`DELETE FROM outbox`);
+    await state.storage.deleteAlarm();
+  });
+}
+
 describe('InteractionStore durable ACP foundation', () => {
   it('is dormant by default and preserves existing records once disabled', async () => {
     const store = stub(`disabled/${crypto.randomUUID()}`);
-    const chatSessionId = await createChatSession();
+    const chatSessionId = createChatSession();
     const disabled = await store.create(createInput({ chatSessionId }));
     expect(disabled).toMatchObject({ status: 'disabled' });
 
@@ -74,6 +76,7 @@ describe('InteractionStore durable ACP foundation', () => {
         createInput({ chatSessionId, interactionId: crypto.randomUUID() })
       );
       expect(created.status).toBe('created');
+      await clearDueWork(store);
     });
 
     const snapshot = await store.snapshot(null);
@@ -83,9 +86,10 @@ describe('InteractionStore durable ACP foundation', () => {
   it('encrypts arbitrary detail, keeps only structural summaries, and rejects same id with another payload hash', async () => {
     await withInteractionsEnabled(async () => {
       const store = stub(`encrypted/${crypto.randomUUID()}`);
-      const chatSessionId = await createChatSession();
+      const chatSessionId = createChatSession();
       const created = await store.create(createInput({ chatSessionId }));
       expect(created).toMatchObject({ status: 'created' });
+      await clearDueWork(store);
 
       const conflict = await store.create(createInput({ chatSessionId, payloadHash: HASH_B }));
       expect(conflict).toMatchObject({ status: 'conflict' });
@@ -111,8 +115,9 @@ describe('InteractionStore durable ACP foundation', () => {
   it('commits answers atomically, binds idempotency keys to body hashes, and survives delivery loss states', async () => {
     await withInteractionsEnabled(async () => {
       const store = stub(`answer/${crypto.randomUUID()}`);
-      const chatSessionId = await createChatSession();
+      const chatSessionId = createChatSession();
       await store.create(createInput({ chatSessionId }));
+      await clearDueWork(store);
 
       const answered = await store.answer({
         projectId: PROJECT_ID,
@@ -154,8 +159,9 @@ describe('InteractionStore durable ACP foundation', () => {
   it('purges encrypted sensitive payloads while preserving bounded summaries', async () => {
     await withInteractionsEnabled(async () => {
       const store = stub(`purge/${crypto.randomUUID()}`);
-      const chatSessionId = await createChatSession();
+      const chatSessionId = createChatSession();
       await store.create(createInput({ chatSessionId }));
+      await clearDueWork(store);
       await store.answer({
         projectId: PROJECT_ID,
         chatSessionId,
