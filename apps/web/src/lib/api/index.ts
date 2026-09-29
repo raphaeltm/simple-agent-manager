@@ -448,6 +448,16 @@ export {
 } from './repo-browse';
 export { getReportIssueConfig, submitReportIssue } from './report';
 export type {
+  ResourceTimelineChunkEntry,
+  ResourceTimelineChunkResponse,
+  ResourceTimelineIndexResponse,
+  ResourceTimelineRollup,
+  ResourceTimelineRunEntry,
+  WorkspaceResourceSample,
+  WorkspaceResourceToolSpan,
+} from './resource-timeline';
+export { getSessionResourceTimeline, getSessionResourceTimelineChunk } from './resource-timeline';
+export type {
   ActivityEventResponse,
   ActivityEventsListResponse,
   AllChatsApiResponse,
@@ -559,13 +569,3 @@ export {
   updateWorkspace,
   updateWorkspacePortsPublic,
 } from './workspaces';
-export type {
-  ResourceTimelineChunkEntry,
-  ResourceTimelineChunkResponse,
-  ResourceTimelineIndexResponse,
-  ResourceTimelineRollup,
-  ResourceTimelineRunEntry,
-  WorkspaceResourceSample,
-  WorkspaceResourceToolSpan,
-} from './resource-timeline';
-export { getSessionResourceTimeline, getSessionResourceTimelineChunk } from './resource-timeline';
