@@ -117,3 +117,8 @@ covered PRs #2092–#2135; this pass covers everything merged since.
     and linked GitHub work before resending.
   - Restored the indexed-search qualifier that reserved words `AND`, `OR`, `NOT`, and `NEAR` are
     ignored. A final read-only verification found no other actionable documentation issues.
+  - Final local validation: the public docs build produced 224 pages, and the link checker found 0
+    broken internal links across 31 documentation pages.
+  - CodeRabbit was requested through the trusted label path and one explicit workflow retry, but
+    neither produced a substantive review. The user explicitly waived that gate for PR #2179 and
+    authorized merge on 29 September 2026.
