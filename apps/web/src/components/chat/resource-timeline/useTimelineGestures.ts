@@ -130,7 +130,10 @@ export function useTimelineGestures(
         event.preventDefault();
         const anchor = toAxis(event.clientX, rect, view);
         const factor = Math.exp(event.deltaY * WHEEL_ZOOM_SENSITIVITY);
-        handlersRef.current.onRange(anchor - (anchor - view.min) * factor, anchor + (view.max - anchor) * factor);
+        handlersRef.current.onRange(
+          anchor - (anchor - view.min) * factor,
+          anchor + (view.max - anchor) * factor
+        );
       } else if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
         event.preventDefault();
         const shift = (event.deltaX / Math.max(1, rect.width)) * span;

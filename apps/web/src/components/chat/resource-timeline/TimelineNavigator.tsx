@@ -31,7 +31,10 @@ interface TimelineNavigatorProps {
   onRange: (min: number, max: number) => void;
 }
 
-function navigatorOptions(theme: ChartTheme, axisRef: { current: TimeAxis }): Omit<uPlot.Options, 'width'> {
+function navigatorOptions(
+  theme: ChartTheme,
+  axisRef: { current: TimeAxis }
+): Omit<uPlot.Options, 'width'> {
   return {
     height: HEIGHT,
     legend: { show: false },
@@ -45,11 +48,24 @@ function navigatorOptions(theme: ChartTheme, axisRef: { current: TimeAxis }): Om
     },
     axes: [
       { show: false },
-      { scale: 'cpu', size: PLOT_LEFT_GUTTER_PX, show: true, values: () => [], grid: { show: false }, ticks: { show: false } },
+      {
+        scale: 'cpu',
+        size: PLOT_LEFT_GUTTER_PX,
+        show: true,
+        values: () => [],
+        grid: { show: false },
+        ticks: { show: false },
+      },
     ],
     series: [
       {},
-      { scale: 'cpu', stroke: theme.cpu, width: 1, fill: withAlpha(theme.cpu, 0.22), points: { show: false } },
+      {
+        scale: 'cpu',
+        stroke: theme.cpu,
+        width: 1,
+        fill: withAlpha(theme.cpu, 0.22),
+        points: { show: false },
+      },
       { scale: 'memory', stroke: withAlpha(theme.memory, 0.8), width: 1, points: { show: false } },
     ],
     hooks: {
@@ -67,7 +83,10 @@ function navigatorOptions(theme: ChartTheme, axisRef: { current: TimeAxis }): Om
             ctx.fillStyle = theme.sleep;
             ctx.fillRect(x0, bbox.top, Math.max(px, x1 - x0), bbox.height);
             const label = formatCompactDuration(sleep.realEnd - sleep.realStart);
-            if (sleep.realEnd - sleep.realStart >= LABELLED_SLEEP_MS && x1 - x0 >= ctx.measureText(label).width + 4 * px) {
+            if (
+              sleep.realEnd - sleep.realStart >= LABELLED_SLEEP_MS &&
+              x1 - x0 >= ctx.measureText(label).width + 4 * px
+            ) {
               ctx.fillStyle = theme.mutedText;
               ctx.fillText(label, (x0 + x1) / 2, bbox.top + 2 * px);
             }
@@ -121,7 +140,10 @@ export function TimelineNavigator({
     const nearMax = Math.abs(x - (left + width)) <= GRIP_HIT_PX / 2;
     if (nearMin || nearMax) {
       // Prefer the grip the pointer is closer to when the window is narrow.
-      drag.current = { kind: Math.abs(x - left) < Math.abs(x - left - width) ? 'min' : 'max', view };
+      drag.current = {
+        kind: Math.abs(x - left) < Math.abs(x - left - width) ? 'min' : 'max',
+        view,
+      };
     } else if (x > left && x < left + width) {
       drag.current = { kind: 'move', startX: event.clientX, view };
     } else {
@@ -147,7 +169,8 @@ export function TimelineNavigator({
         onRange(current.view.min, Math.max(at, current.view.min + 1));
         break;
       case 'draw':
-        if (Math.abs(toPx(at) - toPx(current.anchor)) > 6) onRange(Math.min(at, current.anchor), Math.max(at, current.anchor));
+        if (Math.abs(toPx(at) - toPx(current.anchor)) > 6)
+          onRange(Math.min(at, current.anchor), Math.max(at, current.anchor));
         break;
     }
   };
@@ -156,7 +179,10 @@ export function TimelineNavigator({
     const current = drag.current;
     drag.current = null;
     // A tap outside the window recentres it there.
-    if (current?.kind === 'draw' && Math.abs(toPx(toAxisX(event.clientX)) - toPx(current.anchor)) <= 6) {
+    if (
+      current?.kind === 'draw' &&
+      Math.abs(toPx(toAxisX(event.clientX)) - toPx(current.anchor)) <= 6
+    ) {
       const half = (view.max - view.min) / 2;
       onRange(current.anchor - half, current.anchor + half);
     }
@@ -177,7 +203,10 @@ export function TimelineNavigator({
           onPointerUp={onPointerUp}
           onPointerCancel={() => (drag.current = null)}
         >
-          <div className="pointer-events-none absolute inset-y-0 left-0 bg-canvas/55" style={{ width: left }} />
+          <div
+            className="pointer-events-none absolute inset-y-0 left-0 bg-canvas/55"
+            style={{ width: left }}
+          />
           <div
             className="pointer-events-none absolute inset-y-0 right-0 bg-canvas/55"
             style={{ left: left + width }}

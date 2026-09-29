@@ -438,6 +438,24 @@ describe('session resource timeline', () => {
     expect(unknown).toMatchObject({ collection: 'pending', runtime: null });
   });
 
+  it('reports expired history when samples aged out but the session summary remains', async () => {
+    const { sqlite, env, addNode, addWorkspace } = setup();
+    addNode('node-a', 'vm');
+    addWorkspace('ws-1', 'proj-1', 'node-a', 'sess-old');
+    addWorkspace('ws-2', 'proj-2', 'node-a', 'sess-foreign');
+    await upload(env, { projectId: 'proj-1', workspaceId: 'ws-1', sessionId: 'sess-old', sequence: 0, start: T0 });
+    await upload(env, { projectId: 'proj-2', workspaceId: 'ws-2', sessionId: 'sess-foreign', sequence: 0, start: T0 });
+    // Retention cleanup deletes the chunks and keeps the longer-lived summary.
+    sqlite.prepare('DELETE FROM workspace_resource_chunks').run();
+
+    const expired = await getSessionResourceTimeline(env, { projectId: 'proj-1', sessionId: 'sess-old' });
+    // Another project's summary for a session id must not make this project's answer "expired".
+    const foreign = await getSessionResourceTimeline(env, { projectId: 'proj-1', sessionId: 'sess-foreign' });
+
+    expect(expired).toMatchObject({ collection: 'expired', chunks: [] });
+    expect(foreign).toMatchObject({ collection: 'pending', chunks: [] });
+  });
+
   it('reads a chunk only through its own project and session', async () => {
     const { env, addNode, addWorkspace } = setup();
     addNode('node-a', 'vm');

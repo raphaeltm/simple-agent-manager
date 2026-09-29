@@ -187,14 +187,18 @@ export function indexFromApi(response: ResourceTimelineIndexResponse): ResourceT
       startedAt: chunk.startedAt,
       endedAt: chunk.endedAt,
       sampleCount: chunk.sampleCount,
-      overview: chunk.rollup && chunk.rollup.start.length > 0 ? rollupOverview(chunk.rollup) : [summaryOverview(chunk)],
+      overview:
+        chunk.rollup && chunk.rollup.start.length > 0
+          ? rollupOverview(chunk.rollup)
+          : [summaryOverview(chunk)],
       memoryHighWaterBytes: numberField(chunk.summary, 'memoryKernelPeakBytes'),
     }));
   return {
     runs: runsFromApi(response),
     chunks,
     sampleIntervalMs:
-      numberField(response.chunks[0]?.summary, 'sampleIntervalMillis') ?? DEFAULT_SAMPLE_INTERVAL_MS,
+      numberField(response.chunks[0]?.summary, 'sampleIntervalMillis') ??
+      DEFAULT_SAMPLE_INTERVAL_MS,
     uploadIntervalMs: DEFAULT_UPLOAD_INTERVAL_MS,
     completeness:
       response.omittedChunkCount > 0
@@ -210,7 +214,10 @@ export function indexFromApi(response: ResourceTimelineIndexResponse): ResourceT
  * previous kept sample so the line does not break between them — except across a
  * sampler gap, which must stay visible.
  */
-function coverThinnedSamples(samples: ResourceAggregate[], raw: readonly WorkspaceResourceSample[]): ResourceAggregate[] {
+function coverThinnedSamples(
+  samples: ResourceAggregate[],
+  raw: readonly WorkspaceResourceSample[]
+): ResourceAggregate[] {
   return samples.map((sample, i) => {
     const previous = samples[i - 1];
     if (!previous || raw[i]?.gap || previous.end >= sample.start) return sample;
@@ -219,13 +226,19 @@ function coverThinnedSamples(samples: ResourceAggregate[], raw: readonly Workspa
   });
 }
 
-export function chunkDetailFromApi(chunkId: string, detail: ResourceTimelineChunkResponse): ResourceChunkDetail {
+export function chunkDetailFromApi(
+  chunkId: string,
+  detail: ResourceTimelineChunkResponse
+): ResourceChunkDetail {
   const toolSpans = detail.toolSpans.map(toolSpanFromApi);
   const raw = [...detail.samples].sort((a, b) => a.t - b.t);
   const samples = raw.map(sampleToAggregate);
   return {
     chunkId,
-    samples: withToolStarts(detail.downsampled ? coverThinnedSamples(samples, raw) : samples, toolSpans),
+    samples: withToolStarts(
+      detail.downsampled ? coverThinnedSamples(samples, raw) : samples,
+      toolSpans
+    ),
     toolSpans,
     samplerGaps: detail.gaps
       .map((gap) => ({ start: numberField(gap, 'startedAt'), end: numberField(gap, 'endedAt') }))
@@ -234,7 +247,10 @@ export function chunkDetailFromApi(chunkId: string, detail: ResourceTimelineChun
 }
 
 /** Reads a session's whole resource timeline. */
-export function apiResourceHistorySource(projectId: string, sessionId: string): ResourceHistorySource {
+export function apiResourceHistorySource(
+  projectId: string,
+  sessionId: string
+): ResourceHistorySource {
   return {
     cacheKey: ['session-resource-timeline', projectId, sessionId],
     async loadIndex() {

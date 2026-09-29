@@ -60,10 +60,12 @@ export interface ResourceTimelineIndexResponse {
   omittedChunkCount: number;
   maxChunks: number;
   /**
-   * `unsupported` when nothing is recorded and the session's runtime does not
-   * collect resource history; `pending` when nothing has been uploaded yet.
+   * Why an empty timeline is empty: `unsupported` when the session's runtime
+   * collects no resource history, `expired` when samples were collected but have
+   * passed their retention (the session summary outlives them), and `pending`
+   * when nothing has been uploaded yet.
    */
-  collection: 'collected' | 'pending' | 'unsupported';
+  collection: 'collected' | 'pending' | 'unsupported' | 'expired';
   runtime: string | null;
 }
 
@@ -158,6 +160,19 @@ async function loadSessionRuntime(
   return row?.runtime ?? null;
 }
 
+/** A retained summary with no chunks means the samples existed and expired. */
+async function hasSessionSummary(env: Env, projectId: string, sessionId: string): Promise<boolean> {
+  const row = await env.DATABASE.prepare(
+    `SELECT 1 AS present
+       FROM workspace_resource_summaries
+      WHERE project_id = ? AND session_id = ?
+      LIMIT 1`
+  )
+    .bind(projectId, sessionId)
+    .first<{ present: number }>();
+  return row != null;
+}
+
 function groupRuns(
   chunks: readonly ResourceTimelineChunk[],
   workspaces: ReadonlyMap<string, RunWorkspaceRow>
@@ -231,7 +246,10 @@ export async function getSessionResourceTimeline(
   chunks.reverse();
 
   if (chunks.length === 0) {
-    const runtime = await loadSessionRuntime(env, projectId, sessionId);
+    const [runtime, hasSummary] = await Promise.all([
+      loadSessionRuntime(env, projectId, sessionId),
+      hasSessionSummary(env, projectId, sessionId),
+    ]);
     return {
       sessionId,
       runs: [],
@@ -239,7 +257,12 @@ export async function getSessionResourceTimeline(
       totalChunkCount,
       omittedChunkCount: 0,
       maxChunks,
-      collection: runtime && UNSUPPORTED_RUNTIMES.has(runtime) ? 'unsupported' : 'pending',
+      collection:
+        runtime && UNSUPPORTED_RUNTIMES.has(runtime)
+          ? 'unsupported'
+          : hasSummary
+            ? 'expired'
+            : 'pending',
       runtime,
     };
   }

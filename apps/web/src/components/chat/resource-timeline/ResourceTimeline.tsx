@@ -1,9 +1,9 @@
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { AlertTriangle } from 'lucide-react';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useMemo, useRef, useState } from 'react';
 
 import { formatBytes, formatDayTime, formatElapsed, formatMinutes } from './format';
-import { type PanelState,PLOT_LEFT_GUTTER_PX, PLOT_RIGHT_PADDING_PX } from './panels';
+import { type PanelState, PLOT_LEFT_GUTTER_PX, PLOT_RIGHT_PADDING_PX } from './panels';
 import { readoutAtCursor, readoutForRange } from './readout';
 import type { ResourceHistorySource } from './resource-source';
 import { buildSeries, findPeaks, type UsagePeak } from './series';
@@ -14,7 +14,11 @@ import { TimelineNavigator } from './TimelineNavigator';
 import { TimelinePanels } from './TimelinePanels';
 import type { ResourceTimelineIndex } from './types';
 import { useElementWidth } from './useElementWidth';
-import { useResourceTimelineData, useResourceTimelineIndex, useTimelineAxis } from './useResourceTimelineData';
+import {
+  useResourceTimelineData,
+  useResourceTimelineIndex,
+  useTimelineAxis,
+} from './useResourceTimelineData';
 
 /** Peaks closer together than this count as one moment. */
 const PEAK_SEPARATION_MS = 20 * 60_000;
@@ -47,41 +51,47 @@ export function ResourceTimeline({ source }: Readonly<{ source: ResourceHistoryS
     );
   }
   if (indexQuery.data.chunks.length === 0) {
-    return indexQuery.data.collection === 'unsupported' ? (
-      <UnsupportedTimeline />
-    ) : (
-      <EmptyTimeline uploadIntervalMs={indexQuery.data.uploadIntervalMs} />
-    );
+    switch (indexQuery.data.collection) {
+      case 'unsupported':
+        return (
+          <EmptyNotice title="Not recorded for Instant sessions">
+            Instant sessions run in a lightweight container that does not record CPU, memory or disk
+            usage yet. Sessions on a VM workspace record the full timeline.
+          </EmptyNotice>
+        );
+      case 'expired':
+        return (
+          <EmptyNotice title="Detailed history has expired">
+            This session&apos;s CPU, memory and disk samples are older than the retention period and
+            have been deleted.
+          </EmptyNotice>
+        );
+      default:
+        return (
+          <EmptyNotice title="No resource samples yet">
+            The workspace samples CPU, memory and disk every few seconds and uploads them every{' '}
+            {formatMinutes(indexQuery.data.uploadIntervalMs)}, so the first data appears about{' '}
+            {formatMinutes(indexQuery.data.uploadIntervalMs)} after the session starts.
+          </EmptyNotice>
+        );
+    }
   }
   return <TimelineBody source={source} index={indexQuery.data} />;
 }
 
-function EmptyTimeline({ uploadIntervalMs }: Readonly<{ uploadIntervalMs: number }>) {
+function EmptyNotice({ title, children }: Readonly<{ title: string; children: ReactNode }>) {
   return (
     <div className="rounded-lg border border-border-default bg-surface p-4 text-sm text-fg-muted">
-      <p className="font-medium text-fg-primary">No resource samples yet</p>
-      <p className="mt-1">
-        The workspace samples CPU, memory and disk every few seconds and uploads them every{' '}
-        {formatMinutes(uploadIntervalMs)}, so the first data appears about {formatMinutes(uploadIntervalMs)} after the
-        session starts.
-      </p>
+      <p className="font-medium text-fg-primary">{title}</p>
+      <p className="mt-1">{children}</p>
     </div>
   );
 }
 
-function UnsupportedTimeline() {
-  return (
-    <div className="rounded-lg border border-border-default bg-surface p-4 text-sm text-fg-muted">
-      <p className="font-medium text-fg-primary">Not recorded for Instant sessions</p>
-      <p className="mt-1">
-        Instant sessions run in a lightweight container that does not record CPU, memory or disk usage yet. Sessions on
-        a VM workspace record the full timeline.
-      </p>
-    </div>
-  );
-}
-
-function SessionSummary({ index, activeMs }: Readonly<{ index: ResourceTimelineIndex; activeMs: number }>) {
+function SessionSummary({
+  index,
+  activeMs,
+}: Readonly<{ index: ResourceTimelineIndex; activeMs: number }>) {
   const first = index.runs[0]?.startedAt ?? index.chunks[0]?.startedAt ?? 0;
   const last = index.chunks.at(-1)?.endedAt ?? first;
   const nodes = new Set(index.runs.map((run) => run.nodeId).filter(Boolean)).size;
@@ -112,7 +122,10 @@ function SessionSummary({ index, activeMs }: Readonly<{ index: ResourceTimelineI
   );
 }
 
-function TimelineBody({ source, index }: Readonly<{ source: ResourceHistorySource; index: ResourceTimelineIndex }>) {
+function TimelineBody({
+  source,
+  index,
+}: Readonly<{ source: ResourceHistorySource; index: ResourceTimelineIndex }>) {
   const [axisMode, setAxisMode] = useState<TimeAxisMode>('active');
   const axis = useTimelineAxis(index, axisMode);
   const { view, intent, setRange, zoom, showSpan, showLatest, showAll } = useTimelineView(axis);
@@ -123,7 +136,11 @@ function TimelineBody({ source, index }: Readonly<{ source: ResourceHistorySourc
   const width = useElementWidth(measureRef);
   const plotWidth = Math.max(1, width - PLOT_LEFT_GUTTER_PX - PLOT_RIGHT_PADDING_PX);
 
-  const data = useResourceTimelineData(source, index, axis, { min: view.min, max: view.max, widthPx: plotWidth });
+  const data = useResourceTimelineData(source, index, axis, {
+    min: view.min,
+    max: view.max,
+    widthPx: plotWidth,
+  });
   const series = useMemo(
     () => buildSeries(data.aggregates, axis, view.min, view.max, plotWidth, index.sampleIntervalMs),
     [data.aggregates, axis, view.min, view.max, plotWidth, index.sampleIntervalMs]
@@ -149,7 +166,13 @@ function TimelineBody({ source, index }: Readonly<{ source: ResourceHistorySourc
   const cursorInView = cursorX != null && cursorX >= view.min && cursorX <= view.max;
   const readout = cursorInView
     ? readoutAtCursor(cursorX, series, axis, index.runs, data.toolSpans, index.sampleIntervalMs)
-    : readoutForRange(view.min, view.max, axis, data.aggregates, index.completeness.kind === 'truncated');
+    : readoutForRange(
+        view.min,
+        view.max,
+        axis,
+        data.aggregates,
+        index.completeness.kind === 'truncated'
+      );
 
   const peaks = useMemo(
     () =>
@@ -160,7 +183,10 @@ function TimelineBody({ source, index }: Readonly<{ source: ResourceHistorySourc
     [data.overview]
   );
 
-  const onCursor = useCallback((x: number | null) => setCursorT(x == null ? null : toReal(axis, x)), [axis]);
+  const onCursor = useCallback(
+    (x: number | null) => setCursorT(x == null ? null : toReal(axis, x)),
+    [axis]
+  );
   const onAxisMode = useCallback((mode: TimeAxisMode) => setAxisMode(mode), []);
   const centre = cursorInView ? cursorX : (view.min + view.max) / 2;
   const runLabel = useCallback(
@@ -222,19 +248,23 @@ function TimelineBody({ source, index }: Readonly<{ source: ResourceHistorySourc
         <summary className="cursor-pointer font-medium text-fg-primary">About this data</summary>
         <ul className="mt-2 list-disc space-y-1 pl-4">
           <li>
-            Sampled every {formatElapsed(index.sampleIntervalMs)} from the workspace container&apos;s cgroup. It covers
-            everything in the container, not one process.
+            Sampled every {formatElapsed(index.sampleIntervalMs)} from the workspace
+            container&apos;s cgroup. It covers everything in the container, not one process.
           </li>
           <li>CPU is in cores: 1.0 means one core fully busy.</li>
           <li>
-            Memory &ldquo;used&rdquo; is the working set the kernel cannot reclaim; &ldquo;incl. cache&rdquo; adds page
-            cache it can drop under pressure. Size workspaces by &ldquo;used&rdquo;.
+            Memory &ldquo;used&rdquo; is the working set the kernel cannot reclaim; &ldquo;incl.
+            cache&rdquo; adds page cache it can drop under pressure. Size workspaces by
+            &ldquo;used&rdquo;.
           </li>
           <li>
-            Tool calls line up with usage by time only. A spike during a tool call is a correlation, not proof that the
-            tool caused it.
+            Tool calls line up with usage by time only. A spike during a tool call is a correlation,
+            not proof that the tool caused it.
           </li>
-          <li>Zoomed out, each point is an average with its peak shaded; zoom in for individual samples.</li>
+          <li>
+            Zoomed out, each point is an average with its peak shaded; zoom in for individual
+            samples.
+          </li>
         </ul>
       </details>
     </div>

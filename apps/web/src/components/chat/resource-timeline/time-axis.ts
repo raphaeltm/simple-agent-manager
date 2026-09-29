@@ -89,7 +89,13 @@ export function buildTimeAxis(runs: readonly ResourceRun[], mode: TimeAxisMode):
       });
       cursor += width;
     }
-    spans.push({ kind: 'active', realStart: start, realEnd: end, axisStart: cursor, axisEnd: cursor + (end - start) });
+    spans.push({
+      kind: 'active',
+      realStart: start,
+      realEnd: end,
+      axisStart: cursor,
+      axisEnd: cursor + (end - start),
+    });
     cursor += end - start;
   }
 
@@ -143,7 +149,11 @@ export function sleepAt(axis: TimeAxis, x: number): AxisSpan | null {
 export function activeMsInView(axis: TimeAxis, viewMin: number, viewMax: number): number {
   return axis.spans
     .filter((span) => span.kind === 'active')
-    .reduce((sum, span) => sum + Math.max(0, Math.min(span.axisEnd, viewMax) - Math.max(span.axisStart, viewMin)), 0);
+    .reduce(
+      (sum, span) =>
+        sum + Math.max(0, Math.min(span.axisEnd, viewMax) - Math.max(span.axisStart, viewMin)),
+      0
+    );
 }
 
 /** Axis spans (compressed breaks included) that are sleeps. */
@@ -154,8 +164,21 @@ export function sleeps(axis: TimeAxis): AxisSpan[] {
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const TICK_STEPS_MS = [
-  1_000, 5_000, 15_000, 30_000, MINUTE_MS, 2 * MINUTE_MS, 5 * MINUTE_MS, 10 * MINUTE_MS,
-  15 * MINUTE_MS, 30 * MINUTE_MS, HOUR_MS, 2 * HOUR_MS, 3 * HOUR_MS, 6 * HOUR_MS, 12 * HOUR_MS,
+  1_000,
+  5_000,
+  15_000,
+  30_000,
+  MINUTE_MS,
+  2 * MINUTE_MS,
+  5 * MINUTE_MS,
+  10 * MINUTE_MS,
+  15 * MINUTE_MS,
+  30 * MINUTE_MS,
+  HOUR_MS,
+  2 * HOUR_MS,
+  3 * HOUR_MS,
+  6 * HOUR_MS,
+  12 * HOUR_MS,
   24 * HOUR_MS,
 ];
 

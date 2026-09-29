@@ -85,7 +85,9 @@ export function formatToolName(name: string | null): string {
 
 /** Tight label for small spaces: whole hours from an hour up ("9h"), else minutes ("37m"). */
 export function formatCompactDuration(ms: number): string {
-  return ms >= 3_600_000 ? `${Math.round(ms / 3_600_000)}h` : `${Math.max(1, Math.round(ms / 60_000))}m`;
+  return ms >= 3_600_000
+    ? `${Math.round(ms / 3_600_000)}h`
+    : `${Math.max(1, Math.round(ms / 60_000))}m`;
 }
 
 /** Whole minutes for running prose ("every 15 minutes"). */

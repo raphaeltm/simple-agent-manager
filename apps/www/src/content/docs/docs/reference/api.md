@@ -179,6 +179,17 @@ All three return `{ summary, chunks }`, where `summary` carries the session's pe
 
 Samples are workspace-cgroup observations, not per-process attribution. Stored payloads deliberately exclude prompts, commands, tool names, tool arguments, tool output, file paths, environment values, and secrets; tool-call IDs are hashed. Instant (Cloudflare Container) sessions have no resource history: the response is `200` with `summary: null` and an empty `chunks` array.
 
+### Session timeline
+
+The Resources drawer reads a whole chat session through two endpoints, both scoped to the project and session in the path.
+
+| Method | Endpoint                                                                  | Purpose                                           |
+| ------ | ------------------------------------------------------------------------- | ------------------------------------------------- |
+| GET    | `/api/projects/:id/sessions/:sessionId/resource-timeline`                 | Every retained chunk of the session, with rollups |
+| GET    | `/api/projects/:id/sessions/:sessionId/resource-timeline/chunks/:chunkId` | One chunk's 5-second samples and tool spans       |
+
+The index returns `{ sessionId, runs, chunks, totalChunkCount, omittedChunkCount, maxChunks, collection, runtime }`. `chunks` is ascending by start time and covers every workspace the session ran on (each wake is a new workspace); each carries its `summary` and a columnar per-minute `rollup` (`null` for chunks uploaded before rollups existed). `runs` groups chunks by workspace with that workspace's `reservation` (`cpuMillis`, `memoryMb`, or `null`). Past `WORKSPACE_RESOURCE_TIMELINE_MAX_CHUNKS` (1000) the oldest chunks are left out and counted in `omittedChunkCount`. When there are no chunks, `collection` explains why: `unsupported` (an Instant session), `expired` (samples passed retention; the summary remains), or `pending` (nothing uploaded yet). The chunk endpoint returns the same shape as `detail` above and `404`s for a chunk that belongs to another project or session.
+
 Agents read the same data with the `get_resource_history` MCP tool, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
 
 ## Nodes

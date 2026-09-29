@@ -100,10 +100,11 @@ export interface ResourceTimelineIndex {
   uploadIntervalMs: number;
   completeness: HistoryCompleteness;
   /**
-   * Whether history is recorded at all: `unsupported` for runtimes that collect
-   * none (Instant sessions), `pending` before the first upload.
+   * Why an empty history is empty: `unsupported` for runtimes that collect none
+   * (Instant sessions), `expired` once samples pass their retention, `pending`
+   * before the first upload.
    */
-  collection: 'collected' | 'pending' | 'unsupported';
+  collection: 'collected' | 'pending' | 'unsupported' | 'expired';
 }
 
 export interface ResourceToolSpan {
