@@ -70,15 +70,15 @@ WITH attribution AS (
           OR (workspace_profile.project_id IS NULL
               AND workspace_profile.user_id = workspace.user_id))
    WHERE summary.agent_profile_id IS NULL
-      OR TRIM(summary.agent_profile_id) = ''
+      OR LENGTH(TRIM(summary.agent_profile_id)) = 0
       OR summary.skill_id IS NULL
-      OR TRIM(summary.skill_id) = ''
+      OR LENGTH(TRIM(summary.skill_id)) = 0
       OR summary.agent_type IS NULL
-      OR TRIM(summary.agent_type) = ''
+      OR LENGTH(TRIM(summary.agent_type)) = 0
 )
 UPDATE workspace_resource_summaries
    SET agent_profile_id = CASE
-         WHEN agent_profile_id IS NULL OR TRIM(agent_profile_id) = ''
+         WHEN agent_profile_id IS NULL OR LENGTH(TRIM(agent_profile_id)) = 0
            THEN COALESCE(
              (SELECT attribution.agent_profile_id
                 FROM attribution
@@ -88,7 +88,7 @@ UPDATE workspace_resource_summaries
          ELSE agent_profile_id
        END,
        skill_id = CASE
-         WHEN skill_id IS NULL OR TRIM(skill_id) = ''
+         WHEN skill_id IS NULL OR LENGTH(TRIM(skill_id)) = 0
            THEN COALESCE(
              (SELECT attribution.skill_id
                 FROM attribution
@@ -98,7 +98,7 @@ UPDATE workspace_resource_summaries
          ELSE skill_id
        END,
        agent_type = CASE
-         WHEN agent_type IS NULL OR TRIM(agent_type) = ''
+         WHEN agent_type IS NULL OR LENGTH(TRIM(agent_type)) = 0
            THEN COALESCE(
              (SELECT attribution.agent_type
                 FROM attribution
@@ -109,11 +109,11 @@ UPDATE workspace_resource_summaries
        END
  WHERE (
    agent_profile_id IS NULL
-   OR TRIM(agent_profile_id) = ''
+   OR LENGTH(TRIM(agent_profile_id)) = 0
    OR skill_id IS NULL
-   OR TRIM(skill_id) = ''
+   OR LENGTH(TRIM(skill_id)) = 0
    OR agent_type IS NULL
-   OR TRIM(agent_type) = ''
+   OR LENGTH(TRIM(agent_type)) = 0
  )
    AND id IN (
      SELECT attribution.id
