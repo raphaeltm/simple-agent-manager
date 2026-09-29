@@ -27,7 +27,7 @@ catalog:
   # always agree on the AST/rule surface. Dependabot only proposes the parser.
   '@typescript-eslint/eslint-plugin': 8.67.0
   '@typescript-eslint/parser': 8.67.0
-  typescript-eslint: 8.67.0
+  typescript-eslint: 8.70.1
 
   # === Cloudflare ===
   '@cloudflare/workers-types': 5.20260707.1
