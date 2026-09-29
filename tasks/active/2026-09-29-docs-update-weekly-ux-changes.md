@@ -47,7 +47,7 @@ covered PRs #2092–#2135; this pass covers everything merged since.
 - [x] `self-hosting.mdx`: Problem migrations + Abandon; unresponsive managed machines are released automatically
 - [x] `reference/configuration.md`: `DASHBOARD_*` settings
 - [x] Screenshots via two new Playwright specs (real components, mock data): a chat whose wake failed, beside running and sleeping chats; a Mermaid diagram in an agent reply; the Admin → Storage Abandon dialog at phone width. (A desktop capture of all three problem-migration cards was dropped: it was ~900px tall in the docs column, and the badge table already explains them.)
-- [ ] Local sub-agent review loop until no actionable feedback
+- [x] Local sub-agent review loop until no actionable feedback
 - [x] `pnpm --filter @simple-agent-manager/www build` + link check (current-head Marketing Site CI: 224 pages, 0 broken internal links, 206 browser checks)
 - [ ] PR review gates green; merge
 
@@ -103,4 +103,10 @@ covered PRs #2092–#2135; this pass covers everything merged since.
     still has Retry.
   - Filed idea `01M3NX01NR144RNXNERWZBF9VK`: `useWakeProgress` `settledRef` latches on `failed`,
     so a retried wake in the same page view shows no phases.
-- **Round 5**: running.
+- **Round 5** (supplemental shepherd `doc-sync-validator`): 0 CRITICAL, 0 HIGH, 0 MEDIUM,
+  1 LOW. Clarified that reserved FTS operator words are ignored only for indexed chats; the keyword
+  fallback retains them. The validator rechecked the fix and returned PASS with no remaining
+  actionable docs/code-sync findings. The independent `task-completion-validator` found no missing
+  user-facing documentation or screenshot work; its task-record mismatch was corrected in the
+  implementation checklist above, while the remaining PR/CodeRabbit/merge gates stay tracked
+  separately.
