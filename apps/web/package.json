@@ -46,6 +46,7 @@
     "recharts": "3.10.1",
     "remark-gfm": "catalog:",
     "tailwindcss": "4.3.3",
+    "uplot": "1.6.32",
     "valibot": "catalog:"
   },
   "devDependencies": {

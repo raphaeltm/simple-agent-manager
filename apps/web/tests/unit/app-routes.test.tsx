@@ -308,6 +308,7 @@ describe('App routes', () => {
 
     expect(DEV_ONLY_ROUTE_PATHS).toEqual([
       '/sam',
+      '/prototype/resource-timeline',
       '/__test/trial-chat-gate',
       '/__test/error-boundary',
       '/ui-standards',
@@ -320,6 +321,7 @@ describe('App routes', () => {
 
       expect(screen.getByTestId('landing-page')).toBeInTheDocument();
       expect(screen.queryByTestId('sam-prototype-page')).not.toBeInTheDocument();
+      expect(screen.queryByText('Session resources timeline')).not.toBeInTheDocument();
       expect(screen.queryByTestId('trial-chat-gate-harness-page')).not.toBeInTheDocument();
       expect(screen.queryByTestId('ui-standards-page')).not.toBeInTheDocument();
     }
