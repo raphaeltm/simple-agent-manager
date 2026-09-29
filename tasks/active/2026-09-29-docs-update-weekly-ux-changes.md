@@ -59,3 +59,26 @@ covered PRs #2092–#2135; this pass covers everything merged since.
 - Mermaid: chat renders a ` ```mermaid ` fence as a diagram once the message stops streaming (`MessageBubble.tsx:286`), with copy-source, reset-view, full-screen and pan/zoom controls, and a "Mermaid diagram error" card with the source on failure (`MermaidDiagram.tsx`). Markdown files render through `MarkdownRenderer.tsx` with the same pipeline (`renderMermaidSvg`).
 - Model picker accepts any typed ID ("press Enter to use … as custom model", `ModelSelect.tsx:383`); profile routes do not validate the model against the catalog.
 - Problem migrations UI: `pages/admin-storage/ProblemMigrations.tsx` (Failed / Poisoned / Frozen badges, required reason, server refusal shown verbatim).
+
+## Review log
+
+- **Round 1** (fixed in `eebb702cc`): 1 CRITICAL, 4 HIGH, 9 MEDIUM, 3 LOW. Created
+  `guides/session-troubleshooting.md` as the one place for "something went wrong", corrected the
+  wake/failed-task guidance, removed an unverified "wheel also scrolls the chat" claim.
+- **Round 2** (fixed in `77aefed08`): 0 CRITICAL, 2 HIGH, 6 MEDIUM, 10 LOW.
+  - The interrupted/checkpoint banners are Instant-only (`vm-agent-container-recovery.ts`); VM
+    users see `WAKE_PHASE_LABELS` steps and, after a degraded restore, "SAM restored this sleeping
+    conversation from a degraded snapshot…" (`agent-session-bootstrap.ts`). Page now covers both.
+  - `recovery_start_failed` is SAM failing to start its own wake job (`session-recovery.ts`), never a
+    provider error; provider failures inside the runner re-sleep the chat and surface as the retry
+    budget or "Session is waking" (`task-runner/state-machine.ts:failRecoveryLifecycle`).
+  - Instant incomplete snapshot → container not kept → a reply only yields Wake failed
+    (`failed-task-preservation.ts:failedTaskIncompleteSnapshotMessage`).
+  - Preservation waits up to `FAILED_TASK_PRESERVATION_MAX_WAIT_MS` (8 h) for a mid-turn agent.
+  - Tables → lists for phones; phone capture served via `<picture>` (`chat-wake-failed-mobile.png`).
+  - Pushed back on "DASHBOARD_* not passed by deploy": Worker `[vars]` are settable in
+    `wrangler.toml`, as the configuration reference already says; only build-time `VITE_*` differs.
+  - Product bugs filed instead of papered over: idea `01M3NT26NMFCA92X53MNBRADEJ` (VM resume banner
+    says "Instant"); note appended to `01M38YEY4A6WMPG1DSD0P5MHHJ` (abandoned migration rows push
+    new problems past the list limit).
+- **Round 3**: running.
