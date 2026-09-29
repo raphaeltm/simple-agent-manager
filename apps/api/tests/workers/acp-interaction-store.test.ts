@@ -269,11 +269,17 @@ describe('InteractionStore durable ACP foundation', () => {
           createInput({
             chatSessionId: createChatSession(),
             interactionId: expiryId,
-            deadlineAt: Date.now() + 100,
+            deadlineAt: Date.now() + 30_000,
           })
         );
         expect(expiring.status).toBe('created');
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        await runInDurableObject(expiryStore, async (_instance, state) => {
+          state.storage.sql.exec(
+            `UPDATE interactions SET deadline_at = ? WHERE interaction_id = ?`,
+            Date.now() - 1,
+            expiryId
+          );
+        });
         await runInDurableObject(expiryStore, async (instance) => instance.alarm());
         const expired = await expiryStore.snapshot(null);
         expect(expired.pending).toHaveLength(0);
