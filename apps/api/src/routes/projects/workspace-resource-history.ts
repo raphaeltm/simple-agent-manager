@@ -54,9 +54,9 @@ projectResourceHistoryRoutes.get(
   async (c) => {
     const projectId = c.req.param('id');
     const sessionId = c.req.param('sessionId');
+    await requireAccess(c.env, projectId, getUserId(c));
     const chunkId = optionalDetailChunkId(c.req.param('chunkId'));
     if (!chunkId) throw errors.badRequest('chunkId is required');
-    await requireAccess(c.env, projectId, getUserId(c));
     return c.json(await getSessionResourceTimelineChunk(c.env, { projectId, sessionId, chunkId }));
   }
 );

@@ -1,8 +1,9 @@
-import { type PointerEvent, useLayoutEffect, useMemo, useRef } from 'react';
+import { type PointerEvent, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import uPlot from 'uplot';
 
 import { type ChartTheme, useChartTheme, withAlpha } from './chart-theme';
 import { formatCompactDuration, formatDayTime } from './format';
+import { createFrameCoalescer } from './frame-coalescer';
 import { PLOT_LEFT_GUTTER_PX, PLOT_RIGHT_PADDING_PX } from './panels';
 import { buildSeries } from './series';
 import { sleeps, type TimeAxis } from './time-axis';
@@ -112,6 +113,16 @@ export function TimelineNavigator({
   const axisRef = useRef(axis);
   const trackWidth = useElementWidth(trackRef);
   const drag = useRef<Drag | null>(null);
+  // Drags report every pointer event; apply at most one view change per frame.
+  const onRangeRef = useRef(onRange);
+  const rangeFrame = useMemo(
+    () => createFrameCoalescer((min: number, max: number) => onRangeRef.current(min, max)),
+    []
+  );
+  useLayoutEffect(() => {
+    onRangeRef.current = onRange;
+  }, [onRange]);
+  useEffect(() => () => rangeFrame.cancel(), [rangeFrame]);
 
   useLayoutEffect(() => {
     axisRef.current = axis;
@@ -159,18 +170,18 @@ export function TimelineNavigator({
     switch (current.kind) {
       case 'move': {
         const shift = ((event.clientX - current.startX) / Math.max(1, trackWidth)) * span;
-        onRange(current.view.min + shift, current.view.max + shift);
+        rangeFrame.schedule(current.view.min + shift, current.view.max + shift);
         break;
       }
       case 'min':
-        onRange(Math.min(at, current.view.max - 1), current.view.max);
+        rangeFrame.schedule(Math.min(at, current.view.max - 1), current.view.max);
         break;
       case 'max':
-        onRange(current.view.min, Math.max(at, current.view.min + 1));
+        rangeFrame.schedule(current.view.min, Math.max(at, current.view.min + 1));
         break;
       case 'draw':
         if (Math.abs(toPx(at) - toPx(current.anchor)) > 6)
-          onRange(Math.min(at, current.anchor), Math.max(at, current.anchor));
+          rangeFrame.schedule(Math.min(at, current.anchor), Math.max(at, current.anchor));
         break;
     }
   };

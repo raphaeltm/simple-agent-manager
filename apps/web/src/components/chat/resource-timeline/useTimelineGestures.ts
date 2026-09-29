@@ -1,5 +1,6 @@
 import { type RefObject, useEffect } from 'react';
 
+import { createFrameCoalescer } from './frame-coalescer';
 import type { ViewRange } from './timeline-view';
 
 /**
@@ -47,10 +48,20 @@ export function useTimelineGestures(
     if (!element) return;
     const pointers = new Map<number, { x: number; y: number }>();
     let gesture: Gesture = { kind: 'idle' };
+    // One view and one scrub update per frame, however fast the events arrive.
+    const range = createFrameCoalescer((min: number, max: number) =>
+      handlersRef.current.onRange(min, max)
+    );
+    const scrub = createFrameCoalescer((x: number) => handlersRef.current.onScrub(x));
+    /** The view including a range still waiting for its frame, so rapid wheel events accumulate. */
+    const currentView = (): ViewRange => {
+      const next = range.pending();
+      return next ? { min: next[0], max: next[1] } : handlersRef.current.view();
+    };
 
     const axisAt = (clientX: number): number | null => {
       const rect = handlersRef.current.plotRect();
-      return rect ? toAxis(clientX, rect, handlersRef.current.view()) : null;
+      return rect ? toAxis(clientX, rect, currentView()) : null;
     };
 
     const startPinch = () => {
@@ -60,7 +71,7 @@ export function useTimelineGestures(
         kind: 'pinch',
         distance: Math.max(1, Math.abs(a.x - b.x)),
         midX: (a.x + b.x) / 2,
-        view: handlersRef.current.view(),
+        view: currentView(),
       };
     };
 
@@ -74,7 +85,7 @@ export function useTimelineGestures(
       const anchor = toAxis(pinch.midX, rect, pinch.view);
       const midFraction = ((a.x + b.x) / 2 - rect.left) / Math.max(1, rect.width);
       const min = anchor - midFraction * nextSpan;
-      handlersRef.current.onRange(min, min + nextSpan);
+      range.schedule(min, min + nextSpan);
     };
 
     const onPointerDown = (event: PointerEvent) => {
@@ -104,7 +115,7 @@ export function useTimelineGestures(
       }
       if (gesture.kind === 'scrub') {
         const x = axisAt(event.clientX);
-        if (x != null) handlersRef.current.onScrub(x);
+        if (x != null) scrub.schedule(x);
       } else if (gesture.kind === 'pinch') {
         updatePinch(gesture);
       }
@@ -124,20 +135,20 @@ export function useTimelineGestures(
     const onWheel = (event: WheelEvent) => {
       const rect = handlersRef.current.plotRect();
       if (!rect) return;
-      const view = handlersRef.current.view();
+      const view = currentView();
       const span = view.max - view.min;
       if (event.ctrlKey) {
         event.preventDefault();
         const anchor = toAxis(event.clientX, rect, view);
         const factor = Math.exp(event.deltaY * WHEEL_ZOOM_SENSITIVITY);
-        handlersRef.current.onRange(
+        range.schedule(
           anchor - (anchor - view.min) * factor,
           anchor + (view.max - anchor) * factor
         );
       } else if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
         event.preventDefault();
         const shift = (event.deltaX / Math.max(1, rect.width)) * span;
-        handlersRef.current.onRange(view.min + shift, view.max + shift);
+        range.schedule(view.min + shift, view.max + shift);
       }
     };
 
@@ -152,6 +163,8 @@ export function useTimelineGestures(
       element.removeEventListener('pointerup', onPointerEnd);
       element.removeEventListener('pointercancel', onPointerEnd);
       element.removeEventListener('wheel', onWheel);
+      range.cancel();
+      scrub.cancel();
     };
   }, [elementRef, handlersRef]);
 }
