@@ -56,7 +56,7 @@ A CodeRabbit review is **not** a hard merge requirement. The requirement is to *
 
    Always dispatch the workflow from `main`; do not execute a workflow definition from the PR branch. Agents MUST NOT post `@coderabbitai review` directly with their own GitHub App token: CodeRabbit ignores bot-authored review commands. The workflow is the human-identity bridge.
 
-2. **Wait about 15 minutes for a response.** Watch the PR's reviews, review comments, and CodeRabbit's check and status comment. If CodeRabbit has visibly started a review that is still in progress, wait for it to finish.
+2. **Wait about 15 minutes for a response.** Watch the PR's reviews, review comments, and CodeRabbit's check and status comment. If CodeRabbit has visibly started a review that is still in progress, wait for it to finish, up to about 45 minutes in total. Past that, treat it as no review.
 
 3. **If a review arrives, it blocks merge until its feedback is resolved.** Implement valid feedback, push, and re-run the affected checks. For feedback you judge inapplicable, reply with the reason and resolve the thread. Keep the `coderabbit-review` label on the PR so pushed fixes get incremental reviews, and give each one the same wait. The PR is ready when no CodeRabbit feedback is unresolved. CodeRabbit not re-reviewing your fixes within the wait does not block.
 
@@ -84,7 +84,7 @@ Local reviewers:
 
 CodeRabbit:
 
-- [ ] Requested once the PR was otherwise ready, and the wait was observed
+- [ ] Requested once the PR was otherwise ready, and the ~15-minute wait completed
 - [ ] If it reviewed: every finding is implemented or resolved with a reason, and no CodeRabbit feedback is unresolved
 - [ ] If it did not review: the observed outcome is recorded in "CodeRabbit Review Evidence", with no `needs-human-review` label and no waiver request
 

@@ -128,7 +128,7 @@ If this is not an agent-authored PR, write `N/A: human-authored PR`.
 Once every other gate is satisfied and the PR is not a draft, the agent applies the `coderabbit-review` label (or dispatches the trusted workflow) and waits about 15 minutes. A CodeRabbit review is **not** required. **If CodeRabbit reviews, its feedback blocks merge** until every finding is implemented or explicitly resolved with a reason. **If it does not review** (silence, `Review skipped`, rate limit), record what you observed below and merge on the remaining gates. A missing review never calls for `needs-human-review` or a waiver. See `.claude/rules/25-review-merge-gate.md`.
 
 - [ ] CodeRabbit requested after local review, staging if applicable, and CI gates passed
-- [ ] Waited about 15 minutes, or longer while a review CodeRabbit had started was still in progress
+- [ ] Waited about 15 minutes, or up to about 45 minutes in total while a review CodeRabbit had started was still in progress
 - [ ] Either CodeRabbit reviewed and no CodeRabbit feedback is unresolved, or it did not review and the observed outcome is recorded below
 
 ### CodeRabbit Notes
