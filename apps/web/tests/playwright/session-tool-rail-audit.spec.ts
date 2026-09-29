@@ -19,6 +19,7 @@ import {
   screenshot,
   seedTheme,
 } from './audit-helpers';
+import { buildResourceScenario, type ResourceScenarioId } from './resource-timeline-scenarios';
 
 const PROJECT_ID = 'proj-rail-1';
 const SESSION_ID = 'cs-rail-1';
@@ -101,155 +102,6 @@ function makeChatSession(options: SessionOptions = {}) {
 const LONG_TOKEN =
   'sam/layered-resource-management-with-an-extremely-long-branch-name-that-will-not-wrap-0123456789';
 
-const RESOURCE_HISTORY_SUMMARY = {
-  id: 'workspace:proj-rail-1:ws-rail-1:session:cs-rail-1',
-  projectId: PROJECT_ID,
-  workspaceId: WORKSPACE_ID,
-  sessionId: SESSION_ID,
-  taskId: 'task-rail-1',
-  nodeId: 'node-rail-1',
-  agentProfileId: 'profile-resource-heavy',
-  skillId: 'skill-resource-history',
-  agentType: 'openai-codex',
-  runtime: 'vm',
-  sourceVersion: 1,
-  startedAt: NOW - 1_800_000,
-  endedAt: NOW - 900_000,
-  sampleCount: 180,
-  gapCount: 2,
-  toolSpanCount: 4,
-  cpuMeanMillis: 38,
-  cpuPeakMillis: 410,
-  memoryMeanBytes: 524_288_000,
-  memoryPeakBytes: 1_342_177_280,
-  memoryKernelPeakBytes: 1_610_612_736,
-  ioReadBytes: 18_874_368,
-  ioWriteBytes: 94_371_840,
-  oomCount: 1,
-  completeness: { status: 'partial', nodeLossMayLoseUnflushedWindow: true },
-  summary: { weightedMeanWallMillis: 895_000 },
-  firstChunkId: 'wrchunk-rail-1',
-  latestChunkId: 'wrchunk-rail-2',
-};
-
-const RESOURCE_HISTORY_CHUNKS = [
-  {
-    id: 'wrchunk-rail-2',
-    workspaceId: WORKSPACE_ID,
-    sessionId: SESSION_ID,
-    taskId: 'task-rail-1',
-    nodeId: 'node-rail-1',
-    chunkSequence: 2,
-    sourceVersion: 1,
-    storageFormat: 'resource-history-gzip-json-v1',
-    compressedBytes: 6299,
-    uncompressedBytes: 106_968,
-    sha256: 'a'.repeat(64),
-    startedAt: NOW - 1_800_000,
-    endedAt: NOW - 900_000,
-    sampleCount: 180,
-    gapCount: 2,
-    toolSpanCount: 4,
-    completeness: { status: 'partial' },
-    summary: { cpuPeakMillis: 410 },
-    expiresAt: NOW + 90 * 86_400_000,
-  },
-  {
-    id: 'wrchunk-rail-1',
-    workspaceId: WORKSPACE_ID,
-    sessionId: SESSION_ID,
-    taskId: 'task-rail-1',
-    nodeId: 'node-rail-1',
-    chunkSequence: 1,
-    sourceVersion: 1,
-    storageFormat: 'resource-history-gzip-json-v1',
-    compressedBytes: 5980,
-    uncompressedBytes: 99_000,
-    sha256: 'b'.repeat(64),
-    startedAt: NOW - 2_700_000,
-    endedAt: NOW - 1_800_000,
-    sampleCount: 180,
-    gapCount: 0,
-    toolSpanCount: 3,
-    completeness: { status: 'complete' },
-    summary: { cpuPeakMillis: 205 },
-    expiresAt: NOW + 90 * 86_400_000,
-  },
-];
-
-function resourceHistoryCpuMillis(index: number): number {
-  if (index === 14) return 410;
-  if (index % 7 === 0) return 160;
-  return 32 + (index % 5) * 9;
-}
-
-const RESOURCE_HISTORY_DETAIL = {
-  chunkId: 'wrchunk-rail-2',
-  originalSampleCount: 180,
-  downsampled: true,
-  downsampleLimit: 720,
-  samples: Array.from({ length: 36 }, (_, i) => ({
-    t: NOW - 1_800_000 + i * 25_000,
-    intervalMillis: 5_000,
-    cpuMillis: resourceHistoryCpuMillis(i),
-    memoryBytes: i === 24 ? 1_342_177_280 : 410_000_000 + i * 12_000_000,
-    memoryPeakBytes: i >= 24 ? 1_342_177_280 : 610_000_000 + i * 8_000_000,
-    ioReadBytes: i % 8 === 0 ? 1_048_576 : 16_384,
-    ioWriteBytes: i % 9 === 0 ? 4_194_304 : 65_536,
-    oom: i === 24 ? 1 : 0,
-    gap: i === 20,
-  })),
-  toolSpans: [
-    {
-      id: 'tool-compile',
-      kind: 'acp_tool_call',
-      startedAt: NOW - 1_650_000,
-      endedAt: NOW - 1_520_000,
-      concurrency: 1,
-    },
-    {
-      id: 'tool-tests',
-      kind: 'acp_tool_call',
-      startedAt: NOW - 1_470_000,
-      endedAt: NOW - 1_240_000,
-      concurrency: 2,
-    },
-    {
-      id: 'tool-review',
-      kind: 'acp_tool_call',
-      startedAt: NOW - 1_210_000,
-      endedAt: NOW - 980_000,
-      concurrency: 1,
-      approximate: true,
-    },
-  ],
-  gaps: [{ startedAt: NOW - 1_300_000, endedAt: NOW - 1_250_000, reason: 'sampler_delay' }],
-};
-
-/** The older, quieter chunk: the timeline loads every chunk its view needs, not only the newest. */
-const RESOURCE_HISTORY_QUIET_DETAIL = {
-  chunkId: 'wrchunk-rail-1',
-  originalSampleCount: 180,
-  downsampled: false,
-  downsampleLimit: 720,
-  samples: Array.from({ length: 180 }, (_, i) => ({
-    t: NOW - 2_700_000 + (i + 1) * 5_000,
-    intervalMillis: 5_000,
-    cpuMillis: 20 + (i % 3) * 5,
-    memoryBytes: 400_000_000,
-    memoryPeakBytes: 420_000_000,
-    ioReadBytes: 4_096,
-    ioWriteBytes: 8_192,
-  })),
-  toolSpans: [],
-  gaps: [],
-};
-
-const RESOURCE_HISTORY_DETAILS: Record<string, unknown> = {
-  'wrchunk-rail-2': RESOURCE_HISTORY_DETAIL,
-  'wrchunk-rail-1': RESOURCE_HISTORY_QUIET_DETAIL,
-};
-
 /** Enough messages to overflow any test viewport, so the scroll-to-bottom button appears. */
 function makeManyMessages(count = 60) {
   return {
@@ -316,6 +168,8 @@ interface MockOptions extends SessionOptions {
   empty?: boolean;
   /** Seeds a long conversation so the scroll-to-bottom button can actually appear. */
   manyMessages?: boolean;
+  /** Which synthetic resource history the Resources drawer reads. */
+  resourceScenario?: ResourceScenarioId;
 }
 
 async function setupMocks(page: Page, options: MockOptions = {}) {
@@ -325,7 +179,10 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     messagesLong = false,
     empty = false,
     manyMessages = false,
+    resourceScenario = 'overnight',
   } = options;
+  const resources = buildResourceScenario(resourceScenario, SESSION_ID, NOW);
+  const resourceTimelinePath = `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/resource-timeline`;
 
   await page.addInitScript(
     ({ userId, storageKey, seededMode }) => {
@@ -376,15 +233,13 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       return;
     }
 
-    if (pathname === `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/resource-history`) {
-      const detail = RESOURCE_HISTORY_DETAILS[new URL(url).searchParams.get('chunkId') ?? ''];
-      await route.fulfill({
-        json: {
-          summary: RESOURCE_HISTORY_SUMMARY,
-          chunks: RESOURCE_HISTORY_CHUNKS,
-          ...(detail ? { detail } : {}),
-        },
-      });
+    if (pathname === resourceTimelinePath) {
+      await route.fulfill({ json: resources.index });
+      return;
+    }
+    if (pathname.startsWith(`${resourceTimelinePath}/chunks/`)) {
+      const chunk = resources.chunks.get(decodeURIComponent(pathname.slice(resourceTimelinePath.length + 8)));
+      await route.fulfill(chunk ? { json: chunk } : { status: 404, json: { error: 'NOT_FOUND' } });
       return;
     }
     if (pathname === `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/state`) {
@@ -1096,5 +951,67 @@ test.describe('Session resource history drawer', () => {
       el.scrollTop = el.scrollHeight;
     });
     await capture(page, `resource-history-detail-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+});
+
+async function openResources(page: Page, resourceScenario: ResourceScenarioId) {
+  await openChat(page, { state: 'active', resourceScenario });
+  await page.getByTestId('session-tool-resources').click();
+  const dialog = page.getByRole('dialog', { name: 'Session resources' });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+test.describe('Session resource timeline scenarios', () => {
+  test('zooming in fetches full detail only for the visible chunks, each once', async ({ page }) => {
+    const chunkRequests: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/resource-timeline/chunks/')) chunkRequests.push(request.url());
+    });
+    const dialog = await openResources(page, 'overnight');
+    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({ timeout: 10_000 });
+    const total = buildResourceScenario('overnight', SESSION_ID, NOW).chunks.size;
+    const beforeZoom = chunkRequests.length;
+
+    await dialog.getByRole('button', { name: '15m', exact: true }).click();
+    await expect.poll(() => chunkRequests.length, { timeout: 10_000 }).toBeGreaterThan(beforeZoom);
+    await page.waitForTimeout(600);
+    // Zoomed to 15 minutes: a handful of chunks at most, never the whole session.
+    expect(chunkRequests.length).toBeLessThan(total);
+    await dialog.getByRole('button', { name: '1h', exact: true }).click();
+    await dialog.getByRole('button', { name: '15m', exact: true }).click();
+    await page.waitForTimeout(600);
+    expect(new Set(chunkRequests).size).toBe(chunkRequests.length);
+    await capture(page, `resource-timeline-zoomed-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+
+  test('older VM agents without rollups still draw the whole session', async ({ page }) => {
+    const dialog = await openResources(page, 'legacy-agent');
+    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByRole('slider', { name: /Session timeline/ })).toBeVisible();
+    await expect(dialog.getByText(/3 wake cycles/)).toBeVisible();
+    await capture(page, `resource-timeline-legacy-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+
+  test('a session past the server cap says how much older history is not shown', async ({ page }) => {
+    const dialog = await openResources(page, 'truncated');
+    await expect(dialog.getByText(/612 older 15-minute segments are not shown/)).toBeVisible({ timeout: 10_000 });
+    // Liveness: the part that is shown still draws.
+    await expect(dialog.getByRole('slider', { name: /Session timeline/ })).toBeVisible();
+    await capture(page, `resource-timeline-truncated-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+
+  test('a new VM session explains when its first samples arrive', async ({ page }) => {
+    const dialog = await openResources(page, 'pending');
+    await expect(dialog.getByText('No resource samples yet')).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('Not recorded for Instant sessions')).toHaveCount(0);
+    await capture(page, `resource-timeline-pending-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+
+  test('an Instant session says nothing is recorded instead of promising data', async ({ page }) => {
+    const dialog = await openResources(page, 'instant');
+    await expect(dialog.getByText('Not recorded for Instant sessions')).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('No resource samples yet')).toHaveCount(0);
+    await capture(page, `resource-timeline-instant-${page.viewportSize()?.width ?? 'viewport'}`);
   });
 });

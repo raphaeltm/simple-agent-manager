@@ -9,7 +9,7 @@ const HOUR = 60 * MINUTE;
 const T0 = Date.UTC(2026, 8, 28, 19, 0, 0);
 
 function run(startedAt: number, endedAt: number): ResourceRun {
-  return { id: `run-${startedAt}`, nodeId: null, startedAt, endedAt, unsupportedReason: null };
+  return { id: `run-${startedAt}`, nodeId: null, startedAt, endedAt, unsupportedReason: null, reservation: null };
 }
 
 const RUNS = [run(T0, T0 + HOUR), run(T0 + 10 * HOUR, T0 + 11 * HOUR)];

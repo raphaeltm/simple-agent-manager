@@ -14,7 +14,7 @@ import { type ChartTheme, withAlpha } from './chart-theme';
 import { formatBytes, formatClock, formatCoresAxis, formatElapsed, formatRate } from './format';
 import type { TimelineSeries } from './series';
 import { axisTicks, sleeps, tickStepMs, type TimeAxis, toAxis, toReal } from './time-axis';
-import type { ResourceReservation, ResourceToolSpan } from './types';
+import type { ResourceRun, ResourceToolSpan } from './types';
 
 export type PanelKind = 'cpu' | 'memory' | 'disk' | 'tools';
 
@@ -23,7 +23,8 @@ export interface PanelState {
   viewMin: number;
   viewMax: number;
   series: TimelineSeries;
-  reservation: ResourceReservation | null;
+  /** Each run carries its own reservation: a wake can land on a different size. */
+  runs: readonly ResourceRun[];
   toolSpans: readonly ResourceToolSpan[];
   /** Whether the agent reports working-set memory (otherwise memory includes cache). */
   hasWorkingSet: boolean;
@@ -105,26 +106,48 @@ function drawSleeps(u: uPlot, state: PanelState, theme: ChartTheme, label: boole
   }
 }
 
-function drawReservation(u: uPlot, value: number | null, theme: ChartTheme, label: string) {
-  if (value == null) return;
-  const y = u.valToPos(value, 'y', true);
+type ReservationMetric = 'cpuCores' | 'memoryBytes';
+
+function highestReservation(runs: readonly ResourceRun[], metric: ReservationMetric): number {
+  return Math.max(0, ...runs.map((run) => run.reservation?.[metric] ?? 0));
+}
+
+/** A dashed line at each run's reservation, spanning only that run. */
+function drawReservations(
+  u: uPlot,
+  state: PanelState,
+  metric: ReservationMetric,
+  theme: ChartTheme,
+  label: (value: number) => string
+) {
   const { ctx, bbox } = u;
-  if (y < bbox.top || y > bbox.top + bbox.height) return;
-  ctx.save();
-  ctx.strokeStyle = theme.reservation;
-  ctx.lineWidth = px(1);
-  ctx.setLineDash([px(4), px(3)]);
-  ctx.beginPath();
-  ctx.moveTo(bbox.left, y);
-  ctx.lineTo(bbox.left + bbox.width, y);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.fillStyle = theme.mutedText;
-  ctx.font = `${px(10)}px system-ui, sans-serif`;
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText(label, bbox.left + bbox.width - px(4), y - px(2));
-  ctx.restore();
+  const right = bbox.left + bbox.width;
+  for (const run of state.runs) {
+    const value = run.reservation?.[metric];
+    if (value == null) continue;
+    const x0 = Math.max(bbox.left, canvasX(u, toAxis(state.axis, run.startedAt)));
+    const x1 = Math.min(right, canvasX(u, toAxis(state.axis, run.endedAt)));
+    const y = u.valToPos(value, 'y', true);
+    if (x1 - x0 < 1 || y < bbox.top || y > bbox.top + bbox.height) continue;
+    ctx.save();
+    ctx.strokeStyle = theme.reservation;
+    ctx.lineWidth = px(1);
+    ctx.setLineDash([px(4), px(3)]);
+    ctx.beginPath();
+    ctx.moveTo(x0, y);
+    ctx.lineTo(x1, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const text = `reserved ${label(value)}`;
+    ctx.font = `${px(10)}px system-ui, sans-serif`;
+    if (ctx.measureText(text).width + px(8) <= x1 - x0) {
+      ctx.fillStyle = theme.mutedText;
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(text, x1 - px(4), y - px(2));
+    }
+    ctx.restore();
+  }
 }
 
 function drawOomMarkers(u: uPlot, state: PanelState, theme: ChartTheme) {
@@ -308,10 +331,7 @@ export function panelOptions(
             },
           ],
           draw: [
-            (u) => {
-              const cores = stateRef.current.reservation?.cpuCores ?? null;
-              drawReservation(u, cores, theme, cores == null ? '' : `reserved ${formatCoresAxis(cores)}`);
-            },
+            (u) => drawReservations(u, stateRef.current, 'cpuCores', theme, formatCoresAxis),
           ],
         },
         scales: {
@@ -319,7 +339,7 @@ export function panelOptions(
           y: {
             range: () => {
               const state = stateRef.current;
-              const top = Math.max(0.5, peak(state.series.cpuMax), state.reservation?.cpuCores ?? 0);
+              const top = Math.max(0.5, peak(state.series.cpuMax), highestReservation(state.runs, 'cpuCores'));
               return [0, top * 1.12];
             },
           },
@@ -340,8 +360,7 @@ export function panelOptions(
           draw: [
             (u) => {
               const state = stateRef.current;
-              const bytes = state.reservation?.memoryBytes ?? null;
-              drawReservation(u, bytes, theme, bytes == null ? '' : `reserved ${formatBytes(bytes)}`);
+              drawReservations(u, state, 'memoryBytes', theme, formatBytes);
               drawOomMarkers(u, state, theme);
             },
           ],
@@ -354,7 +373,7 @@ export function panelOptions(
               const top = Math.max(
                 256 * 1024 ** 2,
                 peak(state.series.memoryMax),
-                state.reservation?.memoryBytes ?? 0
+                highestReservation(state.runs, 'memoryBytes')
               );
               return [0, top * 1.1];
             },

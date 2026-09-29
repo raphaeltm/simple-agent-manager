@@ -47,7 +47,11 @@ export function ResourceTimeline({ source }: Readonly<{ source: ResourceHistoryS
     );
   }
   if (indexQuery.data.chunks.length === 0) {
-    return <EmptyTimeline uploadIntervalMs={indexQuery.data.uploadIntervalMs} />;
+    return indexQuery.data.collection === 'unsupported' ? (
+      <UnsupportedTimeline />
+    ) : (
+      <EmptyTimeline uploadIntervalMs={indexQuery.data.uploadIntervalMs} />
+    );
   }
   return <TimelineBody source={source} index={indexQuery.data} />;
 }
@@ -60,6 +64,18 @@ function EmptyTimeline({ uploadIntervalMs }: Readonly<{ uploadIntervalMs: number
         The workspace samples CPU, memory and disk every few seconds and uploads them every{' '}
         {formatMinutes(uploadIntervalMs)}, so the first data appears about {formatMinutes(uploadIntervalMs)} after the
         session starts.
+      </p>
+    </div>
+  );
+}
+
+function UnsupportedTimeline() {
+  return (
+    <div className="rounded-lg border border-border-default bg-surface p-4 text-sm text-fg-muted">
+      <p className="font-medium text-fg-primary">Not recorded for Instant sessions</p>
+      <p className="mt-1">
+        Instant sessions run in a lightweight container that does not record CPU, memory or disk usage yet. Sessions on
+        a VM workspace record the full timeline.
       </p>
     </div>
   );
@@ -85,7 +101,11 @@ function SessionSummary({ index, activeMs }: Readonly<{ index: ResourceTimelineI
       {index.completeness.kind === 'truncated' && (
         <p className="mt-1 flex items-start gap-1 text-warning-fg">
           <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
-          Only the newest part of this session&apos;s history was returned. Older data exists but is not shown.
+          {index.completeness.omitted == null
+            ? 'Only the newest part of this session\u2019s history is shown. Older data exists but is not shown.'
+            : `Only the newest part of this session\u2019s history is shown: ${index.completeness.omitted} older 15-minute ${
+                index.completeness.omitted === 1 ? 'segment is' : 'segments are'
+              } not shown.`}
         </p>
       )}
     </div>
@@ -118,11 +138,11 @@ function TimelineBody({ source, index }: Readonly<{ source: ResourceHistorySourc
       viewMin: view.min,
       viewMax: view.max,
       series,
-      reservation: index.reservation,
+      runs: index.runs,
       toolSpans: data.toolSpans,
       hasWorkingSet,
     }),
-    [axis, view.min, view.max, series, index.reservation, data.toolSpans, hasWorkingSet]
+    [axis, view.min, view.max, series, index.runs, data.toolSpans, hasWorkingSet]
   );
 
   const cursorX = cursorT == null ? null : toAxis(axis, cursorT);

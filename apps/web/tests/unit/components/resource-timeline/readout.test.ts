@@ -21,7 +21,7 @@ const GB = 1024 ** 3;
 const T0 = new Date(2026, 8, 28, 19, 0, 0).getTime();
 
 function run(id: string, startedAt: number, endedAt: number): ResourceRun {
-  return { id, nodeId: 'node-a', startedAt, endedAt, unsupportedReason: null };
+  return { id, nodeId: 'node-a', startedAt, endedAt, unsupportedReason: null, reservation: null };
 }
 
 function sample(end: number, cores: number): ResourceAggregate {
