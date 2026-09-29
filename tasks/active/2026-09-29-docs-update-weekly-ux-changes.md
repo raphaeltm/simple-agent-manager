@@ -92,4 +92,14 @@ covered PRs #2092–#2135; this pass covers everything merged since.
   - Wake tasks carry no attachments, so a wake shows "Restoring your session..." (`workspace_ready`),
     never "Restoring your files..." (`session-recovery-task.ts`, `workspace-ready-steps.ts`).
   - `isWaking` is VM-only (`recoveryStatus: 'waking'`); Instant wakes in place.
-- **Round 4**: running.
+- **Round 4** (fixed in `5bda5e7a6`): 0 CRITICAL, 0 HIGH, 1 MEDIUM, 2 LOW.
+  - Round 3's "if the strip disappears, send again" could double-deliver. A failed VM wake attempt
+    leaves the durable delivery in `retry_wait` (`prompt-delivery.ts`), SAM re-wakes by itself, and
+    every send is its own delivery (`chat-prompt-route.ts`). The **Wake failed** message is the
+    signal to resend.
+  - The wake strip has no elapsed timer (only the idle-resume strip does).
+  - Retry/Fork live in the session tool rail (`session-tool-actions.ts`); an ended chat with a task
+    still has Retry.
+  - Filed idea `01M3NX01NR144RNXNERWZBF9VK`: `useWakeProgress` `settledRef` latches on `failed`,
+    so a retried wake in the same page view shows no phases.
+- **Round 5**: running.
