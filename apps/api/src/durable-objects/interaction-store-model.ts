@@ -75,7 +75,7 @@ export type InteractionStoreAnswerResult =
   | {
       status: 'answered' | 'already_answered';
       summary: AcpInteractionSafeSummary;
-      delivery: { generation: string; runtimeIdentity: string };
+      delivery: { generation: string; runtimeIdentity: string; agentSessionId: string };
     }
   | {
       status: 'not_found' | 'stale' | 'conflict' | 'answer_key_conflict' | 'payload_too_large';
@@ -95,6 +95,12 @@ export function nowMs(): number {
 export async function sha256(value: string): Promise<string> {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export async function interactionDecisionHash(
+  decision: AcpInteractionAnswerDecision
+): Promise<string> {
+  return sha256(canonicalJson(decision));
 }
 
 export function parseSummary(row: InteractionRow): AcpInteractionSafeSummary {
@@ -136,6 +142,15 @@ export function detailBoundsViolation(
   return detailRecordBoundsViolation(asRecord(detail), config);
 }
 
+export function answerBoundsViolation(
+  decision: AcpInteractionAnswerDecision,
+  config: AcpInteractionConfig
+): string | null {
+  return hasOversizedString(decision, config.answerStringMaxBytes)
+    ? 'answer string exceeds configured maximum'
+    : null;
+}
+
 function detailRecordBoundsViolation(
   record: Record<string, unknown> | null,
   config: AcpInteractionConfig
@@ -159,7 +174,24 @@ function optionsBoundsViolation(
   if (Array.isArray(record.options) && record.options.length > config.optionsMaxCount) {
     return 'request options exceed configured maximum';
   }
+  if (
+    Array.isArray(record.options) &&
+    record.options.some((option) => {
+      const optionRecord = asRecord(option);
+      const name = optionRecord?.name ?? optionRecord?.label;
+      return typeof name === 'string' && [...name].length > config.optionNameMaxChars;
+    })
+  ) {
+    return 'request option name exceeds configured maximum';
+  }
   return null;
+}
+
+function hasOversizedString(value: unknown, maxBytes: number): boolean {
+  if (typeof value === 'string') return new TextEncoder().encode(value).byteLength > maxBytes;
+  if (Array.isArray(value)) return value.some((item) => hasOversizedString(item, maxBytes));
+  const record = asRecord(value);
+  return record ? Object.values(record).some((item) => hasOversizedString(item, maxBytes)) : false;
 }
 
 function schemaBoundsViolation(
@@ -175,17 +207,15 @@ function schemaBoundsViolation(
   return schemaObjectBoundsViolation(schema, config);
 }
 
-function schemaObjectBoundsViolation(
-  schema: unknown,
-  config: AcpInteractionConfig
-): string | null {
+function schemaObjectBoundsViolation(schema: unknown, config: AcpInteractionConfig): string | null {
   const schemaRecord = asRecord(schema);
   if (!schemaRecord) return null;
   const properties = asRecord(schemaRecord.properties);
   if (properties && Object.keys(properties).length > config.formSchemaMaxProperties) {
     return 'form schema properties exceed configured maximum';
   }
-  if (hasEnumOverflow(schema, config.formSchemaMaxEnum)) return 'form schema enum exceeds configured maximum';
+  if (hasEnumOverflow(schema, config.formSchemaMaxEnum))
+    return 'form schema enum exceeds configured maximum';
   return null;
 }
 

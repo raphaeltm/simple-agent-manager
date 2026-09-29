@@ -199,8 +199,14 @@ beforeEach(() => {
     summary: { state: 'answered' },
     delivery: { generation: '22222222-2222-4222-8222-222222222222', runtimeIdentity: 'runtime-1' },
   });
-  mocks.resolveAcpInteractionDeliveryTarget.mockResolvedValue({ status: 'interrupted', reason: 'no runtime' });
-  mocks.deliverAcpInteractionAnswer.mockResolvedValue({ outcome: 'confirmed', runtimeStatus: 'consumed' });
+  mocks.resolveAcpInteractionDeliveryTarget.mockResolvedValue({
+    status: 'interrupted',
+    reason: 'no runtime',
+  });
+  mocks.deliverAcpInteractionAnswer.mockResolvedValue({
+    outcome: 'confirmed',
+    runtimeStatus: 'consumed',
+  });
   mocks.recordInteractionDelivery.mockResolvedValue(undefined);
 
   app = new Hono<{ Bindings: Env }>();
@@ -640,6 +646,19 @@ describe('POST /sessions/:sessionId/attention/:markerId/resolve', () => {
     expect(projectDataService.completeAttentionAnswer).not.toHaveBeenCalled();
   });
 
+  it('rejects ACP projection markers without forwarding them as chat prompts', async () => {
+    vi.mocked(projectDataService.prepareAttentionAnswer).mockResolvedValue({
+      status: 'unsupported_source',
+      source: 'acp_interaction',
+    });
+
+    const response = await postAnswer();
+
+    expect(response.status).toBe(400);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expect(projectDataService.completeAttentionAnswer).not.toHaveBeenCalled();
+  });
+
   it('preserves the claim when delivery to the agent has an ambiguous generic failure', async () => {
     mocks.sendPromptToAgentOnNode.mockRejectedValue(new Error('runtime unavailable'));
 
@@ -932,7 +951,6 @@ describe('POST /sessions/:sessionId/cancel', () => {
   });
 });
 
-
 describe('ACP interaction browser routes', () => {
   const interactionId = '11111111-1111-4111-8111-111111111111';
   const answerBody = {
@@ -974,15 +992,22 @@ describe('ACP interaction browser routes', () => {
       'user-1',
       'task:write'
     );
-    expect(projectDataService.getSession).toHaveBeenCalledWith(expect.anything(), 'proj-1', 'chat-1');
+    expect(projectDataService.getSession).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1'
+    );
     expect(mocks.answerInteraction).toHaveBeenCalledWith(expect.anything(), {
       projectId: 'proj-1',
       chatSessionId: 'chat-1',
       interactionId,
       answerKey: 'answer-key-1',
-      answerBodyHash: 'a'.repeat(64),
+      answerBodyHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
       decision: answerBody.decision,
     });
+    expect(mocks.answerInteraction.mock.calls.at(-1)?.[1].answerBodyHash).not.toBe(
+      answerBody.decision.answerHash
+    );
   });
 
   it('rejects a project writer who did not create the session', async () => {

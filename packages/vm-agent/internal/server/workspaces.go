@@ -23,11 +23,11 @@ import (
 )
 
 const (
-	vmExecutionProtocolVersion       = 1
-	acpInteractionCapabilityVersion  = 1
-	maxDeliveryIDLength              = 128
-	maxRolloverOperationIDLength     = 128
-	maxAcpInteractionIDLength        = 128
+	vmExecutionProtocolVersion        = 1
+	acpInteractionCapabilityVersion   = 1
+	maxDeliveryIDLength               = 128
+	maxRolloverOperationIDLength      = 128
+	maxAcpInteractionIDLength         = 128
 	maxAcpInteractionGenerationLength = 128
 )
 
@@ -1839,6 +1839,14 @@ func (s *Server) handleAcpInteractionAnswer(w http.ResponseWriter, r *http.Reque
 	if !s.requireNodeManagementAuth(w, r, workspaceID) {
 		return
 	}
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	host := s.sessionHosts[hostKey]
+	s.sessionHostMu.Unlock()
+	if host == nil || host.Status() == acp.HostStopped || host.Status() == acp.HostError {
+		writeError(w, http.StatusNotFound, "no active agent session found")
+		return
+	}
 
 	var body acpInteractionAnswerRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -1908,11 +1916,10 @@ func (s *Server) agentCapabilities() map[string]interface{} {
 				persistence.PromptReceiptCompleted, persistence.PromptReceiptAmbiguous},
 		},
 		"interactions": map[string]interface{}{
-			"supported":          true,
-			"version":            acpInteractionCapabilityVersion,
-			"answerEndpoint":     true,
-			"receiptCap":         256,
-			"deliverySemantics":  "best_effort_no_wake",
+			"supported":         true,
+			"version":           acpInteractionCapabilityVersion,
+			"answerEndpoint":    true,
+			"deliverySemantics": "best_effort_no_wake",
 			"noWaiterStatus":    "no_waiter",
 			"staleStatus":       "stale_generation",
 		},

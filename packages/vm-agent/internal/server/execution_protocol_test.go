@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/persistence"
 )
@@ -66,6 +67,7 @@ func TestAcpInteractionAnswerEndpointReturnsNoWaiterForDormantRuntime(t *testing
 	s.config.NodeID = "node-1"
 	s.jwtValidator = validator
 	s.executionRuntimeID = "runtime-vm-01"
+	s.sessionHosts["ws-existing:session"] = acp.NewSessionHost(acp.SessionHostConfig{})
 	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", "ws-existing")
 
 	body := `{"protocolVersion":1,"interactionId":"11111111-1111-4111-8111-111111111111","generation":"22222222-2222-4222-8222-222222222222","runtimeIdentity":"runtime-vm-01","decision":{"kind":"permission","outcome":"approved"}}`
@@ -91,12 +93,36 @@ func TestAcpInteractionAnswerEndpointReturnsNoWaiterForDormantRuntime(t *testing
 	}
 }
 
+func TestAcpInteractionAnswerEndpointRequiresActiveSessionHost(t *testing.T) {
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	s := newContractTestServer()
+	s.config.NodeID = "node-1"
+	s.jwtValidator = validator
+	s.executionRuntimeID = "runtime-vm-01"
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", "ws-existing")
+	body := `{"protocolVersion":1,"interactionId":"11111111-1111-4111-8111-111111111111","generation":"22222222-2222-4222-8222-222222222222","runtimeIdentity":"runtime-vm-01","decision":{"kind":"permission","outcome":"approved"}}`
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/ws-existing/agent-sessions/missing/interactions/11111111-1111-4111-8111-111111111111/answer", strings.NewReader(body))
+	req.SetPathValue("workspaceId", "ws-existing")
+	req.SetPathValue("sessionId", "missing")
+	req.SetPathValue("interactionId", "11111111-1111-4111-8111-111111111111")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-SAM-Node-Id", "node-1")
+	req.Header.Set("X-SAM-Workspace-Id", "ws-existing")
+
+	rec := httptest.NewRecorder()
+	s.handleAcpInteractionAnswer(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAcpInteractionAnswerEndpointRejectsStaleRuntimeIdentity(t *testing.T) {
 	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
 	s := newContractTestServer()
 	s.config.NodeID = "node-1"
 	s.jwtValidator = validator
 	s.executionRuntimeID = "runtime-current"
+	s.sessionHosts["ws-existing:session"] = acp.NewSessionHost(acp.SessionHostConfig{})
 	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", "ws-existing")
 
 	body := `{"protocolVersion":1,"interactionId":"11111111-1111-4111-8111-111111111111","generation":"22222222-2222-4222-8222-222222222222","runtimeIdentity":"runtime-old","decision":{"kind":"permission","outcome":"approved"}}`

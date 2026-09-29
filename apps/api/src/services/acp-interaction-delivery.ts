@@ -2,12 +2,18 @@ import {
   type AcpInteractionAnswerDecision,
   AcpRuntimeAnswerResponseSchema,
   buildAcpInteractionAnswerPath,
+  buildVmPromptDeliveryCapabilitiesPath,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
-import { NodeAgentHttpError, nodeAgentRequest } from './node-agent';
+import {
+  getNodeAgentBackgroundRequestTimeoutMs,
+  NodeAgentHttpError,
+  nodeAgentRequest,
+} from './node-agent';
+import { CapabilitiesSchema } from './vm-prompt-delivery-adapter-schemas';
 
 const log = createModuleLogger('acp_interaction_delivery');
 
@@ -18,7 +24,6 @@ export interface AcpInteractionDeliveryTarget {
   nodeId: string;
   userId: string;
   agentSessionId: string;
-  runtimeIdentity: string;
   runtime: string;
 }
 
@@ -34,10 +39,8 @@ interface TargetRow {
   node_id: string | null;
   node_status: string | null;
   node_runtime: string | null;
-  agent_version: string | null;
   agent_session_id: string | null;
   agent_session_status: string | null;
-  agent_session_updated_at: string | null;
 }
 
 const TERMINAL_WORKSPACE_STATUSES = new Set(['stopping', 'stopped', 'evicted', 'deleted', 'error']);
@@ -47,7 +50,8 @@ const TERMINAL_AGENT_SESSION_STATUSES = new Set(['completed', 'failed', 'error',
 export async function resolveAcpInteractionDeliveryTarget(
   env: Env,
   projectId: string,
-  chatSessionId: string
+  chatSessionId: string,
+  agentSessionId: string
 ): Promise<
   | { status: 'ready'; target: AcpInteractionDeliveryTarget }
   | { status: 'retry' | 'interrupted'; reason: string }
@@ -59,18 +63,16 @@ export async function resolveAcpInteractionDeliveryTarget(
             w.node_id AS node_id,
             n.status AS node_status,
             n.runtime AS node_runtime,
-            n.agent_version AS agent_version,
             a.id AS agent_session_id,
-            a.status AS agent_session_status,
-            a.updated_at AS agent_session_updated_at
+            a.status AS agent_session_status
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
-     LEFT JOIN agent_sessions a ON a.workspace_id = w.id
+     LEFT JOIN agent_sessions a ON a.workspace_id = w.id AND a.id = ?
      WHERE w.project_id = ? AND w.chat_session_id = ?
-     ORDER BY w.updated_at DESC, a.created_at DESC
+     ORDER BY w.updated_at DESC
      LIMIT 1`
   )
-    .bind(projectId, chatSessionId)
+    .bind(agentSessionId, projectId, chatSessionId)
     .first<TargetRow>();
 
   if (!row) return { status: 'interrupted', reason: 'target workspace missing' };
@@ -97,12 +99,6 @@ export async function resolveAcpInteractionDeliveryTarget(
       nodeId: row.node_id,
       userId: row.user_id,
       agentSessionId: row.agent_session_id,
-      runtimeIdentity: [
-        row.node_id,
-        row.agent_session_id,
-        row.agent_version ?? 'legacy',
-        row.agent_session_updated_at ?? 'unknown',
-      ].join(':'),
       runtime: row.node_runtime ?? 'vm',
     },
   };
@@ -118,10 +114,26 @@ export async function deliverAcpInteractionAnswer(
     decision: AcpInteractionAnswerDecision;
   }
 ): Promise<AcpInteractionDeliveryResult> {
-  if (target.runtimeIdentity !== input.runtimeIdentity) {
-    return { outcome: 'interrupted', reason: 'runtime identity changed before delivery' };
-  }
+  const requestTimeoutMs = getNodeAgentBackgroundRequestTimeoutMs(env);
   try {
+    const capabilities = v.parse(
+      CapabilitiesSchema,
+      await nodeAgentRequest(
+        target.nodeId,
+        env,
+        buildVmPromptDeliveryCapabilitiesPath(target.workspaceId),
+        {
+          method: 'GET',
+          userId: target.userId,
+          workspaceId: target.workspaceId,
+          requestTimeoutMs,
+          recoverContainerOnTimeout: false,
+        }
+      )
+    );
+    if (capabilities.runtimeIdentity !== input.runtimeIdentity) {
+      return { outcome: 'interrupted', reason: 'runtime identity changed before delivery' };
+    }
     const raw = await nodeAgentRequest(
       target.nodeId,
       env,
@@ -130,6 +142,7 @@ export async function deliverAcpInteractionAnswer(
         method: 'POST',
         userId: target.userId,
         workspaceId: target.workspaceId,
+        requestTimeoutMs,
         recoverContainerOnTimeout: false,
         body: JSON.stringify({
           protocolVersion: 1,

@@ -48,7 +48,7 @@ Slice A builds the dormant foundation only. It must not advertise new ACP intera
 - [x] Add minimal attention projection source `acp_interaction`, `expires_at NULL`, structural metadata only, best-effort nonblocking create/resolve, and source-aware expiry guard.
 - [x] Add legacy attention resolve guard so `acp_interaction` markers cannot route an answer as a prompt.
 - [x] Add actual session-delete cleanup hook to purge/cancel active interaction records while preserving bounded summaries for history-preserving archive.
-- [x] Add focused tests for local-runtime DO state transitions/restart/outbox persistence, idempotency hash mismatches, answer/cancel/expire races, stale/dead generation, no-wake transport proof, auth/caller-type/CSRF negatives, canary secrecy, retention/deletion, attention source guard, fresh install and upgrade config. Evidence: node-level no-wake delivery tests, worker InteractionStore tests, VM route contract tests, migration compatibility tests, and ACP browser route guard tests added; CI Durable Object Workers and staging remain the authoritative Cloudflare runtime proof.
+- [x] Add focused tests for concurrent create/answer linearization, answer idempotency mismatches, expiry, delivery outbox persistence, sensitive purge, stale/dead runtime identity, no-wake transport, browser authorization/origin guards, VM session binding, migration compatibility, and deployment override plumbing. Broader live waiter/tombstone and activated runtime scenarios remain Slice B work.
 - [x] Update docs/API contract/env references as needed without advertising runtime/UI capability activation.
 - [ ] Run required quality gates, local specialist reviews, staging proof, CodeRabbit, merge, production deploy/version monitoring, and append concise A outcome to the canonical Idea. Progress: local gates, specialist review evidence, Sonar, PR, and CodeRabbit label path complete; latest CI/staging/merge/prod evidence pending.
 
@@ -65,62 +65,19 @@ Slice A builds the dormant foundation only. It must not advertise new ACP intera
 - Fresh install and upgrade generated Cloudflare config include the new binding/migration safely.
 - PR passes local quality gates, local security/Cloudflare/constitution/env/doc/task-completion reviews, staging controlled fixture proof, CI, CodeRabbit trusted review loop, merge, production deployment monitoring, and bounded dormant production smoke.
 
-
 ## Implementation Evidence So Far
 
 - Added `InteractionStore` Durable Object with encrypted request detail and encrypted answer/decision storage, per-chat deterministic service wrapper, answer idempotency/body-hash binding, delivery state separation, alarm-driven projection/delivery/purge/compaction, and session cleanup hooks.
 - Added shared Valibot contracts/defaults and VM-agent contract fixture updates.
 - Added Worker runtime callback create/settle routes and browser snapshot/detail/answer routes with exact Origin guard and session creator gating.
-- Added no-wake answer delivery service using `nodeAgentRequest(..., recoverContainerOnTimeout: false)` and tests for consumed/duplicate/stale/no-waiter/conflict/404/ambiguous transport outcomes.
+- Added no-wake answer delivery service that probes the VM agent's current runtime identity and uses `nodeAgentRequest(..., recoverContainerOnTimeout: false)` with the background request budget for both probe and answer delivery.
 - Added source-safe `acp_interaction` attention projection plus legacy attention resolve/expiry guard.
-- Added dormant `ACP_INTERACTIONS_ENABLED=false` wrangler flag; other ACP interaction tuning defaults are typed/documented and resolved in code to avoid exceeding Cloudflare Worker text-binding guard.
-- Local checks passing so far: `pnpm typecheck`, `pnpm lint` (pre-existing warnings only), `pnpm --filter @simple-agent-manager/api test -- tests/acp-interaction-delivery.test.ts`, `pnpm --filter @simple-agent-manager/shared typecheck`, and `pnpm vitest run scripts/quality/do-migration-compatibility.test.ts scripts/quality/go-toolchain-floor.test.ts scripts/quality/check-runtime-boundary-semantics.test.ts`.
-- Local limitations: Go toolchain/gofmt are unavailable in this container; Cloudflare worker tests stall at startup here even for an existing attention-marker test, so worker runtime proof needs CI/staging confirmation.
+- Added dormant `ACP_INTERACTIONS_ENABLED=false` wrangler flag and deploy workflow forwarding for every typed ACP interaction override, including configurable alarm batch and wall-time budgets.
+- Local checks passing on the repair head: API typecheck; 50 focused API route/delivery tests; 684 shared-package tests and typecheck; VM-agent server tests with Go 1.26.6; deployment workflow tests; targeted ESLint/Prettier; and the InteractionStore workerd suite after exercising its D1/DO runtime.
+- The previous PR head's full CI run `36568005268` completed successfully. A fresh full CI run, staging verification, trusted CodeRabbit retry, merge, and production monitoring remain required after the repair commit is pushed.
+- Final local specialist verdicts on the repair tree: task completion PASS, test engineering PASS, Cloudflare PASS, environment PASS, documentation sync PASS, constitution PASS, Go PASS, and security PASS.
+- Added a real worker vertical slice covering signed callback create, D1/ProjectData/InteractionStore persistence, valid callback-token rejection at browser auth, signed-in browser answer, VM HTTP boundary payload, and final `delivery_confirmed` durable state.
 
+## Validation Status
 
-## Task Completion Validation Report
-
-**Task**: `tasks/active/2026-09-29-dormant-acp-interactions-foundation.md`  
-**Branch**: `sam/implement-ship-slice-dormant-bdptty`  
-**Date**: 2026-09-29
-
-### Verdict: PASS with one scoped WARN
-
-| Check | Status | Issues |
-| --- | --- | --- |
-| A: Research → Checklist | PASS | All research findings have checklist coverage or scoped deferral. |
-| B: Checklist → Diff | PASS | Checked items map to shared schemas, Worker routes, InteractionStore DO, VM endpoint, attention guards, cleanup hooks, env/docs, and tests. |
-| C: Criteria → Tests | PASS/WARN | Automated coverage exists for store state, encryption canaries, idempotency, no-wake delivery, VM dormant endpoint, route guards, and migration config; live staging proof still pending. |
-| D: UI → Backend | N/A | Slice A adds no UI inputs. |
-| E: Multi-Resource | N/A | No provider/resource selector added. |
-| F: Vertical Slice | PASS/WARN | Worker DO tests cover Cloudflare store behavior; staging remains required for deployed dormant route/config proof. |
-
-### Findings
-
-#### WARN F: VM in-memory waiter registry deferred to Slice B
-
-**Planned** (task file checklist): VM-agent low-level endpoint plus in-memory receipt/tombstone registry.
-
-**Actual**: Slice A implements the dormant VM endpoint and capability consumer. Runtime consumed/duplicate waiter state is not reachable until Slice B wires live ACP waiters, so the registry is deferred to Slice B. The Worker delivery module is still tested against fake runtime `consumed`, `duplicate`, `stale_generation`, `no_waiter`, `conflict`, dead-generation, and ambiguous-transport outcomes.
-
-**Risk**: None while Slice A remains dormant; later B must add the runtime waiter/tombstone registry before activating runtime-generated interactions.
-
-**Recommendation**: Preserve this as a Slice B acceptance item; do not implement it in A because A must not activate runtime interaction waiters.
-
-### Uncovered Acceptance Criteria
-
-| Criterion | Test or verification | Status |
-| --- | --- | --- |
-| Dormant default and no advertised live ACP creation | shared defaults/config, VM capability fixture, prompt-delivery fixture subset test | COVERED |
-| Worker create/read/answer/settle controlled fixtures | `apps/api/tests/workers/acp-interaction-store.test.ts`; staging pending | COVERED/PENDING STAGING |
-| Encryption and sensitive canaries | `apps/api/tests/workers/acp-interaction-store.test.ts` | COVERED |
-| Browser human answer auth + exact Origin | `apps/api/tests/unit/routes/chat-prompt-cancel.test.ts` ACP route cases | COVERED |
-| Runtime callback identity | `apps/api/src/routes/projects/acp-interaction-callback.ts` plus existing callback auth patterns; staging pending | COVERED/PENDING STAGING |
-| No-wake delivery | `apps/api/tests/acp-interaction-delivery.test.ts` | COVERED |
-| Decision/delivery race states | `apps/api/tests/workers/acp-interaction-store.test.ts` plus delivery tests | COVERED |
-| Attention source guard | source guard code and route reject path; staging pending | COVERED/PENDING STAGING |
-| Generated Cloudflare config | `scripts/quality/do-migration-compatibility.test.ts`; CI/staging pending | COVERED/PENDING STAGING |
-
-### UI-to-Backend Data Path Audit
-
-No UI inputs were added in Slice A.
+The earlier validation report was superseded after specialist review found runtime-identity, cross-session binding, outbox, purge, alarm-budget, deployment-plumbing, and coverage gaps. Those findings have been addressed in the current working tree. Final task-completion review, staging, CI, CodeRabbit, merge, and production verification remain pending.
