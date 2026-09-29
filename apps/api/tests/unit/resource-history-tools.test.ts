@@ -89,8 +89,6 @@ describe('resource history MCP tool', () => {
           agentType: 'openai-codex',
           memoryWorkingSetMeanBytes: 512,
           memoryWorkingSetPeakBytes: 1024,
-        memoryWorkingSetMeanBytes: 512,
-        memoryWorkingSetPeakBytes: 1024,
         },
         detail: {
           toolSpans: [{ id: 'hashed', kind: 'execute', toolName: 'Bash', startedAt: 1 }],
@@ -207,8 +205,6 @@ describe('SAM native get_resource_history tool', () => {
           agentType: 'openai-codex',
           memoryWorkingSetMeanBytes: 512,
           memoryWorkingSetPeakBytes: 1024,
-        memoryWorkingSetMeanBytes: 512,
-        memoryWorkingSetPeakBytes: 1024,
         },
         detail: {
           toolSpans: [

@@ -94,6 +94,10 @@ describe('workspace resource history HTTP vertical slice', () => {
       schema.projects,
       schema.projectMembers,
       schema.workspaces,
+      schema.tasks,
+      schema.agentSessions,
+      schema.agentProfiles,
+      schema.skills,
       schema.workspaceResourceSummaries,
       schema.workspaceResourceChunks,
     ]);
