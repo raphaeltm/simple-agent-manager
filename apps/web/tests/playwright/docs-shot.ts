@@ -8,31 +8,42 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 /** Where committed docs images live, relative to `apps/web` (Playwright's cwd). */
 export const DOCS_IMAGE_DIR = resolve(process.cwd(), '../www/public/images/docs');
 
+/** A page region, for captures that must span several elements (e.g. a list beside a chat). */
+export interface DocsShotClip {
+  clip: { x: number; y: number; width: number; height: number };
+}
+
 /**
- * Capture a focused element (or the full page) into the docs image directory when
- * DOCS_SHOTS is set, otherwise into the gitignored tmp dir with a viewport suffix.
+ * Capture a focused element, a page region, or the whole viewport into the docs image
+ * directory when DOCS_SHOTS is set, otherwise into the gitignored tmp dir with a viewport
+ * suffix.
  */
 export async function docsShot(
   page: Page,
   name: string,
-  locator?: ReturnType<Page['locator']>
+  target?: Locator | DocsShotClip
 ): Promise<void> {
   await page.waitForTimeout(500);
-  const target = locator ?? page;
+  let path: string;
   if (process.env.DOCS_SHOTS) {
     mkdirSync(DOCS_IMAGE_DIR, { recursive: true });
-    await target.screenshot({ path: `${DOCS_IMAGE_DIR}/${name}.png` });
+    path = `${DOCS_IMAGE_DIR}/${name}.png`;
+  } else {
+    const suffix = page.viewportSize()?.width ?? 'x';
+    const tmp = `${process.cwd()}/.codex/tmp/playwright-screenshots`;
+    mkdirSync(tmp, { recursive: true });
+    path = `${tmp}/${name}-${suffix}.png`;
+  }
+  if (target && 'clip' in target) {
+    await page.screenshot({ path, clip: target.clip });
     return;
   }
-  const suffix = page.viewportSize()?.width ?? 'x';
-  const tmp = `${process.cwd()}/.codex/tmp/playwright-screenshots`;
-  mkdirSync(tmp, { recursive: true });
-  await target.screenshot({ path: `${tmp}/${name}-${suffix}.png` });
+  await (target ?? page).screenshot({ path });
 }
 
 /**

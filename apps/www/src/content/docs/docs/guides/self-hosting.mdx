@@ -387,13 +387,19 @@ The sentinel user id defaults to `system_anonymous_trials`. If your deployment u
 
 Below the breakers, **Problem migrations** lists the individual session migrations that need attention, each with its error, attempt count, and timestamps:
 
-| Badge        | Meaning                                                                                                                                  |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Failed**   | An attempt failed. The sweep retries it after `PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS` (an hour by default).                          |
-| **Poisoned** | It failed `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS` times (3 by default), which is what opens the project's breaker.                   |
+| Badge        | Meaning                                                                                                                                            |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Failed**   | An attempt failed. The sweep retries it after `PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS` (an hour by default).                                   |
+| **Poisoned** | It failed `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS` times (3 by default), which is what opens the project's breaker.                            |
 | **Frozen**   | The sweep is holding it back — for example, the session was still active when the sweep tried to copy it. Closing the breaker does not release it. |
 
 **Abandon** is how you clear a migration that never got as far as deleting the session from the project's live storage. It discards the partial archive copy, returns the session to live storage so it reads normally, and makes it eligible for a later sweep; you have to enter a reason. SAM refuses, and the page shows its reason verbatim, when the migration is still running (its lease has not expired) or has already deleted its source. That second case needs a copy-back instead, which has no button yet: `POST /api/admin/project-data/storage/:projectId/archive-sharding/migrations/:migrationId/copy-back` with a `reason`.
+
+<img
+  src="/images/docs/admin-storage-abandon-dialog-mobile.png"
+  alt="The Abandon migration dialog on a phone: it explains that abandoning drops the partial shard copy and returns the session to root, lists the project, migration, and session IDs, and has a filled-in Reason field above a red Abandon migration button and a Cancel button."
+  width="375"
+/>
 
 ## Teardown
 
