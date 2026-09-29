@@ -311,6 +311,7 @@ interface MockOptions extends SessionOptions {
   /** Seeds a long conversation so the scroll-to-bottom button can actually appear. */
   manyMessages?: boolean;
   legacyResourceHistory?: boolean;
+  resourceHistoryScenario?: 'normal' | 'empty' | 'error' | 'many';
 }
 
 async function setupMocks(page: Page, options: MockOptions = {}) {
@@ -321,6 +322,7 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     empty = false,
     manyMessages = false,
     legacyResourceHistory = false,
+    resourceHistoryScenario = 'normal',
   } = options;
 
   await page.addInitScript(
@@ -373,7 +375,25 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     }
 
     if (pathname === `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/resource-history`) {
+      if (resourceHistoryScenario === 'error') {
+        await route.fulfill({ status: 500, json: { error: 'resource_history_unavailable' } });
+        return;
+      }
+      if (resourceHistoryScenario === 'empty') {
+        await route.fulfill({ json: { summary: null, chunks: [] } });
+        return;
+      }
       const includeDetail = new URL(url).searchParams.get('chunkId') === 'wrchunk-rail-2';
+      const chunks =
+        resourceHistoryScenario === 'many'
+          ? Array.from({ length: 30 }, (_, index) => ({
+              ...RESOURCE_HISTORY_CHUNKS[0],
+              id: `wrchunk-many-${index}`,
+              chunkSequence: 30 - index,
+              startedAt: NOW - (index + 2) * 900_000,
+              endedAt: NOW - (index + 1) * 900_000,
+            }))
+          : RESOURCE_HISTORY_CHUNKS;
       await route.fulfill({
         json: {
           summary: legacyResourceHistory
@@ -383,7 +403,7 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
                 memoryWorkingSetPeakBytes: null,
               }
             : RESOURCE_HISTORY_SUMMARY,
-          chunks: RESOURCE_HISTORY_CHUNKS,
+          chunks,
           ...(includeDetail ? { detail: RESOURCE_HISTORY_DETAIL } : {}),
         },
       });
@@ -1140,5 +1160,33 @@ test.describe('Session resource history drawer', () => {
     const neededCard = page.getByText('Memory needed (peak)', { exact: true }).locator('..');
     await expect(neededCard).toContainText('—');
     await expect(neededCard).not.toContainText('0 B');
+  });
+
+  test('shows the empty resource-history state', async ({ page }) => {
+    await openChat(page, { state: 'active', resourceHistoryScenario: 'empty' });
+    await page.getByTestId('session-tool-resources').click();
+
+    await expect(
+      page.getByText('No retained resource history is available for this session yet.')
+    ).toBeVisible();
+    await capture(page, `resource-history-empty-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+
+  test('shows the resource-history error state', async ({ page }) => {
+    await openChat(page, { state: 'active', resourceHistoryScenario: 'error' });
+    await page.getByTestId('session-tool-resources').click();
+
+    await expect(page.getByText('Resource history could not be loaded.')).toBeVisible();
+    await capture(page, `resource-history-error-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+
+  test('keeps a long chunk list usable', async ({ page }) => {
+    await openChat(page, { state: 'active', resourceHistoryScenario: 'many' });
+    await page.getByTestId('session-tool-resources').click();
+
+    const chunksToggle = page.getByRole('button', { name: '30 chunks' });
+    await chunksToggle.click();
+    await expect(page.getByRole('button', { name: /samples/ })).toHaveCount(30);
+    await capture(page, `resource-history-many-${page.viewportSize()?.width ?? 'viewport'}`);
   });
 });
