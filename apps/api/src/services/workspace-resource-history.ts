@@ -287,6 +287,16 @@ function hex(bytes: ArrayBuffer): string {
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return hex(await crypto.subtle.digest('SHA-256', bytes));
 }
+
+async function gzipJson(value: unknown): Promise<{ bytes: Uint8Array; uncompressedBytes: number }> {
+  const encoded = new TextEncoder().encode(JSON.stringify(value));
+  const stream = new Blob([encoded]).stream().pipeThrough(new CompressionStream('gzip'));
+  return {
+    bytes: new Uint8Array(await new Response(stream).arrayBuffer()),
+    uncompressedBytes: encoded.byteLength,
+  };
+}
+
 async function readBoundedGzipJson(
   bytes: Uint8Array,
   maxBytes: number,
@@ -608,7 +618,12 @@ function assertWorkspaceResourceUploadMetadata(body: WorkspaceResourceUploadBody
 async function validateWorkspaceResourceChunkBytes(
   env: Env,
   body: WorkspaceResourceUploadBody
-): Promise<{ bytes: Uint8Array; actualSha: string }> {
+): Promise<{
+  bytes: Uint8Array;
+  actualSha: string;
+  compressedBytes: number;
+  uncompressedBytes: number;
+}> {
   const bytes = decodeBase64(body.compressedBase64);
   if (bytes.byteLength !== body.compressedBytes) {
     throw errors.badRequest('compressedBytes does not match decoded payload size');
@@ -617,8 +632,8 @@ async function validateWorkspaceResourceChunkBytes(
     throw errors.badRequest('Resource history chunk exceeds configured upload limit');
   }
 
-  const actualSha = await sha256Hex(bytes);
-  if (actualSha !== body.sha256.toLowerCase()) {
+  const uploadedSha = await sha256Hex(bytes);
+  if (uploadedSha !== body.sha256.toLowerCase()) {
     throw errors.badRequest('Resource history chunk checksum mismatch');
   }
   if (body.uncompressedBytes > uncompressedMaxBytes(env)) {
@@ -634,7 +649,18 @@ async function validateWorkspaceResourceChunkBytes(
     throw errors.badRequest('uncompressedBytes does not match decoded payload size');
   }
 
-  return { bytes, actualSha };
+  // Archive the allowlisted representation. This prevents an authenticated but
+  // buggy agent from retaining tool titles, inputs, or uncapped metadata in R2.
+  const sanitized = await gzipJson(decodedChunk.value);
+  if (sanitized.bytes.byteLength > getWorkspaceResourceUploadMaxBytes(env)) {
+    throw errors.badRequest('Normalized resource history chunk exceeds configured upload limit');
+  }
+  return {
+    bytes: sanitized.bytes,
+    actualSha: await sha256Hex(sanitized.bytes),
+    compressedBytes: sanitized.bytes.byteLength,
+    uncompressedBytes: sanitized.uncompressedBytes,
+  };
 }
 
 export async function storeWorkspaceResourceChunk(
@@ -657,7 +683,8 @@ export async function storeWorkspaceResourceChunk(
   );
   const nodeId = validateWorkspaceUploadIdentity(workspace, body, uploadedByNodeId);
   assertWorkspaceResourceUploadMetadata(body);
-  const { bytes, actualSha } = await validateWorkspaceResourceChunkBytes(env, body);
+  const { bytes, actualSha, compressedBytes, uncompressedBytes } =
+    await validateWorkspaceResourceChunkBytes(env, body);
 
   const db = drizzle(env.DATABASE, { schema });
   const now = Date.now();
@@ -820,8 +847,8 @@ export async function storeWorkspaceResourceChunk(
       sourceVersion: body.sourceVersion,
       r2Key,
       storageFormat: WORKSPACE_RESOURCE_STORAGE_FORMAT,
-      compressedBytes: body.compressedBytes,
-      uncompressedBytes: body.uncompressedBytes,
+      compressedBytes,
+      uncompressedBytes,
       sha256: actualSha,
       startedAt: body.startedAt,
       endedAt: body.endedAt,

@@ -32,6 +32,11 @@ async function gzipJson(value: unknown): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+async function gunzipJson(bytes: Uint8Array): Promise<unknown> {
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return JSON.parse(await new Response(stream).text()) as unknown;
+}
+
 function samplePayload() {
   return {
     samples: [
@@ -508,6 +513,25 @@ describe('workspace resource history', () => {
       { id: 'legacy', startedAt: 1_200, endedAt: 1_300 },
     ]);
     expect(JSON.stringify(history.detail?.toolSpans)).not.toContain(commandCanary);
+
+    const archivedBytes = [...r2.objects.values()][0];
+    expect(archivedBytes).toBeDefined();
+    const archivedPayload = await gunzipJson(archivedBytes!);
+    expect(archivedPayload).toMatchObject({
+      toolSpans: [
+        {
+          id: 'named',
+          kind: 'execute',
+          toolName: 'Bash🔥',
+          startedAt: 1_000,
+          endedAt: 2_000,
+        },
+        { id: 'invalid-kind', startedAt: 1_100 },
+        { id: 'legacy', startedAt: 1_200, endedAt: 1_300 },
+      ],
+    });
+    expect(JSON.stringify(archivedPayload)).not.toContain(commandCanary);
+    expect(JSON.stringify(archivedPayload)).not.toContain('unsafe');
   });
 
   it('rejects mismatched decoded size and oversized D1 metadata before indexing', async () => {
