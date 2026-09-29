@@ -190,6 +190,7 @@ const RESOURCE_HISTORY_DETAIL = {
   downsampleLimit: 720,
   samples: Array.from({ length: 36 }, (_, i) => ({
     t: NOW - 1_800_000 + i * 25_000,
+    intervalMillis: 5_000,
     cpuMillis: resourceHistoryCpuMillis(i),
     memoryBytes: i === 24 ? 1_342_177_280 : 410_000_000 + i * 12_000_000,
     memoryPeakBytes: i >= 24 ? 1_342_177_280 : 610_000_000 + i * 8_000_000,
@@ -223,6 +224,30 @@ const RESOURCE_HISTORY_DETAIL = {
     },
   ],
   gaps: [{ startedAt: NOW - 1_300_000, endedAt: NOW - 1_250_000, reason: 'sampler_delay' }],
+};
+
+/** The older, quieter chunk: the timeline loads every chunk its view needs, not only the newest. */
+const RESOURCE_HISTORY_QUIET_DETAIL = {
+  chunkId: 'wrchunk-rail-1',
+  originalSampleCount: 180,
+  downsampled: false,
+  downsampleLimit: 720,
+  samples: Array.from({ length: 180 }, (_, i) => ({
+    t: NOW - 2_700_000 + (i + 1) * 5_000,
+    intervalMillis: 5_000,
+    cpuMillis: 20 + (i % 3) * 5,
+    memoryBytes: 400_000_000,
+    memoryPeakBytes: 420_000_000,
+    ioReadBytes: 4_096,
+    ioWriteBytes: 8_192,
+  })),
+  toolSpans: [],
+  gaps: [],
+};
+
+const RESOURCE_HISTORY_DETAILS: Record<string, unknown> = {
+  'wrchunk-rail-2': RESOURCE_HISTORY_DETAIL,
+  'wrchunk-rail-1': RESOURCE_HISTORY_QUIET_DETAIL,
 };
 
 /** Enough messages to overflow any test viewport, so the scroll-to-bottom button appears. */
@@ -352,12 +377,12 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     }
 
     if (pathname === `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/resource-history`) {
-      const includeDetail = new URL(url).searchParams.get('chunkId') === 'wrchunk-rail-2';
+      const detail = RESOURCE_HISTORY_DETAILS[new URL(url).searchParams.get('chunkId') ?? ''];
       await route.fulfill({
         json: {
           summary: RESOURCE_HISTORY_SUMMARY,
           chunks: RESOURCE_HISTORY_CHUNKS,
-          ...(includeDetail ? { detail: RESOURCE_HISTORY_DETAIL } : {}),
+          ...(detail ? { detail } : {}),
         },
       });
       return;
@@ -1037,7 +1062,7 @@ test.describe('Session Details — desktop', () => {
 });
 
 test.describe('Session resource history drawer', () => {
-  test('opens contextual summary and auto-loads detail from the real rail action', async ({
+  test('opens the whole session from the real rail action and reads values under the cursor', async ({
     page,
   }) => {
     await openChat(page, { state: 'active', messagesLong: true });
@@ -1047,47 +1072,29 @@ test.describe('Session resource history drawer', () => {
     await expect(dialog).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Resources' })).toBeVisible();
 
-    // Stat cards — use exact match to avoid ambiguity with chart legend text
-    await expect(page.getByText('CPU peak', { exact: true })).toBeVisible();
-    await expect(page.getByText('RAM peak', { exact: true })).toBeVisible();
-    await expect(page.getByText('1 OOM event observed in retained samples.')).toBeVisible();
-
-    // Chart auto-loads via useEffect selecting newest chunk — wait for it
-    await expect(
-      page.getByRole('img', { name: 'CPU and memory resource timeline' })
-    ).toBeVisible({ timeout: 10_000 });
-    await expect(
-      page.getByText('CPU: green solid line, normalized to the CPU peak for this chunk.')
-    ).toBeVisible();
-    await expect(
-      page.getByText('RAM: purple dashed line, normalized to the RAM peak for this chunk.')
-    ).toBeVisible();
-    await expect(page.getByText(/Blue bands: concurrent tool windows/)).toBeVisible();
-    await expect(page.getByText('Tool windows', { exact: true })).toBeVisible();
-
-    // Correlation disclaimer is contextual — only visible after chart loads
-    await expect(page.getByText('Correlation is based on concurrent tool windows')).toBeVisible();
+    // The whole session is on screen, and the OOM kill recorded in the detail samples is called out.
+    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('1 out-of-memory kill')).toBeVisible({ timeout: 10_000 });
+    const timeline = dialog.getByRole('slider', { name: /Session timeline/ });
+    await expect(timeline).toBeVisible();
+    await expect(dialog.getByText('Busiest moments', { exact: true })).toBeVisible();
+    // Chunks are a storage detail: nothing in the drawer offers them.
+    await expect(dialog.getByRole('button', { name: /chunk/i })).toHaveCount(0);
 
     await capture(page, `resource-history-summary-${page.viewportSize()?.width ?? 'viewport'}`);
 
-    // Scroll to bottom for detail screenshot
+    // Keyboard reaches the same readout a finger or pointer does.
+    await timeline.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(dialog.getByRole('button', { name: 'Clear the selected instant' })).toBeVisible();
+    await expect(timeline).toHaveAttribute('aria-valuetext', /CPU <?\d+(\.\d+)? cores?/);
+    await expect(timeline).toHaveAttribute('aria-valuetext', /Memory \d/);
+
+    await capture(page, `resource-history-cursor-${page.viewportSize()?.width ?? 'viewport'}`);
+
     await dialog.locator('.overflow-y-auto').evaluate((el) => {
       el.scrollTop = el.scrollHeight;
     });
     await capture(page, `resource-history-detail-${page.viewportSize()?.width ?? 'viewport'}`);
-
-    // Chunks disclosure — collapsed by default, toggle to expand
-    const chunksToggle = page.getByRole('button', { name: /chunk/ });
-    await expect(chunksToggle).toBeVisible();
-    await expect(chunksToggle).toHaveAttribute('aria-expanded', 'false');
-    await chunksToggle.click();
-    await expect(chunksToggle).toHaveAttribute('aria-expanded', 'true');
-    // Verify chunk buttons are visible after expanding
-    await expect(page.getByRole('button', { name: /samples/ }).first()).toBeVisible();
-
-    await dialog.locator('.overflow-y-auto').evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-    });
-    await capture(page, `resource-history-chunks-${page.viewportSize()?.width ?? 'viewport'}`);
   });
 });
