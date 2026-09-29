@@ -8,9 +8,9 @@ label in the session list. Find what you are seeing below. The section it points
 your work is safe and what to do next. Everything here applies to both
 [Instant and VM sessions](/docs/guides/instant-sessions/) unless it says otherwise.
 
-- **A strip with a spinner and an elapsed time**, such as **Waking and restoring session...** or,
-  on a VM, a step like **Finding a server...** or **Waiting for server capacity...**. A wake or a
-  recovery is in progress. → [Wait](#recovery-is-in-progress)
+- **A strip with a spinner**, such as **Waking and restoring session...** or, on a VM, a step like
+  **Finding a server...** or **Waiting for server capacity...**. A wake or a recovery is in
+  progress. → [Wait](#recovery-is-in-progress)
 - **"…delivery was interrupted and its execution outcome is unknown"** (Instant). Your prompt may
   or may not have run. → [Check, then decide](#your-prompt-may-or-may-not-have-run)
 - **"…could not restore its last safe checkpoint"** (Instant). SAM stopped the container; your
@@ -38,8 +38,8 @@ an Instant profile has no branch of its own, and pushes only what you ask the ag
 
 ## Recovery is in progress
 
-A strip with a spinner and an elapsed-time counter means SAM is waking the session or rebuilding it
-from its snapshot. **Do nothing.** When it finishes, the chat carries on.
+A strip with a spinner means SAM is waking the session or rebuilding it from its snapshot. **Do
+nothing.** When it finishes, the chat carries on.
 
 On Instant this finishes within two minutes. On a VM, the strip names the step it has reached —
 **Finding a server...**, **Provisioning a server...**, **Restoring your session...**, **Starting
@@ -54,8 +54,11 @@ or you may already have as many machines as SAM allows you (10 by default) or yo
 [compute pool](/docs/guides/compute-pools/) permits. SAM keeps trying; if the wait drags on,
 delete machines you no longer need from the **Nodes** page. A message you sent is held for an
 hour: if the wake is still waiting then, the chat reports **Wake failed: Session is waking** (see
-[Wake failed](#wake-failed)). If the strip disappears and the chat is still **Sleeping**, the wake
-gave up; send your message again.
+[Wake failed](#wake-failed)).
+
+Until a **Wake failed** message appears, SAM still holds your message and keeps retrying the wake,
+even if the strip is gone when you reopen the chat. Don't send the message again: a second copy
+would be delivered as well.
 
 :::note[The Recovery container label]
 The chat header's **Recovery container** label means different things on the two runtimes. On a VM
@@ -179,7 +182,9 @@ middle of a turn SAM waits for it to end, for up to eight hours. Until then the 
 the failure card showing: wait for it to go to sleep rather than using **Retry**.
 
 The failure card under the chat header stays either way. It is red, or grey when there is nothing to
-debug — an expired question, for example. Read the chat to see whether the work was kept:
+debug — an expired question, for example. **Retry** (re-run the task in a new chat) and **Fork** (a
+new chat that carries a summary of this one) are in the session tool rail. Read the chat to see
+whether the work was kept:
 
 - **The chat goes to Sleeping, and the composer is still there.** The work was kept. Reply in the
   same chat: it wakes with its files restored, and you can tell the agent how to carry on. Don't use
@@ -225,11 +230,12 @@ If you delete a node yourself from the **Nodes** page, the tasks still running o
 
 The composer is gone and the chat reads **"This session has ended."** There is nothing left to
 wake: the session was stopped or archived, or it failed in a way SAM could not preserve (the chat
-says so when that is the reason — see [When a task fails](#when-a-task-fails)). A retry button
-against a runtime that can never come back would only invite futile retries, so you don't get one.
+says so when that is the reason — see [When a task fails](#when-a-task-fails)).
 
-Start a new chat. [Fork](/docs/guides/chat-features/#conversation-forking) this one to carry its
-context across rather than re-explaining from scratch.
+If the chat belongs to a task, **Retry** in the session tool rail re-runs it in a new chat, without
+the old files. Otherwise start a new chat, or
+[fork](/docs/guides/chat-features/#conversation-forking) this one to carry its context across
+rather than re-explaining from scratch.
 
 ## None of these fit
 
