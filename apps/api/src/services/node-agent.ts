@@ -441,9 +441,11 @@ export async function stopWorkspaceOnNode(
     // Snapshot before network dispatch for older internal callers. This guards
     // in-flight transport delay; callers with an earlier lifecycle claim must
     // pass that claim's generation explicitly, as the Stop route does.
-    const workspace = await env.DATABASE.prepare(`SELECT w.eviction_generation, n.runtime
+    const workspace = await env.DATABASE.prepare(
+      `SELECT w.eviction_generation, n.runtime
       FROM workspaces w JOIN nodes n ON n.id = w.node_id
-      WHERE w.id = ? AND w.node_id = ? AND w.user_id = ? AND n.user_id = ?`)
+      WHERE w.id = ? AND w.node_id = ? AND w.user_id = ? AND n.user_id = ?`
+    )
       .bind(workspaceId, nodeId, userId, userId)
       .first<{ eviction_generation: string | null; runtime: string | null }>();
     if (!workspace) throw new AppError(409, 'CONFLICT', 'Workspace stop identity changed');
@@ -569,7 +571,9 @@ export type McpServerConfig = McpServerEntry;
  * their own single-element array literal, which is why adding a field here previously meant
  * remembering two places.
  */
-function serializeMcpServers(mcpServers: McpServerConfig[] | undefined): McpServerConfig[] | undefined {
+function serializeMcpServers(
+  mcpServers: McpServerConfig[] | undefined
+): McpServerConfig[] | undefined {
   if (!mcpServers || mcpServers.length === 0) {
     return undefined;
   }
