@@ -608,6 +608,7 @@ describe('workspace resource history', () => {
         sampleCount: 1,
         gapCount: 0,
         toolSpanCount: 3,
+        summary: {},
         compressedBase64: base64(compressed),
         compressedBytes: compressed.byteLength,
         uncompressedBytes: new TextEncoder().encode(JSON.stringify(payload)).byteLength,
