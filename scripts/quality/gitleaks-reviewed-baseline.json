@@ -206,6 +206,18 @@
       "digests": [
         "6e7d007b454a727e2d53a1ccfb0b9b3bf6b38081674abc35260efe50410cbc21"
       ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Reviewed existing synthetic Worker-test cryptographic fixtures in apps/api/vitest.workers.config.ts after adding the INTERACTION_STORE test binding shifted exact finding digests. These are deterministic local Miniflare/JWT/VAPID/encryption fixtures only, not live credentials.",
+      "owner": "security",
+      "reviewedAt": "2026-09-29T00:00:00.000Z",
+      "expiresAt": "2026-12-28T00:00:00.000Z",
+      "digests": [
+        "54c818c7ade8518dca18c82bf022302d7e93251d161d7311130d92d63e919aa7",
+        "cebc591fa06ac4eb357e4355bd9685d7f9b717e68c0ca19f8a2d601b50f989c8",
+        "d1825d5702b57ea0ab87a15624a93992cd2ad7a00aecaf179bb0d1be452fe8fb"
+      ]
     }
   ]
 }
