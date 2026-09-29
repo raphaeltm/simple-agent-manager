@@ -8,22 +8,12 @@ import { handleAppError } from '../../src/middleware/app-error-handler';
 import { workspaceResourceHistoryCallbackRoute } from '../../src/routes/projects/workspace-resource-history-callback';
 import { verifyCallbackToken } from '../../src/services/jwt';
 import { getWorkspaceResourceHistory } from '../../src/services/workspace-resource-history';
+import { base64, gzipText, sha256Hex } from '../helpers/resource-history';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(),
 }));
-
-function base64(bytes: Uint8Array): string {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
 
 describe('workspace resource history vertical slice', () => {
   it('resolves server attribution through the callback and exposes the persisted summary', async () => {
@@ -54,11 +44,7 @@ describe('workspace resource history vertical slice', () => {
     `);
 
     const samples = JSON.stringify({ samples: [{ t: 1, cpuMillis: 1, memoryBytes: 2 }] });
-    const compressed = new Uint8Array(
-      await new Response(
-        new Blob([samples]).stream().pipeThrough(new CompressionStream('gzip'))
-      ).arrayBuffer()
-    );
+    const compressed = await gzipText(samples);
     const storedObjects = new Map<string, Uint8Array>();
     const env = {
       DATABASE: createSqliteD1(sqlite),

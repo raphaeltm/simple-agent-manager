@@ -9,30 +9,13 @@ import type { AuthContext } from '../../src/middleware/auth';
 import { projectResourceHistoryRoutes } from '../../src/routes/projects/workspace-resource-history';
 import { workspaceResourceHistoryCallbackRoute } from '../../src/routes/projects/workspace-resource-history-callback';
 import { verifyCallbackToken } from '../../src/services/jwt';
+import { base64, gzipJson, sha256Hex } from '../helpers/resource-history';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 vi.mock('../../src/services/jwt', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/services/jwt')>()),
   verifyCallbackToken: vi.fn(),
 }));
-
-function base64(bytes: Uint8Array): string {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-async function gzipJson(value: unknown): Promise<Uint8Array> {
-  const stream = new Blob([JSON.stringify(value)])
-    .stream()
-    .pipeThrough(new CompressionStream('gzip'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
 
 function authContext(): AuthContext {
   return {
