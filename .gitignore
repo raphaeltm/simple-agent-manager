@@ -19,6 +19,11 @@ packages/vm-agent/bin/
 packages/vm-agent/vm-agent
 apps/api/container-artifacts/
 
+# SQLite files a vm-agent test run can leave beside the package (message reporter databases)
+packages/vm-agent/**/*.db
+packages/vm-agent/**/*.db-shm
+packages/vm-agent/**/*.db-wal
+
 # Environment files
 .env
 .env.local

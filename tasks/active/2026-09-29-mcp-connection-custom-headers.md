@@ -150,7 +150,7 @@ Authorization:Bearer ${SAM_MCP_TOKEN}`, with the token in the stdio server env r
 - [x] Split `McpServersManager.tsx` into list + `McpServerForm` + `McpServerHeadersField`
 - [x] Headers editor in the create form; Edit action with keep-semantics payload; header names in the row
 - [x] Unit tests (create payload, edit payload keep/replace/remove, rendering)
-- [ ] Playwright audit: headers form + edit form + rows with many/long headers, 375 and 1280
+- [x] Playwright audit: headers form + edit form + rows with many/long headers, 375 and 1280 (20 scenarios incl. Project Settings → Runtime; screenshots reviewed)
 
 ### Tests
 
@@ -172,16 +172,22 @@ Authorization:Bearer ${SAM_MCP_TOKEN}`, with the token in the stdio server env r
 
 ## Acceptance Criteria
 
-- [ ] A user can add an MCP server with one or more custom headers (e.g. `x-api-key`) in
+- [x] A user can add an MCP server with one or more custom headers (e.g. `x-api-key`) in
       Settings → MCP Servers and in Project Settings → Runtime
-- [ ] A user can edit an existing server to add, rotate, or remove headers without re-entering
+      (McpServersManager.test.tsx "adds a server authenticated only by a custom header"; Playwright add-form-headers + project-runtime)
+- [x] A user can edit an existing server to add, rotate, or remove headers without re-entering
       the URL, the token, or other header values
-- [ ] Header values are encrypted at rest and never returned by any API response; names are shown
-- [ ] Every harness receives the headers: ACP HTTP (Claude Code etc.), Codex
+      (McpServersManager.test.tsx editing suite; mcp-connection-headers.test.ts "updating headers")
+- [x] Header values are encrypted at rest and never returned by any API response; names are shown
+      (mcp-connection-headers.test.ts "returns header names but never values...")
+- [x] Every harness receives the headers: ACP HTTP (Claude Code etc.), Codex
       (`env_http_headers`), Vibe, and Amp (mcp-remote)
-- [ ] Invalid header names/values are rejected at write time with a clear message; a bad stored
+      (mcp_headers_test.go, one test per harness; wire fixture through the real Go handler)
+- [x] Invalid header names/values are rejected at write time with a clear message; a bad stored
       row cannot break session start for the scope
-- [ ] Existing connections without headers behave exactly as before
+      (mcp-connection-headers.test.ts rejection table; mcp-connection-headers-injection.test.ts fault isolation)
+- [x] Existing connections without headers behave exactly as before
+      (no-header resolution test; node-agent wire fixture; TestMigrationV18KeepsExistingMcpServerRows)
 - [ ] Staging: an agent session reaches a real MCP server that requires a custom header, and
       successfully calls a tool
 

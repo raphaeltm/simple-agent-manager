@@ -103,6 +103,11 @@ func ValidMcpHeaderValue(value string) bool {
 
 // ValidateMcpHeaders checks every header. The error never carries a value: it propagates to
 // the control plane, which stores it where any project member can read it.
+//
+// Only what protects the config files and argv this package writes is checked here. The
+// write-time policy rules — reserved transport headers, case-insensitive duplicates, the
+// Authorization/bearer conflict, size limits — belong to the control plane
+// (apps/api/src/services/mcp-connection-headers.ts), the only writer of stored headers.
 func ValidateMcpHeaders(headers []McpHeader) error {
 	for i, header := range headers {
 		if !ValidMcpHeaderName(header.Name) {
