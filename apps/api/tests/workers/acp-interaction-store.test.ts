@@ -150,7 +150,7 @@ describe('InteractionStore durable ACP foundation', () => {
       });
       expect(mismatch).toMatchObject({ status: 'answer_key_conflict' });
 
-      await store.recordDelivery(INTERACTION_ID, 'unknown', 'send timeout after commit');
+      await store.recordDelivery(INTERACTION_ID, 'unconfirmed', 'send timeout after commit');
       const snapshot = await store.snapshot(null);
       expect(snapshot.settled[0]).toMatchObject({ state: 'delivery_unconfirmed' });
     });
