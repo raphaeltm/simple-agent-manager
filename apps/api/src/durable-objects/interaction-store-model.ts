@@ -133,29 +133,51 @@ export function detailBoundsViolation(
   detail: unknown,
   config: AcpInteractionConfig
 ): string | null {
-  if (!detail || typeof detail !== 'object') return null;
-  const record = detail as Record<string, unknown>;
+  const record = asRecord(detail);
+  if (!record) return null;
+  return optionsBoundsViolation(record, config) ?? schemaBoundsViolation(record, config);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') return null;
+  if (Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function optionsBoundsViolation(
+  record: Record<string, unknown>,
+  config: AcpInteractionConfig
+): string | null {
   if (Array.isArray(record.options) && record.options.length > config.optionsMaxCount) {
     return 'request options exceed configured maximum';
   }
+  return null;
+}
+
+function schemaBoundsViolation(
+  record: Record<string, unknown>,
+  config: AcpInteractionConfig
+): string | null {
   const schema = record.schema ?? record.formSchema;
-  if (schema !== undefined) {
-    const schemaJson = canonicalJson(schema);
-    if (new TextEncoder().encode(schemaJson).byteLength > config.formSchemaMaxBytes) {
-      return 'form schema exceeds configured maximum';
-    }
-    if (schema && typeof schema === 'object') {
-      const schemaRecord = schema as Record<string, unknown>;
-      const properties = schemaRecord.properties;
-      if (properties && typeof properties === 'object' && !Array.isArray(properties)) {
-        if (Object.keys(properties).length > config.formSchemaMaxProperties) {
-          return 'form schema properties exceed configured maximum';
-        }
-      }
-      const enumViolation = hasEnumOverflow(schema, config.formSchemaMaxEnum);
-      if (enumViolation) return 'form schema enum exceeds configured maximum';
-    }
+  if (schema === undefined) return null;
+  const schemaJson = canonicalJson(schema);
+  if (new TextEncoder().encode(schemaJson).byteLength > config.formSchemaMaxBytes) {
+    return 'form schema exceeds configured maximum';
   }
+  return schemaObjectBoundsViolation(schema, config);
+}
+
+function schemaObjectBoundsViolation(
+  schema: unknown,
+  config: AcpInteractionConfig
+): string | null {
+  const schemaRecord = asRecord(schema);
+  if (!schemaRecord) return null;
+  const properties = asRecord(schemaRecord.properties);
+  if (properties && Object.keys(properties).length > config.formSchemaMaxProperties) {
+    return 'form schema properties exceed configured maximum';
+  }
+  if (hasEnumOverflow(schema, config.formSchemaMaxEnum)) return 'form schema enum exceeds configured maximum';
   return null;
 }
 

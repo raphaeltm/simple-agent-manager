@@ -4,7 +4,8 @@ import {
   AcpInteractionIdSchema,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
-import type { Hono } from 'hono';
+import type { Context, Hono } from 'hono';
+import type { InferOutput } from 'valibot';
 import * as v from 'valibot';
 
 import * as schema from '../db/schema';
@@ -30,6 +31,13 @@ type AnswerInteractionResult = Awaited<ReturnType<typeof answerInteraction>>;
 type AcceptedAnswerResult = Extract<
   AnswerInteractionResult,
   { status: 'answered' | 'already_answered' }
+>;
+type ChatAcpContext = Context<{ Bindings: Env }>;
+type BrowserAnswerBody = InferOutput<typeof AcpInteractionBrowserAnswerSchema>;
+type BrowserAnswerContext = Context<
+  { Bindings: Env },
+  string,
+  { in: { json: BrowserAnswerBody }; out: { json: BrowserAnswerBody } }
 >;
 
 function exactAppOrigin(env: Pick<Env, 'BASE_DOMAIN'>): string {
@@ -112,85 +120,87 @@ async function deliverAcceptedAnswer(
   }
 }
 
+async function listInteractionSnapshots(c: ChatAcpContext): Promise<Response> {
+  const userId = getUserId(c);
+  const projectId = requiredParam(c.req.param('projectId'), 'projectId');
+  const sessionId = requiredParam(c.req.param('sessionId'), 'sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireProjectCapability(db, projectId, userId, 'task:read');
+  const session = await requireSessionCreator(c.env, projectId, sessionId, userId).catch(() => null);
+  const snapshot = await snapshotInteractions(
+    c.env,
+    projectId,
+    sessionId,
+    c.req.query('cursor') ?? null
+  );
+  if (session) return c.json(snapshot);
+  return c.json({
+    pending: snapshot.pending.map((item) => ({
+      interactionId: item.interactionId,
+      kind: item.kind,
+      state: item.state,
+      createdAt: item.createdAt,
+      deadlineAt: item.deadlineAt,
+    })),
+    settled: [],
+    cursor: null,
+  });
+}
+
+async function readInteractionDetail(c: ChatAcpContext): Promise<Response> {
+  const userId = getUserId(c);
+  const projectId = requiredParam(c.req.param('projectId'), 'projectId');
+  const sessionId = requiredParam(c.req.param('sessionId'), 'sessionId');
+  const interactionId = v.parse(AcpInteractionIdSchema, c.req.param('interactionId'));
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireProjectCapability(db, projectId, userId, 'task:read');
+  await requireSessionCreator(c.env, projectId, sessionId, userId);
+  const detail = await getInteractionDetail(c.env, projectId, sessionId, interactionId);
+  if (!detail) throw errors.notFound('ACP interaction');
+  c.header('Cache-Control', 'private, no-store');
+  return c.json(detail);
+}
+
+async function answerInteractionRoute(c: BrowserAnswerContext): Promise<Response> {
+  requireExactBrowserOrigin(c);
+  const userId = getUserId(c);
+  const projectId = requiredParam(c.req.param('projectId'), 'projectId');
+  const sessionId = requiredParam(c.req.param('sessionId'), 'sessionId');
+  const interactionId = v.parse(AcpInteractionIdSchema, c.req.param('interactionId'));
+  const body = c.req.valid('json');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireProjectCapability(db, projectId, userId, 'task:write');
+  await requireSessionCreator(c.env, projectId, sessionId, userId);
+  const answer = await answerInteraction(c.env, {
+    projectId,
+    chatSessionId: sessionId,
+    interactionId,
+    answerKey: body.answerKey,
+    answerBodyHash: body.decision.answerHash,
+    decision: body.decision,
+  });
+  const acceptedAnswer = requireAcceptedAnswer(answer);
+  await deliverAcceptedAnswer(
+    c.env,
+    projectId,
+    sessionId,
+    interactionId,
+    acceptedAnswer,
+    body.decision
+  );
+
+  return c.json({ accepted: true, state: acceptedAnswer.summary.state });
+}
+
 export function registerChatAcpInteractionRoutes(chatRoutes: Hono<{ Bindings: Env }>): void {
-  chatRoutes.get('/:sessionId/interactions', async (c) => {
-    const userId = getUserId(c);
-    const projectId = requiredParam(c.req.param('projectId'), 'projectId');
-    const sessionId = requiredParam(c.req.param('sessionId'), 'sessionId');
-    const db = drizzle(c.env.DATABASE, { schema });
-
-    await requireProjectCapability(db, projectId, userId, 'task:read');
-    const session = await requireSessionCreator(c.env, projectId, sessionId, userId).catch(
-      () => null
-    );
-    const snapshot = await snapshotInteractions(
-      c.env,
-      projectId,
-      sessionId,
-      c.req.query('cursor') ?? null
-    );
-    if (session) return c.json(snapshot);
-    return c.json({
-      pending: snapshot.pending.map((item) => ({
-        interactionId: item.interactionId,
-        kind: item.kind,
-        state: item.state,
-        createdAt: item.createdAt,
-        deadlineAt: item.deadlineAt,
-      })),
-      settled: [],
-      cursor: null,
-    });
-  });
-
-  chatRoutes.get('/:sessionId/interactions/:interactionId', async (c) => {
-    const userId = getUserId(c);
-    const projectId = requiredParam(c.req.param('projectId'), 'projectId');
-    const sessionId = requiredParam(c.req.param('sessionId'), 'sessionId');
-    const interactionId = v.parse(AcpInteractionIdSchema, c.req.param('interactionId'));
-    const db = drizzle(c.env.DATABASE, { schema });
-
-    await requireProjectCapability(db, projectId, userId, 'task:read');
-    await requireSessionCreator(c.env, projectId, sessionId, userId);
-    const detail = await getInteractionDetail(c.env, projectId, sessionId, interactionId);
-    if (!detail) throw errors.notFound('ACP interaction');
-    c.header('Cache-Control', 'private, no-store');
-    return c.json(detail);
-  });
-
+  chatRoutes.get('/:sessionId/interactions', listInteractionSnapshots);
+  chatRoutes.get('/:sessionId/interactions/:interactionId', readInteractionDetail);
   chatRoutes.post(
     '/:sessionId/interactions/:interactionId/answer',
     jsonValidator(AcpInteractionBrowserAnswerSchema),
-    async (c) => {
-      requireExactBrowserOrigin(c);
-      const userId = getUserId(c);
-      const projectId = requiredParam(c.req.param('projectId'), 'projectId');
-      const sessionId = requiredParam(c.req.param('sessionId'), 'sessionId');
-      const interactionId = v.parse(AcpInteractionIdSchema, c.req.param('interactionId'));
-      const body = c.req.valid('json');
-      const db = drizzle(c.env.DATABASE, { schema });
-
-      await requireProjectCapability(db, projectId, userId, 'task:write');
-      await requireSessionCreator(c.env, projectId, sessionId, userId);
-      const answer = await answerInteraction(c.env, {
-        projectId,
-        chatSessionId: sessionId,
-        interactionId,
-        answerKey: body.answerKey,
-        answerBodyHash: body.decision.answerHash,
-        decision: body.decision,
-      });
-      const acceptedAnswer = requireAcceptedAnswer(answer);
-      await deliverAcceptedAnswer(
-        c.env,
-        projectId,
-        sessionId,
-        interactionId,
-        acceptedAnswer,
-        body.decision
-      );
-
-      return c.json({ accepted: true, state: acceptedAnswer.summary.state });
-    }
+    answerInteractionRoute
   );
 }

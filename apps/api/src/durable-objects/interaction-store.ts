@@ -332,7 +332,7 @@ export class InteractionStore extends DurableObject<Env> {
 
   async detail(
     interactionId: string
-  ): Promise<{ summary: AcpInteractionSafeSummary; detail: unknown | null } | null> {
+  ): Promise<{ summary: AcpInteractionSafeSummary; detail: unknown } | null> {
     const row = this.read(interactionId);
     if (!row) return null;
     let detail: unknown = null;
