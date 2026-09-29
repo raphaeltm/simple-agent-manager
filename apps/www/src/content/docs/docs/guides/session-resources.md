@@ -230,7 +230,9 @@ unit on the node; the defaults are what every managed node runs.
 ## What is actually stored
 
 The retained payload is deliberately narrow: timestamps, CPU-milliseconds, memory bytes, I/O bytes,
-process counts, OOM flags, and hashed tool-call IDs with their start and end times.
+process counts, OOM flags, and hashed tool-call IDs with their start and end times. Its summary also
+retains nullable `agentProfileId`, `skillId`, and `agentType` attribution. SAM resolves those fields
+from server-owned records for the same project and workspace instead of trusting upload values.
 
 It contains **no** prompts, messages, commands, tool names, tool arguments, tool output, file paths,
 environment variables, or secrets. That is what makes it safe to keep for months and safe to hand to
@@ -241,6 +243,7 @@ an agent.
 Agents connected to SAM's MCP server read the same data with the `get_resource_history` tool.
 **Called with no arguments it returns the agent's own session** — which is the useful case, because
 an agent can check whether it is heading for the same wall that killed the last attempt. Pass
+The returned summary includes the server-resolved profile, skill, and agent type when available. Pass
 `sessionId`, `taskId`, or `workspaceId` to look at a different scope — any one of them replaces the
 agent's own scope rather than narrowing it — and `chunkId` to pull one slice's samples. Without `chunkId` it returns only the summary and chunk index, so a casual lookup
 stays cheap. There is no `projectId` parameter — the project comes from the agent's connection.
