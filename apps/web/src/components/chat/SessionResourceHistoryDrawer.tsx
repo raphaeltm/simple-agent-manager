@@ -53,6 +53,14 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function toolSpanLabel(span: WorkspaceResourceToolSpan): string {
+  const toolName = span.toolName?.trim();
+  if (toolName) return toolName;
+  const kind = span.kind?.trim();
+  if (!kind || kind === 'acp_tool_call') return 'tool';
+  return kind.replaceAll('_', ' ');
+}
+
 function sampleMemoryMiB(sample: WorkspaceResourceSample): number {
   return Number(sample.memoryBytes ?? 0) / (1024 * 1024);
 }
@@ -222,7 +230,7 @@ export function ResourceSparkline({
                 className="flex items-center justify-between gap-2"
               >
                 <span className="truncate">
-                  {span.kind || 'tool'} · {formatTime(span.startedAt)}
+                  {toolSpanLabel(span)} · {formatTime(span.startedAt)}
                   {span.approximate ? ' · approximate end' : ''}
                 </span>
                 <span className="shrink-0">

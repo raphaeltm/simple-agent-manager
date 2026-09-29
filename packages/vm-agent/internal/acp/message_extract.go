@@ -359,10 +359,8 @@ func marshalRawContent(contents []acpsdk.ToolCallContent) []json.RawMessage {
 // the first branch to known tools avoids mistaking an arbitrary human title for
 // a tool identifier. Returns "" when nothing yields a name.
 func extractToolName(meta map[string]any, title string) string {
-	if cc, ok := meta["claudeCode"].(map[string]any); ok {
-		if name, ok := cc["toolName"].(string); ok && name != "" {
-			return name
-		}
+	if name := extractToolNameFromMeta(meta); name != "" {
+		return name
 	}
 	if title == "" {
 		return ""
@@ -373,6 +371,18 @@ func extractToolName(meta map[string]any, title string) string {
 	// Legacy mcp__<server>__<tool> convention (any tool, not just library ones).
 	if strings.HasPrefix(title, "mcp__") && strings.Count(title, "__") >= 2 {
 		return title
+	}
+	return ""
+}
+
+// extractToolNameFromMeta returns only the adapter-supplied stable identifier.
+// Resource history uses this metadata-only path because an ACP title may contain
+// sensitive input such as the complete Bash command line.
+func extractToolNameFromMeta(meta map[string]any) string {
+	if cc, ok := meta["claudeCode"].(map[string]any); ok {
+		if name, ok := cc["toolName"].(string); ok && name != "" {
+			return name
+		}
 	}
 	return ""
 }

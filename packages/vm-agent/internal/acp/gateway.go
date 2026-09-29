@@ -100,7 +100,7 @@ type MessageReporter interface {
 // ToolLifecycleObserver observes sanitized ACP tool-call lifecycle edges.
 // Implementations must not persist raw prompts, arguments, outputs, commands, paths, or env.
 type ToolLifecycleObserver interface {
-	RecordACPToolCall(toolCallID string, status string, at time.Time)
+	RecordACPToolCall(toolCallID string, status string, kind string, toolName string, at time.Time)
 	ReconcileACPToolCalls(at time.Time)
 }
 

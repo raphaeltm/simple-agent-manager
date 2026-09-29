@@ -215,7 +215,7 @@ export async function handleGetResourceHistory(
             ...history,
             notes: [
               'Samples are workspace-level cgroup observations, not per-process attribution.',
-              'Tool spans are timestamp correlation windows and may overlap background work.',
+              'Tool spans are timestamp correlation windows and may include an ACP kind and metadata-provided tool name; titles and inputs are never returned.',
               'Chunk detail is returned only when chunkId is supplied; summary reads stay bounded.',
             ],
           },

@@ -46,6 +46,11 @@ describe('resource history MCP tool', () => {
         agentType: 'openai-codex',
       },
       chunks: [{ id: 'wrchunk:1', sampleCount: 12 }],
+      detail: {
+        chunkId: 'wrchunk:1',
+        samples: [],
+        toolSpans: [{ id: 'hashed', kind: 'execute', toolName: 'Bash', startedAt: 1 }],
+      },
     });
   });
 
@@ -80,6 +85,9 @@ describe('resource history MCP tool', () => {
           agentProfileId: 'profile-1',
           skillId: 'skill-1',
           agentType: 'openai-codex',
+        },
+        detail: {
+          toolSpans: [{ id: 'hashed', kind: 'execute', toolName: 'Bash', startedAt: 1 }],
         },
       });
     },
@@ -143,6 +151,18 @@ describe('SAM native get_resource_history tool', () => {
         agentType: 'openai-codex',
       },
       chunks: [{ id: 'wrchunk:1', sampleCount: 7 }],
+      detail: {
+        chunkId: 'wrchunk:1',
+        samples: [],
+        toolSpans: [
+          {
+            id: 'hashed-mcp',
+            kind: 'other',
+            toolName: 'mcp__sam-mcp__dispatch_task',
+            startedAt: 1,
+          },
+        ],
+      },
     });
   });
 
@@ -177,6 +197,14 @@ describe('SAM native get_resource_history tool', () => {
           agentProfileId: 'profile-1',
           skillId: 'skill-1',
           agentType: 'openai-codex',
+        },
+        detail: {
+          toolSpans: [
+            expect.objectContaining({
+              kind: 'other',
+              toolName: 'mcp__sam-mcp__dispatch_task',
+            }),
+          ],
         },
       });
     },

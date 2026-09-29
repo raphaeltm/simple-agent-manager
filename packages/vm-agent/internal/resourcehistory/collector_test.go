@@ -171,10 +171,10 @@ func TestCollectorUploadsCompressedChunkAndHashesToolIDs(t *testing.T) {
 	writeFile(t, filepath.Join(path, "memory.current"), "2000\n")
 	writeFile(t, filepath.Join(path, "memory.peak"), "2500\n")
 	writeFile(t, filepath.Join(path, "io.stat"), "8:0 rbytes=110 wbytes=220\n")
-	collector.RecordACPToolCall("secret-tool-id", "in_progress", now)
+	collector.RecordACPToolCall("secret-tool-id", "in_progress", "execute", "Bash", now)
 	collector.sample(context.Background())
 	now = now.Add(time.Second)
-	collector.RecordACPToolCall("secret-tool-id", "completed", now)
+	collector.RecordACPToolCall("secret-tool-id", "completed", "", "", now)
 	collector.flush(context.Background(), true)
 
 	if received.WorkspaceID != "ws-1" || received.SampleCount != 2 || received.ToolSpanCount != 1 {

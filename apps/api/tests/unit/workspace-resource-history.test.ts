@@ -49,7 +49,8 @@ function samplePayload() {
     toolSpans: [
       {
         id: 'hashed-tool-id',
-        kind: 'acp_tool_call',
+        kind: 'execute',
+        toolName: 'Bash',
         startedAt: 1_250,
         endedAt: 1_750,
         concurrency: 1,
@@ -266,7 +267,9 @@ describe('workspace resource history', () => {
       chunkId: first.chunkId,
       originalSampleCount: 3,
       downsampled: false,
-      toolSpans: [expect.objectContaining({ id: 'hashed-tool-id', kind: 'acp_tool_call' })],
+      toolSpans: [
+        expect.objectContaining({ id: 'hashed-tool-id', kind: 'execute', toolName: 'Bash' }),
+      ],
       gaps: [expect.objectContaining({ reason: 'sample_error' })],
     });
     expect(history.detail?.samples.some((sample) => sample.cpuMillis === 900)).toBe(true);
@@ -435,6 +438,76 @@ describe('workspace resource history', () => {
       skillId: null,
       agentType: null,
     });
+  });
+
+  it('caps and allowlists decoded tool metadata while preserving legacy spans', async () => {
+    const sqlite = new Database(':memory:');
+    createSchemaTables(sqlite, [
+      schema.workspaces,
+      schema.workspaceResourceSummaries,
+      schema.workspaceResourceChunks,
+    ]);
+    sqlite
+      .prepare(
+        `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)
+         VALUES ('ws-1', 'proj-1', 'node-1', 'session-1')`
+      )
+      .run();
+    const r2 = makeR2();
+    const env = makeEnv(sqlite, r2.binding);
+    env.WORKSPACE_RESOURCE_TOOL_NAME_MAX_BYTES = '8';
+    const commandCanary = 'printf super-secret-command';
+    const payload = {
+      samples: [{ t: 1_000 }],
+      toolSpans: [
+        {
+          id: 'named',
+          kind: 'execute',
+          toolName: 'Bash🔥unsafe',
+          title: commandCanary,
+          rawInput: { command: commandCanary },
+          startedAt: 1_000,
+          endedAt: 2_000,
+        },
+        { id: 'invalid-kind', kind: 'command', toolName: 'Bad\u0000Name', startedAt: 1_100 },
+        { id: 'legacy', startedAt: 1_200, endedAt: 1_300 },
+      ],
+      gaps: [],
+    };
+    const compressed = await gzipJson(payload);
+    const result = await storeWorkspaceResourceChunk(
+      env,
+      'proj-1',
+      await uploadBody({
+        sampleCount: 1,
+        gapCount: 0,
+        toolSpanCount: 3,
+        compressedBase64: base64(compressed),
+        compressedBytes: compressed.byteLength,
+        uncompressedBytes: new TextEncoder().encode(JSON.stringify(payload)).byteLength,
+        sha256: await sha256Hex(compressed),
+      }),
+      'node-1'
+    );
+
+    const history = await getWorkspaceResourceHistory(env, {
+      projectId: 'proj-1',
+      sessionId: 'session-1',
+      detailChunkId: result.chunkId,
+    });
+
+    expect(history.detail?.toolSpans).toEqual([
+      {
+        id: 'named',
+        kind: 'execute',
+        toolName: 'Bash🔥',
+        startedAt: 1_000,
+        endedAt: 2_000,
+      },
+      { id: 'invalid-kind', startedAt: 1_100 },
+      { id: 'legacy', startedAt: 1_200, endedAt: 1_300 },
+    ]);
+    expect(JSON.stringify(history.detail?.toolSpans)).not.toContain(commandCanary);
   });
 
   it('rejects mismatched decoded size and oversized D1 metadata before indexing', async () => {

@@ -18,16 +18,16 @@ Resource-history tool spans are currently stored as the generic `acp_tool_call` 
 
 ## Implementation Checklist
 
-- [ ] Extend the VM-agent tool lifecycle observer and collector to retain ACP kind and metadata-derived tool name across initial, patch, terminal, and reconciled tool-call edges.
-- [ ] Keep resource-history extraction metadata-only; never pass ACP title or raw input/output into the observer or collector.
-- [ ] Add a real-path Go regression test that drives a Bash ACP notification through `sessionHostClient`, captures the collector upload, verifies kind/name, and proves the full command canary is absent.
-- [ ] Normalize decoded tool spans at the API boundary: allow known ACP kinds, omit invalid values, trim and UTF-8 length-cap tool names using configurable resource-history limits, and preserve legacy spans.
-- [ ] Cover valid, oversized, malformed, and legacy tool-span payloads through callback/storage/read tests.
-- [ ] Carry optional kind/name through API response types, both MCP tool surfaces, and privacy/correlation notes.
-- [ ] Render tool name first, ACP kind second, and a legacy `tool` fallback in the Resources drawer without breaking old VM-agent chunks.
-- [ ] Update web behavioral/Playwright fixtures and assertions for named, kind-only, legacy, long-name, dense, empty, and error states.
+- [x] Extend the VM-agent tool lifecycle observer and collector to retain ACP kind and metadata-derived tool name across initial, patch, terminal, and reconciled tool-call edges.
+- [x] Keep resource-history extraction metadata-only; never pass ACP title or raw input/output into the observer or collector.
+- [x] Add a real-path Go regression test that drives a Bash ACP notification through `sessionHostClient`, captures the collector upload, verifies kind/name, and proves the full command canary is absent.
+- [x] Normalize decoded tool spans at the API boundary: allow known ACP kinds, omit invalid values, trim and UTF-8 length-cap tool names using configurable resource-history limits, and preserve legacy spans.
+- [x] Cover valid, oversized, malformed, and legacy tool-span payloads through callback/storage/read tests.
+- [x] Carry optional kind/name through API response types, both MCP tool surfaces, and privacy/correlation notes.
+- [x] Render tool name first, ACP kind second, and a legacy `tool` fallback in the Resources drawer without breaking old VM-agent chunks.
+- [x] Update web behavioral/Playwright fixtures and assertions for named, kind-only, legacy, long-name, dense, empty, and error states.
 - [ ] Run the focused Go, API, MCP, and web test suites plus lint/typecheck/build gates.
-- [ ] Run Playwright visual audits at 375x667 and 1280x800, inspect screenshots, and verify no horizontal overflow or clipping.
+- [x] Run Playwright visual audits at 375x667 and 1280x800, inspect screenshots, and verify no horizontal overflow or clipping.
 - [ ] Run task-completion, Go, Cloudflare, UI/UX, constitution, and test specialist reviews; address all blocking findings.
 - [ ] Rebase on `origin/main`, deploy to staging, provision a current VM agent, verify upload/read/MCP/UI behavior end to end, capture screenshots, and clean up the workspace/node.
 

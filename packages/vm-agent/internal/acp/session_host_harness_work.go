@@ -288,20 +288,31 @@ func (h *SessionHost) applyACPToolCallLifecycle(notification acpsdk.SessionNotif
 	update := notification.Update
 	switch {
 	case update.ToolCall != nil:
-		return h.applyACPToolCallStatus(string(update.ToolCall.ToolCallId), &update.ToolCall.Status)
+		return h.applyACPToolCallStatus(
+			string(update.ToolCall.ToolCallId),
+			&update.ToolCall.Status,
+			string(update.ToolCall.Kind),
+			extractToolNameFromMeta(update.ToolCall.Meta),
+		)
 	case update.ToolCallUpdate != nil:
 		// Status is a patch field. Absent means "unchanged", which for lease
 		// purposes is treated the same as a non-terminal update.
+		kind := ""
+		if update.ToolCallUpdate.Kind != nil {
+			kind = string(*update.ToolCallUpdate.Kind)
+		}
 		return h.applyACPToolCallStatus(
 			string(update.ToolCallUpdate.ToolCallId),
 			update.ToolCallUpdate.Status,
+			kind,
+			extractToolNameFromMeta(update.ToolCallUpdate.Meta),
 		)
 	default:
 		return false
 	}
 }
 
-func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status *acpsdk.ToolCallStatus) bool {
+func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status *acpsdk.ToolCallStatus, kind string, toolName string) bool {
 	if toolCallID == "" {
 		return false
 	}
@@ -311,7 +322,7 @@ func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status *acpsdk.T
 		if status != nil {
 			statusText = string(*status)
 		}
-		h.config.ToolLifecycleObserver.RecordACPToolCall(toolCallID, statusText, now)
+		h.config.ToolLifecycleObserver.RecordACPToolCall(toolCallID, statusText, kind, toolName, now)
 	}
 
 	h.harnessWorkMu.Lock()

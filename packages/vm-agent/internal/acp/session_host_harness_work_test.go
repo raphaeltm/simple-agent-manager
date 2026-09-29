@@ -1,10 +1,14 @@
 package acp
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +17,7 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/workspace/vm-agent/internal/resourcehistory"
 )
 
 func TestHarnessLifecycleSessionMetaIsClaudeOnlyAndFiltered(t *testing.T) {
@@ -202,6 +207,101 @@ func TestACPToolCallLifecycleTracksCodexAndOpencodeWork(t *testing.T) {
 				t.Fatalf("inactive snapshot = %#v", inactive)
 			}
 		})
+	}
+}
+
+func TestACPToolCallResourceHistoryUploadUsesMetadataWithoutTitleOrInput(t *testing.T) {
+	const commandCanary = "printf RESOURCE_HISTORY_PRIVATE_COMMAND_7F4A"
+
+	var uploaded []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		uploaded, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read upload: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	now := time.Unix(100, 0)
+	collector := resourcehistory.New(resourcehistory.Config{
+		ControlPlaneURL: server.URL,
+		ProjectID:       "project",
+		WorkspaceID:     "workspace",
+		SessionID:       "sam-session",
+		SpoolDir:        t.TempDir(),
+		CallbackToken:   func() string { return "callback-token" },
+		HTTPClient:      server.Client(),
+		Now:             func() time.Time { return now },
+	})
+	host, client := newHarnessWorkTestClient(t, SessionHostConfig{GatewayConfig: GatewayConfig{
+		Now:                   func() time.Time { return now },
+		ToolLifecycleObserver: collector,
+	}}, "openai-codex", "acp-session", HostPrompting)
+	t.Cleanup(host.Stop)
+
+	err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+		SessionId: "acp-session",
+		Update: acpsdk.SessionUpdate{ToolCall: &acpsdk.SessionUpdateToolCall{
+			ToolCallId: "tool-1",
+			Title:      commandCanary,
+			Kind:       acpsdk.ToolKindExecute,
+			Status:     acpsdk.ToolCallStatusInProgress,
+			RawInput:   map[string]any{"command": commandCanary},
+			Meta: map[string]any{
+				"claudeCode": map[string]any{"toolName": "Bash"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("initial ACP tool call: %v", err)
+	}
+	now = now.Add(35 * time.Second)
+	notifyACPToolCallUpdate(t, client, "acp-session", "tool-1", toolStatus(acpsdk.ToolCallStatusCompleted))
+	collector.Stop(context.Background())
+
+	if len(uploaded) == 0 {
+		t.Fatal("collector did not upload the ACP tool span")
+	}
+	if bytes.Contains(uploaded, []byte(commandCanary)) {
+		t.Fatal("outer upload leaked the Bash command")
+	}
+	var body struct {
+		CompressedBase64 string `json:"compressedBase64"`
+	}
+	if err := json.Unmarshal(uploaded, &body); err != nil {
+		t.Fatalf("decode upload body: %v", err)
+	}
+	compressed, err := base64.StdEncoding.DecodeString(body.CompressedBase64)
+	if err != nil {
+		t.Fatalf("decode compressed payload: %v", err)
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		t.Fatalf("open compressed payload: %v", err)
+	}
+	decoded, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read compressed payload: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close compressed payload: %v", err)
+	}
+	if bytes.Contains(decoded, []byte(commandCanary)) {
+		t.Fatalf("resource-history payload leaked the Bash title/input: %s", decoded)
+	}
+	var payload struct {
+		ToolSpans []struct {
+			Kind     string `json:"kind"`
+			ToolName string `json:"toolName"`
+		} `json:"toolSpans"`
+	}
+	if err := json.Unmarshal(decoded, &payload); err != nil {
+		t.Fatalf("decode resource-history payload: %v", err)
+	}
+	if len(payload.ToolSpans) != 1 || payload.ToolSpans[0].Kind != "execute" || payload.ToolSpans[0].ToolName != "Bash" {
+		t.Fatalf("unexpected resource-history tool span: %#v", payload.ToolSpans)
 	}
 }
 

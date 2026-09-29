@@ -213,7 +213,8 @@ export interface WorkspaceResourceSample {
 
 export interface WorkspaceResourceToolSpan {
   id: string;
-  kind: string;
+  kind?: string;
+  toolName?: string;
   startedAt: number;
   endedAt?: number;
   concurrency?: number;
