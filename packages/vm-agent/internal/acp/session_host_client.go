@@ -71,7 +71,7 @@ func (c *sessionHostClient) SessionUpdate(_ context.Context, params acpsdk.Sessi
 	}
 
 	// Persist chat messages to the control plane via the message reporter.
-	if c.host.config.MessageReporter != nil {
+	if c.host.config.MessageReporter != nil && !c.host.sharedCodexDaemonEnabled() {
 		msgs := ExtractMessages(params)
 		for _, m := range msgs {
 			if err := c.host.config.MessageReporter.Enqueue(MessageReportEntry{
@@ -105,6 +105,16 @@ func (c *sessionHostClient) RequestPermission(_ context.Context, params acpsdk.R
 		mode = "default"
 	}
 	slog.Info("Permission request", "mode", mode, "optionsCount", len(params.Options))
+	if c.host.sharedCodexDaemonEnabled() {
+		// Shared mode cannot prove which attached app-server client initiated a
+		// request from the ACP callback alone. Never let the SAM ACP connection
+		// answer on another client's behalf; the initiating native client keeps
+		// ownership, while SAM-origin requests fail closed for this spike.
+		slog.Warn("Cancelling permission request in shared-daemon mode")
+		return acpsdk.RequestPermissionResponse{
+			Outcome: acpsdk.NewRequestPermissionOutcomeCancelled(),
+		}, nil
+	}
 
 	if len(params.Options) > 0 {
 		return acpsdk.RequestPermissionResponse{

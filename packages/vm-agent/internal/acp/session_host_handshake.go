@@ -18,7 +18,10 @@ func (h *SessionHost) establishACPSession(ctx context.Context, agentType string,
 	}
 	loaded, err := h.tryLoadPreviousACPSession(ctx, agentType, settings, previousAcpSessionID, initResp.AgentCapabilities.LoadSession, timeouts.loadSession, !requireLoadSession)
 	if loaded {
-		return err
+		if err != nil {
+			return err
+		}
+		return h.startCodexNativeObserver(ctx)
 	}
 	if requireLoadSession {
 		if err != nil {
@@ -26,7 +29,10 @@ func (h *SessionHost) establishACPSession(ctx context.Context, agentType string,
 		}
 		return fmt.Errorf("ACP LoadSession required for crash recovery but no previous session is available")
 	}
-	return h.startNewACPSession(ctx, agentType, settings, timeouts.newSession)
+	if err := h.startNewACPSession(ctx, agentType, settings, timeouts.newSession); err != nil {
+		return err
+	}
+	return h.startCodexNativeObserver(ctx)
 }
 
 type acpPhaseTimeouts struct {

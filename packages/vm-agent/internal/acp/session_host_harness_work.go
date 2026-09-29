@@ -14,6 +14,7 @@ const (
 	claudeSDKMessageMethod     = "_claude/sdkMessage"
 	claudeHarnessWorkSource    = "claude_sdk"
 	acpToolCallWorkSource      = "acp_tool_call"
+	codexNativeWorkSource      = "codex_native"
 	claudeBackgroundTasksLevel = "background_tasks_changed"
 
 	// Fallback bounds used when SessionHostConfig leaves them unset (zero).
@@ -164,6 +165,7 @@ func (h *SessionHost) resetHarnessWorkForAgent(agentType string) {
 	h.stopHarnessWorkRereportLocked()
 	progressAt := h.nextHarnessWorkProgressAtLocked()
 	h.harnessTaskIDs = nil
+	h.codexNativeTaskIDs = nil
 	h.harnessWork = harnessWorkStatus{}
 	if source := harnessWorkSourceForAgent(agentType); source != "" {
 		h.harnessWork.State = harnessWorkInactive
@@ -189,6 +191,7 @@ func (h *SessionHost) clearHarnessWork() {
 	h.harnessWorkMu.Lock()
 	h.stopHarnessWorkRereportLocked()
 	h.harnessTaskIDs = nil
+	h.codexNativeTaskIDs = nil
 	if h.harnessWork.Source != "" {
 		h.harnessWork.State = harnessWorkInactive
 		h.harnessWork.Count = 0
@@ -200,7 +203,47 @@ func (h *SessionHost) clearHarnessWork() {
 func (h *SessionHost) harnessWorkSnapshot() harnessWorkStatus {
 	h.harnessWorkMu.Lock()
 	defer h.harnessWorkMu.Unlock()
-	return h.harnessWork
+	snapshot := h.harnessWork
+	if nativeCount := len(h.codexNativeTaskIDs); nativeCount > 0 {
+		snapshot.State = harnessWorkActive
+		snapshot.Count += nativeCount
+		snapshot.Source = codexNativeWorkSource
+	}
+	return snapshot
+}
+
+func (h *SessionHost) applyCodexNativeWork(workID string, active bool) bool {
+	if workID == "" {
+		return false
+	}
+	h.harnessWorkMu.Lock()
+	defer h.harnessWorkMu.Unlock()
+	if h.codexNativeTaskIDs == nil {
+		h.codexNativeTaskIDs = make(map[string]struct{})
+	}
+	_, existed := h.codexNativeTaskIDs[workID]
+	if active {
+		if existed || !h.addCodexNativeTaskLocked(workID) {
+			return false
+		}
+	} else {
+		if !existed {
+			return false
+		}
+		delete(h.codexNativeTaskIDs, workID)
+	}
+	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
+	h.refreshHarnessWorkRereportLocked()
+	return true
+}
+
+func (h *SessionHost) addCodexNativeTaskLocked(workID string) bool {
+	_, maxTasks, _ := h.harnessLifecycleLimits()
+	if len(h.codexNativeTaskIDs) >= maxTasks {
+		return false
+	}
+	h.codexNativeTaskIDs[workID] = struct{}{}
+	return true
 }
 
 func (h *SessionHost) applyClaudeHarnessLifecycle(message claudeSDKLifecycleMessage) bool {
@@ -272,11 +315,7 @@ func (h *SessionHost) applyClaudeHarnessLifecycle(message claudeSDKLifecycleMess
 		h.harnessWork.State = harnessWorkSettling
 	}
 	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
-	if h.harnessWork.State == harnessWorkActive {
-		h.startHarnessWorkRereportLocked()
-	} else {
-		h.stopHarnessWorkRereportLocked()
-	}
+	h.refreshHarnessWorkRereportLocked()
 	return true
 }
 
@@ -364,11 +403,7 @@ func (h *SessionHost) applyACPToolCallStatus(toolCallID string, status *acpsdk.T
 	h.harnessWork.State = state
 	h.harnessWork.Count = count
 	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLockedAt(now)
-	if state == harnessWorkActive {
-		h.startHarnessWorkRereportLocked()
-	} else {
-		h.stopHarnessWorkRereportLocked()
-	}
+	h.refreshHarnessWorkRereportLocked()
 	return true
 }
 
@@ -405,7 +440,8 @@ func (h *SessionHost) reconcileHarnessWorkAtPromptTurnEnd() {
 	if h.harnessWork.Source != acpToolCallWorkSource || len(h.harnessTaskIDs) == 0 {
 		return
 	}
-	h.stopHarnessWorkRereportLocked()
+	// Native-origin turns have their own explicit completion edge and must not
+	// be cleared by the ACP prompt boundary.
 	h.harnessTaskIDs = nil
 	h.harnessWork.State = harnessWorkSettling
 	h.harnessWork.Count = 0
@@ -414,6 +450,7 @@ func (h *SessionHost) reconcileHarnessWorkAtPromptTurnEnd() {
 		h.config.ToolLifecycleObserver.ReconcileACPToolCalls(now)
 	}
 	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLockedAt(now)
+	h.refreshHarnessWorkRereportLocked()
 }
 
 // addHarnessTaskLocked bounds cumulative edge messages as well as the
@@ -496,6 +533,14 @@ func (h *SessionHost) startHarnessWorkRereportLocked() {
 			}
 		}
 	}()
+}
+
+func (h *SessionHost) refreshHarnessWorkRereportLocked() {
+	if h.harnessWork.State == harnessWorkActive || len(h.codexNativeTaskIDs) > 0 {
+		h.startHarnessWorkRereportLocked()
+		return
+	}
+	h.stopHarnessWorkRereportLocked()
 }
 
 func (h *SessionHost) stopHarnessWorkRereportLocked() {
