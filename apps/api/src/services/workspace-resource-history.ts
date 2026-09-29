@@ -333,7 +333,7 @@ async function readBoundedGzipJson(
   }
   try {
     const record = parseJsonRecord(
-      new TextDecoder().decode(merged),
+      new TextDecoder('utf-8', { fatal: true }).decode(merged),
       'workspace_resource_history.chunk'
     );
     return {
@@ -652,6 +652,11 @@ async function validateWorkspaceResourceChunkBytes(
   // Archive the allowlisted representation. This prevents an authenticated but
   // buggy agent from retaining tool titles, inputs, or uncapped metadata in R2.
   const sanitized = await gzipJson(decodedChunk.value);
+  if (sanitized.uncompressedBytes > uncompressedMaxBytes(env)) {
+    throw errors.badRequest(
+      'Normalized resource history chunk exceeds configured uncompressed limit'
+    );
+  }
   if (sanitized.bytes.byteLength > getWorkspaceResourceUploadMaxBytes(env)) {
     throw errors.badRequest('Normalized resource history chunk exceeds configured upload limit');
   }

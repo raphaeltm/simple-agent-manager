@@ -229,6 +229,14 @@ const RESOURCE_HISTORY_DETAIL = {
       endedAt: NOW - 900_000,
       concurrency: 1,
     },
+    {
+      id: 'tool-special-name',
+      kind: 'fetch',
+      toolName: 'fetch <img src=x onerror=alert(1)> & "quotes" 🔥',
+      startedAt: NOW - 880_000,
+      endedAt: NOW - 850_000,
+      concurrency: 1,
+    },
   ],
   gaps: [{ startedAt: NOW - 1_300_000, endedAt: NOW - 1_250_000, reason: 'sampler_delay' }],
 };
@@ -1073,6 +1081,11 @@ test.describe('Session resource history drawer', () => {
     await expect(page.getByText(/Bash ·/)).toBeVisible();
     await expect(page.getByText(/search ·/)).toBeVisible();
     await expect(page.getByText(/tool ·/)).toBeVisible();
+    await expect(
+      page.getByText(/fetch <img src=x onerror=alert\(1\)> & "quotes" 🔥 ·/)
+    ).toBeVisible();
+    await expect(dialog.locator('img[src="x"]')).toHaveCount(0);
+    await expect(dialog.locator('[title^="mcp__sam-mcp__"]')).toHaveCount(1);
 
     // Correlation disclaimer is contextual — only visible after chart loads
     await expect(page.getByText('Correlation is based on concurrent tool windows')).toBeVisible();

@@ -26,9 +26,11 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 async function gzipJson(value: unknown): Promise<Uint8Array> {
-  const stream = new Blob([JSON.stringify(value)])
-    .stream()
-    .pipeThrough(new CompressionStream('gzip'));
+  return gzipBytes(new TextEncoder().encode(JSON.stringify(value)));
+}
+
+async function gzipBytes(value: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([value]).stream().pipeThrough(new CompressionStream('gzip'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
@@ -575,6 +577,47 @@ describe('workspace resource history', () => {
     expect(sqlite.prepare(`SELECT COUNT(*) AS count FROM workspace_resource_chunks`).get()).toEqual(
       { count: 0 }
     );
+    expect(r2.objects.size).toBe(0);
+  });
+
+  it('rejects invalid UTF-8 before normalizing and archiving a chunk', async () => {
+    const sqlite = new Database(':memory:');
+    createSchemaTables(sqlite, [
+      schema.workspaces,
+      schema.workspaceResourceSummaries,
+      schema.workspaceResourceChunks,
+    ]);
+    sqlite
+      .prepare(
+        `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)
+         VALUES ('ws-1', 'proj-1', 'node-1', 'session-1')`
+      )
+      .run();
+    const r2 = makeR2();
+    const env = makeEnv(sqlite, r2.binding);
+    const invalidJsonBytes = new Uint8Array([
+      ...new TextEncoder().encode('{"samples":[],"notes":["'),
+      0xff,
+      ...new TextEncoder().encode('"]}'),
+    ]);
+    const compressed = await gzipBytes(invalidJsonBytes);
+
+    await expect(
+      storeWorkspaceResourceChunk(
+        env,
+        'proj-1',
+        await uploadBody({
+          sampleCount: 0,
+          gapCount: 0,
+          toolSpanCount: 0,
+          compressedBase64: base64(compressed),
+          compressedBytes: compressed.byteLength,
+          uncompressedBytes: invalidJsonBytes.byteLength,
+          sha256: await sha256Hex(compressed),
+        }),
+        'node-1'
+      )
+    ).rejects.toThrow(/gzip-compressed JSON/i);
     expect(r2.objects.size).toBe(0);
   });
 
