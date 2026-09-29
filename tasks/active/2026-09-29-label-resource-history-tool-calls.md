@@ -26,9 +26,9 @@ Resource-history tool spans are currently stored as the generic `acp_tool_call` 
 - [x] Carry optional kind/name through API response types, both MCP tool surfaces, and privacy/correlation notes.
 - [x] Render tool name first, ACP kind second, and a legacy `tool` fallback in the Resources drawer without breaking old VM-agent chunks.
 - [x] Update web behavioral/Playwright fixtures and assertions for named, kind-only, legacy, long-name, dense, empty, and error states.
-- [ ] Run the focused Go, API, MCP, and web test suites plus lint/typecheck/build gates.
+- [x] Run the focused Go, API, MCP, and web test suites plus lint/typecheck/build gates.
 - [x] Run Playwright visual audits at 375x667 and 1280x800, inspect screenshots, and verify no horizontal overflow or clipping.
-- [ ] Run task-completion, Go, Cloudflare, UI/UX, constitution, and test specialist reviews; address all blocking findings.
+- [x] Run task-completion, Go, Cloudflare, UI/UX, constitution, and test specialist reviews; address all blocking findings.
 - [ ] Rebase on `origin/main`, deploy to staging, provision a current VM agent, verify upload/read/MCP/UI behavior end to end, capture screenshots, and clean up the workspace/node.
 
 ## Acceptance Criteria
