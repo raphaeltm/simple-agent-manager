@@ -54,3 +54,11 @@ Resource-history tool spans are currently stored as the generic `acp_tool_call` 
 - `.claude/rules/54-vm-agent-rollout-compatibility.md`
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`
 - `tasks/archive/2026-09-20-workspace-resource-history.md`
+
+## Validation Evidence
+
+- Focused post-rebase API coverage passed 18/18 tests across MCP output, callback integration, archive sanitization, and read behavior.
+- Focused VM-agent ACP and collector packages passed, including the real `session/update` Bash privacy regression.
+- API and web TypeScript checks passed after merging the server-resolved attribution changes from `main`.
+- Staging deploy `36547205805` verified a real TaskRunner Bash span as `execute` / `Bash`, proved the command canary absent, and passed drawer audits at 375x667 and 1280x800 without overflow.
+- Task-completion checks A–F passed after the final rebase; no planned work, acceptance criteria, or vertical-slice coverage remains open.
