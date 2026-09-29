@@ -341,6 +341,54 @@ describe('workspace resource history', () => {
     );
   });
 
+  it('initializes working-set aggregates when a new-agent chunk follows old-agent history', async () => {
+    const sqlite = new Database(':memory:');
+    createSchemaTables(sqlite, [
+      schema.workspaces,
+      schema.workspaceResourceSummaries,
+      schema.workspaceResourceChunks,
+    ]);
+    sqlite
+      .prepare(
+        `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)
+         VALUES ('ws-1', 'proj-1', 'node-1', 'session-1')`
+      )
+      .run();
+    const r2 = makeR2();
+    const env = makeEnv(sqlite, r2.binding);
+
+    await storeWorkspaceResourceChunk(
+      env,
+      'proj-1',
+      await uploadBody({ summary: {} }, samplePayload({ includeWorkingSet: false })),
+      'node-1'
+    );
+    await storeWorkspaceResourceChunk(
+      env,
+      'proj-1',
+      await uploadBody({ chunkSequence: 1, startedAt: 2_001, endedAt: 3_000 }),
+      'node-1'
+    );
+
+    const history = await getWorkspaceResourceHistory(env, {
+      projectId: 'proj-1',
+      sessionId: 'session-1',
+    });
+    expect(history.summary).toMatchObject({
+      sampleCount: 6,
+      memoryWorkingSetMeanBytes: 768,
+      memoryWorkingSetPeakBytes: 1024,
+    });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT memory_working_set_sample_count AS count
+             FROM workspace_resource_summaries`
+        )
+        .get()
+    ).toEqual({ count: 3 });
+  });
+
   it('keeps separate bounded summaries for reused workspace sessions while indexing raw chunks in R2', async () => {
     const sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
