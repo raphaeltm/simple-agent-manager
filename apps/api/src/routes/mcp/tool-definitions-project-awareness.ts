@@ -171,7 +171,7 @@ export const PROJECT_AWARENESS_TOOLS = [
   {
     name: 'get_resource_history',
     description:
-      'Inspect bounded workspace resource history for the current project. By default, MCP callers read their current session/task/workspace summary, including server-resolved agentProfileId, skillId, and agentType, plus the chunk index. Pass sessionId, taskId, or workspaceId to inspect a related scope. Pass chunkId to lazily load downsampled raw samples and tool-span correlation for that chunk, including ACP kind and metadata-provided tool name when available. This reports correlation, not causal per-process attribution, and never includes titles, prompts, commands, tool args/output, file paths, env, or secrets.',
+      'Inspect bounded workspace resource history for the current project. By default, MCP callers read their current session/task/workspace summary, including server-resolved agentProfileId, skillId, and agentType, plus the chunk index. Pass sessionId, taskId, or workspaceId to inspect a related scope. Pass chunkId to lazily load downsampled raw samples and tool-span correlation for that chunk, including ACP kind and metadata-provided tool name when available. Working-set memory is the sizing figure; total memory includes reclaimable file cache. This reports correlation, not causal per-process attribution, and never includes titles, prompts, commands, tool args/output, file paths, env, or secrets.',
     inputSchema: {
       type: 'object' as const,
       properties: {

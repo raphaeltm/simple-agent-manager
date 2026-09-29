@@ -24,7 +24,7 @@ The button is always there, including on sessions that already ended — which i
 want it, because the workspace is gone and this is the only record left. It is also there on
 sessions that never collected anything, where it shows an empty state rather than hiding itself.
 
-![The Resources drawer for a chat session: stat cards reading CPU peak 4120 ms/sample, RAM peak 3.4 GB, I/O total 384 MB read and 1.1 GB write, and 360 samples with 1 gap; an amber banner reading "1 OOM event observed in retained samples"; a detail timeline chart with a green CPU line, a dashed purple RAM line, blue tool-window bands and an amber OOM marker; Tool windows labeled Bash, search, and tool; and a collapsed "2 chunks" disclosure.](/images/docs/session-resources-drawer.png)
+![The Resources drawer for a chat session: stat cards distinguish peak and mean memory needed from total RAM including cache, alongside CPU peak, I/O totals, and sample counts; an amber OOM banner; a detail timeline chart with CPU, working-set memory, cache-inclusive memory, named tool-window bands and an OOM marker; a Tool windows list labeled Bash, search, and tool; and a collapsed chunk disclosure.](/images/docs/session-resources-drawer.png)
 
 On mobile the same panel fills the screen and scrolls, with the stat cards and the OOM banner
 first so the answer is above the fold.
@@ -53,12 +53,16 @@ The drawer stacks its content top to bottom in the order you normally need it.
 
 Four numbers for the whole session:
 
-| Card          | What it means                                                                                                                                              |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **CPU peak**  | The busiest single sample, in milliseconds of CPU time. See the conversion below.                                                                          |
-| **RAM peak**  | The highest total memory the container held at any sampled moment — **including page cache**, so read it with [this caveat](#what-this-does-not-tell-you). |
-| **I/O total** | Bytes read and written over the session.                                                                                                                   |
-| **Samples**   | How many observations were retained, and how many **gaps** there are (see [Gaps and resets](#gaps-and-resets)).                                            |
+| Card                            | What it means                                                                                                             |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **CPU peak**                    | The busiest single sample, in milliseconds of CPU time. See the conversion below.                                         |
+| **Memory needed (peak / mean)** | The non-reclaimable working set: `memory.current - inactive_file`, clamped at zero. Use the peak when sizing a workspace. |
+| **Total RAM (incl. cache)**     | The highest `memory.current` sample, including reclaimable page cache. Keep it for comparison, but do not size from it.   |
+| **I/O total**                   | Bytes read and written over the session.                                                                                  |
+| **Samples**                     | How many observations were retained, and how many **gaps** there are (see [Gaps and resets](#gaps-and-resets)).           |
+
+History uploaded by an older VM agent has no working-set fields. SAM shows an em dash for those
+cards rather than treating an absent measurement as zero.
 
 **Converting CPU peak to cores.** CPU is reported as CPU-milliseconds consumed per sample, and
 SAM samples every 5 seconds by default (`RESOURCE_HISTORY_SAMPLE_INTERVAL`). One core running flat
@@ -93,7 +97,8 @@ hitting the limit, raise the memory the work asks for. See
 The chart loads automatically for the most recent slice of the session:
 
 - **Green solid line** — CPU, normalized to this slice's own CPU peak.
-- **Purple dashed line** — RAM, normalized to this slice's own RAM peak.
+- **Purple solid line** — memory needed (working set), when the VM agent reported it.
+- **Faint purple dashed line** — total RAM including reclaimable file cache.
 - **Blue bands** — tool windows: stretches where the agent had one or more tool calls in flight.
   A fainter band means SAM inferred the end of the window rather than observing it.
 - **An amber marker at the top**, with a dashed line down the chart — an out-of-memory sample.
@@ -151,10 +156,10 @@ stretch.
 
 The panel is easy to over-read. Four things it cannot tell you:
 
-- **RAM peak is not "how much memory the program needed."** It is the container's total cgroup
+- **Total RAM is not "how much memory the program needed."** It is the container's total cgroup
   memory, which includes reclaimable page cache. A workspace that reads or writes large files —
-  a clone, a build, a test run — climbs toward the machine's limit as a matter of course, with no
-  memory pressure at all. **Treat the OOM banner, not RAM peak, as evidence that memory ran out.**
+  a clone, a build, a test run — can make total RAM climb while the working set stays much lower.
+  Use **Memory needed (peak)** for sizing and the OOM banner as evidence that memory ran out.
 - **It is not per-process attribution.** Samples come from the workspace's cgroup — the whole
   container, including the agent harness, your dev server, test runners, and background jobs. A
   tool window that overlaps a CPU spike is a _correlation_, not proof that the tool caused the spike.
@@ -192,9 +197,10 @@ the project default for "everything here needs more", the agent profile for "thi
 the task itself for a one-off. Remember the host reserve: a 4 GiB machine can only back a ~3.5 GiB
 reservation, so asking for exactly 4 GB pushes you onto an 8 GiB machine.
 
-Do **not** use "RAM peak looks close to the machine size" as your trigger. That number includes
-page cache (see [What this does not tell you](#what-this-does-not-tell-you)), so a workspace that
-reads large files reaches it while having plenty of memory to spare. The OOM banner is the signal.
+Use **Memory needed (peak)** as the historical sizing input. Do **not** use "Total RAM looks close
+to the machine size" as your trigger: that number includes page cache, so a workspace that reads
+large files can reach it while having plenty of reclaimable memory. The OOM banner remains the
+strongest signal that the configured limit was insufficient.
 
 **If CPU peak never approached one core and there was no OOM**, you are likely paying for headroom
 you never used. Lower the requirement, or set the pool's **Workspace strategy** to **Smallest fit**
@@ -231,12 +237,12 @@ unit on the node; the defaults are what every managed node runs.
 
 ## What is actually stored
 
-The retained payload is deliberately narrow: timestamps, CPU-milliseconds, memory bytes, I/O bytes,
-process counts, OOM flags, and hashed tool-call IDs with their start and end times. Tool spans may
-also carry an ACP kind and a bounded metadata tool name; older history may contain neither. Its
-summary also retains nullable `agentProfileId`, `skillId`, and `agentType` attribution. SAM resolves
-those fields from server-owned records for the same project and workspace instead of trusting upload
-values.
+The retained payload is deliberately narrow: timestamps, CPU-milliseconds, total and working-set
+memory bytes, I/O bytes, process counts, OOM flags, and hashed tool-call IDs with their start and end
+times. Tool spans may also carry an ACP kind and a bounded metadata tool name; older history may
+contain neither. Its summary also retains nullable `agentProfileId`, `skillId`, and `agentType`
+attribution. SAM resolves those fields from server-owned records for the same project and workspace
+instead of trusting upload values.
 
 It contains **no** prompts, messages, tool-call titles, commands, tool inputs or arguments, tool
 output, file paths, environment variables, or secrets. That is what makes it safe to keep for months
@@ -255,7 +261,7 @@ stays cheap. There is no `projectId` parameter — the project comes from the ag
 This turns a vague complaint into a checkable one. For example:
 
 > "Task `01M2…` failed near the end. Use `get_resource_history` for that task, tell me whether it
-> hit an OOM, and if so what its RAM peak was."
+> hit an OOM, and if so what its peak working set was."
 
 The same information is available over HTTP at
 `GET /api/projects/:projectId/sessions/:sessionId/resource-history` (also `…/tasks/:taskId/…` and

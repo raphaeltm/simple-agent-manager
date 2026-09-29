@@ -11,6 +11,7 @@ export const getResourceHistoryDef: AnthropicToolDef = {
   description:
     'Inspect bounded workspace resource history for a project session, task, or workspace. ' +
     'Returns a cheap summary with server-resolved agentProfileId, skillId, and agentType plus a chunk index by default. Pass chunkId to load bounded downsampled samples and tool-span correlation for one chunk. ' +
+    'Working-set memory is the sizing figure; total memory includes reclaimable file cache. ' +
     'Tool spans include the ACP kind and metadata-provided tool name when available. They are correlation windows, not causal per-process attribution, and stored payloads omit titles, prompts, commands, tool args/output, file paths, env, and secrets.',
   input_schema: {
     type: 'object',
@@ -84,6 +85,8 @@ export async function getResourceHistory(
     ...history,
     notes: [
       'Samples are workspace-level cgroup observations, not per-process attribution.',
+      'memoryWorkingSetMeanBytes and memoryWorkingSetPeakBytes estimate memory needed by excluding reclaimable inactive file cache; null means the VM agent did not report them.',
+      'memoryMeanBytes, memoryPeakBytes, and memoryKernelPeakBytes include cache and remain available for historical comparison.',
       'Tool spans are timestamp correlation windows and may include an ACP kind and metadata-provided tool name; titles and inputs are never returned.',
       'Chunk detail is returned only when chunkId is supplied; summary reads stay bounded.',
     ],

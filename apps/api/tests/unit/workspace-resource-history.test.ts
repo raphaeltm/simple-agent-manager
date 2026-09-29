@@ -42,16 +42,32 @@ async function gunzipJson(bytes: Uint8Array): Promise<unknown> {
 function samplePayload() {
   return {
     samples: [
-      { t: 1_000, cpuMillis: 0, memoryBytes: 1024, ioReadBytes: 0, ioWriteBytes: 0 },
+      {
+        t: 1_000,
+        cpuMillis: 0,
+        memoryBytes: 1024,
+        memoryWorkingSetBytes: 512,
+        ioReadBytes: 0,
+        ioWriteBytes: 0,
+      },
       {
         t: 1_500,
         cpuMillis: 40,
         memoryBytes: 2048,
         memoryPeakBytes: 4096,
+        memoryWorkingSetBytes: 1024,
         ioReadBytes: 10,
         ioWriteBytes: 20,
       },
-      { t: 2_000, cpuMillis: 900, memoryBytes: 1536, ioReadBytes: 5, ioWriteBytes: 7, oom: 1 },
+      {
+        t: 2_000,
+        cpuMillis: 900,
+        memoryBytes: 1536,
+        memoryWorkingSetBytes: 768,
+        ioReadBytes: 5,
+        ioWriteBytes: 7,
+        oom: 1,
+      },
     ],
     toolSpans: [
       {
@@ -95,6 +111,9 @@ async function uploadBody(
       memoryMeanBytes: 1536,
       memoryPeakBytes: 2048,
       memoryKernelPeakBytes: 4096,
+      memoryWorkingSetMeanBytes: 768,
+      memoryWorkingSetPeakBytes: 1024,
+      memoryWorkingSetSampleCount: 3,
       ioReadBytes: 15,
       ioWriteBytes: 27,
       oomCount: 1,
@@ -218,6 +237,98 @@ describe('workspace resource history', () => {
     ]);
   });
 
+  it('aggregates working-set samples without treating old-agent omissions as zero', async () => {
+    const sqlite = new Database(':memory:');
+    createSchemaTables(sqlite, [
+      schema.workspaces,
+      schema.workspaceResourceSummaries,
+      schema.workspaceResourceChunks,
+    ]);
+    sqlite
+      .prepare(
+        `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)
+         VALUES ('ws-1', 'proj-1', 'node-1', 'session-1')`
+      )
+      .run();
+    const r2 = makeR2();
+    const env = makeEnv(sqlite, r2.binding);
+
+    await storeWorkspaceResourceChunk(env, 'proj-1', await uploadBody(), 'node-1');
+    await storeWorkspaceResourceChunk(
+      env,
+      'proj-1',
+      await uploadBody({
+        chunkSequence: 1,
+        startedAt: 2_001,
+        endedAt: 3_000,
+        sampleCount: 2,
+        summary: {
+          memoryWorkingSetMeanBytes: 1536,
+          memoryWorkingSetPeakBytes: 2048,
+          memoryWorkingSetSampleCount: 2,
+        },
+      }),
+      'node-1'
+    );
+    await storeWorkspaceResourceChunk(
+      env,
+      'proj-1',
+      await uploadBody({
+        chunkSequence: 2,
+        startedAt: 3_001,
+        endedAt: 4_000,
+        summary: {},
+      }),
+      'node-1'
+    );
+
+    const history = await getWorkspaceResourceHistory(env, {
+      projectId: 'proj-1',
+      sessionId: 'session-1',
+    });
+    expect(history.summary).toMatchObject({
+      sampleCount: 8,
+      memoryWorkingSetMeanBytes: 1075,
+      memoryWorkingSetPeakBytes: 2048,
+    });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT memory_working_set_sample_count AS count
+             FROM workspace_resource_summaries`
+        )
+        .get()
+    ).toEqual({ count: 5 });
+  });
+
+  it('keeps working-set summary fields null for old-agent uploads', async () => {
+    const sqlite = new Database(':memory:');
+    createSchemaTables(sqlite, [
+      schema.workspaces,
+      schema.workspaceResourceSummaries,
+      schema.workspaceResourceChunks,
+    ]);
+    sqlite
+      .prepare(
+        `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)
+         VALUES ('ws-1', 'proj-1', 'node-1', 'session-1')`
+      )
+      .run();
+    const r2 = makeR2();
+    const env = makeEnv(sqlite, r2.binding);
+
+    await storeWorkspaceResourceChunk(env, 'proj-1', await uploadBody({ summary: {} }), 'node-1');
+
+    const history = await getWorkspaceResourceHistory(env, {
+      projectId: 'proj-1',
+      sessionId: 'session-1',
+    });
+    expect(history.summary).toMatchObject({
+      memoryWorkingSetMeanBytes: null,
+      memoryWorkingSetPeakBytes: null,
+    });
+  });
+
   it('keeps separate bounded summaries for reused workspace sessions while indexing raw chunks in R2', async () => {
     const sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
@@ -301,6 +412,9 @@ describe('workspace resource history', () => {
       gaps: [expect.objectContaining({ reason: 'sample_error' })],
     });
     expect(history.detail?.samples.some((sample) => sample.cpuMillis === 900)).toBe(true);
+    expect(history.detail?.samples.some((sample) => sample.memoryWorkingSetBytes === 1024)).toBe(
+      true
+    );
 
     const summaries = sqlite
       .prepare(

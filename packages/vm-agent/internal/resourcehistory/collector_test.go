@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ func TestResolveCgroupPathFindsDockerScopeAndReadsCounters(t *testing.T) {
 	writeFile(t, filepath.Join(path, "cpu.stat"), "usage_usec 123456\nuser_usec 1\n")
 	writeFile(t, filepath.Join(path, "memory.current"), "4096\n")
 	writeFile(t, filepath.Join(path, "memory.peak"), "8192\n")
+	writeFile(t, filepath.Join(path, "memory.stat"), "anon 1024\nfile 3072\ninactive_anon 256\nactive_anon 768\ninactive_file 3072\nactive_file 0\nslab 128\n")
 	writeFile(t, filepath.Join(path, "io.stat"), "8:0 rbytes=100 wbytes=25 rios=1 wios=2\n8:16 rbytes=50 wbytes=75\n")
 	writeFile(t, filepath.Join(path, "memory.events"), "oom 2\noom_kill 1\n")
 	writeFile(t, filepath.Join(path, "pids.current"), "7\n")
@@ -48,10 +50,78 @@ func TestResolveCgroupPathFindsDockerScopeAndReadsCounters(t *testing.T) {
 	if counters.CPUUsageUsec != 123456 || counters.MemoryCurrent != 4096 || counters.MemoryPeak != 8192 {
 		t.Fatalf("unexpected counters: %+v", counters)
 	}
+	if counters.MemoryWorkingSet == nil || *counters.MemoryWorkingSet != 1024 {
+		t.Fatalf("working set = %v, want 1024", counters.MemoryWorkingSet)
+	}
 	if counters.IOReadBytes != 150 || counters.IOWriteBytes != 100 || counters.OOM != 2 || counters.OOMKill != 1 || counters.PidsCurrent != 7 {
 		t.Fatalf("unexpected io/events counters: %+v", counters)
 	}
 }
+
+func TestReadCgroupCountersWorkingSetMemory(t *testing.T) {
+	const gib = uint64(1024 * 1024 * 1024)
+	tests := []struct {
+		name       string
+		current    uint64
+		memoryStat *string
+		want       *uint64
+	}{
+		{
+			name:       "large page cache",
+			current:    8 * gib,
+			memoryStat: stringPtr("anon 1610612736\nfile 6442450944\nkernel 536870912\ninactive_anon 268435456\nactive_anon 1342177280\ninactive_file 6442450944\nactive_file 0\nslab 268435456\n"),
+			want:       uint64Ptr(2 * gib),
+		},
+		{
+			name:       "inactive file clamps at zero",
+			current:    2 * gib,
+			memoryStat: stringPtr("anon 536870912\nfile 3221225472\ninactive_file 3221225472\n"),
+			want:       uint64Ptr(0),
+		},
+		{name: "missing memory stat", current: 2 * gib, want: nil},
+		{
+			name:       "unparseable inactive file",
+			current:    2 * gib,
+			memoryStat: stringPtr("anon 536870912\ninactive_file not-a-number\nfile 1610612736\n"),
+			want:       nil,
+		},
+		{
+			name:       "missing inactive file key",
+			current:    2 * gib,
+			memoryStat: stringPtr("anon 536870912\nfile 1610612736\n"),
+			want:       nil,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := t.TempDir()
+			writeFile(t, filepath.Join(path, "cpu.stat"), "usage_usec 1\n")
+			writeFile(t, filepath.Join(path, "memory.current"), strconv.FormatUint(test.current, 10)+"\n")
+			if test.memoryStat != nil {
+				writeFile(t, filepath.Join(path, "memory.stat"), *test.memoryStat)
+			}
+
+			counters, err := readCgroupCounters(path)
+			if err != nil {
+				t.Fatalf("readCgroupCounters: %v", err)
+			}
+			if test.want == nil {
+				if counters.MemoryWorkingSet != nil {
+					t.Fatalf("working set = %d, want unknown", *counters.MemoryWorkingSet)
+				}
+				return
+			}
+			if counters.MemoryWorkingSet == nil || *counters.MemoryWorkingSet != *test.want {
+				t.Fatalf("working set = %v, want %d", counters.MemoryWorkingSet, *test.want)
+			}
+		})
+	}
+}
+
+func stringPtr(value string) *string { return &value }
+
+func uint64Ptr(value uint64) *uint64 { return &value }
 
 func TestResolveCgroupPathFindsNestedSystemdScopeWithShortContainerID(t *testing.T) {
 	root := t.TempDir()
@@ -144,6 +214,7 @@ func TestCollectorUploadsCompressedChunkAndHashesToolIDs(t *testing.T) {
 	writeFile(t, filepath.Join(path, "cpu.stat"), "usage_usec 100000\n")
 	writeFile(t, filepath.Join(path, "memory.current"), "1000\n")
 	writeFile(t, filepath.Join(path, "memory.peak"), "1200\n")
+	writeFile(t, filepath.Join(path, "memory.stat"), "anon 600\nfile 400\ninactive_file 300\n")
 	writeFile(t, filepath.Join(path, "io.stat"), "8:0 rbytes=10 wbytes=20\n")
 	writeFile(t, filepath.Join(path, "memory.events"), "oom 0\noom_kill 0\n")
 	writeFile(t, filepath.Join(path, "pids.current"), "5\n")
@@ -170,6 +241,7 @@ func TestCollectorUploadsCompressedChunkAndHashesToolIDs(t *testing.T) {
 	writeFile(t, filepath.Join(path, "cpu.stat"), "usage_usec 175000\n")
 	writeFile(t, filepath.Join(path, "memory.current"), "2000\n")
 	writeFile(t, filepath.Join(path, "memory.peak"), "2500\n")
+	writeFile(t, filepath.Join(path, "memory.stat"), "anon 900\nfile 1100\ninactive_file 800\n")
 	writeFile(t, filepath.Join(path, "io.stat"), "8:0 rbytes=110 wbytes=220\n")
 	collector.RecordACPToolCall("secret-tool-id", "in_progress", "execute", "Bash", now)
 	collector.sample(context.Background())
@@ -185,6 +257,15 @@ func TestCollectorUploadsCompressedChunkAndHashesToolIDs(t *testing.T) {
 	}
 	if received.CompressedBytes == 0 || received.SHA256 == "" || received.StorageFormat != StorageFormat {
 		t.Fatalf("missing compressed payload metadata: %+v", received)
+	}
+	if received.Summary.MemoryWorkingSetMeanBytes == nil || *received.Summary.MemoryWorkingSetMeanBytes != 950 {
+		t.Fatalf("working-set mean = %v, want 950", received.Summary.MemoryWorkingSetMeanBytes)
+	}
+	if received.Summary.MemoryWorkingSetPeakBytes == nil || *received.Summary.MemoryWorkingSetPeakBytes != 1200 {
+		t.Fatalf("working-set peak = %v, want 1200", received.Summary.MemoryWorkingSetPeakBytes)
+	}
+	if received.Summary.MemoryWorkingSetSampleCount != 2 {
+		t.Fatalf("working-set sample count = %d, want 2", received.Summary.MemoryWorkingSetSampleCount)
 	}
 }
 
@@ -274,6 +355,7 @@ func BenchmarkReadCgroupCounters(b *testing.B) {
 		"cpu.stat":       "usage_usec 123456\nuser_usec 1\nsystem_usec 2\n",
 		"memory.current": "4096\n",
 		"memory.peak":    "8192\n",
+		"memory.stat":    "anon 1024\nfile 3072\ninactive_file 3072\n",
 		"io.stat":        "8:0 rbytes=100 wbytes=25 rios=1 wios=2\n8:16 rbytes=50 wbytes=75\n",
 		"memory.events":  "oom 2\noom_kill 1\n",
 		"pids.current":   "7\n",

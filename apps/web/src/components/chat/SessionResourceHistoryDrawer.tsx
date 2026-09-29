@@ -30,7 +30,8 @@ interface SessionResourceHistoryDrawerProps {
 }
 
 function formatBytes(value: number | null | undefined): string {
-  if (!value || value <= 0) return '—';
+  if (value == null || !Number.isFinite(value)) return '—';
+  if (value <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let next = value;
   let unit = 0;
@@ -65,6 +66,11 @@ function sampleMemoryMiB(sample: WorkspaceResourceSample): number {
   return Number(sample.memoryBytes ?? 0) / (1024 * 1024);
 }
 
+function sampleWorkingSetMiB(sample: WorkspaceResourceSample): number | null {
+  if (sample.memoryWorkingSetBytes == null) return null;
+  return Number(sample.memoryWorkingSetBytes) / (1024 * 1024);
+}
+
 function sampleCpuMillis(sample: WorkspaceResourceSample): number {
   return Number(sample.cpuMillis ?? 0);
 }
@@ -84,13 +90,17 @@ function sampleX(samples: WorkspaceResourceSample[], sample: WorkspaceResourceSa
 
 function seriesPoints(
   samples: WorkspaceResourceSample[],
-  valueForSample: (sample: WorkspaceResourceSample) => number
+  valueForSample: (sample: WorkspaceResourceSample) => number | null,
+  scaleMax?: number
 ): string {
-  const max = Math.max(1, ...samples.map(valueForSample));
+  const values = samples.map(valueForSample).filter((value): value is number => value != null);
+  const max = Math.max(1, scaleMax ?? 0, ...values);
   return samples
+    .filter((sample) => valueForSample(sample) != null)
     .map((sample) => {
       const x = sampleX(samples, sample);
-      const y = 100 - (valueForSample(sample) / max) * 84 - 8;
+      const value = valueForSample(sample) ?? 0;
+      const y = 100 - (value / max) * 84 - 8;
       return `${x.toFixed(2)},${y.toFixed(2)}`;
     })
     .join(' ');
@@ -101,7 +111,15 @@ export function ResourceSparkline({
   toolSpans,
 }: Readonly<{ samples: WorkspaceResourceSample[]; toolSpans: WorkspaceResourceToolSpan[] }>) {
   const cpuPoints = useMemo(() => seriesPoints(samples, sampleCpuMillis), [samples]);
-  const memoryPoints = useMemo(() => seriesPoints(samples, sampleMemoryMiB), [samples]);
+  const memoryScaleMax = useMemo(() => Math.max(1, ...samples.map(sampleMemoryMiB)), [samples]);
+  const totalMemoryPoints = useMemo(
+    () => seriesPoints(samples, sampleMemoryMiB, memoryScaleMax),
+    [memoryScaleMax, samples]
+  );
+  const workingSetPoints = useMemo(
+    () => seriesPoints(samples, sampleWorkingSetMiB, memoryScaleMax),
+    [memoryScaleMax, samples]
+  );
   const eventMarkers = useMemo(
     () =>
       samples
@@ -172,13 +190,23 @@ export function ResourceSparkline({
           vectorEffect="non-scaling-stroke"
         />
         <polyline
-          points={memoryPoints}
+          points={totalMemoryPoints}
           fill="none"
           stroke="var(--sam-color-accent-secondary, #a78bfa)"
           strokeDasharray="4 3"
+          strokeOpacity="0.55"
           strokeWidth="2.2"
           vectorEffect="non-scaling-stroke"
         />
+        {workingSetPoints && (
+          <polyline
+            points={workingSetPoints}
+            fill="none"
+            stroke="var(--sam-color-accent-secondary, #a78bfa)"
+            strokeWidth="2.4"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
         {eventMarkers.map(({ sample, x }) => (
           <g key={`${sample.t}-${x}`}>
             <line
@@ -210,7 +238,8 @@ export function ResourceSparkline({
       </svg>
       <div className="mt-2 grid gap-1 text-xs text-fg-muted">
         <span>CPU: green solid line, normalized to the CPU peak for this chunk.</span>
-        <span>RAM: purple dashed line, normalized to the RAM peak for this chunk.</span>
+        <span>Memory needed: purple solid line (working set, when reported).</span>
+        <span>Total RAM: faint purple dashed line, including reclaimable file cache.</span>
         <span>
           Blue bands: concurrent tool windows. Dashed markers: gaps, counter resets, or OOM samples.
         </span>
@@ -328,7 +357,17 @@ export function ResourceHistoryContent({
           <StatCard icon={Cpu} label="CPU peak" value={formatCpuPeak(summary)} />
           <StatCard
             icon={MemoryStick}
-            label="RAM peak"
+            label="Memory needed (peak)"
+            value={formatBytes(summary.memoryWorkingSetPeakBytes)}
+          />
+          <StatCard
+            icon={MemoryStick}
+            label="Memory needed (mean)"
+            value={formatBytes(summary.memoryWorkingSetMeanBytes)}
+          />
+          <StatCard
+            icon={MemoryStick}
+            label="Total RAM (incl. cache)"
             value={formatBytes(summary.memoryPeakBytes)}
           />
           <StatCard

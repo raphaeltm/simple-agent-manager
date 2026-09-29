@@ -69,6 +69,9 @@ export interface WorkspaceResourceSummaryPayload {
   memoryMeanBytes?: number | null;
   memoryPeakBytes?: number | null;
   memoryKernelPeakBytes?: number | null;
+  memoryWorkingSetMeanBytes?: number | null;
+  memoryWorkingSetPeakBytes?: number | null;
+  memoryWorkingSetSampleCount?: number | null;
   ioReadBytes?: number | null;
   ioWriteBytes?: number | null;
   oomCount?: number | null;
@@ -88,6 +91,7 @@ export interface ResourceSamplePoint {
   cpuMillis?: number;
   memoryBytes?: number;
   memoryPeakBytes?: number;
+  memoryWorkingSetBytes?: number;
   ioReadBytes?: number;
   ioWriteBytes?: number;
   oom?: number;
@@ -144,6 +148,8 @@ export interface PublicWorkspaceResourceSummary {
   memoryMeanBytes: number | null;
   memoryPeakBytes: number | null;
   memoryKernelPeakBytes: number | null;
+  memoryWorkingSetMeanBytes: number | null;
+  memoryWorkingSetPeakBytes: number | null;
   ioReadBytes: number | null;
   ioWriteBytes: number | null;
   oomCount: number;
@@ -752,6 +758,25 @@ export async function storeWorkspaceResourceChunk(
     const skillId = workspace.skill_id;
     const agentType = workspace.agent_type;
     const runtime = normalizeNullable(body.runtime) ?? 'vm';
+    const memoryWorkingSetMeanBytes = assertFiniteMetric(
+      body.summary.memoryWorkingSetMeanBytes,
+      'summary.memoryWorkingSetMeanBytes'
+    );
+    const memoryWorkingSetPeakBytes = assertFiniteMetric(
+      body.summary.memoryWorkingSetPeakBytes,
+      'summary.memoryWorkingSetPeakBytes'
+    );
+    const memoryWorkingSetSampleCount =
+      memoryWorkingSetMeanBytes == null
+        ? 0
+        : (assertFiniteMetric(
+            body.summary.memoryWorkingSetSampleCount,
+            'summary.memoryWorkingSetSampleCount'
+          ) ?? body.sampleCount);
+    assertFiniteInteger(memoryWorkingSetSampleCount, 'summary.memoryWorkingSetSampleCount');
+    if (memoryWorkingSetSampleCount > body.sampleCount) {
+      throw errors.badRequest('summary.memoryWorkingSetSampleCount cannot exceed sampleCount');
+    }
     const values = {
       id: summaryId,
       projectId,
@@ -776,6 +801,9 @@ export async function storeWorkspaceResourceChunk(
         body.summary.memoryKernelPeakBytes,
         'summary.memoryKernelPeakBytes'
       ),
+      memoryWorkingSetMeanBytes,
+      memoryWorkingSetPeakBytes,
+      memoryWorkingSetSampleCount,
       ioReadBytes: assertFiniteMetric(body.summary.ioReadBytes, 'summary.ioReadBytes'),
       ioWriteBytes: assertFiniteMetric(body.summary.ioWriteBytes, 'summary.ioWriteBytes'),
       oomCount: Math.trunc(assertFiniteMetric(body.summary.oomCount, 'summary.oomCount') ?? 0),
@@ -829,6 +857,27 @@ export async function storeWorkspaceResourceChunk(
               END`,
           memoryPeakBytes: sql`MAX(COALESCE(${schema.workspaceResourceSummaries.memoryPeakBytes}, 0), ${values.memoryPeakBytes ?? 0})`,
           memoryKernelPeakBytes: sql`MAX(COALESCE(${schema.workspaceResourceSummaries.memoryKernelPeakBytes}, 0), ${values.memoryKernelPeakBytes ?? 0})`,
+          memoryWorkingSetMeanBytes:
+            values.memoryWorkingSetMeanBytes == null || values.memoryWorkingSetSampleCount === 0
+              ? schema.workspaceResourceSummaries.memoryWorkingSetMeanBytes
+              : sql`CASE
+                WHEN ${schema.workspaceResourceSummaries.memoryWorkingSetMeanBytes} IS NULL
+                  OR ${schema.workspaceResourceSummaries.memoryWorkingSetSampleCount} = 0
+                THEN ${values.memoryWorkingSetMeanBytes}
+                ELSE CAST((
+                  (${schema.workspaceResourceSummaries.memoryWorkingSetMeanBytes} * ${schema.workspaceResourceSummaries.memoryWorkingSetSampleCount}) +
+                  (${values.memoryWorkingSetMeanBytes} * ${values.memoryWorkingSetSampleCount})
+                ) / (${schema.workspaceResourceSummaries.memoryWorkingSetSampleCount} + ${values.memoryWorkingSetSampleCount}) AS INTEGER)
+              END`,
+          memoryWorkingSetPeakBytes:
+            values.memoryWorkingSetPeakBytes == null
+              ? schema.workspaceResourceSummaries.memoryWorkingSetPeakBytes
+              : sql`CASE
+                WHEN ${schema.workspaceResourceSummaries.memoryWorkingSetPeakBytes} IS NULL
+                THEN ${values.memoryWorkingSetPeakBytes}
+                ELSE MAX(${schema.workspaceResourceSummaries.memoryWorkingSetPeakBytes}, ${values.memoryWorkingSetPeakBytes})
+              END`,
+          memoryWorkingSetSampleCount: sql`${schema.workspaceResourceSummaries.memoryWorkingSetSampleCount} + ${values.memoryWorkingSetSampleCount}`,
           ioReadBytes: sql`COALESCE(${schema.workspaceResourceSummaries.ioReadBytes}, 0) + ${values.ioReadBytes ?? 0}`,
           ioWriteBytes: sql`COALESCE(${schema.workspaceResourceSummaries.ioWriteBytes}, 0) + ${values.ioWriteBytes ?? 0}`,
           oomCount: sql`${schema.workspaceResourceSummaries.oomCount} + ${values.oomCount}`,
@@ -908,6 +957,8 @@ function publicSummary(row: schema.WorkspaceResourceSummaryRow): PublicWorkspace
     memoryMeanBytes: row.memoryMeanBytes,
     memoryPeakBytes: row.memoryPeakBytes,
     memoryKernelPeakBytes: row.memoryKernelPeakBytes,
+    memoryWorkingSetMeanBytes: row.memoryWorkingSetMeanBytes,
+    memoryWorkingSetPeakBytes: row.memoryWorkingSetPeakBytes,
     ioReadBytes: row.ioReadBytes,
     ioWriteBytes: row.ioWriteBytes,
     oomCount: row.oomCount,
@@ -947,6 +998,7 @@ function sampleScore(sample: ResourceSamplePoint): number {
     Number(sample.cpuMillis ?? 0),
     Number(sample.memoryBytes ?? 0) / (1024 * 1024),
     Number(sample.memoryPeakBytes ?? 0) / (1024 * 1024),
+    Number(sample.memoryWorkingSetBytes ?? 0) / (1024 * 1024),
     sample.gap ? Number.MAX_SAFE_INTEGER : 0
   );
 }

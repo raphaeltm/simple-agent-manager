@@ -17,13 +17,13 @@ Session resource history records cgroup v2 `memory.current` and `memory.peak`. B
 
 ## Implementation checklist
 
-- [ ] Add strict `memory.stat` parsing and optional working-set samples with realistic Go fixtures.
-- [ ] Summarize known working-set samples into mean, peak, and known-sample count fields.
-- [ ] Add nullable D1 columns and absence-safe aggregate upsert behavior.
-- [ ] Add working-set fields to public API and web client types, detail downsampling, and MCP documentation.
-- [ ] Update the drawer cards and timeline labels to distinguish memory needed from cache-inclusive memory.
-- [ ] Cover new/old-agent uploads and cross-chunk aggregation in API tests.
-- [ ] Update the public guide and API reference.
+- [x] Add strict `memory.stat` parsing and optional working-set samples with realistic Go fixtures.
+- [x] Summarize known working-set samples into mean, peak, and known-sample count fields.
+- [x] Add nullable D1 columns and absence-safe aggregate upsert behavior.
+- [x] Add working-set fields to public API and web client types, detail downsampling, and MCP documentation.
+- [x] Update the drawer cards and timeline labels to distinguish memory needed from cache-inclusive memory.
+- [x] Cover new/old-agent uploads and cross-chunk aggregation in API tests.
+- [x] Update the public guide and API reference.
 - [ ] Run focused tests, full quality gates, visual audit, specialist review, staging VM verification, CI, and CodeRabbit.
 
 ## Acceptance criteria

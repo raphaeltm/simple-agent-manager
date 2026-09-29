@@ -94,19 +94,20 @@ type Collector struct {
 }
 
 type Sample struct {
-	T               int64  `json:"t"`
-	IntervalMillis  int64  `json:"intervalMillis,omitempty"`
-	CPUMillis       int64  `json:"cpuMillis,omitempty"`
-	MemoryBytes     uint64 `json:"memoryBytes,omitempty"`
-	MemoryPeakBytes uint64 `json:"memoryPeakBytes,omitempty"`
-	IOReadBytes     uint64 `json:"ioReadBytes,omitempty"`
-	IOWriteBytes    uint64 `json:"ioWriteBytes,omitempty"`
-	OOM             uint64 `json:"oom,omitempty"`
-	OOMKill         uint64 `json:"oomKill,omitempty"`
-	PidsCurrent     uint64 `json:"pidsCurrent,omitempty"`
-	CounterReset    bool   `json:"counterReset,omitempty"`
-	Unsupported     string `json:"unsupported,omitempty"`
-	Gap             bool   `json:"gap,omitempty"`
+	T                     int64   `json:"t"`
+	IntervalMillis        int64   `json:"intervalMillis,omitempty"`
+	CPUMillis             int64   `json:"cpuMillis,omitempty"`
+	MemoryBytes           uint64  `json:"memoryBytes,omitempty"`
+	MemoryPeakBytes       uint64  `json:"memoryPeakBytes,omitempty"`
+	MemoryWorkingSetBytes *uint64 `json:"memoryWorkingSetBytes,omitempty"`
+	IOReadBytes           uint64  `json:"ioReadBytes,omitempty"`
+	IOWriteBytes          uint64  `json:"ioWriteBytes,omitempty"`
+	OOM                   uint64  `json:"oom,omitempty"`
+	OOMKill               uint64  `json:"oomKill,omitempty"`
+	PidsCurrent           uint64  `json:"pidsCurrent,omitempty"`
+	CounterReset          bool    `json:"counterReset,omitempty"`
+	Unsupported           string  `json:"unsupported,omitempty"`
+	Gap                   bool    `json:"gap,omitempty"`
 }
 
 type ToolSpan struct {
@@ -128,16 +129,19 @@ type chunkPayload struct {
 }
 
 type summaryPayload struct {
-	CPUMeanMillis          *float64 `json:"cpuMeanMillis,omitempty"`
-	CPUPeakMillis          *int64   `json:"cpuPeakMillis,omitempty"`
-	MemoryMeanBytes        *uint64  `json:"memoryMeanBytes,omitempty"`
-	MemoryPeakBytes        *uint64  `json:"memoryPeakBytes,omitempty"`
-	MemoryKernelPeakBytes  *uint64  `json:"memoryKernelPeakBytes,omitempty"`
-	IOReadBytes            *uint64  `json:"ioReadBytes,omitempty"`
-	IOWriteBytes           *uint64  `json:"ioWriteBytes,omitempty"`
-	OOMCount               *uint64  `json:"oomCount,omitempty"`
-	SampleIntervalMillis   int64    `json:"sampleIntervalMillis"`
-	WeightedMeanWallMillis int64    `json:"weightedMeanWallMillis"`
+	CPUMeanMillis               *float64 `json:"cpuMeanMillis,omitempty"`
+	CPUPeakMillis               *int64   `json:"cpuPeakMillis,omitempty"`
+	MemoryMeanBytes             *uint64  `json:"memoryMeanBytes,omitempty"`
+	MemoryPeakBytes             *uint64  `json:"memoryPeakBytes,omitempty"`
+	MemoryKernelPeakBytes       *uint64  `json:"memoryKernelPeakBytes,omitempty"`
+	MemoryWorkingSetMeanBytes   *uint64  `json:"memoryWorkingSetMeanBytes,omitempty"`
+	MemoryWorkingSetPeakBytes   *uint64  `json:"memoryWorkingSetPeakBytes,omitempty"`
+	MemoryWorkingSetSampleCount int      `json:"memoryWorkingSetSampleCount,omitempty"`
+	IOReadBytes                 *uint64  `json:"ioReadBytes,omitempty"`
+	IOWriteBytes                *uint64  `json:"ioWriteBytes,omitempty"`
+	OOMCount                    *uint64  `json:"oomCount,omitempty"`
+	SampleIntervalMillis        int64    `json:"sampleIntervalMillis"`
+	WeightedMeanWallMillis      int64    `json:"weightedMeanWallMillis"`
 }
 
 type uploadBody struct {
@@ -434,7 +438,12 @@ func (c *Collector) sample(ctx context.Context) {
 func (c *Collector) sampleFromCounters(now time.Time, counters cgroupCounters) Sample {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	sample := Sample{T: now.UnixMilli(), MemoryBytes: counters.MemoryCurrent, MemoryPeakBytes: counters.MemoryPeak}
+	sample := Sample{
+		T:                     now.UnixMilli(),
+		MemoryBytes:           counters.MemoryCurrent,
+		MemoryPeakBytes:       counters.MemoryPeak,
+		MemoryWorkingSetBytes: counters.MemoryWorkingSet,
+	}
 	sample.PidsCurrent = counters.PidsCurrent
 	if !c.lastSampleAt.IsZero() {
 		sample.IntervalMillis = now.Sub(c.lastSampleAt).Milliseconds()
@@ -541,6 +550,9 @@ func summarize(samples []Sample, interval time.Duration) summaryPayload {
 	var totalMem uint64
 	var peakMem uint64
 	var kernelPeak uint64
+	var totalWorkingSet uint64
+	var peakWorkingSet uint64
+	var workingSetSamples int
 	var read uint64
 	var write uint64
 	var oom uint64
@@ -557,6 +569,13 @@ func summarize(samples []Sample, interval time.Duration) summaryPayload {
 		if s.MemoryPeakBytes > kernelPeak {
 			kernelPeak = s.MemoryPeakBytes
 		}
+		if s.MemoryWorkingSetBytes != nil {
+			totalWorkingSet += *s.MemoryWorkingSetBytes
+			if *s.MemoryWorkingSetBytes > peakWorkingSet {
+				peakWorkingSet = *s.MemoryWorkingSetBytes
+			}
+			workingSetSamples++
+		}
 		read += s.IOReadBytes
 		write += s.IOWriteBytes
 		oom += s.OOM + s.OOMKill
@@ -571,6 +590,12 @@ func summarize(samples []Sample, interval time.Duration) summaryPayload {
 		out.MemoryMeanBytes = &meanMem
 		out.MemoryPeakBytes = &peakMem
 		out.MemoryKernelPeakBytes = &kernelPeak
+		if workingSetSamples > 0 {
+			meanWorkingSet := totalWorkingSet / uint64(workingSetSamples)
+			out.MemoryWorkingSetMeanBytes = &meanWorkingSet
+			out.MemoryWorkingSetPeakBytes = &peakWorkingSet
+			out.MemoryWorkingSetSampleCount = workingSetSamples
+		}
 		out.IOReadBytes = &read
 		out.IOWriteBytes = &write
 		out.OOMCount = &oom
@@ -776,14 +801,15 @@ func hashedToolID(raw string) string {
 }
 
 type cgroupCounters struct {
-	CPUUsageUsec  uint64
-	MemoryCurrent uint64
-	MemoryPeak    uint64
-	IOReadBytes   uint64
-	IOWriteBytes  uint64
-	OOM           uint64
-	OOMKill       uint64
-	PidsCurrent   uint64
+	CPUUsageUsec     uint64
+	MemoryCurrent    uint64
+	MemoryPeak       uint64
+	MemoryWorkingSet *uint64
+	IOReadBytes      uint64
+	IOWriteBytes     uint64
+	OOM              uint64
+	OOMKill          uint64
+	PidsCurrent      uint64
 }
 
 func (c *Collector) resolveCgroupPath(ctx context.Context) (string, error) {
@@ -911,8 +937,18 @@ func readCgroupCounters(path string) (cgroupCounters, error) {
 		return out, err
 	}
 	out.CPUUsageUsec = cpu["usage_usec"]
-	out.MemoryCurrent, _ = readUintFile(filepath.Join(path, "memory.current"))
+	var memoryCurrentErr error
+	out.MemoryCurrent, memoryCurrentErr = readUintFile(filepath.Join(path, "memory.current"))
 	out.MemoryPeak, _ = readUintFile(filepath.Join(path, "memory.peak"))
+	if inactiveFile, statErr := readInactiveFile(filepath.Join(path, "memory.stat")); memoryCurrentErr == nil && statErr == nil {
+		workingSet := out.MemoryCurrent
+		if inactiveFile < workingSet {
+			workingSet -= inactiveFile
+		} else {
+			workingSet = 0
+		}
+		out.MemoryWorkingSet = &workingSet
+	}
 	ioStats, _ := readIOStat(filepath.Join(path, "io.stat"))
 	out.IOReadBytes = ioStats[0]
 	out.IOWriteBytes = ioStats[1]
@@ -948,6 +984,28 @@ func readKeyedUintFile(path string) (map[string]uint64, error) {
 		}
 	}
 	return result, nil
+}
+
+func readInactiveFile(path string) (uint64, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0] != "inactive_file" {
+			continue
+		}
+		if len(fields) != 2 {
+			return 0, fmt.Errorf("invalid inactive_file entry in %s", path)
+		}
+		value, parseErr := strconv.ParseUint(fields[1], 10, 64)
+		if parseErr != nil {
+			return 0, fmt.Errorf("parse inactive_file in %s: %w", path, parseErr)
+		}
+		return value, nil
+	}
+	return 0, fmt.Errorf("inactive_file missing from %s", path)
 }
 
 func readIOStat(path string) ([2]uint64, error) {

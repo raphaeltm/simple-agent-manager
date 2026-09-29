@@ -164,6 +164,8 @@ export interface WorkspaceResourceSummary {
   memoryMeanBytes: number | null;
   memoryPeakBytes: number | null;
   memoryKernelPeakBytes: number | null;
+  memoryWorkingSetMeanBytes: number | null;
+  memoryWorkingSetPeakBytes: number | null;
   ioReadBytes: number | null;
   ioWriteBytes: number | null;
   oomCount: number;
@@ -201,6 +203,7 @@ export interface WorkspaceResourceSample {
   cpuMillis?: number;
   memoryBytes?: number;
   memoryPeakBytes?: number;
+  memoryWorkingSetBytes?: number;
   ioReadBytes?: number;
   ioWriteBytes?: number;
   oom?: number;

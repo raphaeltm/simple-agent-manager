@@ -44,6 +44,8 @@ describe('resource history MCP tool', () => {
         agentProfileId: 'profile-1',
         skillId: 'skill-1',
         agentType: 'openai-codex',
+        memoryWorkingSetMeanBytes: 512,
+        memoryWorkingSetPeakBytes: 1024,
       },
       chunks: [{ id: 'wrchunk:1', sampleCount: 12 }],
       detail: {
@@ -85,6 +87,10 @@ describe('resource history MCP tool', () => {
           agentProfileId: 'profile-1',
           skillId: 'skill-1',
           agentType: 'openai-codex',
+          memoryWorkingSetMeanBytes: 512,
+          memoryWorkingSetPeakBytes: 1024,
+        memoryWorkingSetMeanBytes: 512,
+        memoryWorkingSetPeakBytes: 1024,
         },
         detail: {
           toolSpans: [{ id: 'hashed', kind: 'execute', toolName: 'Bash', startedAt: 1 }],
@@ -149,6 +155,8 @@ describe('SAM native get_resource_history tool', () => {
         agentProfileId: 'profile-1',
         skillId: 'skill-1',
         agentType: 'openai-codex',
+        memoryWorkingSetMeanBytes: 512,
+        memoryWorkingSetPeakBytes: 1024,
       },
       chunks: [{ id: 'wrchunk:1', sampleCount: 7 }],
       detail: {
@@ -197,6 +205,10 @@ describe('SAM native get_resource_history tool', () => {
           agentProfileId: 'profile-1',
           skillId: 'skill-1',
           agentType: 'openai-codex',
+          memoryWorkingSetMeanBytes: 512,
+          memoryWorkingSetPeakBytes: 1024,
+        memoryWorkingSetMeanBytes: 512,
+        memoryWorkingSetPeakBytes: 1024,
         },
         detail: {
           toolSpans: [
