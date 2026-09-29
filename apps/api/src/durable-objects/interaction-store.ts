@@ -145,6 +145,44 @@ function terminalState(state: string): boolean {
   ].includes(state);
 }
 
+function detailBoundsViolation(
+  detail: unknown,
+  config: ReturnType<typeof getAcpInteractionConfig>
+): string | null {
+  if (!detail || typeof detail !== 'object') return null;
+  const record = detail as Record<string, unknown>;
+  if (Array.isArray(record.options) && record.options.length > config.optionsMaxCount) {
+    return 'request options exceed configured maximum';
+  }
+  const schema = record.schema ?? record.formSchema;
+  if (schema !== undefined) {
+    const schemaJson = canonicalJson(schema);
+    if (new TextEncoder().encode(schemaJson).byteLength > config.formSchemaMaxBytes) {
+      return 'form schema exceeds configured maximum';
+    }
+    if (schema && typeof schema === 'object') {
+      const schemaRecord = schema as Record<string, unknown>;
+      const properties = schemaRecord.properties;
+      if (properties && typeof properties === 'object' && !Array.isArray(properties)) {
+        if (Object.keys(properties).length > config.formSchemaMaxProperties) {
+          return 'form schema properties exceed configured maximum';
+        }
+      }
+      const enumViolation = hasEnumOverflow(schema, config.formSchemaMaxEnum);
+      if (enumViolation) return 'form schema enum exceeds configured maximum';
+    }
+  }
+  return null;
+}
+
+function hasEnumOverflow(value: unknown, maxEnum: number): boolean {
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return value.some((item) => hasEnumOverflow(item, maxEnum));
+  const record = value as Record<string, unknown>;
+  if (Array.isArray(record.enum) && record.enum.length > maxEnum) return true;
+  return Object.values(record).some((item) => hasEnumOverflow(item, maxEnum));
+}
+
 export class InteractionStore extends DurableObject<Env> {
   private readonly sql: SqlStorage;
 
@@ -242,6 +280,8 @@ export class InteractionStore extends DurableObject<Env> {
     if (new TextEncoder().encode(detailPlaintext).byteLength > config.requestMaxBytes) {
       return { status: 'invalid', reason: 'request detail exceeds configured maximum' };
     }
+    const boundsViolation = detailBoundsViolation(input.detail, config);
+    if (boundsViolation) return { status: 'invalid', reason: boundsViolation };
     const encrypted = await encrypt(detailPlaintext, getCredentialEncryptionKey(this.env));
     const safeSummary = canonicalJson(input.safeSummary);
     this.sql.exec(

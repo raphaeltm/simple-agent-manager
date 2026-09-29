@@ -140,14 +140,16 @@ export function registerChatAcpInteractionRoutes(chatRoutes: Hono<{ Bindings: En
             runtimeIdentity: acceptedAnswer.delivery.runtimeIdentity,
             decision: body.decision,
           });
-          await recordInteractionDelivery(
-            c.env,
-            projectId,
-            sessionId,
-            interactionId,
-            delivery.outcome,
-            'reason' in delivery ? delivery.reason : null
-          );
+          if (delivery.outcome !== 'unconfirmed') {
+            await recordInteractionDelivery(
+              c.env,
+              projectId,
+              sessionId,
+              interactionId,
+              delivery.outcome,
+              'reason' in delivery ? delivery.reason : null
+            );
+          }
         } else if (target.status === 'interrupted') {
           await recordInteractionDelivery(
             c.env,
