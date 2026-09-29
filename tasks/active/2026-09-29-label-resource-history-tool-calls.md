@@ -29,7 +29,7 @@ Resource-history tool spans are currently stored as the generic `acp_tool_call` 
 - [x] Run the focused Go, API, MCP, and web test suites plus lint/typecheck/build gates.
 - [x] Run Playwright visual audits at 375x667 and 1280x800, inspect screenshots, and verify no horizontal overflow or clipping.
 - [x] Run task-completion, Go, Cloudflare, UI/UX, constitution, and test specialist reviews; address all blocking findings.
-- [ ] Rebase on `origin/main`, deploy to staging, provision a current VM agent, verify upload/read/MCP/UI behavior end to end, capture screenshots, and clean up the workspace/node.
+- [x] Rebase on `origin/main`, deploy to staging, provision a current VM agent, verify upload/read/MCP/UI behavior end to end, capture screenshots, and clean up the workspace/node.
 
 ## Acceptance Criteria
 
