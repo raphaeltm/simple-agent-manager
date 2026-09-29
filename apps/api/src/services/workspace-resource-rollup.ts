@@ -8,6 +8,7 @@
  * around a kilobyte.
  */
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import type { ResourceSamplePoint, ResourceToolSpan } from './workspace-resource-history';
 
@@ -248,4 +249,25 @@ export function parseWorkspaceResourceRollup(raw: string | null): WorkspaceResou
     }
   }
   return value as WorkspaceResourceRollup;
+}
+
+/**
+ * The stored rollup is an optimisation for the timeline: failing to build one
+ * must never reject the chunk upload. The timeline falls back to the summary.
+ */
+export function buildStoredRollupJson(
+  env: Env,
+  payload: { samples?: ResourceSamplePoint[]; toolSpans?: ResourceToolSpan[] },
+  window: { startedAt: number; endedAt: number },
+  context: { projectId: string; workspaceId: string; chunkSequence: number }
+): string | null {
+  try {
+    return JSON.stringify(computeWorkspaceResourceRollup(payload, window, getRollupConfig(env)));
+  } catch (error) {
+    log.warn('workspace_resource_history.rollup_failed', {
+      ...context,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }

@@ -8,7 +8,7 @@ import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { parseJsonRecord } from '../lib/runtime-validation';
 import { AppError, errors } from '../middleware/error';
-import { computeWorkspaceResourceRollup, getRollupConfig } from './workspace-resource-rollup';
+import { buildStoredRollupJson } from './workspace-resource-rollup';
 
 export const WORKSPACE_RESOURCE_STORAGE_FORMAT = 'resource-history-gzip-json-v1';
 const R2_PREFIX = 'resource-history/v1';
@@ -561,31 +561,6 @@ async function validateWorkspaceResourceChunkBytes(
   return { bytes, actualSha, payload: decodedChunk.value };
 }
 
-/** The rollup is an optimisation for the timeline; failing to build one must not reject the chunk. */
-function buildRollupJson(
-  env: Env,
-  payload: WorkspaceResourceChunkPayload,
-  body: WorkspaceResourceUploadBody,
-  context: { projectId: string; workspaceId: string }
-): string | null {
-  try {
-    return JSON.stringify(
-      computeWorkspaceResourceRollup(
-        payload,
-        { startedAt: body.startedAt, endedAt: body.endedAt },
-        getRollupConfig(env)
-      )
-    );
-  } catch (error) {
-    log.warn('workspace_resource_history.rollup_failed', {
-      ...context,
-      chunkSequence: body.chunkSequence,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  }
-}
-
 export async function storeWorkspaceResourceChunk(
   env: Env,
   projectId: string,
@@ -779,7 +754,11 @@ export async function storeWorkspaceResourceChunk(
       toolSpanCount: body.toolSpanCount ?? 0,
       completenessJson,
       summaryJson,
-      rollupJson: buildRollupJson(env, payload, body, { projectId, workspaceId }),
+      rollupJson: buildStoredRollupJson(env, payload, body, {
+        projectId,
+        workspaceId,
+        chunkSequence: body.chunkSequence,
+      }),
       createdAt: now,
       expiresAt,
       uploadedByNodeId,

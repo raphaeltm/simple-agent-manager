@@ -8,6 +8,7 @@ import {
   type WorkspaceResourceUploadBody,
 } from '../../src/services/workspace-resource-history';
 import {
+  buildStoredRollupJson,
   computeWorkspaceResourceRollup,
   parseWorkspaceResourceRollup,
 } from '../../src/services/workspace-resource-rollup';
@@ -233,6 +234,23 @@ describe('computeWorkspaceResourceRollup', () => {
     expect(rollup.end.at(-1)).toBeLessThanOrEqual(T0 + day);
   });
 
+  it('degrades to no rollup instead of failing the upload when building one throws', () => {
+    const env = {} as Env;
+    const window = { startedAt: T0, endedAt: T0 + 15 * MINUTE };
+    const context = { projectId: 'proj-1', workspaceId: 'ws-1', chunkSequence: 0 };
+    const hostile = {
+      get samples(): never {
+        throw new Error('decoder bug');
+      },
+    };
+
+    expect(buildStoredRollupJson(env, hostile, window, context)).toBeNull();
+    // Control: a well-formed payload still produces a stored rollup.
+    expect(
+      parseWorkspaceResourceRollup(buildStoredRollupJson(env, chunkPayload(T0), window, context))
+    ).not.toBeNull();
+  });
+
   it('round-trips through JSON and rejects malformed stored rollups', () => {
     const rollup = computeWorkspaceResourceRollup(
       chunkPayload(T0),
@@ -443,14 +461,32 @@ describe('session resource timeline', () => {
     addNode('node-a', 'vm');
     addWorkspace('ws-1', 'proj-1', 'node-a', 'sess-old');
     addWorkspace('ws-2', 'proj-2', 'node-a', 'sess-foreign');
-    await upload(env, { projectId: 'proj-1', workspaceId: 'ws-1', sessionId: 'sess-old', sequence: 0, start: T0 });
-    await upload(env, { projectId: 'proj-2', workspaceId: 'ws-2', sessionId: 'sess-foreign', sequence: 0, start: T0 });
+    await upload(env, {
+      projectId: 'proj-1',
+      workspaceId: 'ws-1',
+      sessionId: 'sess-old',
+      sequence: 0,
+      start: T0,
+    });
+    await upload(env, {
+      projectId: 'proj-2',
+      workspaceId: 'ws-2',
+      sessionId: 'sess-foreign',
+      sequence: 0,
+      start: T0,
+    });
     // Retention cleanup deletes the chunks and keeps the longer-lived summary.
     sqlite.prepare('DELETE FROM workspace_resource_chunks').run();
 
-    const expired = await getSessionResourceTimeline(env, { projectId: 'proj-1', sessionId: 'sess-old' });
+    const expired = await getSessionResourceTimeline(env, {
+      projectId: 'proj-1',
+      sessionId: 'sess-old',
+    });
     // Another project's summary for a session id must not make this project's answer "expired".
-    const foreign = await getSessionResourceTimeline(env, { projectId: 'proj-1', sessionId: 'sess-foreign' });
+    const foreign = await getSessionResourceTimeline(env, {
+      projectId: 'proj-1',
+      sessionId: 'sess-foreign',
+    });
 
     expect(expired).toMatchObject({ collection: 'expired', chunks: [] });
     expect(foreign).toMatchObject({ collection: 'pending', chunks: [] });
