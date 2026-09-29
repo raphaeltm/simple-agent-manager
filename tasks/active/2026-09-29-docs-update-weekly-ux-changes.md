@@ -102,4 +102,13 @@ covered PRs #2092–#2135; this pass covers everything merged since.
     still has Retry.
   - Filed idea `01M3NX01NR144RNXNERWZBF9VK`: `useWakeProgress` `settledRef` latches on `failed`,
     so a retried wake in the same page view shows no phases.
-- **Round 5**: running.
+- **Round 5** (fixed in `e6103abb7`): 0 CRITICAL, 0 HIGH, 2 MEDIUM, 4 LOW.
+  - Quota-aware wake waits apply to Hetzner account limits only (`classifyHetznerAccountLimit` →
+    `classifyVmProviderCapacityError`); other providers' quota errors fail the attempt.
+  - The profile model picker (`ProfileFormDialog` → `ModelSelect`, no `useDynamicCatalog`) is the
+    bundled catalog for every agent; only Settings → Agents loads OpenCode Zen/Go from Models.dev.
+  - A delivery lives at most an hour (`DEFAULT_PROMPT_DELIVERY_TTL_MS`); some endings post no Wake
+    failed message, so "don't resend" is time-bounded.
+  - Retry pre-fills the task's original request plus a summary (`useProjectChatState.handleRetry`);
+    the stuck fork shows **Sending...**; materialization indexes ≤5,000 rows per pass.
+- **Round 6**: running.
