@@ -58,6 +58,8 @@ const protocolFixture = JSON.parse(
   notReadyPrompt: Record<string, unknown>;
   notFoundReceipt: Record<string, unknown>;
 };
+const promptProtocolCapabilities = { ...protocolFixture.capabilities };
+delete promptProtocolCapabilities.interactions;
 
 const targetRow = {
   workspace_id: 'workspace-1',
@@ -230,7 +232,7 @@ describe('VM prompt delivery adapter', () => {
         kind: 'retry',
         reason: 'not_ready',
       });
-      expect(beforeSubmit).toHaveBeenCalledWith(protocolFixture.capabilities);
+      expect(beforeSubmit).toHaveBeenCalledWith(promptProtocolCapabilities);
       expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
     }
   );

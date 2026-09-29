@@ -14,7 +14,6 @@ import { getTrustedApiOrigin } from '../lib/trusted-origins';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
-import { jsonValidator } from '../schemas';
 import {
   deliverAcpInteractionAnswer,
   resolveAcpInteractionDeliveryTarget,
@@ -34,11 +33,6 @@ type AcceptedAnswerResult = Extract<
 >;
 type ChatAcpContext = Context<{ Bindings: Env }>;
 type BrowserAnswerBody = InferOutput<typeof AcpInteractionBrowserAnswerSchema>;
-type BrowserAnswerContext = Context<
-  { Bindings: Env },
-  string,
-  { in: { json: BrowserAnswerBody }; out: { json: BrowserAnswerBody } }
->;
 
 function exactAppOrigin(env: Pick<Env, 'BASE_DOMAIN'>): string {
   const apiOrigin = getTrustedApiOrigin(env);
@@ -77,6 +71,18 @@ function requireAcceptedAnswer(answer: AnswerInteractionResult): AcceptedAnswerR
     throw errors.conflict(answer.reason);
   }
   throw errors.badRequest('reason' in answer ? answer.reason : 'Interaction answer was not accepted');
+}
+
+async function parseBrowserAnswerBody(c: ChatAcpContext): Promise<BrowserAnswerBody> {
+  let raw: unknown;
+  try {
+    raw = (await c.req.json()) as unknown;
+  } catch {
+    throw errors.badRequest('Invalid JSON in request body');
+  }
+  const result = v.safeParse(AcpInteractionBrowserAnswerSchema, raw);
+  if (!result.success) throw errors.badRequest('Invalid interaction answer body');
+  return result.output;
 }
 
 async function deliverAcceptedAnswer(
@@ -163,13 +169,13 @@ async function readInteractionDetail(c: ChatAcpContext): Promise<Response> {
   return c.json(detail);
 }
 
-async function answerInteractionRoute(c: BrowserAnswerContext): Promise<Response> {
+async function answerInteractionRoute(c: ChatAcpContext): Promise<Response> {
   requireExactBrowserOrigin(c);
   const userId = getUserId(c);
   const projectId = requiredParam(c.req.param('projectId'), 'projectId');
   const sessionId = requiredParam(c.req.param('sessionId'), 'sessionId');
   const interactionId = v.parse(AcpInteractionIdSchema, c.req.param('interactionId'));
-  const body = c.req.valid('json');
+  const body = await parseBrowserAnswerBody(c);
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
@@ -198,9 +204,5 @@ async function answerInteractionRoute(c: BrowserAnswerContext): Promise<Response
 export function registerChatAcpInteractionRoutes(chatRoutes: Hono<{ Bindings: Env }>): void {
   chatRoutes.get('/:sessionId/interactions', listInteractionSnapshots);
   chatRoutes.get('/:sessionId/interactions/:interactionId', readInteractionDetail);
-  chatRoutes.post(
-    '/:sessionId/interactions/:interactionId/answer',
-    jsonValidator(AcpInteractionBrowserAnswerSchema),
-    answerInteractionRoute
-  );
+  chatRoutes.post('/:sessionId/interactions/:interactionId/answer', answerInteractionRoute);
 }

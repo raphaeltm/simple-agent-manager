@@ -51,6 +51,7 @@ export function getInteractionDetail(
 }
 
 export function purgeInteractionStore(env: Env, projectId: string, chatSessionId: string) {
+  if (!env.INTERACTION_STORE) return undefined;
   return getInteractionStore(env, projectId, chatSessionId).purge();
 }
 

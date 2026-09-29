@@ -147,12 +147,13 @@ export async function cleanupTerminalTaskResources(
     });
   }
 
-  if (workspace?.chatSessionId && workspace.projectId && options.destructiveSessionEnd) {
+  const cleanupProjectId = workspace?.projectId ?? task.projectId;
+  if (workspace?.chatSessionId && cleanupProjectId && options.destructiveSessionEnd) {
     const chatSessionId = workspace.chatSessionId;
     await options.beforeSideEffect?.();
     await Promise.all([
       deleteSessionSnapshotState(db, env, chatSessionId),
-      purgeInteractionStore(env, workspace.projectId, chatSessionId),
+      purgeInteractionStore(env, cleanupProjectId, chatSessionId),
     ]);
   }
 
