@@ -129,19 +129,21 @@ export function readoutForRange(
   viewMin: number,
   viewMax: number,
   axis: TimeAxis,
-  aggregates: readonly ResourceAggregate[]
+  aggregates: readonly ResourceAggregate[],
+  /** Older history exists that the index left out, so "everything shown" is not the whole session. */
+  truncated = false
 ): Readout {
   const from = toReal(axis, viewMin);
   const to = toReal(axis, viewMax);
   const usage = summarizeUsage(aggregates, from, to);
   const whole = viewMin <= axis.min && viewMax >= axis.max;
-  const scope = whole ? 'Whole session' : formatRange(from, to, viewMax - viewMin < 30 * 60_000 ? 1_000 : 60_000);
+  const scope = whole ? (truncated ? 'Everything shown' : 'Whole session') : formatRange(from, to, viewMax - viewMin < 30 * 60_000 ? 1_000 : 60_000);
   const activeTotal = formatElapsed(axis.activeMs);
   return {
     mode: 'range',
     time: scope,
     context: whole
-      ? `All ${activeTotal} of active time`
+      ? `All ${activeTotal} of ${truncated ? 'shown ' : ''}active time`
       : `${formatElapsed(activeMsInView(axis, viewMin, viewMax))} of ${activeTotal} active time in view`,
     cpu: usage.cpuMaxCores == null ? DASH : `avg ${formatCores(usage.cpuMeanCores)} · peak ${formatCores(usage.cpuMaxCores)}`,
     memory:
