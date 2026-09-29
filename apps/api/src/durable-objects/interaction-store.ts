@@ -12,7 +12,10 @@ import type { Env } from '../env';
 import { canonicalJson } from '../lib/canonical-json';
 import { createModuleLogger } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
-import { getAcpInteractionConfig } from '../services/acp-interaction-config';
+import {
+  type AcpInteractionConfig,
+  getAcpInteractionConfig,
+} from '../services/acp-interaction-config';
 import {
   deliverAcpInteractionAnswer,
   resolveAcpInteractionDeliveryTarget,
@@ -35,6 +38,16 @@ import {
 import type { ProjectData } from './project-data';
 
 const log = createModuleLogger('interaction_store');
+
+type CreateValidationResult = Exclude<
+  InteractionStoreCreateResult,
+  { status: 'created' | 'existing' }
+>;
+
+type EncryptedNullablePayload = {
+  ciphertext: string | null;
+  iv: string | null;
+};
 
 export type {
   InteractionStoreAnswerInput,
@@ -122,24 +135,10 @@ export class InteractionStore extends DurableObject<Env> {
       }
       return { status: 'existing', summary: parseSummary(existing) };
     }
-    if (!config.enabled) return { status: 'disabled', reason: 'ACP interactions are disabled' };
-    if (input.protocolVersion !== ACP_INTERACTION_PROTOCOL_VERSION) {
-      return { status: 'invalid', reason: 'unsupported protocol version' };
-    }
-    if (input.deadlineAt <= now) return { status: 'expired', reason: 'deadline is already past' };
-    if (input.deadlineAt - now > config.maxDeadlineMs) {
-      return { status: 'invalid', reason: 'deadline exceeds configured maximum' };
-    }
-    if (this.pendingCount() >= config.maxPendingPerSession) {
-      return { status: 'too_many_pending', reason: 'too many pending interactions for session' };
-    }
+    const validation = this.validateCreateInput(input, config, now);
+    if (validation) return validation;
 
     const detailPlaintext = canonicalJson(input.detail);
-    if (new TextEncoder().encode(detailPlaintext).byteLength > config.requestMaxBytes) {
-      return { status: 'invalid', reason: 'request detail exceeds configured maximum' };
-    }
-    const boundsViolation = detailBoundsViolation(input.detail, config);
-    if (boundsViolation) return { status: 'invalid', reason: boundsViolation };
     const encrypted = await encrypt(detailPlaintext, getCredentialEncryptionKey(this.env));
     const safeSummary = canonicalJson(input.safeSummary);
     this.sql.exec(
@@ -171,6 +170,31 @@ export class InteractionStore extends DurableObject<Env> {
     return { status: 'created', summary: parseSummary(this.readRequired(input.interactionId)) };
   }
 
+  private validateCreateInput(
+    input: InteractionStoreCreateInput,
+    config: AcpInteractionConfig,
+    now: number
+  ): CreateValidationResult | null {
+    if (!config.enabled) return { status: 'disabled', reason: 'ACP interactions are disabled' };
+    if (input.protocolVersion !== ACP_INTERACTION_PROTOCOL_VERSION) {
+      return { status: 'invalid', reason: 'unsupported protocol version' };
+    }
+    if (input.deadlineAt <= now) return { status: 'expired', reason: 'deadline is already past' };
+    if (input.deadlineAt - now > config.maxDeadlineMs) {
+      return { status: 'invalid', reason: 'deadline exceeds configured maximum' };
+    }
+    if (this.pendingCount() >= config.maxPendingPerSession) {
+      return { status: 'too_many_pending', reason: 'too many pending interactions for session' };
+    }
+    const detailPlaintext = canonicalJson(input.detail);
+    if (new TextEncoder().encode(detailPlaintext).byteLength > config.requestMaxBytes) {
+      return { status: 'invalid', reason: 'request detail exceeds configured maximum' };
+    }
+    const boundsViolation = detailBoundsViolation(input.detail, config);
+    if (boundsViolation) return { status: 'invalid', reason: boundsViolation };
+    return null;
+  }
+
   async answer(input: InteractionStoreAnswerInput): Promise<InteractionStoreAnswerResult> {
     const config = getAcpInteractionConfig(this.env);
     const row = this.read(input.interactionId);
@@ -178,37 +202,15 @@ export class InteractionStore extends DurableObject<Env> {
       return { status: 'not_found', reason: 'interaction not found' };
     }
     if (row.state !== 'pending') {
-      if (row.answer_key === input.answerKey) {
-        if (row.answer_body_hash === input.answerBodyHash) {
-          return {
-            status: 'already_answered',
-            summary: parseSummary(row),
-            delivery: { generation: row.generation, runtimeIdentity: row.runtime_identity },
-          };
-        }
-        return { status: 'answer_key_conflict', reason: 'answer key was reused with another body' };
-      }
-      return { status: 'stale', reason: `interaction is ${row.state}` };
+      return this.answerResultForCommittedRow(row, input);
     }
     const answerPlaintext = canonicalJson(input.decision);
     if (new TextEncoder().encode(answerPlaintext).byteLength > config.answerMaxBytes) {
       return { status: 'payload_too_large', reason: 'answer exceeds configured maximum' };
     }
-    if (row.answer_key && row.answer_key === input.answerKey) {
-      return row.answer_body_hash === input.answerBodyHash
-        ? {
-            status: 'already_answered',
-            summary: parseSummary(row),
-            delivery: { generation: row.generation, runtimeIdentity: row.runtime_identity },
-          }
-        : { status: 'answer_key_conflict', reason: 'answer key was reused with another body' };
-    }
-    if (row.answer_key && row.decision_hash !== input.decision.answerHash) {
-      return { status: 'conflict', reason: 'another decision is already committed' };
-    }
     const encryptionKey = getCredentialEncryptionKey(this.env);
     const encryptedDecision = await encrypt(answerPlaintext, encryptionKey);
-    const encryptedAnswer = input.decision.encryptedAnswer
+    const encryptedAnswer: EncryptedNullablePayload = input.decision.encryptedAnswer
       ? await encrypt(canonicalJson(input.decision.encryptedAnswer), encryptionKey)
       : { ciphertext: null, iv: null };
     const now = nowMs();
@@ -249,11 +251,35 @@ export class InteractionStore extends DurableObject<Env> {
     this.enqueue(`purge:${input.interactionId}`, input.interactionId, 'purge', purgeAt);
     await this.scheduleNextAlarm();
     const updated = this.readRequired(input.interactionId);
+    if (
+      updated.answer_key !== input.answerKey ||
+      updated.answer_body_hash !== input.answerBodyHash
+    ) {
+      return this.answerResultForCommittedRow(updated, input);
+    }
     return {
       status: 'answered',
       summary: parseSummary(updated),
       delivery: { generation: updated.generation, runtimeIdentity: updated.runtime_identity },
     };
+  }
+
+  private answerResultForCommittedRow(
+    row: InteractionRow,
+    input: InteractionStoreAnswerInput
+  ): InteractionStoreAnswerResult {
+    if (row.answer_key === input.answerKey && row.answer_body_hash === input.answerBodyHash) {
+      return {
+        status: 'already_answered',
+        summary: parseSummary(row),
+        delivery: { generation: row.generation, runtimeIdentity: row.runtime_identity },
+      };
+    }
+    if (row.answer_key === input.answerKey) {
+      return { status: 'answer_key_conflict', reason: 'answer key was reused with another body' };
+    }
+    if (row.answer_key) return { status: 'conflict', reason: 'another decision is already committed' };
+    return { status: 'stale', reason: `interaction is ${row.state}` };
   }
 
   settle(input: InteractionStoreSettleInput): { status: 'settled' | 'not_found' | 'stale' } {
@@ -310,7 +336,7 @@ export class InteractionStore extends DurableObject<Env> {
     const row = this.read(interactionId);
     if (!row) return null;
     let detail: unknown = null;
-    if (row.encrypted_detail && row.detail_iv) {
+    if (row.encrypted_detail?.length && row.detail_iv?.length) {
       const plaintext = await decrypt(
         row.encrypted_detail,
         row.detail_iv,
@@ -605,7 +631,7 @@ export class InteractionStore extends DurableObject<Env> {
 
   private async projectAttention(interactionId: string): Promise<void> {
     const row = this.read(interactionId);
-    if (!row || terminalState(row.state) || row.attention_marker_id) return;
+    if (!row || terminalState(row.state) || row.attention_marker_id?.length) return;
     const stub = this.projectDataStub(row.project_id);
     const summary = parseSummary(row);
     const marker = await stub.createAttentionMarker({

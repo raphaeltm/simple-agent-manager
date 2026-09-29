@@ -48,7 +48,7 @@ async function verifyWorkspaceCallback(c: {
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, workspaceId))
     .get();
-  if (!row || row.projectId !== projectId || !row.chatSessionId) {
+  if (row?.projectId !== projectId || !row.chatSessionId) {
     throw errors.notFound('Workspace');
   }
   const chatSessionId = row.chatSessionId;
@@ -72,6 +72,12 @@ async function assertAgentSessionCurrent(env: Env, workspaceId: string, agentSes
     .first<{ id: string; status: string }>();
   if (!row) throw errors.notFound('Agent session');
   if (row.status !== 'running') throw errors.conflict(`Agent session is ${row.status}`);
+}
+
+function settleStatusCode(status: string): 200 | 404 | 409 {
+  if (status === 'not_found') return 404;
+  if (status === 'stale') return 409;
+  return 200;
 }
 
 /**
@@ -122,10 +128,7 @@ acpInteractionCallbackRoute.post(
       projectId: identity.projectId,
       chatSessionId: identity.chatSessionId,
     });
-    return c.json(
-      result,
-      result.status === 'not_found' ? 404 : result.status === 'stale' ? 409 : 200
-    );
+    return c.json(result, settleStatusCode(result.status));
   }
 );
 
