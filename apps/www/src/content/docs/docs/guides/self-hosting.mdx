@@ -385,6 +385,16 @@ The sentinel user id defaults to `system_anonymous_trials`. If your deployment u
 
 **Admin → Storage** (`/admin/storage`) shows per-project ProjectData storage telemetry and the archive-sharding circuit breakers. When a project's archive drain fails repeatedly, its breaker opens and the scheduled sweep stops archiving that project until a superadmin closes the breaker. Use the **Close breaker** button on that page (it works from a phone) once the underlying failure is fixed; it calls `POST /api/admin/project-data/storage/:projectId/archive-sharding/circuit-breaker` with `state: "closed"` and the reason you enter. Closing a breaker does not thaw migrations that were already frozen.
 
+Below the breakers, **Problem migrations** lists the individual session migrations that need attention, each with its error, attempt count, and timestamps:
+
+| Badge        | Meaning                                                                                                                                  |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Failed**   | An attempt failed. The sweep retries it after `PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS` (an hour by default).                          |
+| **Poisoned** | It failed `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS` times (3 by default), which is what opens the project's breaker.                   |
+| **Frozen**   | The sweep is holding it back — for example, the session was still active when the sweep tried to copy it. Closing the breaker does not release it. |
+
+**Abandon** is how you clear a migration that never got as far as deleting the session from the project's live storage. It discards the partial archive copy, returns the session to live storage so it reads normally, and makes it eligible for a later sweep; you have to enter a reason. SAM refuses, and the page shows its reason verbatim, when the migration is still running (its lease has not expired) or has already deleted its source. That second case needs a copy-back instead, which has no button yet: `POST /api/admin/project-data/storage/:projectId/archive-sharding/migrations/:migrationId/copy-back` with a `reason`.
+
 ## Teardown
 
 To remove all resources: Actions → Teardown → Run workflow → type `DELETE` to confirm.
@@ -464,6 +474,15 @@ DigitalOcean bills hourly, defaults to `fra1` (Frankfurt), and requires a Full A
 | Large (8xCPU-16GB) | 8 vCPU, 16GB RAM | ~$48            |
 
 UpCloud billing is usage-based. SAM verifies the configured simple plan and zone through the current API before provisioning; the default zone is `de-fra1` (Frankfurt). Create a dedicated API subaccount with API access and storage permissions, then enter its username and password in Settings. Prices are indicative; verify current regional pricing in the UpCloud calculator.
+
+### Unresponsive machines are released automatically
+
+A workspace VM that SAM provisioned and that stops sending heartbeats is released rather than left running up a bill and holding provider quota:
+
+1. After `NODE_UNHEALTHY_DRAIN_AFTER_MS` (10 minutes) of silence, SAM posts a notice in each chat on the VM and asks those sessions to sleep, so idle ones can be woken on another machine later.
+2. After `NODE_UNHEALTHY_RELEASE_AFTER_MS` (30 minutes), SAM deletes the VM through the provider and fails any task still running on it, with a message naming the lost node.
+
+Only SAM-provisioned workspace VMs are released this way. Nodes a user created by hand, app-deployment nodes, and Instant containers are left alone. If half or more of the running workspace VMs go silent at once (`NODE_UNHEALTHY_FLEET_MAX_FRACTION`, applied once there are at least `NODE_UNHEALTHY_FLEET_MIN_NODES`, default 3), SAM assumes it has stopped _receiving_ heartbeats rather than that every machine died: it holds the deletions and, once the silence outlasts the two windows combined (40 minutes by default), logs `node_cleanup.fleet_heartbeat_intake_escalation_required` for you to investigate. Each health decision is recorded in the `node_health_events` table, which keeps its rows after the node itself is deleted. The settings are in [Idle & Orphan Node Reaping](/docs/reference/configuration/#idle--orphan-node-reaping).
 
 ## Troubleshooting
 

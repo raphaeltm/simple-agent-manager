@@ -33,6 +33,14 @@ From the **Dashboard**, click **Import Project** and pick a repository that has 
 
 Open your project and type what you want done in the chat — for example, "add input validation to the signup form and write tests." SAM automatically provisions a workspace, runs your chosen agent, streams its progress back to you in real time, and opens a pull request when it's done.
 
+### 6. Come Back Later
+
+You don't have to watch the chat while the agent works. The **Dashboard** keeps an **Active Tasks** list across all your projects: your six most recently active tasks — ranked by their latest message, or by when they started if they have none yet — refreshed automatically.
+
+Each card shows the task's status, the project it belongs to, when you submitted it, and when its last message arrived. A dot says what the agent is doing: **Active** (working, with a message in the last 15 minutes), **Working** (working, but quiet for longer), **Idle**, or **Sleeping**. Select a card to open its chat.
+
+A sleeping conversation still counts as active — you can wake it for up to a week — which is why the list is ranked by recent messages rather than by start time: whatever you touched most recently stays on top, and dormant work drops off. To hear when a task finishes or needs you, see [Notifications](/docs/guides/notifications/).
+
 That's the whole loop: **import → chat → review the PR.** No terminal or server setup required.
 
 ## Self-Hosting

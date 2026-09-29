@@ -119,6 +119,13 @@ An **agent profile** bundles a connected agent, a model, and settings into a reu
 
 In a [shared project](/docs/guides/collaboration/), agent profiles (and skills, environment variables, secrets, and files) are project-scoped resources — any member can use profiles another member created. LLM cost still follows the running user's own key unless a shared project credential is attached.
 
+### Choosing a model
+
+The profile's model picker lists the models SAM knows each agent supports, and that list is
+updated as providers release new ones. If a model you want isn't listed yet, type its exact ID and
+press **Enter** to use it as a custom model. SAM passes the ID to the agent unchanged, so it has to
+be a model your provider accepts and your agent's version can run.
+
 When work starts, the agent is resolved in this order:
 
 1. The profile you selected (or the trigger's profile)

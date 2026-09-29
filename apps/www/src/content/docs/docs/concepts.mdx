@@ -53,6 +53,10 @@ A **node** is a cloud VM that hosts one or more workspaces. You normally never t
 
 Several workspaces can share one node when the node's CPU, memory, and disk reservations all still fit and nothing on it asked for exclusive use. Work can also ask for a node to itself; see [Compute Pools](/docs/guides/compute-pools/#resource-requirements-how-much-machine-work-asks-for).
 
+### When a Node Stops Responding
+
+Every node reports in to SAM regularly. If a node SAM provisioned for you goes quiet, SAM does not leave it running and billed: after about 10 minutes it posts a notice in each chat on the node and asks those sessions to sleep, and after about 30 minutes it deletes the machine. Tasks still running there fail with a message naming the lost node. Nodes you delete yourself are different: their running tasks are marked cancelled, not failed. See [SAM lost contact with the machine](/docs/guides/instant-sessions/#sam-lost-contact-with-the-machine) for what to do in the chat.
+
 ### Warm Reuse
 
 After a piece of work finishes, SAM keeps the environment **warm** for a short window (30 minutes by default). If you start follow-up work during that window, SAM reuses the warm environment instead of provisioning a fresh one — cutting startup from minutes to seconds. Idle environments are cleaned up automatically afterward.
@@ -153,7 +157,7 @@ Sessions support:
 - Streaming responses (real-time output as the agent works)
 - Multiple concurrent sessions per workspace (each in its own terminal tab)
 - Persistence across page refreshes (tabs restored from VM Agent SQLite)
-- **Conversation forking** — branch off from any point to explore alternatives
+- **Conversation forking** — start a new session that carries a summary of this one, to explore an alternative
 - **Voice input** and **text-to-speech playback**
 - **File browsing** — browse, view, and diff files directly in the chat panel
 - **File upload/download** — attach files to conversations and download from workspaces

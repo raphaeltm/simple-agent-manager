@@ -500,6 +500,19 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | `MODEL_CATALOG_CACHE_TTL_SECONDS` | `3600`                        | KV cache TTL for normalized dynamic model catalog payloads    |
 | `MODEL_CATALOG_FETCH_TIMEOUT_MS`  | `5000`                        | Timeout for the upstream catalog fetch before static fallback |
 
+## Dashboard
+
+The dashboard's **Active Tasks** list (`GET /api/dashboard/active-tasks`, `apps/api/src/routes/dashboard.ts`)
+ranks every active task by its newest message, or by when it started if it has none yet, and only
+then applies the display limit.
+
+| Variable                                | Default           | Description                                                                                                                                    |
+| --------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DASHBOARD_ACTIVE_TASK_LIMIT`           | `6`               | Most recently active tasks the list shows                                                                                                      |
+| `DASHBOARD_ACTIVE_TASK_CANDIDATE_LIMIT` | `100`             | Active tasks read and ranked before the display limit applies (also the maximum; each project's candidates share one SQL statement's binds)    |
+| `DASHBOARD_INACTIVE_THRESHOLD_MS`       | `900000` (15 min) | A working task whose last message is newer than this shows **Active**; older shows **Working**                                                 |
+| `VITE_ACTIVE_TASKS_POLL_MS`             | `15000`           | Build-time web setting: how often the open dashboard refreshes the list; polling pauses while the tab is hidden                                |
+
 ## HTTP Response Caching
 
 Conservative `Cache-Control` budgets for stable and semi-stable API `GET`s, letting the browser
