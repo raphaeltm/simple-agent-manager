@@ -123,6 +123,42 @@ func stringPtr(value string) *string { return &value }
 
 func uint64Ptr(value uint64) *uint64 { return &value }
 
+func TestSummarizeWorkingSetUsesOnlyKnownSamples(t *testing.T) {
+	known := uint64(768)
+	summary := summarize([]Sample{
+		{T: 1, MemoryBytes: 4096},
+		{T: 2, MemoryBytes: 4096, MemoryWorkingSetBytes: &known},
+	}, 5*time.Second)
+
+	if summary.MemoryWorkingSetMeanBytes == nil || *summary.MemoryWorkingSetMeanBytes != known {
+		t.Fatalf("working-set mean = %v, want %d", summary.MemoryWorkingSetMeanBytes, known)
+	}
+	if summary.MemoryWorkingSetPeakBytes == nil || *summary.MemoryWorkingSetPeakBytes != known {
+		t.Fatalf("working-set peak = %v, want %d", summary.MemoryWorkingSetPeakBytes, known)
+	}
+	if summary.MemoryWorkingSetSampleCount != 1 {
+		t.Fatalf("working-set sample count = %d, want 1", summary.MemoryWorkingSetSampleCount)
+	}
+
+	encoded, err := json.Marshal(Sample{T: 1, MemoryBytes: 4096})
+	if err != nil {
+		t.Fatalf("marshal unknown working set: %v", err)
+	}
+	if strings.Contains(string(encoded), "memoryWorkingSetBytes") {
+		t.Fatalf("unknown working set must be omitted, got %s", encoded)
+	}
+}
+
+func TestSummarizeOmitsWorkingSetWhenAllSamplesAreUnknown(t *testing.T) {
+	summary := summarize([]Sample{{T: 1, MemoryBytes: 4096}}, 5*time.Second)
+	if summary.MemoryWorkingSetMeanBytes != nil || summary.MemoryWorkingSetPeakBytes != nil {
+		t.Fatalf("working-set summary = mean %v peak %v, want unknown", summary.MemoryWorkingSetMeanBytes, summary.MemoryWorkingSetPeakBytes)
+	}
+	if summary.MemoryWorkingSetSampleCount != 0 {
+		t.Fatalf("working-set sample count = %d, want 0", summary.MemoryWorkingSetSampleCount)
+	}
+}
+
 func TestResolveCgroupPathFindsNestedSystemdScopeWithShortContainerID(t *testing.T) {
 	root := t.TempDir()
 	fullID := "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"

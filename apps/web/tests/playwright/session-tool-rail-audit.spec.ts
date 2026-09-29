@@ -195,7 +195,8 @@ const RESOURCE_HISTORY_DETAIL = {
     cpuMillis: resourceHistoryCpuMillis(i),
     memoryBytes: i === 24 ? 1_342_177_280 : 410_000_000 + i * 12_000_000,
     memoryPeakBytes: i >= 24 ? 1_342_177_280 : 610_000_000 + i * 8_000_000,
-    memoryWorkingSetBytes: i === 24 ? 671_088_640 : 275_000_000 + i * 5_000_000,
+    memoryWorkingSetBytes:
+      i === 12 ? undefined : i === 24 ? 671_088_640 : 275_000_000 + i * 5_000_000,
     ioReadBytes: i % 8 === 0 ? 1_048_576 : 16_384,
     ioWriteBytes: i % 9 === 0 ? 4_194_304 : 65_536,
     oom: i === 24 ? 1 : 0,
@@ -404,7 +405,18 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
               }
             : RESOURCE_HISTORY_SUMMARY,
           chunks,
-          ...(includeDetail ? { detail: RESOURCE_HISTORY_DETAIL } : {}),
+          ...(includeDetail
+            ? {
+                detail: legacyResourceHistory
+                  ? {
+                      ...RESOURCE_HISTORY_DETAIL,
+                      samples: RESOURCE_HISTORY_DETAIL.samples.map(
+                        ({ memoryWorkingSetBytes: _memoryWorkingSetBytes, ...sample }) => sample
+                      ),
+                    }
+                  : RESOURCE_HISTORY_DETAIL,
+              }
+            : {}),
         },
       });
       return;
@@ -1112,6 +1124,11 @@ test.describe('Session resource history drawer', () => {
     await expect(
       page.getByText('Total RAM: faint purple dashed line, including reclaimable file cache.')
     ).toBeVisible();
+    await expect(
+      page
+        .getByRole('img', { name: 'CPU and memory resource timeline' })
+        .locator('polyline[data-series="working-set"]')
+    ).toHaveCount(2);
     await expect(page.getByText(/Blue bands: concurrent tool windows/)).toBeVisible();
     await expect(page.getByText('Tool windows', { exact: true })).toBeVisible();
     await expect(page.getByText(/Bash ·/)).toBeVisible();
@@ -1157,9 +1174,17 @@ test.describe('Session resource history drawer', () => {
     await openChat(page, { state: 'active', legacyResourceHistory: true });
     await page.getByTestId('session-tool-resources').click();
 
-    const neededCard = page.getByText('Memory needed (peak)', { exact: true }).locator('..');
-    await expect(neededCard).toContainText('—');
-    await expect(neededCard).not.toContainText('0 B');
+    for (const label of ['Memory needed (peak)', 'Memory needed (mean)']) {
+      const neededCard = page.getByText(label, { exact: true }).locator('..');
+      await expect(neededCard).toContainText('—');
+      await expect(neededCard).not.toContainText('0 B');
+    }
+    await expect(
+      page
+        .getByRole('img', { name: 'CPU and memory resource timeline' })
+        .locator('polyline[data-series="working-set"]')
+    ).toHaveCount(0);
+    await capture(page, `resource-history-legacy-${page.viewportSize()?.width ?? 'viewport'}`);
   });
 
   test('shows the empty resource-history state', async ({ page }) => {

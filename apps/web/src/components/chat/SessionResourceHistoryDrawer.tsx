@@ -106,6 +106,31 @@ function seriesPoints(
     .join(' ');
 }
 
+function seriesSegments(
+  samples: WorkspaceResourceSample[],
+  valueForSample: (sample: WorkspaceResourceSample) => number | null,
+  scaleMax?: number
+): string[] {
+  const values = samples.map(valueForSample).filter((value): value is number => value != null);
+  const max = Math.max(1, scaleMax ?? 0, ...values);
+  const segments: string[][] = [];
+  let current: string[] = [];
+
+  for (const sample of samples) {
+    const value = valueForSample(sample);
+    if (value == null) {
+      if (current.length > 0) segments.push(current);
+      current = [];
+      continue;
+    }
+    const x = sampleX(samples, sample);
+    const y = 100 - (value / max) * 84 - 8;
+    current.push(`${x.toFixed(2)},${y.toFixed(2)}`);
+  }
+  if (current.length > 0) segments.push(current);
+  return segments.map((segment) => segment.join(' '));
+}
+
 export function ResourceSparkline({
   samples,
   toolSpans,
@@ -116,8 +141,8 @@ export function ResourceSparkline({
     () => seriesPoints(samples, sampleMemoryMiB, memoryScaleMax),
     [memoryScaleMax, samples]
   );
-  const workingSetPoints = useMemo(
-    () => seriesPoints(samples, sampleWorkingSetMiB, memoryScaleMax),
+  const workingSetSegments = useMemo(
+    () => seriesSegments(samples, sampleWorkingSetMiB, memoryScaleMax),
     [memoryScaleMax, samples]
   );
   const eventMarkers = useMemo(
@@ -198,15 +223,17 @@ export function ResourceSparkline({
           strokeWidth="2.2"
           vectorEffect="non-scaling-stroke"
         />
-        {workingSetPoints && (
+        {workingSetSegments.map((points, index) => (
           <polyline
-            points={workingSetPoints}
+            key={`${points}-${index}`}
+            data-series="working-set"
+            points={points}
             fill="none"
             stroke="var(--sam-color-accent-secondary, #a78bfa)"
             strokeWidth="2.4"
             vectorEffect="non-scaling-stroke"
           />
-        )}
+        ))}
         {eventMarkers.map(({ sample, x }) => (
           <g key={`${sample.t}-${x}`}>
             <line

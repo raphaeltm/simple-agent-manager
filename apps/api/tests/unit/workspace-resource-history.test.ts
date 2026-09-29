@@ -39,14 +39,14 @@ async function gunzipJson(bytes: Uint8Array): Promise<unknown> {
   return JSON.parse(await new Response(stream).text()) as unknown;
 }
 
-function samplePayload() {
+function samplePayload({ includeWorkingSet = true }: { includeWorkingSet?: boolean } = {}) {
   return {
     samples: [
       {
         t: 1_000,
         cpuMillis: 0,
         memoryBytes: 1024,
-        memoryWorkingSetBytes: 512,
+        ...(includeWorkingSet ? { memoryWorkingSetBytes: 512 } : {}),
         ioReadBytes: 0,
         ioWriteBytes: 0,
       },
@@ -55,7 +55,7 @@ function samplePayload() {
         cpuMillis: 40,
         memoryBytes: 2048,
         memoryPeakBytes: 4096,
-        memoryWorkingSetBytes: 1024,
+        ...(includeWorkingSet ? { memoryWorkingSetBytes: 1024 } : {}),
         ioReadBytes: 10,
         ioWriteBytes: 20,
       },
@@ -63,7 +63,7 @@ function samplePayload() {
         t: 2_000,
         cpuMillis: 900,
         memoryBytes: 1536,
-        memoryWorkingSetBytes: 768,
+        ...(includeWorkingSet ? { memoryWorkingSetBytes: 768 } : {}),
         ioReadBytes: 5,
         ioWriteBytes: 7,
         oom: 1,
@@ -85,9 +85,10 @@ function samplePayload() {
 }
 
 async function uploadBody(
-  overrides: Partial<WorkspaceResourceUploadBody> = {}
+  overrides: Partial<WorkspaceResourceUploadBody> = {},
+  payload = samplePayload()
 ): Promise<WorkspaceResourceUploadBody> {
-  const compressed = await gzipJson(samplePayload());
+  const compressed = await gzipJson(payload);
   return {
     workspaceId: 'ws-1',
     nodeId: 'node-1',
@@ -102,7 +103,7 @@ async function uploadBody(
     toolSpanCount: 1,
     compressedBase64: base64(compressed),
     compressedBytes: compressed.byteLength,
-    uncompressedBytes: JSON.stringify(samplePayload()).length,
+    uncompressedBytes: JSON.stringify(payload).length,
     sha256: await sha256Hex(compressed),
     completeness: { status: 'complete' },
     summary: {
@@ -317,16 +318,27 @@ describe('workspace resource history', () => {
     const r2 = makeR2();
     const env = makeEnv(sqlite, r2.binding);
 
-    await storeWorkspaceResourceChunk(env, 'proj-1', await uploadBody({ summary: {} }), 'node-1');
+    const oldAgentPayload = samplePayload({ includeWorkingSet: false });
+    const stored = await storeWorkspaceResourceChunk(
+      env,
+      'proj-1',
+      await uploadBody({ summary: {} }, oldAgentPayload),
+      'node-1'
+    );
 
     const history = await getWorkspaceResourceHistory(env, {
       projectId: 'proj-1',
       sessionId: 'session-1',
+      detailChunkId: stored.chunkId,
     });
     expect(history.summary).toMatchObject({
       memoryWorkingSetMeanBytes: null,
       memoryWorkingSetPeakBytes: null,
     });
+    expect(history.detail?.samples).toHaveLength(3);
+    expect(history.detail?.samples.every((sample) => sample.memoryWorkingSetBytes == null)).toBe(
+      true
+    );
   });
 
   it('keeps separate bounded summaries for reused workspace sessions while indexing raw chunks in R2', async () => {

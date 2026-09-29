@@ -29,7 +29,7 @@ sessions that never collected anything, where it shows an empty state rather tha
 On mobile the same panel fills the screen and scrolls, with the stat cards and the OOM banner
 first so the answer is above the fold.
 
-![The same Resources panel on a phone, filling the whole screen: the four stat cards stacked two by two, the amber OOM banner, the full timeline chart with its four-line legend and chunk I/O totals, and Tool windows labeled Bash, search, and tool, with the rest reachable by scrolling.](/images/docs/session-resources-drawer-mobile.png)
+![The same Resources panel on a phone, filling the whole screen: six stat cards stacked two by two, the amber OOM banner, the full timeline with separate working-set and cache-inclusive memory lines, and Tool windows labeled Bash, search, and tool, with the rest reachable by scrolling.](/images/docs/session-resources-drawer-mobile.png)
 
 ## Where resource history exists — and where it doesn't
 
@@ -51,7 +51,7 @@ The drawer stacks its content top to bottom in the order you normally need it.
 
 ### Stat cards
 
-Four numbers for the whole session:
+Six cards for the whole session:
 
 | Card                            | What it means                                                                                                             |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
@@ -105,9 +105,9 @@ The chart loads automatically for the most recent slice of the session:
 - **A small grey dot at the bottom** — a gap or a counter reset. Easy to miss, and worth not
   missing: see [Gaps and resets](#gaps-and-resets).
 
-Each line is scaled to its **own** peak within the slice, so the two lines are shaped for reading
-against the tool bands — not against each other. A tall green line does not mean CPU is higher
-than RAM.
+CPU is scaled to its own peak within the slice. Both memory lines share the total-RAM scale, so
+their vertical separation shows how much of the cache-inclusive total is the working set. CPU and
+memory still use different units, so their heights cannot be compared with each other.
 
 Under the chart sits its legend and the I/O read/write totals for this slice, then **Tool
 windows** — each window with its start time, duration, and how many tool calls overlapped. SAM uses
