@@ -24,12 +24,12 @@ The button is always there, including on sessions that already ended — which i
 want it, because the workspace is gone and this is the only record left. It is also there on
 sessions that never collected anything, where it shows an empty state rather than hiding itself.
 
-![The Resources drawer for a chat session: stat cards reading CPU peak 4120 ms/sample, RAM peak 3.4 GB, I/O total 384 MB read and 1.1 GB write, and 360 samples with 1 gap; an amber banner reading "1 OOM event observed in retained samples"; a detail timeline chart with a green CPU line, a dashed purple RAM line, blue tool-window bands and an amber OOM marker; a Tool windows list; and a collapsed "2 chunks" disclosure.](/images/docs/session-resources-drawer.png)
+![The Resources drawer for a chat session: stat cards reading CPU peak 4120 ms/sample, RAM peak 3.4 GB, I/O total 384 MB read and 1.1 GB write, and 360 samples with 1 gap; an amber banner reading "1 OOM event observed in retained samples"; a detail timeline chart with a green CPU line, a dashed purple RAM line, blue tool-window bands and an amber OOM marker; Tool windows labeled Bash, search, and tool; and a collapsed "2 chunks" disclosure.](/images/docs/session-resources-drawer.png)
 
 On mobile the same panel fills the screen and scrolls, with the stat cards and the OOM banner
 first so the answer is above the fold.
 
-![The same Resources panel on a phone, filling the whole screen: the four stat cards stacked two by two, the amber OOM banner, the full timeline chart with its four-line legend and chunk I/O totals, and the first Tool windows row, with the rest reachable by scrolling.](/images/docs/session-resources-drawer-mobile.png)
+![The same Resources panel on a phone, filling the whole screen: the four stat cards stacked two by two, the amber OOM banner, the full timeline chart with its four-line legend and chunk I/O totals, and Tool windows labeled Bash, search, and tool, with the rest reachable by scrolling.](/images/docs/session-resources-drawer-mobile.png)
 
 ## Where resource history exists — and where it doesn't
 
@@ -105,9 +105,10 @@ against the tool bands — not against each other. A tall green line does not me
 than RAM.
 
 Under the chart sits its legend and the I/O read/write totals for this slice, then **Tool
-windows** — each window with its start time, duration, and how many tool calls overlapped. Every
-entry reads `acp_tool_call`: SAM records that a tool ran, not which one, so the list tells you
-_when_ and _how long_, never _what_.
+windows** — each window with its start time, duration, and how many tool calls overlapped. SAM uses
+the tool's metadata name when the agent provides one (`Bash`, `Edit`, or an MCP tool name), then the
+ACP kind (`search`, `fetch`, and so on), then `tool` for history uploaded by older VM agents. A
+`Bash` label identifies the tool that ran; it never includes the command, title, input, or output.
 
 ### Chunks
 
@@ -159,9 +160,10 @@ The panel is easy to over-read. Four things it cannot tell you:
   tool window that overlaps a CPU spike is a _correlation_, not proof that the tool caused the spike.
 - **It does not sample disk space.** Only disk _I/O_ (bytes read and written). If you are chasing a
   "no space left on device" failure, this panel will not show it.
-- **It does not explain what the agent was doing.** Tool windows are anonymous. SAM stores a hash
-  of each tool-call ID, never the tool name, arguments, output, file paths, commands, or prompts.
-  Pair the timeline with the chat transcript to work out the "what".
+- **It does not explain what the tool did.** A window can identify a bounded metadata tool name and
+  ACP kind, but SAM stores only a hash of the tool-call ID and never the title, command, input,
+  arguments, output, file paths, environment values, prompts, or secrets. Pair the timeline with
+  the chat transcript to work out the "what".
 
 The drawer states the correlation caveat inline, under the chart, so nobody reads a chart in
 isolation and reports a false cause.
@@ -230,13 +232,15 @@ unit on the node; the defaults are what every managed node runs.
 ## What is actually stored
 
 The retained payload is deliberately narrow: timestamps, CPU-milliseconds, memory bytes, I/O bytes,
-process counts, OOM flags, and hashed tool-call IDs with their start and end times. Its summary also
-retains nullable `agentProfileId`, `skillId`, and `agentType` attribution. SAM resolves those fields
-from server-owned records for the same project and workspace instead of trusting upload values.
+process counts, OOM flags, and hashed tool-call IDs with their start and end times. Tool spans may
+also carry an ACP kind and a bounded metadata tool name; older history may contain neither. Its
+summary also retains nullable `agentProfileId`, `skillId`, and `agentType` attribution. SAM resolves
+those fields from server-owned records for the same project and workspace instead of trusting upload
+values.
 
-It contains **no** prompts, messages, commands, tool names, tool arguments, tool output, file paths,
-environment variables, or secrets. That is what makes it safe to keep for months and safe to hand to
-an agent.
+It contains **no** prompts, messages, tool-call titles, commands, tool inputs or arguments, tool
+output, file paths, environment variables, or secrets. That is what makes it safe to keep for months
+and safe to hand to an agent.
 
 ## Asking an agent to read it
 

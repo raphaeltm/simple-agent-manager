@@ -283,21 +283,21 @@ const RESOURCE_DETAIL = {
   toolSpans: [
     {
       id: 'span-read',
-      kind: 'acp_tool_call',
+      kind: 'execute',
+      toolName: 'Bash',
       startedAt: NOW - 960_000,
       endedAt: NOW - 840_000,
       concurrency: 1,
     },
     {
       id: 'span-build',
-      kind: 'acp_tool_call',
+      kind: 'search',
       startedAt: NOW - 780_000,
       endedAt: NOW - 540_000,
       concurrency: 2,
     },
     {
       id: 'span-tests',
-      kind: 'acp_tool_call',
       startedAt: NOW - 500_000,
       endedAt: NOW - 260_000,
       concurrency: 1,
