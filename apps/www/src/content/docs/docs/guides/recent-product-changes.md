@@ -31,6 +31,10 @@ Also fixed this week:
 - A task that finished or was cancelled can no longer be flipped to **failed** by a late report
   from its machine, and an agent's `complete_task` pull-request link is now saved on the task.
 - Tasks waiting in the queue for a machine start as soon as one frees up.
+- An agent that is still making progress on a long job is no longer cancelled, or failed as
+  _"Agent became unresponsive after SAM check-in"_. An agent that answers a check-in by asking you a
+  question counts as having responded, and stopping a task yourself no longer records it as
+  unresponsive.
 - A sleeping VM conversation no longer fails to wake when the provider refuses its machine because
   the account's vCPU quota is used up. SAM waits for capacity or, in a pool whose exhaustion policy
   is **Fallback chain**, tries permitted machines that need fewer cores but still fit the work. It
