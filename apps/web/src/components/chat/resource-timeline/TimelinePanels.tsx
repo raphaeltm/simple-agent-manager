@@ -104,7 +104,12 @@ export function TimelinePanels({
   const plots = useRef(new Map<PanelKind, RefObject<uPlot | null>>());
 
   const stateRef = useRef(state);
-  /** True while a mouse (not a finger) is over the panels: only then does uPlot's hover drive the cursor. */
+  /**
+   * True while a mouse (not a finger) is over the panels and has moved since the last
+   * keyboard or touch selection: only then does uPlot's hover drive the cursor. uPlot
+   * also reports its cursor on redraws, so a mouse merely resting on the chart would
+   * otherwise overwrite a moment chosen with the arrow keys the next time data lands.
+   */
   const mouseOverRef = useRef(false);
   const hover = (x: number | null) => {
     if (mouseOverRef.current) onCursor(x);
@@ -174,6 +179,7 @@ export function TimelinePanels({
     const action = handled[event.key];
     if (!action) return;
     event.preventDefault();
+    mouseOverRef.current = false;
     action();
   };
 
@@ -190,6 +196,9 @@ export function TimelinePanels({
       aria-valuetext={`${readout.time}. CPU ${readout.cpu}. Memory ${readout.memory}. Disk ${readout.disk}. ${readout.tools}.`}
       onKeyDown={onKeyDown}
       onPointerEnter={(event) => {
+        if (event.pointerType === 'mouse') mouseOverRef.current = true;
+      }}
+      onPointerMove={(event) => {
         if (event.pointerType === 'mouse') mouseOverRef.current = true;
       }}
       onPointerDown={(event) => {
