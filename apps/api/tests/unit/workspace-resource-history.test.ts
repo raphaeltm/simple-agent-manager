@@ -154,6 +154,27 @@ function makeEnv(sqlite: Database.Database, r2: R2Bucket): Env {
   } as unknown as Env;
 }
 
+function makePersistedResourceTestEnv() {
+  const sqlite = new Database(':memory:');
+  createSchemaTables(sqlite, [
+    schema.workspaces,
+    schema.tasks,
+    schema.agentSessions,
+    schema.agentProfiles,
+    schema.skills,
+    schema.workspaceResourceSummaries,
+    schema.workspaceResourceChunks,
+  ]);
+  sqlite
+    .prepare(
+      `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)
+       VALUES ('ws-1', 'proj-1', 'node-1', 'session-1')`
+    )
+    .run();
+  const r2 = makeR2();
+  return { sqlite, r2, env: makeEnv(sqlite, r2.binding) };
+}
+
 describe('workspace resource history', () => {
   it('bounds detail points while preserving first, last, gaps, and spikes', () => {
     const samples: ResourceSamplePoint[] = Array.from({ length: 20 }, (_, index) => ({
@@ -448,24 +469,7 @@ describe('workspace resource history', () => {
   });
 
   it('caps and allowlists decoded tool metadata while preserving legacy spans', async () => {
-    const sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [
-      schema.workspaces,
-      schema.tasks,
-      schema.agentSessions,
-      schema.agentProfiles,
-      schema.skills,
-      schema.workspaceResourceSummaries,
-      schema.workspaceResourceChunks,
-    ]);
-    sqlite
-      .prepare(
-        `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)
-         VALUES ('ws-1', 'proj-1', 'node-1', 'session-1')`
-      )
-      .run();
-    const r2 = makeR2();
-    const env = makeEnv(sqlite, r2.binding);
+    const { env, r2 } = makePersistedResourceTestEnv();
     env.WORKSPACE_RESOURCE_TOOL_NAME_MAX_BYTES = '8';
     const commandCanary = 'printf super-secret-command';
     const payload = {
@@ -541,24 +545,7 @@ describe('workspace resource history', () => {
   });
 
   it('rejects mismatched decoded size and oversized D1 metadata before indexing', async () => {
-    const sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [
-      schema.workspaces,
-      schema.tasks,
-      schema.agentSessions,
-      schema.agentProfiles,
-      schema.skills,
-      schema.workspaceResourceSummaries,
-      schema.workspaceResourceChunks,
-    ]);
-    sqlite
-      .prepare(
-        `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)
-         VALUES ('ws-1', 'proj-1', 'node-1', 'session-1')`
-      )
-      .run();
-    const r2 = makeR2();
-    const env = makeEnv(sqlite, r2.binding);
+    const { env, r2, sqlite } = makePersistedResourceTestEnv();
 
     await expect(
       storeWorkspaceResourceChunk(
@@ -585,24 +572,7 @@ describe('workspace resource history', () => {
   });
 
   it('rejects invalid UTF-8 before normalizing and archiving a chunk', async () => {
-    const sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [
-      schema.workspaces,
-      schema.tasks,
-      schema.agentSessions,
-      schema.agentProfiles,
-      schema.skills,
-      schema.workspaceResourceSummaries,
-      schema.workspaceResourceChunks,
-    ]);
-    sqlite
-      .prepare(
-        `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)
-         VALUES ('ws-1', 'proj-1', 'node-1', 'session-1')`
-      )
-      .run();
-    const r2 = makeR2();
-    const env = makeEnv(sqlite, r2.binding);
+    const { env, r2 } = makePersistedResourceTestEnv();
     const invalidJsonBytes = new Uint8Array([
       ...new TextEncoder().encode('{"samples":[],"notes":["'),
       0xff,
@@ -630,24 +600,7 @@ describe('workspace resource history', () => {
   });
 
   it('cleans up expired R2 chunks and old summaries within the configured batch', async () => {
-    const sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [
-      schema.workspaces,
-      schema.tasks,
-      schema.agentSessions,
-      schema.agentProfiles,
-      schema.skills,
-      schema.workspaceResourceSummaries,
-      schema.workspaceResourceChunks,
-    ]);
-    sqlite
-      .prepare(
-        `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)
-         VALUES ('ws-1', 'proj-1', 'node-1', 'session-1')`
-      )
-      .run();
-    const r2 = makeR2();
-    const env = makeEnv(sqlite, r2.binding);
+    const { env, r2, sqlite } = makePersistedResourceTestEnv();
 
     await storeWorkspaceResourceChunk(env, 'proj-1', await uploadBody(), 'node-1');
     expect(r2.objects.size).toBe(1);
