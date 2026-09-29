@@ -116,6 +116,15 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `ACP_ACTIVITY_BINDING_CACHE_TTL_MS` — Short-lived authorized ACP session binding cache used to avoid ProjectData reads during callback storms (default: `30000`)
 - `ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES` — Maximum cached ACP activity bindings retained by one Worker isolate (default: `2048`)
 
+- `ACP_INTERACTIONS_ENABLED` — Dormant durable ACP interaction foundation kill switch. Slice A defaults this to `false`; later slices must intentionally enable producers/consumers (default: `false`)
+- `ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS` / `ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS` — Default permission deadlines for conversation and task contexts (defaults: `7200000` / `1800000`)
+- `ACP_INTERACTION_MAX_DEADLINE_MS` / `ACP_INTERACTION_DEADLINE_MARGIN_MS` — Absolute deadline ceiling and prompt/runtime cap safety margin (defaults: `14400000` / `60000`)
+- `ACP_INTERACTION_MAX_PENDING_PER_SESSION` — Maximum pending durable ACP interactions per chat (default: `8`)
+- `ACP_INTERACTION_REQUEST_MAX_BYTES`, `ACP_INTERACTION_OPTIONS_MAX_COUNT`, `ACP_INTERACTION_OPTION_NAME_MAX_CHARS`, `ACP_INTERACTION_FORM_SCHEMA_MAX_BYTES`, `ACP_INTERACTION_FORM_SCHEMA_MAX_PROPERTIES`, `ACP_INTERACTION_FORM_SCHEMA_MAX_ENUM` — Request/detail and schema bounds for encrypted ACP interaction payloads (defaults: `32768`, `16`, `200`, `16384`, `20`, `50`)
+- `ACP_INTERACTION_ANSWER_MAX_BYTES` / `ACP_INTERACTION_ANSWER_STRING_MAX_BYTES` — Answer decision and individual answer string bounds before encrypted storage (defaults: `16384` / `4096`)
+- `ACP_INTERACTION_RETRY_DELAYS_MS` / `ACP_INTERACTION_RETRY_STEADY_MS` / `ACP_INTERACTION_DELIVERY_WINDOW_MS` — Durable answer outbox retry sequence, steady retry delay, and max post-answer retry window (defaults: `1000,5000,30000,120000,300000`, `300000`, `900000`)
+- `ACP_INTERACTION_SENSITIVE_PURGE_MS`, `ACP_INTERACTION_SUMMARY_RETENTION_MS`, `ACP_INTERACTION_SUMMARY_LAST_SETTLED`, `ACP_INTERACTION_SNAPSHOT_LAST_SETTLED` — Sensitive encrypted payload purge, settled summary retention, and bounded snapshot controls (defaults: `3600000`, `2592000000`, `100`, `20`)
+
 Activity coalescing and binding caches are per Worker isolate. Delayed flushes carry their original observed event time, and ProjectData rejects stale writes so a delayed intermediate report cannot overwrite a newer idle/error state from another isolate.
 
 - `SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted replacement-runtime wake claim (default: `600000`)

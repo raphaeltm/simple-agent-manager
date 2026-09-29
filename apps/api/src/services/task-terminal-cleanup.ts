@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { purgeInteractionStore } from './acp-interaction-store';
 import {
   preserveFailedTaskWork,
   surfaceFailedTaskWorkLoss,
@@ -100,7 +101,11 @@ export async function cleanupTerminalTaskResources(
   }
 
   const [workspace] = await db
-    .select({ chatSessionId: schema.workspaces.chatSessionId, userId: schema.workspaces.userId })
+    .select({
+      chatSessionId: schema.workspaces.chatSessionId,
+      userId: schema.workspaces.userId,
+      projectId: schema.workspaces.projectId,
+    })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, task.workspaceId))
     .limit(1);
@@ -142,9 +147,13 @@ export async function cleanupTerminalTaskResources(
     });
   }
 
-  if (workspace?.chatSessionId && options.destructiveSessionEnd) {
+  if (workspace?.chatSessionId && workspace.projectId && options.destructiveSessionEnd) {
+    const chatSessionId = workspace.chatSessionId;
     await options.beforeSideEffect?.();
-    await deleteSessionSnapshotState(db, env, workspace.chatSessionId);
+    await Promise.all([
+      deleteSessionSnapshotState(db, env, chatSessionId),
+      purgeInteractionStore(env, workspace.projectId, chatSessionId),
+    ]);
   }
 
   if (workspace?.chatSessionId) {

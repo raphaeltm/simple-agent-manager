@@ -19,6 +19,9 @@ export * from './constants';
 // VM Agent Contract (Zod schemas + types)
 export * from './vm-agent-contract';
 
+// Durable ACP interaction contracts (Valibot schemas + defaults)
+export * from './acp-interactions';
+
 // Trial Onboarding (types + Valibot schemas)
 export * from './trial';
 

@@ -383,6 +383,11 @@ TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS = "5000"
 TASK_RECONCILIATION_CANDIDATE_LEASE_MS = "30000"
 TASK_RECONCILIATION_PROBE_MAX_ATTEMPTS = "3"
 TASK_RECONCILIATION_QUARANTINE_MS = "300000"
+# Dormant durable ACP interaction foundation. Slice A keeps this disabled; later
+# slices activate runtime/UI capability after end-to-end verification. Tuning
+# defaults live in shared constants and apps/api/.env.example to avoid consuming
+# production Worker text bindings unless an operator intentionally overrides them.
+ACP_INTERACTIONS_ENABLED = "false"
 # AI Inference Proxy (Cloudflare AI Gateway for trial/zero-config users)
 AI_PROXY_ENABLED = "true"
 AI_PROXY_DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
@@ -547,6 +552,11 @@ class_name = "SamSession"
 name = "PROJECT_AGENT"
 class_name = "ProjectAgent"
 
+# Durable Object for per-chat dormant ACP interaction state and answer outbox
+[[durable_objects.bindings]]
+name = "INTERACTION_STORE"
+class_name = "InteractionStore"
+
 # Durable Object for atomic per-user AI token budget accounting
 [[durable_objects.bindings]]
 name = "AI_TOKEN_BUDGET_COUNTER"
@@ -666,6 +676,10 @@ new_sqlite_classes = ["SetupSessionPool"]  # Singleton concurrency gate for guid
 [[migrations]]
 tag = "v20"
 new_sqlite_classes = ["DiagnosisRunner"]
+
+[[migrations]]
+tag = "v21"
+new_sqlite_classes = ["InteractionStore"]
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]

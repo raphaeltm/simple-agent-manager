@@ -7,6 +7,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
+import { purgeInteractionStore } from '../../services/acp-interaction-store';
 import { stopComputeTracking } from '../../services/compute-usage';
 import { stopWorkspaceOnNode } from '../../services/node-agent';
 import { stopNodeResources } from '../../services/nodes';
@@ -102,8 +103,13 @@ workspaceStopRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c
       let runtimeStopConfirmed = retryStopCleanup;
       try {
         if (isCfContainerNode) {
-          if (workspace.chatSessionId) {
-            await deleteSessionSnapshotState(innerDb, c.env, workspace.chatSessionId);
+          if (workspace.chatSessionId && workspace.projectId) {
+            const chatSessionId = workspace.chatSessionId;
+            const projectId = workspace.projectId;
+            await Promise.all([
+              deleteSessionSnapshotState(innerDb, c.env, chatSessionId),
+              purgeInteractionStore(c.env, projectId, chatSessionId),
+            ]);
           }
           if (node.status === 'running' && isActiveWorkspaceStatus(workspace.status)) {
             await stopWorkspaceOnNode(nodeId, workspace.id, c.env, userId).catch((e) => {

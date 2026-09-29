@@ -9,6 +9,7 @@ export { CredentialSetupSession } from './durable-objects/credential-setup-sessi
 export { DiagnosisRunner } from './durable-objects/diagnosis-runner';
 export { GitHubUserAccessTokenLock } from './durable-objects/github-user-access-token-lock';
 export { GitLabUserAccessTokenLock } from './durable-objects/gitlab-user-access-token-lock';
+export { InteractionStore } from './durable-objects/interaction-store';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';
 export { ProjectAgent } from './durable-objects/project-agent';
@@ -127,6 +128,7 @@ import {
 import { projectEventChannelRoutes } from './routes/project-event-channels';
 import { projectEventSubscriptionRoutes } from './routes/project-event-subscriptions';
 import { projectsRoutes } from './routes/projects';
+import { acpInteractionCallbackRoute } from './routes/projects/acp-interaction-callback';
 import { agentActivityCallbackRoute } from './routes/projects/agent-activity-callback';
 import { agentUsageCallbackRoute } from './routes/projects/agent-usage-callback';
 import { buildStartedCallbackRoute } from './routes/projects/build-started-callback';
@@ -813,6 +815,7 @@ app.route('/api/webhooks', triggerWebhookRoutes);
 // See .claude/rules/06-api-patterns.md (Hono middleware scoping)
 app.route('/api/projects', deploymentIdentityTokenRoute);
 app.route('/api/projects', nodeAcpHeartbeatRoute);
+app.route('/api/projects', acpInteractionCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', agentActivityCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', agentUsageCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', buildStartedCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth

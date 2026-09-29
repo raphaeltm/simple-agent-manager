@@ -33,23 +33,23 @@ Slice A builds the dormant foundation only. It must not advertise new ACP intera
 
 ## Implementation Checklist
 
-- [ ] Add shared versioned ACP interaction schemas, constants, defaults, limits, and fixture corpus using Valibot and exported shared types.
-- [ ] Add typed Worker env/config resolution for `ACP_INTERACTIONS_ENABLED=false` and all V2 deadline, size, retry, retention, snapshot, and pending-session limits.
-- [ ] Add `InteractionStore` Durable Object binding/class and append-only `v21` `new_sqlite_classes = ["InteractionStore"]` migration with generated config compatibility tests.
-- [ ] Implement `InteractionStore` SQLite tables for interactions, outbox, delivery attempts, answer idempotency, bounded summaries, snapshots, sensitive purge, and due-work indexes.
-- [ ] Implement atomic create semantics: runtime-generated `interactionId`, canonical payload hash, same-id/same-hash idempotency, same-id/different-hash conflict, max pending enforcement, deadline validation, disabled/version-skew fail closed for new records while preserving serviceability of existing records.
-- [ ] Encrypt all arbitrary necessary request detail and human answer detail with existing Worker credential encryption; keep broad logs/events/markers structural only.
-- [ ] Implement answer semantics: answerKey bound to request+body hash, competing answer linearization, stable conflicts after first decision, decision state separate from delivery state, accepted decision surviving later delivery loss.
-- [ ] Implement bounded outbox alarms/retries: projection, delivery, settle/cancel/expire, sensitive purge, history compaction that never trims active rows, snapshot pending+last20 with pagination.
-- [ ] Implement Worker runtime create/settle routes with workspace callback JWT auth, server-side workspace/project/chat/agentSession binding, runtime identity/generation validation contract, structural logs only.
-- [ ] Implement Worker browser snapshot/detail/answer routes with session-cookie auth, `task:write`, session-creator-only mutation/detail, noncreator generic snapshot, exact Origin guard, no-store decrypted detail responses, and negative tests for runtime/MCP/callback tokens answering as humans.
-- [ ] Implement dedicated low-level answer delivery module using `nodeAgentRequest` only, with no prompt-delivery adapter, no `ensureSessionRecovery`, and `recoverContainerOnTimeout: false`; classify confirmed, interrupted, and delivery_unconfirmed outcomes honestly.
-- [ ] Add VM-agent low-level interaction answer endpoint and runtime in-memory receipt/tombstone registry for consumed/duplicate/stale/no-waiter/conflict responses; expose version capability consumer without activating interaction creation.
-- [ ] Add minimal attention projection source `acp_interaction`, `expires_at NULL`, structural metadata only, best-effort nonblocking create/resolve, and source-aware expiry guard.
-- [ ] Add legacy attention resolve guard so `acp_interaction` markers cannot route an answer as a prompt.
-- [ ] Add actual session-delete cleanup hook to purge/cancel active interaction records while preserving bounded summaries for history-preserving archive.
-- [ ] Add focused tests for local-runtime DO state transitions/restart/outbox persistence, idempotency hash mismatches, answer/cancel/expire races, stale/dead generation, no-wake transport proof, auth/caller-type/CSRF negatives, canary secrecy, retention/deletion, attention source guard, fresh install and upgrade config.
-- [ ] Update docs/API contract/env references as needed without advertising runtime/UI capability activation.
+- [x] Add shared versioned ACP interaction schemas, constants, defaults, limits, and fixture corpus using Valibot and exported shared types.
+- [x] Add typed Worker env/config resolution for `ACP_INTERACTIONS_ENABLED=false` and all V2 deadline, size, retry, retention, snapshot, and pending-session limits.
+- [x] Add `InteractionStore` Durable Object binding/class and append-only `v21` `new_sqlite_classes = ["InteractionStore"]` migration with generated config compatibility tests.
+- [x] Implement `InteractionStore` SQLite tables for interactions, outbox, delivery attempts, answer idempotency, bounded summaries, snapshots, sensitive purge, and due-work indexes.
+- [x] Implement atomic create semantics: runtime-generated `interactionId`, canonical payload hash, same-id/same-hash idempotency, same-id/different-hash conflict, max pending enforcement, deadline validation, disabled/version-skew fail closed for new records while preserving serviceability of existing records.
+- [x] Encrypt all arbitrary necessary request detail and human answer detail with existing Worker credential encryption; keep broad logs/events/markers structural only.
+- [x] Implement answer semantics: answerKey bound to request+body hash, competing answer linearization, stable conflicts after first decision, decision state separate from delivery state, accepted decision surviving later delivery loss.
+- [x] Implement bounded outbox alarms/retries: projection, delivery, settle/cancel/expire, sensitive purge, history compaction that never trims active rows, snapshot pending+last20 with pagination.
+- [x] Implement Worker runtime create/settle routes with workspace callback JWT auth, server-side workspace/project/chat/agentSession binding, runtime identity/generation validation contract, structural logs only.
+- [x] Implement Worker browser snapshot/detail/answer routes with session-cookie auth, `task:write`, session-creator-only mutation/detail, noncreator generic snapshot, exact Origin guard, no-store decrypted detail responses, and negative tests for runtime/MCP/callback tokens answering as humans.
+- [x] Implement dedicated low-level answer delivery module using `nodeAgentRequest` only, with no prompt-delivery adapter, no `ensureSessionRecovery`, and `recoverContainerOnTimeout: false`; classify confirmed, interrupted, and delivery_unconfirmed outcomes honestly.
+- [ ] Add VM-agent low-level interaction answer endpoint and runtime in-memory receipt/tombstone registry for consumed/duplicate/stale/no-waiter/conflict responses; expose version capability consumer without activating interaction creation. Progress: dormant no-waiter/stale-generation endpoint and capability advertisement are implemented; consumed/duplicate registry remains for B runtime waiter wiring or a follow-up if reviewers require it in A.
+- [x] Add minimal attention projection source `acp_interaction`, `expires_at NULL`, structural metadata only, best-effort nonblocking create/resolve, and source-aware expiry guard.
+- [x] Add legacy attention resolve guard so `acp_interaction` markers cannot route an answer as a prompt.
+- [x] Add actual session-delete cleanup hook to purge/cancel active interaction records while preserving bounded summaries for history-preserving archive.
+- [ ] Add focused tests for local-runtime DO state transitions/restart/outbox persistence, idempotency hash mismatches, answer/cancel/expire races, stale/dead generation, no-wake transport proof, auth/caller-type/CSRF negatives, canary secrecy, retention/deletion, attention source guard, fresh install and upgrade config. Progress: node-level no-wake delivery tests, worker InteractionStore tests, VM route contract tests, and migration compatibility tests are added; worker test runtime currently stalls locally in this container even for an existing attention marker test and needs CI/staging confirmation.
+- [x] Update docs/API contract/env references as needed without advertising runtime/UI capability activation.
 - [ ] Run required quality gates, local specialist reviews, staging proof, CodeRabbit, merge, production deploy/version monitoring, and append concise A outcome to the canonical Idea.
 
 ## Acceptance Criteria
@@ -64,3 +64,15 @@ Slice A builds the dormant foundation only. It must not advertise new ACP intera
 - Attention projection failures never block canonical reads/answers; legacy attention resolve rejects `acp_interaction` source.
 - Fresh install and upgrade generated Cloudflare config include the new binding/migration safely.
 - PR passes local quality gates, local security/Cloudflare/constitution/env/doc/task-completion reviews, staging controlled fixture proof, CI, CodeRabbit trusted review loop, merge, production deployment monitoring, and bounded dormant production smoke.
+
+
+## Implementation Evidence So Far
+
+- Added `InteractionStore` Durable Object with encrypted request detail and encrypted answer/decision storage, per-chat deterministic service wrapper, answer idempotency/body-hash binding, delivery state separation, alarm-driven projection/delivery/purge/compaction, and session cleanup hooks.
+- Added shared Valibot contracts/defaults and VM-agent contract fixture updates.
+- Added Worker runtime callback create/settle routes and browser snapshot/detail/answer routes with exact Origin guard and session creator gating.
+- Added no-wake answer delivery service using `nodeAgentRequest(..., recoverContainerOnTimeout: false)` and tests for consumed/duplicate/stale/no-waiter/conflict/404/ambiguous transport outcomes.
+- Added source-safe `acp_interaction` attention projection plus legacy attention resolve/expiry guard.
+- Added dormant `ACP_INTERACTIONS_ENABLED=false` wrangler flag; other ACP interaction tuning defaults are typed/documented and resolved in code to avoid exceeding Cloudflare Worker text-binding guard.
+- Local checks passing so far: `pnpm typecheck`, `pnpm lint` (pre-existing warnings only), `pnpm --filter @simple-agent-manager/api test -- tests/acp-interaction-delivery.test.ts`, `pnpm --filter @simple-agent-manager/shared typecheck`, and `pnpm vitest run scripts/quality/do-migration-compatibility.test.ts scripts/quality/go-toolchain-floor.test.ts scripts/quality/check-runtime-boundary-semantics.test.ts`.
+- Local limitations: Go toolchain/gofmt are unavailable in this container; Cloudflare worker tests stall at startup here even for an existing attention-marker test, so worker runtime proof needs CI/staging confirmation.

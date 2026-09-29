@@ -118,6 +118,7 @@ const AttentionExpiryRowSchema = v.object({
   task_id: v.nullable(v.string()),
   workspace_id: v.nullable(v.string()),
   kind: v.string(),
+  source: v.string(),
   source_notification_id: v.nullable(v.string()),
   notification_user_id: v.nullable(v.string()),
   created_at: v.number(),
@@ -133,6 +134,7 @@ export function parseAttentionExpiryRow(row: unknown): {
   taskId: string | null;
   workspaceId: string | null;
   kind: string;
+  source: string;
   sourceNotificationId: string | null;
   notificationUserId: string | null;
   createdAt: number;
@@ -148,6 +150,7 @@ export function parseAttentionExpiryRow(row: unknown): {
     taskId: r.task_id,
     workspaceId: r.workspace_id,
     kind: r.kind,
+    source: r.source,
     sourceNotificationId: r.source_notification_id,
     notificationUserId: r.notification_user_id,
     createdAt: r.created_at,
