@@ -247,8 +247,7 @@ export class InteractionStore extends DurableObject<Env> {
         `CREATE INDEX IF NOT EXISTS idx_interactions_delivery_due
            ON interactions(delivery_state, delivery_deadline_at)`
       );
-      this.addColumnIfMissing('interactions', 'encrypted_decision', 'TEXT');
-      this.addColumnIfMissing('interactions', 'decision_iv', 'TEXT');
+      this.addMissingDecisionColumns();
       this.sql.exec(`CREATE INDEX IF NOT EXISTS idx_interactions_purge ON interactions(purge_at)`);
       this.sql.exec(`CREATE INDEX IF NOT EXISTS idx_outbox_due ON outbox(due_at)`);
     });
@@ -506,11 +505,26 @@ export class InteractionStore extends DurableObject<Env> {
     this.sql.exec(`DELETE FROM interactions`);
   }
 
-  private addColumnIfMissing(table: string, column: string, definition: string): void {
+  private addMissingDecisionColumns(): void {
     try {
-      this.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+      this.sql.exec('ALTER TABLE interactions ADD COLUMN encrypted_decision TEXT');
     } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes('duplicate column')) throw error;
+      if (!(error instanceof Error) || !error.message.includes('duplicate column')) {
+        log.warn('interaction_store.add_encrypted_decision_column_failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    }
+    try {
+      this.sql.exec('ALTER TABLE interactions ADD COLUMN decision_iv TEXT');
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('duplicate column')) {
+        log.warn('interaction_store.add_decision_iv_column_failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
     }
   }
 
