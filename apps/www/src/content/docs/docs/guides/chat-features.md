@@ -277,7 +277,8 @@ Two different tools answer two different questions:
 
 ### Getting good results from agent search
 
-- **Use a few distinctive words.** A search returns messages that contain _all_ of its words.
+- **Use a few distinctive words.** A search returns messages that contain every usable word. For
+  indexed chats, the reserved search words `AND`, `OR`, `NOT`, and `NEAR` are ignored.
   Indexed chats match whole words, ignoring case, so `retry` does not find `retries` — ask for the
   forms you expect. Punctuation and quotation marks are ignored, so there is no exact-phrase search.
 - **Leave out accents.** Accented letters in a search are dropped, but indexed chats are stored
