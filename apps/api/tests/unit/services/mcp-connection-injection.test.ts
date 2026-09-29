@@ -24,7 +24,13 @@ import { createMcpConnection } from '../../../src/services/mcp-connections';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const ENCRYPTION_KEY = Buffer.alloc(32, 3).toString('base64');
-const LIMITS = { maxPerScope: 25, urlMaxBytes: 2048, tokenMaxBytes: 8192 };
+const LIMITS = {
+  maxPerScope: 25,
+  urlMaxBytes: 2048,
+  tokenMaxBytes: 8192,
+  maxHeaders: 10,
+  headerValueMaxBytes: 8192,
+};
 const BASE_DOMAIN = 'example.com';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;

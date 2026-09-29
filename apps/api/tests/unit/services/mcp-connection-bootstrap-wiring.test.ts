@@ -56,7 +56,13 @@ const { createMcpConnection } = await import('../../../src/services/mcp-connecti
 const projectDataService = await import('../../../src/services/project-data');
 
 const ENCRYPTION_KEY = Buffer.alloc(32, 5).toString('base64');
-const LIMITS = { maxPerScope: 25, urlMaxBytes: 2048, tokenMaxBytes: 8192 };
+const LIMITS = {
+  maxPerScope: 25,
+  urlMaxBytes: 2048,
+  tokenMaxBytes: 8192,
+  maxHeaders: 10,
+  headerValueMaxBytes: 8192,
+};
 
 let sqlite: Database.Database;
 let db: ReturnType<typeof drizzle<typeof schema>>;
