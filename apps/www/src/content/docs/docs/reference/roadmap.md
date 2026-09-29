@@ -115,12 +115,17 @@ Visible project automation:
 Shared project collaboration:
 
 - Project members with owner and admin roles.
+- Maintainer and viewer role enforcement foundation.
 - Invite links and access requests.
 - Member removal and ownership transfer flows with credential impact handling.
 
 ## Planned: Billing Integration
 
 - Billing integration.
+
+## Planned: Role Assignment for Project Members
+
+- User-facing controls for assigning maintainer and viewer roles.
 
 ## Future Considerations
 
