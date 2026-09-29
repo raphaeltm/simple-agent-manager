@@ -38,15 +38,15 @@ covered PRs #2092–#2135; this pass covers everything merged since.
 
 ## Implementation checklist
 
-- [ ] `recent-product-changes.md`: new cycle (23–29 Sep) with tables and deep-dives; roll the previous cycle
-- [ ] `instant-sessions.md`: add **Wake failed**, **task failed (work saved)** and **lost contact with node** rows to the "what to do" table; a "Wake failed" section mapping each message to an action; fix the self-contradicting caution box; GitHub access in long sessions
-- [ ] `chat-features.md`: rewrite search around the user's goal (finding an old conversation), keeping the agent/operator detail in a subsection; Diagrams (Mermaid) section; PDF preview in document cards; Fork/Retry summary rate limit; voice transcription rate limit
-- [ ] `quickstart.md`: step 6 — the dashboard's Active Tasks list (text only; no dashboard screenshot per DocumentationStyle knowledge)
-- [ ] `concepts.mdx`: "When a node stops responding"; fix "fork from any point" (forks are session-scoped)
-- [ ] `agents.md`: choosing a model — typing a model ID the picker doesn't list
-- [ ] `self-hosting.mdx`: Problem migrations + Abandon; unresponsive managed machines are released automatically
-- [ ] `reference/configuration.md`: `DASHBOARD_*` settings
-- [ ] Screenshots via a new Playwright spec (real components, mock data): session list with **Wake failed**; a Mermaid diagram in chat; Admin → Storage problem migrations (desktop + mobile)
+- [x] `recent-product-changes.md`: new cycle (23–29 Sep) with tables and deep-dives; roll the previous cycle
+- [x] `instant-sessions.md`: add **Wake failed**, **task failed (work saved)** and **lost contact with node** rows to the "what to do" table; a "Wake failed" section mapping each message to an action; fix the self-contradicting caution box; GitHub access in long sessions
+- [x] `chat-features.md`: rewrite search around the user's goal (finding an old conversation), keeping the agent/operator detail in a subsection; Diagrams (Mermaid) section; PDF preview in document cards; Fork/Retry summary rate limit; voice transcription rate limit
+- [x] `quickstart.md`: step 6 — the dashboard's Active Tasks list (text only; no dashboard screenshot per DocumentationStyle knowledge)
+- [x] `concepts.mdx`: "When a node stops responding"; fix "fork from any point" (forks are session-scoped)
+- [x] `agents.md`: choosing a model — typing a model ID the picker doesn't list
+- [x] `self-hosting.mdx`: Problem migrations + Abandon; unresponsive managed machines are released automatically
+- [x] `reference/configuration.md`: `DASHBOARD_*` settings
+- [x] Screenshots via two new Playwright specs (real components, mock data): a chat whose wake failed, beside running and sleeping chats; a Mermaid diagram in an agent reply; the Admin → Storage Abandon dialog at phone width. (A desktop capture of all three problem-migration cards was dropped: it was ~900px tall in the docs column, and the badge table already explains them.)
 - [ ] Local sub-agent review loop until no actionable feedback
 - [ ] `pnpm --filter @simple-agent-manager/www build` + link check; PR; CI green; merge
 
