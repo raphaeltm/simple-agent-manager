@@ -34,35 +34,35 @@ Idea: `01M3P13H0W6EG1FS47PCG0N2EG`. Prototype branch: `sam/looks-resources-detai
 ## Implementation checklist
 
 ### Backend
-- [ ] Migration `0177_workspace_resource_chunk_rollups.sql`: `ALTER TABLE workspace_resource_chunks ADD COLUMN rollup_json TEXT` (+ schema.ts)
-- [ ] `services/workspace-resource-rollup.ts`: pure per-minute rollup from a decoded chunk payload. It holds CPU mean/max in cores, memory mean/max, working set mean/max, disk bytes, OOM kills, tool-call starts and sample count. Bucket count is bounded and configurable, and the result is compact and columnar.
-- [ ] Upload hook: compute and store `rollup_json` in `storeWorkspaceResourceChunk`. A rollup failure must never fail the upload.
-- [ ] `services/workspace-resource-timeline.ts`: the session index lists every chunk for `(project, session)`, newest first, capped by `WORKSPACE_RESOURCE_TIMELINE_MAX_CHUNKS` with `omittedChunkCount` disclosure. It groups chunks into runs with each workspace's reservation, and tolerates a malformed row. With no chunks, it reports whether the session's runtime collects at all (cf-container → unsupported).
-- [ ] Chunk read by id scoped to project + session, reusing `readChunkPayload`.
-- [ ] Routes `GET /api/projects/:id/sessions/:sessionId/resource-timeline` and `.../resource-timeline/chunks/:chunkId`, gated by project access.
-- [ ] Env var documented: `.env.example`, env.ts, env-reference skill, configuration.md.
+- [x] Migration `0177_workspace_resource_chunk_rollups.sql` (numbered after #2181's 0175; the working-set branch added no migration): `ALTER TABLE workspace_resource_chunks ADD COLUMN rollup_json TEXT` (+ schema.ts)
+- [x] `services/workspace-resource-rollup.ts`: pure per-minute rollup from a decoded chunk payload. It holds CPU mean/max in cores, memory mean/max, working set mean/max, disk bytes, OOM kills, tool-call starts and sample count. Bucket count is bounded and configurable, and the result is compact and columnar.
+- [x] Upload hook: compute and store `rollup_json` in `storeWorkspaceResourceChunk`. A rollup failure must never fail the upload.
+- [x] `services/workspace-resource-timeline.ts`: the session index lists every chunk for `(project, session)`, newest first, capped by `WORKSPACE_RESOURCE_TIMELINE_MAX_CHUNKS` with `omittedChunkCount` disclosure. It groups chunks into runs with each workspace's reservation, and tolerates a malformed row. With no chunks, it reports whether the session's runtime collects at all (cf-container → unsupported).
+- [x] Chunk read by id scoped to project + session, reusing `readChunkPayload`.
+- [x] Routes `GET /api/projects/:id/sessions/:sessionId/resource-timeline` and `.../resource-timeline/chunks/:chunkId`, gated by project access.
+- [x] Env var documented: `.env.example`, env.ts, env-reference skill, configuration.md.
 
 ### Web
-- [ ] API client + types for the two endpoints; the API source adapter reads the index (rollups → overview, summary fallback for older chunks) and the chunk endpoint
-- [ ] Per-run reservation lines
-- [ ] Empty state distinguishes "not uploaded yet" from "not recorded for Instant sessions"
-- [ ] ToolKind covers the full ACP set (read, edit, delete, move, search, execute, think, fetch, switch_mode, other)
-- [ ] Working-set fields read by the sibling's names (`memoryWorkingSetBytes`, `memoryWorkingSetMeanBytes`, `memoryWorkingSetPeakBytes`)
-- [ ] Remove the prototype route, page, mock data and the DEV_ONLY entry
-- [ ] Remove dead code: the old-API index adapter, and `getSessionResourceHistory` if unused
-- [ ] Playwright visual audit with stress data (27 h multi-wake, empty, Instant, older agent) at 375 and 1280, plus the rail audit
+- [x] API client + types for the two endpoints; the API source adapter reads the index (rollups → overview, summary fallback for older chunks) and the chunk endpoint
+- [x] Per-run reservation lines
+- [x] Empty state distinguishes "not uploaded yet" from "not recorded for Instant sessions"
+- [x] ToolKind covers the full ACP set (read, edit, delete, move, search, execute, think, fetch, switch_mode, other)
+- [x] Working-set fields read by the sibling's names (`memoryWorkingSetBytes`, `memoryWorkingSetMeanBytes`, `memoryWorkingSetPeakBytes`)
+- [x] Remove the prototype route, page, mock data and the DEV_ONLY entry
+- [x] Remove dead code: the old-API index adapter, and `getSessionResourceHistory` if unused
+- [x] Playwright visual audit with stress data (27 h multi-wake, empty, Instant, older agent) at 375 and 1280, plus the rail audit
 
 ### Docs
-- [ ] `apps/www/.../guides/session-resources.md` rewritten for the timeline
-- [ ] `reference/api.md` lists the new endpoints
+- [x] `apps/www/.../guides/session-resources.md` rewritten for the timeline
+- [x] `reference/api.md` lists the new endpoints
 
 ### Tests
-- [ ] Rollup unit tests (buckets, gaps, working set present and absent, tool starts, bounded bucket count)
-- [ ] Upload stores `rollup_json` (real SQL engine + fake R2)
-- [ ] Index on a real SQL engine: all chunks across workspaces; a foreign project/session is excluded (attack) while the owner is served (control); cap + disclosure; malformed row tolerated; reservation join; Instant detection
-- [ ] Chunk read: a foreign session's chunk id → 404 (attack) + owner control
-- [ ] Routes through the Hono app with project-access gating
-- [ ] Web data-layer tests updated for the new adapter
+- [x] Rollup unit tests (buckets, gaps, working set present and absent, tool starts, bounded bucket count)
+- [x] Upload stores `rollup_json` (real SQL engine + fake R2)
+- [x] Index on a real SQL engine: all chunks across workspaces; a foreign project/session is excluded (attack) while the owner is served (control); cap + disclosure; malformed row tolerated; reservation join; Instant detection
+- [x] Chunk read: a foreign session's chunk id → 404 (attack) + owner control
+- [x] Routes through the Hono app with project-access gating
+- [x] Web data-layer tests updated for the new adapter
 
 ## Acceptance criteria
 - [ ] Opening Resources on a multi-wake session shows the whole session, with no chunk UI and no silent cap (disclosed only past the configured cap)
@@ -76,3 +76,12 @@ Idea: `01M3P13H0W6EG1FS47PCG0N2EG`. Prototype branch: `sam/looks-resources-detai
 ## References
 - `.claude/rules/37` (prototypes), `60` (request budgets), `11` and `28` (scope tests), `50` (row isolation), `31` (migrations), `65` (capped selection), `62` (real trigger), `17` and `56` (visual audit)
 - Idea 01KZP2972NHBXVRM4695E3DCB3 (telemetry), 01M3P13H0W6EG1FS47PCG0N2EG (this work)
+
+## Implementation notes (2026-09-29)
+- The first implementation session hit its limit before committing; the migration/env edits were redone from scratch.
+- Added `collection: 'expired'` (not in the original plan): once raw chunks pass retention the summary remains, and the drawer would otherwise have said "No resource samples yet" for a months-old session — the same kind of misleading copy this work exists to remove.
+- A truncated history labels its all-in-view card "Everything shown", not "Whole session", found in the Playwright screenshot review.
+- Sibling field names verified on their branches: spans `kind`/`toolName`; samples `memoryWorkingSetBytes`; summaries `memoryWorkingSetMeanBytes`/`memoryWorkingSetPeakBytes`.
+- Rebased onto #2181 (attribution); its upload query joins tasks/agent_sessions/agent_profiles/skills, so the timeline test harness seeds those tables.
+- Scope predicates proven discriminating: deleting the project/session conjuncts reddened exactly the two attack tests.
+- Prototype route, page and mock data removed; the stress generator lives on as `apps/web/tests/playwright/resource-timeline-scenarios.ts`, serving real API shapes to the real chat rail.
