@@ -84,6 +84,10 @@ export default defineConfig({
             className: 'DiagnosisRunner',
             useSQLite: true,
           },
+          INTERACTION_STORE: {
+            className: 'InteractionStore',
+            useSQLite: true,
+          },
           PROJECT_AGENT: {
             className: 'ProjectAgent',
             useSQLite: true,
