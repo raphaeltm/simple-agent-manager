@@ -39,13 +39,19 @@ function normalize(raw: string): string {
 describe('MCP server name contract (TypeScript side)', () => {
   it('accepts every name the contract marks valid', () => {
     for (const name of contract.valid) {
-      expect(MCP_CONNECTION_NAME_PATTERN.test(normalize(name)), `expected ${JSON.stringify(name)} to be valid`).toBe(true);
+      expect(
+        MCP_CONNECTION_NAME_PATTERN.test(normalize(name)),
+        `expected ${JSON.stringify(name)} to be valid`
+      ).toBe(true);
     }
   });
 
   it('rejects every name the contract marks invalid', () => {
     for (const name of contract.invalid) {
-      expect(MCP_CONNECTION_NAME_PATTERN.test(normalize(name)), `expected ${JSON.stringify(name)} to be invalid`).toBe(false);
+      expect(
+        MCP_CONNECTION_NAME_PATTERN.test(normalize(name)),
+        `expected ${JSON.stringify(name)} to be invalid`
+      ).toBe(false);
     }
   });
 
@@ -70,13 +76,19 @@ describe('MCP server name contract (TypeScript side)', () => {
 describe('MCP custom header name contract (TypeScript side)', () => {
   it('accepts every header name the contract marks valid', () => {
     for (const name of contract.headerNames.valid) {
-      expect(MCP_CONNECTION_HEADER_NAME_PATTERN.test(name), `expected ${JSON.stringify(name)} to be valid`).toBe(true);
+      expect(
+        MCP_CONNECTION_HEADER_NAME_PATTERN.test(name),
+        `expected ${JSON.stringify(name)} to be valid`
+      ).toBe(true);
     }
   });
 
   it('rejects every header name the contract marks invalid', () => {
     for (const name of contract.headerNames.invalid) {
-      expect(MCP_CONNECTION_HEADER_NAME_PATTERN.test(name), `expected ${JSON.stringify(name)} to be invalid`).toBe(false);
+      expect(
+        MCP_CONNECTION_HEADER_NAME_PATTERN.test(name),
+        `expected ${JSON.stringify(name)} to be invalid`
+      ).toBe(false);
     }
   });
 

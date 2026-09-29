@@ -21,6 +21,7 @@ interface ConnectionOverrides {
   urlHost?: string;
   authType?: 'none' | 'bearer';
   hasToken?: boolean;
+  headerNames?: string[];
   enabled?: boolean;
   projectId?: string | null;
 }
@@ -32,6 +33,7 @@ function makeConnection(overrides: ConnectionOverrides) {
     urlHost: 'https://mcp.zapier.com',
     authType: 'bearer',
     hasToken: true,
+    headerNames: [],
     enabled: true,
     createdAt: '2026-08-23T00:00:00Z',
     updatedAt: '2026-08-23T00:00:00Z',
@@ -52,6 +54,7 @@ const NORMAL = [
     urlHost: 'https://backend.composio.dev',
     authType: 'none',
     hasToken: false,
+    headerNames: ['x-api-key'],
   }),
   makeConnection({ id: 'c4', name: 'notion', urlHost: 'https://mcp.notion.com', enabled: false }),
 ];
@@ -70,6 +73,21 @@ const LONG_TEXT = [
     name: 'x',
     urlHost: 'https://a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.r.s.t.u.v.w.x.y.z.example.com',
   }),
+  // Header names are bounded at 64 characters of [A-Za-z0-9_-], so the widest realistic row is
+  // several maximum-length names with no break opportunity between hyphens.
+  makeConnection({
+    id: 'l3',
+    name: 'many-headers',
+    authType: 'none',
+    hasToken: false,
+    headerNames: [
+      `x-${'a'.repeat(62)}`,
+      'X-Composio-Consumer-Api-Key',
+      'x_org_id',
+      'x-team',
+      `X_${'Z'.repeat(62)}`,
+    ],
+  }),
 ];
 
 const MANY = Array.from({ length: 30 }, (_, i) =>
@@ -80,19 +98,21 @@ const MANY = Array.from({ length: 30 }, (_, i) =>
     enabled: i % 3 !== 0,
     authType: i % 4 === 0 ? 'none' : 'bearer',
     hasToken: i % 4 !== 0,
+    headerNames: i % 5 === 0 ? ['x-api-key', 'x-org-id'] : [],
   })
 );
 
 const SPECIAL = [
   makeConnection({ id: 's1', name: 'emoji-host', urlHost: 'https://xn--ls8h.example.com' }),
-  makeConnection({ id: 's2', name: 'script-tag', urlHost: 'https://<script>alert(1)</script>.com' }),
+  makeConnection({
+    id: 's2',
+    name: 'script-tag',
+    urlHost: 'https://<script>alert(1)</script>.com',
+  }),
   makeConnection({ id: 's3', name: 'unicode', urlHost: 'https://日本語ドメイン.example.com' }),
 ];
 
-async function setupMocks(
-  page: Page,
-  options: { connections?: unknown[]; error?: boolean } = {}
-) {
+async function setupMocks(page: Page, options: { connections?: unknown[]; error?: boolean } = {}) {
   // Without this the first-run onboarding wizard covers the page. Playwright would still
   // report the settings content "visible" (it is in the DOM), so every screenshot would
   // capture the modal and every overflow check would measure the modal's layout — the exact
@@ -169,6 +189,57 @@ function runScenarios(label: string) {
     await setupMocks(page, { error: true });
     await gotoMcpServers(page);
     await audit(page, `mcp-servers-error-${label}`);
+  });
+
+  test('add form with custom headers keeps every row inside the viewport', async ({ page }) => {
+    await setupMocks(page, { connections: NORMAL });
+    await gotoMcpServers(page);
+
+    await page.getByRole('button', { name: /^add$/i }).click();
+    await page.getByLabel(/Authentication/i).selectOption('none');
+    await page.getByRole('button', { name: /add header/i }).click();
+    await page.getByLabel('Header 1 name').fill('x-api-key');
+    await page.getByLabel('x-api-key value').fill('ak_live_1234567890');
+    await page.getByRole('button', { name: /add header/i }).click();
+    await page.getByLabel('Header 2 name').fill(`x-${'a'.repeat(62)}`);
+
+    // The row's layout claim, measured (rule 17): on a phone the value takes its own line
+    // under the name; from `sm` up the name, value and remove button share one line.
+    const name = await page.getByLabel('Header 1 name').boundingBox();
+    const value = await page.getByLabel('x-api-key value').boundingBox();
+    const remove = await page.getByRole('button', { name: 'Remove x-api-key' }).boundingBox();
+    expect(name && value && remove).toBeTruthy();
+    const viewportWidth = page.viewportSize()!.width;
+    if (viewportWidth < 640) {
+      expect(value!.y).toBeGreaterThanOrEqual(name!.y + name!.height - 1);
+      expect(remove!.y).toBeLessThan(value!.y);
+    } else {
+      expect(Math.abs(value!.y - name!.y)).toBeLessThanOrEqual(2);
+      expect(value!.x).toBeGreaterThanOrEqual(name!.x + name!.width);
+      expect(remove!.x).toBeGreaterThanOrEqual(value!.x + value!.width);
+    }
+    expect(remove!.x + remove!.width).toBeLessThanOrEqual(viewportWidth);
+    await audit(page, `mcp-servers-add-form-headers-${label}`);
+  });
+
+  test('edit form shows saved header names with blank, keep-by-default values', async ({
+    page,
+  }) => {
+    await setupMocks(page, { connections: LONG_TEXT });
+    await gotoMcpServers(page);
+
+    await page.getByRole('button', { name: 'Edit many-headers' }).click();
+    const form = page.getByRole('form', { name: 'Edit many-headers' });
+    await expect(form).toBeVisible();
+    await expect(form.getByText('X-Composio-Consumer-Api-Key', { exact: true })).toBeVisible();
+    await expect(form.getByLabel('X-Composio-Consumer-Api-Key value')).toHaveValue('');
+    await expect(form.getByLabel('X-Composio-Consumer-Api-Key value')).toHaveAttribute(
+      'placeholder',
+      'Leave blank to keep'
+    );
+    // Only one form at a time: the header Add button is withdrawn while editing.
+    await expect(page.getByRole('button', { name: /^add$/i })).toHaveCount(0);
+    await audit(page, `mcp-servers-edit-form-${label}`);
   });
 
   test('add form is usable', async ({ page }) => {

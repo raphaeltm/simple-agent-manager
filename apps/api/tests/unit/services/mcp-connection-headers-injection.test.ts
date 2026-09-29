@@ -21,7 +21,13 @@ import { createMcpConnection } from '../../../src/services/mcp-connections';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const ENCRYPTION_KEY = Buffer.alloc(32, 5).toString('base64');
-const LIMITS = { maxPerScope: 25, urlMaxBytes: 2048, tokenMaxBytes: 8192, maxHeaders: 10, headerValueMaxBytes: 8192 };
+const LIMITS = {
+  maxPerScope: 25,
+  urlMaxBytes: 2048,
+  tokenMaxBytes: 8192,
+  maxHeaders: 10,
+  headerValueMaxBytes: 8192,
+};
 const API_KEY = 'ak_live_composio_secret';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -51,7 +57,11 @@ async function startApiKeyMcpServer(apiKey: string): Promise<ApiKeyMcpServer> {
       const result =
         request.method === 'tools/list'
           ? { tools: [{ name: 'GMAIL_SEND_EMAIL', inputSchema: { type: 'object' } }] }
-          : { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'composio-mock' } };
+          : {
+              protocolVersion: '2025-06-18',
+              capabilities: { tools: {} },
+              serverInfo: { name: 'composio-mock' },
+            };
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id ?? 1, result }));
     });
@@ -61,7 +71,10 @@ async function startApiKeyMcpServer(apiKey: string): Promise<ApiKeyMcpServer> {
   return {
     url: `http://127.0.0.1:${port}/mcp`,
     seen,
-    close: () => new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+    close: () =>
+      new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve()))
+      ),
   };
 }
 
@@ -79,7 +92,10 @@ async function callAsHarness(entry: McpServerEntry, method: string) {
     headers,
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method }),
   });
-  return { status: response.status, body: (await response.json()) as { result?: { tools?: Array<{ name: string }> } } };
+  return {
+    status: response.status,
+    body: (await response.json()) as { result?: { tools?: Array<{ name: string }> } },
+  };
 }
 
 let sqlite: Database.Database;
@@ -142,14 +158,21 @@ describe('custom headers, end to end', () => {
   });
 
   it('the endpoint really rejects a request without the header (the check is not a formality)', async () => {
-    const response = await callAsHarness({ url: mcpServer.url, token: '', name: 'composio' }, 'initialize');
+    const response = await callAsHarness(
+      { url: mcpServer.url, token: '', name: 'composio' },
+      'initialize'
+    );
     expect(response.status).toBe(401);
   });
 
   it('a connection without headers resolves with no headers key, as before this feature', async () => {
     await saveComposio({ headers: undefined });
 
-    const [entry] = await resolveMcpServersForSession(db, { userId: 'user-1', projectId: 'proj-1' }, ENCRYPTION_KEY);
+    const [entry] = await resolveMcpServersForSession(
+      db,
+      { userId: 'user-1', projectId: 'proj-1' },
+      ENCRYPTION_KEY
+    );
 
     expect(entry).toEqual({ url: mcpServer.url, token: '', name: 'composio' });
   });
@@ -159,10 +182,16 @@ describe('header fault isolation on the session-start path', () => {
   it('skips a row whose headers cannot be decrypted, keeps the rest, and logs no secret', async () => {
     const broken = await saveComposio({ name: 'broken' });
     await saveComposio({ name: 'healthy' });
-    sqlite.prepare('UPDATE mcp_connections SET encrypted_headers = ? WHERE id = ?').run('garbage', broken.id);
+    sqlite
+      .prepare('UPDATE mcp_connections SET encrypted_headers = ? WHERE id = ?')
+      .run('garbage', broken.id);
     const warn = vi.spyOn(log, 'warn');
 
-    const resolved = await resolveMcpServersForSession(db, { userId: 'user-1', projectId: 'proj-1' }, ENCRYPTION_KEY);
+    const resolved = await resolveMcpServersForSession(
+      db,
+      { userId: 'user-1', projectId: 'proj-1' },
+      ENCRYPTION_KEY
+    );
 
     expect(resolved.map((entry) => entry.name)).toEqual(['healthy']);
     const skipLog = warn.mock.calls.find(([event]) => event === 'mcp_connections.row_skipped');
@@ -178,12 +207,19 @@ describe('header fault isolation on the session-start path', () => {
     const broken = await saveComposio({ name: 'broken' });
     await saveComposio({ name: 'healthy' });
     const { encrypt } = await import('../../../src/services/encryption');
-    const sealed = await encrypt(JSON.stringify([{ name: 'x api key', value: API_KEY }]), ENCRYPTION_KEY);
+    const sealed = await encrypt(
+      JSON.stringify([{ name: 'x api key', value: API_KEY }]),
+      ENCRYPTION_KEY
+    );
     sqlite
       .prepare('UPDATE mcp_connections SET encrypted_headers = ?, headers_iv = ? WHERE id = ?')
       .run(sealed.ciphertext, sealed.iv, broken.id);
 
-    const resolved = await resolveMcpServersForSession(db, { userId: 'user-1', projectId: 'proj-1' }, ENCRYPTION_KEY);
+    const resolved = await resolveMcpServersForSession(
+      db,
+      { userId: 'user-1', projectId: 'proj-1' },
+      ENCRYPTION_KEY
+    );
 
     expect(resolved.map((entry) => entry.name)).toEqual(['healthy']);
   });

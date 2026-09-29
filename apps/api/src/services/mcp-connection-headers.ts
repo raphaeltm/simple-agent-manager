@@ -43,6 +43,7 @@ export interface SealedMcpConnectionHeaders {
 type HeaderColumns = Pick<schema.McpConnectionRow, 'encryptedHeaders' | 'headersIv'>;
 
 /** Tab, CR, LF, NUL and the rest: anything that could split a header or a config line. */
+// eslint-disable-next-line no-control-regex -- matching control characters is the purpose of this pattern
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
 const StoredHeadersSchema = v.array(v.object({ name: v.string(), value: v.string() }));
@@ -67,12 +68,16 @@ export function validateMcpConnectionHeaders(
   return headers.map((header) => {
     const name = header.name.trim();
     if (!MCP_CONNECTION_HEADER_NAME_PATTERN.test(name)) {
-      throw errors.badRequest(`Invalid header name ${JSON.stringify(name)}: ${MCP_CONNECTION_HEADER_NAME_RULE}`);
+      throw errors.badRequest(
+        `Invalid header name ${JSON.stringify(name)}: ${MCP_CONNECTION_HEADER_NAME_RULE}`
+      );
     }
 
     const key = name.toLowerCase();
     if (MCP_CONNECTION_RESERVED_HEADER_NAMES.includes(key)) {
-      throw errors.badRequest(`Header "${name}" is set by the MCP transport and cannot be overridden`);
+      throw errors.badRequest(
+        `Header "${name}" is set by the MCP transport and cannot be overridden`
+      );
     }
     if (key === 'authorization' && authType === 'bearer') {
       throw errors.badRequest(
@@ -89,10 +94,14 @@ export function validateMcpConnectionHeaders(
       throw errors.badRequest(`Header "${name}" needs a value`);
     }
     if (utf8ByteLength(value) > limits.headerValueMaxBytes) {
-      throw errors.badRequest(`Header "${name}" value exceeds max size of ${limits.headerValueMaxBytes} bytes`);
+      throw errors.badRequest(
+        `Header "${name}" value exceeds max size of ${limits.headerValueMaxBytes} bytes`
+      );
     }
     if (CONTROL_CHARACTERS.test(value)) {
-      throw errors.badRequest(`Header "${name}" value must not contain line breaks or control characters`);
+      throw errors.badRequest(
+        `Header "${name}" value must not contain line breaks or control characters`
+      );
     }
     return { name, value };
   });

@@ -47,8 +47,7 @@ export const MCP_CONNECTION_NAME_PATTERN = new RegExp(
   `^[a-z0-9][a-z0-9-]{0,${MCP_CONNECTION_NAME_MAX_LENGTH - 2}}[a-z0-9]$|^[a-z0-9]$`
 );
 
-export const MCP_CONNECTION_NAME_RULE =
-  `name must be 1-${MCP_CONNECTION_NAME_MAX_LENGTH} characters of lowercase letters, digits or hyphens, and may not start or end with a hyphen`;
+export const MCP_CONNECTION_NAME_RULE = `name must be 1-${MCP_CONNECTION_NAME_MAX_LENGTH} characters of lowercase letters, digits or hyphens, and may not start or end with a hyphen`;
 
 /**
  * Maximum custom header name length.
@@ -71,8 +70,7 @@ export const MCP_CONNECTION_HEADER_NAME_PATTERN = new RegExp(
   `^[A-Za-z0-9_-]{1,${MCP_CONNECTION_HEADER_NAME_MAX_LENGTH}}$`
 );
 
-export const MCP_CONNECTION_HEADER_NAME_RULE =
-  `header names must be 1-${MCP_CONNECTION_HEADER_NAME_MAX_LENGTH} characters of letters, digits, hyphens or underscores`;
+export const MCP_CONNECTION_HEADER_NAME_RULE = `header names must be 1-${MCP_CONNECTION_HEADER_NAME_MAX_LENGTH} characters of letters, digits, hyphens or underscores`;
 
 /**
  * Headers the MCP transport or the HTTP client sets itself. A stored value would either be

@@ -10,13 +10,13 @@ SAM does not build per-service connectors. It speaks MCP, and the endpoint owns 
 ## How it works
 
 1. Pick a provider (see below) and connect the services you want **in that provider's dashboard**. That is where the OAuth happens, in your browser.
-2. The provider gives you an MCP endpoint URL, usually with a bearer token.
-3. Paste both into SAM under **Settings → MCP Servers** (yours alone) or **Project Settings → Runtime** (shared with the project).
+2. The provider gives you an MCP endpoint URL, usually with a bearer token or an API key to send in a header.
+3. Paste them into SAM under **Settings → MCP Servers** (yours alone) or **Project Settings → Runtime** (shared with the project).
 4. Start a chat or task. The agent sees the new tools immediately, namespaced by the name you chose.
 
 This works on both runtimes — VM workspaces and Instant (container) sessions.
 
-How the endpoint reaches the agent depends on the agent. Claude Code receives it in the session handshake, Codex and Vibe get it written into their own config files, and Amp reaches it through a bridge. Agents that do not implement remote MCP servers will not see the tools.
+How the endpoint reaches the agent depends on the agent. Claude Code receives it in the session handshake, Codex and Vibe get it written into their own config files (Codex reads the token and header values from environment variables, so they never land in its config file), and Amp reaches it through a bridge. Agents that do not implement remote MCP servers will not see the tools.
 
 ## Choosing a provider
 
@@ -24,7 +24,7 @@ How the endpoint reaches the agent depends on the agent. Claude Code receives it
 | --- | --- | --- |
 | [Zapier MCP](https://zapier.com/mcp) | Breadth — around 9,000 apps, including LinkedIn and Google Docs | Bearer token |
 | [executor.sh](https://executor.sh/) | Open source (MIT). Run it yourself via CLI, Docker or a Cloudflare Worker, or use their hosted endpoint | Bearer token |
-| [Composio / Rube](https://composio.dev/) | Managed OAuth with a large toolkit catalog | Pre-signed URL — choose **None** |
+| [Composio / Rube](https://composio.dev/) | Managed OAuth with a large toolkit catalog | API key header — choose **None** and add an `x-api-key` header (`x-consumer-api-key` for Composio Connect). Older pre-signed URLs need no header. |
 | [Klavis / Strata](https://www.klavis.ai/) | Self-hosting everything (Apache-2.0) | Bearer token |
 | Official service endpoints | A single service you already pay for — GitHub, Notion, Linear, Sentry, Stripe | Personal access token as bearer |
 
@@ -36,9 +36,14 @@ Prefer gateway-style providers that expose a small number of tools over servers 
 | --- | --- |
 | **Name** | How the agent sees the server; its tools are namespaced by it. 1–32 characters, lowercase letters, digits and hyphens; it may not start or end with a hyphen. `sam-mcp` is reserved. |
 | **MCP endpoint URL** | Must be HTTPS. `http://localhost:<port>` and `http://127.0.0.1:<port>` are allowed for a gateway running on the same machine — an explicit port is required. |
-| **Authentication** | **Bearer token** for most providers. **None** when the credential is embedded in the URL itself, as with Composio's pre-signed URLs. |
+| **Authentication** | **Bearer token** for most providers. **None** when the credential travels in the URL itself (pre-signed URLs) or in a custom header. |
+| **Headers** | Optional HTTP headers sent with every request, for providers that take an API key in a header — Composio's `x-api-key`, for example. Names are 1–64 letters, digits, hyphens or underscores. Headers the MCP transport sets itself (`Accept`, `Content-Type`, `Host`, `Connection`, `Content-Length`, `Transfer-Encoding`, `Mcp-Session-Id`, `Mcp-Protocol-Version`, `Last-Event-ID`) cannot be overridden. `Authorization` is accepted only when Authentication is **None**, so you can use a scheme other than Bearer. By default a server can have up to 10 headers. |
 
-Both the URL and the token are encrypted at rest and are never returned by the API or shown again after you save them — several providers put the credential directly in the URL, so the URL is treated as a secret too. SAM shows only the host.
+The URL, the token and every header value are encrypted at rest and are never returned by the API or shown again after you save them — several providers put the credential directly in the URL, so the URL is treated as a secret too. SAM shows only the host and the header names.
+
+## Editing a server
+
+Use **Edit** to rename a server, switch its authentication, or add, replace and remove headers. Saved secrets are never shown, so the URL, the token and each saved header value start blank: leave them blank to keep what is saved, or type a new value to replace it. To rename a header, remove it and add it again under the new name.
 
 ## Scopes
 
@@ -71,6 +76,5 @@ Tools from a connected MCP server run inside your agent's session, which already
 ## Limitations
 
 - **Remote HTTP servers only.** `stdio` servers are not supported: configuring an arbitrary command from a web UI is an unnecessary attack surface, and every major provider is remote-first.
-- **Bearer or no authentication.** Custom auth headers (for example `X-API-Key`) are not yet supported.
 - **Personal and project scope only.** Attaching a server to a specific agent profile or skill is not yet supported.
-- **Amp exposes the endpoint URL locally.** The Amp harness reaches remote MCP servers through a bridge process that receives the URL as a command-line argument, so anything running inside that same workspace can read it. The bearer token is not exposed this way. If your endpoint's URL is itself the credential (a pre-signed URL), prefer a different agent for now.
+- **Amp exposes the endpoint URL locally.** The Amp harness reaches remote MCP servers through a bridge process that receives the URL and the header names as command-line arguments, so anything running inside that same workspace can read them. The bearer token and header values are not exposed this way. If your endpoint's URL is itself the credential (a pre-signed URL), prefer a different agent for now.

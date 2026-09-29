@@ -67,7 +67,10 @@ function update(connectionId: string, changes: Record<string, unknown>) {
 }
 
 function storedRow(id: string) {
-  return sqlite.prepare('SELECT * FROM mcp_connections WHERE id = ?').get(id) as Record<string, string | null>;
+  return sqlite.prepare('SELECT * FROM mcp_connections WHERE id = ?').get(id) as Record<
+    string,
+    string | null
+  >;
 }
 
 async function storedHeaders(id: string) {
@@ -120,11 +123,27 @@ describe('creating a connection with custom headers', () => {
   });
 
   it.each([
-    ['a name mcp-remote cannot parse', [{ name: 'x:api-key', value: API_KEY }], /Invalid header name/],
+    [
+      'a name mcp-remote cannot parse',
+      [{ name: 'x:api-key', value: API_KEY }],
+      /Invalid header name/,
+    ],
     ['a name with a dot', [{ name: 'x.api.key', value: API_KEY }], /Invalid header name/],
-    ['a name over 64 characters', [{ name: 'x'.repeat(65), value: API_KEY }], /Invalid header name/],
-    ['a transport-managed header', [{ name: 'Content-Type', value: 'text/plain' }], /set by the MCP transport/],
-    ['a reserved header in any case', [{ name: 'MCP-SESSION-ID', value: 'abc' }], /set by the MCP transport/],
+    [
+      'a name over 64 characters',
+      [{ name: 'x'.repeat(65), value: API_KEY }],
+      /Invalid header name/,
+    ],
+    [
+      'a transport-managed header',
+      [{ name: 'Content-Type', value: 'text/plain' }],
+      /set by the MCP transport/,
+    ],
+    [
+      'a reserved header in any case',
+      [{ name: 'MCP-SESSION-ID', value: 'abc' }],
+      /set by the MCP transport/,
+    ],
     [
       'a duplicate name differing only in case',
       [
@@ -134,9 +153,21 @@ describe('creating a connection with custom headers', () => {
       /more than once/,
     ],
     ['an empty value', [{ name: 'x-api-key', value: '   ' }], /needs a value/],
-    ['a value with a line break', [{ name: 'x-api-key', value: `${API_KEY}\nX-Evil: 1` }], /control characters/],
-    ['a value with a tab', [{ name: 'x-api-key', value: `${API_KEY}\t` + 'x' }], /control characters/],
-    ['a value over the byte limit', [{ name: 'x-api-key', value: 'v'.repeat(65) }], /exceeds max size of 64 bytes/],
+    [
+      'a value with a line break',
+      [{ name: 'x-api-key', value: `${API_KEY}\nX-Evil: 1` }],
+      /control characters/,
+    ],
+    [
+      'a value with a tab',
+      [{ name: 'x-api-key', value: `${API_KEY}\t` + 'x' }],
+      /control characters/,
+    ],
+    [
+      'a value over the byte limit',
+      [{ name: 'x-api-key', value: 'v'.repeat(65) }],
+      /exceeds max size of 64 bytes/,
+    ],
     [
       'more headers than the limit',
       ['a', 'b', 'c', 'd', 'e'].map((name) => ({ name, value: 'v' })),
@@ -236,21 +267,29 @@ describe('updating headers', () => {
     expect(storedRow(created.id).auth_type).toBe('none');
 
     // Control: the same switch succeeds once the request drops the conflicting header.
-    const switched = await update(created.id, { authType: 'bearer', token: 'bearer-token', headers: [] });
+    const switched = await update(created.id, {
+      authType: 'bearer',
+      token: 'bearer-token',
+      headers: [],
+    });
     expect(switched.authType).toBe('bearer');
     expect(switched.headerNames).toEqual([]);
   });
 
   it('asks for every value when the stored headers cannot be decrypted, and accepts a full replacement', async () => {
     const created = await createComposio();
-    sqlite.prepare('UPDATE mcp_connections SET encrypted_headers = ? WHERE id = ?').run('garbage', created.id);
+    sqlite
+      .prepare('UPDATE mcp_connections SET encrypted_headers = ? WHERE id = ?')
+      .run('garbage', created.id);
 
     await expect(update(created.id, { headers: [{ name: 'x-api-key' }] })).rejects.toThrow(
       /cannot be read; send every header with its value/
     );
 
     await update(created.id, { headers: [{ name: 'x-api-key', value: 'ak_replacement' }] });
-    expect(await storedHeaders(created.id)).toEqual([{ name: 'x-api-key', value: 'ak_replacement' }]);
+    expect(await storedHeaders(created.id)).toEqual([
+      { name: 'x-api-key', value: 'ak_replacement' },
+    ]);
   });
 });
 
@@ -259,7 +298,9 @@ describe('listing connections with headers', () => {
   it('shows a row with an unreadable header_names column as having no names', async () => {
     const broken = await createComposio({ name: 'broken' });
     await createComposio({ name: 'healthy' });
-    sqlite.prepare('UPDATE mcp_connections SET header_names = ? WHERE id = ?').run('not json', broken.id);
+    sqlite
+      .prepare('UPDATE mcp_connections SET header_names = ? WHERE id = ?')
+      .run('not json', broken.id);
 
     const listed = await listMcpConnections(db, { userId: 'user-1', projectId: null });
 

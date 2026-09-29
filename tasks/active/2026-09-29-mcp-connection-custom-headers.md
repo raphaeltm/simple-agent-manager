@@ -46,7 +46,7 @@ headers were deferred there).
     (`internal/acp/session_host.go:76`). It already emits `[]acpsdk.HttpHeader`, but only
     `Authorization`.
   - Amp: `buildAmpMcpServer` bridges through `npx mcp-remote@0.1.38 <url> --header
-    Authorization:Bearer ${SAM_MCP_TOKEN}`, with the token in the stdio server env rather than argv.
+Authorization:Bearer ${SAM_MCP_TOKEN}`, with the token in the stdio server env rather than argv.
   - Codex: `generateCodexMcpConfig` (`gateway.go:1393`) writes `[mcp_servers.<name>] url` +
     `bearer_token_env_var`, and exports env vars for docker exec.
   - Vibe: `generateVibeConfig` (`gateway.go:1481`) writes `headers = { Authorization = "Bearer …" }`.
@@ -112,6 +112,7 @@ headers were deferred there).
 ## Implementation Checklist
 
 ### Shared
+
 - [ ] `mcp-connection.ts`: `McpConnectionHeader`, `McpConnectionHeaderUpdate`, `headerNames` on
       `McpConnection`, `headers` on create/update requests, header name pattern/rule/max
       length, reserved header names
@@ -121,6 +122,7 @@ headers were deferred there).
       consumed by the TS test and the Go test
 
 ### API
+
 - [ ] Migration `0175_mcp_connection_headers.sql` (ADD COLUMN ×3, additive) + `schema.ts` columns
 - [ ] `services/mcp-connection-headers.ts`: validate, merge-for-update, seal/open, display names
 - [ ] `services/mcp-connections.ts`: create/update/response use the header module
@@ -131,6 +133,7 @@ headers were deferred there).
 - [ ] `services/node-agent.ts`: `McpServerConfig.headers`, `serializeMcpServers` sends only when non-empty
 
 ### vm-agent
+
 - [ ] Refactor commit: extract `acp/mcp_servers.go`, `acp/codex_config.go`, `acp/vibe_config.go`,
       `server/mcp_servers.go`, `persistence/session_mcp_servers.go` (pure moves)
 - [ ] `McpHeader` + `McpServerEntry.Headers`; header name/value validators in acp
@@ -143,12 +146,14 @@ headers were deferred there).
 - [ ] Vibe: custom headers in the `headers` inline table
 
 ### Web
+
 - [ ] Split `McpServersManager.tsx` into list + `McpServerForm` + `McpServerHeadersField`
 - [ ] Headers editor in the create form; Edit action with keep-semantics payload; header names in the row
 - [ ] Unit tests (create payload, edit payload keep/replace/remove, rendering)
 - [ ] Playwright audit: headers form + edit form + rows with many/long headers, 375 and 1280
 
 ### Tests
+
 - [ ] API: header validation, encryption at rest, never-returned values, PATCH keep/replace/remove,
       authType/Authorization conflict, malformed `header_names` tolerated on list
 - [ ] API vertical slice: mock MCP server requiring `x-api-key` authorizes the resolved entry,
@@ -160,6 +165,7 @@ headers were deferred there).
 - [ ] Contract fixture consumed on both sides
 
 ### Docs
+
 - [ ] `apps/www/.../guides/mcp-servers.md`: headers field, Composio row, editing, remove limitation, Amp note
 - [ ] `apps/www/.../reference/configuration.md` + `apps/api/.env.example`: new limits
 - [ ] `.claude/skills/changelog/SKILL.md` entry; env-reference skill if it lists MCP limits

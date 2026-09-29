@@ -1371,6 +1371,8 @@ lifecycle bookkeeping.
 | `MAX_MCP_CONNECTIONS_PER_SCOPE`            | `25`     | Max bring-your-own MCP servers per scope   |
 | `MCP_CONNECTION_URL_MAX_BYTES`             | `2048`   | Max MCP endpoint URL size                  |
 | `MCP_CONNECTION_TOKEN_MAX_BYTES`           | `8192`   | Max MCP bearer token size                  |
+| `MAX_MCP_CONNECTION_HEADERS`               | `10`     | Max custom headers per MCP server          |
+| `MCP_CONNECTION_HEADER_VALUE_MAX_BYTES`    | `8192`   | Max bytes per MCP custom header value      |
 
 ## External API Timeouts
 

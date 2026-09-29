@@ -1024,7 +1024,10 @@ describe('Node Agent client functions send correct payloads', () => {
     // packages/vm-agent/internal/server/mcp_servers_wire_test.go, so the two sides cannot drift.
     const wire = JSON.parse(
       readFileSync(
-        new URL('../../../../packages/shared/src/fixtures/mcp-server-entry-wire.json', import.meta.url),
+        new URL(
+          '../../../../packages/shared/src/fixtures/mcp-server-entry-wire.json',
+          import.meta.url
+        ),
         'utf8'
       )
     ) as { mcpServers: unknown[] };
