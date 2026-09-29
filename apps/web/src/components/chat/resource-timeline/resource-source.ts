@@ -195,14 +195,31 @@ export function indexFromApi(response: WorkspaceResourceHistoryResponse): Resour
   };
 }
 
+/**
+ * When the server thinned a chunk (`downsampled`), the kept samples are far apart
+ * but each still spans only its own 5-second interval. Stretch each back to the
+ * previous kept sample so the line does not break between them — except across a
+ * sampler gap, which must stay visible.
+ */
+function coverThinnedSamples(samples: ResourceAggregate[], raw: readonly WorkspaceResourceSample[]): ResourceAggregate[] {
+  return samples.map((sample, i) => {
+    const previous = samples[i - 1];
+    if (!previous || raw[i]?.gap || previous.end >= sample.start) return sample;
+    // One kept sample now stands for a wider window: a reading, not a full-resolution measurement of it.
+    return { ...sample, start: previous.end, exact: false };
+  });
+}
+
 export function chunkDetailFromApi(
   chunkId: string,
   detail: NonNullable<WorkspaceResourceHistoryResponse['detail']>
 ): ResourceChunkDetail {
   const toolSpans = detail.toolSpans.map(toolSpanFromApi);
+  const raw = [...detail.samples].sort((a, b) => a.t - b.t);
+  const samples = raw.map(sampleToAggregate);
   return {
     chunkId,
-    samples: withToolStarts(detail.samples.map(sampleToAggregate), toolSpans),
+    samples: withToolStarts(detail.downsampled ? coverThinnedSamples(samples, raw) : samples, toolSpans),
     toolSpans,
     samplerGaps: detail.gaps
       .map((gap) => ({ start: numberField(gap, 'startedAt'), end: numberField(gap, 'endedAt') }))

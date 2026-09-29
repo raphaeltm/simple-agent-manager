@@ -152,3 +152,34 @@ describe('chunkDetailFromApi', () => {
     expect(detail.samplerGaps).toEqual([{ start: T0, end: T0 + 40_000 }]);
   });
 });
+
+describe('chunkDetailFromApi with server-thinned samples', () => {
+  const detail = (downsampled: boolean) =>
+    chunkDetailFromApi('c1', {
+      chunkId: 'c1',
+      samples: [
+        { t: T0 + 5_000, intervalMillis: 5000, cpuMillis: 5000 },
+        { t: T0 + 30_000, intervalMillis: 5000, cpuMillis: 5000 },
+        { t: T0 + 90_000, intervalMillis: 5000, cpuMillis: 5000, gap: true },
+      ],
+      toolSpans: [],
+      gaps: [],
+      originalSampleCount: 18,
+      downsampled,
+      downsampleLimit: 3,
+    });
+
+  it('stretches each kept sample back to the previous one, but never across a sampler gap', () => {
+    const samples = detail(true).samples;
+    expect(samples.map((sample) => [sample.start - T0, sample.end - T0])).toEqual([
+      [0, 5_000],
+      [5_000, 30_000],
+      [85_000, 90_000],
+    ]);
+    expect(samples.map((sample) => sample.exact)).toEqual([true, false, true]);
+  });
+
+  it('leaves full-resolution samples on their own intervals', () => {
+    expect(detail(false).samples.map((sample) => sample.start - T0)).toEqual([0, 25_000, 85_000]);
+  });
+});

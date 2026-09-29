@@ -123,8 +123,6 @@ const RESOURCE_HISTORY_SUMMARY = {
   memoryMeanBytes: 524_288_000,
   memoryPeakBytes: 1_342_177_280,
   memoryKernelPeakBytes: 1_610_612_736,
-  memoryWorkingSetMeanBytes: 346_030_080,
-  memoryWorkingSetPeakBytes: 671_088_640,
   ioReadBytes: 18_874_368,
   ioWriteBytes: 94_371_840,
   oomCount: 1,
@@ -192,11 +190,10 @@ const RESOURCE_HISTORY_DETAIL = {
   downsampleLimit: 720,
   samples: Array.from({ length: 36 }, (_, i) => ({
     t: NOW - 1_800_000 + i * 25_000,
+    intervalMillis: 5_000,
     cpuMillis: resourceHistoryCpuMillis(i),
     memoryBytes: i === 24 ? 1_342_177_280 : 410_000_000 + i * 12_000_000,
     memoryPeakBytes: i >= 24 ? 1_342_177_280 : 610_000_000 + i * 8_000_000,
-    memoryWorkingSetBytes:
-      i === 12 ? undefined : i === 24 ? 671_088_640 : 275_000_000 + i * 5_000_000,
     ioReadBytes: i % 8 === 0 ? 1_048_576 : 16_384,
     ioWriteBytes: i % 9 === 0 ? 4_194_304 : 65_536,
     oom: i === 24 ? 1 : 0,
@@ -205,44 +202,52 @@ const RESOURCE_HISTORY_DETAIL = {
   toolSpans: [
     {
       id: 'tool-compile',
-      kind: 'execute',
-      toolName: 'Bash',
+      kind: 'acp_tool_call',
       startedAt: NOW - 1_650_000,
       endedAt: NOW - 1_520_000,
       concurrency: 1,
     },
     {
       id: 'tool-tests',
-      kind: 'search',
+      kind: 'acp_tool_call',
       startedAt: NOW - 1_470_000,
       endedAt: NOW - 1_240_000,
       concurrency: 2,
     },
     {
       id: 'tool-review',
+      kind: 'acp_tool_call',
       startedAt: NOW - 1_210_000,
       endedAt: NOW - 980_000,
       concurrency: 1,
       approximate: true,
     },
-    {
-      id: 'tool-long-name',
-      kind: 'other',
-      toolName: `mcp__sam-mcp__${'dispatch_task_with_a_deliberately_long_name_'.repeat(6)}`,
-      startedAt: NOW - 930_000,
-      endedAt: NOW - 900_000,
-      concurrency: 1,
-    },
-    {
-      id: 'tool-special-name',
-      kind: 'fetch',
-      toolName: 'fetch <img src=x onerror=alert(1)> & "quotes" 🔥',
-      startedAt: NOW - 880_000,
-      endedAt: NOW - 850_000,
-      concurrency: 1,
-    },
   ],
   gaps: [{ startedAt: NOW - 1_300_000, endedAt: NOW - 1_250_000, reason: 'sampler_delay' }],
+};
+
+/** The older, quieter chunk: the timeline loads every chunk its view needs, not only the newest. */
+const RESOURCE_HISTORY_QUIET_DETAIL = {
+  chunkId: 'wrchunk-rail-1',
+  originalSampleCount: 180,
+  downsampled: false,
+  downsampleLimit: 720,
+  samples: Array.from({ length: 180 }, (_, i) => ({
+    t: NOW - 2_700_000 + (i + 1) * 5_000,
+    intervalMillis: 5_000,
+    cpuMillis: 20 + (i % 3) * 5,
+    memoryBytes: 400_000_000,
+    memoryPeakBytes: 420_000_000,
+    ioReadBytes: 4_096,
+    ioWriteBytes: 8_192,
+  })),
+  toolSpans: [],
+  gaps: [],
+};
+
+const RESOURCE_HISTORY_DETAILS: Record<string, unknown> = {
+  'wrchunk-rail-2': RESOURCE_HISTORY_DETAIL,
+  'wrchunk-rail-1': RESOURCE_HISTORY_QUIET_DETAIL,
 };
 
 /** Enough messages to overflow any test viewport, so the scroll-to-bottom button appears. */
@@ -311,8 +316,6 @@ interface MockOptions extends SessionOptions {
   empty?: boolean;
   /** Seeds a long conversation so the scroll-to-bottom button can actually appear. */
   manyMessages?: boolean;
-  legacyResourceHistory?: boolean;
-  resourceHistoryScenario?: 'normal' | 'empty' | 'error' | 'many';
 }
 
 async function setupMocks(page: Page, options: MockOptions = {}) {
@@ -322,8 +325,6 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     messagesLong = false,
     empty = false,
     manyMessages = false,
-    legacyResourceHistory = false,
-    resourceHistoryScenario = 'normal',
   } = options;
 
   await page.addInitScript(
@@ -376,47 +377,12 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     }
 
     if (pathname === `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/resource-history`) {
-      if (resourceHistoryScenario === 'error') {
-        await route.fulfill({ status: 500, json: { error: 'resource_history_unavailable' } });
-        return;
-      }
-      if (resourceHistoryScenario === 'empty') {
-        await route.fulfill({ json: { summary: null, chunks: [] } });
-        return;
-      }
-      const includeDetail = new URL(url).searchParams.get('chunkId') === 'wrchunk-rail-2';
-      const chunks =
-        resourceHistoryScenario === 'many'
-          ? Array.from({ length: 30 }, (_, index) => ({
-              ...RESOURCE_HISTORY_CHUNKS[0],
-              id: `wrchunk-many-${index}`,
-              chunkSequence: 30 - index,
-              startedAt: NOW - (index + 2) * 900_000,
-              endedAt: NOW - (index + 1) * 900_000,
-            }))
-          : RESOURCE_HISTORY_CHUNKS;
+      const detail = RESOURCE_HISTORY_DETAILS[new URL(url).searchParams.get('chunkId') ?? ''];
       await route.fulfill({
         json: {
-          summary: legacyResourceHistory
-            ? {
-                ...RESOURCE_HISTORY_SUMMARY,
-                memoryWorkingSetMeanBytes: null,
-                memoryWorkingSetPeakBytes: null,
-              }
-            : RESOURCE_HISTORY_SUMMARY,
-          chunks,
-          ...(includeDetail
-            ? {
-                detail: legacyResourceHistory
-                  ? {
-                      ...RESOURCE_HISTORY_DETAIL,
-                      samples: RESOURCE_HISTORY_DETAIL.samples.map(
-                        ({ memoryWorkingSetBytes: _memoryWorkingSetBytes, ...sample }) => sample
-                      ),
-                    }
-                  : RESOURCE_HISTORY_DETAIL,
-              }
-            : {}),
+          summary: RESOURCE_HISTORY_SUMMARY,
+          chunks: RESOURCE_HISTORY_CHUNKS,
+          ...(detail ? { detail } : {}),
         },
       });
       return;
@@ -489,7 +455,9 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       await route.fulfill({ json: { email: false, push: false } });
       return;
     }
-    if (pathname === `/api/projects/${PROJECT_ID}/credential-attribution-health`) {
+    if (
+      pathname === `/api/projects/${PROJECT_ID}/credential-attribution-health`
+    ) {
       await route.fulfill({ json: { healthy: true } });
       return;
     }
@@ -1094,7 +1062,7 @@ test.describe('Session Details — desktop', () => {
 });
 
 test.describe('Session resource history drawer', () => {
-  test('opens contextual summary and auto-loads detail from the real rail action', async ({
+  test('opens the whole session from the real rail action and reads values under the cursor', async ({
     page,
   }) => {
     await openChat(page, { state: 'active', messagesLong: true });
@@ -1104,114 +1072,29 @@ test.describe('Session resource history drawer', () => {
     await expect(dialog).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Resources' })).toBeVisible();
 
-    // Stat cards — use exact match to avoid ambiguity with chart legend text
-    await expect(page.getByText('CPU peak', { exact: true })).toBeVisible();
-    await expect(page.getByText('Memory needed (peak)', { exact: true })).toBeVisible();
-    await expect(page.getByText('640 MB', { exact: true })).toBeVisible();
-    await expect(page.getByText('Total RAM (incl. cache)', { exact: true })).toBeVisible();
-    await expect(page.getByText('1 OOM event observed in retained samples.')).toBeVisible();
-
-    // Chart auto-loads via useEffect selecting newest chunk — wait for it
-    await expect(page.getByRole('img', { name: 'CPU and memory resource timeline' })).toBeVisible({
-      timeout: 10_000,
-    });
-    await expect(
-      page.getByText('CPU: green solid line, normalized to the CPU peak for this chunk.')
-    ).toBeVisible();
-    await expect(
-      page.getByText('Memory needed: purple solid line (working set, when reported).')
-    ).toBeVisible();
-    await expect(
-      page.getByText('Total RAM: faint purple dashed line, including reclaimable file cache.')
-    ).toBeVisible();
-    await expect(
-      page
-        .getByRole('img', { name: 'CPU and memory resource timeline' })
-        .locator('polyline[data-series="working-set"]')
-    ).toHaveCount(2);
-    await expect(page.getByText(/Blue bands: concurrent tool windows/)).toBeVisible();
-    await expect(page.getByText('Tool windows', { exact: true })).toBeVisible();
-    await expect(page.getByText(/Bash ·/)).toBeVisible();
-    await expect(page.getByText(/search ·/)).toBeVisible();
-    await expect(page.getByText(/tool ·/)).toBeVisible();
-    await expect(
-      page.getByText(/fetch <img src=x onerror=alert\(1\)> & "quotes" 🔥 ·/)
-    ).toBeVisible();
-    await expect(dialog.locator('img[src="x"]')).toHaveCount(0);
-    await expect(dialog.locator('[title^="mcp__sam-mcp__"]')).toHaveCount(1);
-    const toolWindows = page.getByText('Tool windows', { exact: true }).locator('..');
-    expect(
-      await toolWindows.evaluate((element) => element.scrollWidth <= element.clientWidth)
-    ).toBe(true);
-
-    // Correlation disclaimer is contextual — only visible after chart loads
-    await expect(page.getByText('Correlation is based on concurrent tool windows')).toBeVisible();
+    // The whole session is on screen, and the OOM kill recorded in the detail samples is called out.
+    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('1 out-of-memory kill')).toBeVisible({ timeout: 10_000 });
+    const timeline = dialog.getByRole('slider', { name: /Session timeline/ });
+    await expect(timeline).toBeVisible();
+    await expect(dialog.getByText('Busiest moments', { exact: true })).toBeVisible();
+    // Chunks are a storage detail: nothing in the drawer offers them.
+    await expect(dialog.getByRole('button', { name: /chunk/i })).toHaveCount(0);
 
     await capture(page, `resource-history-summary-${page.viewportSize()?.width ?? 'viewport'}`);
 
-    // Scroll to bottom for detail screenshot
+    // Keyboard reaches the same readout a finger or pointer does.
+    await timeline.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(dialog.getByRole('button', { name: 'Clear the selected instant' })).toBeVisible();
+    await expect(timeline).toHaveAttribute('aria-valuetext', /CPU <?\d+(\.\d+)? cores?/);
+    await expect(timeline).toHaveAttribute('aria-valuetext', /Memory \d/);
+
+    await capture(page, `resource-history-cursor-${page.viewportSize()?.width ?? 'viewport'}`);
+
     await dialog.locator('.overflow-y-auto').evaluate((el) => {
       el.scrollTop = el.scrollHeight;
     });
     await capture(page, `resource-history-detail-${page.viewportSize()?.width ?? 'viewport'}`);
-
-    // Chunks disclosure — collapsed by default, toggle to expand
-    const chunksToggle = page.getByRole('button', { name: /chunk/ });
-    await expect(chunksToggle).toBeVisible();
-    await expect(chunksToggle).toHaveAttribute('aria-expanded', 'false');
-    await chunksToggle.click();
-    await expect(chunksToggle).toHaveAttribute('aria-expanded', 'true');
-    // Verify chunk buttons are visible after expanding
-    await expect(page.getByRole('button', { name: /samples/ }).first()).toBeVisible();
-
-    await dialog.locator('.overflow-y-auto').evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-    });
-    await capture(page, `resource-history-chunks-${page.viewportSize()?.width ?? 'viewport'}`);
-  });
-
-  test('shows unknown working set for history from an older VM agent', async ({ page }) => {
-    await openChat(page, { state: 'active', legacyResourceHistory: true });
-    await page.getByTestId('session-tool-resources').click();
-
-    for (const label of ['Memory needed (peak)', 'Memory needed (mean)']) {
-      const neededCard = page.getByText(label, { exact: true }).locator('..');
-      await expect(neededCard).toContainText('—');
-      await expect(neededCard).not.toContainText('0 B');
-    }
-    await expect(
-      page
-        .getByRole('img', { name: 'CPU and memory resource timeline' })
-        .locator('polyline[data-series="working-set"]')
-    ).toHaveCount(0);
-    await capture(page, `resource-history-legacy-${page.viewportSize()?.width ?? 'viewport'}`);
-  });
-
-  test('shows the empty resource-history state', async ({ page }) => {
-    await openChat(page, { state: 'active', resourceHistoryScenario: 'empty' });
-    await page.getByTestId('session-tool-resources').click();
-
-    await expect(
-      page.getByText('No retained resource history is available for this session yet.')
-    ).toBeVisible();
-    await capture(page, `resource-history-empty-${page.viewportSize()?.width ?? 'viewport'}`);
-  });
-
-  test('shows the resource-history error state', async ({ page }) => {
-    await openChat(page, { state: 'active', resourceHistoryScenario: 'error' });
-    await page.getByTestId('session-tool-resources').click();
-
-    await expect(page.getByText('Resource history could not be loaded.')).toBeVisible();
-    await capture(page, `resource-history-error-${page.viewportSize()?.width ?? 'viewport'}`);
-  });
-
-  test('keeps a long chunk list usable', async ({ page }) => {
-    await openChat(page, { state: 'active', resourceHistoryScenario: 'many' });
-    await page.getByTestId('session-tool-resources').click();
-
-    const chunksToggle = page.getByRole('button', { name: '30 chunks' });
-    await chunksToggle.click();
-    await expect(page.getByRole('button', { name: /samples/ })).toHaveCount(30);
-    await capture(page, `resource-history-many-${page.viewportSize()?.width ?? 'viewport'}`);
   });
 });
