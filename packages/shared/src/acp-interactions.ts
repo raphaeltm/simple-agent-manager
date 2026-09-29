@@ -57,7 +57,11 @@ export const DEFAULT_ACP_INTERACTION_SENSITIVE_PURGE_MS = 60 * 60 * 1000;
 export const DEFAULT_ACP_INTERACTION_SUMMARY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export const DEFAULT_ACP_INTERACTION_SUMMARY_LAST_SETTLED = 100;
 export const DEFAULT_ACP_INTERACTION_SNAPSHOT_LAST_SETTLED = 20;
-export const DEFAULT_ACP_INTERACTION_RUNTIME_RECEIPT_CAP = 256;
+export const DEFAULT_ACP_INTERACTION_EXPIRY_BATCH_SIZE = 25;
+export const DEFAULT_ACP_INTERACTION_OUTBOX_BATCH_SIZE = 25;
+export const DEFAULT_ACP_INTERACTION_DELIVERY_BATCH_SIZE = 1;
+export const DEFAULT_ACP_INTERACTION_ALARM_WALL_TIME_MS = 15_000;
+export const DEFAULT_ACP_INTERACTION_ALARM_REARM_DELAY_MS = 1_000;
 
 export const AcpInteractionIdSchema = v.pipe(v.string(), v.uuid());
 export const AcpInteractionGenerationSchema = v.pipe(v.string(), v.uuid());
@@ -170,7 +174,6 @@ export type AcpRuntimeAnswerResponse = v.InferOutput<typeof AcpRuntimeAnswerResp
 export interface AcpInteractionCapabilities {
   version: typeof ACP_INTERACTION_CAPABILITY_VERSION;
   answerEndpoint: boolean;
-  receiptCap: number;
 }
 
 export function buildAcpInteractionAnswerPath(

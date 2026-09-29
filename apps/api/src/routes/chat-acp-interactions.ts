@@ -9,6 +9,7 @@ import type { InferOutput } from 'valibot';
 import * as v from 'valibot';
 
 import * as schema from '../db/schema';
+import { interactionDecisionHash } from '../durable-objects/interaction-store-model';
 import type { Env } from '../env';
 import { getTrustedApiOrigin } from '../lib/trusted-origins';
 import { getUserId } from '../middleware/auth';
@@ -70,7 +71,9 @@ function requireAcceptedAnswer(answer: AnswerInteractionResult): AcceptedAnswerR
   ) {
     throw errors.conflict(answer.reason);
   }
-  throw errors.badRequest('reason' in answer ? answer.reason : 'Interaction answer was not accepted');
+  throw errors.badRequest(
+    'reason' in answer ? answer.reason : 'Interaction answer was not accepted'
+  );
 }
 
 async function parseBrowserAnswerBody(c: ChatAcpContext): Promise<BrowserAnswerBody> {
@@ -94,7 +97,12 @@ async function deliverAcceptedAnswer(
   decision: AcpInteractionAnswerDecision
 ): Promise<void> {
   if (answer.status !== 'answered') return;
-  const target = await resolveAcpInteractionDeliveryTarget(env, projectId, sessionId);
+  const target = await resolveAcpInteractionDeliveryTarget(
+    env,
+    projectId,
+    sessionId,
+    answer.delivery.agentSessionId
+  );
   if (target.status === 'ready') {
     const delivery = await deliverAcpInteractionAnswer(env, target.target, {
       interactionId,
@@ -133,7 +141,9 @@ async function listInteractionSnapshots(c: ChatAcpContext): Promise<Response> {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:read');
-  const session = await requireSessionCreator(c.env, projectId, sessionId, userId).catch(() => null);
+  const session = await requireSessionCreator(c.env, projectId, sessionId, userId).catch(
+    () => null
+  );
   const snapshot = await snapshotInteractions(
     c.env,
     projectId,
@@ -180,12 +190,13 @@ async function answerInteractionRoute(c: ChatAcpContext): Promise<Response> {
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
   await requireSessionCreator(c.env, projectId, sessionId, userId);
+  const answerBodyHash = await interactionDecisionHash(body.decision);
   const answer = await answerInteraction(c.env, {
     projectId,
     chatSessionId: sessionId,
     interactionId,
     answerKey: body.answerKey,
-    answerBodyHash: body.decision.answerHash,
+    answerBodyHash,
     decision: body.decision,
   });
   const acceptedAnswer = requireAcceptedAnswer(answer);

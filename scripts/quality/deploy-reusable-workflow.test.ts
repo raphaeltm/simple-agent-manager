@@ -232,6 +232,32 @@ const DEPLOYMENT_IMAGE_RESOLVE_ENV_VARS = [
   'DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES',
 ] as const;
 
+const ACP_INTERACTION_ENV_VARS = [
+  'ACP_INTERACTIONS_ENABLED',
+  'ACP_INTERACTION_MAX_DEADLINE_MS',
+  'ACP_INTERACTION_MAX_PENDING_PER_SESSION',
+  'ACP_INTERACTION_REQUEST_MAX_BYTES',
+  'ACP_INTERACTION_OPTIONS_MAX_COUNT',
+  'ACP_INTERACTION_OPTION_NAME_MAX_CHARS',
+  'ACP_INTERACTION_FORM_SCHEMA_MAX_BYTES',
+  'ACP_INTERACTION_FORM_SCHEMA_MAX_PROPERTIES',
+  'ACP_INTERACTION_FORM_SCHEMA_MAX_ENUM',
+  'ACP_INTERACTION_ANSWER_MAX_BYTES',
+  'ACP_INTERACTION_ANSWER_STRING_MAX_BYTES',
+  'ACP_INTERACTION_RETRY_DELAYS_MS',
+  'ACP_INTERACTION_RETRY_STEADY_MS',
+  'ACP_INTERACTION_DELIVERY_WINDOW_MS',
+  'ACP_INTERACTION_SENSITIVE_PURGE_MS',
+  'ACP_INTERACTION_SUMMARY_RETENTION_MS',
+  'ACP_INTERACTION_SUMMARY_LAST_SETTLED',
+  'ACP_INTERACTION_SNAPSHOT_LAST_SETTLED',
+  'ACP_INTERACTION_EXPIRY_BATCH_SIZE',
+  'ACP_INTERACTION_OUTBOX_BATCH_SIZE',
+  'ACP_INTERACTION_DELIVERY_BATCH_SIZE',
+  'ACP_INTERACTION_ALARM_WALL_TIME_MS',
+  'ACP_INTERACTION_ALARM_REARM_DELAY_MS',
+] as const;
+
 const ARCHIVE_SWEEP_AFFORDABILITY_ENV_VARS = [
   'PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT',
   'PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH',
@@ -1039,6 +1065,21 @@ describe('deploy reusable workflow', () => {
     ];
 
     for (const name of DEPLOYMENT_IMAGE_RESOLVE_ENV_VARS) {
+      expect(optionalWorkerVars).toContain(name);
+      for (const sync of syncBlocks) {
+        expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
+      }
+    }
+  });
+
+  it('forwards ACP interaction controls into every wrangler config sync env', () => {
+    const optionalWorkerVars = extractOptionalWorkerEnvVars();
+    const syncBlocks = [
+      stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)'),
+      stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)'),
+    ];
+
+    for (const name of ACP_INTERACTION_ENV_VARS) {
       expect(optionalWorkerVars).toContain(name);
       for (const sync of syncBlocks) {
         expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');

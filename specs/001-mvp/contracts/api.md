@@ -8,7 +8,9 @@
 
 ## Overview
 
-RESTful API for managing AI coding workspaces. All endpoints require bearer token authentication.
+RESTful API for managing AI coding workspaces. Authentication varies by route: browser routes use
+the normal authenticated browser session, runtime callbacks use scoped callback JWTs, and other API
+routes use the bearer-token contract described below.
 
 ---
 
@@ -32,6 +34,29 @@ Authorization: Bearer {API_TOKEN}
 ---
 
 ## Endpoints
+
+### Dormant ACP interaction foundation
+
+These routes exist for the durable ACP interaction foundation. New interaction creation remains
+disabled while `ACP_INTERACTIONS_ENABLED=false`; existing records remain readable and serviceable.
+
+- `POST /api/projects/:projectId/workspaces/:workspaceId/acp-interactions` creates an
+  interaction. It requires a workspace-scoped callback JWT; project, workspace,
+  chat-session, and running agent-session identity are resolved server-side.
+- `POST /api/projects/:projectId/workspaces/:workspaceId/acp-interactions/:interactionId/settle`
+  records runtime cancellation or completion under the same callback-JWT binding.
+- `GET /api/projects/:projectId/sessions/:sessionId/interactions` returns a safe snapshot.
+  Project members without session ownership receive generic pending summaries only.
+- `GET /api/projects/:projectId/sessions/:sessionId/interactions/:interactionId` returns
+  decrypted detail only to the session creator and uses `Cache-Control: private, no-store`.
+- `POST /api/projects/:projectId/sessions/:sessionId/interactions/:interactionId/answer`
+  requires `task:write`, session-creator ownership, and the exact configured app Origin.
+  The accepted decision is committed before no-wake delivery is attempted.
+
+Runtime create/settle routes return `404` for mismatched workspace/project/session
+binding, `409` for stale or conflicting state, and `410` for terminal workspaces.
+Browser mutation routes reject callback/MCP bearer tokens because they require the
+normal authenticated browser session in addition to the Origin check.
 
 ### GET /projects/:projectId/library/:fileId/preview
 
@@ -65,11 +90,12 @@ Content-Type: application/json
 ```
 
 **Request Body**:
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `repoUrl` | string | Yes | Git repository URL |
-| `size` | string | No | VM size: `small`, `medium` (default), `large` |
-| `name` | string | No | Custom workspace name |
+
+| Field     | Type   | Required | Description                                   |
+| --------- | ------ | -------- | --------------------------------------------- |
+| `repoUrl` | string | Yes      | Git repository URL                            |
+| `size`    | string | No       | VM size: `small`, `medium` (default), `large` |
+| `name`    | string | No       | Custom workspace name                         |
 
 > **Note**: Anthropic API key is NOT required. Users authenticate Claude Code via
 > `claude login` in the CloudCLI terminal using their Claude Max subscription.
@@ -121,9 +147,10 @@ Authorization: Bearer {token}
 ```
 
 **Query Parameters**:
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `status` | string | Filter by status (optional) |
+
+| Parameter | Type   | Description                 |
+| --------- | ------ | --------------------------- |
+| `status`  | string | Filter by status (optional) |
 
 **Success Response** (200 OK):
 
@@ -237,9 +264,10 @@ Content-Type: application/json
 ```
 
 **Request Body**:
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `reason` | string | Yes | Reason for cleanup: `idle_timeout`, `manual`, `error` |
+
+| Field    | Type   | Required | Description                                           |
+| -------- | ------ | -------- | ----------------------------------------------------- |
+| `reason` | string | Yes      | Reason for cleanup: `idle_timeout`, `manual`, `error` |
 
 **Success Response** (200 OK):
 
@@ -291,10 +319,11 @@ GET /github/callback?installation_id=12345&setup_action=install HTTP/1.1
 ```
 
 **Query Parameters**:
-| Parameter | Type | Description |
-|-----------|------|-------------|
+
+| Parameter         | Type   | Description                |
+| ----------------- | ------ | -------------------------- |
 | `installation_id` | number | GitHub App installation ID |
-| `setup_action` | string | `install` or `update` |
+| `setup_action`    | string | `install` or `update`      |
 
 **Success Response** (302 Redirect):
 
@@ -422,14 +451,15 @@ All errors follow this structure:
 ```
 
 **Common Error Codes**:
-| Code | HTTP Status | Description |
-|------|-------------|-------------|
-| `unauthorized` | 401 | Invalid or missing token |
-| `forbidden` | 403 | Token valid but not allowed |
-| `not_found` | 404 | Resource does not exist |
-| `validation_error` | 400 | Request validation failed |
-| `provider_error` | 502 | Cloud provider API error |
-| `internal_error` | 500 | Unexpected server error |
+
+| Code               | HTTP Status | Description                 |
+| ------------------ | ----------- | --------------------------- |
+| `unauthorized`     | 401         | Invalid or missing token    |
+| `forbidden`        | 403         | Token valid but not allowed |
+| `not_found`        | 404         | Resource does not exist     |
+| `validation_error` | 400         | Request validation failed   |
+| `provider_error`   | 502         | Cloud provider API error    |
+| `internal_error`   | 500         | Unexpected server error     |
 
 ---
 
