@@ -133,9 +133,17 @@ export function detailBoundsViolation(
   detail: unknown,
   config: AcpInteractionConfig
 ): string | null {
-  const record = asRecord(detail);
+  return detailRecordBoundsViolation(asRecord(detail), config);
+}
+
+function detailRecordBoundsViolation(
+  record: Record<string, unknown> | null,
+  config: AcpInteractionConfig
+): string | null {
   if (!record) return null;
-  return optionsBoundsViolation(record, config) ?? schemaBoundsViolation(record, config);
+  const optionsViolation = optionsBoundsViolation(record, config);
+  if (optionsViolation) return optionsViolation;
+  return schemaBoundsViolation(record, config);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

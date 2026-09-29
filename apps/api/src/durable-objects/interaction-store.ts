@@ -49,6 +49,13 @@ type EncryptedNullablePayload = {
   iv: string | null;
 };
 
+type StoredJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | object;
+
 export type {
   InteractionStoreAnswerInput,
   InteractionStoreCreateInput,
@@ -198,7 +205,7 @@ export class InteractionStore extends DurableObject<Env> {
   async answer(input: InteractionStoreAnswerInput): Promise<InteractionStoreAnswerResult> {
     const config = getAcpInteractionConfig(this.env);
     const row = this.read(input.interactionId);
-    if (!row || row.project_id !== input.projectId || row.chat_session_id !== input.chatSessionId) {
+    if (row?.project_id !== input.projectId || row.chat_session_id !== input.chatSessionId) {
       return { status: 'not_found', reason: 'interaction not found' };
     }
     if (row.state !== 'pending') {
@@ -290,8 +297,7 @@ export class InteractionStore extends DurableObject<Env> {
     }
     if (row.state !== 'pending') return { status: 'settled' };
     const now = nowMs();
-    const state = input.reason === 'completed' ? 'cancelled' : 'cancelled';
-    this.markTerminal(row.interaction_id, state, now, input.reason);
+    this.markTerminal(row.interaction_id, 'cancelled', now, input.reason);
     return { status: 'settled' };
   }
 
@@ -332,17 +338,18 @@ export class InteractionStore extends DurableObject<Env> {
 
   async detail(
     interactionId: string
-  ): Promise<{ summary: AcpInteractionSafeSummary; detail: unknown } | null> {
+  ): Promise<{ summary: AcpInteractionSafeSummary; detail: StoredJsonValue } | null> {
     const row = this.read(interactionId);
     if (!row) return null;
-    let detail: unknown = null;
+    let detail: StoredJsonValue = null;
     if (row.encrypted_detail?.length && row.detail_iv?.length) {
       const plaintext = await decrypt(
         row.encrypted_detail,
         row.detail_iv,
         getCredentialEncryptionKey(this.env)
       );
-      detail = JSON.parse(plaintext) as unknown;
+      const parsedDetail = JSON.parse(plaintext) as unknown;
+      detail = parsedDetail as StoredJsonValue;
     }
     return { summary: parseSummary(row), detail };
   }
@@ -364,12 +371,7 @@ export class InteractionStore extends DurableObject<Env> {
     const row = this.read(interactionId);
     if (!row) return { status: 'not_found' };
     const now = nowMs();
-    const state =
-      outcome === 'confirmed'
-        ? 'delivery_confirmed'
-        : outcome === 'unconfirmed'
-          ? 'delivery_unconfirmed'
-          : 'interrupted';
+    const state = deliveryStateForOutcome(outcome);
     this.sql.exec(
       `UPDATE interactions
        SET state = ?, delivery_state = ?, updated_at = ?, terminal_at = ?, last_delivery_error = ?
@@ -504,7 +506,7 @@ export class InteractionStore extends DurableObject<Env> {
 
   private async processDeliveryJob(interactionId: string, now: number): Promise<void> {
     const row = this.read(interactionId);
-    if (!row || row.state !== 'answered') return;
+    if (row?.state !== 'answered') return;
     if (!row.encrypted_decision || !row.decision_iv) {
       this.recordDelivery(interactionId, 'unconfirmed', 'missing encrypted decision for retry');
       return;
@@ -700,6 +702,12 @@ export class InteractionStore extends DurableObject<Env> {
       await this.ctx.storage.setAlarm(Math.max(due, nowMs() + 1000));
     }
   }
+}
+
+function deliveryStateForOutcome(outcome: 'confirmed' | 'unconfirmed' | 'interrupted'): string {
+  if (outcome === 'confirmed') return 'delivery_confirmed';
+  if (outcome === 'unconfirmed') return 'delivery_unconfirmed';
+  return 'interrupted';
 }
 
 export async function interactionDecisionHash(
