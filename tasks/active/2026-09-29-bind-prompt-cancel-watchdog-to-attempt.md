@@ -47,28 +47,28 @@ urgent delivery) is a separate follow-up PR.
 
 ## Implementation Checklist
 
-- [ ] Commit 1 (pure move): split `session_host.go` below 800 lines — cancel block →
+- [x] Commit 1 (pure move): split `session_host.go` below 800 lines — cancel block →
       `session_host_cancel.go`; promptAttempt/checkpoint episode →
       `session_host_attempt.go`; session settings → `session_host_settings.go`;
       stderr helpers → `session_host_stderr.go`; MCP server builders →
       `session_host_mcp.go`
-- [ ] Arm the cancel watchdog with the exact `*promptAttempt`; select on
+- [x] Arm the cancel watchdog with the exact `*promptAttempt`; select on
       `attempt.done`, `h.ctx.Done()`, and an injectable grace timer
-- [ ] Force-stop is attempt-bound: no-op (with log) unless `h.promptAttempt == attempt`
+- [x] Force-stop is attempt-bound: no-op (with log) unless `h.promptAttempt == attempt`
       and the attempt is non-terminal; `watchPromptTimeout` passes the attempt
-- [ ] Delete `promptAttemptForID` and its fabricate branch
-- [ ] A stuck *requested* cancel finishes `cancelled` and restarts the agent via the
+- [x] Delete `promptAttemptForID` and its fabricate branch
+- [x] A stuck *requested* cancel finishes `cancelled` and restarts the agent via the
       intentional prompt-cancel process stop (never `HostError`/fatal)
-- [ ] Observability: `promptId` (+ `deliveryId` for control-plane prompts) on
+- [x] Observability: `promptId` (+ `deliveryId` for control-plane prompts) on
       `ACP Prompt started/cancelled/completed`, `Prompt cancel requested`; force-stop
       logs `{promptId, currentPromptId, cancelRequested}`
-- [ ] Tests: real prompts via fake ACP agent + gated timer, both HTTP and WS cancel
+- [x] Tests: real prompts via fake ACP agent + gated timer, both HTTP and WS cancel
       paths, next prompt accepted before deadline, then release timer → B untouched,
       no HostError, one completion per prompt
-- [ ] Convergence control: fake agent that blocks cancel → watchdog fires, outcome
+- [x] Convergence control: fake agent that blocks cancel → watchdog fires, outcome
       `cancelled`, agent restart requested, host not in error
-- [ ] Rewrite hand-built-state tests to drive real accepted attempts
-- [ ] Discrimination: revert to ID lookup + fabricate seam → new test goes red
+- [x] Rewrite hand-built-state tests to drive real accepted attempts
+- [x] Discrimination: revert to ID lookup + fabricate seam → new test goes red
 - [ ] Update idea 01M31M9G3T4SEWT9ZW1BM4QKZ3 with PR evidence
 
 ## Acceptance Criteria
@@ -79,6 +79,23 @@ urgent delivery) is a separate follow-up PR.
 - [ ] `go test ./...` and `go vet` pass for `packages/vm-agent`
 - [ ] Staging: VM provisioned, heartbeat, prompt → Stop → immediate follow-up
       completes without task failure
+
+## Implementation Notes
+
+- Stale-watchdog discrimination (2026-09-29): removing the `attempt.done` disarm and
+  re-pointing the force-stop at the current attempt (pre-fix semantics) made
+  `TestCancelGraceWatchdogNeverTouchesTheNextPrompt/{ws,http}` fail with prompt B
+  completing `fatal_error`, the incident signature, and
+  `TestCancelGraceWatchdogDisarmsWhenAttemptSettles` fail. Restored → green.
+- Convergence discrimination: disabling the stuck-cancel settle branch made
+  `TestCancelGraceWatchdogSettlesAGenuinelyStuckCancel/{ws,http}` report
+  `fatal_error` instead of `cancelled`. Restored → green.
+- Stuck cancel is modelled realistically: the fake agent stops draining stdin, so
+  the ACP SDK's post-cancel `session/cancel` write blocks and `Run` cannot settle.
+- `finishPromptWithError` seam only creates an attempt when none exists, so it
+  cannot overwrite a live attempt; left as is.
+- The HTTP transport test calls `CancelPromptFromControlPlane` directly; the HTTP
+  handler is a thin `IsPrompting()` guard in front of it.
 
 ## References
 

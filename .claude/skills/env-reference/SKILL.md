@@ -761,7 +761,7 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `ACP_PONG_TIMEOUT` — WebSocket pong deadline after ping (default: 10s)
 - `ACP_PROMPT_TIMEOUT` — Max ACP prompt runtime for workspace sessions; 0 = no timeout (default: 0)
 - `ACP_TASK_PROMPT_TIMEOUT` — Max ACP prompt runtime for task-driven sessions (default: 8h)
-- `ACP_PROMPT_CANCEL_GRACE_PERIOD` — Grace wait after cancel before force-stop (default: 5s)
+- `ACP_PROMPT_CANCEL_GRACE_PERIOD` — Grace wait for the cancelled prompt to settle before it is finished as `cancelled` and the agent is restarted (default: 5s). Bound to the cancelled prompt; never affects a later prompt
 - `ACP_PROMPT_RETRY_MAX_RETRIES` — Max transient provider prompt retries after the initial attempt (default: 2)
 - `ACP_PROMPT_RETRY_INITIAL_BACKOFF` — Initial backoff before retrying transient provider prompt errors (default: 15s)
 - `ACP_PROMPT_RETRY_MAX_BACKOFF` — Max exponential backoff for transient provider prompt retries (default: 2m)

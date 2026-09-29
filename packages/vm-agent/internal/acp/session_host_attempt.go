@@ -13,7 +13,10 @@ import (
 type PromptTerminalObserver func(stopReason string, promptErr error)
 
 type promptAttempt struct {
-	id                  uint64
+	id uint64
+	// deliveryID is the control-plane prompt delivery that created this
+	// attempt, empty for viewer prompts. Immutable after beginPrompt.
+	deliveryID          string
 	startedAt           time.Time
 	cancel              context.CancelFunc
 	done                chan struct{}
@@ -92,6 +95,21 @@ func (a *promptAttempt) completeWith(h *SessionHost, stopReason string, promptEr
 	a.terminalMu.Unlock()
 	a.publishCompletion(h, stopReason, promptErr, finalize)
 	return true
+}
+
+func (a *promptAttempt) isTerminal() bool {
+	a.terminalMu.Lock()
+	defer a.terminalMu.Unlock()
+	return a.terminal
+}
+
+// logFields adds the attempt's delivery identity to lifecycle log fields. Safe
+// on a nil attempt so callers can log a cancel whose attempt already settled.
+func (a *promptAttempt) logFields(fields map[string]interface{}) map[string]interface{} {
+	if a != nil && a.deliveryID != "" {
+		fields["deliveryId"] = a.deliveryID
+	}
+	return fields
 }
 
 func (a *promptAttempt) claimCheckpointTerminal() bool {

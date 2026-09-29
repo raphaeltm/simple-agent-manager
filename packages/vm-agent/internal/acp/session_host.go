@@ -29,8 +29,9 @@ const (
 )
 
 const (
-	// DefaultPromptCancelGracePeriod is how long we wait after cancel before
-	// force-stopping an unresponsive agent process.
+	// DefaultPromptCancelGracePeriod is how long a cancelled prompt may take to
+	// settle before it is finished as "cancelled" and the agent is restarted.
+	// The watchdog is bound to that one prompt attempt and disarms when it ends.
 	DefaultPromptCancelGracePeriod = 5 * time.Second
 
 	// DefaultPromptRetryInitialDelay is the first delay before retrying a
@@ -257,6 +258,10 @@ type SessionHost struct {
 	// promptActivityCancel stops the periodic prompting re-report loop.
 	// Protected by promptCancelMu.
 	promptActivityCancel context.CancelFunc
+	// cancelGraceTimer replaces the cancel-grace timer in tests so they can own
+	// the ordering between a cancel, the next prompt, and the deadline. Set
+	// only before the host is used; nil means a real time.Timer.
+	cancelGraceTimer func(time.Duration) (<-chan time.Time, func())
 
 	// Harness-owned background work is normalized from optional ACP extension
 	// notifications. It is isolated from the prompt lifecycle because it may

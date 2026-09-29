@@ -1528,7 +1528,7 @@ func (s *Server) startAgentWithPromptObserved(host *acp.SessionHost, workspaceID
 		host.HandlePrompt(ctx, syntheticReqID, promptParams, "server", true)
 		return
 	}
-	accepted, ok := host.AcceptPrompt(ctx, syntheticReqID, promptParams, "server", true, observer)
+	accepted, ok := host.AcceptPrompt(ctx, syntheticReqID, promptParams, "server", true, "", observer)
 	if !ok {
 		promptErr := errors.New("initial prompt was not accepted by the session host")
 		observer("error", promptErr)
@@ -1695,7 +1695,7 @@ func (s *Server) handleVersionedPromptDelivery(
 
 	observer := s.promptReceiptObserver(workspaceID, sessionID, deliveryID)
 	accepted, ok := host.AcceptPrompt(context.Background(), reqID, promptParams,
-		"control-plane", false, observer)
+		"control-plane", false, deliveryID, observer)
 	if !ok {
 		receipt.RuntimeIdentity = s.executionRuntimeID
 		writeVersionedPromptResponse(w, http.StatusConflict, "not_ready", sessionID, receipt)

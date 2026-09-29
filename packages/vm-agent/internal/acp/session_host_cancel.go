@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -80,11 +81,18 @@ func (h *SessionHost) cancelPrompt(startGraceTimer bool) {
 		return
 	}
 
-	slog.Info("CancelPrompt: cancelling in-flight prompt")
-	h.reportLifecycle("info", "Prompt cancel requested", nil)
+	// Resolve the exact attempt being cancelled. promptMu is taken only after
+	// promptCancelMu is released (beginPrompt nests them the other way round).
+	// If the attempt already settled and a newer one began in between, the
+	// lookup misses and no watchdog is armed: this cancel's attempt is done.
+	attempt := h.promptAttemptByID(promptID)
+	slog.Info("CancelPrompt: cancelling in-flight prompt", "promptId", promptID)
+	h.reportLifecycle("info", "Prompt cancel requested", attempt.logFields(map[string]interface{}{
+		"promptId": promptID,
+	}))
 	cancelFn()
 
-	if !startGraceTimer {
+	if !startGraceTimer || attempt == nil {
 		return
 	}
 
@@ -93,12 +101,47 @@ func (h *SessionHost) cancelPrompt(startGraceTimer bool) {
 		return
 	}
 
-	go func(id uint64, wait time.Duration) {
-		timer := time.NewTimer(wait)
-		defer timer.Stop()
-		<-timer.C
-		h.triggerPromptForceStopIfStuck(id, fmt.Sprintf("Prompt cancel grace elapsed after %s", wait))
-	}(promptID, grace)
+	go h.watchPromptCancelGrace(attempt, grace)
+}
+
+// watchPromptCancelGrace is bound to the one attempt a cancel targeted. It is
+// disarmed as soon as that attempt reaches a terminal state, so a stale timer
+// can never act on the next prompt (the 2026-09 regression where a follow-up
+// accepted inside the grace window was force-stopped and its task failed).
+func (h *SessionHost) watchPromptCancelGrace(attempt *promptAttempt, grace time.Duration) {
+	fired, stop := h.startCancelGraceTimer(grace)
+	defer stop()
+	select {
+	case <-attempt.done:
+		return
+	case <-h.lifecycleContext().Done():
+		return
+	case <-fired:
+	}
+	h.triggerPromptForceStopIfStuck(attempt, fmt.Sprintf("Prompt cancel grace elapsed after %s", grace))
+}
+
+func (h *SessionHost) startCancelGraceTimer(d time.Duration) (<-chan time.Time, func()) {
+	if h.cancelGraceTimer != nil {
+		return h.cancelGraceTimer(d)
+	}
+	timer := time.NewTimer(d)
+	return timer.C, func() { timer.Stop() }
+}
+
+// settleStuckPromptCancel handles a requested cancel whose attempt did not
+// finish within the grace period. A stop is never a task failure: the attempt
+// finishes "cancelled" and the agent process is restarted through the same
+// intentional prompt-cancel path the control-plane Stop uses, which returns
+// the host to ready for follow-up prompts.
+func (h *SessionHost) settleStuckPromptCancel(attempt *promptAttempt, reason string, fields map[string]interface{}) {
+	attempt.completeWith(h, "cancelled", context.Canceled, func() {
+		slog.Warn("ACP prompt cancel did not settle; restarting agent", "promptId", attempt.id, "reason", reason)
+		h.reportLifecycle("warn", "ACP prompt cancel did not settle; restarting agent", fields)
+		h.stopPromptActivityRereport()
+		h.broadcastControl(MsgSessionPromptDone, nil)
+		h.StopProcessForPromptCancel()
+	})
 }
 
 // ForwardToAgent sends a raw message to the agent's stdin.
