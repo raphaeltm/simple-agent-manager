@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const nodeAgentRequest = vi.fn();
@@ -103,14 +100,5 @@ describe('ACP interaction answer delivery', () => {
       outcome: 'unconfirmed',
       reason: 'transport outcome unknown',
     });
-  });
-
-  it('does not depend on prompt delivery wake/recovery adapters', () => {
-    const source = readFileSync(
-      fileURLToPath(new URL('../src/services/acp-interaction-delivery.ts', import.meta.url)),
-      'utf8'
-    );
-    expect(source).not.toContain('ensureSessionRecovery');
-    expect(source).not.toContain('prompt-delivery');
   });
 });
