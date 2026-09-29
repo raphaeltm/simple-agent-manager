@@ -1,21 +1,18 @@
--- Backfill resource summaries from server-owned session/task records. Every join is
--- constrained through the summary's project and workspace so a malformed cross-project
--- task reference cannot contribute attribution.
+-- Backfill blank resource-summary attribution from validated server-owned records.
+-- Exact task attribution wins for task-backed history; the newest workspace agent
+-- session is only a fallback. Every task/profile/skill lookup is tenant scoped.
 WITH attribution AS (
   SELECT summary.id,
+         COALESCE(task_profile.id, session_profile.id, workspace_profile.id)
+           AS agent_profile_id,
+         COALESCE(task_skill.id, session_skill.id) AS skill_id,
          COALESCE(
-           NULLIF(agent_session.agent_profile_id, ''),
-           NULLIF(task.agent_profile_hint, ''),
-           NULLIF(workspace.agent_profile_hint, '')
-         ) AS agent_profile_id,
-         COALESCE(
-           NULLIF(agent_session.skill_id, ''),
-           NULLIF(task.skill_id, '')
-         ) AS skill_id,
-         COALESCE(
+           task_profile.agent_type,
+           task_skill.agent_type,
            NULLIF(agent_session.agent_type, ''),
-           NULLIF(profile.agent_type, ''),
-           NULLIF(skill.agent_type, '')
+           session_profile.agent_type,
+           session_skill.agent_type,
+           workspace_profile.agent_type
          ) AS agent_type
     FROM workspace_resource_summaries summary
     JOIN workspaces workspace
@@ -51,17 +48,27 @@ WITH attribution AS (
                   candidate.id DESC
          LIMIT 1
       )
-    LEFT JOIN agent_profiles profile
-      ON profile.id = COALESCE(
-        NULLIF(agent_session.agent_profile_id, ''),
-        NULLIF(task.agent_profile_hint, ''),
-        NULLIF(workspace.agent_profile_hint, '')
-      )
-    LEFT JOIN skills skill
-      ON skill.id = COALESCE(
-        NULLIF(agent_session.skill_id, ''),
-        NULLIF(task.skill_id, '')
-      )
+    LEFT JOIN agent_profiles task_profile
+      ON task_profile.id = NULLIF(task.agent_profile_hint, '')
+     AND (task_profile.project_id = workspace.project_id
+          OR (task_profile.project_id IS NULL AND task_profile.user_id = workspace.user_id))
+    LEFT JOIN skills task_skill
+      ON task_skill.id = NULLIF(task.skill_id, '')
+     AND (task_skill.project_id = workspace.project_id
+          OR (task_skill.project_id IS NULL AND task_skill.user_id = workspace.user_id))
+    LEFT JOIN agent_profiles session_profile
+      ON session_profile.id = NULLIF(agent_session.agent_profile_id, '')
+     AND (session_profile.project_id = workspace.project_id
+          OR (session_profile.project_id IS NULL AND session_profile.user_id = workspace.user_id))
+    LEFT JOIN skills session_skill
+      ON session_skill.id = NULLIF(agent_session.skill_id, '')
+     AND (session_skill.project_id = workspace.project_id
+          OR (session_skill.project_id IS NULL AND session_skill.user_id = workspace.user_id))
+    LEFT JOIN agent_profiles workspace_profile
+      ON workspace_profile.id = NULLIF(workspace.agent_profile_hint, '')
+     AND (workspace_profile.project_id = workspace.project_id
+          OR (workspace_profile.project_id IS NULL
+              AND workspace_profile.user_id = workspace.user_id))
    WHERE summary.agent_profile_id IS NULL
       OR TRIM(summary.agent_profile_id) = ''
       OR summary.skill_id IS NULL

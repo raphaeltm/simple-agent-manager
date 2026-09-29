@@ -392,7 +392,7 @@ interface WorkspaceUploadRow {
 }
 
 const WORKSPACE_UPLOAD_CONTEXT_QUERY = `WITH target_workspace AS (
-  SELECT id, project_id, node_id, chat_session_id, agent_profile_hint
+  SELECT id, project_id, user_id, node_id, chat_session_id, agent_profile_hint
     FROM workspaces
    WHERE id = ? AND project_id = ?
    LIMIT 1
@@ -422,16 +422,15 @@ SELECT w.id,
        w.node_id,
        w.chat_session_id,
        t.id AS resolved_task_id,
+       COALESCE(task_profile.id, session_profile.id, workspace_profile.id) AS agent_profile_id,
+       COALESCE(task_skill.id, session_skill.id) AS skill_id,
        COALESCE(
-         NULLIF(a.agent_profile_id, ''),
-         NULLIF(t.agent_profile_hint, ''),
-         NULLIF(w.agent_profile_hint, '')
-       ) AS agent_profile_id,
-       COALESCE(NULLIF(a.skill_id, ''), NULLIF(t.skill_id, '')) AS skill_id,
-       COALESCE(
+         task_profile.agent_type,
+         task_skill.agent_type,
          NULLIF(a.agent_type, ''),
-         NULLIF(p.agent_type, ''),
-         NULLIF(s.agent_type, '')
+         session_profile.agent_type,
+         session_skill.agent_type,
+         workspace_profile.agent_type
        ) AS agent_type
   FROM target_workspace w
   LEFT JOIN resolved_task t ON 1 = 1
@@ -446,14 +445,26 @@ SELECT w.id,
                 candidate.id DESC
        LIMIT 1
     )
-  LEFT JOIN agent_profiles p
-    ON p.id = COALESCE(
-      NULLIF(a.agent_profile_id, ''),
-      NULLIF(t.agent_profile_hint, ''),
-      NULLIF(w.agent_profile_hint, '')
-    )
-  LEFT JOIN skills s
-    ON s.id = COALESCE(NULLIF(a.skill_id, ''), NULLIF(t.skill_id, ''))
+  LEFT JOIN agent_profiles task_profile
+    ON task_profile.id = NULLIF(t.agent_profile_hint, '')
+   AND (task_profile.project_id = w.project_id
+        OR (task_profile.project_id IS NULL AND task_profile.user_id = w.user_id))
+  LEFT JOIN skills task_skill
+    ON task_skill.id = NULLIF(t.skill_id, '')
+   AND (task_skill.project_id = w.project_id
+        OR (task_skill.project_id IS NULL AND task_skill.user_id = w.user_id))
+  LEFT JOIN agent_profiles session_profile
+    ON session_profile.id = NULLIF(a.agent_profile_id, '')
+   AND (session_profile.project_id = w.project_id
+        OR (session_profile.project_id IS NULL AND session_profile.user_id = w.user_id))
+  LEFT JOIN skills session_skill
+    ON session_skill.id = NULLIF(a.skill_id, '')
+   AND (session_skill.project_id = w.project_id
+        OR (session_skill.project_id IS NULL AND session_skill.user_id = w.user_id))
+  LEFT JOIN agent_profiles workspace_profile
+    ON workspace_profile.id = NULLIF(w.agent_profile_hint, '')
+   AND (workspace_profile.project_id = w.project_id
+        OR (workspace_profile.project_id IS NULL AND workspace_profile.user_id = w.user_id))
  LIMIT 1`;
 
 async function loadWorkspaceForUpload(

@@ -316,17 +316,24 @@ describe('workspace resource history', () => {
       INSERT INTO workspaces (id, project_id, node_id, chat_session_id) VALUES
         ('ws-a', 'proj-1', 'node-a', 'session-a'),
         ('ws-b', 'proj-1', 'node-b', 'session-b'),
-        ('ws-foreign-guard', 'proj-1', 'node-c', 'session-c');
+        ('ws-foreign-guard', 'proj-1', 'node-c', 'session-c'),
+        ('ws-dangling', 'proj-1', 'node-d', 'session-d');
       INSERT INTO agent_sessions
         (id, workspace_id, status, agent_type, agent_profile_id, skill_id, created_at, updated_at)
       VALUES
         ('agent-session-a', 'ws-a', 'running', 'openai-codex', 'profile-a', 'skill-a',
-         '2026-09-29T00:00:00.000Z', '2026-09-29T00:00:00.000Z');
+         '2026-09-29T00:00:00.000Z', '2026-09-29T00:00:00.000Z'),
+        ('agent-session-b-conflict', 'ws-b', 'running', 'openai-codex', 'profile-a', 'skill-a',
+         '2026-09-29T01:00:00.000Z', '2026-09-29T01:00:00.000Z');
       INSERT INTO tasks
         (id, project_id, workspace_id, chat_session_id, agent_profile_hint, skill_id, started_at)
       VALUES
         ('task-b', 'proj-1', 'ws-b', 'session-b', 'profile-b', 'skill-b',
          '2026-09-29T00:00:00.000Z'),
+        ('task-local-foreign-hints', 'proj-1', 'ws-foreign-guard', 'session-c',
+         'profile-foreign', 'skill-foreign', '2026-09-29T00:30:00.000Z'),
+        ('task-dangling', 'proj-1', 'ws-dangling', 'session-d',
+         'missing-profile', 'missing-skill', '2026-09-29T00:30:00.000Z'),
         ('task-foreign', 'proj-2', 'ws-foreign-guard', 'session-c',
          'profile-foreign', 'skill-foreign', '2026-09-29T00:00:00.000Z');
     `);
@@ -387,11 +394,23 @@ describe('workspace resource history', () => {
       }),
       'node-c'
     );
+    await storeWorkspaceResourceChunk(
+      env,
+      'proj-1',
+      await uploadBody({
+        workspaceId: 'ws-dangling',
+        nodeId: 'node-d',
+        sessionId: 'session-d',
+        taskId: 'task-dangling',
+      }),
+      'node-d'
+    );
 
-    const [historyA, historyB, guardedHistory] = await Promise.all([
+    const [historyA, historyB, guardedHistory, danglingHistory] = await Promise.all([
       getWorkspaceResourceHistory(env, { projectId: 'proj-1', sessionId: 'session-a' }),
       getWorkspaceResourceHistory(env, { projectId: 'proj-1', sessionId: 'session-b' }),
       getWorkspaceResourceHistory(env, { projectId: 'proj-1', sessionId: 'session-c' }),
+      getWorkspaceResourceHistory(env, { projectId: 'proj-1', sessionId: 'session-d' }),
     ]);
     expect(historyA.summary).toMatchObject({
       agentProfileId: 'profile-a',
@@ -405,7 +424,13 @@ describe('workspace resource history', () => {
       agentType: 'claude-code',
     });
     expect(guardedHistory.summary).toMatchObject({
-      taskId: null,
+      taskId: 'task-local-foreign-hints',
+      agentProfileId: null,
+      skillId: null,
+      agentType: null,
+    });
+    expect(danglingHistory.summary).toMatchObject({
+      taskId: 'task-dangling',
       agentProfileId: null,
       skillId: null,
       agentType: null,

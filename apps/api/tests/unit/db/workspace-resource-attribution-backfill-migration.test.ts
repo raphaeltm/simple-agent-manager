@@ -35,17 +35,25 @@ describe('0175_backfill_workspace_resource_attribution migration', () => {
       INSERT INTO workspaces (id, project_id, chat_session_id) VALUES
         ('workspace-a', 'project-1', 'session-a'),
         ('workspace-b', 'project-1', 'session-b'),
-        ('workspace-guard', 'project-1', 'session-guard');
+        ('workspace-guard', 'project-1', 'session-guard'),
+        ('workspace-dangling', 'project-1', 'session-dangling');
       INSERT INTO agent_sessions
         (id, workspace_id, status, agent_type, agent_profile_id, skill_id, created_at, updated_at)
       VALUES
         ('agent-session-a', 'workspace-a', 'running', 'openai-codex', 'profile-a', 'skill-a',
-         '2026-09-29T00:00:00.000Z', '2026-09-29T00:00:00.000Z');
+         '2026-09-29T00:00:00.000Z', '2026-09-29T00:00:00.000Z'),
+        ('agent-session-b-conflict', 'workspace-b', 'running', 'openai-codex',
+         'profile-a', 'skill-a', '2026-09-29T01:00:00.000Z',
+         '2026-09-29T01:00:00.000Z');
       INSERT INTO tasks
         (id, project_id, workspace_id, chat_session_id, agent_profile_hint, skill_id, started_at)
       VALUES
         ('task-b', 'project-1', 'workspace-b', 'session-b', 'profile-b', 'skill-b',
          '2026-09-29T00:00:00.000Z'),
+        ('task-local-foreign-hints', 'project-1', 'workspace-guard', 'session-guard',
+         'profile-foreign', 'skill-foreign', '2026-09-29T01:00:00.000Z'),
+        ('task-dangling', 'project-1', 'workspace-dangling', 'session-dangling',
+         'missing-profile', 'missing-skill', '2026-09-29T01:00:00.000Z'),
         ('task-foreign', 'project-2', 'workspace-guard', 'session-guard',
          'profile-foreign', 'skill-foreign', '2026-09-29T00:00:00.000Z');
       INSERT INTO workspace_resource_summaries
@@ -54,9 +62,18 @@ describe('0175_backfill_workspace_resource_attribution migration', () => {
         ('summary-a', 'project-1', 'workspace-a', 'session-a', NULL, NULL, '', NULL),
         ('summary-b', 'project-1', 'workspace-b', 'session-b', 'task-b', '', NULL, ''),
         ('summary-guard', 'project-1', 'workspace-guard', 'session-guard',
-         'task-foreign', NULL, '', NULL);
+         'task-foreign', NULL, '', NULL),
+        ('summary-tenant-guard', 'project-1', 'workspace-guard', 'session-guard',
+         'task-local-foreign-hints', NULL, '', NULL),
+        ('summary-dangling', 'project-1', 'workspace-dangling', 'session-dangling',
+         'task-dangling', NULL, '', NULL),
+        ('summary-preserved', 'project-1', 'workspace-b', 'session-b', 'task-b',
+         'profile-a', 'skill-a', 'preserved-agent'),
+        ('summary-partial', 'project-1', 'workspace-b', 'session-b', 'task-b',
+         'profile-a', '', NULL);
     `);
 
+    await createSqliteD1(sqlite).exec(migrationSql);
     await createSqliteD1(sqlite).exec(migrationSql);
 
     const rows = sqlite
@@ -80,7 +97,31 @@ describe('0175_backfill_workspace_resource_attribution migration', () => {
         agent_type: 'claude-code',
       },
       {
+        id: 'summary-dangling',
+        agent_profile_id: null,
+        skill_id: '',
+        agent_type: null,
+      },
+      {
         id: 'summary-guard',
+        agent_profile_id: null,
+        skill_id: '',
+        agent_type: null,
+      },
+      {
+        id: 'summary-partial',
+        agent_profile_id: 'profile-a',
+        skill_id: 'skill-b',
+        agent_type: 'claude-code',
+      },
+      {
+        id: 'summary-preserved',
+        agent_profile_id: 'profile-a',
+        skill_id: 'skill-a',
+        agent_type: 'preserved-agent',
+      },
+      {
+        id: 'summary-tenant-guard',
         agent_profile_id: null,
         skill_id: '',
         agent_type: null,
