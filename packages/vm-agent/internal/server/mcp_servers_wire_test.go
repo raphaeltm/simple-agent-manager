@@ -30,6 +30,9 @@ func TestCreateAgentSessionAcceptsWireFixtureHeaders(t *testing.T) {
 	}
 
 	s, store := newMcpTestServer(t)
+	// The handler late-inits a message reporter whose database sits beside this path; without
+	// it the reporter writes messages-ws.db into the package directory.
+	s.config.PersistenceDBPath = filepath.Join(t.TempDir(), "vm-agent.db")
 	s.workspaces["ws"] = &WorkspaceRuntime{ID: "ws", ProjectID: "project", Status: "running", CallbackToken: "cb"}
 	validator, key := newWorkspaceCreateJWTValidator(t, "node-test")
 	s.jwtValidator = validator

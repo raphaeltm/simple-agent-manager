@@ -113,62 +113,62 @@ Authorization:Bearer ${SAM_MCP_TOKEN}`, with the token in the stdio server env r
 
 ### Shared
 
-- [ ] `mcp-connection.ts`: `McpConnectionHeader`, `McpConnectionHeaderUpdate`, `headerNames` on
+- [x] `mcp-connection.ts`: `McpConnectionHeader`, `McpConnectionHeaderUpdate`, `headerNames` on
       `McpConnection`, `headers` on create/update requests, header name pattern/rule/max
       length, reserved header names
-- [ ] `defaults.ts`: `DEFAULT_MAX_MCP_CONNECTION_HEADERS`, `DEFAULT_MCP_CONNECTION_HEADER_VALUE_MAX_BYTES`
-- [ ] `vm-agent-contract.ts`: optional `headers` on `McpServerEntrySchema`
-- [ ] Contract fixture `mcp-server-name-contract.json`: `headerNames` valid/invalid block,
+- [x] `defaults.ts`: `DEFAULT_MAX_MCP_CONNECTION_HEADERS`, `DEFAULT_MCP_CONNECTION_HEADER_VALUE_MAX_BYTES`
+- [x] `vm-agent-contract.ts`: optional `headers` on `McpServerEntrySchema`
+- [x] Contract fixture `mcp-server-name-contract.json`: `headerNames` valid/invalid block,
       consumed by the TS test and the Go test
 
 ### API
 
-- [ ] Migration `0175_mcp_connection_headers.sql` (ADD COLUMN ×3, additive) + `schema.ts` columns
-- [ ] `services/mcp-connection-headers.ts`: validate, merge-for-update, seal/open, display names
-- [ ] `services/mcp-connections.ts`: create/update/response use the header module
-- [ ] `schemas/mcp-connections.ts`: structural `headers` for create/update
-- [ ] `routes/mcp-connections.ts`: pass headers + new limits
-- [ ] `services/limits.ts` + `env.ts`: two new limits
-- [ ] `services/mcp-connection-resolution.ts`: decrypt + validate headers per row (skip on failure)
-- [ ] `services/node-agent.ts`: `McpServerConfig.headers`, `serializeMcpServers` sends only when non-empty
+- [x] Migration `0175_mcp_connection_headers.sql` (ADD COLUMN ×3, additive) + `schema.ts` columns
+- [x] `services/mcp-connection-headers.ts`: validate, merge-for-update, seal/open, display names
+- [x] `services/mcp-connections.ts`: create/update/response use the header module
+- [x] `schemas/mcp-connections.ts`: structural `headers` for create/update
+- [x] `routes/mcp-connections.ts`: pass headers + new limits
+- [x] `services/limits.ts` + `env.ts`: two new limits
+- [x] `services/mcp-connection-resolution.ts`: decrypt + validate headers per row (skip on failure)
+- [x] `services/node-agent.ts`: `McpServerConfig.headers`, `serializeMcpServers` sends only when non-empty
 
 ### vm-agent
 
-- [ ] Refactor commit: extract `acp/mcp_servers.go`, `acp/codex_config.go`, `acp/vibe_config.go`,
+- [x] Refactor commit: extract `acp/mcp_servers.go`, `acp/codex_config.go`, `acp/vibe_config.go`,
       `server/mcp_servers.go`, `persistence/session_mcp_servers.go` (pure moves)
-- [ ] `McpHeader` + `McpServerEntry.Headers`; header name/value validators in acp
-- [ ] `normalizeMcpServers` validates + copies headers; persistence conversion helpers used by
+- [x] `McpHeader` + `McpServerEntry.Headers`; header name/value validators in acp
+- [x] `normalizeMcpServers` validates + copies headers; persistence conversion helpers used by
       register + agent_ws prefetch
-- [ ] Persistence `migrateV18` (`headers` JSON column) + upsert/get
-- [ ] ACP: custom headers after Authorization
-- [ ] Amp: `--header name:${SAM_MCP_HEADER_<i>}` with values in the server env, not argv
-- [ ] Codex: `env_http_headers` + `SAM_MCP_<NAME>_HEADER_<i>_SECRET` env vars
-- [ ] Vibe: custom headers in the `headers` inline table
+- [x] Persistence `migrateV18` (`headers` JSON column) + upsert/get
+- [x] ACP: custom headers after Authorization
+- [x] Amp: `--header name:${SAM_MCP_HEADER_<i>}` with values in the server env, not argv
+- [x] Codex: `env_http_headers` + `SAM_MCP_<NAME>_HEADER_<i>_SECRET` env vars
+- [x] Vibe: custom headers in the `headers` inline table
 
 ### Web
 
-- [ ] Split `McpServersManager.tsx` into list + `McpServerForm` + `McpServerHeadersField`
-- [ ] Headers editor in the create form; Edit action with keep-semantics payload; header names in the row
-- [ ] Unit tests (create payload, edit payload keep/replace/remove, rendering)
+- [x] Split `McpServersManager.tsx` into list + `McpServerForm` + `McpServerHeadersField`
+- [x] Headers editor in the create form; Edit action with keep-semantics payload; header names in the row
+- [x] Unit tests (create payload, edit payload keep/replace/remove, rendering)
 - [ ] Playwright audit: headers form + edit form + rows with many/long headers, 375 and 1280
 
 ### Tests
 
-- [ ] API: header validation, encryption at rest, never-returned values, PATCH keep/replace/remove,
+- [x] API: header validation, encryption at rest, never-returned values, PATCH keep/replace/remove,
       authType/Authorization conflict, malformed `header_names` tolerated on list
-- [ ] API vertical slice: mock MCP server requiring `x-api-key` authorizes the resolved entry,
+- [x] API vertical slice: mock MCP server requiring `x-api-key` authorizes the resolved entry,
       and rejects without it
-- [ ] API: resolution skips a row with undecryptable headers, others still resolve
-- [ ] API: node-agent contract serializes headers only when present
-- [ ] Go: ACP/Amp/Codex/Vibe header output; normalize rejects bad header without leaking the value;
+- [x] API: resolution skips a row with undecryptable headers, others still resolve
+- [x] API: node-agent contract serializes headers only when present
+- [x] Go: ACP/Amp/Codex/Vibe header output; normalize rejects bad header without leaking the value;
       full round trip incl. restart backfill; migrateV18 upgrade of existing rows
-- [ ] Contract fixture consumed on both sides
+- [x] Contract fixture consumed on both sides
 
 ### Docs
 
-- [ ] `apps/www/.../guides/mcp-servers.md`: headers field, Composio row, editing, remove limitation, Amp note
-- [ ] `apps/www/.../reference/configuration.md` + `apps/api/.env.example`: new limits
-- [ ] `.claude/skills/changelog/SKILL.md` entry; env-reference skill if it lists MCP limits
+- [x] `apps/www/.../guides/mcp-servers.md`: headers field, Composio row, editing, remove limitation, Amp note
+- [x] `apps/www/.../reference/configuration.md` + `apps/api/.env.example`: new limits
+- [x] `.claude/skills/changelog/SKILL.md` entry (env-reference skill never listed MCP limits; the public configuration reference is canonical)
 
 ## Acceptance Criteria
 
@@ -190,3 +190,14 @@ Authorization:Bearer ${SAM_MCP_TOKEN}`, with the token in the stdio server env r
 - `.claude/rules/54` (vm-agent rollout), `41`/`50` (per-row isolation), `28` (real SQL for
   scoping), `62`/`73` (field copies must not drop), `18` (file size), `23` (cross-boundary contract)
 - `tasks/archive/2026-08-23-byo-mcp-servers.md`
+
+## Implementation Notes
+
+- Main is protected ("push declined due to repository rule violations"), so this task file
+  ships in the PR instead of being committed to main first.
+- Commits: `03c2ce2bb` pure-move refactor; `3417926b1` shared/API/vm-agent feature;
+  `582936857` tests; `3234c96a7` web UI + docs.
+- Discrimination: 8 Go mutations + 7 API mutations + 1 wire-tag mutation each turned the
+  intended tests red (see PR body).
+- Codex `env_http_headers` was verified against the published Codex config reference, and
+  mcp-remote's header parser against the `mcp-remote@0.1.38` tarball source.
