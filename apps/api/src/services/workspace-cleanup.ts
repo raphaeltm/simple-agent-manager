@@ -5,6 +5,7 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { purgeInteractionStore } from './acp-interaction-store';
 import { deleteSessionSnapshotState } from './session-snapshots';
 import {
   attemptWorkspaceDeletion,
@@ -213,11 +214,17 @@ export async function cleanupWorkspaceForDeletion(
     source: workspaceDeletionLogSource(logContext),
     mode: 'explicit',
     allowWorkspaceNeverStartedProof: workspace.status === 'pending',
-    beforeFinalize: workspace.chatSessionId
-      ? async () => {
-          await deleteSessionSnapshotState(db, env, workspace.chatSessionId as string);
-        }
-      : undefined,
+    beforeFinalize:
+      workspace.chatSessionId && workspace.projectId
+        ? async () => {
+            const chatSessionId = workspace.chatSessionId as string;
+            const projectId = workspace.projectId as string;
+            await Promise.all([
+              deleteSessionSnapshotState(db, env, chatSessionId),
+              purgeInteractionStore(env, projectId, chatSessionId),
+            ]);
+          }
+        : undefined,
   });
 
   if (outcome.status === 'confirmed') {

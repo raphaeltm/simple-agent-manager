@@ -1974,6 +1974,19 @@ export class ProjectData extends DurableObject<Env> {
     return count;
   }
 
+  async resolveAttentionMarkerById(
+    markerId: string,
+    actorType: string = 'system',
+    reason: string = 'system_resolved'
+  ): Promise<number> {
+    const count = attention.resolveAttentionMarkerById(this.sql, markerId, actorType, reason);
+    if (count > 0) {
+      await this.recalculateAlarm();
+      this.broadcastEvent('attention.resolved', { markerId, count, reason });
+    }
+    return count;
+  }
+
   async resolveSessionAttentionMarkers(
     sessionId: string,
     resolvedByMessageId: string | null,

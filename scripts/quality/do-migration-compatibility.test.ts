@@ -62,11 +62,11 @@ describe('resolveDurableObjectMigrations', () => {
 
     const resolved = resolveDurableObjectMigrations(history, null);
 
-    expect(history).toHaveLength(20);
+    expect(history).toHaveLength(21);
     expect(legacyCreateCount).toBe(7);
     expect(resolved).toHaveLength(history.length);
     expect(resolved.every((migration) => migration.new_classes === undefined)).toBe(true);
-    expect(resolved.flatMap((migration) => migration.new_sqlite_classes ?? [])).toHaveLength(20);
+    expect(resolved.flatMap((migration) => migration.new_sqlite_classes ?? [])).toHaveLength(21);
     expect(loadCheckedInMigrations()).toEqual(history);
   });
 
@@ -89,7 +89,7 @@ describe('resolveDurableObjectMigrations', () => {
     const latestTag = history.at(-1)?.tag;
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
-    expect(latestTag).toBe('v20');
+    expect(latestTag).toBe('v21');
     const resolved = resolveDurableObjectMigrations(history, latestTag ?? null);
     const envConfig = generateApiWorkerEnv(
       { migrations: history },

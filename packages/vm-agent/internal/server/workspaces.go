@@ -23,9 +23,12 @@ import (
 )
 
 const (
-	vmExecutionProtocolVersion   = 1
-	maxDeliveryIDLength          = 128
-	maxRolloverOperationIDLength = 128
+	vmExecutionProtocolVersion       = 1
+	acpInteractionCapabilityVersion  = 1
+	maxDeliveryIDLength              = 128
+	maxRolloverOperationIDLength     = 128
+	maxAcpInteractionIDLength        = 128
+	maxAcpInteractionGenerationLength = 128
 )
 
 type sendPromptRequest struct {
@@ -1810,6 +1813,78 @@ func (s *Server) writePromptReceiptNotFound(w http.ResponseWriter, deliveryID st
 	})
 }
 
+type acpInteractionAnswerRequest struct {
+	ProtocolVersion int             `json:"protocolVersion"`
+	InteractionID   string          `json:"interactionId"`
+	Generation      string          `json:"generation"`
+	RuntimeIdentity string          `json:"runtimeIdentity"`
+	Decision        json.RawMessage `json:"decision"`
+}
+
+type acpInteractionAnswerResponse struct {
+	Status          string `json:"status"`
+	InteractionID   string `json:"interactionId"`
+	Generation      string `json:"generation"`
+	RuntimeIdentity string `json:"runtimeIdentity"`
+}
+
+func (s *Server) handleAcpInteractionAnswer(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	sessionID := r.PathValue("sessionId")
+	interactionID := strings.TrimSpace(r.PathValue("interactionId"))
+	if workspaceID == "" || sessionID == "" || interactionID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId, sessionId, and interactionId are required")
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+
+	var body acpInteractionAnswerRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	body.InteractionID = strings.TrimSpace(body.InteractionID)
+	body.Generation = strings.TrimSpace(body.Generation)
+	body.RuntimeIdentity = strings.TrimSpace(body.RuntimeIdentity)
+	if body.ProtocolVersion != vmExecutionProtocolVersion {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error":             "unsupported_protocol_version",
+			"supportedVersions": []int{vmExecutionProtocolVersion},
+		})
+		return
+	}
+	if body.InteractionID != interactionID || !validExecutionProtocolID(body.InteractionID, maxAcpInteractionIDLength) {
+		writeError(w, http.StatusBadRequest, "interactionId has an invalid format")
+		return
+	}
+	if !validExecutionProtocolID(body.Generation, maxAcpInteractionGenerationLength) {
+		writeError(w, http.StatusBadRequest, "generation has an invalid format")
+		return
+	}
+	if body.Decision == nil || !json.Valid(body.Decision) {
+		writeError(w, http.StatusBadRequest, "decision is required")
+		return
+	}
+	if body.RuntimeIdentity != s.executionRuntimeID {
+		writeJSON(w, http.StatusConflict, acpInteractionAnswerResponse{
+			Status:          "stale_generation",
+			InteractionID:   body.InteractionID,
+			Generation:      body.Generation,
+			RuntimeIdentity: s.executionRuntimeID,
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, acpInteractionAnswerResponse{
+		Status:          "no_waiter",
+		InteractionID:   body.InteractionID,
+		Generation:      body.Generation,
+		RuntimeIdentity: s.executionRuntimeID,
+	})
+}
+
 func (s *Server) handleAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
@@ -1831,6 +1906,15 @@ func (s *Server) agentCapabilities() map[string]interface{} {
 			"lookup":    true,
 			"states": []string{persistence.PromptReceiptAccepted, persistence.PromptReceiptInFlight,
 				persistence.PromptReceiptCompleted, persistence.PromptReceiptAmbiguous},
+		},
+		"interactions": map[string]interface{}{
+			"supported":          true,
+			"version":            acpInteractionCapabilityVersion,
+			"answerEndpoint":     true,
+			"receiptCap":         256,
+			"deliverySemantics":  "best_effort_no_wake",
+			"noWaiterStatus":    "no_waiter",
+			"staleStatus":       "stale_generation",
 		},
 		"checkpointRollover": map[string]interface{}{
 			"supported": true,

@@ -130,6 +130,15 @@ async function processExpiredNeedsInputMarker(
   failSession: (sessionId: string, errorMessage: string) => Promise<void>,
   hooks: AttentionExpiryProcessingHooks
 ): Promise<void> {
+  if (marker.source === 'acp_interaction') {
+    attention.resolveAttentionMarkerById(sql, marker.id, 'system', 'unsupported_expiry_source');
+    log.warn('attention_marker.acp_interaction_expiry_ignored', {
+      markerId: marker.id,
+      sessionId: marker.sessionId,
+      taskId: marker.taskId,
+    });
+    return;
+  }
   const now = Date.now();
   const maxExpiresAt =
     marker.maxExpiresAt ??
@@ -220,6 +229,7 @@ async function failExpiredTaskMarker(
   failSession: (sessionId: string, errorMessage: string) => Promise<void>,
   hooks: AttentionExpiryProcessingHooks
 ): Promise<void> {
+  if (marker.source === 'acp_interaction') return;
   if ((marker.kind !== 'needs_input' && marker.kind !== 'reconciliation_checkin') || !marker.taskId)
     return;
 

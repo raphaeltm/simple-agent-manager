@@ -36,6 +36,7 @@ import * as projectDataService from '../services/project-data';
 import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 import { isTaskStatus } from '../services/task-status';
 import { attachWakeState } from './chat/wake-state';
+import { registerChatAcpInteractionRoutes } from './chat-acp-interactions';
 import { resolveChatAgentState } from './chat-agent-state';
 import { registerChatCancelRoute } from './chat-cancel';
 import { registerChatCommentDirectiveRoute } from './chat-comment-directives';
@@ -63,6 +64,7 @@ const chatRoutes = new Hono<{ Bindings: Env }>();
 chatRoutes.use('/*', requireAuth(), requireApproved());
 
 registerChatSessionListRoute(chatRoutes);
+registerChatAcpInteractionRoutes(chatRoutes);
 
 /**
  * POST /api/projects/:projectId/sessions
@@ -428,6 +430,9 @@ chatRoutes.post('/:sessionId/attention/:markerId/resolve', async (c) => {
     markerId,
     answer
   );
+  if (prepared.status === 'unsupported_source') {
+    throw errors.badRequest('This attention marker must be answered through the interaction route');
+  }
   if (prepared.status === 'not_found') throw errors.notFound('Attention request');
   if (prepared.status === 'invalid_option') {
     throw errors.badRequest('answer must match one of the requested options');

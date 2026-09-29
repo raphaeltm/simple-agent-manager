@@ -7,6 +7,15 @@
       "lookup": true,
       "states": ["accepted", "in_flight", "completed", "ambiguous"]
     },
+    "interactions": {
+      "supported": true,
+      "version": 1,
+      "answerEndpoint": true,
+      "receiptCap": 256,
+      "deliverySemantics": "best_effort_no_wake",
+      "noWaiterStatus": "no_waiter",
+      "staleStatus": "stale_generation"
+    },
     "checkpointRollover": {
       "supported": true,
       "automatic": false,
