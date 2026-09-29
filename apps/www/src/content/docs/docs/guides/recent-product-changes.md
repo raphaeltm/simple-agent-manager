@@ -57,11 +57,11 @@ Also changed this week:
   _"Agent became unresponsive after SAM check-in"_. An agent that answers a check-in by asking you a
   question counts as having responded, and stopping a task yourself no longer records it as
   unresponsive.
-- A sleeping VM conversation no longer fails to wake when the provider refuses its machine because
-  the account's vCPU quota is used up. SAM waits for capacity or, in a pool whose exhaustion policy
-  is **Fallback chain**, tries permitted machines that need fewer cores but still fit the work. It
-  prefers the region the chat last ran in, but can use a healthy machine elsewhere unless a region
-  was pinned.
+- On Hetzner, a sleeping VM conversation no longer fails to wake when Hetzner refuses its machine
+  because the account's vCPU quota is used up. SAM waits for capacity or, in a pool whose exhaustion
+  policy is **Fallback chain**, tries permitted machines that need fewer cores but still fit the
+  work. A waking VM conversation also prefers the region it last ran in, but can use a healthy
+  machine elsewhere unless a region was pinned.
 - Editing an agent profile on a phone no longer loses focus or your typing mid-edit, and the
   **Description** field is now a multi-line box.
 

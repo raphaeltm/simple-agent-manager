@@ -358,7 +358,9 @@ concatenates consecutive same-role tokens into logical messages and indexes thos
 (`materializeSession()` in `apps/api/src/durable-objects/project-data/materialization.ts`), using the
 `unicode61` tokenizer, which folds case and diacritics but does not stem. Indexing is incremental:
 it runs every time a session sleeps and again when it stops, fails, or is cleaned up after going
-idle, and each pass covers only the messages written since the last one.
+idle. Each pass covers the rows written since the last one, oldest first, up to
+`PROJECT_DATA_MATERIALIZATION_MAX_ROWS_PER_PASS` (5,000 streamed rows), and leaves any remainder
+for the next pass.
 
 - **Everything indexed so far**: word search. The query's words are ANDed, and everything outside
   ASCII letters, digits, `_`, and whitespace is stripped first (`buildSafeFtsQuery()` in

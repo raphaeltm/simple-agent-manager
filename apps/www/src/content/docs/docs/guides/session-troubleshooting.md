@@ -49,7 +49,7 @@ works, and the **Nodes** page may briefly show the chat's old workspace deleted 
 created. That is normal.
 
 If a VM wake sits on **Waiting for server capacity...**, SAM can't get a machine for it yet. Your
-provider may be out of that machine type, your cloud account may be at its server or quota limit,
+provider may be out of that machine type, your Hetzner account may be at its server or vCPU limit,
 or you may already have as many machines as SAM allows you (10 by default) or your
 [compute pool](/docs/guides/compute-pools/) permits. SAM keeps trying; if the wait drags on,
 delete machines you no longer need from the **Nodes** page. A message you sent is held for an
@@ -58,7 +58,8 @@ hour: if the wake is still waiting then, the chat reports **Wake failed: Session
 
 Until a **Wake failed** message appears, SAM still holds your message and keeps retrying the wake,
 even if the strip is gone when you reopen the chat. Don't send the message again: a second copy
-would be delivered as well.
+would be delivered as well. SAM holds a message for an hour at most, so if an hour has passed with
+no reply and no **Wake failed** message, it expired undelivered, and sending it again is safe.
 
 :::note[The Recovery container label]
 The chat header's **Recovery container** label means different things on the two runtimes. On a VM
@@ -182,9 +183,11 @@ middle of a turn SAM waits for it to end, for up to eight hours. Until then the 
 the failure card showing: wait for it to go to sleep rather than using **Retry**.
 
 The failure card under the chat header stays either way. It is red, or grey when there is nothing to
-debug — an expired question, for example. **Retry** (re-run the task in a new chat) and **Fork** (a
-new chat that carries a summary of this one) are in the session tool rail. Read the chat to see
-whether the work was kept:
+debug — an expired question, for example. Two tools in the
+[session tool rail](/docs/guides/chat-features/#the-session-tool-rail) start over: **Retry** opens a
+new chat pre-filled with the task's original request, and **Fork** opens one for a new instruction.
+Both carry a summary of this chat, but not its files. Read the chat to see whether the work was
+kept:
 
 - **The chat goes to Sleeping, and the composer is still there.** The work was kept. Reply in the
   same chat: it wakes with its files restored, and you can tell the agent how to carry on. Don't use
@@ -232,10 +235,10 @@ The composer is gone and the chat reads **"This session has ended."** There is n
 wake: the session was stopped or archived, or it failed in a way SAM could not preserve (the chat
 says so when that is the reason — see [When a task fails](#when-a-task-fails)).
 
-If the chat belongs to a task, **Retry** in the session tool rail re-runs it in a new chat, without
-the old files. Otherwise start a new chat, or
-[fork](/docs/guides/chat-features/#conversation-forking) this one to carry its context across
-rather than re-explaining from scratch.
+Start again from the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail):
+**Retry** opens a new chat pre-filled with the task's original request, and **Fork** opens one for a
+new instruction. Both carry a summary of this chat, so you don't have to re-explain it, but not its
+files. Or start a new chat from scratch.
 
 ## None of these fit
 

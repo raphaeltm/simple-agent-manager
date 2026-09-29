@@ -127,10 +127,10 @@ When work starts, the agent is resolved in this order:
 
 ### Choosing a model
 
-The profile's model picker lists the models SAM knows each agent supports. The list is updated
-with SAM releases, except OpenCode's, which SAM loads live from Models.dev. If a model you want
-isn't listed yet, type its exact ID and
-press **Enter** to use it as a custom model. SAM does not check a custom ID against any list, so it
+The profile's model picker lists the models SAM knows each agent supports. The list is bundled with
+SAM and updated with its releases, OpenCode's included. (In **Settings → Agents**, OpenCode's model
+dropdown loads live from Models.dev when its provider is OpenCode Zen or OpenCode Go.) If a model you
+want isn't listed yet, type its exact ID and press **Enter** to use it as a custom model. SAM does not check a custom ID against any list, so it
 has to be a model your provider accepts and your agent's version can run. The exception is the
 **SAM** provider mode: the platform proxy only serves models in its catalog, so there an unlisted
 ID is refused.

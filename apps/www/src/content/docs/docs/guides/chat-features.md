@@ -254,12 +254,13 @@ For short conversations (5 or fewer messages), the messages are passed directly 
 ### Fork Limits
 
 - Maximum fork depth: 10 levels (configurable via `ACP_SESSION_MAX_FORK_DEPTH`)
-- Each fork creates a new session with its own branch and workspace
+- Each fork starts a new chat; on a VM it gets its own branch and workspace
 - **Fork** and **Retry** both ask SAM for a summary of the conversation, and together they allow 30
   summaries per hour per user (`RATE_LIMIT_SESSION_SUMMARIZE`), however short the conversation.
   - Past the limit, **Fork** shows _"Too many requests. Please try again later."_, and its
-    "Forking from" banner stays on _Loading context..._ with **Send** disabled. Close the banner with
-    its **✕** and fork again later.
+    "Forking from" banner stays on _Loading context..._ and the send button stays on a disabled
+    **Sending...**, although nothing is being sent. Close the banner with its **✕** and fork again
+    later.
   - **Retry** still opens the new chat, but without a summary of the previous one. Wait, or paste the
     context you need into your message yourself.
 
@@ -285,7 +286,8 @@ Two different tools answer two different questions:
   searched yet.
 - **The agent's latest replies may not be searchable yet.** SAM indexes a chat each time it goes to
   sleep, and again when it stops. Your own messages can be found straight away; the agent's replies
-  become searchable at the next indexing pass.
+  become searchable at the next indexing pass. In a long chat that can take a few passes, because
+  each pass indexes a bounded amount, oldest first.
 - **Very old chats can be hard to find.** When a project runs short of storage, SAM removes the
   search index for chats that ended more than a week ago, and it never rebuilds it.
 - **In a very large project, "nothing found" is not proof.** A search reads only the newest part of
