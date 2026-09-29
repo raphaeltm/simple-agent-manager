@@ -81,7 +81,25 @@ function jsonOrNull(value: string): unknown {
   }
 }
 
-function timelineChunk(row: schema.WorkspaceResourceChunkRow): ResourceTimelineChunk {
+/** Only what the index needs: skips storage bookkeeping (R2 key, checksum, sizes) on up to maxChunks rows. */
+const TIMELINE_CHUNK_COLUMNS = {
+  id: schema.workspaceResourceChunks.id,
+  workspaceId: schema.workspaceResourceChunks.workspaceId,
+  startedAt: schema.workspaceResourceChunks.startedAt,
+  endedAt: schema.workspaceResourceChunks.endedAt,
+  sampleCount: schema.workspaceResourceChunks.sampleCount,
+  gapCount: schema.workspaceResourceChunks.gapCount,
+  toolSpanCount: schema.workspaceResourceChunks.toolSpanCount,
+  summaryJson: schema.workspaceResourceChunks.summaryJson,
+  completenessJson: schema.workspaceResourceChunks.completenessJson,
+  rollupJson: schema.workspaceResourceChunks.rollupJson,
+};
+
+type TimelineChunkRow = {
+  [K in keyof typeof TIMELINE_CHUNK_COLUMNS]: schema.WorkspaceResourceChunkRow[K];
+};
+
+function timelineChunk(row: TimelineChunkRow): ResourceTimelineChunk {
   return {
     id: row.id,
     workspaceId: row.workspaceId,
@@ -211,14 +229,14 @@ export async function getSessionResourceTimeline(
   );
 
   // Newest first so that, past the cap, it is the oldest chunks that are left out (and disclosed).
+  // Ordered by `started_at` alone so idx_workspace_resource_chunks_project_session serves the
+  // ORDER BY and LIMIT stops the scan; an `id` tie-break adds a sort over the session's whole
+  // history. Chunks within a run are sequential, so equal start times do not occur in practice.
   const rows = await db
-    .select()
+    .select(TIMELINE_CHUNK_COLUMNS)
     .from(schema.workspaceResourceChunks)
     .where(scope)
-    .orderBy(
-      desc(schema.workspaceResourceChunks.startedAt),
-      desc(schema.workspaceResourceChunks.id)
-    )
+    .orderBy(desc(schema.workspaceResourceChunks.startedAt))
     .limit(maxChunks);
 
   let totalChunkCount = rows.length;
