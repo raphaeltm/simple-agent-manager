@@ -218,6 +218,16 @@
         "cebc591fa06ac4eb357e4355bd9685d7f9b717e68c0ca19f8a2d601b50f989c8",
         "d1825d5702b57ea0ab87a15624a93992cd2ad7a00aecaf179bb0d1be452fe8fb"
       ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Intermediate PR-range bytes only: a unit-test map associated a public HTTP header name with an environment-variable identifier, which the generic API-key detector interpreted as a credential assignment. The literal map entry is absent from the current tree and contained no credential material.",
+      "owner": "security",
+      "reviewedAt": "2026-09-29T00:00:00.000Z",
+      "expiresAt": "2026-12-28T00:00:00.000Z",
+      "digests": [
+        "662cc0d541ef21f3ab25c0d51d96e5959d225d317f9930c4b151d449dce64376"
+      ]
     }
   ]
 }

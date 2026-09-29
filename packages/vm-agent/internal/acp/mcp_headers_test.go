@@ -162,8 +162,8 @@ func TestGenerateCodexMcpConfig_RoutesCustomHeadersThroughEnv(t *testing.T) {
 	}
 
 	composio := parsed.McpServers["composio"]
-	// Built in a loop: a literal `"x-api-key": "SAM_…"` pair reads as an API key assignment
-	// to secret scanners, but the values are environment variable NAMES.
+	// Build this in a loop because a literal header map entry can look like an API
+	// credential assignment even when its values only name environment variables.
 	wantHeaders := map[string]string{}
 	for i, name := range []string{"x-api-key", "X-Org_Id"} {
 		wantHeaders[name] = fmt.Sprintf("SAM_MCP_COMPOSIO_HEADER_%d_SECRET", i)
