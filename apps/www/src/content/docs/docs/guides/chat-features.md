@@ -278,9 +278,10 @@ Two different tools answer two different questions:
 
 ### Getting good results from agent search
 
-- **Use a few distinctive words.** A search returns messages that contain _all_ of its words.
-  Indexed chats match whole words, ignoring case, so `retry` does not find `retries` — ask for the
-  forms you expect. Punctuation and quotation marks are ignored, so there is no exact-phrase search.
+- **Use a few distinctive words.** A search returns messages that contain _all usable_ words.
+  Indexed search ignores the reserved words `AND`, `OR`, `NOT`, and `NEAR`; its other words match
+  whole words, ignoring case, so `retry` does not find `retries` — ask for the forms you expect.
+  Punctuation and quotation marks are ignored, so there is no exact-phrase search.
 - **Leave out accents.** Accented letters in a search are dropped, but indexed chats are stored
   without accents, so `deploiement` finds "déploiement". Words in non-Latin scripts can't be
   searched yet.

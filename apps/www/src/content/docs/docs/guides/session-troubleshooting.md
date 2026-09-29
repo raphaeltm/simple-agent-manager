@@ -58,8 +58,10 @@ hour: if the wake is still waiting then, the chat reports **Wake failed: Session
 
 Until a **Wake failed** message appears, SAM still holds your message and keeps retrying the wake,
 even if the strip is gone when you reopen the chat. Don't send the message again: a second copy
-would be delivered as well. SAM holds a message for an hour at most, so if an hour has passed with
-no reply and no **Wake failed** message, it expired undelivered, and sending it again is safe.
+would be delivered as well. SAM retries a pending delivery for up to an hour, but elapsed time and
+the absence of a reply do not prove that the agent never received it. If the state is unclear,
+check the transcript, task, and linked GitHub work before resending. Send it again only when those
+records make it clear that the first copy did not run.
 
 :::note[The Recovery container label]
 The chat header's **Recovery container** label means different things on the two runtimes. On a VM

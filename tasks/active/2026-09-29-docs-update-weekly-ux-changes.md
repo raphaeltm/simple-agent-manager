@@ -47,7 +47,7 @@ covered PRs #2092–#2135; this pass covers everything merged since.
 - [x] `self-hosting.mdx`: Problem migrations + Abandon; unresponsive managed machines are released automatically
 - [x] `reference/configuration.md`: `DASHBOARD_*` settings
 - [x] Screenshots via two new Playwright specs (real components, mock data): a chat whose wake failed, beside running and sleeping chats; a Mermaid diagram in an agent reply; the Admin → Storage Abandon dialog at phone width. (A desktop capture of all three problem-migration cards was dropped: it was ~900px tall in the docs column, and the badge table already explains them.)
-- [ ] Local sub-agent review loop until no actionable feedback
+- [x] Local sub-agent review loop until no actionable feedback
 - [ ] `pnpm --filter @simple-agent-manager/www build` + link check; PR; CI green; merge
 
 ## Verified facts (code-cited)
@@ -107,8 +107,13 @@ covered PRs #2092–#2135; this pass covers everything merged since.
     `classifyVmProviderCapacityError`); other providers' quota errors fail the attempt.
   - The profile model picker (`ProfileFormDialog` → `ModelSelect`, no `useDynamicCatalog`) is the
     bundled catalog for every agent; only Settings → Agents loads OpenCode Zen/Go from Models.dev.
-  - A delivery lives at most an hour (`DEFAULT_PROMPT_DELIVERY_TTL_MS`); some endings post no Wake
-    failed message, so "don't resend" is time-bounded.
+  - Pending deliveries live at most an hour (`DEFAULT_PROMPT_DELIVERY_TTL_MS`), but accepted work
+    can continue beyond that boundary.
   - Retry pre-fills the task's original request plus a summary (`useProjectChatState.handleRetry`);
     the stuck fork shows **Sending...**; materialization indexes ≤5,000 rows per pass.
-- **Round 6**: running.
+- **Round 6** (fixed in the final follow-up commit): 0 CRITICAL, 0 HIGH, 1 MEDIUM, 1 LOW.
+  - Removed the unsafe inference that one hour without a reply means a prompt never ran. Delivery
+    expiry applies only before acceptance; the guide now tells users to check the transcript, task,
+    and linked GitHub work before resending.
+  - Restored the indexed-search qualifier that reserved words `AND`, `OR`, `NOT`, and `NEAR` are
+    ignored. A final read-only verification found no other actionable documentation issues.
