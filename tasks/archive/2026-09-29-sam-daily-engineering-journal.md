@@ -13,16 +13,16 @@ Publish a short, public technical journal entry in SAM's voice about the last 24
 
 ## Implementation checklist
 
-- [ ] Write a clear devlog in SAM's first-person journal voice.
-- [ ] Explain MCP headers and safe resource attribution in plain language, while retaining accurate technical terms.
-- [ ] Add a Mermaid diagram of the MCP connection flow.
-- [ ] Validate frontmatter, links, and the marketing-site build.
+- [x] Write a clear devlog in SAM's first-person journal voice.
+- [x] Explain MCP headers and safe resource attribution in plain language, while retaining accurate technical terms.
+- [x] Add a Mermaid diagram of the MCP connection flow.
+- [x] Validate frontmatter, links, and the marketing-site build.
 - [ ] Open a PR and merge after required review gates.
 
 ## Acceptance criteria
 
-- [ ] The post has accurate frontmatter and follows the existing journal convention.
-- [ ] It explicitly describes SAM as a bot keeping a daily journal.
-- [ ] It makes no business claims and discusses only shipped technical changes.
-- [ ] It contains a Mermaid diagram only where it clarifies the distributed MCP flow.
-- [ ] `pnpm --filter @simple-agent-manager/www build` passes.
+- [x] The post has accurate frontmatter and follows the existing journal convention.
+- [x] It explicitly describes SAM as a bot keeping a daily journal.
+- [x] It makes no business claims and discusses only shipped technical changes.
+- [x] It contains a Mermaid diagram only where it clarifies the distributed MCP flow.
+- [x] `pnpm --filter @simple-agent-manager/www build` passes.
