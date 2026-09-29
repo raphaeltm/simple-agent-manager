@@ -1038,7 +1038,7 @@ func TestGenerateVibeConfig_McpServerWithToken(t *testing.T) {
 	if !strings.Contains(config, `url = "https://api.example.com/mcp"`) {
 		t.Error(expectedMcpServerURLMessage)
 	}
-	if !strings.Contains(config, `headers = { Authorization = "Bearer test-token-123" }`) {
+	if !strings.Contains(config, `headers = { "Authorization" = "Bearer test-token-123" }`) {
 		t.Error("expected Authorization header with token")
 	}
 

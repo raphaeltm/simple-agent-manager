@@ -16,10 +16,17 @@
     "",
     "The `urls` block pins the SECOND rule implemented twice: validateMcpConnectionUrl in",
     "apps/api/src/services/mcp-connections.ts and normalizeMcpServers in",
-    "packages/vm-agent/internal/server/workspaces.go. These drifted in review: TS accepted",
+    "packages/vm-agent/internal/server/mcp_servers.go. These drifted in review: TS accepted",
     "http://localhost/mcp (no port) while Go required an explicit port, and Go's rejection fails",
     "the WHOLE create-agent-session request, so one saved row would have broken every session",
-    "for that scope."
+    "for that scope.",
+    "",
+    "The `headerNames` block pins the THIRD rule implemented twice: MCP_CONNECTION_HEADER_NAME_PATTERN",
+    "in packages/shared/src/types/mcp-connection.ts (control plane, rejects on write) and",
+    "ValidMcpHeaderName in packages/vm-agent/internal/acp/mcp_servers.go (vm-agent, rejects the",
+    "create-agent-session request). Both judge the exact string with no normalization; the control",
+    "plane trims user input before judging. The charset is what mcp-remote accepts in",
+    "`--header name:value` and what TOML accepts as a bare key."
   ],
   "valid": [
     "a",
@@ -78,6 +85,41 @@
       "ftp://example.com/mcp",
       "https://a.example/mcp\nurl = \"https://evil\"",
       "https://a.example/mcp\rx"
+    ]
+  },
+  "headerNames": {
+    "valid": [
+      "x-api-key",
+      "X-API-Key",
+      "x-consumer-api-key",
+      "Authorization",
+      "api_key",
+      "X_Custom-Header_2",
+      "a",
+      "9",
+      "x-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "invalid": [
+      "",
+      " ",
+      " x-api-key",
+      "x-api-key ",
+      "x api key",
+      "x:api-key",
+      "x.api.key",
+      "x/api",
+      "x@key",
+      "x$key",
+      "x=key",
+      "x;key",
+      "x{key}",
+      "x\"key",
+      "x\\key",
+      "x\nkey",
+      "x\rkey",
+      "x\tkey",
+      "caf\u00e9",
+      "x-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     ]
   }
 }

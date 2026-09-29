@@ -9,6 +9,8 @@
  *    an environment-variable suffix on the VM. It is validated against a strict charset here
  *    so the vm-agent never has to sanitize a hostile value into config files.
  *  - `sam-mcp` is reserved for SAM's own endpoint and may not be taken by a user connection.
+ *  - Custom header values are secrets too; their rules and storage format live in
+ *    `mcp-connection-headers.ts`.
  *
  * Resolution (the read path used at agent-session start) lives in
  * `mcp-connection-resolution.ts` so a bad row there cannot take this module's limits and
@@ -20,6 +22,8 @@ import {
   MCP_CONNECTION_NAME_RULE,
   type McpConnection,
   type McpConnectionAuthType,
+  type McpConnectionHeader,
+  type McpConnectionHeaderUpdate,
   SAM_MCP_SERVER_NAME,
 } from '@simple-agent-manager/shared';
 import { and, count, eq, isNull } from 'drizzle-orm';
@@ -27,8 +31,17 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { ulid } from '../lib/ulid';
+import { utf8ByteLength } from '../lib/utf8';
 import { errors } from '../middleware/error';
 import { encrypt } from './encryption';
+import {
+  applyMcpConnectionHeaderUpdate,
+  type McpConnectionHeaderLimits,
+  openMcpConnectionHeaders,
+  readMcpConnectionHeaderNames,
+  sealMcpConnectionHeaders,
+  validateMcpConnectionHeaders,
+} from './mcp-connection-headers';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -41,7 +54,7 @@ export interface McpConnectionScopeRef {
   projectId: string | null;
 }
 
-export interface McpConnectionWriteLimits {
+export interface McpConnectionWriteLimits extends McpConnectionHeaderLimits {
   maxPerScope: number;
   urlMaxBytes: number;
   tokenMaxBytes: number;
@@ -52,6 +65,7 @@ export interface CreateMcpConnectionInput extends McpConnectionScopeRef {
   url: string;
   authType: McpConnectionAuthType;
   token?: string | null;
+  headers?: McpConnectionHeader[];
   enabled: boolean;
   limits: McpConnectionWriteLimits;
   encryptionKey: string;
@@ -63,13 +77,11 @@ export interface UpdateMcpConnectionInput extends McpConnectionScopeRef {
   url?: string;
   authType?: McpConnectionAuthType;
   token?: string | null;
+  /** The complete desired header set; an entry without a value keeps the stored one. */
+  headers?: McpConnectionHeaderUpdate[];
   enabled?: boolean;
   limits: McpConnectionWriteLimits;
   encryptionKey: string;
-}
-
-function byteLength(value: string): number {
-  return new TextEncoder().encode(value).length;
 }
 
 /**
@@ -93,7 +105,7 @@ export function validateMcpConnectionName(rawName: string): string {
 /**
  * Validates the endpoint URL and derives the display-only host.
  *
- * Mirrors the vm-agent's own check (`normalizeMcpServers` in `internal/server/workspaces.go`)
+ * Mirrors the vm-agent's own check (`normalizeMcpServers` in `internal/server/mcp_servers.go`)
  * so a URL that would be rejected on the VM is rejected here, at the point where the user can
  * still see the error. HTTP is allowed only for loopback, which is what a self-hosted gateway
  * running on the same box would use.
@@ -103,7 +115,7 @@ export function validateMcpConnectionUrl(rawUrl: string, maxBytes: number): { ur
   if (!url) {
     throw errors.badRequest('url is required');
   }
-  if (byteLength(url) > maxBytes) {
+  if (utf8ByteLength(url) > maxBytes) {
     throw errors.badRequest(`url exceeds max size of ${maxBytes} bytes`);
   }
   if (/[\r\n]/.test(url)) {
@@ -119,7 +131,7 @@ export function validateMcpConnectionUrl(rawUrl: string, maxBytes: number): { ur
 
   // An explicit port is REQUIRED for loopback, because the vm-agent's own check is a string
   // prefix match on "http://localhost:" / "http://127.0.0.1:" (normalizeMcpServers in
-  // internal/server/workspaces.go). Without the port requirement here, `http://localhost/mcp`
+  // internal/server/mcp_servers.go). Without the port requirement here, `http://localhost/mcp`
   // saves cleanly and then fails normalizeMcpServers on the VM — which rejects the ENTIRE
   // create-agent-session request, not just that one server, so one bad row would break every
   // future session for the scope. The two validators are pinned together by
@@ -154,7 +166,7 @@ function validateToken(
   if (!value) {
     throw errors.badRequest('token is required when authType is "bearer"');
   }
-  if (byteLength(value) > maxBytes) {
+  if (utf8ByteLength(value) > maxBytes) {
     throw errors.badRequest(`token exceeds max size of ${maxBytes} bytes`);
   }
   if (/[\r\n]/.test(value)) {
@@ -190,6 +202,7 @@ export function toMcpConnectionResponse(row: schema.McpConnectionRow): McpConnec
     urlHost: row.urlHost,
     authType: assertAuthType(row.authType),
     hasToken: Boolean(row.encryptedToken),
+    headerNames: readMcpConnectionHeaderNames(row),
     enabled: row.enabled,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -248,6 +261,7 @@ export async function createMcpConnection(
   const authType = assertAuthType(input.authType);
   const { url, urlHost } = validateMcpConnectionUrl(input.url, input.limits.urlMaxBytes);
   const token = validateToken(authType, input.token, input.limits.tokenMaxBytes);
+  const headers = validateMcpConnectionHeaders(input.headers ?? [], authType, input.limits);
 
   const scope: McpConnectionScopeRef = { userId: input.userId, projectId: input.projectId };
   await assertScopeLimit(db, scope, input.limits.maxPerScope);
@@ -255,6 +269,7 @@ export async function createMcpConnection(
 
   const encryptedUrl = await encrypt(url, input.encryptionKey);
   const encryptedToken = token ? await encrypt(token, input.encryptionKey) : null;
+  const sealedHeaders = await sealMcpConnectionHeaders(headers, input.encryptionKey);
   const now = new Date().toISOString();
 
   const row: schema.NewMcpConnectionRow = {
@@ -268,6 +283,7 @@ export async function createMcpConnection(
     authType,
     encryptedToken: encryptedToken?.ciphertext ?? null,
     tokenIv: encryptedToken?.iv ?? null,
+    ...sealedHeaders,
     enabled: input.enabled,
     createdAt: now,
     updatedAt: now,
@@ -343,6 +359,17 @@ export async function updateMcpConnection(
     throw errors.badRequest('token is required when authType is "bearer"');
   }
 
+  // Headers are re-validated whenever they or the auth type change: switching to bearer must
+  // not leave a stored Authorization header behind.
+  if (input.headers !== undefined || nextAuthType !== existing.authType) {
+    const headers = validateMcpConnectionHeaders(
+      await resolveUpdatedHeaders(existing, input.headers, input.encryptionKey),
+      nextAuthType,
+      input.limits
+    );
+    Object.assign(updates, await sealMcpConnectionHeaders(headers, input.encryptionKey));
+  }
+
   if (input.enabled !== undefined) {
     updates.enabled = input.enabled;
   }
@@ -353,6 +380,29 @@ export async function updateMcpConnection(
     .where(and(scopeWhere(scope), eq(schema.mcpConnections.id, existing.id)));
 
   return toMcpConnectionResponse({ ...existing, ...updates } as schema.McpConnectionRow);
+}
+
+/**
+ * The header set an update asks for. Stored values are decrypted only when the update keeps
+ * at least one of them, so a caller replacing every header never depends on the old ciphertext.
+ */
+async function resolveUpdatedHeaders(
+  existing: schema.McpConnectionRow,
+  desired: McpConnectionHeaderUpdate[] | undefined,
+  encryptionKey: string
+): Promise<McpConnectionHeader[]> {
+  const keepsStoredValues = desired === undefined || desired.some((header) => header.value === undefined);
+  let stored: McpConnectionHeader[] = [];
+  if (keepsStoredValues) {
+    try {
+      stored = await openMcpConnectionHeaders(existing, encryptionKey);
+    } catch {
+      throw errors.badRequest(
+        'The stored headers for this MCP server cannot be read; send every header with its value to replace them'
+      );
+    }
+  }
+  return desired === undefined ? stored : applyMcpConnectionHeaderUpdate(stored, desired);
 }
 
 export async function deleteMcpConnection(

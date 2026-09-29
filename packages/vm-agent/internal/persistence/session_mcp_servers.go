@@ -2,6 +2,8 @@ package persistence
 
 import (
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -14,6 +16,16 @@ type McpServer struct {
 	// Name is the agent-visible server name. Empty for rows written before the
 	// name column existed; callers fall back to positional naming.
 	Name string `json:"name,omitempty"`
+	// Headers are the server's custom HTTP headers, stored as a JSON array in the
+	// headers column. Empty for rows written before that column existed.
+	Headers []McpServerHeader `json:"headers,omitempty"`
+}
+
+// McpServerHeader mirrors acp.McpHeader for the same reason McpServer mirrors
+// acp.McpServerEntry.
+type McpServerHeader struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // migrateV5 creates the session_mcp_servers table for persisting MCP server
@@ -45,6 +57,15 @@ func migrateV12(db *sql.DB) error {
 	return err
 }
 
+// migrateV18 adds custom HTTP headers for injected MCP servers as a JSON array.
+//
+// Additive with an empty default, so rows written before it read back with no headers —
+// which is exactly what they had.
+func migrateV18(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE session_mcp_servers ADD COLUMN headers TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
 // UpsertSessionMcpServers replaces all MCP server entries for a session.
 // Passing an empty slice removes all servers for the session without error.
 // This is intentionally a full replace (delete + insert) so that the
@@ -67,9 +88,13 @@ func (s *Store) UpsertSessionMcpServers(workspaceID, sessionID string, servers [
 	}
 
 	for i, srv := range servers {
+		headers, err := encodeMcpServerHeaders(srv.Headers)
+		if err != nil {
+			return fmt.Errorf("upsert session mcp servers: encode headers for row %d: %w", i, err)
+		}
 		if _, err := tx.Exec(
-			"INSERT INTO session_mcp_servers (workspace_id, session_id, sort_order, url, token, name) VALUES (?, ?, ?, ?, ?, ?)",
-			workspaceID, sessionID, i, srv.URL, srv.Token, srv.Name,
+			"INSERT INTO session_mcp_servers (workspace_id, session_id, sort_order, url, token, name, headers) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			workspaceID, sessionID, i, srv.URL, srv.Token, srv.Name, headers,
 		); err != nil {
 			return fmt.Errorf("upsert session mcp servers: insert row %d: %w", i, err)
 		}
@@ -88,7 +113,7 @@ func (s *Store) GetSessionMcpServers(workspaceID, sessionID string) ([]McpServer
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(
-		"SELECT url, token, name FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ? ORDER BY sort_order ASC",
+		"SELECT url, token, name, headers FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ? ORDER BY sort_order ASC",
 		workspaceID, sessionID,
 	)
 	if err != nil {
@@ -99,8 +124,12 @@ func (s *Store) GetSessionMcpServers(workspaceID, sessionID string) ([]McpServer
 	servers := []McpServer{}
 	for rows.Next() {
 		var srv McpServer
-		if err := rows.Scan(&srv.URL, &srv.Token, &srv.Name); err != nil {
+		var headers string
+		if err := rows.Scan(&srv.URL, &srv.Token, &srv.Name, &headers); err != nil {
 			return nil, fmt.Errorf("get session mcp servers: scan: %w", err)
+		}
+		if srv.Headers, err = decodeMcpServerHeaders(headers); err != nil {
+			return nil, fmt.Errorf("get session mcp servers: row %d: %w", len(servers), err)
 		}
 		servers = append(servers, srv)
 	}
@@ -140,4 +169,30 @@ func (s *Store) DeleteWorkspaceMcpServers(workspaceID string) error {
 		return fmt.Errorf("delete workspace mcp servers: %w", err)
 	}
 	return nil
+}
+
+// encodeMcpServerHeaders stores "no headers" as an empty string rather than "[]" or "null",
+// matching the column default that rows written before the column existed carry.
+func encodeMcpServerHeaders(headers []McpServerHeader) (string, error) {
+	if len(headers) == 0 {
+		return "", nil
+	}
+	encoded, err := json.Marshal(headers)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+// decodeMcpServerHeaders reverses encodeMcpServerHeaders. The error deliberately omits the
+// column contents, which hold header values.
+func decodeMcpServerHeaders(encoded string) ([]McpServerHeader, error) {
+	if encoded == "" {
+		return nil, nil
+	}
+	var headers []McpServerHeader
+	if err := json.Unmarshal([]byte(encoded), &headers); err != nil {
+		return nil, errors.New("headers column is not a JSON header list")
+	}
+	return headers, nil
 }

@@ -853,14 +853,20 @@ export type {
   CreateMcpConnectionRequest,
   McpConnection,
   McpConnectionAuthType,
+  McpConnectionHeader,
+  McpConnectionHeaderUpdate,
   McpConnectionListResponse,
   McpConnectionScope,
   UpdateMcpConnectionRequest,
 } from './mcp-connection';
 export {
   MCP_CONNECTION_AUTH_TYPES,
+  MCP_CONNECTION_HEADER_NAME_MAX_LENGTH,
+  MCP_CONNECTION_HEADER_NAME_PATTERN,
+  MCP_CONNECTION_HEADER_NAME_RULE,
   MCP_CONNECTION_NAME_PATTERN,
   MCP_CONNECTION_NAME_RULE,
+  MCP_CONNECTION_RESERVED_HEADER_NAMES,
   SAM_MCP_SERVER_NAME,
 } from './mcp-connection';
 export * from './project-event-channels';

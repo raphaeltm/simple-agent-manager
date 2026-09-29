@@ -3,6 +3,7 @@ import {
   DEFAULT_MAX_DEPLOYMENT_ENV_TOTAL_BYTES,
   DEFAULT_MAX_DEPLOYMENT_ENV_VALUE_BYTES,
   DEFAULT_MAX_DEPLOYMENT_ENV_VARS_PER_ENVIRONMENT,
+  DEFAULT_MAX_MCP_CONNECTION_HEADERS,
   DEFAULT_MAX_MCP_CONNECTIONS_PER_SCOPE,
   DEFAULT_MAX_NODES_PER_USER,
   DEFAULT_MAX_PROJECT_GITHUB_REPOS_PER_PROJECT,
@@ -14,6 +15,7 @@ import {
   DEFAULT_MAX_PROJECTS_PER_USER,
   DEFAULT_MAX_TASK_DEPENDENCIES_PER_TASK,
   DEFAULT_MAX_TASKS_PER_PROJECT,
+  DEFAULT_MCP_CONNECTION_HEADER_VALUE_MAX_BYTES,
   DEFAULT_MCP_CONNECTION_TOKEN_MAX_BYTES,
   DEFAULT_MCP_CONNECTION_URL_MAX_BYTES,
   DEFAULT_NODE_HEARTBEAT_STALE_SECONDS,
@@ -46,6 +48,8 @@ export interface RuntimeLimits {
   maxMcpConnectionsPerScope: number;
   mcpConnectionUrlMaxBytes: number;
   mcpConnectionTokenMaxBytes: number;
+  maxMcpConnectionHeaders: number;
+  mcpConnectionHeaderValueMaxBytes: number;
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
@@ -80,6 +84,8 @@ export function getRuntimeLimits(env: {
   MAX_MCP_CONNECTIONS_PER_SCOPE?: string;
   MCP_CONNECTION_URL_MAX_BYTES?: string;
   MCP_CONNECTION_TOKEN_MAX_BYTES?: string;
+  MAX_MCP_CONNECTION_HEADERS?: string;
+  MCP_CONNECTION_HEADER_VALUE_MAX_BYTES?: string;
 }): RuntimeLimits {
   return {
     maxNodesPerUser: parsePositiveInt(env.MAX_NODES_PER_USER, DEFAULT_MAX_NODES_PER_USER),
@@ -160,6 +166,14 @@ export function getRuntimeLimits(env: {
     mcpConnectionTokenMaxBytes: parsePositiveInt(
       env.MCP_CONNECTION_TOKEN_MAX_BYTES,
       DEFAULT_MCP_CONNECTION_TOKEN_MAX_BYTES
+    ),
+    maxMcpConnectionHeaders: parsePositiveInt(
+      env.MAX_MCP_CONNECTION_HEADERS,
+      DEFAULT_MAX_MCP_CONNECTION_HEADERS
+    ),
+    mcpConnectionHeaderValueMaxBytes: parsePositiveInt(
+      env.MCP_CONNECTION_HEADER_VALUE_MAX_BYTES,
+      DEFAULT_MCP_CONNECTION_HEADER_VALUE_MAX_BYTES
     ),
   };
 }

@@ -28,9 +28,19 @@ func normalizeMcpServers(entries []acp.McpServerEntry) ([]acp.McpServerEntry, er
 		if !strings.HasPrefix(u, "https://") && !isLocalhost {
 			return nil, fmt.Errorf("mcpServers[%d].url must use HTTPS (or http:// on localhost/127.0.0.1 with an explicit port)", i)
 		}
+		// Header values reach TOML files and mcp-remote arguments, so a malformed header fails
+		// the request here, like a malformed URL, rather than being written out.
+		if err := acp.ValidateMcpHeaders(srv.Headers); err != nil {
+			return nil, fmt.Errorf("mcpServers[%d]: %w", i, err)
+		}
 		// Every field must be copied explicitly: this rebuilds the struct, so a field added
 		// upstream and forgotten here is silently dropped rather than failing to compile.
-		normalized[i] = acp.McpServerEntry{URL: u, Token: srv.Token, Name: strings.TrimSpace(srv.Name)}
+		normalized[i] = acp.McpServerEntry{
+			URL:     u,
+			Token:   srv.Token,
+			Name:    strings.TrimSpace(srv.Name),
+			Headers: srv.Headers,
+		}
 	}
 	return normalized, nil
 }
@@ -48,11 +58,7 @@ func (s *Server) registerSessionMcpServers(workspaceID, sessionID string, entrie
 	// Persist to SQLite so MCP servers survive VM agent restarts and
 	// are available even if a WebSocket creates the SessionHost first.
 	if s.store != nil {
-		persistEntries := make([]persistence.McpServer, len(entries))
-		for i, srv := range entries {
-			persistEntries[i] = persistence.McpServer{URL: srv.URL, Token: srv.Token, Name: srv.Name}
-		}
-		if err := s.store.UpsertSessionMcpServers(workspaceID, sessionID, persistEntries); err != nil {
+		if err := s.store.UpsertSessionMcpServers(workspaceID, sessionID, toPersistedMcpServers(entries)); err != nil {
 			slog.Warn("Failed to persist MCP servers to SQLite",
 				"workspace", workspaceID, "session", sessionID, "error", err)
 		}
@@ -60,4 +66,32 @@ func (s *Server) registerSessionMcpServers(workspaceID, sessionID string, entrie
 
 	slog.Info("MCP servers registered for agent session",
 		"workspace", workspaceID, "session", sessionID, "count", len(entries))
+}
+
+// toPersistedMcpServers and fromPersistedMcpServers are the only conversions between the acp
+// and persistence shapes. Both rebuild structs field by field, so a field added to one side and
+// not copied here is silently dropped. TestMcpServerNameSurvivesFullRoundTrip and
+// TestMcpServerHeadersSurviveFullRoundTrip guard that.
+func toPersistedMcpServers(entries []acp.McpServerEntry) []persistence.McpServer {
+	servers := make([]persistence.McpServer, len(entries))
+	for i, entry := range entries {
+		headers := make([]persistence.McpServerHeader, len(entry.Headers))
+		for j, header := range entry.Headers {
+			headers[j] = persistence.McpServerHeader{Name: header.Name, Value: header.Value}
+		}
+		servers[i] = persistence.McpServer{URL: entry.URL, Token: entry.Token, Name: entry.Name, Headers: headers}
+	}
+	return servers
+}
+
+func fromPersistedMcpServers(servers []persistence.McpServer) []acp.McpServerEntry {
+	entries := make([]acp.McpServerEntry, len(servers))
+	for i, server := range servers {
+		headers := make([]acp.McpHeader, len(server.Headers))
+		for j, header := range server.Headers {
+			headers[j] = acp.McpHeader{Name: header.Name, Value: header.Value}
+		}
+		entries[i] = acp.McpServerEntry{URL: server.URL, Token: server.Token, Name: server.Name, Headers: headers}
+	}
+	return entries
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 )
 
 // vibeDefaultActiveModel is the model alias used when no user model override
@@ -105,16 +104,16 @@ temperature = 0.2
 	names := ResolveMcpServerNames(mcpServers)
 	for i, server := range mcpServers {
 		// Skip entries with control characters that would corrupt TOML
-		if strings.ContainsAny(server.URL, "\n\r") || strings.ContainsAny(server.Token, "\n\r") {
-			slog.Warn("Skipping MCP server with control characters in URL or token",
+		if !server.safeForConfigFile() {
+			slog.Warn("Skipping MCP server with control characters in its URL, token or headers",
 				"index", i, "url_length", len(server.URL))
 			continue
 		}
 		safeURL := tomlEscapeBasicString(server.URL)
 		config += fmt.Sprintf("\n[[mcp_servers]]\nname = \"%s\"\ntransport = \"http\"\nurl = \"%s\"\n", names[i], safeURL)
-		if server.Token != "" {
-			safeToken := tomlEscapeBasicString(server.Token)
-			config += fmt.Sprintf("headers = { Authorization = \"Bearer %s\" }\n", safeToken)
+		if headers := server.httpHeaders(); len(headers) > 0 {
+			headerValue := func(_ int, header McpHeader) string { return header.Value }
+			config += fmt.Sprintf("headers = %s\n", mcpHeadersTOMLTable(headers, headerValue))
 		}
 	}
 

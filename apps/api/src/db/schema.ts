@@ -2063,11 +2063,11 @@ export type NewSkillRow = typeof skills.$inferInsert;
 /**
  * Bring-your-own MCP servers injected into agent sessions alongside SAM's own `sam-mcp`.
  *
- * Both the URL and the token are AES-256-GCM encrypted (`services/encryption.ts`). The URL is
- * a secret because providers such as Composio issue pre-signed MCP URLs with the credential
- * embedded in the path/query; `urlHost` is the display-only `scheme://host` the API returns
- * instead. `projectId` NULL means personal scope; a project row overrides a personal row with
- * the same name.
+ * The URL, the token and the custom headers are AES-256-GCM encrypted
+ * (`services/encryption.ts`). The URL is a secret because providers issue pre-signed MCP URLs
+ * with the credential embedded in the path/query; `urlHost` is the display-only
+ * `scheme://host` the API returns instead, as `headerNames` is for the headers. `projectId`
+ * NULL means personal scope; a project row overrides a personal row with the same name.
  */
 export const mcpConnections = sqliteTable(
   'mcp_connections',
@@ -2089,6 +2089,12 @@ export const mcpConnections = sqliteTable(
     encryptedToken: text('encrypted_token'),
     /** AES-256-GCM IV (base64). Null when authType is 'none'. */
     tokenIv: text('token_iv'),
+    /** Display-only JSON array of custom header names. Never the values. */
+    headerNames: text('header_names').notNull().default('[]'),
+    /** AES-256-GCM ciphertext (base64) of the JSON `[{name, value}]` list. Null when none. */
+    encryptedHeaders: text('encrypted_headers'),
+    /** AES-256-GCM IV (base64) for `encryptedHeaders`. Null when none. */
+    headersIv: text('headers_iv'),
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
     createdAt: text('created_at')
       .notNull()

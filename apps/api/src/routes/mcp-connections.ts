@@ -9,7 +9,7 @@
  * has `secret:read` but not `secret:write`), because a connection stores a credential that
  * every member's agents will then use.
  *
- * No read path returns the URL or the token; see `toMcpConnectionResponse`.
+ * No read path returns the URL, the token or a header value; see `toMcpConnectionResponse`.
  */
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
@@ -40,6 +40,8 @@ function writeLimits(c: AppContext): McpConnectionWriteLimits {
     maxPerScope: limits.maxMcpConnectionsPerScope,
     urlMaxBytes: limits.mcpConnectionUrlMaxBytes,
     tokenMaxBytes: limits.mcpConnectionTokenMaxBytes,
+    maxHeaders: limits.maxMcpConnectionHeaders,
+    headerValueMaxBytes: limits.mcpConnectionHeaderValueMaxBytes,
   };
 }
 
@@ -84,6 +86,7 @@ function buildRoutes(projectScoped: boolean): Hono<{ Bindings: Env }> {
       url: body.url,
       authType: body.authType ?? 'bearer',
       token: body.token ?? null,
+      headers: body.headers,
       enabled: body.enabled ?? true,
       limits: writeLimits(c),
       encryptionKey: getCredentialEncryptionKey(c.env),
@@ -102,6 +105,7 @@ function buildRoutes(projectScoped: boolean): Hono<{ Bindings: Env }> {
       url: body.url,
       authType: body.authType,
       token: body.token,
+      headers: body.headers,
       enabled: body.enabled,
       limits: writeLimits(c),
       encryptionKey: getCredentialEncryptionKey(c.env),

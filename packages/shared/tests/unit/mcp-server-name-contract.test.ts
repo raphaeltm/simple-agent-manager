@@ -12,12 +12,16 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { MCP_CONNECTION_NAME_PATTERN } from '../../src/types/mcp-connection';
+import {
+  MCP_CONNECTION_HEADER_NAME_PATTERN,
+  MCP_CONNECTION_NAME_PATTERN,
+} from '../../src/types/mcp-connection';
 
 interface Contract {
   valid: string[];
   invalid: string[];
   normalized: Record<string, string>;
+  headerNames: { valid: string[]; invalid: string[] };
 }
 
 const contract = JSON.parse(
@@ -55,5 +59,29 @@ describe('MCP server name contract (TypeScript side)', () => {
   it('has a non-trivial corpus, so a broken fixture read cannot pass as all-clear', () => {
     expect(contract.valid.length).toBeGreaterThanOrEqual(8);
     expect(contract.invalid.length).toBeGreaterThanOrEqual(15);
+  });
+});
+
+/**
+ * Header names are judged as exact strings on both sides — no trimming or case folding — so a
+ * name the control plane stores is byte-for-byte the name the vm-agent writes into TOML and
+ * mcp-remote arguments. The Go half is TestMcpHeaderNameContract in mcp_server_name_contract_test.go.
+ */
+describe('MCP custom header name contract (TypeScript side)', () => {
+  it('accepts every header name the contract marks valid', () => {
+    for (const name of contract.headerNames.valid) {
+      expect(MCP_CONNECTION_HEADER_NAME_PATTERN.test(name), `expected ${JSON.stringify(name)} to be valid`).toBe(true);
+    }
+  });
+
+  it('rejects every header name the contract marks invalid', () => {
+    for (const name of contract.headerNames.invalid) {
+      expect(MCP_CONNECTION_HEADER_NAME_PATTERN.test(name), `expected ${JSON.stringify(name)} to be invalid`).toBe(false);
+    }
+  });
+
+  it('has a non-trivial header corpus', () => {
+    expect(contract.headerNames.valid.length).toBeGreaterThanOrEqual(8);
+    expect(contract.headerNames.invalid.length).toBeGreaterThanOrEqual(15);
   });
 });

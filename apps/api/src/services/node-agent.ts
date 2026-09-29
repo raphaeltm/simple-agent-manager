@@ -1,4 +1,5 @@
 // FILE SIZE EXCEPTION: Cross-boundary node-agent request layer marginally over the limit; interactive/background timeout tiers and cf-container interruption classification are one cohesive concern. Split candidate if it grows further. See .claude/rules/18-file-size-limits.md
+import type { McpServerEntry } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -555,19 +556,11 @@ export async function createAgentSessionOnNode(
   });
 }
 
-/** MCP server configuration passed to the VM agent for ACP session injection */
-export interface McpServerConfig {
-  url: string;
-  token: string;
-  /**
-   * Agent-visible server name. Tools are namespaced by it.
-   *
-   * Optional for rollout compatibility (rule 54): a vm-agent built before this field existed
-   * ignores it and falls back to its legacy positional naming, so a new control plane still
-   * works against an old agent.
-   */
-  name?: string;
-}
+/**
+ * MCP server configuration passed to the VM agent for ACP session injection. The wire contract,
+ * including why `name` and `headers` are optional (rule 54), is `McpServerEntrySchema`.
+ */
+export type McpServerConfig = McpServerEntry;
 
 /**
  * Serializes MCP servers for the vm-agent request body.
@@ -576,16 +569,17 @@ export interface McpServerConfig {
  * their own single-element array literal, which is why adding a field here previously meant
  * remembering two places.
  */
-function serializeMcpServers(
-  mcpServers: McpServerConfig[] | undefined
-): Array<{ url: string; token: string; name?: string }> | undefined {
+function serializeMcpServers(mcpServers: McpServerConfig[] | undefined): McpServerConfig[] | undefined {
   if (!mcpServers || mcpServers.length === 0) {
     return undefined;
   }
+  // Optional fields are sent only when set, so a server without them serializes byte-for-byte
+  // as it did before they existed.
   return mcpServers.map((server) => ({
     url: server.url,
     token: server.token,
     ...(server.name ? { name: server.name } : {}),
+    ...(server.headers?.length ? { headers: server.headers } : {}),
   }));
 }
 

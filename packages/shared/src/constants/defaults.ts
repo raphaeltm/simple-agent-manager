@@ -398,3 +398,9 @@ export const DEFAULT_MCP_CONNECTION_URL_MAX_BYTES = 2048;
 
 /** Default max MCP bearer token size in bytes. Override via MCP_CONNECTION_TOKEN_MAX_BYTES env var. */
 export const DEFAULT_MCP_CONNECTION_TOKEN_MAX_BYTES = 8 * 1024;
+
+/** Default max custom headers per MCP server. Override via MAX_MCP_CONNECTION_HEADERS env var. */
+export const DEFAULT_MAX_MCP_CONNECTION_HEADERS = 10;
+
+/** Default max size in bytes of one MCP custom header value. Override via MCP_CONNECTION_HEADER_VALUE_MAX_BYTES env var. */
+export const DEFAULT_MCP_CONNECTION_HEADER_VALUE_MAX_BYTES = 8 * 1024;

@@ -41,6 +41,16 @@ func codexMcpTokenEnvVar(name string) string {
 	return fmt.Sprintf("SAM_MCP_%s_TOKEN", McpServerEnvVarSuffix(name))
 }
 
+// codexMcpHeaderEnvVar derives the env var Codex reads a server's custom header from, via
+// env_http_headers, so header values stay out of config.toml just like the bearer token.
+//
+// "_SECRET" rather than "_TOKEN": it must still classify as a secret for isSecretEnvVar, but a
+// "_TOKEN" suffix would let server "x"'s header 0 (SAM_MCP_X_HEADER_0_TOKEN) collide with the
+// bearer variable of a server named "x-header-0".
+func codexMcpHeaderEnvVar(name string, index int) string {
+	return fmt.Sprintf("SAM_MCP_%s_HEADER_%d_SECRET", McpServerEnvVarSuffix(name), index)
+}
+
 func isAllDigits(s string) bool {
 	if s == "" {
 		return false
@@ -209,15 +219,15 @@ func normalizeCodexEffort(effort string) string {
 
 // generateCodexMcpConfig produces a managed TOML block for Codex MCP server
 // configuration plus the environment variables referenced by
-// bearer_token_env_var. Codex natively supports streamable HTTP MCP servers
-// via ~/.codex/config.toml.
+// bearer_token_env_var and env_http_headers. Codex natively supports streamable
+// HTTP MCP servers via ~/.codex/config.toml.
 func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig, effort string) (string, []string) {
 	providerConfig := generateCodexProxyProviderConfig(proxyProvider)
 	codexEffort := normalizeCodexEffort(effort)
 	validServers := make([]McpServerEntry, 0, len(mcpServers))
 	for i, server := range mcpServers {
-		if strings.ContainsAny(server.URL, "\n\r") || strings.ContainsAny(server.Token, "\n\r") {
-			slog.Warn("Skipping Codex MCP server with control characters in URL or token",
+		if !server.safeForConfigFile() {
+			slog.Warn("Skipping Codex MCP server with control characters in its URL, token or headers",
 				"index", i, "url_length", len(server.URL))
 			continue
 		}
@@ -247,6 +257,13 @@ func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexPro
 			tokenEnvVar := codexMcpTokenEnvVar(name)
 			config.WriteString(fmt.Sprintf("bearer_token_env_var = \"%s\"\n", tokenEnvVar))
 			envVars = append(envVars, fmt.Sprintf("%s=%s", tokenEnvVar, server.Token))
+		}
+		if len(server.Headers) > 0 {
+			headerEnvVar := func(index int, _ McpHeader) string { return codexMcpHeaderEnvVar(name, index) }
+			config.WriteString(fmt.Sprintf("env_http_headers = %s\n", mcpHeadersTOMLTable(server.Headers, headerEnvVar)))
+			for j, header := range server.Headers {
+				envVars = append(envVars, fmt.Sprintf("%s=%s", codexMcpHeaderEnvVar(name, j), header.Value))
+			}
 		}
 		config.WriteString("\n")
 	}

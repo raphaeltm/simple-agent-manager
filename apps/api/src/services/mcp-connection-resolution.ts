@@ -32,6 +32,7 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { decrypt } from './encryption';
+import { openMcpConnectionHeaders } from './mcp-connection-headers';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -118,16 +119,9 @@ export async function buildSessionMcpServers(
   options: { baseDomain: string; encryptionKey: string },
   scope: McpConnectionResolutionScope,
   samMcpToken: string
-): Promise<Array<{ url: string; token: string; name: string }>> {
+): Promise<McpServerEntry[]> {
   const resolved = await resolveMcpServersForSession(db, scope, options.encryptionKey);
-  return [
-    buildSamMcpEntry(options.baseDomain, samMcpToken),
-    ...resolved.map((entry) => ({
-      url: entry.url,
-      token: entry.token,
-      name: entry.name as string,
-    })),
-  ];
+  return [buildSamMcpEntry(options.baseDomain, samMcpToken), ...resolved];
 }
 
 /**
@@ -168,7 +162,7 @@ export async function decryptAndMerge(
   );
 
   // Decrypt concurrently, then merge in order. Sequential awaits here would stack up to
-  // ~100 AES-GCM operations (2 per bearer row, both scopes at cap) directly on the
+  // ~150 AES-GCM operations (up to 3 per row, both scopes at cap) directly on the
   // agent-session start path — which the Instant runtime shares, and which has a documented
   // history of timing out (rule 43). The merge still walks personal-then-project so a project
   // row wins a name collision.
@@ -211,7 +205,10 @@ async function toEntry(
       }
     }
 
-    return { url, token, name: row.name };
+    // Validated on the way out as well as on the way in: the vm-agent rejects the WHOLE
+    // create-agent-session request over one malformed header, so a bad row must stop here.
+    const headers = await openMcpConnectionHeaders(row, encryptionKey);
+    return { url, token, name: row.name, ...(headers.length > 0 ? { headers } : {}) };
   } catch (error) {
     log.warn('mcp_connections.row_skipped', {
       connectionId: row.id,

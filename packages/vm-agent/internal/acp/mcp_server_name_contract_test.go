@@ -26,6 +26,10 @@ type mcpNameContract struct {
 		Valid   []string `json:"valid"`
 		Invalid []string `json:"invalid"`
 	} `json:"urls"`
+	HeaderNames struct {
+		Valid   []string `json:"valid"`
+		Invalid []string `json:"invalid"`
+	} `json:"headerNames"`
 }
 
 func loadMcpNameContract(t *testing.T) mcpNameContract {
@@ -80,6 +84,29 @@ func TestMcpServerNameContract_Normalizes(t *testing.T) {
 	for input, expected := range contract.Normalized {
 		if got := sanitizeMcpServerName(input); got != expected {
 			t.Errorf("sanitizeMcpServerName(%q) = %q, want %q", input, got, expected)
+		}
+	}
+}
+
+// Header names are judged as exact strings on both sides — no trimming or case folding — so a
+// name the control plane stores is byte-for-byte the name written into TOML and mcp-remote
+// arguments. The TypeScript half checks MCP_CONNECTION_HEADER_NAME_PATTERN against the same list.
+func TestMcpHeaderNameContract(t *testing.T) {
+	t.Parallel()
+	contract := loadMcpNameContract(t)
+
+	if len(contract.HeaderNames.Valid) < 8 || len(contract.HeaderNames.Invalid) < 15 {
+		t.Fatalf("header name corpus looks truncated: %d valid, %d invalid",
+			len(contract.HeaderNames.Valid), len(contract.HeaderNames.Invalid))
+	}
+	for _, name := range contract.HeaderNames.Valid {
+		if !ValidMcpHeaderName(name) {
+			t.Errorf("ValidMcpHeaderName(%q) rejected a name the shared contract marks valid", name)
+		}
+	}
+	for _, name := range contract.HeaderNames.Invalid {
+		if ValidMcpHeaderName(name) {
+			t.Errorf("ValidMcpHeaderName(%q) accepted a name the shared contract marks invalid", name)
 		}
 	}
 }
