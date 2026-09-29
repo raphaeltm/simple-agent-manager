@@ -340,6 +340,8 @@ If you enabled GitLab in platform configuration, create a test project from a Gi
 
 Pushing upstream changes to your fork's `main` branch does **not** update the running instance by itself. Self-host forks skip the canonical repository's full `main`-push CI path, so the automatic `workflow_run` production deploy is not the update mechanism for forks.
 
+Before you update, read the **For self-hosters & admins** notes in [Recent Product Changes](/docs/guides/recent-product-changes/) for every cycle since your last update. They list new and changed settings, and say whether an update needs any action from you.
+
 ### Option A: Update Self-Hosted Instance workflow (recommended)
 
 The **Update Self-Hosted Instance** workflow (`update-self-hosted.yml`) automates the entire update process. It fetches the upstream release, fast-forwards your fork's `main` branch, and triggers a production deploy automatically.
@@ -396,7 +398,7 @@ Below the breakers, **Problem migrations** lists the individual session migratio
 What to do, by what the card shows:
 
 - **Frozen, error code `precopy_refused`**: nothing. The session was still in use when the sweep tried to copy it, so nothing was copied and it reads normally; the sweep tries it again after `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS` (a week). The list shows these last.
-- **Frozen, error code `operator_abandoned`**: nothing. Someone already abandoned it, and the card stays in the list as a record.
+- **Frozen, error code `operator_abandoned`**: nothing. Someone already abandoned it, and the card stays in the list as a record. These records are never removed, and the list puts older entries first, so over time they can push newer problems past its limit (`PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT`, 25). When the page says more may exist beyond the limit, ask the API for more, or for one project: `GET /api/admin/project-data/storage/archive-sharding/problem-migrations?limit=100&projectId=<id>`.
 - **Failed**: nothing yet. If it keeps failing it turns Poisoned.
 - **Poisoned, or Frozen with any other error code**: read the error and fix its cause first. Then clear the migration with **Abandon** (or a copy-back, if it already deleted its source — see below), and finally **Close breaker** for the project, because abandoning a migration does not close the breaker.
 
@@ -498,6 +500,8 @@ A workspace VM that stops sending heartbeats is released rather than left runnin
 Machines users enrolled themselves (bring-your-own nodes), app-deployment nodes, and Instant containers are left alone. If half or more of the running workspace VMs go silent at once (`NODE_UNHEALTHY_FLEET_MAX_FRACTION`, applied once there are at least `NODE_UNHEALTHY_FLEET_MIN_NODES`, default 3), SAM assumes it has stopped _receiving_ heartbeats rather than that every machine died. It then holds everything — no chat notices, no sleep requests, no deletions — and, once the silence outlasts the two windows combined (40 minutes by default), logs `node_cleanup.fleet_heartbeat_intake_escalation_required` for you to investigate. Each health decision is recorded in the `node_health_events` table, which keeps its rows after the node itself is deleted. The settings are in [Idle & Orphan Node Reaping](/docs/reference/configuration/#idle--orphan-node-reaping).
 
 ## Troubleshooting
+
+For what SAM does with a workspace VM that stops responding, see [Unresponsive machines are released automatically](#unresponsive-machines-are-released-automatically).
 
 ### "error: failed to decrypt state"
 

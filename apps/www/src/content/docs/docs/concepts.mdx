@@ -55,7 +55,7 @@ Several workspaces can share one node when the node's CPU, memory, and disk rese
 
 ### When a Node Stops Responding
 
-Every node reports in to SAM regularly. If a cloud node goes quiet — whether SAM provisioned it or you created it from the **Nodes** page — SAM does not leave it running and billed. After about 10 minutes it posts a notice in each chat on the node and asks those sessions to sleep; it deletes the machine once they are all asleep, or after about 30 minutes at the latest. Tasks still running there fail with a message naming the lost node. Deleting a node yourself is different: its running tasks are marked cancelled, not failed. See [SAM lost contact with the machine](/docs/guides/session-troubleshooting/#sam-lost-contact-with-the-machine) for what to do in the chat.
+Every node reports in to SAM regularly. A cloud node that SAM runs for you and that goes quiet is not left running and billed: SAM asks its chats to sleep and deletes it within about 30 minutes. Machines you enrolled yourself are left alone. See [SAM lost contact with the machine](/docs/guides/session-troubleshooting/#sam-lost-contact-with-the-machine) for what that looks like in a chat and what to do.
 
 ### Warm Reuse
 

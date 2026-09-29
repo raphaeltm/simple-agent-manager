@@ -6,47 +6,63 @@ description: What to do when a chat can't wake, a task fails, the machine behind
 When a chat stops behaving normally, it tells you what happened: a banner, a system message, or a
 label in the session list. Find what you are seeing below. The section it points to says whether
 your work is safe and what to do next. Everything here applies to both
-[Instant and VM sessions](/docs/guides/instant-sessions/) unless a row says otherwise.
+[Instant and VM sessions](/docs/guides/instant-sessions/) unless it says otherwise.
 
-| You see                                                                                 | What happened                                  | Do this                                                                        |
-| --------------------------------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------ |
-| A spinner reading **"Waking and restoring Instant session..."** with an elapsed counter | A wake or a recovery is in progress            | Wait                                                                           |
-| **"delivery was interrupted … outcome is unknown"**                                     | Your prompt may or may not have executed       | [Check, then decide](#your-prompt-may-or-may-not-have-run)                     |
-| **"could not restore its last safe checkpoint"**                                        | In-container work in progress is gone          | [Re-state the work](#the-checkpoint-could-not-be-restored)                     |
-| A system message starting **"Wake failed:"**, and **Wake failed** in the session list   | SAM could not wake the sleeping chat           | [Read the reason, then act on it](#wake-failed)                                |
-| A failure card under the chat header                                                    | The task failed; its work may have been kept   | [See whether the work was kept](#when-a-task-fails)                            |
-| A system message starting **"SAM lost contact with node"** (VM sessions)                | The machine behind the chat stopped responding | [Wait for the chat to sleep, then wake it](#sam-lost-contact-with-the-machine) |
-| The composer is gone and the chat reads **"This session has ended."**                   | The session is over — nothing left to wake     | [Start a new chat or fork](#the-session-has-ended)                             |
-| No banner, composer still there — the agent just stopped mid-sentence (VM sessions)     | Possibly an out-of-memory kill                 | [Check the Resources panel](#none-of-these-fit)                                |
+- **A strip with a spinner and an elapsed time**, such as **Waking and restoring Instant
+  session...** or, on a VM, a step like **Finding a server...** or **Waiting for server
+  capacity...**. A wake or a recovery is in progress. → [Wait](#recovery-is-in-progress)
+- **"…delivery was interrupted and its execution outcome is unknown"** (Instant). Your prompt may
+  or may not have run. → [Check, then decide](#your-prompt-may-or-may-not-have-run)
+- **"…could not restore its last safe checkpoint"** (Instant), or **"SAM restored this sleeping
+  conversation from a degraded snapshot…"** (VM). The chat is back, but some unpushed work may not
+  be. → [Check what's missing](#some-work-in-progress-was-not-restored)
+- **A system message starting "Wake failed:"**, and **Wake failed** in the session list. SAM could
+  not wake the sleeping chat. → [Read the reason, then act on it](#wake-failed)
+- **A failure card under the chat header.** The task failed; its work may have been kept.
+  → [See whether it was](#when-a-task-fails)
+- **A system message starting "SAM lost contact with node"** (VM). The machine behind the chat
+  stopped responding. → [Wait for the chat to sleep, then wake it](#sam-lost-contact-with-the-machine)
+- **No composer, and the chat reads "This session has ended."** There is nothing left to wake.
+  → [Start a new chat or fork](#the-session-has-ended)
+- **No message at all: the agent just stopped mid-sentence** (VM). It may have run out of memory.
+  → [Check the Resources panel](#none-of-these-fit)
 
 Anything else — including a message that delivery "could not be confirmed" — means SAM couldn't
 classify the failure. Treat it like the interrupted case: check before you resend.
-
-The chat lifecycle is authoritative while a wake is in progress. A VM wake can briefly show a
-deleted original workspace and a replacement workspace being provisioned; the accepted follow-up
-stays queued until strict restore succeeds.
 
 Several sections below say to check GitHub for anything the agent pushed. Work started as a task
 runs on its own `sam/…` [output branch](/docs/guides/idea-execution/#where-the-work-lands), and the
 project **Files** tab shows its diff without opening a workspace. A chat started in the composer on
 an Instant profile has no branch of its own, and pushes only what you ask the agent to push.
 
-:::note
-The **Recovery** badge and the chat header's **Recovery container** label are shared with an
-unrelated VM failure mode: a `.devcontainer` build that failed and fell back to a plain container.
-The header's tooltip describes that case ("check Boot Logs for the devcontainer error output"), so on
-an Instant session it is misleading — there is no devcontainer and nothing in Boot Logs to find. Go
-by the chat banner instead.
-:::
-
 ## Recovery is in progress
 
-A spinner banner with an elapsed-time counter means SAM is rebuilding the session from its snapshot.
-**Do nothing.** When restore finishes the session continues normally.
+A strip with a spinner and an elapsed-time counter means SAM is waking the session or rebuilding it
+from its snapshot. **Do nothing.** When it finishes, the chat carries on. While a sleeping chat
+wakes, the composer reads **Waking the agent — your message will be delivered...**
+
+On Instant this finishes within two minutes. On a VM, the strip names the step it has reached —
+**Finding a server...**, **Provisioning a server...**, **Restoring your files...**, **Starting the
+agent...** — because a VM wake provisions a replacement machine, which takes a few minutes.
+Meanwhile the **Nodes** page may briefly show the chat's old workspace deleted and a new one being
+created. That is normal.
+
+If a VM wake sits on **Waiting for server capacity...**, your cloud provider has no room for the
+machine yet, and SAM keeps trying. A message you sent is held for an hour: if the wake is still
+waiting then, the chat reports **Wake failed: Session is waking** (see [Wake failed](#wake-failed)).
+
+:::note[The Recovery container label]
+The chat header's **Recovery container** label means different things on the two runtimes. On a VM
+it means what its tooltip says: your `.devcontainer` failed to build, so SAM started a plain
+fallback container to keep the chat usable. Open the workspace and check **Boot Logs** for the
+build error. On an Instant session it appears while SAM rebuilds the container, and the tooltip's
+advice doesn't apply — there is no devcontainer and nothing in Boot Logs to find. Go by the chat's
+banner instead.
+:::
 
 ## Your prompt may or may not have run
 
-This is the one that needs your judgment.
+This banner appears on Instant sessions, and it is the one that needs your judgment.
 
 ![A red banner in the SAM chat reading "Your message is saved, but delivery was interrupted and its execution outcome is unknown. It was not replayed automatically. After restore finishes, check the transcript and partial output before deciding whether to send it again." with a Dismiss button.](/images/docs/instant-recovery-interrupted.png)
 
@@ -66,21 +82,27 @@ So, once restore finishes:
 Your text stays in the composer, so resending is one click if that's the call. **Dismiss** clears
 the banner without sending anything.
 
-## The checkpoint could not be restored
+## Some work in progress was not restored
 
-The container came back but the snapshot could not be applied. **Your transcript and any partial
-output are still there** — that history lives in SAM, not in the container. What's gone is the
-in-container work in progress: uncommitted edits, the git index, anything the agent hadn't pushed.
+The chat is back, but not everything it had saved came back with it. **Your transcript and any
+partial output are still there** — that history lives in SAM, not in the workspace. What may be
+gone is unpushed work inside the workspace: uncommitted edits, the git index, anything the agent
+hadn't pushed.
 
-Treat this like a fresh workspace:
+- On **Instant**, the chat says the session **could not restore its last safe checkpoint**: the
+  container came back, but its snapshot could not be applied.
+- On a **VM**, the chat says SAM **restored this sleeping conversation from a degraded snapshot**,
+  so the agent is starting fresh. It has lost its own memory of the session and re-reads the
+  transcript, and some uncommitted changes may be missing.
 
-1. Check GitHub for anything the agent already pushed; assume everything else from the container is
-   gone.
-2. Re-state what still needs doing in the same chat — the agent still has the transcript.
+Either way, treat it like a fresh workspace:
 
-If restore fails repeatedly (`CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`, twice by default), SAM gives up:
-it marks the session and its task **failed** rather than leaving you watching a spinner. At that
-point the session is closed like a stopped one — start a new chat, or
+1. Check GitHub for anything the agent already pushed, and assume other changes may be gone.
+2. Re-state what still needs doing in the same chat — the agent can read the transcript.
+
+On Instant, if restore fails repeatedly (`CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`, twice by default), SAM
+gives up: it marks the session and its task **failed** rather than leaving you watching a spinner.
+At that point the session is closed like a stopped one — start a new chat, or
 [fork](/docs/guides/chat-features/#conversation-forking) this one to keep its context.
 
 ## Wake failed
@@ -93,26 +115,52 @@ time retrying, it repeats the last reason it hit. The session list keeps the cha
 **Wake failed** until you reply. Anything you sent is still in the transcript; the agent never
 received it.
 
-![A project chat. In the session list, the selected chat shows a red alert icon and a red "Wake failed" label, next to a running chat and a sleeping one. The conversation ends with the user's follow-up and a system message reading "Wake failed: Cloud provider credentials are missing for this wake. (placement_credentials_missing)". The chat header still says Sleeping, and the composer reads "Send a message to wake the agent".](/images/docs/chat-wake-failed.png)
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/chat-wake-failed-mobile.png 2x" />
+  <img
+    src="/images/docs/chat-wake-failed.png"
+    alt="A sleeping project chat whose wake failed. The conversation ends with the user's follow-up and a system message reading &quot;Wake failed: Cloud provider credentials are missing for this wake. (placement_credentials_missing)&quot;. The chat header still says Sleeping, and the composer reads &quot;Send a message to wake the agent&quot;. On a wide screen, the session list beside the chat marks it with a red alert icon and a red &quot;Wake failed&quot; label, next to a running chat and a sleeping one."
+  />
+</picture>
 
 Every message you send starts a new wake attempt, so what matters is whether the cause is something
 you can fix first:
 
-| The reason says                                                                                                                                                                                    | What to do                                                                                                                                                                                                                                                                                       |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Cloud provider credentials are missing for this wake**                                                                                                                                           | No cloud credential is available to pay for a replacement machine — for example, the one the session used was removed. Connect one (yours under **Settings → Connections**, or the project's), then send your message again.                                                                     |
-| **No configured compute option can satisfy the stored requirements for this wake**                                                                                                                 | The machine the session was saved with can't be provisioned under your current compute settings — for example, an instance type, provider, or region it relied on is no longer in its [compute pool](/docs/guides/compute-pools/). Allow a matching machine again, then send your message again. |
-| **SAM could not start the replacement runtime: …**                                                                                                                                                 | The text after the colon says what went wrong while starting the machine. If it is a capacity or quota problem at your provider, send your message again later.                                                                                                                                  |
-| **SAM spent the wake retry budget for this sleep snapshot**                                                                                                                                        | Several wake attempts failed in a row, so SAM paused. Wait about 15 minutes, then send your message again. If it fails the same way, fork the chat and report it.                                                                                                                                |
-| **Session is waking (…)**                                                                                                                                                                          | The wake was still going — for example, waiting for machine capacity — when your message's delivery window ran out. Wait for the chat to finish waking, then send the message again.                                                                                                             |
-| **SAM retried the wake until the delivery expired…**, or another retry reason such as **Session cannot wake yet (…)**                                                                              | Something temporary outlasted SAM's retries: an hour for a message you send, a day for a scheduled action. Send your message again.                                                                                                                                                              |
-| **The task that owns this durable wake is no longer wakeable**                                                                                                                                     | An automatic wake-up — a subtask reporting back, a scheduled action, or an event — arrived after the task it was meant for had finished. The chat itself is fine: send a message and it wakes normally.                                                                                          |
-| The **sleep snapshot** is expired, missing, not restorable, or not wakeable; **the sleeping container runtime is gone**; or **the stored resource requirements for this conversation are invalid** | The saved session can't be restored. [Fork](/docs/guides/chat-features/#conversation-forking) the chat to carry its context into a fresh session, and check GitHub for anything the agent pushed. Unless the snapshot simply expired, also report it.                                            |
+- **Cloud provider credentials are missing for this wake.** No cloud credential is available to pay
+  for a replacement machine — for example, the one the session used was removed. Connect one (yours
+  under **Settings → Connections**, or the project's), then send your message again.
+- **No configured compute option can satisfy the stored requirements for this wake.** The machine
+  the session was saved with can't be provisioned under your current compute settings — for
+  example, an instance type, provider, or region it relied on is no longer in its
+  [compute pool](/docs/guides/compute-pools/). Allow a matching machine again, then send your
+  message again.
+- **SAM could not start the replacement runtime: …** SAM itself failed to start the wake. Send your
+  message again. If the same error comes back, report it.
+- **SAM spent the wake retry budget for this sleep snapshot.** Several wake attempts failed in a
+  row, so SAM paused. The chat doesn't say why they failed. If the session runs on your own cloud
+  account, check that its credential still works and that the account hasn't hit a server or quota
+  limit. Then wait about 15 minutes and send your message again. If it fails the same way, fork the
+  chat and report it.
+- **Session is waking (…).** The wake was still going — for example, waiting for server capacity —
+  when your message's delivery window ran out. Wait for the chat to finish waking, then send the
+  message again.
+- **SAM retried the wake until the delivery expired…**, or another retry reason such as **Session
+  cannot wake yet (…)**. Something temporary outlasted SAM's retries: an hour for a message you
+  send, a day for a scheduled action. Send your message again.
+- **The task that owns this durable wake is no longer wakeable.** An automatic wake-up — a subtask
+  reporting back, a scheduled action, or an event — arrived after the task it was meant for had
+  finished, so what it carried was never delivered. The chat itself is fine: send a message and it
+  wakes normally. If you still need what was missed, ask the agent for it.
+- **The sleep snapshot is expired, missing, not restorable, or not wakeable; the sleeping container
+  runtime is gone; or the stored resource requirements for this conversation are invalid.** The
+  saved session can't be restored. [Fork](/docs/guides/chat-features/#conversation-forking) the chat
+  to carry its context into a fresh session, and check GitHub for anything the agent pushed. Unless
+  the snapshot simply expired, also report it.
 
 Don't archive a chat whose wake failed unless you are finished with it: **Archive** (the round button
 above the composer on a sleeping chat) permanently deletes its saved session.
 
-If a reason isn't in this table, or a fixable one keeps coming back after you fixed it,
+If a reason isn't in this list, or a fixable one keeps coming back after you fixed it,
 [report it](/docs/guides/reporting-issues/) from the session tool rail.
 
 ## When a task fails
@@ -120,7 +168,9 @@ If a reason isn't in this table, or a fixable one keeps coming back after you fi
 A task can fail for reasons that have nothing to do with its work — the provider's usage limit ran
 out, or a question the agent asked you expired unanswered. When that happens while the workspace is
 still running, SAM tries to keep the workspace: it lets the agent's current turn end, snapshots the
-workspace, and puts the chat to sleep.
+workspace, and puts the chat to sleep. That usually takes a few minutes, but if the agent was in the
+middle of a turn SAM waits for it to end, for up to eight hours. Until then the chat stays awake with
+the failure card showing: wait for it to go to sleep rather than using **Retry**.
 
 The failure card under the chat header stays either way. It is red, or grey when there is nothing to
 debug — an expired question, for example. Read the chat to see whether the work was kept:
@@ -130,8 +180,10 @@ debug — an expired question, for example. Read the chat to see whether the wor
   **Retry** for this, even if the failure card suggests it — Retry starts a new chat without the
   saved files.
 - **A system message: "Task failed. SAM saved this conversation, but its workspace snapshot is
-  incomplete (…)".** Replying still wakes the chat, but some uncommitted changes may be missing. On
-  Instant, an incomplete snapshot can't be restored at all, and the message says so.
+  incomplete (…)".** On a VM, replying still wakes the chat, but some uncommitted changes may be
+  missing. On Instant the message ends "…so this Instant workspace cannot be restored": don't reply,
+  which only produces a **Wake failed** message. Check GitHub for what was pushed, then use
+  **Retry** or [Fork](/docs/guides/chat-features/#conversation-forking).
 - **A system message: "Task failed and SAM could not preserve its workspace: …", and the chat reads
   "This session has ended."** The message names the reason. Uncommitted or unpushed changes are
   gone; commits the agent pushed are safe. Check GitHub for what was pushed, then use **Retry** or

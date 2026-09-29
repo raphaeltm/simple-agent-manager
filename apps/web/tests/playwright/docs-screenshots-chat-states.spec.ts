@@ -8,7 +8,8 @@
  * (`.claude/rules/62-tests-must-observe-the-real-trigger.md`).
  *
  * Write the committed images with:
- *   DOCS_SHOTS=1 npx playwright test docs-screenshots-chat-states --project="Desktop (1280x800)"
+ *   DOCS_SHOTS=1 npx playwright test docs-screenshots-chat-states \
+ *     --project="Desktop (1280x800)" --project="iPhone SE (375x667)"
  *
  * The committed PNGs were then palette-compressed (about 5x smaller, no visible change), from
  * apps/www: sharp(file).png({ palette: true, quality: 90, effort: 10, dither: 0.6 }).
@@ -358,6 +359,23 @@ test('docs: wake failed in the session list and the chat', async ({ page }) => {
   await docsShot(page, 'chat-wake-failed', {
     clip: { x: listBox.x, y: 0, width: viewport.width - listBox.x, height: viewport.height },
   });
+});
+
+/**
+ * The same chat on a phone, where the desktop capture shrinks to unreadable text. The phone
+ * layout shows the chat without the session list, so the reason in the chat is what it shows.
+ */
+test('docs: wake failed in the chat on a phone', async ({ page }) => {
+  test.skip(!isMobile(page), 'phone capture');
+  await openChat(page, WAKE_FAILED.id);
+
+  await expect(
+    page.getByRole('log', { name: 'Conversation' }).getByText(WAKE_FAILED_TEXT)
+  ).toBeVisible();
+  await expect(page.getByPlaceholder(/wake the agent/i)).toBeVisible();
+  await expect(page.getByText('Starting...')).toHaveCount(0);
+
+  await docsShot(page, 'chat-wake-failed-mobile');
 });
 
 // ---------------------------------------------------------------------------

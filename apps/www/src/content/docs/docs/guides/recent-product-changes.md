@@ -17,10 +17,11 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   list, with a system message giving the reason.
   → [Wake failed](/docs/guides/session-troubleshooting/#wake-failed)
 - **One page for when things go wrong.** [Session Troubleshooting](/docs/guides/session-troubleshooting/)
-  covers wake failures, failed tasks, machines that stop responding, and interrupted messages, on
-  Instant and VM sessions alike.
-- **Switching chats is instant.** Up to 20 recently opened chats open at once from a browser cache,
-  load their newest messages first, and keep your unsent draft while you visit other chats.
+  covers wake failures, failed tasks, machines that stop responding, and interrupted messages, for
+  Instant and VM sessions.
+- **Switching chats no longer waits on the network.** Up to 20 recently opened chats open at once
+  from a browser cache, load their newest messages first, and keep your unsent draft while you
+  visit other chats.
   → [Switching Between Chats](/docs/guides/chat-features/#switching-between-chats)
 - **The dashboard shows what's live.** **Active Tasks** shows your six most recently active tasks,
   instead of every conversation that is still asleep. → [Come back later](/docs/quickstart/#6-come-back-later)
@@ -43,7 +44,7 @@ Also changed this week:
 
 - **npm-based agents need Node.js 22 in VM workspaces.** Claude Code, Codex, Gemini CLI, OpenCode,
   and Amp now need Node 22 or newer (up from 20). If a devcontainer has an older Node, SAM installs
-  Node 22 over it before starting the agent, which can change the `node` your project uses there.
+  Node 22 before starting the agent, which can change the `node` your project uses there.
   → [Choosing an environment size and profile](/docs/guides/creating-workspaces/#choosing-an-environment-size-and-profile)
 - Waking a sleeping Instant session — whether it fell asleep on its own or you put it to sleep — no
   longer fails with _"The sleeping container runtime is gone and cannot wake in place"_.
@@ -94,11 +95,12 @@ and disk alone — see [Compute Pools](/docs/guides/compute-pools/).
   inconclusive checks back off to six hours: `WORKSPACE_IDLE_BACKOFF_BASE_MS`,
   `WORKSPACE_IDLE_BACKOFF_MAX_MS`.
 
-**Updating to this release needs no action.** There are no new secrets or bindings, and the new
-database migrations run in the deploy pipeline. Two things in your GitHub Environment are worth a
-look: a `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` or `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET`
-variable there overrides the faster archive defaults, and a leftover `MAX_WORKSPACES_PER_NODE` is no
-longer read and can be deleted.
+**Updating to any release from this cycle needs no action.** There are no new secrets or bindings,
+and the new database migrations run in the deploy pipeline. Two things are worth a look. A
+`PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` or `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` variable
+in your GitHub Environment overrides the faster archive defaults. And if you set
+`MAX_WORKSPACES_PER_NODE` anywhere, it has no effect and can be deleted: machines are shared by CPU,
+memory, and disk alone.
 
 ### A failed task no longer throws its work away
 
@@ -121,10 +123,11 @@ nothing happened. Now the chat gets a system message starting **Wake failed:** w
 and the session list marks it **Wake failed** in red until you reply.
 
 The reason decides what to do next. Most causes you can fix, then send your message again: a
-removed cloud credential, a compute pool that no longer allows a matching machine, a provider out
-of capacity, or a burst of failed attempts that clears after 15 minutes. A few mean the saved
-session can't be restored, such as an expired snapshot, and then the answer is to fork the chat.
-The [Wake failed table](/docs/guides/session-troubleshooting/#wake-failed) covers each reason.
+removed cloud credential, a compute pool that no longer allows a matching machine, a wake still
+waiting for server capacity when your message's hour ran out, or a burst of failed attempts that
+clears after 15 minutes. A few mean the saved session can't be restored, such as an expired
+snapshot, and then the answer is to fork the chat.
+[Wake failed](/docs/guides/session-troubleshooting/#wake-failed) covers each reason.
 
 ### Switching chats no longer waits on the network
 

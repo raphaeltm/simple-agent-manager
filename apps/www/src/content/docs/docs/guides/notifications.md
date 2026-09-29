@@ -56,7 +56,7 @@ confirmed delivery, SAM extends the request instead. A hard maximum residence ti
 guarantees eventual termination. The separate agent-liveness reconciliation watchdog keeps
 its fixed deadline. Either way, a failed task's workspace is snapshotted and its
 conversation put to sleep rather than deleted, so your reply wakes it with its files
-restored (see [Sleeping and recovering sessions](/docs/guides/chat-features/#sleeping-and-recovering-sessions)).
+restored (see [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)).
 The exception is an agent still stuck mid-turn when the watchdog expires: its workspace is
 released, and the chat says the work was not saved.
 

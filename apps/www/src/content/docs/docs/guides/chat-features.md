@@ -171,10 +171,9 @@ see the source. You can write one in your own messages too.
 
 ![An agent's chat reply containing a rendered Mermaid flowchart: a checkout request goes from the browser to a rate limiter, which either answers 429 or passes it on to payments and then the ledger. The diagram sits under a Diagram header with copy, reset and expand buttons.](/images/docs/chat-mermaid-diagram.png)
 
-In chat, each diagram has three buttons: **Copy Mermaid source**, **Reset diagram view**, and
-**Expand Mermaid diagram**, which opens it full-screen. Drag to pan, and scroll or pinch to zoom. On
-a phone, a swipe that starts on a diagram pans the diagram, so start the swipe beside it to scroll
-the chat.
+In chat, each diagram has three icon buttons: copy its Mermaid source, reset the view, and expand,
+which opens it full-screen. Drag to pan, and scroll or pinch to zoom. On a phone, a swipe that
+starts on a diagram pans the diagram, so start the swipe above or below it to scroll the chat.
 
 Markdown files show diagrams too, in the project library and the **Files** tab, as a plain picture
 without those controls.
