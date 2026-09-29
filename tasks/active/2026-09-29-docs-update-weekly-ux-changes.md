@@ -81,4 +81,15 @@ covered PRs #2092–#2135; this pass covers everything merged since.
   - Product bugs filed instead of papered over: idea `01M3NT26NMFCA92X53MNBRADEJ` (VM resume banner
     says "Instant"); note appended to `01M38YEY4A6WMPG1DSD0P5MHHJ` (abandoned migration rows push
     new problems past the list limit).
-- **Round 3**: running.
+- **Round 3** (fixed in `ede594ab3`): 0 CRITICAL, 0 HIGH, 2 MEDIUM, 4 LOW.
+  - Instant "could not restore its last safe checkpoint" stops the container; the next request
+    retries the full restore once, then `exhaustRecovery` fails the session
+    (`vm-agent-container.ts:degradeRecovery`). The pre-existing text on `main` ("the container came
+    back") was wrong; corrected.
+  - "Waiting for server capacity..." (`waiting_for_node_capacity`) is every VM admission wait:
+    provider stock, account quota, `user_node_limit` (`MAX_NODES_PER_USER`, 10, counts running/warm
+    workspace nodes), and `capacity_pool_node_limit` (`vm-admission-control-types.ts`).
+  - Wake tasks carry no attachments, so a wake shows "Restoring your session..." (`workspace_ready`),
+    never "Restoring your files..." (`session-recovery-task.ts`, `workspace-ready-steps.ts`).
+  - `isWaking` is VM-only (`recoveryStatus: 'waking'`); Instant wakes in place.
+- **Round 4**: running.
