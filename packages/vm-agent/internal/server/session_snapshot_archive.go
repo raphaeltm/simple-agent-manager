@@ -633,8 +633,8 @@ var homeExcludeFiles = map[string]bool{
 	".claude/.credentials.json": true,
 	".codex/auth.json":          true,
 	// Generated runtime configuration can contain callback-token URLs (Codex)
-	// or literal MCP bearer tokens (Vibe). It is regenerated from fresh control-
-	// plane credentials before the restored harness is loaded.
+	// or literal MCP bearer tokens and header values (Vibe). It is regenerated
+	// from fresh control-plane credentials before the restored harness is loaded.
 	".codex/config.toml": true,
 	".vibe/config.toml":  true,
 	".git-credentials":   true,

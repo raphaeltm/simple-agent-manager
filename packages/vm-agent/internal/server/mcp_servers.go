@@ -30,7 +30,7 @@ func normalizeMcpServers(entries []acp.McpServerEntry) ([]acp.McpServerEntry, er
 		}
 		// Header values reach TOML files and mcp-remote arguments, so a malformed header fails
 		// the request here, like a malformed URL, rather than being written out.
-		if err := acp.ValidateMcpHeaders(srv.Headers); err != nil {
+		if err := srv.ValidateHeaders(); err != nil {
 			return nil, fmt.Errorf("mcpServers[%d]: %w", i, err)
 		}
 		// Every field must be copied explicitly: this rebuilds the struct, so a field added

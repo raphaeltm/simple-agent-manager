@@ -1,6 +1,8 @@
 package persistence
 
 import (
+	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -100,22 +102,48 @@ func TestMigrationV18KeepsExistingMcpServerRows(t *testing.T) {
 	}
 }
 
-func TestGetSessionMcpServers_MalformedHeadersFailWithoutLeakingThem(t *testing.T) {
+// One unreadable row must not cost the restored session its other servers: the caller treats
+// any error as "no MCP servers", which would silently drop sam-mcp as well.
+func TestGetSessionMcpServers_SkipsARowWithMalformedHeadersWithoutLeakingThem(t *testing.T) {
 	store := openTestStore(t)
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	if err := store.UpsertSessionMcpServers("ws-1", "sess-1", []McpServer{
+		{URL: "https://api.example.com/mcp", Token: "sam-token", Name: "sam-mcp"},
+		{URL: "https://backend.composio.dev/mcp", Name: "composio"},
+		{
+			URL:     "https://mcp.zapier.com/api/mcp",
+			Name:    "zapier",
+			Headers: []McpServerHeader{{Name: "x-api-key", Value: "zap-key"}},
+		},
+	}); err != nil {
+		t.Fatalf("UpsertSessionMcpServers: %v", err)
+	}
 	const secret = "ak_live_secret"
 	if _, err := store.db.Exec(
-		"INSERT INTO session_mcp_servers (workspace_id, session_id, sort_order, url, token, name, headers) "+
-			"VALUES ('ws-1', 'sess-1', 0, 'https://backend.composio.dev/mcp', '', 'composio', ?)",
+		"UPDATE session_mcp_servers SET headers = ? WHERE workspace_id = 'ws-1' AND session_id = 'sess-1' AND sort_order = 1",
 		`[{"name":"x-api-key","value":"`+secret+`"`, // truncated JSON
 	); err != nil {
-		t.Fatalf("insert malformed row: %v", err)
+		t.Fatalf("corrupt row: %v", err)
 	}
 
-	_, err := store.GetSessionMcpServers("ws-1", "sess-1")
-	if err == nil {
-		t.Fatal("expected a malformed headers column to fail the read")
+	got, err := store.GetSessionMcpServers("ws-1", "sess-1")
+	if err != nil {
+		t.Fatalf("GetSessionMcpServers: %v", err)
 	}
-	if strings.Contains(err.Error(), secret) {
-		t.Fatalf("error leaks the stored header value: %v", err)
+	if len(got) != 2 || got[0].Name != "sam-mcp" || got[1].Name != "zapier" {
+		t.Fatalf("got %#v, want sam-mcp and zapier with the corrupted composio row skipped", got)
+	}
+	if len(got[1].Headers) != 1 || got[1].Headers[0].Value != "zap-key" {
+		t.Fatalf("zapier headers = %#v, want its own header intact", got[1].Headers)
+	}
+	if !strings.Contains(logs.String(), "sortOrder=1") {
+		t.Fatalf("expected a warning naming the skipped row, got logs:\n%s", logs.String())
+	}
+	if strings.Contains(logs.String(), secret) {
+		t.Fatalf("warning leaks the stored header value:\n%s", logs.String())
 	}
 }

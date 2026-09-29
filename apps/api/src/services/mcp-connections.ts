@@ -325,7 +325,9 @@ export async function updateMcpConnection(
   const scope: McpConnectionScopeRef = { userId: input.userId, projectId: input.projectId };
   const existing = await requireScopedConnection(db, scope, input.connectionId);
 
-  const updates: Partial<schema.NewMcpConnectionRow> = { updatedAt: new Date().toISOString() };
+  const updates: Partial<schema.NewMcpConnectionRow> = {
+    updatedAt: nextUpdatedAt(existing.updatedAt),
+  };
 
   if (input.name !== undefined) {
     const name = validateMcpConnectionName(input.name);
@@ -379,12 +381,37 @@ export async function updateMcpConnection(
     updates.enabled = input.enabled;
   }
 
-  await db
+  // Every value above was derived from `existing`, so the write only lands if the row is still
+  // the one that was read. Without this, a request replacing only the headers could commit after
+  // a concurrent switch to bearer and persist a custom Authorization header beside a bearer
+  // token — a pair validation forbids but a stale snapshot cannot see.
+  const written = await db
     .update(schema.mcpConnections)
     .set(updates)
-    .where(and(scopeWhere(scope), eq(schema.mcpConnections.id, existing.id)));
+    .where(
+      and(
+        scopeWhere(scope),
+        eq(schema.mcpConnections.id, existing.id),
+        eq(schema.mcpConnections.updatedAt, existing.updatedAt)
+      )
+    )
+    .returning({ id: schema.mcpConnections.id });
+  if (written.length === 0) {
+    throw errors.conflict('This MCP server was changed by another request; reload and try again');
+  }
 
   return toMcpConnectionResponse({ ...existing, ...updates } as schema.McpConnectionRow);
+}
+
+/**
+ * A write timestamp strictly after `previous`, so every update changes the `updated_at` the
+ * concurrency guard in `updateMcpConnection` compares against — even two writes in one
+ * millisecond.
+ */
+function nextUpdatedAt(previous: string): string {
+  const previousMs = Date.parse(previous);
+  const now = Date.now();
+  return new Date(Number.isNaN(previousMs) ? now : Math.max(now, previousMs + 1)).toISOString();
 }
 
 /**

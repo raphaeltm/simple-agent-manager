@@ -7,7 +7,7 @@
  */
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { openMcpConnectionHeaders } from '../../../src/services/mcp-connection-headers';
@@ -180,6 +180,25 @@ describe('creating a connection with custom headers', () => {
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM mcp_connections').get()).toEqual({ n: 0 });
   });
 
+  it('lets a bearer token and a non-Authorization header coexist', async () => {
+    const created = await createComposio({ authType: 'bearer', token: 'bearer-token' });
+
+    expect(created.authType).toBe('bearer');
+    expect(created.hasToken).toBe(true);
+    expect(created.headerNames).toEqual(['x-api-key']);
+  });
+
+  it('measures the value limit in UTF-8 bytes, not characters', async () => {
+    // 40 characters, 80 bytes: under a character-count check, over the 64-byte limit.
+    await expect(
+      createComposio({ headers: [{ name: 'x-api-key', value: 'é'.repeat(40) }] })
+    ).rejects.toThrow(/exceeds max size of 64 bytes/);
+    // Control: 32 two-byte characters are exactly 64 bytes and fit.
+    await expect(
+      createComposio({ headers: [{ name: 'x-api-key', value: 'é'.repeat(32) }] })
+    ).resolves.toMatchObject({ headerNames: ['x-api-key'] });
+  });
+
   it('rejects an Authorization header alongside a bearer token', async () => {
     await expect(
       createComposio({
@@ -274,6 +293,77 @@ describe('updating headers', () => {
     });
     expect(switched.authType).toBe('bearer');
     expect(switched.headerNames).toEqual([]);
+  });
+
+  it('keeps a non-conflicting header when the auth type changes and headers are not mentioned', async () => {
+    const created = await createComposio();
+
+    const switched = await update(created.id, { authType: 'bearer', token: 'bearer-token' });
+
+    expect(switched.authType).toBe('bearer');
+    expect(switched.headerNames).toEqual(['x-api-key']);
+    expect(await storedHeaders(created.id)).toEqual([{ name: 'x-api-key', value: API_KEY }]);
+  });
+
+  it('enforces the header limit on update as well as create', async () => {
+    const created = await createComposio();
+
+    await expect(
+      update(created.id, {
+        headers: [
+          { name: 'x-api-key' },
+          ...['b', 'c', 'd', 'e'].map((name) => ({ name, value: 'v' })),
+        ],
+      })
+    ).rejects.toThrow(/Maximum 4 headers/);
+    expect(await storedHeaders(created.id)).toEqual([{ name: 'x-api-key', value: API_KEY }]);
+  });
+
+  describe('with the clock frozen, so every write lands in the same millisecond', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-09-29T08:00:00.000Z'));
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('lets only one of two concurrent updates land, so auth type and headers never mix', async () => {
+      // Both updates start in the same tick, so both read the row before either writes — the
+      // interleaving a double submit or two collaborators produce. Without the updated_at guard
+      // both would commit, and whichever landed last would leave its own stale view of the
+      // other column behind. The frozen clock makes the create and both updates share one
+      // millisecond, so the guard only holds if every write still moves updated_at forward.
+      const created = await createComposio({ headers: [] });
+
+      const results = await Promise.allSettled([
+        update(created.id, { headers: [{ name: 'Authorization', value: 'Basic dXNlcjpwYXNz' }] }),
+        update(created.id, { authType: 'bearer', token: 'bearer-token' }),
+      ]);
+
+      const rejected = results.filter((result) => result.status === 'rejected');
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(String((rejected[0] as PromiseRejectedResult).reason)).toMatch(
+        /changed by another request/
+      );
+
+      const row = storedRow(created.id);
+      const headers = await storedHeaders(created.id);
+      const hasAuthorizationHeader = headers.some((header) => header.name === 'Authorization');
+      expect(row.auth_type === 'bearer' && hasAuthorizationHeader).toBe(false);
+    });
+
+    it('still accepts sequential updates, each against the row the previous one wrote', async () => {
+      const created = await createComposio();
+
+      await update(created.id, { enabled: false });
+      await update(created.id, { enabled: true });
+      const renamed = await update(created.id, { name: 'composio-2' });
+
+      expect(renamed.name).toBe('composio-2');
+      expect(renamed.enabled).toBe(true);
+    });
   });
 
   it('asks for every value when the stored headers cannot be decrypted, and accepts a full replacement', async () => {

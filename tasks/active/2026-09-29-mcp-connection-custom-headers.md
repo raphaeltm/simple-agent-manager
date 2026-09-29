@@ -207,3 +207,36 @@ Authorization:Bearer ${SAM_MCP_TOKEN}`, with the token in the stdio server env r
   intended tests red (see PR body).
 - Codex `env_http_headers` was verified against the published Codex config reference, and
   mcp-remote's header parser against the `mcp-remote@0.1.38` tarball source.
+
+### Phase 5 review fixes
+
+- cloudflare-specialist (HIGH, TOCTOU): `updateMcpConnection` derives every field from the row
+  it read, so a header-only PATCH racing a switch to bearer could persist `Authorization` beside
+  a bearer token. The write is now conditional on `updated_at` still matching (409 otherwise),
+  with `nextUpdatedAt` keeping the column strictly increasing inside one millisecond, plus a
+  resolution-time backstop that refuses that pair. Tests freeze the clock so both halves are
+  load-bearing; dropping the predicate, the strict step, or the backstop each turned a test red.
+- go-specialist (HIGH): a repeated header name made the Codex/Vibe TOML unparseable. The
+  vm-agent now validates through `McpServerEntry.ValidateHeaders` — charset, reserved transport
+  names (pinned TS↔Go by `headerNames.reserved` in the contract fixture), case-insensitive
+  duplicates, and `Authorization` beside a bearer token. Five Go mutations proven red.
+- go-specialist + test-engineer (MEDIUM): `GetSessionMcpServers` failed the whole read over one
+  undecodable `headers` column, which the restore path treats as "no MCP servers" (sam-mcp
+  included). It now skips that row with a warning that names the row, never the value.
+- go-specialist (MEDIUM, Vibe writes header values into `~/.vibe/config.toml`): accepted and
+  documented. Vibe has env indirection for one header only (`api_key_env`); the bearer token has
+  always been written the same way, the directory is `chmod 700`, and the file is excluded from
+  session snapshots (`homeExcludeFiles`). The public guide already says only Codex keeps values
+  out of its config file.
+- go-specialist (LOW, count/size limits not mirrored in Go): declined on purpose. They are
+  operator-configurable in the control plane; a Go constant would silently diverge from an
+  operator who raises them.
+- test-engineer: route-level POST/PATCH tests with real SQLite, env-driven
+  `MAX_MCP_CONNECTION_HEADERS` / `MCP_CONNECTION_HEADER_VALUE_MAX_BYTES` (hardcoding either in
+  the route turned its test red), Vibe TOML escaping of `"` and `\`, authType switch keeping a
+  non-conflicting header, bearer + `x-api-key` on create, update-time header limit, UTF-8 byte
+  (not character) limit.
+- ui-ux-specialist: the header name rule is shown up front, the edit form says a saved header
+  keeps its value unless retyped, and server names use the card-title type style.
+- Full API suite under load (load average ~18 on 8 cores) showed 8 cold-import timeouts in
+  unrelated files; all 40 affected tests pass when rerun with longer timeouts.

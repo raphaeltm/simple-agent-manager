@@ -26,7 +26,11 @@
     "ValidMcpHeaderName in packages/vm-agent/internal/acp/mcp_servers.go (vm-agent, rejects the",
     "create-agent-session request). Both judge the exact string with no normalization; the control",
     "plane trims user input before judging. The charset is what mcp-remote accepts in",
-    "`--header name:value` and what TOML accepts as a bare key."
+    "`--header name:value` and what TOML accepts as a bare key.",
+    "",
+    "`headerNames.reserved` pins MCP_CONNECTION_RESERVED_HEADER_NAMES (TS) to reservedMcpHeaderNames",
+    "in packages/vm-agent/internal/acp/mcp_servers.go: names the HTTP client or MCP transport sets",
+    "itself. Both sides compare case-insensitively and must hold exactly this list."
   ],
   "valid": [
     "a",
@@ -120,6 +124,17 @@
       "x\tkey",
       "caf\u00e9",
       "x-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "reserved": [
+      "accept",
+      "connection",
+      "content-length",
+      "content-type",
+      "host",
+      "last-event-id",
+      "mcp-protocol-version",
+      "mcp-session-id",
+      "transfer-encoding"
     ]
   }
 }

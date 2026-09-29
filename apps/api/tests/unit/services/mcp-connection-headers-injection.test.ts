@@ -200,6 +200,31 @@ describe('header fault isolation on the session-start path', () => {
     warn.mockRestore();
   });
 
+  it('skips a row that pairs a bearer token with a custom Authorization header', async () => {
+    // Writes forbid this pair, so it is built by hand: a stored Authorization header, then the
+    // row flipped to bearer underneath it.
+    const broken = await saveComposio({
+      name: 'broken',
+      headers: [{ name: 'Authorization', value: 'Basic dXNlcjpwYXNz' }],
+    });
+    await saveComposio({ name: 'healthy' });
+    const { encrypt } = await import('../../../src/services/encryption');
+    const token = await encrypt('bearer-token', ENCRYPTION_KEY);
+    sqlite
+      .prepare(
+        "UPDATE mcp_connections SET auth_type = 'bearer', encrypted_token = ?, token_iv = ? WHERE id = ?"
+      )
+      .run(token.ciphertext, token.iv, broken.id);
+
+    const resolved = await resolveMcpServersForSession(
+      db,
+      { userId: 'user-1', projectId: 'proj-1' },
+      ENCRYPTION_KEY
+    );
+
+    expect(resolved.map((entry) => entry.name)).toEqual(['healthy']);
+  });
+
   it('skips a row whose stored header would make the vm-agent reject the whole session', async () => {
     // Constructed through the real write path, then corrupted into a shape the write path
     // refuses: the resolver must hold the same line, because the vm-agent fails the entire

@@ -280,36 +280,44 @@ func TestConfigGenerators_SkipServerWithUnsafeHeader(t *testing.T) {
 	}
 }
 
-func TestValidateMcpHeaders(t *testing.T) {
+func TestMcpServerEntryValidateHeaders(t *testing.T) {
 	t.Parallel()
 
 	const secret = "s3cr3t-value"
 	cases := []struct {
 		name    string
+		token   string
 		headers []McpHeader
 		wantErr bool
 	}{
-		{"none", nil, false},
-		{"composio api key", []McpHeader{{Name: "x-api-key", Value: secret}}, false},
-		{"value with spaces and symbols", []McpHeader{{Name: "Authorization", Value: "Basic dXNlcjpwYXNz=="}}, false},
-		{"name with a colon", []McpHeader{{Name: "x:api", Value: secret}}, true},
-		{"name with a dot", []McpHeader{{Name: "x.api", Value: secret}}, true},
-		{"name with a space", []McpHeader{{Name: "x api", Value: secret}}, true},
-		{"empty name", []McpHeader{{Name: "", Value: secret}}, true},
-		{"name over 64 characters", []McpHeader{{Name: strings.Repeat("a", 65), Value: secret}}, true},
-		{"empty value", []McpHeader{{Name: "x-api-key", Value: ""}}, true},
-		{"value with LF", []McpHeader{{Name: "x-api-key", Value: secret + "\n"}}, true},
-		{"value with CR", []McpHeader{{Name: "x-api-key", Value: secret + "\r"}}, true},
-		{"value with NUL", []McpHeader{{Name: "x-api-key", Value: secret + "\x00"}}, true},
-		{"value with DEL", []McpHeader{{Name: "x-api-key", Value: secret + "\x7f"}}, true},
-		{"second header invalid", []McpHeader{{Name: "a", Value: "ok"}, {Name: "b", Value: "bad\n"}}, true},
+		{"none", "", nil, false},
+		{"composio api key", "", []McpHeader{{Name: "x-api-key", Value: secret}}, false},
+		{"api key beside a bearer token", "tok", []McpHeader{{Name: "x-api-key", Value: secret}}, false},
+		{"custom Authorization without a bearer token", "", []McpHeader{{Name: "Authorization", Value: "Basic dXNlcjpwYXNz=="}}, false},
+		{"name with a colon", "", []McpHeader{{Name: "x:api", Value: secret}}, true},
+		{"name with a dot", "", []McpHeader{{Name: "x.api", Value: secret}}, true},
+		{"name with a space", "", []McpHeader{{Name: "x api", Value: secret}}, true},
+		{"empty name", "", []McpHeader{{Name: "", Value: secret}}, true},
+		{"name over 64 characters", "", []McpHeader{{Name: strings.Repeat("a", 65), Value: secret}}, true},
+		{"empty value", "", []McpHeader{{Name: "x-api-key", Value: ""}}, true},
+		{"value with LF", "", []McpHeader{{Name: "x-api-key", Value: secret + "\n"}}, true},
+		{"value with CR", "", []McpHeader{{Name: "x-api-key", Value: secret + "\r"}}, true},
+		{"value with NUL", "", []McpHeader{{Name: "x-api-key", Value: secret + "\x00"}}, true},
+		{"value with DEL", "", []McpHeader{{Name: "x-api-key", Value: secret + "\x7f"}}, true},
+		{"second header invalid", "", []McpHeader{{Name: "a", Value: "ok"}, {Name: "b", Value: "bad\n"}}, true},
+		{"repeated name", "", []McpHeader{{Name: "x-api-key", Value: "a"}, {Name: "x-api-key", Value: secret}}, true},
+		{"repeated name in another case", "", []McpHeader{{Name: "x-api-key", Value: "a"}, {Name: "X-API-Key", Value: secret}}, true},
+		{"custom Authorization beside a bearer token", "tok", []McpHeader{{Name: "authorization", Value: secret}}, true},
+		{"transport-managed name", "", []McpHeader{{Name: "content-length", Value: "0"}}, true},
+		{"transport-managed name in another case", "", []McpHeader{{Name: "Host", Value: "evil.example"}}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := ValidateMcpHeaders(tc.headers)
+			entry := McpServerEntry{URL: "https://api.example.com/mcp", Token: tc.token, Headers: tc.headers}
+			err := entry.ValidateHeaders()
 			if (err != nil) != tc.wantErr {
-				t.Fatalf("ValidateMcpHeaders() error = %v, wantErr %v", err, tc.wantErr)
+				t.Fatalf("ValidateHeaders() error = %v, wantErr %v", err, tc.wantErr)
 			}
 			// The error travels to the control plane and into rows any project member can
 			// read, so it must never carry a header value.
@@ -317,5 +325,80 @@ func TestValidateMcpHeaders(t *testing.T) {
 				t.Fatalf("error leaks the header value: %v", err)
 			}
 		})
+	}
+}
+
+// A repeated key makes a TOML file unparseable, which would take every MCP server in it down,
+// sam-mcp included. Each generator must drop only the offending server and still emit a file
+// its harness can parse.
+func TestConfigGenerators_SkipServerWhoseHeadersRepeatAKey(t *testing.T) {
+	t.Parallel()
+
+	entries := []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "sam-token", Name: SamMcpServerName},
+		composioEntry(),
+		{
+			URL:     "https://repeat.example/mcp",
+			Name:    "repeat",
+			Headers: []McpHeader{{Name: "x-api-key", Value: "a"}, {Name: "X-API-KEY", Value: "b"}},
+		},
+		{
+			URL:     "https://clash.example/mcp",
+			Name:    "clash",
+			Token:   "bearer",
+			Headers: []McpHeader{{Name: "Authorization", Value: "Basic dXNlcjpwYXNz"}},
+		},
+	}
+
+	codexConfig, _ := generateCodexMcpConfig(entries, nil, "")
+	var codex struct {
+		McpServers map[string]any `toml:"mcp_servers"`
+	}
+	if err := toml.Unmarshal([]byte(codexConfig), &codex); err != nil {
+		t.Fatalf("Codex config is not valid TOML: %v\n%s", err, codexConfig)
+	}
+	if len(codex.McpServers) != 2 || codex.McpServers[SamMcpServerName] == nil || codex.McpServers["composio"] == nil {
+		t.Fatalf("Codex mcp_servers = %v, want only sam-mcp and composio", codex.McpServers)
+	}
+
+	vibeConfig := generateVibeConfig("mistral-large", entries)
+	var vibe struct {
+		McpServers []struct {
+			Name string `toml:"name"`
+		} `toml:"mcp_servers"`
+	}
+	if err := toml.Unmarshal([]byte(vibeConfig), &vibe); err != nil {
+		t.Fatalf("Vibe config is not valid TOML: %v\n%s", err, vibeConfig)
+	}
+	if len(vibe.McpServers) != 2 || vibe.McpServers[0].Name != SamMcpServerName || vibe.McpServers[1].Name != "composio" {
+		t.Fatalf("Vibe mcp_servers = %#v, want only sam-mcp and composio", vibe.McpServers)
+	}
+}
+
+// Vibe is the one harness that writes header values into its config file, so a value holding
+// TOML's own delimiters must round-trip exactly rather than end the string early.
+func TestGenerateVibeConfig_EscapesHeaderValues(t *testing.T) {
+	t.Parallel()
+
+	const value = `ak"live\x = "injected"`
+	config := generateVibeConfig("mistral-large", []McpServerEntry{{
+		URL:     "https://backend.composio.dev/mcp",
+		Name:    "composio",
+		Headers: []McpHeader{{Name: "x-api-key", Value: value}},
+	}})
+
+	var parsed struct {
+		McpServers []struct {
+			Headers map[string]string `toml:"headers"`
+		} `toml:"mcp_servers"`
+	}
+	if err := toml.Unmarshal([]byte(config), &parsed); err != nil {
+		t.Fatalf("Vibe config is not valid TOML: %v\n%s", err, config)
+	}
+	if len(parsed.McpServers) != 1 || len(parsed.McpServers[0].Headers) != 1 {
+		t.Fatalf("mcp_servers = %#v, want one server with one header", parsed.McpServers)
+	}
+	if got := parsed.McpServers[0].Headers["x-api-key"]; got != value {
+		t.Fatalf("x-api-key = %q, want %q", got, value)
 	}
 }

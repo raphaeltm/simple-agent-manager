@@ -204,6 +204,11 @@ async function toEntry(
     // Validated on the way out as well as on the way in: the vm-agent rejects the WHOLE
     // create-agent-session request over one malformed header, so a bad row must stop here.
     const headers = await openMcpConnectionHeaders(row, encryptionKey);
+    if (token && headers.some((header) => header.name.toLowerCase() === 'authorization')) {
+      // Writes forbid this pair; a row that holds it anyway would reach the harness with two
+      // Authorization headers and harness-dependent precedence, so it is not injected.
+      throw new Error('a custom Authorization header conflicts with the bearer token');
+    }
     return { url, token, name: row.name, ...(headers.length > 0 ? { headers } : {}) };
   } catch (error) {
     log.warn('mcp_connections.row_skipped', {

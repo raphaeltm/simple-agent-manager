@@ -20,6 +20,22 @@ const (
 // are pinned together by packages/shared/src/fixtures/mcp-server-name-contract.json.
 const maxMcpHeaderNameLen = 64
 
+// reservedMcpHeaderNames are set by the HTTP client or the MCP transport itself, so a custom
+// value would be overwritten or would break the connection (a wrong Content-Length or Host
+// corrupts request framing). Lowercase. It mirrors MCP_CONNECTION_RESERVED_HEADER_NAMES in
+// packages/shared/src/types/mcp-connection.ts; mcp-server-name-contract.json pins the two.
+var reservedMcpHeaderNames = map[string]bool{
+	"accept":               true,
+	"connection":           true,
+	"content-length":       true,
+	"content-type":         true,
+	"host":                 true,
+	"last-event-id":        true,
+	"mcp-protocol-version": true,
+	"mcp-session-id":       true,
+	"transfer-encoding":    true,
+}
+
 // McpServerEntry is a lightweight MCP server config passed from the control
 // plane for injection into ACP sessions. It represents an HTTP MCP server with
 // optional bearer token authentication.
@@ -64,7 +80,7 @@ func (e McpServerEntry) httpHeaders() []McpHeader {
 func (e McpServerEntry) safeForConfigFile() bool {
 	return !strings.ContainsAny(e.URL, "\r\n") &&
 		!strings.ContainsAny(e.Token, "\r\n") &&
-		ValidateMcpHeaders(e.Headers) == nil
+		e.ValidateHeaders() == nil
 }
 
 // ValidMcpHeaderName reports whether name can be written as a TOML key and passed to
@@ -101,18 +117,33 @@ func ValidMcpHeaderValue(value string) bool {
 	return true
 }
 
-// ValidateMcpHeaders checks every header. The error never carries a value: it propagates to
-// the control plane, which stores it where any project member can read it.
+// ValidateHeaders checks the entry's custom headers against everything that would corrupt
+// what this package writes: an unusable name or value, a transport-managed name, or a name the
+// server already receives — a case-insensitive duplicate, or Authorization beside a bearer
+// token. A repeated key makes the whole Codex or Vibe TOML file unparseable, taking every other
+// MCP server, including sam-mcp, down with it. The error never carries a value: it propagates
+// to the control plane, which stores it where any project member can read it.
 //
-// Only what protects the config files and argv this package writes is checked here. The
-// write-time policy rules — reserved transport headers, case-insensitive duplicates, the
-// Authorization/bearer conflict, size limits — belong to the control plane
-// (apps/api/src/services/mcp-connection-headers.ts), the only writer of stored headers.
-func ValidateMcpHeaders(headers []McpHeader) error {
-	for i, header := range headers {
+// The control plane (apps/api/src/services/mcp-connection-headers.ts) enforces the same rules
+// when a connection is saved, plus the configurable count and size limits, which stay there
+// alone so an operator raising them never has to redeploy the vm-agent.
+func (e McpServerEntry) ValidateHeaders() error {
+	seen := make(map[string]bool, len(e.Headers)+1)
+	if e.Token != "" {
+		seen["authorization"] = true
+	}
+	for i, header := range e.Headers {
 		if !ValidMcpHeaderName(header.Name) {
 			return fmt.Errorf("header %d has an invalid name", i)
 		}
+		key := strings.ToLower(header.Name)
+		if reservedMcpHeaderNames[key] {
+			return fmt.Errorf("header %q is set by the MCP transport and cannot be overridden", header.Name)
+		}
+		if seen[key] {
+			return fmt.Errorf("header %q is sent more than once (repeated, or Authorization beside a bearer token)", header.Name)
+		}
+		seen[key] = true
 		if !ValidMcpHeaderValue(header.Value) {
 			return fmt.Errorf("header %q has an empty value or a control character", header.Name)
 		}

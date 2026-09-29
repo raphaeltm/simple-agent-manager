@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 )
 
 // McpServer represents a persisted MCP server config for an ACP session.
@@ -108,12 +109,17 @@ func (s *Store) UpsertSessionMcpServers(workspaceID, sessionID string, servers [
 
 // GetSessionMcpServers returns the persisted MCP servers for a session,
 // ordered by sort_order. Returns an empty (non-nil) slice when none exist.
+//
+// A row whose headers cannot be decoded is skipped with a warning rather than failing the
+// read: the caller treats any error as "no MCP servers", so one bad row would otherwise cost
+// the restored session every server, sam-mcp included. A server without its headers would
+// only fail authentication, so it is dropped rather than returned half-configured.
 func (s *Store) GetSessionMcpServers(workspaceID, sessionID string) ([]McpServer, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	rows, err := s.db.Query(
-		"SELECT url, token, name, headers FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ? ORDER BY sort_order ASC",
+		"SELECT sort_order, url, token, name, headers FROM session_mcp_servers WHERE workspace_id = ? AND session_id = ? ORDER BY sort_order ASC",
 		workspaceID, sessionID,
 	)
 	if err != nil {
@@ -124,12 +130,15 @@ func (s *Store) GetSessionMcpServers(workspaceID, sessionID string) ([]McpServer
 	servers := []McpServer{}
 	for rows.Next() {
 		var srv McpServer
+		var sortOrder int
 		var headers string
-		if err := rows.Scan(&srv.URL, &srv.Token, &srv.Name, &headers); err != nil {
+		if err := rows.Scan(&sortOrder, &srv.URL, &srv.Token, &srv.Name, &headers); err != nil {
 			return nil, fmt.Errorf("get session mcp servers: scan: %w", err)
 		}
 		if srv.Headers, err = decodeMcpServerHeaders(headers); err != nil {
-			return nil, fmt.Errorf("get session mcp servers: row %d: %w", len(servers), err)
+			slog.Warn("Skipping persisted MCP server whose headers cannot be read",
+				"workspace", workspaceID, "session", sessionID, "sortOrder", sortOrder, "error", err)
+			continue
 		}
 		servers = append(servers, srv)
 	}

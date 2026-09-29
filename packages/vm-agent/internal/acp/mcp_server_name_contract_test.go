@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -27,8 +28,9 @@ type mcpNameContract struct {
 		Invalid []string `json:"invalid"`
 	} `json:"urls"`
 	HeaderNames struct {
-		Valid   []string `json:"valid"`
-		Invalid []string `json:"invalid"`
+		Valid    []string `json:"valid"`
+		Invalid  []string `json:"invalid"`
+		Reserved []string `json:"reserved"`
 	} `json:"headerNames"`
 }
 
@@ -107,6 +109,30 @@ func TestMcpHeaderNameContract(t *testing.T) {
 	for _, name := range contract.HeaderNames.Invalid {
 		if ValidMcpHeaderName(name) {
 			t.Errorf("ValidMcpHeaderName(%q) accepted a name the shared contract marks invalid", name)
+		}
+	}
+}
+
+// The control plane refuses to save a transport-managed header, and the vm-agent refuses one
+// that arrives anyway. Both lists come from the fixture, so neither side can reserve a name the
+// other lets through — in either case.
+func TestMcpReservedHeaderNameContract(t *testing.T) {
+	t.Parallel()
+	contract := loadMcpNameContract(t)
+
+	if len(contract.HeaderNames.Reserved) == 0 {
+		t.Fatal("reserved header name list is empty")
+	}
+	if len(reservedMcpHeaderNames) != len(contract.HeaderNames.Reserved) {
+		t.Fatalf("vm-agent reserves %d header names, the shared contract %d",
+			len(reservedMcpHeaderNames), len(contract.HeaderNames.Reserved))
+	}
+	for _, name := range contract.HeaderNames.Reserved {
+		for _, variant := range []string{name, strings.ToUpper(name)} {
+			entry := McpServerEntry{URL: "https://api.example.com/mcp", Headers: []McpHeader{{Name: variant, Value: "v"}}}
+			if entry.ValidateHeaders() == nil {
+				t.Errorf("ValidateHeaders accepted reserved header %q", variant)
+			}
 		}
 	}
 }

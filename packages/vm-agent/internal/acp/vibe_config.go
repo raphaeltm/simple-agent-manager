@@ -112,6 +112,9 @@ temperature = 0.2
 		safeURL := tomlEscapeBasicString(server.URL)
 		config += fmt.Sprintf("\n[[mcp_servers]]\nname = \"%s\"\ntransport = \"http\"\nurl = \"%s\"\n", names[i], safeURL)
 		if headers := server.httpHeaders(); len(headers) > 0 {
+			// Vibe has no environment-variable indirection for arbitrary headers (its
+			// api_key_env covers one header), so values are written into the file, exactly as
+			// the bearer token always has been. The file is private to the container user.
 			headerValue := func(_ int, header McpHeader) string { return header.Value }
 			config += fmt.Sprintf("headers = %s\n", mcpHeadersTOMLTable(headers, headerValue))
 		}

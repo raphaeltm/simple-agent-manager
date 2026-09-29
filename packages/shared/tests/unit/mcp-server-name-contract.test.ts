@@ -15,13 +15,14 @@ import { describe, expect, it } from 'vitest';
 import {
   MCP_CONNECTION_HEADER_NAME_PATTERN,
   MCP_CONNECTION_NAME_PATTERN,
+  MCP_CONNECTION_RESERVED_HEADER_NAMES,
 } from '../../src/types/mcp-connection';
 
 interface Contract {
   valid: string[];
   invalid: string[];
   normalized: Record<string, string>;
-  headerNames: { valid: string[]; invalid: string[] };
+  headerNames: { valid: string[]; invalid: string[]; reserved: string[] };
 }
 
 const contract = JSON.parse(
@@ -95,5 +96,11 @@ describe('MCP custom header name contract (TypeScript side)', () => {
   it('has a non-trivial header corpus', () => {
     expect(contract.headerNames.valid.length).toBeGreaterThanOrEqual(8);
     expect(contract.headerNames.invalid.length).toBeGreaterThanOrEqual(15);
+  });
+
+  it('reserves exactly the transport-managed names the vm-agent reserves', () => {
+    expect([...MCP_CONNECTION_RESERVED_HEADER_NAMES].sort()).toEqual(
+      [...contract.headerNames.reserved].sort()
+    );
   });
 });
