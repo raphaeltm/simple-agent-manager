@@ -76,7 +76,7 @@ Four panels share one time axis, so a moment in one lines up with the same momen
 | **CPU**        | Cores in use. **1.0 means one core fully busy**; 2.0 means two.                                                                                                                                   |
 | **Memory**     | **Used** (the working set the kernel cannot reclaim) as a solid line, and **+ cache** (used plus reclaimable page cache) as a dotted one. Older VM agents report only the total, including cache. |
 | **Disk**       | Write rate above the line and read rate below it.                                                                                                                                                 |
-| **Tool calls** | When the agent had tool calls running, one mark per call.                                                                                                                                         |
+| **Tool calls** | When the agent had tool calls running, one mark per call, coloured by kind (read, edit, execute, search, fetch and so on).                                                                        |
 
 The headline beside each panel describes the range in view: average and peak cores, peak memory,
 bytes written and read, and the number of tool calls.
@@ -95,7 +95,7 @@ so the whole session appears at once, however long it ran. When you zoom in far 
 fetches the underlying **5-second samples** for just the stretch on screen, and only once: panning
 back over a stretch you have already seen does not download it again.
 
-![The drawer zoomed to 15 minutes: the card reads a 10:34 to 10:49 PM range; CPU is a detailed line near two cores that drops to idle; memory sits under a dashed "reserved 4.0 GB" line; disk read and write rates move with the CPU; and the tool-call panel shows one long orange command followed by a cluster of short calls.](/images/docs/session-resources-zoomed.png)
+![The drawer zoomed to 15 minutes: the card reads a 15-minute clock range; CPU is a detailed line near two cores that drops to idle; memory sits under a dashed "reserved 4.0 GB" line; disk read and write rates move with the CPU; and the tool-call panel shows one long orange command followed by a cluster of short calls.](/images/docs/session-resources-zoomed.png)
 
 To move around:
 
@@ -112,7 +112,9 @@ zoom, `0` to show everything, and `Esc` to clear the selected moment.
 
 ### Reading one moment
 
-Hovering, tapping or stepping to a moment replaces the card with the exact values there. The time
+Hovering, tapping or stepping to a moment replaces the card with the exact values there, including
+the longest tool call running at that moment (and how many others were running) — by name
+(`Bash`, `Edit`, or an MCP tool such as `dispatch_task (sam-mcp)`) when the agent reported one. The time
 says what kind of number you are reading: a plain clock time is a single 5-second measurement, and
 a time followed by something like **· 1m avg** is an average over that window, with its peak shown
 beside it.
@@ -155,9 +157,10 @@ The panel is easy to over-read. Four things it cannot tell you:
   tool window that overlaps a CPU spike is a _correlation_, not proof that the tool caused the spike.
 - **It does not sample disk space.** Only disk _I/O_ (bytes read and written). If you are chasing a
   "no space left on device" failure, this panel will not show it.
-- **It does not explain what the agent was doing.** SAM stores a hash of each tool-call ID and its
-  start and end, never the arguments, output, file paths, commands, or prompts. Pair the timeline
-  with the chat transcript to work out the "what".
+- **It does not explain what the tool did.** A tool call can carry a bounded metadata tool name and
+  ACP kind, but SAM stores only a hash of the tool-call ID and never the title, command, input,
+  arguments, output, file paths, environment values, prompts, or secrets. Pair the timeline with
+  the chat transcript to work out the "what".
 
 The drawer repeats these caveats under **About this data**, below the charts.
 
@@ -227,13 +230,15 @@ unit on the node; the defaults are what every managed node runs.
 ## What is actually stored
 
 The retained payload is deliberately narrow: timestamps, CPU-milliseconds, memory bytes, I/O bytes,
-process counts, OOM flags, and hashed tool-call IDs with their start and end times. Its summary also
-retains nullable `agentProfileId`, `skillId`, and `agentType` attribution. SAM resolves those fields
-from server-owned records for the same project and workspace instead of trusting upload values.
+process counts, OOM flags, and hashed tool-call IDs with their start and end times. Tool spans may
+also carry an ACP kind and a bounded metadata tool name; older history may contain neither. Its
+summary also retains nullable `agentProfileId`, `skillId`, and `agentType` attribution. SAM resolves
+those fields from server-owned records for the same project and workspace instead of trusting upload
+values.
 
-It contains **no** prompts, messages, commands, tool names, tool arguments, tool output, file paths,
-environment variables, or secrets. That is what makes it safe to keep for months and safe to hand to
-an agent.
+It contains **no** prompts, messages, tool-call titles, commands, tool inputs or arguments, tool
+output, file paths, environment variables, or secrets. That is what makes it safe to keep for months
+and safe to hand to an agent.
 
 ## Asking an agent to read it
 

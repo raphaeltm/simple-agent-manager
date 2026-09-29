@@ -21,7 +21,23 @@ const DEFAULT_DETAIL_MAX_POINTS = 720;
 const DEFAULT_LIST_LIMIT = 24;
 const DEFAULT_CLEANUP_BATCH_SIZE = 50;
 const DEFAULT_OBJECT_CLEANUP_LIMIT = 5000;
+const DEFAULT_TOOL_NAME_MAX_BYTES = 256;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+const RESOURCE_TOOL_KINDS = new Set([
+  'read',
+  'edit',
+  'delete',
+  'move',
+  'search',
+  'execute',
+  'think',
+  'fetch',
+  'switch_mode',
+  'other',
+  // Pre-label VM agents emitted this correlation-only sentinel.
+  'acp_tool_call',
+]);
 
 export interface WorkspaceResourceUploadBody {
   workspaceId: string;
@@ -89,6 +105,7 @@ export interface ResourceToolSpan {
   endedAt?: number;
   concurrency?: number;
   sampleCount?: number;
+  approximate?: boolean;
   [key: string]: unknown;
 }
 
@@ -182,6 +199,10 @@ function metadataMaxBytes(env: Env): number {
   return parsePositiveInt(env.WORKSPACE_RESOURCE_METADATA_MAX_BYTES, DEFAULT_METADATA_MAX_BYTES);
 }
 
+function toolNameMaxBytes(env: Env): number {
+  return parsePositiveInt(env.WORKSPACE_RESOURCE_TOOL_NAME_MAX_BYTES, DEFAULT_TOOL_NAME_MAX_BYTES);
+}
+
 function retentionDays(env: Env, key: 'raw' | 'summary'): number {
   return key === 'raw'
     ? parsePositiveInt(env.WORKSPACE_RESOURCE_RAW_RETENTION_DAYS, DEFAULT_RAW_RETENTION_DAYS)
@@ -267,9 +288,20 @@ function hex(bytes: ArrayBuffer): string {
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return hex(await crypto.subtle.digest('SHA-256', bytes));
 }
+
+async function gzipJson(value: unknown): Promise<{ bytes: Uint8Array; uncompressedBytes: number }> {
+  const encoded = new TextEncoder().encode(JSON.stringify(value));
+  const stream = new Blob([encoded]).stream().pipeThrough(new CompressionStream('gzip'));
+  return {
+    bytes: new Uint8Array(await new Response(stream).arrayBuffer()),
+    uncompressedBytes: encoded.byteLength,
+  };
+}
+
 async function readBoundedGzipJson(
   bytes: Uint8Array,
-  maxBytes: number
+  maxBytes: number,
+  maxToolNameBytes: number
 ): Promise<{ value: WorkspaceResourceChunkPayload; byteLength: number }> {
   let total = 0;
   const chunks: Uint8Array[] = [];
@@ -302,11 +334,11 @@ async function readBoundedGzipJson(
   }
   try {
     const record = parseJsonRecord(
-      new TextDecoder().decode(merged),
+      new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(merged),
       'workspace_resource_history.chunk'
     );
     return {
-      value: normalizeChunkPayload(record),
+      value: normalizeChunkPayload(record, maxToolNameBytes),
       byteLength: total,
     };
   } catch {
@@ -323,9 +355,55 @@ function isResourceSamplePoint(value: unknown): value is ResourceSamplePoint {
   return typeof value.t === 'number' && Number.isFinite(value.t);
 }
 
-function isResourceToolSpan(value: unknown): value is ResourceToolSpan {
-  if (!isJsonObject(value)) return false;
-  return typeof value.startedAt === 'number' && Number.isFinite(value.startedAt);
+function truncateUtf8(value: string, maxBytes: number): string {
+  let output = '';
+  let bytes = 0;
+  for (const character of value) {
+    const characterBytes = utf8ByteLength(character);
+    if (bytes + characterBytes > maxBytes) break;
+    output += character;
+    bytes += characterBytes;
+  }
+  return output;
+}
+
+function containsControlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint !== undefined && (codePoint <= 31 || codePoint === 127);
+  });
+}
+
+function normalizeResourceToolSpan(
+  value: unknown,
+  maxToolNameBytes: number
+): ResourceToolSpan | null {
+  if (!isJsonObject(value)) return null;
+  if (typeof value.startedAt !== 'number' || !Number.isFinite(value.startedAt)) return null;
+
+  const span: ResourceToolSpan = { startedAt: value.startedAt };
+  if (typeof value.id === 'string') span.id = value.id;
+  if (typeof value.toolCallId === 'string') span.toolCallId = value.toolCallId;
+  if (typeof value.kind === 'string' && RESOURCE_TOOL_KINDS.has(value.kind)) {
+    span.kind = value.kind;
+  }
+  if (typeof value.toolName === 'string') {
+    const normalizedName = truncateUtf8(value.toolName.trim(), maxToolNameBytes);
+    if (normalizedName && !containsControlCharacter(normalizedName)) {
+      span.toolName = normalizedName;
+    }
+  }
+  if (typeof value.endedAt === 'number' && Number.isFinite(value.endedAt)) {
+    span.endedAt = value.endedAt;
+  }
+  if (typeof value.concurrency === 'number' && Number.isFinite(value.concurrency)) {
+    span.concurrency = value.concurrency;
+  }
+  if (typeof value.sampleCount === 'number' && Number.isFinite(value.sampleCount)) {
+    span.sampleCount = value.sampleCount;
+  }
+  if (typeof value.approximate === 'boolean') span.approximate = value.approximate;
+  return span;
 }
 
 function stringArray(value: unknown): string[] | undefined {
@@ -333,13 +411,18 @@ function stringArray(value: unknown): string[] | undefined {
   return value.filter((entry): entry is string => typeof entry === 'string');
 }
 
-function normalizeChunkPayload(record: Record<string, unknown>): WorkspaceResourceChunkPayload {
+function normalizeChunkPayload(
+  record: Record<string, unknown>,
+  maxToolNameBytes: number
+): WorkspaceResourceChunkPayload {
   const payload: WorkspaceResourceChunkPayload = { ...record };
   payload.samples = Array.isArray(record.samples)
     ? record.samples.filter(isResourceSamplePoint)
     : undefined;
   payload.toolSpans = Array.isArray(record.toolSpans)
-    ? record.toolSpans.filter(isResourceToolSpan)
+    ? record.toolSpans
+        .map((span) => normalizeResourceToolSpan(span, maxToolNameBytes))
+        .filter((span): span is ResourceToolSpan => span !== null)
     : undefined;
   payload.gaps = Array.isArray(record.gaps) ? record.gaps.filter(isJsonObject) : undefined;
   payload.notes = stringArray(record.notes);
@@ -536,7 +619,14 @@ function assertWorkspaceResourceUploadMetadata(body: WorkspaceResourceUploadBody
 async function validateWorkspaceResourceChunkBytes(
   env: Env,
   body: WorkspaceResourceUploadBody
-): Promise<{ bytes: Uint8Array; actualSha: string; payload: WorkspaceResourceChunkPayload }> {
+): Promise<{
+  bytes: Uint8Array;
+  actualSha: string;
+  compressedBytes: number;
+  uncompressedBytes: number;
+  /** The normalized payload that was archived; the timeline rollup is computed from it. */
+  payload: WorkspaceResourceChunkPayload;
+}> {
   const bytes = decodeBase64(body.compressedBase64);
   if (bytes.byteLength !== body.compressedBytes) {
     throw errors.badRequest('compressedBytes does not match decoded payload size');
@@ -545,20 +635,41 @@ async function validateWorkspaceResourceChunkBytes(
     throw errors.badRequest('Resource history chunk exceeds configured upload limit');
   }
 
-  const actualSha = await sha256Hex(bytes);
-  if (actualSha !== body.sha256.toLowerCase()) {
+  const uploadedSha = await sha256Hex(bytes);
+  if (uploadedSha !== body.sha256.toLowerCase()) {
     throw errors.badRequest('Resource history chunk checksum mismatch');
   }
   if (body.uncompressedBytes > uncompressedMaxBytes(env)) {
     throw errors.badRequest('Resource history chunk exceeds configured uncompressed limit');
   }
 
-  const decodedChunk = await readBoundedGzipJson(bytes, uncompressedMaxBytes(env));
+  const decodedChunk = await readBoundedGzipJson(
+    bytes,
+    uncompressedMaxBytes(env),
+    toolNameMaxBytes(env)
+  );
   if (decodedChunk.byteLength !== body.uncompressedBytes) {
     throw errors.badRequest('uncompressedBytes does not match decoded payload size');
   }
 
-  return { bytes, actualSha, payload: decodedChunk.value };
+  // Archive the allowlisted representation. This prevents an authenticated but
+  // buggy agent from retaining tool titles, inputs, or uncapped metadata in R2.
+  const sanitized = await gzipJson(decodedChunk.value);
+  if (sanitized.uncompressedBytes > uncompressedMaxBytes(env)) {
+    throw errors.badRequest(
+      'Normalized resource history chunk exceeds configured uncompressed limit'
+    );
+  }
+  if (sanitized.bytes.byteLength > getWorkspaceResourceUploadMaxBytes(env)) {
+    throw errors.badRequest('Normalized resource history chunk exceeds configured upload limit');
+  }
+  return {
+    bytes: sanitized.bytes,
+    actualSha: await sha256Hex(sanitized.bytes),
+    compressedBytes: sanitized.bytes.byteLength,
+    uncompressedBytes: sanitized.uncompressedBytes,
+    payload: decodedChunk.value,
+  };
 }
 
 export async function storeWorkspaceResourceChunk(
@@ -581,7 +692,8 @@ export async function storeWorkspaceResourceChunk(
   );
   const nodeId = validateWorkspaceUploadIdentity(workspace, body, uploadedByNodeId);
   assertWorkspaceResourceUploadMetadata(body);
-  const { bytes, actualSha, payload } = await validateWorkspaceResourceChunkBytes(env, body);
+  const { bytes, actualSha, compressedBytes, uncompressedBytes, payload } =
+    await validateWorkspaceResourceChunkBytes(env, body);
 
   const db = drizzle(env.DATABASE, { schema });
   const now = Date.now();
@@ -744,8 +856,8 @@ export async function storeWorkspaceResourceChunk(
       sourceVersion: body.sourceVersion,
       r2Key,
       storageFormat: WORKSPACE_RESOURCE_STORAGE_FORMAT,
-      compressedBytes: body.compressedBytes,
-      uncompressedBytes: body.uncompressedBytes,
+      compressedBytes,
+      uncompressedBytes,
       sha256: actualSha,
       startedAt: body.startedAt,
       endedAt: body.endedAt,
@@ -895,7 +1007,11 @@ export async function readChunkPayload(env: Env, chunk: schema.WorkspaceResource
   if (chunk.uncompressedBytes > uncompressedMaxBytes(env)) {
     throw errors.internal('Resource history chunk exceeds configured uncompressed limit');
   }
-  const decoded = await readBoundedGzipJson(compressedBytes, uncompressedMaxBytes(env));
+  const decoded = await readBoundedGzipJson(
+    compressedBytes,
+    uncompressedMaxBytes(env),
+    toolNameMaxBytes(env)
+  );
   if (decoded.byteLength !== chunk.uncompressedBytes) {
     throw errors.internal('Resource history chunk failed decoded size verification');
   }

@@ -77,10 +77,18 @@ export function formatRange(start: number, end: number, precisionMs: number): st
 }
 
 /** "mcp__sam-mcp__update_task_status" reads as "update_task_status (sam-mcp)"; built-in tools keep their name. */
+/** Agent-reported tool names can be arbitrarily long; longer labels end in an ellipsis so the readout stays two lines. */
+const MAX_TOOL_LABEL_CHARS = 48;
+
 export function formatToolName(name: string | null): string {
   if (!name) return 'Tool call';
   const [prefix, server, ...rest] = name.split('__');
-  return prefix === 'mcp' && server && rest.length > 0 ? `${rest.join('__')} (${server})` : name;
+  const label =
+    prefix === 'mcp' && server && rest.length > 0 ? `${rest.join('__')} (${server})` : name;
+  const chars = [...label];
+  return chars.length > MAX_TOOL_LABEL_CHARS
+    ? `${chars.slice(0, MAX_TOOL_LABEL_CHARS - 1).join('')}…`
+    : label;
 }
 
 /** Tight label for small spaces: whole hours from an hour up ("9h"), else minutes ("37m"). */

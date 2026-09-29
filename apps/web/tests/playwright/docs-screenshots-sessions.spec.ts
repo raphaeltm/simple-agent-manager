@@ -18,6 +18,7 @@ import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { makeMockUser, seedTheme } from './audit-helpers';
 import { docsShot, opaqueBackdrop } from './docs-shot';
+import { buildResourceScenario } from './resource-timeline-scenarios';
 
 const PROJECT_ID = 'proj-docs-1';
 const SESSION_ID = '01K9CHATDOCS5EFJ8TW0N6RQZD';
@@ -141,171 +142,11 @@ function conversation() {
 }
 
 // ---------------------------------------------------------------------------
-// Resource history: a session that peaked hard enough to be OOM-killed.
+// Resource history: a 27-hour, 10-wake session with an out-of-memory kill, served in
+// the same shapes as the real /resource-timeline endpoints.
 // ---------------------------------------------------------------------------
 
-const CHUNK_ID = 'wrchunk-docs-2';
-
-/**
- * One chunk at the shipped defaults: 15 minutes of 5-second samples, so 180 points —
- * comfortably under WORKSPACE_RESOURCE_DETAIL_MAX_POINTS (720). Downsampling therefore
- * does not fire, which is what a reader's own panel will show, so the captured header
- * must read a plain point count rather than the `<shown>/<total>` downsampled form.
- */
-const CHUNK_SAMPLE_COUNT = 180;
-
-/** Index of the out-of-memory sample, and of the telemetry gap after it. */
-const OOM_INDEX = Math.round(CHUNK_SAMPLE_COUNT * 0.55);
-const GAP_INDEX = Math.round(CHUNK_SAMPLE_COUNT * 0.7);
-
-const RESOURCE_SUMMARY = {
-  id: `workspace:${PROJECT_ID}:${WORKSPACE_ID}:session:${SESSION_ID}`,
-  projectId: PROJECT_ID,
-  workspaceId: WORKSPACE_ID,
-  sessionId: SESSION_ID,
-  taskId: 'task-docs-1',
-  nodeId: NODE_ID,
-  agentProfileId: 'profile-docs-1',
-  skillId: null,
-  agentType: 'claude-code',
-  runtime: 'vm',
-  sourceVersion: 1,
-  startedAt: NOW - 1_920_000,
-  endedAt: NOW - 120_000,
-  sampleCount: 360,
-  gapCount: 1,
-  toolSpanCount: 8,
-  cpuMeanMillis: 940,
-  cpuPeakMillis: 4_120,
-  memoryMeanBytes: 1_181_116_006,
-  memoryPeakBytes: 3_650_722_201,
-  memoryKernelPeakBytes: 3_758_096_384,
-  ioReadBytes: 402_653_184,
-  ioWriteBytes: 1_181_116_006,
-  oomCount: 1,
-  completeness: { status: 'complete' },
-  summary: {},
-  firstChunkId: 'wrchunk-docs-1',
-  latestChunkId: CHUNK_ID,
-};
-
-const RESOURCE_CHUNKS = [
-  {
-    id: CHUNK_ID,
-    workspaceId: WORKSPACE_ID,
-    sessionId: SESSION_ID,
-    taskId: 'task-docs-1',
-    nodeId: NODE_ID,
-    chunkSequence: 2,
-    sourceVersion: 1,
-    storageFormat: 'resource-history-gzip-json-v1',
-    compressedBytes: 7_412,
-    uncompressedBytes: 128_904,
-    sha256: 'a'.repeat(64),
-    startedAt: NOW - 1_020_000,
-    endedAt: NOW - 120_000,
-    sampleCount: CHUNK_SAMPLE_COUNT,
-    gapCount: 1,
-    toolSpanCount: 5,
-    completeness: { status: 'complete' },
-    summary: { cpuPeakMillis: 4_120 },
-    expiresAt: NOW + 90 * 86_400_000,
-  },
-  {
-    id: 'wrchunk-docs-1',
-    workspaceId: WORKSPACE_ID,
-    sessionId: SESSION_ID,
-    taskId: 'task-docs-1',
-    nodeId: NODE_ID,
-    chunkSequence: 1,
-    sourceVersion: 1,
-    storageFormat: 'resource-history-gzip-json-v1',
-    compressedBytes: 6_140,
-    uncompressedBytes: 101_220,
-    sha256: 'b'.repeat(64),
-    startedAt: NOW - 1_920_000,
-    endedAt: NOW - 1_020_000,
-    sampleCount: CHUNK_SAMPLE_COUNT,
-    gapCount: 0,
-    toolSpanCount: 3,
-    completeness: { status: 'complete' },
-    summary: { cpuPeakMillis: 1_980 },
-    expiresAt: NOW + 90 * 86_400_000,
-  },
-];
-
-/**
- * A build ramp, a test spike, the OOM, then a quieter recovery.
- *
- * The wobble is a slow sine rather than `i % n`: at 180 points a modulo jitter
- * draws a sawtooth that fills the chart and hides the shape the docs describe.
- */
-function wobble(i: number, amplitude: number): number {
-  return Math.round(amplitude * (0.5 + 0.5 * Math.sin(i / 9)));
-}
-
-function sampleCpu(i: number): number {
-  if (i === OOM_INDEX) return 4_120;
-  if (i >= OOM_INDEX - 6 && i <= OOM_INDEX + 3) return 2_300 + wobble(i, 700);
-  if (i >= CHUNK_SAMPLE_COUNT * 0.15 && i <= CHUNK_SAMPLE_COUNT * 0.32) {
-    return 1_450 + wobble(i, 520);
-  }
-  return 300 + wobble(i, 240);
-}
-
-function sampleMemory(i: number): number {
-  if (i === OOM_INDEX) return 3_650_722_201;
-  if (i >= CHUNK_SAMPLE_COUNT * 0.4) return 2_100_000_000 + i * 8_000_000;
-  return 620_000_000 + i * 13_000_000;
-}
-
-const RESOURCE_DETAIL = {
-  chunkId: CHUNK_ID,
-  originalSampleCount: CHUNK_SAMPLE_COUNT,
-  downsampled: false,
-  downsampleLimit: 720,
-  samples: Array.from({ length: CHUNK_SAMPLE_COUNT }, (_, i) => ({
-    t: NOW - 1_020_000 + i * 5_000,
-    intervalMillis: 5_000,
-    cpuMillis: sampleCpu(i),
-    memoryBytes: sampleMemory(i),
-    memoryPeakBytes: sampleMemory(i),
-    // Scaled so one chunk's I/O stays well inside RESOURCE_SUMMARY's session totals:
-    // 30 x 5 MiB + 150 x 64 KiB read, 36 x 12 MiB + 144 x 64 KiB write. The guide
-    // teaches the reader to compare the chunk line against the session stat card, so a
-    // slice that out-reads the session containing it would read as a contradiction.
-    ioReadBytes: i % 6 === 0 ? 5_242_880 : 65_536,
-    ioWriteBytes: i % 5 === 0 ? 12_582_912 : 65_536,
-    oom: i === OOM_INDEX ? 1 : 0,
-    oomKill: i === OOM_INDEX ? 1 : 0,
-    gap: i === GAP_INDEX,
-  })),
-  toolSpans: [
-    {
-      id: 'span-read',
-      kind: 'acp_tool_call',
-      startedAt: NOW - 960_000,
-      endedAt: NOW - 840_000,
-      concurrency: 1,
-    },
-    {
-      id: 'span-build',
-      kind: 'acp_tool_call',
-      startedAt: NOW - 780_000,
-      endedAt: NOW - 540_000,
-      concurrency: 2,
-    },
-    {
-      id: 'span-tests',
-      kind: 'acp_tool_call',
-      startedAt: NOW - 500_000,
-      endedAt: NOW - 260_000,
-      concurrency: 1,
-      approximate: true,
-    },
-  ],
-  gaps: [{ startedAt: NOW - 400_000, endedAt: NOW - 360_000, reason: 'sampler_delay' }],
-};
+const RESOURCES = buildResourceScenario('overnight', SESSION_ID, NOW);
 
 // ---------------------------------------------------------------------------
 // Events: subscriptions, schedules, and a standing watch.
@@ -511,7 +352,7 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
 
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
-    const { pathname, searchParams } = new URL(url);
+    const { pathname } = new URL(url);
     const json = (body: unknown) => route.fulfill({ status: 200, json: body });
 
     if (pathname.endsWith('/ws') || url.includes('websocket')) return route.abort();
@@ -521,15 +362,13 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
     if (pathname === '/api/report-issue/config') return json({ enabled: true });
 
     const sessionBase = `/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}`;
-    if (pathname === `${sessionBase}/resource-history`) {
-      // Detail is returned only for the chunk the drawer asks for, exactly as the API
-      // behaves — so the auto-load path is what produces the chart in the image.
-      const wantsDetail = searchParams.get('chunkId') === CHUNK_ID;
-      return json({
-        summary: RESOURCE_SUMMARY,
-        chunks: RESOURCE_CHUNKS,
-        ...(wantsDetail ? { detail: RESOURCE_DETAIL } : {}),
-      });
+    if (pathname === `${sessionBase}/resource-timeline`) return json(RESOURCES.index);
+    if (pathname.startsWith(`${sessionBase}/resource-timeline/chunks/`)) {
+      // Detail exists only for chunks the drawer asks for, exactly as the API behaves,
+      // so the zoomed capture shows what the real fetch-on-zoom path loads.
+      const chunkId = decodeURIComponent(pathname.split('/').pop() ?? '');
+      const chunk = RESOURCES.chunks.get(chunkId);
+      return chunk ? json(chunk) : route.fulfill({ status: 404, json: { error: 'NOT_FOUND' } });
     }
     if (pathname === `${sessionBase}/messages`) return json({ messages, hasMore: false });
     if (pathname === `${sessionBase}/state`) return json(state);
@@ -639,15 +478,11 @@ async function openResources(page: Page) {
   await page.getByTestId('session-tool-resources').click();
   const drawer = page.getByRole('dialog', { name: 'Session resources' });
   await expect(drawer).toBeVisible();
-  // The stat cards, the OOM banner and the auto-loaded chart are the three things the
-  // guide describes, so all three must be on screen before the shutter fires.
-  //
-  // `exact` matters: the chart legend also contains the words "CPU peak", so a substring
-  // match resolves to two nodes once the chart renders and the assertion becomes a race
-  // between "one match, passes" and "two matches, strict-mode violation".
-  await expect(drawer.getByText('CPU peak', { exact: true })).toBeVisible();
-  await expect(drawer.getByText(/OOM event/)).toBeVisible();
-  await expect(drawer.getByRole('img', { name: /resource timeline/i })).toBeVisible();
+  // The summary, the OOM warning and the charts are what the guide describes, so all
+  // three must be on screen before the shutter fires.
+  await expect(drawer.getByText('Whole session', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(drawer.getByText('1 out-of-memory kill')).toBeVisible();
+  await expect(drawer.getByRole('slider', { name: /Session timeline/ })).toBeVisible();
   return drawer;
 }
 
@@ -656,6 +491,21 @@ test('docs: session resources drawer', async ({ page }) => {
   const drawer = await openResources(page);
   await opaqueBackdrop(page);
   await docsShot(page, 'session-resources-drawer', drawer);
+});
+
+test('docs: session resources drawer zoomed in', async ({ page }) => {
+  test.skip(isMobile(page), 'desktop capture');
+  const drawer = await openResources(page);
+  // Zooming fetches 5-second detail for the visible chunks; wait for it before the shutter.
+  const detail = page.waitForResponse((response) =>
+    response.url().includes('/resource-timeline/chunks/')
+  );
+  await drawer.getByRole('button', { name: '15m', exact: true }).click();
+  await expect(drawer.getByText(/^15m of .* active time in view$/)).toBeVisible();
+  await detail;
+  await page.waitForTimeout(600);
+  await opaqueBackdrop(page);
+  await docsShot(page, 'session-resources-zoomed', drawer);
 });
 
 test('docs: session resources drawer on mobile', async ({ page }) => {

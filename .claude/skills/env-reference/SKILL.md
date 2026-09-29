@@ -572,6 +572,10 @@ by the read-only cron-liveness check.
 - `CF_API_TIMEOUT_MS` — Timeout for Cloudflare DNS API calls (default: 30000)
 - `NODE_AGENT_REQUEST_TIMEOUT_MS` — Timeout for Node Agent HTTP requests (default: 30000)
 
+### Workspace Resource History
+
+- `WORKSPACE_RESOURCE_TOOL_NAME_MAX_BYTES` — Maximum UTF-8 bytes retained and returned for one resource-history tool name; truncation keeps complete Unicode characters (default: `256`).
+
 ### Audio/Transcription
 
 - `WHISPER_MODEL_ID` — Workers AI model for transcription (default: `@cf/openai/whisper-large-v3-turbo`)

@@ -43,7 +43,9 @@ function sample(end: number, cores: number): ResourceAggregate {
 }
 
 const RUNS = [run('ws-1', T0, T0 + HOUR), run('ws-2', T0 + 10 * HOUR, T0 + 11 * HOUR)];
-const SAMPLES = Array.from({ length: 720 }, (_, i) => sample(T0 + (i + 1) * 5 * SECOND, i === 100 ? 3 : 0.5));
+const SAMPLES = Array.from({ length: 720 }, (_, i) =>
+  sample(T0 + (i + 1) * 5 * SECOND, i === 100 ? 3 : 0.5)
+);
 const BASH: ResourceToolSpan = {
   id: 'bash',
   kind: 'execute',
@@ -125,6 +127,11 @@ describe('readoutForRange', () => {
 describe('formatToolName', () => {
   it('names MCP tools by tool, then server', () => {
     expect(formatToolName('mcp__sam-mcp__update_task_status')).toBe('update_task_status (sam-mcp)');
+    // Agent-reported names can be arbitrarily long; the label is capped by characters, not bytes.
+    const long = formatToolName(`mcp__sam-mcp__${'x'.repeat(200)}`);
+    expect([...long]).toHaveLength(48);
+    expect(long.endsWith('…')).toBe(true);
+    expect(formatToolName('🔥'.repeat(60))).toBe(`${'🔥'.repeat(47)}…`);
     expect(formatToolName('Bash')).toBe('Bash');
     expect(formatToolName(null)).toBe('Tool call');
   });

@@ -1128,3 +1128,34 @@ test.describe('Session resource timeline touch interaction', () => {
     await expect(dialog.getByText(/active time in view/)).toBeVisible();
   });
 });
+
+test.describe('Session resource timeline tool names', () => {
+  test('hostile and very long tool names under the cursor render as plain text', async ({
+    page,
+  }) => {
+    const dialog = await openResources(page, 'hostile-tools');
+    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    const timeline = dialog.getByRole('slider', { name: /Session timeline/ });
+    const box = await timeline.boundingBox();
+    if (!box) throw new Error('timeline has no layout box');
+    // The hostile name runs 1-5 min into this 12-minute session, the long MCP name 7-11 min.
+    await page.mouse.move(box.x + box.width * 0.25, box.y + 40);
+    await expect(
+      dialog.getByText(/<img src=x onerror=alert\(1\)> & "quotes" 🔥 running/)
+    ).toBeVisible();
+    await expect(dialog.locator('img[src="x"]')).toHaveCount(0);
+    await capture(
+      page,
+      `resource-timeline-hostile-tool-${page.viewportSize()?.width ?? 'viewport'}`
+    );
+
+    await page.mouse.move(box.x + box.width * 0.75, box.y + 40);
+    // An agent-reported name longer than the readout allows is shortened with an ellipsis.
+    const longName = dialog.getByText(/^dispatch_task_with_a_deliberately_long_name_.*… running/);
+    await expect(longName).toBeVisible();
+    await expect(dialog.locator('img[src="x"]')).toHaveCount(0);
+    await capture(page, `resource-timeline-tool-names-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+});

@@ -56,10 +56,12 @@ interface ScenarioPlan {
   omittedChunkCount?: number;
   collection?: ResourceTimelineIndexResponse['collection'];
   runtime?: string;
+  /** Fixed tool spans added to the first run, in minutes from its start. */
+  extraSpans?: Array<{ name: string; kind: string; startMin: number; endMin: number }>;
 }
 
 export type ResourceScenarioId =
-  'overnight' | 'legacy-agent' | 'truncated' | 'pending' | 'instant' | 'expired';
+  'overnight' | 'legacy-agent' | 'truncated' | 'pending' | 'instant' | 'expired' | 'hostile-tools';
 
 const SMALL: Reservation = { cpuMillis: 2_000, memoryMb: 4_096 };
 const LARGE: Reservation = { cpuMillis: 4_000, memoryMb: 8_192 };
@@ -123,6 +125,29 @@ const SCENARIOS: Record<ResourceScenarioId, ScenarioPlan> = {
     runs: [],
     collection: 'pending',
     runtime: 'vm',
+  },
+  // Tool names are agent-reported: one tries HTML injection, one is far wider than a phone.
+  'hostile-tools': {
+    startedMinutesAgo: 20,
+    seed: 5,
+    workload: 'coordinator',
+    modernAgent: true,
+    rollups: true,
+    runs: [{ startMin: 0, durationMin: 12, node: 'node-hel1-a', reservation: SMALL }],
+    extraSpans: [
+      {
+        name: 'fetch <img src=x onerror=alert(1)> & "quotes" 🔥',
+        kind: 'fetch',
+        startMin: 1,
+        endMin: 5,
+      },
+      {
+        name: `mcp__sam-mcp__${'dispatch_task_with_a_deliberately_long_name_'.repeat(6)}`,
+        kind: 'other',
+        startMin: 7,
+        endMin: 11,
+      },
+    ],
   },
   expired: {
     startedMinutesAgo: 140 * 24 * 60,
@@ -332,6 +357,17 @@ function generateRun(
   const toolSpans = phases.flatMap((phase) =>
     spansForPhase(phase, random, nextId, scenario.modernAgent)
   );
+  if (index === 0) {
+    for (const extra of scenario.extraSpans ?? []) {
+      toolSpans.push({
+        id: nextId(),
+        kind: extra.kind,
+        toolName: extra.name,
+        startedAt: startedAt + extra.startMin * MINUTE,
+        endedAt: startedAt + extra.endMin * MINUTE,
+      });
+    }
+  }
 
   const baseMemory = (0.75 + random() * 0.45) * GB;
   const limit = plan.reservation ? plan.reservation.memoryMb * MB : Infinity;

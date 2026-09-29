@@ -87,6 +87,7 @@ type Collector struct {
 	toolSpans      []ToolSpan
 	activeTools    map[string]time.Time
 	activeToolKind map[string]string
+	activeToolName map[string]string
 	closed         bool
 
 	cancel context.CancelFunc
@@ -110,7 +111,8 @@ type Sample struct {
 
 type ToolSpan struct {
 	ID          string `json:"id"`
-	Kind        string `json:"kind"`
+	Kind        string `json:"kind,omitempty"`
+	ToolName    string `json:"toolName,omitempty"`
 	StartedAt   int64  `json:"startedAt"`
 	EndedAt     int64  `json:"endedAt,omitempty"`
 	Concurrency int    `json:"concurrency,omitempty"`
@@ -210,7 +212,12 @@ func New(cfg Config) *Collector {
 	if cfg.SpoolDir == "" {
 		cfg.SpoolDir = "/var/lib/vm-agent/resource-history"
 	}
-	return &Collector{cfg: cfg, activeTools: make(map[string]time.Time), activeToolKind: make(map[string]string)}
+	return &Collector{
+		cfg:            cfg,
+		activeTools:    make(map[string]time.Time),
+		activeToolKind: make(map[string]string),
+		activeToolName: make(map[string]string),
+	}
 }
 
 func (c *Collector) Enabled() bool {
@@ -289,12 +296,13 @@ func (c *Collector) Stop(ctx context.Context) {
 	c.retrySpool(ctx)
 }
 
-func (c *Collector) RecordACPToolCall(toolCallID string, status string, at time.Time) {
+func (c *Collector) RecordACPToolCall(toolCallID string, status string, kind string, toolName string, at time.Time) {
 	if strings.TrimSpace(toolCallID) == "" {
 		return
 	}
 	id := hashedToolID(toolCallID)
-	kind := "acp_tool_call"
+	kind = strings.TrimSpace(kind)
+	toolName = strings.TrimSpace(toolName)
 	terminal := status == "completed" || status == "failed" || status == "cancelled"
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -306,16 +314,32 @@ func (c *Collector) RecordACPToolCall(toolCallID string, status string, at time.
 		if !active {
 			return
 		}
+		if kind != "" {
+			c.activeToolKind[id] = kind
+		}
+		if toolName != "" {
+			c.activeToolName[id] = toolName
+		}
 		delete(c.activeTools, id)
+		spanKind := c.activeToolKind[id]
+		spanToolName := c.activeToolName[id]
 		delete(c.activeToolKind, id)
-		c.toolSpans = append(c.toolSpans, ToolSpan{ID: id, Kind: kind, StartedAt: start.UnixMilli(), EndedAt: at.UnixMilli(), Concurrency: len(c.activeTools) + 1})
+		delete(c.activeToolName, id)
+		c.toolSpans = append(c.toolSpans, ToolSpan{ID: id, Kind: spanKind, ToolName: spanToolName, StartedAt: start.UnixMilli(), EndedAt: at.UnixMilli(), Concurrency: len(c.activeTools) + 1})
 		return
 	}
 	if active {
+		if kind != "" {
+			c.activeToolKind[id] = kind
+		}
+		if toolName != "" {
+			c.activeToolName[id] = toolName
+		}
 		return
 	}
 	c.activeTools[id] = at
 	c.activeToolKind[id] = kind
+	c.activeToolName[id] = toolName
 }
 
 func (c *Collector) ReconcileACPToolCalls(at time.Time) {
@@ -326,13 +350,11 @@ func (c *Collector) ReconcileACPToolCalls(at time.Time) {
 	}
 	for id, start := range c.activeTools {
 		kind := c.activeToolKind[id]
-		if kind == "" {
-			kind = "acp_tool_call"
-		}
-		c.toolSpans = append(c.toolSpans, ToolSpan{ID: id, Kind: kind, StartedAt: start.UnixMilli(), EndedAt: at.UnixMilli(), Approximate: true})
+		c.toolSpans = append(c.toolSpans, ToolSpan{ID: id, Kind: kind, ToolName: c.activeToolName[id], StartedAt: start.UnixMilli(), EndedAt: at.UnixMilli(), Approximate: true})
 	}
 	c.activeTools = make(map[string]time.Time)
 	c.activeToolKind = make(map[string]string)
+	c.activeToolName = make(map[string]string)
 }
 
 func (c *Collector) loop(ctx context.Context) {

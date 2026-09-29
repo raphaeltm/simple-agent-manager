@@ -17,12 +17,12 @@ type resourceHistoryObserver struct {
 	workspaceID string
 }
 
-func (o resourceHistoryObserver) RecordACPToolCall(toolCallID string, status string, at time.Time) {
+func (o resourceHistoryObserver) RecordACPToolCall(toolCallID string, status string, kind string, toolName string, at time.Time) {
 	if o.server == nil {
 		return
 	}
 	if collector := o.server.resourceHistoryCollector(o.workspaceID); collector != nil {
-		collector.RecordACPToolCall(toolCallID, status, at)
+		collector.RecordACPToolCall(toolCallID, status, kind, toolName, at)
 	}
 }
 

@@ -26,10 +26,17 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 async function gzipJson(value: unknown): Promise<Uint8Array> {
-  const stream = new Blob([JSON.stringify(value)])
-    .stream()
-    .pipeThrough(new CompressionStream('gzip'));
+  return gzipBytes(new TextEncoder().encode(JSON.stringify(value)));
+}
+
+async function gzipBytes(value: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([value]).stream().pipeThrough(new CompressionStream('gzip'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function gunzipJson(bytes: Uint8Array): Promise<unknown> {
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return JSON.parse(await new Response(stream).text()) as unknown;
 }
 
 function samplePayload() {
@@ -49,7 +56,8 @@ function samplePayload() {
     toolSpans: [
       {
         id: 'hashed-tool-id',
-        kind: 'acp_tool_call',
+        kind: 'execute',
+        toolName: 'Bash',
         startedAt: 1_250,
         endedAt: 1_750,
         concurrency: 1,
@@ -144,6 +152,27 @@ function makeEnv(sqlite: Database.Database, r2: R2Bucket): Env {
     DATABASE: createSqliteD1(sqlite),
     PROJECT_DATA_ARCHIVE_R2: r2,
   } as unknown as Env;
+}
+
+function makePersistedResourceTestEnv() {
+  const sqlite = new Database(':memory:');
+  createSchemaTables(sqlite, [
+    schema.workspaces,
+    schema.tasks,
+    schema.agentSessions,
+    schema.agentProfiles,
+    schema.skills,
+    schema.workspaceResourceSummaries,
+    schema.workspaceResourceChunks,
+  ]);
+  sqlite
+    .prepare(
+      `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)
+       VALUES ('ws-1', 'proj-1', 'node-1', 'session-1')`
+    )
+    .run();
+  const r2 = makeR2();
+  return { sqlite, r2, env: makeEnv(sqlite, r2.binding) };
 }
 
 describe('workspace resource history', () => {
@@ -266,7 +295,9 @@ describe('workspace resource history', () => {
       chunkId: first.chunkId,
       originalSampleCount: 3,
       downsampled: false,
-      toolSpans: [expect.objectContaining({ id: 'hashed-tool-id', kind: 'acp_tool_call' })],
+      toolSpans: [
+        expect.objectContaining({ id: 'hashed-tool-id', kind: 'execute', toolName: 'Bash' }),
+      ],
       gaps: [expect.objectContaining({ reason: 'sample_error' })],
     });
     expect(history.detail?.samples.some((sample) => sample.cpuMillis === 900)).toBe(true);
@@ -437,25 +468,84 @@ describe('workspace resource history', () => {
     });
   });
 
-  it('rejects mismatched decoded size and oversized D1 metadata before indexing', async () => {
-    const sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [
-      schema.workspaces,
-      schema.tasks,
-      schema.agentSessions,
-      schema.agentProfiles,
-      schema.skills,
-      schema.workspaceResourceSummaries,
-      schema.workspaceResourceChunks,
+  it('caps and allowlists decoded tool metadata while preserving legacy spans', async () => {
+    const { env, r2 } = makePersistedResourceTestEnv();
+    env.WORKSPACE_RESOURCE_TOOL_NAME_MAX_BYTES = '8';
+    const commandCanary = 'printf super-secret-command';
+    const payload = {
+      samples: [{ t: 1_000 }],
+      toolSpans: [
+        {
+          id: 'named',
+          kind: 'execute',
+          toolName: 'Bash🔥unsafe',
+          title: commandCanary,
+          rawInput: { command: commandCanary },
+          startedAt: 1_000,
+          endedAt: 2_000,
+        },
+        { id: 'invalid-kind', kind: 'command', toolName: 'Bad\u0000Name', startedAt: 1_100 },
+        { id: 'legacy', startedAt: 1_200, endedAt: 1_300 },
+      ],
+      gaps: [],
+    };
+    const compressed = await gzipJson(payload);
+    const result = await storeWorkspaceResourceChunk(
+      env,
+      'proj-1',
+      await uploadBody({
+        sampleCount: 1,
+        gapCount: 0,
+        toolSpanCount: 3,
+        compressedBase64: base64(compressed),
+        compressedBytes: compressed.byteLength,
+        uncompressedBytes: new TextEncoder().encode(JSON.stringify(payload)).byteLength,
+        sha256: await sha256Hex(compressed),
+      }),
+      'node-1'
+    );
+
+    const history = await getWorkspaceResourceHistory(env, {
+      projectId: 'proj-1',
+      sessionId: 'session-1',
+      detailChunkId: result.chunkId,
+    });
+
+    expect(history.detail?.toolSpans).toEqual([
+      {
+        id: 'named',
+        kind: 'execute',
+        toolName: 'Bash🔥',
+        startedAt: 1_000,
+        endedAt: 2_000,
+      },
+      { id: 'invalid-kind', startedAt: 1_100 },
+      { id: 'legacy', startedAt: 1_200, endedAt: 1_300 },
     ]);
-    sqlite
-      .prepare(
-        `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)
-         VALUES ('ws-1', 'proj-1', 'node-1', 'session-1')`
-      )
-      .run();
-    const r2 = makeR2();
-    const env = makeEnv(sqlite, r2.binding);
+    expect(JSON.stringify(history.detail?.toolSpans)).not.toContain(commandCanary);
+
+    const archivedBytes = [...r2.objects.values()][0];
+    expect(archivedBytes).toBeDefined();
+    const archivedPayload = await gunzipJson(archivedBytes!);
+    expect(archivedPayload).toMatchObject({
+      toolSpans: [
+        {
+          id: 'named',
+          kind: 'execute',
+          toolName: 'Bash🔥',
+          startedAt: 1_000,
+          endedAt: 2_000,
+        },
+        { id: 'invalid-kind', startedAt: 1_100 },
+        { id: 'legacy', startedAt: 1_200, endedAt: 1_300 },
+      ],
+    });
+    expect(JSON.stringify(archivedPayload)).not.toContain(commandCanary);
+    expect(JSON.stringify(archivedPayload)).not.toContain('unsafe');
+  });
+
+  it('rejects mismatched decoded size and oversized D1 metadata before indexing', async () => {
+    const { env, r2, sqlite } = makePersistedResourceTestEnv();
 
     await expect(
       storeWorkspaceResourceChunk(
@@ -481,25 +571,36 @@ describe('workspace resource history', () => {
     expect(r2.objects.size).toBe(0);
   });
 
-  it('cleans up expired R2 chunks and old summaries within the configured batch', async () => {
-    const sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [
-      schema.workspaces,
-      schema.tasks,
-      schema.agentSessions,
-      schema.agentProfiles,
-      schema.skills,
-      schema.workspaceResourceSummaries,
-      schema.workspaceResourceChunks,
+  it('rejects invalid UTF-8 before normalizing and archiving a chunk', async () => {
+    const { env, r2 } = makePersistedResourceTestEnv();
+    const invalidJsonBytes = new Uint8Array([
+      ...new TextEncoder().encode('{"samples":[],"notes":["'),
+      0xff,
+      ...new TextEncoder().encode('"]}'),
     ]);
-    sqlite
-      .prepare(
-        `INSERT INTO workspaces (id, project_id, node_id, chat_session_id)
-         VALUES ('ws-1', 'proj-1', 'node-1', 'session-1')`
+    const compressed = await gzipBytes(invalidJsonBytes);
+
+    await expect(
+      storeWorkspaceResourceChunk(
+        env,
+        'proj-1',
+        await uploadBody({
+          sampleCount: 0,
+          gapCount: 0,
+          toolSpanCount: 0,
+          compressedBase64: base64(compressed),
+          compressedBytes: compressed.byteLength,
+          uncompressedBytes: invalidJsonBytes.byteLength,
+          sha256: await sha256Hex(compressed),
+        }),
+        'node-1'
       )
-      .run();
-    const r2 = makeR2();
-    const env = makeEnv(sqlite, r2.binding);
+    ).rejects.toThrow(/gzip-compressed JSON/i);
+    expect(r2.objects.size).toBe(0);
+  });
+
+  it('cleans up expired R2 chunks and old summaries within the configured batch', async () => {
+    const { env, r2, sqlite } = makePersistedResourceTestEnv();
 
     await storeWorkspaceResourceChunk(env, 'proj-1', await uploadBody(), 'node-1');
     expect(r2.objects.size).toBe(1);
