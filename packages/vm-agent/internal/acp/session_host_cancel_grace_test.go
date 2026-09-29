@@ -152,6 +152,13 @@ type cancelGraceHarness struct {
 
 func newCancelGraceHarness(t *testing.T) *cancelGraceHarness {
 	t.Helper()
+	return newCancelGraceHarnessWithProcess(t, false)
+}
+
+// newCancelGraceHarnessWithProcess lets a test choose whether Stop() makes the
+// fake agent process exit, which is what lets a real process monitor restart it.
+func newCancelGraceHarnessWithProcess(t *testing.T, exitOnStop bool) *cancelGraceHarness {
+	t.Helper()
 	completions := make(chan promptCompletion, 8)
 	events := &lifecycleRecorder{}
 	host := NewSessionHost(SessionHostConfig{
@@ -171,7 +178,7 @@ func newCancelGraceHarness(t *testing.T) *cancelGraceHarness {
 	timer := &gatedGraceTimer{armed: make(chan chan time.Time, 4)}
 	host.cancelGraceTimer = timer.start
 
-	process, agentReader, agentWriter := newFakeAgentProcess(time.Now(), false)
+	process, agentReader, agentWriter := newFakeAgentProcess(time.Now().Add(-time.Minute), exitOnStop)
 	agent := &cancelGraceFakeAgent{
 		t:           t,
 		reader:      bufio.NewReader(agentReader),
@@ -348,7 +355,9 @@ func TestCancelGraceWatchdogNeverTouchesTheNextPrompt(t *testing.T) {
 // TestCancelGraceWatchdogSettlesAGenuinelyStuckCancel is the convergence
 // control: when the cancelled prompt itself cannot settle, the watchdog still
 // fires, reports "cancelled" (never a fatal task failure), and restarts the
-// agent through the intentional prompt-cancel stop.
+// agent through the intentional prompt-cancel stop. That the intentional stop
+// then restarts the agent back to ready is proven separately by
+// TestSessionHost_MonitorIntentionalPromptCancelReportsIdleAfterSuccessfulRestart.
 func TestCancelGraceWatchdogSettlesAGenuinelyStuckCancel(t *testing.T) {
 	t.Parallel()
 	for _, transport := range cancelTransports {
@@ -422,4 +431,101 @@ func TestCancelGraceWatchdogDisarmsWhenAttemptSettles(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("cancel-grace watchdog stayed armed after its attempt settled")
 	}
+}
+
+// TestCancelGraceStuckViewerCancelRestartsAgentBackToReady closes the loop for
+// the viewer WebSocket transport, where the settled stuck cancel is the only
+// thing that stops the wedged agent: the real process monitor must restart it
+// back to ready, and a follow-up prompt must then run on the new agent.
+func TestCancelGraceStuckViewerCancelRestartsAgentBackToReady(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", "")
+	h := newCancelGraceHarnessWithProcess(t, true)
+	h.host.config.InitializeTimeoutMs = 500
+	h.host.config.LoadSessionTimeoutMs = 500
+	h.host.config.ContainerResolver = func() (string, error) { return "", nil }
+	var restarts sync.WaitGroup
+	restarts.Add(1)
+	h.host.config.StartProcess = func(*agentStartup) (agentProcess, error) {
+		defer restarts.Done()
+		proc, reader, writer := newFakeAgentProcess(time.Now(), false)
+		serveRecoveryACP(t, reader, writer)
+		return proc, nil
+	}
+	h.host.mu.Lock()
+	h.host.agentSupportsLoadSession = true
+	h.host.mu.Unlock()
+	go h.host.monitorProcessExit(h.process, "claude-code", &agentCredential{credentialKind: "api-key"}, nil)
+
+	close(h.agent.stopReading)
+	ws := cancelTransports[0]
+	ws.prompt(t, h, "prompt-a")
+	h.agent.nextPrompt(t)
+	waitFor(t, 2*time.Second, func() bool { return h.host.Status() == HostPrompting })
+
+	go ws.cancel(h)
+	fireA := h.timer.awaitArmed(t)
+	if got := h.process.stopCount.Load(); got != 0 {
+		t.Fatalf("viewer cancel stopped the agent %d times before the grace deadline", got)
+	}
+
+	fireA <- time.Now()
+	if a := h.nextCompletion(t); a.stopReason != "cancelled" {
+		t.Fatalf("stuck cancel stopReason = %q, want cancelled", a.stopReason)
+	}
+	waitFor(t, 5*time.Second, func() bool { return h.host.Status() == HostReady })
+	restarts.Wait()
+
+	ws.prompt(t, h, "prompt-b")
+	b := h.nextCompletion(t)
+	if b.err != nil || b.stopReason == fatalErrorStopReason {
+		t.Fatalf("follow-up prompt after restart = %+v, want a clean completion", b)
+	}
+	if got := h.host.Status(); got != HostReady {
+		t.Fatalf("status after follow-up = %s, want %s", got, HostReady)
+	}
+}
+
+// TestCancelGraceStuckCancelDefersToAnInFlightRestart covers a stuck cancel
+// whose agent process was already cleared by a concurrent restart (for example
+// a crash-recovery restart that does not fail the active prompt). The attempt
+// still settles "cancelled", and the watchdog does not claim a second restart.
+func TestCancelGraceStuckCancelDefersToAnInFlightRestart(t *testing.T) {
+	t.Parallel()
+	h := newCancelGraceHarness(t)
+	close(h.agent.stopReading)
+	ws := cancelTransports[0]
+	ws.prompt(t, h, "prompt-a")
+	h.agent.nextPrompt(t)
+	waitFor(t, 2*time.Second, func() bool { return h.host.Status() == HostPrompting })
+
+	go ws.cancel(h)
+	fireA := h.timer.awaitArmed(t)
+
+	// Model monitorProcessExit's restart branch having already taken the process.
+	h.host.mu.Lock()
+	h.host.process = nil
+	h.host.setStatusLocked(HostStarting)
+	h.host.mu.Unlock()
+
+	fireA <- time.Now()
+	if a := h.nextCompletion(t); a.stopReason != "cancelled" {
+		t.Fatalf("stuck cancel stopReason = %q, want cancelled", a.stopReason)
+	}
+	waitFor(t, 2*time.Second, func() bool {
+		return h.events.Count("ACP prompt cancel did not settle; agent restart already in progress") == 1
+	})
+	if got := h.events.Count("ACP prompt cancel did not settle; restarting agent"); got != 0 {
+		t.Fatalf("restart claims = %d, want 0 when another owner is restarting", got)
+	}
+	if got := h.host.Status(); got != HostStarting {
+		t.Fatalf("status = %s, want the in-flight restart's %s left untouched", got, HostStarting)
+	}
+	h.host.mu.RLock()
+	intentional := h.host.intentionalPromptCancelProcessStop
+	h.host.mu.RUnlock()
+	if intentional {
+		t.Fatal("no intentional stop may be recorded without a process to stop")
+	}
+	h.assertNoCompletion(t)
 }

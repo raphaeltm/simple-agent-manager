@@ -136,10 +136,23 @@ func (h *SessionHost) startCancelGraceTimer(d time.Duration) (<-chan time.Time, 
 // the host to ready for follow-up prompts.
 func (h *SessionHost) settleStuckPromptCancel(attempt *promptAttempt, reason string, fields map[string]interface{}) {
 	attempt.completeWith(h, "cancelled", context.Canceled, func() {
-		slog.Warn("ACP prompt cancel did not settle; restarting agent", "promptId", attempt.id, "reason", reason)
-		h.reportLifecycle("warn", "ACP prompt cancel did not settle; restarting agent", fields)
 		h.stopPromptActivityRereport()
 		h.broadcastControl(MsgSessionPromptDone, nil)
+
+		h.mu.RLock()
+		hasProcess := h.process != nil
+		h.mu.RUnlock()
+		if !hasProcess {
+			// Whoever cleared the process owns the host transition: Stop()
+			// marks it stopped, and monitorProcessExit is already restarting it
+			// (including when a crash-recovery restart skipped failing this
+			// attempt). Starting a second recovery here would race that owner.
+			slog.Warn("ACP prompt cancel did not settle; agent restart already in progress", "promptId", attempt.id, "reason", reason)
+			h.reportLifecycle("warn", "ACP prompt cancel did not settle; agent restart already in progress", fields)
+			return
+		}
+		slog.Warn("ACP prompt cancel did not settle; restarting agent", "promptId", attempt.id, "reason", reason)
+		h.reportLifecycle("warn", "ACP prompt cancel did not settle; restarting agent", fields)
 		h.StopProcessForPromptCancel()
 	})
 }

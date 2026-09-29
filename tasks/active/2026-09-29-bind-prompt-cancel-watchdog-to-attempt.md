@@ -73,10 +73,10 @@ urgent delivery) is a separate follow-up PR.
 
 ## Acceptance Criteria
 
-- [ ] A stale cancel-grace timer never affects a later prompt (Go test, both transports)
-- [ ] A genuinely stuck cancel reports `cancelled`, not `failed`, and restarts the agent
-- [ ] Hard prompt timeout still reports fatal exactly once
-- [ ] `go test ./...` and `go vet` pass for `packages/vm-agent`
+- [x] A stale cancel-grace timer never affects a later prompt (Go test, both transports)
+- [x] A genuinely stuck cancel reports `cancelled`, not `failed`, and restarts the agent
+- [x] Hard prompt timeout still reports fatal exactly once
+- [x] `go test ./...` and `go vet` pass for `packages/vm-agent`
 - [ ] Staging: VM provisioned, heartbeat, prompt → Stop → immediate follow-up
       completes without task failure
 
