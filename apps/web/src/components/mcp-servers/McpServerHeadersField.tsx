@@ -17,8 +17,9 @@ interface McpServerHeadersFieldProps {
  * the API never returns values, so there is nothing to prefill. Renaming a saved header is
  * remove-then-add, which keeps "blank means keep" unambiguous.
  *
- * Layout: on a phone the value takes its own full-width line beneath the name and the remove
- * button; from `sm` up the three share one line. DOM order stays name, value, remove.
+ * Layout: on a phone each header is a bordered card whose value takes its own full-width line
+ * beneath the name and the remove button, so it is clear which value belongs to which name;
+ * from `sm` up the three share one borderless line. DOM order stays name, value, remove.
  */
 export const McpServerHeadersField: FC<McpServerHeadersFieldProps> = ({ headers, onChange }) => {
   const update = (key: string, patch: Partial<McpHeaderRow>) =>
@@ -39,7 +40,7 @@ export const McpServerHeadersField: FC<McpServerHeadersFieldProps> = ({ headers,
             return (
               <li
                 key={row.key}
-                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto]"
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-border-default p-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] sm:border-0 sm:p-0"
               >
                 {row.stored ? (
                   <span className="col-start-1 row-start-1 min-w-0 break-all font-mono text-sm text-fg-primary">

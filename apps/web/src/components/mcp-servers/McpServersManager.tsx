@@ -184,7 +184,11 @@ export const McpServersManager: FC<McpServersManagerProps> = ({
                 key={connection.id}
                 className="flex flex-wrap items-center gap-2 rounded-md border border-border-default p-3"
               >
-                <div className="min-w-0 flex-1">
+                {/*
+                  `basis-48` lets the three actions wrap under the text on a phone instead of
+                  squeezing a long host into a column a few characters wide.
+                */}
+                <div className="min-w-0 grow basis-48">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium text-fg-primary break-words">
                       {connection.name}

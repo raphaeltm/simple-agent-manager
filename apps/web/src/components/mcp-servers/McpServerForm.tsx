@@ -108,7 +108,7 @@ export const McpServerForm: FC<McpServerFormProps> = ({
           className="mt-1"
         >
           <option value="bearer">Bearer token</option>
-          <option value="none">None (URL or headers carry the credential)</option>
+          <option value="none">None (credential in URL or headers)</option>
         </Select>
       </div>
 

@@ -147,6 +147,42 @@ async function audit(page: Page, name: string) {
   await assertNoClippedOverflow(page);
 }
 
+const PROJECT = {
+  id: 'proj-mcp-1',
+  name: 'Composio Project',
+  repository: 'acme/app',
+  repoProvider: 'github',
+  defaultBranch: 'main',
+  userId: 'user-test-1',
+  createdAt: '2026-08-23T00:00:00Z',
+  updatedAt: '2026-08-23T00:00:00Z',
+};
+
+/** The same manager, rendered in its project scope under Project Settings → Runtime. */
+async function gotoProjectRuntime(page: Page, connections: unknown[]) {
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
+  await setupAuditRoutes(page, (path, respond) => {
+    if (path.includes('/api/auth/get-session')) return respond(200, MOCK_USER);
+    if (path === `/api/projects/${PROJECT.id}/mcp-connections`) {
+      return respond(200, { items: connections });
+    }
+    if (path === `/api/projects/${PROJECT.id}/runtime-config`) {
+      return respond(200, { envVars: [], files: [] });
+    }
+    if (path === `/api/projects/${PROJECT.id}`) return respond(200, PROJECT);
+    if (path === '/api/projects') return respond(200, { projects: [PROJECT], nextCursor: null });
+    if (path.includes('/sessions')) return respond(200, { sessions: [], total: 0 });
+    if (path.includes('/api/credentials')) return respond(200, []);
+    return undefined;
+  });
+  await page.goto(`/projects/${PROJECT.id}/settings/runtime`);
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('[data-testid="onboarding-wizard"]')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'MCP servers' })).toBeVisible();
+}
+
 function runScenarios(label: string) {
   test('normal data', async ({ page }) => {
     await setupMocks(page, { connections: NORMAL });
@@ -160,6 +196,14 @@ function runScenarios(label: string) {
     await gotoMcpServers(page);
     await expect(page.getByText('a-very-long-server-name-here', { exact: true })).toBeVisible();
     await audit(page, `mcp-servers-long-text-${label}`);
+
+    // Five header names, two of them 64 unbroken characters, on one row.
+    const headersLine = page.getByText(/^Headers:/);
+    await headersLine.scrollIntoViewIfNeeded();
+    await expect(headersLine).toBeVisible();
+    const box = await headersLine.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await audit(page, `mcp-servers-long-headers-row-${label}`);
   });
 
   test('empty state', async ({ page }) => {
@@ -240,6 +284,17 @@ function runScenarios(label: string) {
     // Only one form at a time: the header Add button is withdrawn while editing.
     await expect(page.getByRole('button', { name: /^add$/i })).toHaveCount(0);
     await audit(page, `mcp-servers-edit-form-${label}`);
+  });
+
+  test('project runtime settings list header names for a shared server', async ({ page }) => {
+    const shared = NORMAL.map((connection) => ({ ...connection, projectId: PROJECT.id }));
+    await gotoProjectRuntime(page, shared);
+
+    const headerNames = page.getByText('x-api-key', { exact: true });
+    await headerNames.scrollIntoViewIfNeeded();
+    await expect(headerNames).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Edit composio' })).toBeVisible();
+    await audit(page, `mcp-servers-project-runtime-${label}`);
   });
 
   test('add form is usable', async ({ page }) => {
