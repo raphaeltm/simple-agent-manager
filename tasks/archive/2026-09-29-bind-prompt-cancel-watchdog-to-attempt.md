@@ -77,7 +77,7 @@ urgent delivery) is a separate follow-up PR.
 - [x] A genuinely stuck cancel reports `cancelled`, not `failed`, and restarts the agent
 - [x] Hard prompt timeout still reports fatal exactly once
 - [x] `go test ./...` and `go vet` pass for `packages/vm-agent`
-- [ ] Staging: VM provisioned, heartbeat, prompt → Stop → immediate follow-up
+- [x] Staging: VM provisioned, heartbeat, prompt → Stop → immediate follow-up
       completes without task failure
 
 ## Implementation Notes
@@ -96,6 +96,25 @@ urgent delivery) is a separate follow-up PR.
   cannot overwrite a live attempt; left as is.
 - The HTTP transport test calls `CancelPromptFromControlPlane` directly; the HTTP
   handler is a thin `IsPrompting()` guard in front of it.
+
+## Staging Evidence (2026-09-29)
+
+- Branch deployed to staging (run 36530902316, success). Fresh node
+  `01M3NYCH7N2JK1QAACABAKF4NJ` reported `agent_version` `4ef45be85` (this branch) and
+  healthy heartbeats; Claude Code VM task `01M3NYC8SHR8N7JFR0HY137SV1`.
+- Three HTTP control-plane cancels of live turns, each followed immediately by a
+  durable follow-up. Cycle 2 hit the incident window: prompt 10 was cancelled at
+  06:52:44.101 and follow-up prompt 11 started at 06:52:48.976 (4.875 s later, inside
+  the 5 s grace). The stale timer would have fired about 125 ms into prompt 11;
+  instead prompt 11 ran 17 s until the next deliberate cancel.
+- Workspace logs: zero warn/error, zero `ACP prompt force-stopped`, zero grace or
+  "did not settle" events. Task ended `in_progress` / `awaiting_followup`, and the
+  final follow-up answered `PONG`.
+- New log identity is live: `Prompt cancel requested`, `ACP Prompt started` and
+  `ACP Prompt cancelled` carry `promptId` and `deliveryId`.
+- Cleanup: session stopped, node deleted and confirmed gone.
+- Found: Claude Code blocks a bare `sleep N` as a standalone command; use a
+  `python3 -c "import time; time.sleep(N)"` busy-wait for staging timing tests.
 
 ## References
 
