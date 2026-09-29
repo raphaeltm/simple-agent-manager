@@ -1644,6 +1644,8 @@ export const workspaceResourceChunks = sqliteTable(
     toolSpanCount: integer('tool_span_count').notNull().default(0),
     completenessJson: text('completeness_json').notNull(),
     summaryJson: text('summary_json').notNull(),
+    /** Per-minute rollup computed on upload; NULL for chunks uploaded before migration 0177. */
+    rollupJson: text('rollup_json'),
     createdAt: integer('created_at').notNull(),
     expiresAt: integer('expires_at').notNull(),
     uploadedByNodeId: text('uploaded_by_node_id'),
