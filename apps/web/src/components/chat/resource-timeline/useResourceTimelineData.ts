@@ -51,7 +51,11 @@ export interface ResourceTimelineData {
  * make a small pan land on cached data, and they carry tool calls that overlap the
  * window but ended after it (the collector files a span under the chunk where it ends).
  */
-function chunksAround(chunks: readonly ResourceChunkRef[], from: number, to: number): ResourceChunkRef[] {
+function chunksAround(
+  chunks: readonly ResourceChunkRef[],
+  from: number,
+  to: number
+): ResourceChunkRef[] {
   const first = chunks.findIndex((chunk) => chunk.endedAt > from);
   if (first === -1) return chunks.slice(-1);
   let last = first;
@@ -67,18 +71,27 @@ interface ChunkQueryState {
 
 /** Module-level so `useQueries` does not re-run it on every render; its output is structurally shared. */
 function combineChunkQueries(
-  results: Array<{ data?: ResourceChunkDetail; isPending: boolean; isError: boolean; fetchStatus: string }>
+  results: Array<{
+    data?: ResourceChunkDetail;
+    isPending: boolean;
+    isError: boolean;
+    fetchStatus: string;
+  }>
 ): ChunkQueryState {
   return {
     details: results.map((result) => result.data),
-    pending: results.filter((result) => result.isPending && result.fetchStatus === 'fetching').length,
+    pending: results.filter((result) => result.isPending && result.fetchStatus === 'fetching')
+      .length,
     failed: results.filter((result) => result.isError).length,
   };
 }
 
 /** Duration of the chunk's coarsest overview aggregate — what the overview can resolve. */
 function overviewResolutionMs(chunk: ResourceChunkRef): number {
-  return chunk.overview.reduce((widest, aggregate) => Math.max(widest, aggregate.end - aggregate.start), 0);
+  return chunk.overview.reduce(
+    (widest, aggregate) => Math.max(widest, aggregate.end - aggregate.start),
+    0
+  );
 }
 
 export function useResourceTimelineIndex(source: ResourceHistorySource) {
@@ -107,7 +120,10 @@ export function useResourceTimelineData(
   const to = toReal(axis, viewport.max);
   const msPerPx = (viewport.max - viewport.min) / Math.max(1, viewport.widthPx);
 
-  const visibleChunks = useMemo(() => chunksAround(index.chunks, from, to), [index.chunks, from, to]);
+  const visibleChunks = useMemo(
+    () => chunksAround(index.chunks, from, to),
+    [index.chunks, from, to]
+  );
   const wantDetail =
     visibleChunks.length <= MAX_DETAIL_CHUNKS &&
     visibleChunks.some((chunk) => overviewResolutionMs(chunk) > msPerPx);

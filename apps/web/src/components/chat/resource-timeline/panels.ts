@@ -100,7 +100,11 @@ function drawSleeps(u: uPlot, state: PanelState, theme: ChartTheme, label: boole
       ctx.font = `${px(10)}px system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`asleep ${formatElapsed(sleep.realEnd - sleep.realStart)}`, (x0 + x1) / 2, bbox.top + bbox.height / 2);
+      ctx.fillText(
+        `asleep ${formatElapsed(sleep.realEnd - sleep.realStart)}`,
+        (x0 + x1) / 2,
+        bbox.top + bbox.height / 2
+      );
     }
     ctx.restore();
   }
@@ -213,13 +217,22 @@ function drawToolLane(u: uPlot, state: PanelState, theme: ChartTheme) {
     const row = rows[index] ?? 0;
     ctx.fillStyle = theme.tools[span.kind];
     ctx.globalAlpha = span.approximateEnd ? 0.5 : 0.9;
-    ctx.fillRect(x0, bbox.top + row * rowHeight + px(1), Math.max(px(2), x1 - x0), rowHeight - px(2));
+    ctx.fillRect(
+      x0,
+      bbox.top + row * rowHeight + px(1),
+      Math.max(px(2), x1 - x0),
+      rowHeight - px(2)
+    );
   });
   ctx.restore();
   drawSleeps(u, state, theme, true);
 }
 
-function xAxis(stateRef: RefObject<PanelState>, theme: ChartTheme, showLabels: boolean): uPlot.Axis {
+function xAxis(
+  stateRef: RefObject<PanelState>,
+  theme: ChartTheme,
+  showLabels: boolean
+): uPlot.Axis {
   let stepMs = 60_000;
   return {
     scale: 'x',
@@ -269,7 +282,9 @@ function commonOptions(
   syncKey: string,
   stateRef: RefObject<PanelState>,
   callbacks: RefObject<PanelCallbacks>
-): Pick<uPlot.Options, 'height' | 'legend' | 'padding' | 'cursor' | 'select' | 'scales'> & { hooks: uPlot.Hooks.Arrays } {
+): Pick<uPlot.Options, 'height' | 'legend' | 'padding' | 'cursor' | 'select' | 'scales'> & {
+  hooks: uPlot.Hooks.Arrays;
+} {
   return {
     height,
     legend: { show: false },
@@ -330,16 +345,18 @@ export function panelOptions(
               callbacks.current.onHover(left >= 0 ? u.posToVal(left, 'x') : null);
             },
           ],
-          draw: [
-            (u) => drawReservations(u, stateRef.current, 'cpuCores', theme, formatCoresAxis),
-          ],
+          draw: [(u) => drawReservations(u, stateRef.current, 'cpuCores', theme, formatCoresAxis)],
         },
         scales: {
           ...base.scales,
           y: {
             range: () => {
               const state = stateRef.current;
-              const top = Math.max(0.5, peak(state.series.cpuMax), highestReservation(state.runs, 'cpuCores'));
+              const top = Math.max(
+                0.5,
+                peak(state.series.cpuMax),
+                highestReservation(state.runs, 'cpuCores')
+              );
               return [0, top * 1.12];
             },
           },
@@ -348,7 +365,12 @@ export function panelOptions(
         series: [
           {},
           { stroke: 'transparent', points: { show: false } },
-          { stroke: theme.cpu, width: 1.5, fill: withAlpha(theme.cpu, 0.15), points: { show: false } },
+          {
+            stroke: theme.cpu,
+            width: 1.5,
+            fill: withAlpha(theme.cpu, 0.15),
+            points: { show: false },
+          },
         ],
         bands: [{ series: [1, 2], fill: withAlpha(theme.cpu, 0.25) }],
       };
@@ -379,12 +401,20 @@ export function panelOptions(
             },
           },
         },
-        axes: [xAxis(stateRef, theme, false), yAxis(theme, (value) => formatBytes(value).replace(' ', ''))],
+        axes: [
+          xAxis(stateRef, theme, false),
+          yAxis(theme, (value) => formatBytes(value).replace(' ', '')),
+        ],
         series: [
           {},
           { stroke: theme.memory, width: 1, dash: [3, 3], points: { show: false } },
           { stroke: 'transparent', points: { show: false } },
-          { stroke: theme.memory, width: 1.5, fill: withAlpha(theme.memory, 0.18), points: { show: false } },
+          {
+            stroke: theme.memory,
+            width: 1.5,
+            fill: withAlpha(theme.memory, 0.18),
+            points: { show: false },
+          },
         ],
         bands: [{ series: [2, 3], fill: withAlpha(theme.memory, 0.3) }],
       };
@@ -405,12 +435,24 @@ export function panelOptions(
         },
         axes: [
           xAxis(stateRef, theme, false),
-          yAxis(theme, (value) => (value === 0 ? '0' : formatRate(Math.abs(value)).replace(' ', ''))),
+          yAxis(theme, (value) =>
+            value === 0 ? '0' : formatRate(Math.abs(value)).replace(' ', '')
+          ),
         ],
         series: [
           {},
-          { stroke: theme.ioWrite, width: 1.25, fill: withAlpha(theme.ioWrite, 0.2), points: { show: false } },
-          { stroke: theme.ioRead, width: 1.25, fill: withAlpha(theme.ioRead, 0.2), points: { show: false } },
+          {
+            stroke: theme.ioWrite,
+            width: 1.25,
+            fill: withAlpha(theme.ioWrite, 0.2),
+            points: { show: false },
+          },
+          {
+            stroke: theme.ioRead,
+            width: 1.25,
+            fill: withAlpha(theme.ioRead, 0.2),
+            points: { show: false },
+          },
         ],
       };
     case 'tools':
@@ -418,7 +460,17 @@ export function panelOptions(
         ...base,
         hooks: { ...hooks, draw: [(u) => drawToolLane(u, stateRef.current, theme)] },
         scales: { ...base.scales, y: { range: () => [0, 1] } },
-        axes: [xAxis(stateRef, theme, true), { scale: 'y', size: PLOT_LEFT_GUTTER_PX, show: true, values: () => [], grid: { show: false }, ticks: { show: false } }],
+        axes: [
+          xAxis(stateRef, theme, true),
+          {
+            scale: 'y',
+            size: PLOT_LEFT_GUTTER_PX,
+            show: true,
+            values: () => [],
+            grid: { show: false },
+            ticks: { show: false },
+          },
+        ],
         series: [{}],
       };
   }
@@ -438,7 +490,11 @@ export function panelData(kind: PanelKind, state: PanelState): uPlot.AlignedData
       return [series.x, withCache, primaryMax, primaryMean];
     }
     case 'disk':
-      return [series.x, series.ioWriteRate, series.ioReadRate.map((value) => (value == null ? null : -value))];
+      return [
+        series.x,
+        series.ioWriteRate,
+        series.ioReadRate.map((value) => (value == null ? null : -value)),
+      ];
     case 'tools':
       return [series.x];
   }

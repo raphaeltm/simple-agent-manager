@@ -238,7 +238,9 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       return;
     }
     if (pathname.startsWith(`${resourceTimelinePath}/chunks/`)) {
-      const chunk = resources.chunks.get(decodeURIComponent(pathname.slice(resourceTimelinePath.length + 8)));
+      const chunk = resources.chunks.get(
+        decodeURIComponent(pathname.slice(resourceTimelinePath.length + 8))
+      );
       await route.fulfill(chunk ? { json: chunk } : { status: 404, json: { error: 'NOT_FOUND' } });
       return;
     }
@@ -310,9 +312,7 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       await route.fulfill({ json: { email: false, push: false } });
       return;
     }
-    if (
-      pathname === `/api/projects/${PROJECT_ID}/credential-attribution-health`
-    ) {
+    if (pathname === `/api/projects/${PROJECT_ID}/credential-attribution-health`) {
       await route.fulfill({ json: { healthy: true } });
       return;
     }
@@ -928,7 +928,9 @@ test.describe('Session resource history drawer', () => {
     await expect(page.getByRole('heading', { name: 'Resources' })).toBeVisible();
 
     // The whole session is on screen, and the OOM kill recorded in the detail samples is called out.
-    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(dialog.getByText('1 out-of-memory kill')).toBeVisible({ timeout: 10_000 });
     const timeline = dialog.getByRole('slider', { name: /Session timeline/ });
     await expect(timeline).toBeVisible();
@@ -963,13 +965,17 @@ async function openResources(page: Page, resourceScenario: ResourceScenarioId) {
 }
 
 test.describe('Session resource timeline scenarios', () => {
-  test('zooming in fetches full detail only for the visible chunks, each once', async ({ page }) => {
+  test('zooming in fetches full detail only for the visible chunks, each once', async ({
+    page,
+  }) => {
     const chunkRequests: string[] = [];
     page.on('request', (request) => {
       if (request.url().includes('/resource-timeline/chunks/')) chunkRequests.push(request.url());
     });
     const dialog = await openResources(page, 'overnight');
-    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
     const total = buildResourceScenario('overnight', SESSION_ID, NOW).chunks.size;
     const beforeZoom = chunkRequests.length;
 
@@ -987,15 +993,21 @@ test.describe('Session resource timeline scenarios', () => {
 
   test('older VM agents without rollups still draw the whole session', async ({ page }) => {
     const dialog = await openResources(page, 'legacy-agent');
-    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('Whole session', { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(dialog.getByRole('slider', { name: /Session timeline/ })).toBeVisible();
     await expect(dialog.getByText(/3 wake cycles/)).toBeVisible();
     await capture(page, `resource-timeline-legacy-${page.viewportSize()?.width ?? 'viewport'}`);
   });
 
-  test('a session past the server cap says how much older history is not shown', async ({ page }) => {
+  test('a session past the server cap says how much older history is not shown', async ({
+    page,
+  }) => {
     const dialog = await openResources(page, 'truncated');
-    await expect(dialog.getByText(/612 older 15-minute segments are not shown/)).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText(/612 older 15-minute segments are not shown/)).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(dialog.getByText('Everything shown', { exact: true })).toBeVisible();
     await expect(dialog.getByText('Whole session', { exact: true })).toHaveCount(0);
     // Liveness: the part that is shown still draws.
@@ -1010,9 +1022,20 @@ test.describe('Session resource timeline scenarios', () => {
     await capture(page, `resource-timeline-pending-${page.viewportSize()?.width ?? 'viewport'}`);
   });
 
-  test('an Instant session says nothing is recorded instead of promising data', async ({ page }) => {
+  test('an old session says its samples expired instead of promising data', async ({ page }) => {
+    const dialog = await openResources(page, 'expired');
+    await expect(dialog.getByText('Detailed history has expired')).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('No resource samples yet')).toHaveCount(0);
+    await capture(page, `resource-timeline-expired-${page.viewportSize()?.width ?? 'viewport'}`);
+  });
+
+  test('an Instant session says nothing is recorded instead of promising data', async ({
+    page,
+  }) => {
     const dialog = await openResources(page, 'instant');
-    await expect(dialog.getByText('Not recorded for Instant sessions')).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText('Not recorded for Instant sessions')).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(dialog.getByText('No resource samples yet')).toHaveCount(0);
     await capture(page, `resource-timeline-instant-${page.viewportSize()?.width ?? 'viewport'}`);
   });

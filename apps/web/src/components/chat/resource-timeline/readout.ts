@@ -42,7 +42,10 @@ export function nearestBucket(series: TimelineSeries, x: number): number {
     else hi = mid;
   }
   const previous = lo - 1;
-  if (previous >= 0 && Math.abs((series.x[previous] ?? 0) - x) <= Math.abs((series.x[lo] ?? 0) - x)) {
+  if (
+    previous >= 0 &&
+    Math.abs((series.x[previous] ?? 0) - x) <= Math.abs((series.x[lo] ?? 0) - x)
+  ) {
     return previous;
   }
   return lo;
@@ -54,21 +57,34 @@ function runLabel(runs: readonly ResourceRun[], t: number): string {
   if (!run) return 'No workspace running';
   const node = run.nodeId ? ` · ${run.nodeId}` : '';
   const problem = run.unsupportedReason ? ' · not observed' : '';
-  return runs.length > 1 ? `Run ${index + 1} of ${runs.length}${node}${problem}` : `Workspace${node}${problem}`;
+  return runs.length > 1
+    ? `Run ${index + 1} of ${runs.length}${node}${problem}`
+    : `Workspace${node}${problem}`;
 }
 
 /** Kept short enough to sit beside the panel's title and legend on a phone. */
 function memoryText(used: number | null, total: number | null): string {
   if (used == null) return total == null ? DASH : `${formatBytes(total)} incl. cache`;
   const cache = total == null ? null : Math.max(0, total - used);
-  return cache == null ? `${formatBytes(used)} used` : `${formatBytes(used)} + ${formatBytes(cache)} cache`;
+  return cache == null
+    ? `${formatBytes(used)} used`
+    : `${formatBytes(used)} + ${formatBytes(cache)} cache`;
 }
 
-function activeToolsText(spans: readonly ResourceToolSpan[], from: number, to: number, instant: number): string | null {
+function activeToolsText(
+  spans: readonly ResourceToolSpan[],
+  from: number,
+  to: number,
+  instant: number
+): string | null {
   const running = spans.filter((span) => span.startedAt <= instant && span.endedAt >= instant);
-  const inWindow = running.length ? running : spans.filter((span) => span.startedAt < to && span.endedAt > from);
+  const inWindow = running.length
+    ? running
+    : spans.filter((span) => span.startedAt < to && span.endedAt > from);
   if (inWindow.length === 0) return null;
-  const longest = [...inWindow].sort((a, b) => b.endedAt - b.startedAt - (a.endedAt - a.startedAt))[0];
+  const longest = [...inWindow].sort(
+    (a, b) => b.endedAt - b.startedAt - (a.endedAt - a.startedAt)
+  )[0];
   if (!longest) return null;
   const label = formatToolName(longest.name);
   const more = inWindow.length > 1 ? ` +${inWindow.length - 1} more` : '';
@@ -113,14 +129,24 @@ export function readoutAtCursor(
   return {
     mode: 'cursor',
     // The instant under the cursor stays put while zooming; the averaging window says how wide the reading is.
-    time: measured ? formatClock(t, 1_000) : `${formatClock(t, series.bucketMs)} · ${formatElapsed(to - from)} avg`,
+    time: measured
+      ? formatClock(t, 1_000)
+      : `${formatClock(t, series.bucketMs)} · ${formatElapsed(to - from)} avg`,
     context: runLabel(runs, t),
-    cpu: measured || cpuMax == null ? formatCores(cpuMean) : `${formatCores(cpuMean)} · peak ${formatCores(cpuMax)}`,
+    cpu:
+      measured || cpuMax == null
+        ? formatCores(cpuMean)
+        : `${formatCores(cpuMean)} · peak ${formatCores(cpuMax)}`,
     memory: memoryText(used, total),
-    disk: write == null && read == null ? DASH : `↑ ${formatRate(write)} write · ↓ ${formatRate(read)} read`,
+    disk:
+      write == null && read == null
+        ? DASH
+        : `↑ ${formatRate(write)} write · ↓ ${formatRate(read)} read`,
     tools:
       activeToolsText(toolSpans, from, to, t) ??
-      (overview > 0 ? `~${overview} call${overview === 1 ? '' : 's'} in this window` : 'No tool calls'),
+      (overview > 0
+        ? `~${overview} call${overview === 1 ? '' : 's'} in this window`
+        : 'No tool calls'),
     oomKills: series.oomKills[i] ?? 0,
   };
 }
@@ -137,7 +163,11 @@ export function readoutForRange(
   const to = toReal(axis, viewMax);
   const usage = summarizeUsage(aggregates, from, to);
   const whole = viewMin <= axis.min && viewMax >= axis.max;
-  const scope = whole ? (truncated ? 'Everything shown' : 'Whole session') : formatRange(from, to, viewMax - viewMin < 30 * 60_000 ? 1_000 : 60_000);
+  const scope = whole
+    ? truncated
+      ? 'Everything shown'
+      : 'Whole session'
+    : formatRange(from, to, viewMax - viewMin < 30 * 60_000 ? 1_000 : 60_000);
   const activeTotal = formatElapsed(axis.activeMs);
   return {
     mode: 'range',
@@ -145,7 +175,10 @@ export function readoutForRange(
     context: whole
       ? `All ${activeTotal} of ${truncated ? 'shown ' : ''}active time`
       : `${formatElapsed(activeMsInView(axis, viewMin, viewMax))} of ${activeTotal} active time in view`,
-    cpu: usage.cpuMaxCores == null ? DASH : `avg ${formatCores(usage.cpuMeanCores)} · peak ${formatCores(usage.cpuMaxCores)}`,
+    cpu:
+      usage.cpuMaxCores == null
+        ? DASH
+        : `avg ${formatCores(usage.cpuMeanCores)} · peak ${formatCores(usage.cpuMaxCores)}`,
     memory:
       usage.workingSetMaxBytes != null
         ? `peak ${formatBytes(usage.workingSetMaxBytes)} (${formatBytes(usage.memoryMaxBytes)} w/ cache)`

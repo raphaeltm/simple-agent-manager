@@ -58,7 +58,8 @@ interface ScenarioPlan {
   runtime?: string;
 }
 
-export type ResourceScenarioId = 'overnight' | 'legacy-agent' | 'truncated' | 'pending' | 'instant';
+export type ResourceScenarioId =
+  'overnight' | 'legacy-agent' | 'truncated' | 'pending' | 'instant' | 'expired';
 
 const SMALL: Reservation = { cpuMillis: 2_000, memoryMb: 4_096 };
 const LARGE: Reservation = { cpuMillis: 4_000, memoryMb: 8_192 };
@@ -121,6 +122,16 @@ const SCENARIOS: Record<ResourceScenarioId, ScenarioPlan> = {
     rollups: true,
     runs: [],
     collection: 'pending',
+    runtime: 'vm',
+  },
+  expired: {
+    startedMinutesAgo: 140 * 24 * 60,
+    seed: 1,
+    workload: 'coordinator',
+    modernAgent: true,
+    rollups: true,
+    runs: [],
+    collection: 'expired',
     runtime: 'vm',
   },
   instant: {

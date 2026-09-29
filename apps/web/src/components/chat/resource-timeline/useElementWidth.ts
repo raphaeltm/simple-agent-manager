@@ -7,7 +7,9 @@ export function useElementWidth(ref: RefObject<HTMLElement | null>): number {
     const element = ref.current;
     if (!element) return;
     setWidth(element.clientWidth);
-    const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry?.contentRect.width ?? 0)));
+    const observer = new ResizeObserver(([entry]) =>
+      setWidth(Math.round(entry?.contentRect.width ?? 0))
+    );
     observer.observe(element);
     return () => observer.disconnect();
   }, [ref]);

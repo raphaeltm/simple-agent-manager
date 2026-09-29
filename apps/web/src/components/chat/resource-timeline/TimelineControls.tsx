@@ -25,7 +25,12 @@ export function ReadoutBar({
   pendingChunks,
   failedChunks,
   onClear,
-}: Readonly<{ readout: Readout; pendingChunks: number; failedChunks: number; onClear: () => void }>) {
+}: Readonly<{
+  readout: Readout;
+  pendingChunks: number;
+  failedChunks: number;
+  onClear: () => void;
+}>) {
   return (
     <div className="flex min-h-[44px] items-start justify-between gap-2 rounded-lg border border-border-default bg-inset px-3 py-2">
       <div className="min-w-0">
@@ -90,7 +95,12 @@ export function RangeControls({
   const presets = PRESET_SPANS_MS.filter((preset) => preset.ms < fullSpanMs * 0.9);
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-      <button type="button" className={showingAll ? chipActive : chipIdle} onClick={onAll} aria-pressed={showingAll}>
+      <button
+        type="button"
+        className={showingAll ? chipActive : chipIdle}
+        onClick={onAll}
+        aria-pressed={showingAll}
+      >
         All
       </button>
       {presets.map((preset) => {
@@ -118,7 +128,11 @@ export function RangeControls({
         <ChevronsRight size={12} aria-hidden="true" />
       </button>
       {hasSleeps && (
-        <div className="ml-auto flex rounded-full border border-border-default p-0.5 text-[11px]" role="group" aria-label="Time axis">
+        <div
+          className="ml-auto flex rounded-full border border-border-default p-0.5 text-[11px]"
+          role="group"
+          aria-label="Time axis"
+        >
           {(['active', 'clock'] as const).map((mode) => (
             <button
               key={mode}
@@ -140,11 +154,17 @@ export function PeakList({
   peaks,
   runLabel,
   onSelect,
-}: Readonly<{ peaks: UsagePeak[]; runLabel: (t: number) => string; onSelect: (peak: UsagePeak) => void }>) {
+}: Readonly<{
+  peaks: UsagePeak[];
+  runLabel: (t: number) => string;
+  onSelect: (peak: UsagePeak) => void;
+}>) {
   if (peaks.length === 0) return null;
   return (
     <section className="mt-4" aria-label="Busiest moments">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">Busiest moments</h3>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
+        Busiest moments
+      </h3>
       <ul className="mt-1.5 divide-y divide-border-default rounded-lg border border-border-default">
         {peaks.map((peak) => (
           <li key={`${peak.metric}-${peak.at}`}>
@@ -155,13 +175,17 @@ export function PeakList({
             >
               <span className="min-w-0">
                 <span className="block text-sm tabular-nums text-fg-primary">
-                  {peak.metric === 'cpu' ? formatCores(peak.value) : `${formatBytes(peak.value)} memory`}
+                  {peak.metric === 'cpu'
+                    ? formatCores(peak.value)
+                    : `${formatBytes(peak.value)} memory`}
                 </span>
                 <span className="block break-words text-xs text-fg-muted">
                   {formatDayTime(peak.at)} · {runLabel(peak.at)}
                 </span>
               </span>
-              <span className="shrink-0 text-xs text-accent">Zoom to ±{formatElapsed(PEAK_CONTEXT_MS / 2)}</span>
+              <span className="shrink-0 text-xs text-accent">
+                Zoom to ±{formatElapsed(PEAK_CONTEXT_MS / 2)}
+              </span>
             </button>
           </li>
         ))}

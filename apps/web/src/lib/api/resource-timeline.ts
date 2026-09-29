@@ -80,7 +80,7 @@ export interface ResourceTimelineIndexResponse {
   totalChunkCount: number;
   omittedChunkCount: number;
   maxChunks: number;
-  collection: 'collected' | 'pending' | 'unsupported';
+  collection: 'collected' | 'pending' | 'unsupported' | 'expired';
   runtime: string | null;
 }
 

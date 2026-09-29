@@ -81,7 +81,12 @@ function maxOf(current: number | null, next: number | null): number | null {
 }
 
 /** Folds the part of `aggregate` overlapping the bucket (`overlap` ms of `duration`) into `acc`. */
-function accumulate(acc: Accumulator, aggregate: ResourceAggregate, overlap: number, duration: number) {
+function accumulate(
+  acc: Accumulator,
+  aggregate: ResourceAggregate,
+  overlap: number,
+  duration: number
+) {
   acc.covered += overlap;
   acc.exact &&= aggregate.exact;
   if (aggregate.cpuMeanCores != null) {

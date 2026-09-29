@@ -1,8 +1,22 @@
-import { type KeyboardEvent, type RefObject, useCallback, useId, useLayoutEffect, useMemo, useRef } from 'react';
+import {
+  type KeyboardEvent,
+  type RefObject,
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from 'react';
 import type uPlot from 'uplot';
 
 import { type ChartTheme, useChartTheme } from './chart-theme';
-import { type PanelCallbacks, panelData, type PanelKind, panelOptions, type PanelState } from './panels';
+import {
+  type PanelCallbacks,
+  panelData,
+  type PanelKind,
+  panelOptions,
+  type PanelState,
+} from './panels';
 import type { Readout } from './readout';
 import type { ViewRange } from './timeline-view';
 import { type GestureHandlers, useTimelineGestures } from './useTimelineGestures';
@@ -15,7 +29,10 @@ interface PanelSpec {
   value: (readout: Readout) => string;
   /** Tool names can be long; this panel lets its value wrap instead of truncating. */
   wrapValue?: boolean;
-  legend: (theme: ChartTheme, hasWorkingSet: boolean) => Array<{ color: string; label: string; dashed?: boolean }>;
+  legend: (
+    theme: ChartTheme,
+    hasWorkingSet: boolean
+  ) => Array<{ color: string; label: string; dashed?: boolean }>;
 }
 
 const PANELS: PanelSpec[] = [
@@ -92,7 +109,11 @@ export function TimelinePanels({
   const hover = (x: number | null) => {
     if (mouseOverRef.current) onCursor(x);
   };
-  const callbacksRef = useRef<PanelCallbacks>({ onHover: hover, onSelectRange: onRange, onResetZoom });
+  const callbacksRef = useRef<PanelCallbacks>({
+    onHover: hover,
+    onSelectRange: onRange,
+    onResetZoom,
+  });
   const gestureRef = useRef<GestureHandlers>({
     plotRect: () => null,
     view: () => ({ min: state.viewMin, max: state.viewMax }),
