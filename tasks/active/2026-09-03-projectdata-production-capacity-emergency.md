@@ -619,8 +619,8 @@ Measured 2026-09-30 (read-only production D1):
   2026-09-23 audit and 10,124 MB on the morning of 2026-09-29.
 - `project_data_archive_circuit_breakers`: SAM's breaker is **`open`** with reason
   `attempts_exhausted:CompactArchiveTimeoutError`, opened 2026-09-27 16:47:58Z and never closed.
-  The last SAM archive publish was 2026-09-27 14:08:35Z. Other projects have published 172
-  archives since the breaker opened, so the sweep itself is healthy.
+  The last SAM archive publish was 2026-09-27 14:08:35Z. Other projects had published 172
+  archives since the breaker opened (as of about 05:40Z), so the sweep itself is healthy.
 - SAM archive migrations: 322 `published`, 23 `frozen`, 3 `failed` (`156046f1`, `5ed87b67`,
   `ff721a49`, all 2026-09-27) and 2 `poisoned` (`6d6f3099` since 2026-09-15, and `5f82299c`, the
   one that opened the breaker).
