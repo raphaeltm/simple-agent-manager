@@ -12,6 +12,7 @@
  *
  * Mount point: app.route('/ai/v1', aiProxyRoutes) in index.ts.
  */
+import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
 
 import type { Env } from '../env';
@@ -97,6 +98,18 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   );
   const modelError = validateAllowedModel(c, modelId);
   if (modelError) return modelError;
+  const model = PLATFORM_AI_MODELS.find((candidate) => candidate.id === modelId);
+  if (body.tools && model?.supportsChatCompletionsToolCalls === false) {
+    return c.json(
+      {
+        error: {
+          message: `${modelId} tool calls require the Responses API.`,
+          type: 'invalid_request_error',
+        },
+      },
+      400
+    );
+  }
   const tierError = await enforceModelTier(c, prepared, modelId);
   if (tierError) return tierError;
   const usageError = await enforceUsageGate(c, prepared.userId);

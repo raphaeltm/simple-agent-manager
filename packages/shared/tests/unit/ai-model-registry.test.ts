@@ -340,6 +340,7 @@ describe('AI Model Registry', () => {
         contextWindow: 1050000,
         toolCallSupport: 'excellent',
         intendedRole: 'workspace-agent',
+        supportsChatCompletionsToolCalls: false,
         fallbackGroup: 'openai-premium',
         unifiedApiModelId: 'openai/gpt-6.1-sol',
       });

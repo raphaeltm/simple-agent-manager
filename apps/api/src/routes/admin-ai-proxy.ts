@@ -103,7 +103,9 @@ adminAIProxyRoutes.get('/config', async (c) => {
   const effectiveDefault =
     parsed?.defaultModel ?? c.env.AI_PROXY_DEFAULT_MODEL ?? DEFAULT_AI_PROXY_MODEL;
 
-  const models = PLATFORM_AI_MODELS.map((m) => ({
+  const models = PLATFORM_AI_MODELS.filter(
+    (m) => m.supportsChatCompletionsToolCalls !== false
+  ).map((m) => ({
     ...m,
     available: isModelAvailable(m.provider, hasAnthropic, hasOpenAI, hasUnifiedBilling),
   }));
@@ -142,6 +144,11 @@ adminAIProxyRoutes.put('/config', jsonValidator(UpdateAiProxyDefaultModelSchema)
   if (!model) {
     throw errors.badRequest(
       `Unknown model: ${defaultModel}. Available: ${PLATFORM_AI_MODELS.map((m) => m.id).join(', ')}`
+    );
+  }
+  if (model.supportsChatCompletionsToolCalls === false) {
+    throw errors.badRequest(
+      `${defaultModel} is not available for chat-completions agent defaults; use the Responses API.`
     );
   }
 

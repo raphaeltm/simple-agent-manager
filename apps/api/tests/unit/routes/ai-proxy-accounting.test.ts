@@ -395,10 +395,12 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
       )
     );
 
+    const tools = [{ type: 'function', name: 'lookup', parameters: { type: 'object' } }];
     const res = await postResponses(
       {
         model: 'gpt-6.1-sol',
-        input: 'Say hi',
+        input: 'Use a tool',
+        tools,
       },
       { AI_PROXY_ALLOWED_MODELS: undefined }
     );
@@ -407,8 +409,28 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
     await res.text();
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://api.openai.com/v1/responses');
-    expect(init.body).toBe(JSON.stringify({ model: 'gpt-6.1-sol', input: 'Say hi' }));
+    expect(init.body).toBe(
+      JSON.stringify({ model: 'gpt-6.1-sol', input: 'Use a tool', tools })
+    );
     expectUsageIncrement(6, 2);
+  });
+
+  it('directs GPT-6.1 Sol tool calls to the Responses API', async () => {
+    allowProxyRequest();
+
+    const res = await postChat(
+      {
+        model: 'gpt-6.1-sol',
+        messages: [{ role: 'user', content: 'Use a tool' }],
+        tools: [{ type: 'function', function: { name: 'lookup', parameters: {} } }],
+      },
+      { AI_PROXY_ALLOWED_MODELS: undefined }
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain('Responses API');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
 

@@ -238,6 +238,8 @@ export interface PlatformAIModel {
   contextWindow: number;
   /** Tool-call reliability for agent loop suitability. */
   toolCallSupport: ToolCallSupport;
+  /** Whether tool calls are supported through the Chat Completions API. Defaults to true. */
+  supportsChatCompletionsToolCalls?: boolean;
   /** Primary intended role in the SAM agent hierarchy. */
   intendedRole: ModelIntendedRole;
   /** Fallback group — models in the same group can substitute for each other. */
@@ -528,6 +530,8 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
         contextWindow: 1050000,
         toolCallSupport: 'excellent',
         intendedRole: 'workspace-agent',
+        // GPT-6.1 Sol supports tool calls through Responses, but not Chat Completions.
+        supportsChatCompletionsToolCalls: id === 'gpt-6.1-sol' ? false : undefined,
         fallbackGroup,
       })
   ),

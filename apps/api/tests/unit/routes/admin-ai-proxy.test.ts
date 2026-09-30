@@ -120,6 +120,32 @@ describe('admin AI proxy config routes — PUT /config (defaultModel)', () => {
     const body = (await res.json()) as { message: string };
     expect(body.message).toContain('Unknown model: does-not-exist');
   });
+
+  it('does not allow a Responses-only model as the chat-completions agent default', async () => {
+    const res = await honoApp.request(
+      '/api/admin/ai-proxy/config',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ defaultModel: 'gpt-6.1-sol' }),
+      },
+      bindings()
+    );
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { message: string };
+    expect(body.message).toContain('not available for chat-completions agent defaults');
+  });
+});
+
+describe('admin AI proxy config routes — GET /config', () => {
+  it('omits Responses-only models from chat-completions agent defaults', async () => {
+    const res = await app().request('/api/admin/ai-proxy/config', {}, bindings());
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { models: Array<{ id: string }> };
+    expect(body.models.map((model) => model.id)).not.toContain('gpt-6.1-sol');
+  });
 });
 
 describe('admin AI proxy config routes — PATCH /config (billingMode)', () => {
