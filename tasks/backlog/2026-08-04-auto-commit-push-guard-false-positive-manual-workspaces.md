@@ -1,5 +1,12 @@
 # Auto-commit push guard can block a legitimate push on manually created workspaces
 
+> **Reconciliation 2026-09-30:** still open. Traced in code, not tested live: the fallback may
+> also block Instant task-mode output branches (`submit-instant-task.ts:104` passes the output
+> branch, `instant-session.ts:432` sends no `defaultBranch`, and the VM agent reads it only from
+> the request body at `workspaces.go:606`). Callers that omit `defaultBranch` today:
+> `workspaces/_helpers.ts:436`, `trial-orchestrator/steps.ts:755`, `node-lifecycle.ts:243`,
+> `instant-session.ts:432`; only `task-runner/workspace-steps.ts:479` sends it.
+
 ## Problem
 
 The default-branch push guard added in PR #1672 resolves the protected branch via

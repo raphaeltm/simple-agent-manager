@@ -1,5 +1,9 @@
 # Split apps/api/src/env.ts Env Interface Into Domain Modules
 
+> **Reconciliation 2026-09-30:** still open. `apps/api/src/env.ts` is now 1,500 lines (1,429 on
+> 2026-09-23, 802 when filed) and is still exempted by the `FILE SIZE EXCEPTION` comment at
+> `env.ts:1`, which cites this file. No overlap with `2026-04-03-split-oversized-files.md`.
+
 ## Problem
 
 `apps/api/src/env.ts` crossed the 800-line mandatory-split ceiling (802 lines) during the 2026-07-19 instant-container hotfix (two added env var declarations tipped a file already sitting at the limit). A `FILE SIZE EXCEPTION` comment was added to unblock the outage fix; this task tracks the real split.

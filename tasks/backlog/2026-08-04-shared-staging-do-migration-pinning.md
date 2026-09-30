@@ -1,5 +1,22 @@
 # One branch's unmerged DO migration blocks staging deploys for every other branch
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** fail-fast detection. The deploy preflight reads the Worker's deployed Durable
+>   Object migration tag and stops with an explanatory error when that tag is missing from the
+>   checked-in history, instead of Wrangler's misleading `ProjectData` 10074 error
+>   (`scripts/deploy/durable-object-migrations.ts:222-230`; test
+>   `scripts/quality/do-migration-compatibility.test.ts:157`; PR #1649, 3f47e1b26).
+> - **Still open:**
+>   - Choose the prevention model (options a, c or d above) so one branch's migration cannot pin
+>     shared staging.
+>   - Make the error staging-aware: it blames "an upgrade merge that dropped fork-local
+>     migrations" and does not name the branch that pinned the tag.
+>   - Document the constraint in the staging guidance (rule 13 or the `/do` skill); nothing covers
+>     it yet.
+>   - Worth checking: two unmerged branches that add the same next tag (for example `v20`) would
+>     look already applied to the resolver.
+
 ## Problem
 
 `sam-api-staging` is a **single shared Cloudflare Worker**, but Durable Object migrations are

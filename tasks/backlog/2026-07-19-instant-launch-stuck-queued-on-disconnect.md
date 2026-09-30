@@ -1,5 +1,22 @@
 # Instant-Session Launch Leaves Task Stuck `queued` When the Client Disconnects
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - The launch survives a disconnect: `POST .../sessions/start` persists the task first,
+>     returns 202 and continues under `waitUntil` (`apps/api/src/routes/chat-start.ts:39-49,240`;
+>     PR #1722, f8a284cca).
+>   - Stale sweep: a task stuck in `instant_persistence` past `INSTANT_START_STALE_TIMEOUT_MS`
+>     (default 10 min) is failed with a diagnosable message
+>     (`apps/api/src/scheduled/stuck-tasks.ts:40,1265-1270`; PR #1722).
+> - **Still open:**
+>   - Regression test: nothing in `apps/api/tests` drives the `instant_persistence` sweep branch
+>     or a mid-launch cancellation.
+>   - Confirm (or drop) the cleanup of the two July production tasks; the generic
+>     `TASK_STUCK_QUEUED_TIMEOUT_MS` sweep should already have failed them.
+>   - `apps/api/src/services/instant-session.ts:478-481` also points here for the missing
+>     TaskRunner execution-timeout watchdog on task-mode Instant sessions.
+
 ## Problem
 
 `launchInstantSession` runs entirely inside the `POST /api/projects/:projectId/sessions/start` request context (`apps/api/src/routes/chat-start.ts` → `apps/api/src/services/instant-session.ts:launchInstantSession`). When the browser disconnects mid-launch (mobile app backgrounded, user gives up, network blip), the Worker invocation is cancelled and the `catch` block that marks the task `failed` / workspace `error` / chat session failed never runs.

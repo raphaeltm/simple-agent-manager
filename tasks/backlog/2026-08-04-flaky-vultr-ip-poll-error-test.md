@@ -1,5 +1,19 @@
 # Flaky test: `vultr.ip_poll_error` assertion races a 20 ms wall-clock timeout
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Fix option 2 ("widen the asymmetry"): PR #1745 (a45e0c508) raised the poll budget to 500 ms
+>     against a 5 ms interval for this test and for the sibling "polls for main_ip" test, with
+>     comments explaining why (`packages/providers/tests/unit/vultr-lifecycle.test.ts:150,305`).
+>   - The test still asserts `vultr.ip_poll_error` (`vultr-lifecycle.test.ts:309`), and the
+>     timeout path keeps its own test (`:157-165`).
+> - **Still open:**
+>   - The first acceptance criterion as written: the test still uses real timers (option 1,
+>     fake timers, was the preferred fix).
+>   - The 20-consecutive-run check was never recorded.
+>   - If option 2 is judged good enough, close this file instead.
+
 ## Problem
 
 `packages/providers/tests/unit/vultr-lifecycle.test.ts` →

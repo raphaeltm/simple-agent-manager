@@ -1,5 +1,10 @@
 # A sleeping Instant session renders as "Unknown" (and often "Unhealthy")
 
+> **Reconciliation 2026-09-30:** still open. Re-observed on 2026-09-28
+> (`tasks/archive/2026-09-28-instant-idle-sleep-wake.md:367`). The "audit the other missing
+> statuses" item overlaps the `StatusBadge` coverage work in
+> `2026-09-19-volume-status-badge-and-create-time-status.md`; consider doing them together.
+
 ## Problem
 
 `sleeping` is a real status on nodes, workspaces, and agent sessions

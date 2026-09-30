@@ -1,5 +1,25 @@
 # Audit project-data DO list reads for single-bad-row fault isolation
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Message list read skips malformed rows (`project-data/messages.ts:386`; PR #1697, 4f7f4dd1a).
+>   - Message search skips malformed rows (`project-data/message-search-rows.ts:28`; PR #2144,
+>     1c7420585).
+>   - Knowledge high-confidence and entity-index reads (`project-data/knowledge.ts:530,620`;
+>     PR #1894, c5fb1f3b7).
+>   - Shared tolerant helper `mapRows` in `apps/api/src/durable-objects/row-validation.ts`
+>     (PR #1804, 23e7adc23). Other DOs use it; no project-data module does yet.
+> - **Still open:**
+>   - Per-row isolation (ideally via `mapRows`) for the remaining bare `rows.map(parseX)` reads
+>     in `apps/api/src/durable-objects/project-data/`: `activity.ts:67`,
+>     `attention.ts:343,392,412`, `commands.ts:47`, `ideas.ts:51,74`,
+>     `knowledge.ts:327,382,422,451,676`, `mailbox.ts:169,312,382`, `policies.ts:151,238`,
+>     `idle-cleanup.ts:281`, `materialization.ts:261`.
+>   - Good/bad/good regression tests for those reads.
+>   - Review the other large DO-RPC reads for a size budget plus `hasMore` (not re-audited).
+> - **Moot/dropped:** "prioritize `messages.ts`" and "extract a shared helper" (both done above).
+
 ## Problem
 
 `ProjectData.listSessions` threw `INTERNAL_ERROR` in production when a single
