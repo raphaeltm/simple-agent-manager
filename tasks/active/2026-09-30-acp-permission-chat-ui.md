@@ -51,8 +51,8 @@ explicit refresh signal from that state plus a slow, visibility-aware recovery c
 Choice acquisition needs a synchronous in-memory guard before Web Crypto yields. A
 snapshot authorization failure must evict the rendered card immediately so its transient
 detail component unmounts. The mobile jump control needs reserved clearance around exact
-permission option hit targets. No public API, Worker, shared schema, VM, or documentation
-contract changes are required.
+permission option hit targets, status copy, error states, and retry controls. No public API,
+Worker, shared schema, VM, or documentation contract changes are required.
 
 - [x] Refresh the permission snapshot when the active session attention marker changes.
 - [x] Keep a bounded idle recovery poll while preserving the faster pending/delivery poll.
@@ -61,6 +61,7 @@ contract changes are required.
 - [x] Acquire a synchronous option lock and answer key before hashing; re-check mount, identity, permission state, and deadline after hashing.
 - [x] Surface digest failure safely and block concurrent option/retry submissions with deterministic deferred-digest tests.
 - [x] Reserve mobile clearance between permission option hit targets and jump-to-latest; assert geometry at 320px, 375px, and desktop.
+- [x] Extend jump-to-latest clearance to status copy and retry controls without forcing long retry labels into a narrow column.
 - [x] Capture, inspect, and post updated Playwright screenshots.
 - [x] Re-run focused checks, specialist review, and CI; preserve draft-only handoff.
 

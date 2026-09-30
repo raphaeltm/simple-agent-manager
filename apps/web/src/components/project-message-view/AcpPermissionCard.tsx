@@ -222,7 +222,7 @@ function PermissionDetails({
     );
   if (state === 'error')
     return (
-      <div className="flex flex-wrap items-center gap-2" role="alert">
+      <div className="flex flex-wrap items-center gap-2 pr-12 sm:pr-0" role="alert">
         <p className="text-sm text-warning-fg">
           Secure permission details are unavailable. No option was inferred.
         </p>
@@ -255,7 +255,11 @@ function SubmissionStatus({
 }) {
   if (!submission?.message) return null;
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2" role="status">
+    <div
+      className="mt-3 flex flex-wrap items-center gap-2 pr-12 sm:pr-0"
+      role="status"
+      data-testid="acp-permission-submission-status"
+    >
       <p
         className={
           submission.status === 'revoked' ? 'text-sm text-danger' : 'text-sm text-fg-secondary'
@@ -268,10 +272,12 @@ function SubmissionStatus({
           type="button"
           size="sm"
           variant="secondary"
+          className="h-auto min-h-11 min-w-0 max-w-full !whitespace-normal break-words text-left"
+          aria-label={`Retry ${submission.option.name}`}
           disabled={disabled}
           onClick={() => onRetry(submission)}
         >
-          Retry {submission.option.name}
+          Retry answer
         </Button>
       )}
     </div>
@@ -289,7 +295,10 @@ function PermissionCardContent({
 }) {
   return (
     <div className="ml-9 min-w-0">
-      <p className="mt-1 break-words text-sm text-fg-secondary">
+      <p
+        className="mt-1 break-words pr-12 text-sm text-fg-secondary sm:pr-0"
+        data-testid="acp-permission-status-description"
+      >
         {!canAnswer && card.isPending
           ? 'Waiting for the session creator to review this permission request.'
           : status.description}
@@ -307,7 +316,7 @@ function PermissionCardContent({
         </div>
       )}
       {card.mayReveal && card.choiceError && (
-        <p className="mt-3 text-sm text-danger" role="alert">
+        <p className="mt-3 pr-12 text-sm text-danger sm:pr-0" role="alert">
           {card.choiceError}
         </p>
       )}

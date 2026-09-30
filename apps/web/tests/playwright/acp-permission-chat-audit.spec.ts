@@ -1,4 +1,4 @@
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { expect, type Locator, type Page, type Route, test } from '@playwright/test';
 
 import {
   assertNoClippedOverflow,
@@ -453,6 +453,77 @@ async function assertPermissionHitTargetsClearOfJumpButton(page: Page) {
   }
 }
 
+async function alignWithJumpButton(page: Page, target: Locator) {
+  await target.evaluate((element) => {
+    const jumpButton = document.querySelector<HTMLElement>('[aria-label="Scroll to bottom"]');
+    if (!jumpButton) throw new Error('Jump-to-latest button is missing');
+    let ancestor = element.parentElement;
+    while (ancestor) {
+      const overflowY = window.getComputedStyle(ancestor).overflowY;
+      if (overflowY === 'auto' || overflowY === 'scroll') {
+        ancestor.scrollBy({
+          top: element.getBoundingClientRect().top - jumpButton.getBoundingClientRect().top,
+        });
+        return;
+      }
+      ancestor = ancestor.parentElement;
+    }
+    throw new Error('Scrollable conversation ancestor is missing');
+  });
+}
+
+async function assertTextClearOfJumpButton(page: Page) {
+  const jumpButton = page.getByRole('button', { name: 'Scroll to bottom' });
+  const answeredCard = page.locator('[data-interaction-state="answered"]').first();
+  const description = answeredCard.getByTestId('acp-permission-status-description');
+  await alignWithJumpButton(page, description);
+  await expect(description).toBeVisible();
+  await expect(jumpButton).toBeVisible();
+
+  const overlapArea = await description.evaluate((element) => {
+    const jump = document.querySelector<HTMLElement>('[aria-label="Scroll to bottom"]');
+    if (!jump) throw new Error('Jump-to-latest button is missing');
+    const jumpBox = jump.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return [...range.getClientRects()].reduce((total, textBox) => {
+      const width = Math.max(
+        0,
+        Math.min(textBox.right, jumpBox.right) - Math.max(textBox.left, jumpBox.left)
+      );
+      const height = Math.max(
+        0,
+        Math.min(textBox.bottom, jumpBox.bottom) - Math.max(textBox.top, jumpBox.top)
+      );
+      return total + width * height;
+    }, 0);
+  });
+  expect(overlapArea).toBe(0);
+}
+
+async function assertRetryControlClearOfJumpButton(page: Page) {
+  const jumpButton = page.getByRole('button', { name: 'Scroll to bottom' });
+  const retryButton = page.getByRole('button', { name: 'Retry Reject this operation once' });
+  await alignWithJumpButton(page, retryButton);
+  await expect(retryButton).toBeVisible();
+  await expect(jumpButton).toBeVisible();
+  const jumpBox = await jumpButton.boundingBox();
+  const retryBox = await retryButton.boundingBox();
+  expect(jumpBox).not.toBeNull();
+  expect(retryBox).not.toBeNull();
+  const horizontalOverlap = Math.max(
+    0,
+    Math.min(retryBox!.x + retryBox!.width, jumpBox!.x + jumpBox!.width) -
+      Math.max(retryBox!.x, jumpBox!.x)
+  );
+  const verticalOverlap = Math.max(
+    0,
+    Math.min(retryBox!.y + retryBox!.height, jumpBox!.y + jumpBox!.height) -
+      Math.max(retryBox!.y, jumpBox!.y)
+  );
+  expect(horizontalOverlap * verticalOverlap).toBe(0);
+}
+
 async function openDetailFailureSurface(page: Page, status: 403 | 500) {
   await setupPermissionMocks(page, true, createPermissionBackend(), status);
   await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
@@ -478,6 +549,7 @@ test.describe('ACP permission cards — Mobile', () => {
     await openPermissionSurface(page, true);
     await positionAnchoredCardBelowStickyHeader(page);
     await assertPermissionHitTargetsClearOfJumpButton(page);
+    await assertTextClearOfJumpButton(page);
     await screenshot(page, 'acp-permission-chat-owner-mobile');
   });
 
@@ -508,6 +580,8 @@ test.describe('ACP permission cards — Mobile', () => {
     const evidence = await openPermissionSurface(page, true);
     evidence.dropNextAnswerReceipt();
     await page.getByRole('button', { name: 'Reject this operation once' }).click();
+    await assertRetryControlClearOfJumpButton(page);
+    await screenshot(page, 'acp-permission-chat-retry-mobile');
     await page.getByRole('button', { name: 'Retry Reject this operation once' }).click();
     await expect(page.getByTestId(`acp-permission-${ANCHORED_ID}`)).toHaveAttribute(
       'data-interaction-state',
@@ -592,9 +666,14 @@ test.describe('ACP permission cards — Narrow mobile', () => {
   test.use({ viewport: { width: 320, height: 667 }, isMobile: true, hasTouch: true });
 
   test('keeps exact option hit targets clear of jump-to-latest at 320px', async ({ page }) => {
-    await openPermissionSurface(page, true);
+    const evidence = await openPermissionSurface(page, true);
     await positionAnchoredCardBelowStickyHeader(page);
     await assertPermissionHitTargetsClearOfJumpButton(page);
+    await assertTextClearOfJumpButton(page);
     await screenshot(page, 'acp-permission-chat-owner-narrow-mobile');
+    evidence.dropNextAnswerReceipt();
+    await page.getByRole('button', { name: 'Reject this operation once' }).click();
+    await assertRetryControlClearOfJumpButton(page);
+    await screenshot(page, 'acp-permission-chat-retry-narrow-mobile');
   });
 });
