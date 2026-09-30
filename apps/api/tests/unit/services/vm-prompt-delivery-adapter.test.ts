@@ -58,9 +58,15 @@ const protocolFixture = JSON.parse(
   notReadyPrompt: Record<string, unknown>;
   notFoundReceipt: Record<string, unknown>;
 };
-const promptProtocolCapabilities = { ...protocolFixture.capabilities };
-delete promptProtocolCapabilities.interactions;
-
+const promptProtocolCapabilities = {
+  ...protocolFixture.capabilities,
+  interactions: {
+    supported: true,
+    version: 1,
+    answerEndpoint: true,
+    permissionBridge: true,
+  },
+};
 const targetRow = {
   workspace_id: 'workspace-1',
   user_id: 'user-1',
