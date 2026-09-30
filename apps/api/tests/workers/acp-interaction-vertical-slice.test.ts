@@ -143,6 +143,12 @@ describe('ACP interaction cross-boundary vertical slice', () => {
               lookup: true,
               states: ['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous'],
             },
+            interactions: {
+              supported: true,
+              version: 1,
+              answerEndpoint: true,
+              permissionBridge: true,
+            },
             checkpointRollover: {
               supported: true,
               automatic: false,
