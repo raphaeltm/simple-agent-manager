@@ -27,9 +27,9 @@ The reviewed ACP runtime bridge in PR #2201 and project-chat permission UI in PR
 
 ## Implementation checklist
 
-- [ ] Merge the exact reviewed source heads into the current-main integration branch without changing either source branch.
-- [ ] Reconcile conflicts and inspect the combined diff for contract, flag, privacy, and runtime compatibility issues.
-- [ ] Add only narrow integration/harness fixes required for the combined candidate and identify them separately.
+- [x] Merge the exact reviewed source heads into the current-main integration branch without changing either source branch.
+- [x] Reconcile conflicts and inspect the combined diff for contract, flag, privacy, and runtime compatibility issues.
+- [x] Add only narrow integration/harness fixes required for the combined candidate and identify them separately.
 - [ ] Run focused web, Worker vertical-slice, VM agent, fixture, lint, typecheck, build, and relevant repository checks.
 - [ ] Re-run desktop/mobile permission-card screenshots against the integrated candidate and review layout, overflow, accessibility, and normal-chat behavior.
 - [ ] Complete task-completion, Cloudflare, Go, UI/UX, security, environment, constitution, documentation, and test reviews; resolve blocking findings.
@@ -65,3 +65,16 @@ The reviewed ACP runtime bridge in PR #2201 and project-chat permission UI in PR
 - `apps/api/.claude/rules/34-vm-agent-callback-auth.md`
 - `packages/vm-agent/.claude/rules/27-vm-agent-staging-refresh.md`
 - `packages/vm-agent/.claude/rules/54-vm-agent-rollout-compatibility.md`
+
+## Integration-only fix
+
+The runtime slice introduced six typed/documented configuration overrides used by the permission start contract, but the reusable deploy workflow and Wrangler synchronization allowlist did not forward them. This made the documented knobs inert in deployed environments and prevented a staging operator from pinning runtime limits independently of built-in defaults. The integration branch adds the six names to both reusable deployment phases, the synchronization allowlist, and its deployment contract test:
+
+- `ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS`
+- `ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS`
+- `ACP_INTERACTION_DEADLINE_MARGIN_MS`
+- `ACP_INTERACTION_OPTION_ID_MAX_CHARS`
+- `ACP_INTERACTION_RUNTIME_RECEIPT_LIMIT`
+- `ACP_INTERACTION_RUNTIME_RESPONSE_MAX_BYTES`
+
+No default value or production flag changed. `scripts/quality/deploy-reusable-workflow.test.ts` passes with all 47 deployment assertions.
