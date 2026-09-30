@@ -2,17 +2,20 @@
 // CLAUDE_ACP_PACKAGE_DIR=/path/to/claude-agent-acp CODEX_ACP_PACKAGE_DIR=/path/to/codex-acp \
 //   node packages/shared/scripts/verify-pinned-acp-form-fixtures.mjs
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, statSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const fixturePath = new URL('../test-fixtures/acp-forms.json', import.meta.url);
 const fixtures = JSON.parse(readFileSync(fixturePath, 'utf8'));
-const globalRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim();
-const claudeDir = process.env.CLAUDE_ACP_PACKAGE_DIR ?? join(globalRoot, '@agentclientprotocol/claude-agent-acp');
-const codexDir = process.env.CODEX_ACP_PACKAGE_DIR ?? join(globalRoot, '@agentclientprotocol/codex-acp');
+const claudeDir = process.env.CLAUDE_ACP_PACKAGE_DIR;
+const codexDir = process.env.CODEX_ACP_PACKAGE_DIR;
+assert.ok(claudeDir, 'CLAUDE_ACP_PACKAGE_DIR must point to the installed pinned Claude adapter');
+assert.ok(codexDir, 'CODEX_ACP_PACKAGE_DIR must point to the installed pinned Codex adapter');
+for (const dir of [claudeDir, codexDir]) {
+  assert.ok(isAbsolute(dir) && statSync(dir).isDirectory(), `Adapter package path must be an absolute directory: ${dir}`);
+}
 
 function assertPinned(dir, version) {
   const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
