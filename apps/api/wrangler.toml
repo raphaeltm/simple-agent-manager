@@ -386,6 +386,7 @@ TASK_RECONCILIATION_QUARANTINE_MS = "300000"
 # defaults live in shared constants and apps/api/.env.example to avoid consuming
 # production Worker text bindings unless an operator intentionally overrides them.
 ACP_INTERACTIONS_ENABLED = "false"
+ACP_INTERACTION_FORMS_ENABLED = "false"
 # AI Inference Proxy (Cloudflare AI Gateway for trial/zero-config users)
 AI_PROXY_ENABLED = "true"
 AI_PROXY_DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"

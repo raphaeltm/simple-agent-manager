@@ -89,7 +89,7 @@ for (const viewport of ['iPhone SE (375x667)', 'Desktop (1280x800)']) {
       await card.getByRole('button', { name: 'Send answer' }).click();
       await expect(card.getByText('Check Deployment plan.')).toBeVisible();
       await expect(card.getByLabel('Deployment plan')).toBeFocused();
-      await card.getByLabel('Deployment plan').selectOption('Fast');
+      await card.getByLabel('Deployment plan').selectOption({ label: 'Fast' });
       await expect(card.getByText('Quick release')).toBeVisible();
       await card.getByLabel('Confirm the deployment').selectOption('true');
       await card.getByLabel('Other or note').fill('Use the safe rollback path');
@@ -124,11 +124,54 @@ for (const viewport of ['iPhone SE (375x667)', 'Desktop (1280x800)']) {
       expect(JSON.stringify(backend.captured[0])).not.toContain('"content":{}');
     });
 
+    test(`submits required empty text and empty choice; ${viewport}`, async ({ page }, testInfo) => {
+      test.skip(testInfo.project.name !== viewport);
+      const backend = await setup(page, true);
+      await page.route(`**/api/projects/${PROJECT}/sessions/${SESSION}/interactions/${FORM_ID}`, (route: Route) =>
+        route.fulfill({ status: 200, json: { summary: summary(FORM_ID, 'pending', Date.now() + 30 * 60_000),
+          detail: { message: 'Empty strings are valid answers here.', schema: {
+            type: 'object', properties: {
+              freeText: { type: 'string', title: 'Free text', minLength: 0 },
+              emptyChoice: { type: 'string', title: 'Empty choice', oneOf: [
+                { const: '', title: 'Empty option' }, { const: 'filled', title: 'Filled option' }] },
+            }, required: ['freeText', 'emptyChoice'] } } } }));
+      await page.goto(`/projects/${PROJECT}/chat/${SESSION}`);
+      const card = page.getByTestId(`acp-form-${FORM_ID}`);
+      await expect(card.getByText('Empty strings are valid answers here.')).toBeVisible();
+      await expect(card.getByRole('textbox', { name: 'Free text' })).not.toHaveAttribute('required');
+      await card.getByRole('button', { name: 'Send answer' }).click();
+      await expect(card.getByText('Check Free text.')).toBeVisible();
+      await card.getByRole('button', { name: 'Use empty answer for Free text' }).click();
+      await expect(card.getByText('Empty answer selected')).toBeVisible();
+      await card.getByLabel('Empty choice').selectOption({ label: 'Empty option' });
+      await expect(card.getByLabel('Empty choice')).toHaveValue('0');
+      await card.getByText('Empty strings are valid answers here.').evaluate((element) => {
+        const header = document.querySelector<HTMLElement>('[data-testid="session-floating-header"]');
+        if (!header) throw new Error('Floating header missing');
+        let ancestor = element.parentElement;
+        while (ancestor) {
+          const overflowY = window.getComputedStyle(ancestor).overflowY;
+          if (overflowY === 'auto' || overflowY === 'scroll') {
+            ancestor.scrollBy({ top: element.getBoundingClientRect().top - header.getBoundingClientRect().bottom - 16 });
+            return;
+          }
+          ancestor = ancestor.parentElement;
+        }
+        throw new Error('Conversation scroller missing');
+      });
+      await screenshot(page, viewport.startsWith('iPhone') ? 'acp-form-empty-mobile' : 'acp-form-empty-desktop');
+      await card.getByRole('button', { name: 'Send answer' }).click();
+      await expect(card).toHaveAttribute('data-interaction-state', 'answered');
+      expect(backend.captured).toHaveLength(1);
+      expect(backend.captured[0]).toMatchObject({ decision: { kind: 'accepted',
+        content: { freeText: '', emptyChoice: '' } } });
+    });
+
     test(`retries an uncertain receipt with the same key; ${viewport}`, async ({ page }, testInfo) => {
       test.skip(testInfo.project.name !== viewport);
       const { backend, card } = await open(page, true);
       backend.dropNextAnswerReceipt();
-      await card.getByLabel('Deployment plan').selectOption('Fast');
+      await card.getByLabel('Deployment plan').selectOption({ label: 'Fast' });
       await card.getByLabel('Confirm the deployment').selectOption('true');
       await card.getByRole('button', { name: 'Send answer' }).click();
       await expect(card.getByText('Receipt unknown. Retry with the same answer key to check.')).toBeVisible();

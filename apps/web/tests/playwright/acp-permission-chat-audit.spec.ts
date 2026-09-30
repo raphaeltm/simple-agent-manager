@@ -542,15 +542,14 @@ async function assertRetryControlClearOfJumpButton(
       Math.max(retryBox!.y, jumpBox!.y)
   );
   expect(horizontalOverlap * verticalOverlap).toBe(0);
-  expect(
-    await retryButton.evaluate(
+  await expect.poll(async () => {
+    const box = await retryButton.boundingBox();
+    if (!box) return false;
+    return retryButton.evaluate(
       (button, { x, y }) => document.elementFromPoint(x, y)?.closest('button') === button,
-      {
-        x: retryBox!.x + retryBox!.width / 2,
-        y: retryBox!.y + retryBox!.height / 2,
-      }
-    )
-  ).toBe(true);
+      { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    );
+  }).toBe(true);
 }
 
 async function openDetailFailureSurface(page: Page, status: 403 | 500) {

@@ -1,7 +1,7 @@
 import { type AcpFormField, type AcpFormSchema, validateAcpFormAnswer, validateAcpFormSchema } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { AlertTriangle, Check, Clock3, HelpCircle } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { type AcpInteractionSnapshotItem, answerAcpInteraction, getAcpInteractionDetail } from '../../lib/api/acp-interactions';
 
@@ -77,25 +77,32 @@ function FormFieldView({ id, field, value, disabled, required, invalid, onChange
       {field.type !== 'array' && <label htmlFor={id} className="block break-words text-sm font-medium text-fg-primary">{fieldLabel}</label>}
       {field.description && <p id={helpId} className="break-words text-xs text-fg-muted">{field.description}</p>}
       {field.type === 'string' && options.length > 0 ? (
-        <><select id={id} className={inputClass} value={typeof value === 'string' ? value : ''}
+        <><select id={id} className={inputClass} value={typeof value === 'string' ? String(options.findIndex((option) => option.value === value)) : ''}
           required={required} disabled={disabled} aria-describedby={field.description ? helpId : undefined}
           aria-invalid={invalid}
-          onChange={(event) => onChange(event.target.value || undefined)}>
+          onChange={(event) => onChange(event.target.value === '' ? undefined : options[Number(event.target.value)]?.value)}>
           <option value="">Choose an answer</option>
-          {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          {options.map((option, index) => <option key={index} value={String(index)}>{option.label}</option>)}
         </select>{options.find((option) => option.value === value)?.description &&
           <p className="break-words text-xs text-fg-muted">{options.find((option) => option.value === value)?.description}</p>}
           {options.find((option) => option.value === value)?.preview &&
           <p className="whitespace-pre-wrap break-words text-xs text-fg-muted">{options.find((option) => option.value === value)?.preview}</p>}</>
       ) : field.type === 'string' ? (
-        <input id={id} className={inputClass} type={field._meta && 'codex' in field._meta &&
+        <><input id={id} className={inputClass} type={field._meta && 'codex' in field._meta &&
           typeof field._meta.codex === 'object' && field._meta.codex !== null &&
           'isSecret' in field._meta.codex && field._meta.codex.isSecret ? 'password' : 'text'}
-          value={typeof value === 'string' ? value : ''} required={required} disabled={disabled}
+          value={typeof value === 'string' ? value : ''}
+          required={required && (field.minLength ?? 0) > 0} disabled={disabled}
           aria-invalid={invalid}
           minLength={field.minLength} maxLength={field.maxLength} autoComplete="off"
           aria-describedby={field.description ? helpId : undefined}
           onChange={(event) => onChange(event.target.value)} />
+          {required && (field.minLength ?? 0) === 0 && <div className="mt-1 flex flex-wrap items-center gap-2">
+            <button type="button" disabled={disabled} aria-label={`Use empty answer for ${field.title || id}`}
+              className="min-h-11 rounded-md px-2 text-xs text-accent underline underline-offset-2"
+              onClick={() => onChange('')}>Use empty answer</button>
+            {value === '' && <span className="text-xs text-fg-muted" role="status">Empty answer selected</span>}
+          </div>}</>
       ) : field.type === 'number' || field.type === 'integer' ? (
         <input id={id} className={inputClass} type="number" step={field.type === 'integer' ? 1 : 'any'}
           min={field.minimum} max={field.maximum} value={typeof value === 'number' ? value : ''}
@@ -142,6 +149,12 @@ export function AcpFormCard({ interaction, projectId, sessionId, canAnswer, onRe
   const [invalidField, setInvalidField] = useState<string | null>(null);
   const pending = interaction.state === 'pending' && now < interaction.deadlineAt;
   const mayReveal = canAnswer && pending;
+  const activeRequest = useRef<string | null>(null);
+  const requestKey = `${projectId}:${sessionId}:${interaction.interactionId}`;
+  useLayoutEffect(() => {
+    activeRequest.current = mayReveal ? requestKey : null;
+    return () => { activeRequest.current = null; };
+  }, [mayReveal, requestKey]);
   useEffect(() => {
     if (receipt && interaction.state !== 'pending') cardRef.current?.scrollIntoView({ block: 'nearest' });
   }, [interaction.state, receipt]);
@@ -151,25 +164,37 @@ export function AcpFormCard({ interaction, projectId, sessionId, canAnswer, onRe
     return () => window.clearTimeout(timer);
   }, [interaction.deadlineAt, interaction.state]);
   useEffect(() => {
-    if (!mayReveal) { setDetail(null); setValues({}); setDetailState('idle'); return; }
+    if (!mayReveal) {
+      setDetail(null); setValues({}); setReceipt(null); setError(null); setInvalidField(null);
+      setDetailState('idle');
+      return;
+    }
     const controller = new AbortController();
+    setDetail(null);
+    setValues({});
     setDetailState('loading');
     void getAcpInteractionDetail(projectId, sessionId, interaction.interactionId, controller.signal).then(
       (result) => {
+        if (controller.signal.aborted) return;
         const parsed = parseDetail(result.detail);
         setDetail(parsed);
         setValues(parsed ? initialValues(parsed.schema) : {});
         setDetailState(parsed ? 'idle' : 'error');
       }, (failure: unknown) => {
-        if (!controller.signal.aborted) setDetailState(failure instanceof Error && 'status' in failure &&
-          (failure.status === 401 || failure.status === 403) ? 'revoked' : 'error');
+        if (controller.signal.aborted) return;
+        const revoked = failure instanceof Error && 'status' in failure &&
+          (failure.status === 401 || failure.status === 403);
+        if (revoked) {
+          setDetail(null); setValues({}); setReceipt(null); setError(null); setInvalidField(null);
+        }
+        setDetailState(revoked ? 'revoked' : 'error');
       }
     );
     return () => controller.abort();
   }, [interaction.interactionId, mayReveal, projectId, sessionId]);
 
   const submit = useCallback(async (next: PendingReceipt) => {
-    if (saving || !mayReveal) return;
+    if (saving || !mayReveal || activeRequest.current !== requestKey) return;
     setSaving(true);
     setReceipt(next);
     setError(null);
@@ -180,14 +205,17 @@ export function AcpFormCard({ interaction, projectId, sessionId, canAnswer, onRe
     } catch (failure: unknown) {
       const status = failure instanceof Error && 'status' in failure ? failure.status : undefined;
       if (status === 409) { setReceipt(null); setError('This question was answered or expired in another tab. Refreshing…'); await onRefresh(); }
-      else if (status === 401 || status === 403) { setReceipt(null); setDetail(null); setError('Your access changed. You can no longer answer this question.'); }
+      else if (status === 401 || status === 403) {
+        setReceipt(null); setDetail(null); setValues({}); setInvalidField(null);
+        setError(null); setDetailState('revoked');
+      }
       else setError('Receipt unknown. Retry with the same answer key to check.');
     } finally { setSaving(false); }
-  }, [interaction.interactionId, mayReveal, onRefresh, projectId, saving, sessionId]);
+  }, [interaction.interactionId, mayReveal, onRefresh, projectId, requestKey, saving, sessionId]);
 
   const onAccept = useCallback(async () => {
     if (!detail || !pending || receipt) return;
-    const content = Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined && value !== '')) as FormContent;
+    const content = Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined)) as FormContent;
     if (!validateAcpFormAnswer(detail.schema, content)) {
       const first = Object.entries(detail.schema.properties).find(([key, field]) => {
         if (!(key in content)) return detail.schema.required?.includes(key) ?? false;
