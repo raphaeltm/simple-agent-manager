@@ -38,9 +38,9 @@ Selected: variant 1. The permission stays visible even when a tool group is coll
 - [x] Remove the orphan `PermissionDialog` export and component from `packages/acp-client`.
 - [x] Add focused unit/integration coverage using production chat components and mocked production API routes.
 - [x] Add a Playwright stress fixture for desktop/mobile with long text, 30+ interactions, special characters, owner/nonowner states, and overflow assertions.
-- [ ] Capture, inspect, and post desktop/mobile screenshots.
+- [x] Capture, inspect, and post desktop/mobile screenshots.
 - [x] Run scoped lint, typecheck, tests, build, task completion validation, and specialist reviews.
-- [ ] Create a draft PR only. Do not mark ready, merge, deploy, mutate staging, or activate global flags.
+- [x] Create a draft PR only. Do not mark ready, merge, deploy, mutate staging, or activate global flags.
 
 ## Acceptance criteria
 
