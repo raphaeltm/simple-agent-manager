@@ -102,6 +102,8 @@ belongs in the backlog with a status block, not in `active/`.
 - One citation of a path this PR moved was repointed. Three older dangling `tasks/active/`
   references whose targets live in `tasks/archive/` were repointed too. Two references to files
   that only ever existed on branches were left alone as historical text.
+- Citations this PR could have broken were swept repo-wide: it breaks none. About 32 task-path
+  citations that were already dangling at the base commit are unchanged (out of scope).
 
 ## Open PRs older than seven days
 
@@ -139,18 +141,17 @@ that would end it.
 
 ### Verdict tally (300 files audited)
 
-| Verdict         | Files |
-| --------------- | ----: |
-| OPEN            |   101 |
-| PARTIAL         |   101 |
-| SHIPPED         |    59 |
-| OBSOLETE        |    15 |
-| SUPERSEDED      |    11 |
-| UNSURE          |     4 |
-| DUPLICATE       |     4 |
-| SHIPPED-ARCHIVE |     3 |
-| DISSOLVE        |     1 |
-| MERGE           |     1 |
+| Verdict    | Files |
+| ---------- | ----: |
+| OPEN       |   101 |
+| PARTIAL    |   101 |
+| SHIPPED    |    62 |
+| OBSOLETE   |    15 |
+| SUPERSEDED |    11 |
+| UNSURE     |     4 |
+| DUPLICATE  |     4 |
+| DISSOLVE   |     1 |
+| MERGE      |     1 |
 
 ### Deleted (nothing that remains references them): 70
 
