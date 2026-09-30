@@ -454,6 +454,7 @@ async function assertPermissionHitTargetsClearOfJumpButton(page: Page) {
 }
 
 async function alignWithJumpButton(page: Page, target: Locator) {
+  await expect(page.getByRole('button', { name: 'Scroll to bottom' })).toBeVisible();
   await target.evaluate((element) => {
     const jumpButton = document.querySelector<HTMLElement>('[aria-label="Scroll to bottom"]');
     if (!jumpButton) throw new Error('Jump-to-latest button is missing');

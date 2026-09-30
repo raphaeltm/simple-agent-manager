@@ -78,3 +78,5 @@ The runtime slice introduced six typed/documented configuration overrides used b
 - `ACP_INTERACTION_RUNTIME_RESPONSE_MAX_BYTES`
 
 No default value or production flag changed. `scripts/quality/deploy-reusable-workflow.test.ts` passes with all 47 deployment assertions.
+
+The integrated Playwright audit also exposed a deterministic tablet timing race in its geometry helper: it queried the conditionally rendered jump button before waiting for that button to appear, although the failure snapshot showed the button moments later. The integration branch waits for the accessible button to become visible before running the DOM geometry calculation. This changes test synchronization only; production UI behavior is unchanged.
