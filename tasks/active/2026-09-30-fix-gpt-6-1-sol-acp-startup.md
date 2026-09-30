@@ -25,8 +25,8 @@ The fix must preserve the user's Sol profile choice. It must not silently downgr
 - [x] Cover empty settings and special-character encoding so stale or malformed environment values cannot leak into managed configuration.
 - [x] Run focused Go tests, the full VM-agent suite, install-manifest synchronization, and repository quality gates.
 - [x] Complete Go, test, constitution, and task-completion reviews and address all blocking findings.
-- [ ] Coordinate staging ownership, deploy the exact candidate, verify a real `gpt-6.1-sol` session starts and prompts on fresh VM and Instant runtimes, and clean all temporary resources.
-- [ ] Open a reviewed PR with exact pins, runtime/config-option evidence, staging evidence, rollback notes, and limitations; send it to ACP coordinator task `01M3SG06CFJYF7F6HVJXHTFTN1` before merge.
+- [x] Coordinate staging ownership, deploy the exact candidate, verify real `gpt-6.1-sol` sessions reach the provider on fresh VM and Instant runtimes, record the provider rejection, and clean all temporary resources.
+- [x] Open reviewed draft PR #2205 with exact pins, runtime/config-option evidence, staging evidence, rollback notes, and limitations; send it to ACP coordinator task `01M3SG06CFJYF7F6HVJXHTFTN1` before merge.
 
 ## Acceptance criteria
 
@@ -57,3 +57,15 @@ The fix must preserve the user's Sol profile choice. It must not silently downgr
 - Coordinated staging deploy `36751091670` passed for exact head `413d47047`, publishing VM-agent release `76031eeff27ee1169d23c25b00b9b3d0c2261c56` and a refreshed Instant image. Fresh VM and Instant sessions both reached `agent.ready` and selected `gpt-6.1-sol` without the former ACP `-32602 Invalid params`; VM logs explicitly record `ACP: session model config option set` with the exact model.
 - A successful live prompt remains blocked by credential/API availability rather than ACP selection. Both runtimes reached the provider and received HTTP 400: `The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.` Staging has active OpenAI OAuth credentials and no enabled OpenAI platform agent API key. The profile was not downgraded or globally mutated.
 - Live Chromium regression checks passed on dashboard, project, and settings with no console errors during the VM run. All temporary profiles, sessions, workspaces, and nodes were removed; final node inventory is empty. The branch deploy restored the checked-in ACP-interaction default to false after the preceding activation candidate.
+
+## Exact staging boundary evidence
+
+- Deploy run `36751091670` succeeded for code head `413d470470306a4bf515c720f24e7699416b00ee` and published VM-agent release `76031eeff27ee1169d23c25b00b9b3d0c2261c56`. The current PR head differs only by task/PR evidence commits.
+- VM session `afda43f4-0d1d-4d84-aa33-8abb33eeffda` ran on node `01M3SQ9V9Y2Q5JN0DDZN51KMBG` with temporary profile `01M3SQ9H2GV96JCZ8Z2EGW9XSG`.
+  - At `2026-09-30T18:00:35.106821275Z`, the VM agent logged `ACP: setting session model config option` with `model=gpt-6.1-sol` and `configId=model`.
+  - At `2026-09-30T18:00:35.11453384Z`, it logged `ACP: session model config option set` with the same exact values, then emitted `agent.ready`.
+  - The prompt subsequently received HTTP 400 `invalid_request_error`: `The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.` No successful completion occurred.
+- Instant session `3c2caea1-e137-4287-9243-a8a12bb902d2` ran on Instant node `01M3SQQ3GRCJJDXH4B5BB9P6R0` with temporary profile `01M3SQQ0JPFZHF1G7N54SHG0AN`, reported the same release, reached `agent.ready`, and received the same exact provider HTTP 400. No successful completion occurred.
+- Cleanup is complete: VM session stop returned 200 with `workspaceDeleted=true`; VM node and profile deletion returned 200; the final staging node inventory was empty. The Instant workspace/node/profile were also removed; its initial stop raced container deletion and returned 500, then the stop retry returned 200. No compatibility-test resources remain.
+- Read-only production credential metadata shows the Sol profile remains `gpt-6.1-sol` at medium effort and resolves through an active user-scoped OpenAI Codex `oauth-token` represented by an `auth-json` attachment. No project-scoped or platform OpenAI Codex API-key credential is configured. Production is therefore expected to reach the same ChatGPT-account rejection; API-key entitlement for this model remains unproven. No production prompt, secret retrieval, profile mutation, or credential mutation was performed.
+- Acceptance boundary: ACP startup and exact session selection are proven on VM and Instant. GPT-6.1 provider completion is not proven, so this evidence does not justify new Sol 6.1 task dispatches by itself.
