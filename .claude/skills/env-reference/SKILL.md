@@ -116,7 +116,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `ACP_ACTIVITY_BINDING_CACHE_TTL_MS` — Short-lived authorized ACP session binding cache used to avoid ProjectData reads during callback storms (default: `30000`)
 - `ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES` — Maximum cached ACP activity bindings retained by one Worker isolate (default: `2048`)
 
-- `ACP_INTERACTIONS_ENABLED` — Dormant durable ACP interaction foundation kill switch. Slice A defaults this to `false`; later slices must intentionally enable producers/consumers (default: `false`)
+- `ACP_INTERACTIONS_ENABLED` — Durable ACP interaction creation kill switch. Runtime and UI consumers are wired, while creation remains disabled by default pending rollout (default: `false`)
 - `ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS` / `ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS` / `ACP_INTERACTION_DEADLINE_MARGIN_MS` — Runtime permission deadlines for task and conversation sessions and the margin before an enclosing prompt deadline (defaults: `1800000` / `7200000` / `60000`)
 - `ACP_INTERACTION_MAX_DEADLINE_MS` — Absolute deadline ceiling for runtime-created requests (default: `14400000`)
 - `ACP_INTERACTION_MAX_PENDING_PER_SESSION` — Maximum pending durable ACP interactions per chat (default: `8`)

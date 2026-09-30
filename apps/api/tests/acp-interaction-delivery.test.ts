@@ -4,6 +4,16 @@ const nodeAgentRequest = vi.fn();
 
 vi.mock('../src/services/node-agent', () => ({
   getNodeAgentBackgroundRequestTimeoutMs: () => 5_000,
+  NodeAgentRequestError: class NodeAgentRequestError extends Error {
+    constructor(
+      public readonly statusCode: number,
+      public readonly error: string,
+      message: string
+    ) {
+      super(message);
+      this.name = 'NodeAgentRequestError';
+    }
+  },
   NodeAgentHttpError: class NodeAgentHttpError extends Error {
     constructor(
       public readonly statusCode: number,
@@ -17,7 +27,7 @@ vi.mock('../src/services/node-agent', () => ({
 }));
 
 const { deliverAcpInteractionAnswer } = await import('../src/services/acp-interaction-delivery');
-const { NodeAgentHttpError } = await import('../src/services/node-agent');
+const { NodeAgentHttpError, NodeAgentRequestError } = await import('../src/services/node-agent');
 
 describe('ACP interaction answer delivery', () => {
   const target = {
@@ -166,6 +176,32 @@ describe('ACP interaction answer delivery', () => {
       reason: 'transport outcome unknown',
     });
   });
+
+  it.each(['vm', 'cf-container'] as const)(
+    'interrupts a stopped %s runtime without retrying or waking it',
+    async (runtime) => {
+      nodeAgentRequest.mockRejectedValueOnce(
+        new NodeAgentRequestError(410, 'RUNTIME_STOPPED', 'runtime stopped')
+      );
+
+      await expect(
+        deliverAcpInteractionAnswer({} as never, { ...target, runtime }, input)
+      ).resolves.toEqual({
+        outcome: 'interrupted',
+        reason: 'runtime stopped',
+      });
+      expect(nodeAgentRequest).toHaveBeenCalledTimes(1);
+      expect(nodeAgentRequest).toHaveBeenCalledWith(
+        'node-1',
+        expect.anything(),
+        '/workspaces/workspace-1/agent-capabilities',
+        expect.objectContaining({
+          recoverContainerOnTimeout: false,
+          noWakeContainer: true,
+        })
+      );
+    }
+  );
 
   it('classifies a generation conflict returned after the capability probe', async () => {
     nodeAgentRequest.mockResolvedValueOnce(capabilities()).mockRejectedValueOnce(

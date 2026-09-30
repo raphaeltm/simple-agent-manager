@@ -13,6 +13,7 @@ import {
   getNodeAgentBackgroundRequestTimeoutMs,
   NodeAgentHttpError,
   nodeAgentRequest,
+  NodeAgentRequestError,
 } from './node-agent';
 import { CapabilitiesSchema } from './vm-prompt-delivery-adapter-schemas';
 
@@ -170,6 +171,9 @@ export async function deliverAcpInteractionAnswer(
     }
     return { outcome: 'interrupted', reason: response.status };
   } catch (error) {
+    if (error instanceof NodeAgentRequestError && error.error === 'RUNTIME_STOPPED') {
+      return { outcome: 'interrupted', reason: 'runtime stopped' };
+    }
     if (error instanceof NodeAgentHttpError && error.statusCode === 409) {
       try {
         const response = v.parse(AcpRuntimeAnswerResponseSchema, JSON.parse(error.responseBody));

@@ -551,6 +551,7 @@ test.describe('ACP permission cards — Mobile', () => {
     await positionAnchoredCardBelowStickyHeader(page);
     await assertPermissionHitTargetsClearOfJumpButton(page);
     await assertTextClearOfJumpButton(page);
+    await positionAnchoredCardBelowStickyHeader(page);
     await screenshot(page, 'acp-permission-chat-owner-mobile');
   });
 
@@ -643,6 +644,7 @@ test.describe('ACP permission cards — Desktop', () => {
     await openPermissionSurface(page, true);
     await positionAnchoredCardBelowStickyHeader(page);
     await assertPermissionHitTargetsClearOfJumpButton(page);
+    await positionAnchoredCardBelowStickyHeader(page);
     await screenshot(page, 'acp-permission-chat-owner-desktop');
   });
 
@@ -671,6 +673,7 @@ test.describe('ACP permission cards — Narrow mobile', () => {
     await positionAnchoredCardBelowStickyHeader(page);
     await assertPermissionHitTargetsClearOfJumpButton(page);
     await assertTextClearOfJumpButton(page);
+    await positionAnchoredCardBelowStickyHeader(page);
     await screenshot(page, 'acp-permission-chat-owner-narrow-mobile');
     evidence.dropNextAnswerReceipt();
     await page.getByRole('button', { name: 'Reject this operation once' }).click();

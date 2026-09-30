@@ -80,3 +80,9 @@ The runtime slice introduced six typed/documented configuration overrides used b
 No default value or production flag changed. `scripts/quality/deploy-reusable-workflow.test.ts` passes with all 47 deployment assertions.
 
 The integrated Playwright audit also exposed a deterministic tablet timing race in its geometry helper: it queried the conditionally rendered jump button before waiting for that button to appear, although the failure snapshot showed the button moments later. The integration branch waits for the accessible button to become visible before running the DOM geometry calculation. This changes test synchronization only; production UI behavior is unchanged.
+
+Cloudflare review found that the Instant no-wake path returned `RUNTIME_STOPPED` safely but answer delivery classified that terminal response as an ambiguous transport failure. The integration branch now records it as interrupted immediately, with VM and Instant regression coverage proving a single no-wake capability probe.
+
+Constitution and documentation review found that three typed frontend ACP polling controls were omitted from the Vite build environment. The integration branch forwards all three GitHub Environment overrides, extends the deployment contract test, and synchronizes the public configuration table plus the ACP rollout wording. The checked-in production creation flag remains `false`.
+
+UI review found that the visual audit's geometry checks changed scroll position immediately before capture. The audit now restores the validated anchored-card position before owner desktop/mobile screenshots; the rerun passed 24/24 at 375×667 and 1280×800 after terminating a stale local preview process.
