@@ -69,7 +69,7 @@ Debug package analysis revealed several cloud-init and firewall hygiene issues t
 - `packages/cloud-init/src/template.ts` — cloud-init template
 - `packages/cloud-init/tests/generate.test.ts` — existing tests
 - `packages/vm-agent/internal/provision/provision.go` — vm-agent provisioning
-- `tasks/backlog/2026-05-12-fix-vm-agent-stability.md` — broader task (this is a subset)
+- `tasks/archive/2026-05-12-fix-vm-agent-stability.md` — broader task (this is a subset)
 
 ---
 

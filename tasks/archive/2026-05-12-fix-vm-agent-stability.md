@@ -104,3 +104,7 @@ Debug package analysis revealed four interconnected production issues that cause
 - `docs/notes/2026-03-25-deployment-identity-token-middleware-leak-postmortem.md`
 - `.claude/rules/06-api-patterns.md` (Hono middleware scoping)
 - `.claude/rules/31-migration-safety.md`
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: Timers #968, dispatch dedup #1033 + VM idempotency #1031, callback extraction + MCP sliding window #966._
