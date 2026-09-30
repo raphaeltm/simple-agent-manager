@@ -23,8 +23,8 @@ The fix must preserve the user's Sol profile choice. It must not silently downgr
 - [x] Keep the post-handshake exact model selection and fatal rejection behavior intact.
 - [x] Cover VM/devcontainer and standalone/Instant startup paths with regression tests that prove `gpt-6.1-sol` is present before ACP `session/new`.
 - [x] Cover empty settings and special-character encoding so stale or malformed environment values cannot leak into managed configuration.
-- [ ] Run focused Go tests, the full VM-agent suite, install-manifest synchronization, and repository quality gates.
-- [ ] Complete Go, test, constitution, and task-completion reviews and address all blocking findings.
+- [x] Run focused Go tests, the full VM-agent suite, install-manifest synchronization, and repository quality gates.
+- [x] Complete Go, test, constitution, and task-completion reviews and address all blocking findings.
 - [ ] Coordinate staging ownership, deploy the exact candidate, verify a real `gpt-6.1-sol` session starts and prompts on fresh VM and Instant runtimes, and clean all temporary resources.
 - [ ] Open a reviewed PR with exact pins, runtime/config-option evidence, staging evidence, rollback notes, and limitations; send it to ACP coordinator task `01M3SG06CFJYF7F6HVJXHTFTN1` before merge.
 
@@ -52,3 +52,5 @@ The fix must preserve the user's Sol profile choice. It must not silently downgr
 - `buildCodexACPManagedConfigEnv` now JSON-encodes the requested profile model with SAM's managed sandbox and approval settings before the ACP process starts. The environment remains process-scoped; persistent `config.toml` model state is unchanged.
 - Existing `applySessionModelConfigOption` remains unchanged and fatal for rejected Codex selections, so the runtime cannot silently fall back.
 - Standalone/Instant and devcontainer startup tests now assert the exact `gpt-6.1-sol` managed environment. Focused ACP tests pass with Go 1.26.6.
+- `go test ./...`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm quality:agent-install-manifest` pass. The repository-wide `pnpm test` completed 11,080 tests successfully and reported five unrelated API failures. Isolated reruns passed three affected files; the remaining `nodes-max-nodes-quota.test.ts` timeout reproduces unchanged on `main`, establishing a baseline failure rather than a VM-agent regression.
+- Specialist reviews all passed with no findings: task completion (research/checklist/acceptance coverage), Go (ordering, propagation, restart, error and lifecycle behavior), test engineering (discriminating pre-session/exact-selection/runtime-path coverage), and constitution compliance (no hardcoded runtime model or operational knobs).
