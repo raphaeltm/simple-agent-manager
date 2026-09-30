@@ -1,5 +1,24 @@
 # Make SAM Task Status Trustworthy
 
+> **Status (2026-09-30 weekly reconciliation): partially shipped, moved back to backlog.**
+>
+> - **Shipped** in PR #2153 (`1cd4194db`, merged 2026-09-26, production deploy run 36280892213):
+>   a late `toStatus: failed` callback against an already-terminal task now returns the unchanged
+>   task (`apps/api/src/routes/tasks/callback.ts`), and the stuck-task sweep gained a
+>   conversation fallback.
+> - **Not fixed in production:** the fallback, `isHumanResumableConversationTask`
+>   (`apps/api/src/services/task-sleep-preservation.ts:176`), still joins a `session_snapshots` row
+>   with `sleep_status = 'sleeping'`. The 7-day snapshot purge deletes that row before the sweep's
+>   day-7 verdict, so the fallback never matches. Read-only production D1 shows **ten**
+>   conversation tasks failed with "Task runtime is no longer live after 480 minutes … Last
+>   liveness result: workspace_deleted" after the fix deployed, from 2026-09-27 02:36Z
+>   (`01M2Y90KN3VB50A2T18AG4HV1N`) to 2026-09-30 02:36Z (`01M35Y40SZ6JNRTXGW8PP58368`).
+> - **Remaining work:** make the day-7 conversation verdict independent of the purged snapshot
+>   row, and decide which status an idle conversation with an expired snapshot should get. Policy
+>   `a974b04f` says normal lifecycle endings must not look like failures. The regression test
+>   must seed the production shape (conversation task, no snapshot row) rather than an expired
+>   row that still exists. Tracked in SAM idea `01KZNGJG1DCH8DBC835Y0272P4`.
+
 ## Problem
 
 The 2026-09-26 audit found two task-status defects:
@@ -28,7 +47,9 @@ The 2026-09-26 audit found two task-status defects:
 - [x] Run full quality gates.
 - [x] Run specialist review.
 - [ ] Verify on staging.
-- [ ] Open PR, complete CI, CodeRabbit, merge, and production deploy monitoring.
+  - _Reconciled 2026-09-30, left unticked:_ PR #2153 records no staging verification.
+- [x] Open PR, complete CI, CodeRabbit, merge, and production deploy monitoring.
+  - _Reconciled 2026-09-30:_ PR #2153 merged 2026-09-26T23:18Z; production deploy run 36280892213 succeeded 23:54Z.
 
 ## Acceptance Criteria
 

@@ -606,3 +606,38 @@ Current live threads that will actually move this number (do not duplicate them 
 
 Close this task when production `sql.databaseSize` is measured at or below 9 GB and the
 observation window in the acceptance criteria above has been recorded.
+
+## Reconciliation — 2026-09-30 (weekly queue audit)
+
+**Verdict: stays active.** The headline criterion is further from met than a week ago, and the
+drain that was supposed to move it has been stopped since 2026-09-27.
+
+Measured 2026-09-30 (read-only production D1):
+
+- `project_data_storage_telemetry` for `01KHRJGANBBWGDY1NZ0KVF0D4J`: **10,297,155,584 bytes**
+  (usage ratio 1.0297, status `degraded`) at 05:34Z. That is up from 10,103,668,736 at the
+  2026-09-23 audit and 10,124 MB on the morning of 2026-09-29.
+- `project_data_archive_circuit_breakers`: SAM's breaker is **`open`** with reason
+  `attempts_exhausted:CompactArchiveTimeoutError`, opened 2026-09-27 16:47:58Z and never closed.
+  The last SAM archive publish was 2026-09-27 14:08:35Z. Other projects have published 172
+  archives since the breaker opened, so the sweep itself is healthy.
+- SAM archive migrations: 322 `published`, 23 `frozen`, 3 `failed` (`156046f1`, `5ed87b67`,
+  `ff721a49`, all 2026-09-27) and 2 `poisoned` (`6d6f3099` since 2026-09-15, and `5f82299c`, the
+  one that opened the breaker).
+
+What changed since the last audit:
+
+- Slice B, exhaustive archive search: PR #2136, merged 2026-09-27.
+- Abandon-migration control in Admin → Storage: PR #2140, merged 2026-09-24.
+- Drain tripled (18-minute sweep cadence, 2.4M daily write budget): PR #2161, merged 2026-09-27
+  05:12Z. Its own 48-hour rollback trigger includes "the breaker opening"; the breaker opened
+  eleven hours later and the trigger was never acted on.
+- Slice C (bounded root history indexing): no PR yet. The plan lives in idea
+  `01M0YZNBKSKQZ47NC0K7M8N5AX`.
+
+Next actions, in order. These are human-gated production operations, not code:
+
+1. Decide on the #2161 rollback trigger (revert the interval to 3600000, or keep 18 minutes).
+2. Abandon or retry the failed/poisoned migrations first. Closing the breaker while `156046f1`,
+   `5ed87b67` and `ff721a49` are still failed risks re-poisoning it at once.
+3. Close SAM's breaker from Admin → Storage (phone-usable, PR #2135).
