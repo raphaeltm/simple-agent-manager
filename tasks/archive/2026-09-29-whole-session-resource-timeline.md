@@ -65,13 +65,20 @@ Idea: `01M3P13H0W6EG1FS47PCG0N2EG`. Prototype branch: `sam/looks-resources-detai
 - [x] Web data-layer tests updated for the new adapter
 
 ## Acceptance criteria
-- [ ] Opening Resources on a multi-wake session shows the whole session, with no chunk UI and no silent cap (disclosed only past the configured cap)
-- [ ] Hover, tap or keyboard shows exact values and says whether each is a 5 s sample or an average
-- [ ] Zoom (pinch, drag, chips, busiest moments) loads 5 s detail for the visible window only; chunks are fetched once
-- [ ] Reservation lines and OOM kills are visible; Instant sessions explain that no data is recorded
-- [ ] Newly uploaded chunks carry a per-minute rollup; older chunks still render from their summary
-- [ ] uPlot is not in the initial or chat-route bundle
-- [ ] Staging: a real VM session shows its resource timeline end to end, including a chunk uploaded after deploy with a rollup
+- [x] Opening Resources on a multi-wake session shows the whole session, with no chunk UI and no silent cap (disclosed only past the configured cap)
+  - _Reconciled 2026-09-30:_ PR #2185 staging: a retained two-wake session read "22m active over 28m · 2 wake cycles · Whole session"; the Playwright audit includes a truncated history (612 omitted) that discloses the cap.
+- [x] Hover, tap or keyboard shows exact values and says whether each is a 5 s sample or an average
+  - _Reconciled 2026-09-30:_ PR #2185: the readout says whether a value is one 5-second sample or an average; Playwright hover, tap and keyboard-slider coverage.
+- [x] Zoom (pinch, drag, chips, busiest moments) loads 5 s detail for the visible window only; chunks are fetched once
+  - _Reconciled 2026-09-30:_ PR #2185: 5-second detail is fetched only for the visible window, each chunk once (TanStack Query); staging 15m zoom made three real R2 chunk reads, all 200; pinch proven discriminating (`b73317938`).
+- [x] Reservation lines and OOM kills are visible; Instant sessions explain that no data is recorded
+  - _Reconciled 2026-09-30:_ PR #2185: per-wake reserved lines and OOM markers verified by screenshot (canvas-drawn); Instant, pending and expired empty states captured at 375 and 1280.
+- [x] Newly uploaded chunks carry a per-minute rollup; older chunks still render from their summary
+  - _Reconciled 2026-09-30:_ PR #2185 staging: a fresh VM chunk uploaded at 10:55Z carried `rollup_json` (1,596 bytes, 181 samples); the pre-rollup session still rendered from its summary.
+- [x] uPlot is not in the initial or chat-route bundle
+  - _Reconciled 2026-09-30:_ PR #2185: verified with a production build that uPlot is only in the lazy `ResourceTimeline` chunk.
+- [x] Staging: a real VM session shows its resource timeline end to end, including a chunk uploaded after deploy with a rollup
+  - _Reconciled 2026-09-30:_ PR #2185: task `01M3PBHQCGR0RMTK5GQ6YQG197` on a fresh VM showed its timeline at 1280 and 375 with zero failed requests; its workspace and node were deleted afterwards.
 
 ## References
 - `.claude/rules/37` (prototypes), `60` (request budgets), `11` and `28` (scope tests), `50` (row isolation), `31` (migrations), `65` (capped selection), `62` (real trigger), `17` and `56` (visual audit)
@@ -85,3 +92,7 @@ Idea: `01M3P13H0W6EG1FS47PCG0N2EG`. Prototype branch: `sam/looks-resources-detai
 - Rebased onto #2181 (attribution); its upload query joins tasks/agent_sessions/agent_profiles/skills, so the timeline test harness seeds those tables.
 - Scope predicates proven discriminating: deleting the project/session conjuncts reddened exactly the two attack tests.
 - Prototype route, page and mock data removed; the stress generator lives on as `apps/web/tests/playwright/resource-timeline-scenarios.ts`, serving real API shapes to the real chat rail.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): shipped via PR #2185 (`2075aa074`, merged 2026-09-29), first successful production deploy run 36638567882._

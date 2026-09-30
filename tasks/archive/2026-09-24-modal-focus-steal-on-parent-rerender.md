@@ -1,7 +1,7 @@
 # Mobile keyboard dismisses while typing in the agent profile edit modal
 
 **Created:** 2026-09-24
-**Status:** In progress
+**Status:** Shipped (PR #2154, merged 2026-09-27)
 **Branch:** `sam/modal-open-edit-agent-vfgfwx`
 
 ## Problem
@@ -92,7 +92,8 @@ regression tests below.
 - [x] Prove both fixes discriminating by reverting each separately
 - [x] Playwright visual audit at 375px and 1280px (rule 17)
 - [x] Specialist review (rule 25)
-- [ ] Staging deploy and live verification (rule 13)
+- [x] Staging deploy and live verification (rule 13)
+  - _Reconciled 2026-09-30:_ PR #2154 staging: Deploy Staging run 36279956468 passed (12 smoke tests); a 375px edit of a temporary profile kept Description focus and typed text across a forced parent re-render; the profile was deleted afterwards.
 
 ## Acceptance Criteria
 
@@ -104,6 +105,7 @@ regression tests below.
 - [x] Switching profiles and reopening the dialog still load the correct row — two controls
 - [x] No visual regression in any modal at mobile and desktop viewports
 - [ ] Editing a profile from the project-chat cogwheel works end-to-end on staging
+  - _Reconciled 2026-09-30, left unticked:_ the staging check drove the same `ProfileFormDialog` through `/projects/:id/profiles`, not the project-chat cogwheel entry point, so this exact criterion is not evidenced.
 
 ## Verification
 
@@ -126,3 +128,7 @@ regression tests below.
   mount/unmount lifecycle must not depend on caller callback identity. Telling every
   caller to `useCallback` its `onClose` would be 46 chances to regress.
 - SAM MCP `add_knowledge` failed 3x with "Network connection lost" during this task.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): shipped via PR #2154 (`4ab3e20e2`, merged 2026-09-27), first successful production deploy run 36282716394. One acceptance criterion stays unticked (see its note); the fix itself is in the shared `useModalInteraction` hook, so the entry point does not change the mechanism._

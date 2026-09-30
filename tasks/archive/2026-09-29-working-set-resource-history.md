@@ -25,7 +25,8 @@ Session resource history records cgroup v2 `memory.current` and `memory.peak`. B
 - [x] Cover new/old-agent uploads and cross-chunk aggregation in API tests.
 - [x] Update the public guide and API reference.
 - [x] Run focused tests, full quality gates, visual audit, specialist review, and staging VM verification.
-- [ ] Run CI and CodeRabbit review on the pull request.
+- [x] Run CI and CodeRabbit review on the pull request.
+  - _Reconciled 2026-09-30:_ PR #2184 merged 2026-09-29T18:09Z (`c305c01c4`) after green CI; production deploy run 36612733387 succeeded 18:32Z.
 
 ## Acceptance criteria
 
@@ -54,3 +55,7 @@ Session resource history records cgroup v2 `memory.current` and `memory.peak`. B
 - `apps/api/.claude/rules/31-migration-safety.md`
 - `apps/web/.claude/rules/17-ui-visual-testing.md`
 - `tasks/archive/2026-09-20-workspace-resource-history.md`
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): shipped via PR #2184 (`c305c01c4`, merged 2026-09-29), first successful production deploy run 36612733387._

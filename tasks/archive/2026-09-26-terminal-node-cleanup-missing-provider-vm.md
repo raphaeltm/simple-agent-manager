@@ -44,8 +44,9 @@ created these servers, so retrying provider deletion can never make progress.
 - [x] Run relevant tests and full quality gates.
 - [x] Run specialist review gates.
 - [x] Provision and delete a real staging VM; confirm zero active staging nodes.
-- [ ] Exercise the exact rejected-create plus concurrent destroying state on
+- [x] Exercise the exact rejected-create plus concurrent destroying state on
       staging, or document why the live provider cannot safely induce it.
+  - _Reconciled 2026-09-30:_ documented in PR #2157: the live Hetzner API cannot safely be made to reject at that race point; the exact interleaving is covered by a vertical SQLite/provider test (mocked Hetzner 412 while the row moves to `destroying`, then the real sweep finalizes it). Raphaël accepted the limitation on 2026-09-27.
 
 ## Acceptance Criteria
 
@@ -57,3 +58,7 @@ created these servers, so retrying provider deletion can never make progress.
   implementation treats it as idempotent absence.
 - Transient or ambiguous provider deletion errors still back off and retry.
 - User-owned and deployment nodes remain excluded from cleanup.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): shipped via PR #2157 (`8880c8761`, merged 2026-09-27), first successful production deploy run 36294521255. The five legacy production rows this did not clear were handled by the follow-up `2026-09-27-fix-ghost-destroying-node-sweep.md` (PR #2163)._

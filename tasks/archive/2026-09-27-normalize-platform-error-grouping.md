@@ -62,7 +62,8 @@ paused, and this work must not triage, resolve, or close existing drafts.
 - [x] Keep triage configuration/dispatch unchanged and verify the diff contains no existing-draft
       state mutation.
 - [x] Run focused tests, API/repository quality checks, specialist reviews, and staging verification.
-- [ ] Complete the PR/CI/CodeRabbit, merge, and production deploy gates.
+- [x] Complete the PR/CI/CodeRabbit, merge, and production deploy gates.
+  - _Reconciled 2026-09-30:_ PR #2166 merged 2026-09-27T20:46Z (`9bbf4ea76`); production deploy run 36351810180 succeeded 21:27Z.
 
 ## Acceptance criteria
 
@@ -110,3 +111,7 @@ paused, and this work must not triage, resolve, or close existing drafts.
   confirmed `canonical_signature TEXT` and the partial unique
   `idx_platform_feedback_triages_canonical_signature` index. No triage endpoint was invoked, and
   the diff contains no triage scheduling, dispatch, configuration, or existing-draft mutation.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): shipped via PR #2166 (`9bbf4ea76`, merged 2026-09-27), first successful production deploy run 36351810180._

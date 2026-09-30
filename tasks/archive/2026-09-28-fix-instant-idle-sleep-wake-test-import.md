@@ -28,7 +28,8 @@ fail directly or through resulting HTTP 500 responses, blocking main CI and prod
 - [x] Prove the focused test changes from 11 failures / 9 passes to 20 passes.
 - [x] Run API typecheck, lint, build, the full API suite, and root coverage/main-CI-equivalent checks.
 - [x] Complete local task, Cloudflare/API, and test-quality reviews; address every blocking finding.
-- [ ] Open a PR, obtain green CI and CodeRabbit agreement, merge, and monitor production deploy.
+- [x] Open a PR, obtain green CI and CodeRabbit agreement, merge, and monitor production deploy.
+  - _Reconciled 2026-09-30:_ PR #2177 merged 2026-09-29T00:11Z (`a153d0bdb`); main CI passed and production deploy run 36505648204 succeeded 00:58Z (head `a9bbe3952` contains the fix).
 
 ## Acceptance Criteria
 
@@ -56,3 +57,7 @@ fail directly or through resulting HTTP 500 responses, blocking main CI and prod
   main-CI, merge, and production-deploy acceptance criterion is satisfied.
 - Cloudflare/API and test-quality specialist reviews passed with no blocking findings. The test
   review confirmed all five stale reads were corrected and no additional cases are warranted.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): shipped via PR #2177 (`a153d0bdb`, merged 2026-09-29), first successful production deploy run 36505648204._

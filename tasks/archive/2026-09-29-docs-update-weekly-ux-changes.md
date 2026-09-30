@@ -48,7 +48,8 @@ covered PRs #2092–#2135; this pass covers everything merged since.
 - [x] `reference/configuration.md`: `DASHBOARD_*` settings
 - [x] Screenshots via two new Playwright specs (real components, mock data): a chat whose wake failed, beside running and sleeping chats; a Mermaid diagram in an agent reply; the Admin → Storage Abandon dialog at phone width. (A desktop capture of all three problem-migration cards was dropped: it was ~900px tall in the docs column, and the badge table already explains them.)
 - [x] Local sub-agent review loop until no actionable feedback
-- [ ] `pnpm --filter @simple-agent-manager/www build` + link check; PR; CI green; merge
+- [x] `pnpm --filter @simple-agent-manager/www build` + link check; PR; CI green; merge
+  - _Reconciled 2026-09-30:_ PR #2179: `www` build succeeded and `pnpm check:links` reported 0 broken internal links across 30 doc pages; merged 2026-09-29T07:26Z (`c17508d51`); production deploy run 36537657692.
 
 ## Verified facts (code-cited)
 
@@ -122,3 +123,7 @@ covered PRs #2092–#2135; this pass covers everything merged since.
   - CodeRabbit was requested through the trusted label path and one explicit workflow retry, but
     neither produced a substantive review. The user explicitly waived that gate for PR #2179 and
     authorized merge on 29 September 2026.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): shipped via PR #2179 (`c17508d51`, merged 2026-09-29), first successful production deploy run 36537657692._

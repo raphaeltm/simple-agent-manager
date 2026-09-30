@@ -46,8 +46,9 @@ becomes ready or warm.
       the expected ambiguous-column failure before restoring the fix.
 - [x] Run focused and repository quality checks.
 - [x] Complete specialist review and staging D1 verification.
-- [ ] Complete CI, CodeRabbit (if it
+- [x] Complete CI, CodeRabbit (if it
       appears), merge, and production deploy monitoring.
+  - _Reconciled 2026-09-30:_ PR #2164 merged 2026-09-27T18:36Z (`e4434330b`); production deploy run 36342565618 succeeded 18:57Z.
 
 ## Acceptance criteria
 
@@ -91,3 +92,7 @@ green.
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`
 - `.claude/rules/35-vertical-slice-testing.md`
 - `apps/api/.claude/rules/32-cf-api-debugging.md`
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): shipped via PR #2164 (`e4434330b`, merged 2026-09-27), first successful production deploy run 36342565618._

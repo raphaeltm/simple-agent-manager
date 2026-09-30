@@ -184,21 +184,31 @@ verified on staging in August ("wake verified").
 - [x] Web: `wake_failed` attention state in the session list; a failed wake releases the pending-wake "prompting" state
 - [x] Playwright audit (375 px, 1280 px)
 - [x] Docs: public docs for sleep/wake behavior and the new notice; env reference unchanged unless a var is added
-- [ ] Staging: real durable wake inside the deletion window wakes; a reported refusal shows the notice + marker; control: normal wake; human wake consistent; clean up
+- [x] Staging: real durable wake inside the deletion window wakes; a reported refusal shows the notice + marker; control: normal wake; human wake consistent; clean up
+  - _Reconciled 2026-09-30:_ evidenced across the three PRs that delivered this plan: #2145 found and fixed the deletion-window drop during its own staging pass and its final candidate `3e507371c` woke the preserved VM conversation; #2148 is the normal-wake control; #2155 (Deploy Staging 36284391634) showed a refused wake from a human follow-up producing the `Wake failed:` notice and `wake_failed` marker. Each PR records its cleanup.
 
 ## Acceptance criteria
 
 - [ ] A durable wake that hits a pending predecessor deletion is retried and wakes the session once the deletion is confirmed (workers test through `registerTaskWait` → alarm → adapter → real NodeLifecycle; fails on pre-fix code).
+  - _Reconciled 2026-09-30, left unticked:_ the behavior shipped in #2145 (refusals whose cause clears now retry until the delivery TTL; covered by `vm-prompt-delivery-adapter.test.ts` and `session-recovery.test.ts`), but the specific Workers vertical test through `registerTaskWait` → alarm → adapter → real NodeLifecycle was not found in main.
 - [x] A durable wake refused for a reason that cannot clear produces, in the same pass: a SYSTEM notice in the session, an active `wake_failed` attention marker for the parent task, `recovery_error` on the snapshot row naming the condition, and a structured log line, with a liveness assertion beside every absence assertion.
-- [ ] A restorable snapshot still wakes normally (control); a human follow-up to the same session behaves the same as the durable wake.
+- [x] A restorable snapshot still wakes normally (control); a human follow-up to the same session behaves the same as the durable wake.
+  - _Reconciled 2026-09-30:_ #2148 staging restored a preserved VM conversation (matching uncommitted-file hash); #2155 staging drove the same durable path from a human follow-up.
 - [x] A deferral that outlives the delivery TTL produces the same visible failure.
 - [x] A degraded wake posts one notice and tells the fresh agent where its transcript is.
-- [ ] A restore whose request is cancelled keeps running, and the retry receives the completed (not degraded) result.
-- [ ] A wake step that fails transiently retries and commits; the woken agent's MCP token is live.
+- [x] A restore whose request is cancelled keeps running, and the retry receives the completed (not degraded) result.
+  - _Reconciled 2026-09-30:_ delivered by #2148 (PR-C): restore runs on an attempt-owned context and the retry joins it; VM-agent request-cancellation/retry lifecycle tests.
+- [x] A wake step that fails transiently retries and commits; the woken agent's MCP token is live.
+  - _Reconciled 2026-09-30:_ delivered by #2148: premature `failSessionSnapshotRecovery` removed; bootstrap no longer revokes a handed-off MCP token; real step retry/token/exhaustion tests.
 - [ ] Every new guard proven discriminating by a surgical revert, with the reddened test named in the PR.
+  - _Reconciled 2026-09-30, left unticked:_ PR #2155's description records no surgical-revert evidence.
 
 ## References
 
 - `apps/api/.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`, `.claude/rules/74-proxy-signals-must-match-the-condition.md`, `apps/api/.claude/rules/72-error-categories-must-match-the-recovery-action.md`, `.claude/rules/62-tests-must-observe-the-real-trigger.md`, `packages/vm-agent/.claude/rules/71-request-context-must-not-outlive-its-request.md`, `apps/api/.claude/rules/43-long-running-mcp-tools.md`
 - PR #2145 write-ups: `tasks/backlog/2026-09-25-{wake-agent-install-bound-to-request,recovery-step-retry-cannot-commit,split-permanent-session-recovery-refusals}.md` on `sam/preserve-failed-tasks-work-fn8ba7`
 - T1: `sam/sleeping-session-wakes-survive-dnf8ea` (splits `session-recovery.ts`, merges first)
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): the plan shipped in three PRs: #2148 (PR-C, `636aee6c1`, merged 2026-09-25), #2145 (deletion-window retry, `23b477af6`, merged 2026-09-26) and #2155 (PR-A, `371801cce`, merged 2026-09-27, first successful production deploy run 36286553931). Two acceptance boxes stay unticked because their specific proof is not recorded, not because the behavior is missing._

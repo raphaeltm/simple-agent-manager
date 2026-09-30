@@ -55,10 +55,12 @@ backs them off without reaching a terminal state.
 - [x] Add a regression test that invokes `runNodeCleanupSweep` with production-
       shaped providerless `destroying` rows and verifies candidate isolation.
 - [x] Revert the production fix once and record that the regression test fails.
-- [ ] Run focused and repository quality gates, specialist reviews, staging
+- [x] Run focused and repository quality gates, specialist reviews, staging
       verification, PR CI, CodeRabbit, merge, and production deployment.
-- [ ] After one or two production cron ticks, query D1 and report the
+  - _Reconciled 2026-09-30:_ PR #2163: Deploy Staging run 36328121284 passed with 12 smoke tests; merged 2026-09-27T16:03Z (`0b33991ed`); production deploy run 36332601058 succeeded 16:16Z.
+- [x] After one or two production cron ticks, query D1 and report the
       `destroying` count before and after.
+  - _Reconciled 2026-09-30:_ read-only production D1 on 2026-09-30: zero nodes in `destroying`. The five providerless rows (`01M3CHFK0JZGCEJJ9XD8TW350N`, `01M3BB7WG1GK21RGVBY0EDGYWB`, `01M3BB8MQECY1A4T67J49V164J`, `01M3BB9DN5EV2HNWGEVATE95V4`, `01M3C74N1JC4QDPCF2G352ZG45`) reached `deleted` with `runtime_termination_confirmed_at` set at 16:47Z and 17:17Z on 2026-09-27, the first ticks after the 16:16Z deploy. Before: 5. After: 0.
 
 ## Acceptance Criteria
 
@@ -91,3 +93,7 @@ backs them off without reaching a terminal state.
 - `apps/api/.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`
 - `packages/providers/.claude/rules/56-destructive-provider-ownership-proof.md`
 - `tasks/active/2026-09-26-terminal-node-cleanup-missing-provider-vm.md`
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): shipped via PR #2163 (`0b33991ed`, merged 2026-09-27), first successful production deploy run 36332601058; the production outcome is verified above._

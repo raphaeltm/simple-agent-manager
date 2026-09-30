@@ -51,6 +51,7 @@ Slice A builds the dormant foundation only. It must not advertise new ACP intera
 - [x] Add focused tests for concurrent create/answer linearization, answer idempotency mismatches, expiry, delivery outbox persistence, sensitive purge, stale/dead runtime identity, no-wake transport, browser authorization/origin guards, VM session binding, migration compatibility, and deployment override plumbing. Broader live waiter/tombstone and activated runtime scenarios remain Slice B work.
 - [x] Update docs/API contract/env references as needed without advertising runtime/UI capability activation.
 - [ ] Run required quality gates, local specialist reviews, staging proof, CodeRabbit, merge, production deploy/version monitoring, and append concise A outcome to the canonical Idea. Progress: local gates, specialist review evidence, Sonar, PR, and CodeRabbit label path complete; latest CI/staging/merge/prod evidence pending.
+  - _Reconciled 2026-09-30, left unticked:_ everything except the Idea append is evidenced: PR #2182 (staging run 36570587320, merged 2026-09-29T13:07Z, deploy run 36575465475) and hardening PR #2187 (exact-head staging 36585613515 with a fresh VM proof and cleanup, merged 16:04Z, deploy run 36599006121). The production `production` Environment has no `ACP_INTERACTIONS_ENABLED` override, so the `wrangler.toml` value `false` applies. The Idea append could not land: Idea `01M3P2E0JJNQRXX020P65ZRKEJ` is at the 65,536-character `MCP_IDEA_CONTENT_MAX_LENGTH` cap and `update_idea` appends past it are silently discarded (`tasks/backlog/2026-09-30-update-idea-append-silently-truncated-at-cap.md`).
 
 ## Acceptance Criteria
 
@@ -81,3 +82,7 @@ Slice A builds the dormant foundation only. It must not advertise new ACP intera
 ## Validation Status
 
 The earlier validation report was superseded after specialist review found runtime-identity, cross-session binding, outbox, purge, alarm-budget, deployment-plumbing, and coverage gaps. Those findings have been addressed in the current working tree. Final task-completion review, staging, CI, CodeRabbit, merge, and production verification remain pending.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): Slice A shipped via PR #2182 (`eaa01789d`) and PR #2187 (`7b6922ba5`), both merged 2026-09-29 and live (deploy runs 36575465475 and 36599006121). The implementing SAM task `01M3P4R3E9ZGV3Q9QV42BDPTTY` shows `failed` although both PRs merged, and a bounded dormant production smoke beyond the Environment check is not evidenced. Slices B–D remain open in the Idea._

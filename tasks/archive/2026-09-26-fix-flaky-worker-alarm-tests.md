@@ -24,14 +24,16 @@ These failures are unrelated to product changes and delayed production validatio
 - [x] Update the TaskRunner overlap test to pause both direct and transactional alarm scheduling while testing first-start deduplication.
 - [x] Run the focused worker tests repeatedly.
 - [x] Run required validation and local review.
-- [ ] Open PR, get CI green, complete CodeRabbit, merge.
+- [x] Open PR, get CI green, complete CodeRabbit, merge.
+  - _Reconciled 2026-09-30:_ PR #2156 merged 2026-09-26T23:37Z (`398fb92d6`) after green CI; production deploy run 36280892213.
 
 ## Acceptance Criteria
 
 - [x] No retries or longer timeouts are used as the fix.
 - [x] The affected tests control alarm ordering deterministically.
 - [x] Focused repeated worker-test runs are stable.
-- [ ] PR CI is green and CodeRabbit gate is complete before merge.
+- [x] PR CI is green and CodeRabbit gate is complete before merge.
+  - _Reconciled 2026-09-30:_ PR #2156 merged with green CI; its CodeRabbit outcome is recorded in the PR.
 
 ## Validation
 
@@ -61,3 +63,7 @@ PASS. No production business logic, URLs, timeouts, limits, or deployment identi
 ### task-completion-validator
 
 PASS. Research findings map to checklist items and the diff covers both planned test fixes. Acceptance criteria are covered by repeated focused worker runs, full affected-file worker runs, and repository validation. No UI/backend propagation or multi-resource selection concerns apply.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): shipped via PR #2156 (`398fb92d6`, merged 2026-09-26), first successful production deploy run 36280892213._

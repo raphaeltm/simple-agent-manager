@@ -28,7 +28,8 @@ SAM keeps a static model catalog in `packages/shared/src/model-catalog.ts` for a
 - [x] Update focused shared/API/UI tests for changed model groups and IDs.
 - [x] Run focused package validation.
 - [x] Run `/do` review gates.
-- [ ] Open PR, wait for CI and CodeRabbit, merge when green, and monitor production deploy.
+- [x] Open PR, wait for CI and CodeRabbit, merge when green, and monitor production deploy.
+  - _Reconciled 2026-09-30:_ PR #2137 merged 2026-09-23T22:41Z (`9118dc306`); production deploy run 35931461373 succeeded 23:01Z.
 
 ## Validation
 
@@ -59,3 +60,7 @@ Note: `packages/shared/src/constants/ai-services.ts` was kept under the mandator
 - OpenCode static fallback is synchronized with active `opencode` and `opencode-go` entries from SAM's configured `models.dev` source path.
 - Focused tests prove the updated high-value model IDs, group labels, and dynamic OpenCode normalization behavior.
 - Local validation and PR/CI gates pass before merge.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): shipped via PR #2137 (`9118dc306`, merged 2026-09-23), first successful production deploy run 35931461373. All checklist items are now evidenced._

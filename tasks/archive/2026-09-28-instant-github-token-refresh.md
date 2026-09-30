@@ -93,3 +93,7 @@ Second review round (same task), all fixed on the branch:
 - [x] cloudflare-specialist HIGH (pre-existing, amplified here): the `/git-token` owner check called `assertRepositoryAccess` without `env`, so its user-access KV cache never engaged and every exchange paid a paginated GitHub repository listing on the owner's OAuth quota. Now forwards `env`; `workspace-git-token.test.ts` pins the forwarded env (red without the fix). Commit `1cdff5f8c`.
 - [x] go-specialist / task-completion-validator HIGH (test-only): parallel gh-shim subtests appended PATH into one shared env backing array (a real race, also causing flaky `gh: not found` without `-race`). `runGh` appends to a clipped slice and `hermeticEnv` returns a clipped slice; five races reproduced without the fix, none with it; full `go test -race ./...` green. Commit `05fed9bb5`.
 - Deferred with justification (pre-existing, unchanged lines, need corruption or a manual sub-60s TTL edit): KV cache hardening for malformed JSON and the 60 s `expirationTtl` floor, SAM idea `01M3MBHQPB0R1WQREWXTBX0TPG`.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): shipped via PR #2174 (`397c6f2e5`, merged 2026-09-28), first successful production deploy run 36505648204. Every checklist item was already ticked._
