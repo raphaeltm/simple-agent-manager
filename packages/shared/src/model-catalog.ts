@@ -114,8 +114,9 @@ const CLAUDE_MODELS: ModelGroup[] = [
 // ---------------------------------------------------------------------------
 
 const CODEX_MODELS: ModelGroup[] = [
-  modelGroup('GPT-6 (Latest)', [
+  modelGroup('GPT-6.1 / 6 (Latest)', [
     { id: 'gpt-6-astra', name: 'GPT-6 Astra' },
+    { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
     { id: 'gpt-6-sol', name: 'GPT-6 Sol' },
     { id: 'gpt-6-luna', name: 'GPT-6 Luna' },
   ]),
@@ -171,6 +172,7 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' },
     { id: 'opencode/gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
     { id: 'opencode/gpt-6-astra', name: 'GPT-6 Astra' },
+    { id: 'opencode/gpt-6.1-sol', name: 'GPT-6.1 Sol' },
     { id: 'opencode/grok-4.5', name: 'Grok 4.5' },
     { id: 'opencode/kimi-k2.5', name: 'Kimi K2.5' },
     { id: 'opencode/gpt-5.1', name: 'GPT-5.1' },
@@ -193,6 +195,7 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/claude-opus-4-8', name: 'Claude Opus 4.8' },
     { id: 'opencode/gpt-5.5', name: 'GPT-5.5' },
     { id: 'opencode/claude-sonnet-5', name: 'Claude Sonnet 5' },
+    { id: 'opencode/claude-sonnet-5-5', name: 'Claude Sonnet 5.5' },
     { id: 'opencode/nemotron-3.5-lightning-free', name: 'Nemotron 3.5 Lightning Free' },
     { id: 'opencode/claude-opus-4-6', name: 'Claude Opus 4.6' },
     { id: 'opencode/gemini-3.7-flash', name: 'Gemini 3.7 Flash' },

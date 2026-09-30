@@ -52,6 +52,7 @@ describe('getPlatformAIModelTier', () => {
     expect(getPlatformAIModelTier('claude-sonnet-5')).toBe('standard');
     expect(getPlatformAIModelTier('claude-opus-5-5')).toBe('premium');
     expect(getPlatformAIModelTier('gpt-6-luna')).toBe('standard');
+    expect(getPlatformAIModelTier('gpt-6.1-sol')).toBe('premium');
     expect(getPlatformAIModelTier('gpt-6-sol')).toBe('premium');
   });
 

@@ -338,6 +338,7 @@ type OpenAIModelTuple = readonly [string, string, PlatformAIModelTier, number, n
 
 const OPENAI_GPT6_MODELS = [
   ['gpt-6-astra', 'GPT-6 Astra', 'premium', 0.01, 0.05, 'openai-premium'],
+  ['gpt-6.1-sol', 'GPT-6.1 Sol', 'premium', 0.002, 0.01, 'openai-premium'],
   ['gpt-6-sol', 'GPT-6 Sol', 'premium', 0.002, 0.01, 'openai-premium'],
   ['gpt-6-luna', 'GPT-6 Luna', 'standard', 0.0001, 0.0005, 'openai-standard'],
 ] as const satisfies readonly OpenAIModelTuple[];

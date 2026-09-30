@@ -28,7 +28,12 @@ describe('model-catalog', () => {
       const groups = getModelGroupsForAgent('openai-codex');
       expect(groups.length).toBeGreaterThanOrEqual(2);
       const latestModels = groups[0]?.models.map((model) => model.id) ?? [];
-      expect(latestModels).toEqual(['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna']);
+      expect(latestModels).toEqual([
+        'gpt-6-astra',
+        'gpt-6.1-sol',
+        'gpt-6-sol',
+        'gpt-6-luna',
+      ]);
       expect(groups[1]?.models.map((model) => model.id)).toEqual([
         'gpt-5.6-sol',
         'gpt-5.6-terra',
@@ -125,6 +130,7 @@ describe('model-catalog', () => {
       );
       expect(allModels.some((m) => m.id === 'opencode/claude-sonnet-4-6')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/gpt-6-astra')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/gpt-6.1-sol')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/gpt-6-sol')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/gemini-3.8-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/gemini-3.7-flash')).toBe(true);
@@ -274,6 +280,7 @@ describe('model-catalog', () => {
 
     it('returns true for a codex model under openai-codex', () => {
       expect(isKnownModel('openai-codex', 'gpt-6-astra')).toBe(true);
+      expect(isKnownModel('openai-codex', 'gpt-6.1-sol')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6-sol')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-6-luna')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-5.6-sol')).toBe(true);

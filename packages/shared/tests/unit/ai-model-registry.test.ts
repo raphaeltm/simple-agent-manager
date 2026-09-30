@@ -328,6 +328,23 @@ describe('AI Model Registry', () => {
       });
     });
 
+    it('registers GPT-6.1 Sol with current OpenAI metadata', () => {
+      const model = PLATFORM_AI_MODELS.find((candidate) => candidate.id === 'gpt-6.1-sol');
+
+      expect(model).toMatchObject({
+        label: 'GPT-6.1 Sol',
+        provider: 'openai',
+        tier: 'premium',
+        costPer1kInputTokens: 0.002,
+        costPer1kOutputTokens: 0.01,
+        contextWindow: 1050000,
+        toolCallSupport: 'excellent',
+        intendedRole: 'workspace-agent',
+        fallbackGroup: 'openai-premium',
+        unifiedApiModelId: 'openai/gpt-6.1-sol',
+      });
+    });
+
     it('can filter models by scope', () => {
       const workspaceModels = PLATFORM_AI_MODELS.filter((m) => m.allowedScopes.includes('workspace'));
       expect(workspaceModels.length).toBe(PLATFORM_AI_MODELS.length); // all models should be workspace-allowed
