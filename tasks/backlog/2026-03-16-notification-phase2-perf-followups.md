@@ -1,5 +1,28 @@
 # Notification Phase 2 — Performance & Correctness Follow-ups
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Composite index `idx_notifications_task`
+>     (`apps/api/src/durable-objects/notification-migrations.ts:52`).
+>   - `projectName` is set in metadata by every notify helper
+>     (`apps/api/src/services/notification.ts:153` and siblings) and read by
+>     `apps/web/src/components/NotificationCenter.tsx:191`.
+>   - The dead second `setNotifications` in `dismiss` is gone; `useNotifications` moved to TanStack
+>     Query (PR #1872, `apps/web/src/hooks/useNotifications.ts:142-164`).
+> - **Still open:**
+>   - `isNotificationEnabled` still makes up to 3 queries per call
+>     (`apps/api/src/durable-objects/notification.ts:424-481`), and it now runs twice per create
+>     (in-app and web push, `:108-111`).
+>   - `enforceLimit` still runs the age-based DELETE on every insert
+>     (`notification.ts:245,695-704`).
+>   - `stubResponse` still returns `id: 'suppressed'` (`notification.ts:659-675`). That id is now
+>     load-bearing: `routes/mcp/instruction-tools.ts:663` compares against it, so update that
+>     caller when tightening the type.
+>   - Optional: `dismiss` still makes an extra unread-count HTTP call (`useNotifications.ts:145`).
+> - **Moot/dropped:** the HIGH `waitUntil` item has moved to
+>   `tasks/backlog/2026-03-19-mcp-notification-waituntil.md`, which now owns it.
+
 **Created**: 2026-03-16
 **Source**: Late-arriving cloudflare-specialist review of PR #420 (merged)
 **Priority**: Medium

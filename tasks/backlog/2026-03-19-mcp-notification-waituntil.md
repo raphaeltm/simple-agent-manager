@@ -1,5 +1,9 @@
 # Wrap MCP notification blocks in waitUntil()
 
+> **Reconciliation 2026-09-30:** still open. Scope is now the 3 blocks in `task-tools.ts`
+> (`:244-270`, `:389-409`, `:531-553`); `request_human_input` must stay synchronous (its reply uses
+> the notification id). `apps/api/src/routes/mcp.ts` is now `apps/api/src/routes/mcp/task-tools.ts`.
+
 ## Problem
 
 MCP notification blocks in `apps/api/src/routes/mcp.ts` await D1 queries (`getProjectName`, `getChatSessionId`) synchronously in the response path. This adds 1-2 D1 round-trips to every `update_task_status` MCP response, stalling the agent.

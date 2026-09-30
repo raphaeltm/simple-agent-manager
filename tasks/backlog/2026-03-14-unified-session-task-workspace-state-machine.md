@@ -1,5 +1,25 @@
 # Unified Session/Task/Workspace State Machine
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** every cascade except gap 5 (paths under `apps/api/src/` unless noted).
+>   - Gap 1, workspace stop: `routes/workspaces/workspace-stop.ts:145` →
+>     `services/workspace-eviction-lifecycle.ts:53` → shared finalizer
+>     `services/workspace-lifecycle-finalizer.ts:257` (`stopSession`), PR #1917. Test:
+>     `apps/api/tests/unit/routes/workspace-eviction-real-sql.test.ts:200`.
+>   - Gap 2, MCP `complete_task`: `routes/mcp/task-tools.ts:559` calls
+>     `cleanupTerminalTaskResources` (session sleeps or stops; runtime torn down), PR #1560.
+>   - Gap 3, idle timeout: `durable-objects/project-data/idle-cleanup.ts:315-379` terminalizes
+>     the task, then stops the session and the workspace, PR #1760.
+>   - Gap 4, workspace deletion: `services/workspace-deletion.ts:456,526` use the shared finalizer.
+>   - Gap 6, manual fail/cancel: `routes/tasks/crud.ts:498-509` runs
+>     `cleanupTerminalTaskResourcesOrThrow`; failed tasks with recoverable work are kept on purpose.
+>   - Cascade tests: `apps/api/tests/workers/workspace-lifecycle-finalizer-vertical.test.ts`.
+> - **Still open:** gap 5. `acp_sessions.status` is not updated when the chat session or workspace
+>   ends; `durable-objects/project-data/sessions.ts:290-312` updates `chat_sessions` only. ACP rows
+>   become `interrupted` only via the heartbeat-timeout sweep (`project-data/acp-sessions.ts`) or
+>   on session sleep (`services/session-sleep-execution.ts:367`).
+
 ## Problem
 
 Chat sessions, tasks, workspaces, and ACP sessions each have independent state machines stored in different databases (ProjectData DO SQLite vs D1) with no cascading updates between them. Status changes in one entity don't propagate to related entities, leaving orphaned "active" sessions, running workspaces after task completion, and stale task statuses after workspace shutdown.

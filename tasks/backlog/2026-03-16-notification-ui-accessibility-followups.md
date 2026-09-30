@@ -1,5 +1,24 @@
 # Notification UI — Accessibility & UX Follow-ups
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Filter tabs have tab semantics (`role="tablist"`, `role="tab"`, `aria-selected`,
+>     `aria-controls`) and arrow-key navigation (PR #973;
+>     `apps/web/src/components/NotificationCenter.tsx:257-300`).
+>   - Dead code in `dismiss` removed (PR #1872; `apps/web/src/hooks/useNotifications.ts:142-164`).
+> - **Still open:**
+>   - `text-fg-secondary` at `NotificationCenter.tsx:496,619`. It is not a defined token
+>     (`apps/web/src/app.css:28-30` defines only fg-primary, fg-muted and fg-on-accent), and it is
+>     used in 24 `apps/web` files; the repo-wide sweep is owned by
+>     `tasks/backlog/2026-09-23-resource-sparkline-gap-marker-has-no-colour.md`.
+>   - Action buttons are still `opacity-0 group-hover:opacity-100` with no focus variant (`:561`).
+>   - The group toggle has `aria-expanded` but no `aria-controls` (`:607-612`).
+>   - The "Load more" label is unchanged (`:377,412`).
+>   - The group badge is still `text-[9px]` at 14px (`:625`); tab badges are `text-[9px]` too
+>     (`:295`).
+>   - UI items carried over from the phase-1 follow-ups file (end of this file).
+
 **Created**: 2026-03-16
 **Source**: Late-arriving ui-ux-specialist review of PR #420 (merged)
 **Priority**: High (accessibility gaps are WCAG failures)
@@ -58,3 +77,14 @@ Post-merge UI/UX review identified accessibility gaps in the NotificationCenter 
 - [ ] "Load more" button label clarified in grouped view
 - [ ] Badge size meets legibility threshold
 - [ ] Dead code removed from dismiss function
+
+## Carried over 2026-09-30
+
+From `tasks/backlog/2026-03-16-notification-system-phase1-followups.md`, dissolved in the
+2026-09-30 weekly queue audit:
+
+- [ ] Focus trap in the notification panel. It renders `role="dialog"` without
+      `useModalInteraction` (`apps/web/src/components/NotificationCenter.tsx:232-238`).
+- [ ] An `aria-live` region that announces unread-count changes.
+- [ ] A batch-dismiss endpoint. Only `POST /api/notifications/:id/dismiss` exists
+      (`apps/api/src/routes/notifications.ts:163`).

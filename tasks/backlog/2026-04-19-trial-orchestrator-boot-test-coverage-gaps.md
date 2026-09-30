@@ -1,5 +1,29 @@
 # Trial Orchestrator Boot — Fill Test Coverage Gaps
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** HIGH-1 on the failure path. `failTrial()` revokes and clears the MCP token
+>   (`apps/api/src/durable-objects/trial-orchestrator/index.ts:266-276`, tested in
+>   `apps/api/tests/unit/durable-objects/trial-orchestrator.test.ts:452-510`). Not revoking in
+>   `handleRunning` is documented as intentional (`trial-orchestrator/steps.ts:1073-1081`).
+> - **Still open:**
+>   - The three crash-boundary resume tests (not in `trial-orchestrator-agent-boot.test.ts`).
+>   - Argument pinning: `startDiscoveryAgent` args, `acpSessionId` in the `transitionAcpSession`
+>     calls, and the `userId` passed to `storeMcpToken`.
+>   - `fetchDefaultBranch` tests for an `AbortError` and an empty `default_branch`.
+>   - The decision on the silent `'main'` fallback in workspace creation (`steps.ts:694`).
+>   - Rest of HIGH-1: no revocation in `apps/api/src/scheduled/trial-expire.ts`, and no
+>     "reused token gets 401" test.
+>   - HIGH-2: all trials still share the sentinel `userId` in their MCP tokens (`steps.ts:848`),
+>     with no comment in `apps/api/src/services/mcp-token.ts`.
+>   - M-1: `default_branch` is used without validation (`steps.ts:252-253`).
+>   - M-2: `state.mcpToken` stays in DO storage after the agent starts.
+>   - M-3: ACP reason strings only gained a `trial_orchestrator.` prefix (`steps.ts:1017,1043`).
+>   - L-1: raw VM-agent error bodies go into error messages
+>     (`apps/api/src/services/node-agent.ts:98`).
+> - **Moot/dropped:** L-2 is verified safe: observations render as plain text
+>   (`apps/web/src/components/trial/DiscoveryCards.tsx:128,145`). L-3 needed no action.
+
 ## Problem
 
 Post-merge test-engineer review of PR #764 (`fix(trial): boot discovery agent on VM + detect real default branch`) identified six minor coverage gaps in `apps/api/tests/unit/durable-objects/trial-orchestrator-agent-boot.test.ts` and its sibling `trial-orchestrator-steps.test.ts`. None are correctness risks today — the happy-path flow implicitly exercises the affected code — but each reduces regression surface for future refactors.

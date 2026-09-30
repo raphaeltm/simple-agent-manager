@@ -1,5 +1,24 @@
 # Durable Interrupts Phase 1 — Test Coverage Gaps
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** G5. `apps/api/tests/unit/routes/mcp-orchestration-comms.test.ts:440-501` asserts
+>   that a 409 returns `queued: true`, `delivered: false`, `reason: 'agent_busy'` and enqueues a
+>   mailbox message.
+> - **Still open:**
+>   - G3: no test drives `runDeliverySweep`
+>     (`apps/api/src/durable-objects/project-data/mailbox.ts:433`) to re-queue a delivered
+>     message that was never acked. `getUnackedMessages` and `requeueForRedelivery` have no test
+>     references; `apps/api/tests/workers/mailbox-do.test.ts:169` only re-queues by hand. Lower
+>     priority now: durable prompt delivery is on by default
+>     (`packages/shared/src/constants/durable-execution.ts:2`), so this is mostly the legacy path.
+>   - G4: still deferred until session termination exists.
+>   - G6, restated: the handler now calls `acceptPromptDelivery` instead of
+>     `sendPromptToAgentOnNode` (`apps/api/src/routes/mcp/mailbox-tools.ts:92-127`). Each hop is
+>     tested on its own, in `apps/api/tests/unit/routes/mcp-agent-messaging-authorization.test.ts`
+>     (:345-377) and `durable-objects/durable-prompt-delivery.test.ts`, but no single chained test
+>     (handler → DO → VM adapter) exists.
+
 ## Problem
 
 The task-completion-validator identified 4 test gaps in the durable messaging layer (PR #818). All core functionality is implemented and working, but these specific behavioral paths lack automated test coverage.

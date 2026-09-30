@@ -1,5 +1,30 @@
 # Session Header Accessibility and Design Token Fixes
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** files are under `apps/web/src/components/project-message-view/`.
+>   - #1: `bg-surface-default` is gone from the session header.
+>   - #4: Retry/Fork and the details toggle moved to the tool rail; its buttons have focus rings
+>     (`SessionToolRail.tsx:153,228,301`).
+>   - #9: the `hasDetails` constant is gone.
+>   - #11: `apps/web/tests/playwright/session-header-agent-info-audit.spec.ts` covers mobile and
+>     desktop, with overflow checks and long-content cases.
+> - **Still open:**
+>   - #2/#3: undefined tokens `--sam-color-accent-tint` and `--sam-color-surface-hover`
+>     (`SessionHeader.tsx:281,465-466`). The defined names are
+>     `--sam-color-accent-primary-tint` and `--sam-color-bg-surface-hover`
+>     (`packages/ui/src/tokens/theme.css:15,181`). Overlaps the repo-wide undefined-token sweep
+>     owned by `tasks/backlog/2026-09-23-resource-sparkline-gap-marker-has-no-colour.md`.
+>   - #6: copy success is not announced (`CopyableId.tsx` has no `aria-live` or label change).
+>   - #7: the Details action sets `aria-expanded` but not `aria-controls`
+>     (`SessionToolRail.tsx:167`).
+>   - #8: the failed badge has no icon (`SessionHeader.tsx:477`).
+>   - #10: `cancelled` has no distinct badge style.
+>   - #12: `allowedHosts: true` in `apps/web/vite.config.ts:118` is still undocumented.
+> - **Moot/dropped:** #5 (44px touch targets). Current guidance says not to demand larger touch
+>   targets (`.claude/agents/ui-ux-specialist/UI_UX_SPECIALIST.md:31,73`,
+>   `apps/web/.claude/rules/17-ui-visual-testing.md:69`).
+
 **Created**: 2026-04-24
 **Source**: Post-merge UI/UX specialist review + task-completion-validator of PR #804
 

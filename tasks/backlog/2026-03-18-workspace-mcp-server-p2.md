@@ -1,5 +1,14 @@
 # Workspace-Aware MCP Server — Priority 2 (Extended Tools)
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** `get_workspace_diff_summary`
+>   (`apps/api/src/routes/mcp/tool-definitions-workspace-tools.ts`, PR #614).
+> - **Still open:** the other 17 tools; none of them exist. Before building any, check the overlap
+>   with tools that shipped since: `publish_handoff`/`get_handoff` (PR #819) against
+>   `share_artifact` and `annotate_workspace`; `search_tasks` against `get_similar_past_tasks`;
+>   `upload_to_library`; `get_workspace_info`, `get_network_info` and `get_credential_status`.
+
 **Created**: 2026-03-18
 **Depends on**: Core workspace tools are now in `apps/api/src/routes/mcp/workspace-tools.ts` (unified from workspace-mcp)
 **Context**: Second batch of workspace MCP tools. These are useful but less urgent — they enhance agent intelligence, enable advanced workflows, and improve the developer experience.

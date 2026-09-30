@@ -1,5 +1,38 @@
 # Trial Onboarding — Late-Audit Hardening Follow-ups
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** source paths are under `apps/api/src/`.
+>   - MEDIUM-SEC-1: per-IP rate limit on the SSE route (`routes/trial/events.ts:51-73`).
+>   - MEDIUM-CF-2: `eventsUrl` matches the real route (`routes/trial/create.ts:393`, asserted in
+>     `apps/api/tests/unit/routes/trial-create.ts.test.ts:367`).
+>   - LOW-SEC-1: `clearClaimCookie` now gets the cookie domain (`routes/trial/claim.ts:178-180`).
+>   - LOW-SEC-2: a structured error is logged when the secret is missing
+>     (`routes/trial/create.ts:195-203`), and deploys now generate the secret. No one-shot dedupe.
+>   - MEDIUM-1, mostly: `getStatus()` redacts the MCP token and explains why
+>     (`durable-objects/trial-orchestrator/index.ts:140-152`); admin trial routes are
+>     superadmin-only (`routes/admin-trials.ts:30`).
+> - **Still open:**
+>   - HIGH-3: the claim cookie is still `SameSite=Lax` (`services/trial/cookies.ts:193`). Verify
+>     Strict or document why Lax is needed.
+>   - HIGH-4: KV-derived `workspaceUrl` fallback (`services/trial/bridge.ts:43-45`). The only
+>     caller (`durable-objects/project-data/index.ts:2083`) does not pass `workspaceUrl`.
+>   - MEDIUM-2: no check that the sentinel installation is not a real one
+>     (`durable-objects/trial-orchestrator/helpers.ts:46-48`), and no doc.
+>   - HIGH-CF-1: state is still written before the alarm is set
+>     (`durable-objects/trial-orchestrator/index.ts:115-117,316-317`); no regression test.
+>   - LOW-CF-1: `trial.started` is still emitted after `setAlarm` (same file, `:117-129`).
+>   - LOW-CF-3: `TrialEventBus` still has no multi-viewer note.
+>   - MEDIUM-SEC-2: README body is not byte-capped (`services/trial/github-knowledge.ts:63-82`).
+>   - LOW-SEC-3: no rate limit on `routes/trial/status.ts:27` or `routes/trial/waitlist.ts:30`;
+>     `rateLimitAnonymous` (`middleware/rate-limit.ts:390`) exists but nothing uses it.
+>   - LOW-1: the `workspaceUrl` disclosure is not documented (there is no trial architecture doc).
+>   - LOW-2: `timingSafeEqual` still returns early on a length mismatch
+>     (`services/trial/cookies.ts:80-81`).
+> - **Moot/dropped:**
+>   - MEDIUM-CF-1: duplicate of `2026-04-19-trial-sse-abort-propagation.md`, which owns it.
+>   - LOW-CF-2: the v9 migration now uses `new_sqlite_classes` (`apps/api/wrangler.toml:607-609`).
+
 ## Problem
 
 After PR #760 merged, a late-arriving security audit returned with findings. Two were stale (already fixed in the merged branch). The rest are non-exploitable hardening items worth addressing before `sam/trial-onboarding-mvp` merges to `main`.

@@ -1,5 +1,18 @@
 # MCP Page-Size Limits Not Configurable via Env Vars
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** `messageSearchMax` now reads `MCP_MESSAGE_SEARCH_MAX` (PR #460;
+>   `apps/api/src/routes/mcp/_helpers.ts:165`, `apps/api/src/env.ts:1019`). It is not yet
+>   documented in `apps/api/.env.example`.
+> - **Still open:**
+>   - Make `taskListLimit`, `taskListMax`, `taskSearchMax`, `sessionListLimit` and `sessionListMax`
+>     configurable; they are still bare constants at `routes/mcp/_helpers.ts:158-162`.
+>   - Document those five plus `MCP_MESSAGE_SEARCH_MAX` in `apps/api/.env.example` (only
+>     `MCP_MESSAGE_LIST_*` is there, `:736-737`).
+>   - The same item also appears at `tasks/backlog/2026-04-13-knowledge-graph-hardening.md:30`;
+>     this file owns it.
+
 ## Context
 
 Found by constitution-validator during dispatch_task security findings PR review. Eight MCP page-size limits in `getMcpLimits()` use bare constants without env var overrides, violating Principle XI (No Hardcoded Values).

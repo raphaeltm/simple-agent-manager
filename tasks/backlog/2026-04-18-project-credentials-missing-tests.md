@@ -1,5 +1,24 @@
 # Missing test coverage for project credential overrides (PR #753)
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** HIGH #2. `apps/api/tests/unit/routes/project-credentials.test.ts:127-212` covers
+>   the GET route: cross-user 404, empty list, masked key, `scope` and `projectId`.
+> - **Still open:**
+>   - HIGH #5, retargeted: the component is now `ProjectAgentsSection` / `ProjectAgentCard`
+>     (PR #757). `apps/web/tests/unit/components/project-agents-section.test.tsx` covers the
+>     inherit hint (:87), list error (:171) and delete (:185). Missing: the credential save flow
+>     (`saveProjectAgentCredential` is mocked but never used), the Retry button
+>     (`ProjectAgentsSection.tsx:143`) and the "No user-level credential" copy
+>     (`ProjectAgentCard.tsx:186`).
+>   - HIGH #6: no route-level test of `POST /:id/agent-key`
+>     (`apps/api/src/routes/workspaces/runtime.ts:864`) with and without a project. Resolution is
+>     only tested at service level (`project-credentials.test.ts:516-700`).
+>   - LOW #9: the DELETE 400 cases (`apps/api/src/routes/projects/credentials.ts:512-517`).
+>   - LOW #10: a route-level project PUT update (200, `createdAt` kept). The route now calls
+>     `saveAgentCredentialForUser`; only a user-scope service test covers replacement
+>     (`apps/api/tests/workers/agent-credential-save-dual-write.test.ts:129`).
+
 **Created**: 2026-04-18
 **Priority**: HIGH
 **Source**: test-engineer review rerun on PR #753 (`sam/project-credential-overrides`)

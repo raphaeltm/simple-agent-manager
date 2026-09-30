@@ -1,5 +1,25 @@
 # Compute Lifecycle Test Coverage Gaps
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Gap 1: behavioral idle-timeout tests in
+>     `apps/api/tests/unit/conversation-idle-timeout.test.ts:480-913` (stale workspace cleaned up,
+>     project override wins at `:516-537`), plus the real `alarm()` in
+>     `apps/api/tests/workers/project-data-workspace-idle-alarm.test.ts:21`.
+>   - Gap 5: `apps/api/tests/unit/node-cleanup.test.ts:202` (deletion failure) and `:313` (stale
+>     warm node with active workspaces); also `tests/workers/scheduled-node-cleanup.test.ts:1055`.
+> - **Still open:**
+>   - Gap 2: no tests for the timeout bounds or the null reset in
+>     `apps/api/src/routes/projects/project-update.ts:198-216`.
+>   - Gap 3: only the valid-workspace path is tested (`tests/unit/routes/terminal.test.ts:250`);
+>     the missing-`workspaceId` 400 and no-`projectId` paths are not.
+>   - Gap 4: no web test for saving timeouts. There is no "Save Timeouts" button any more: the
+>     workspace timeout saves in `ProjectSettings.tsx:371`, the node idle timeout in
+>     `ScalingSettings.tsx:171,340`.
+> - **Moot/dropped:** gap 1's "lastActivity === 0" case; last activity is now at least the row's
+>   `created_at` (`durable-objects/project-data/workspace-idle-timeouts.ts:46-47`).
+
 **Created**: 2026-03-16
 **Status**: backlog
 **Priority**: high

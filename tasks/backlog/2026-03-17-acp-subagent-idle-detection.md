@@ -1,5 +1,23 @@
 # ACP Subagent Idle Detection Fix
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** a harness work lease keeps the session awake while Claude background tasks run
+>   (PR #1845; `packages/vm-agent/internal/acp/session_host_harness_work.go`,
+>   `apps/api/src/services/session-idleness.ts`). It is configurable
+>   (`HARNESS_BACKGROUND_WORK_LEASE_MS`, `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS`,
+>   `apps/api/src/env.ts:275-276`) and capped by default at 30 minutes after the last progress, so
+>   runaway work cannot keep a session awake forever. ACP tool-call work is covered too (PR #1874).
+> - **Still open:**
+>   - A UI indicator for background work: `runtimeWorkState` exists only as a type
+>     (`apps/web/src/lib/api/sessions.ts:119`) and is never rendered.
+>   - Confirm on staging that subagent output arrives without a manual "?". The Claude SDK now runs
+>     its own completion turn after a task notification, tracked as "settling"
+>     (`session_host_harness_work.go:255-275`); this has not been checked end to end.
+>   - Other agents: lifecycle tracking is Claude-only (`session_host_harness_work.go:63-66`).
+> - **Moot/dropped:** the proposed `HostWaitingForSubagents` state and process-tree detection; the
+>   lease design replaced them.
+
 ## Problem
 
 When Claude Code dispatches subagents (via the `Agent` tool), the ACP SDK interprets this as a turn completion — `Prompt()` returns, the session transitions to `HostReady`, and the system thinks Claude Code is waiting for user input. Meanwhile, subagents run in the background producing output that gets queued but never flows back through ACP because no active prompt exists.

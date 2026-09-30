@@ -1,5 +1,24 @@
 # Trial orchestrator — broaden step handler unit tests
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** some handler tests. Test paths are under `apps/api/tests/unit/`.
+>   - `handleNodeSelection`: `durable-objects/trial-orchestrator-steps.test.ts:311` and
+>     `services/relay-trial-native-selection.test.ts:96-133`.
+>   - `handleNodeProvisioning`, fresh path only: `trial-orchestrator-steps.test.ts:398,448`.
+>   - `handleNodeAgentReady`: `trial-orchestrator-steps.test.ts:564,577`.
+>   - `handleWorkspaceCreation`, admission cleanup only: `trial-orchestrator-steps.test.ts:508`.
+>   - `handleProjectCreation`, happy path and branch re-entry:
+>     `durable-objects/trial-orchestrator-agent-boot.test.ts:333-422`.
+> - **Still open:** source is `apps/api/src/durable-objects/trial-orchestrator/steps.ts`.
+>   - `handleWorkspaceReady` (`steps.ts:777`) has no tests at all.
+>   - `handleProjectCreation`: re-entry with `projectId` set; permanent error on the FK violation.
+>   - `handleNodeProvisioning`: re-entry with `state.nodeId` set (`steps.ts:510-528`).
+>   - `handleNodeAgentReady`: permanent error on node failure.
+>   - `handleWorkspaceCreation`: name-collision retry; permanent error on rejection.
+>   - `handleNodeSelection`: permanent error when there are zero providers.
+>   - `syncTrialRecord` (`steps.ts:174`): a KV write failure is non-fatal.
+
 ## Problem
 `apps/api/src/durable-objects/trial-orchestrator/steps.ts` exports 8 step
 handlers. After the wire-up PR, only `handleRunning` and

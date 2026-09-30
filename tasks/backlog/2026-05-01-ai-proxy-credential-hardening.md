@@ -1,5 +1,23 @@
 # AI Proxy Credential Hardening
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** Go tests for the main proxy injection branches
+>   (`packages/vm-agent/internal/acp/session_host_test.go:3113-3181` and
+>   `gateway_test.go:1301-1338`).
+> - **Still open:** Go files are under `packages/vm-agent/internal/acp/`.
+>   - A short-lived token scoped to the AI proxy. The platform path still injects the full
+>     callback token (`session_host_startup.go:324`) and puts it in the base URL (`:355-360`).
+>   - Clear `credential` when `inferenceConfig` is set (`session_host_reporting.go:117-126`). The
+>     API still sends `apiKey: '__platform_proxy__'`
+>     (`apps/api/src/routes/workspaces/runtime.ts:1174`).
+>   - Validate the `inferenceConfig.BaseURL` origin in the Go agent (there is no check).
+>   - Reject `__platform_proxy__` in `POST /:id/agent-credential-sync` (`runtime.ts:1237`;
+>     `apps/api/src/schemas/workspaces.ts:75-79` accepts any string).
+>   - Go tests for the claude-code platform-proxy and codex passthrough branches.
+> - **Moot/dropped:** the OpenCode proxy branch. PR #1431 removed platform OpenCode, and the Go
+>   agent now rejects an OpenCode inference proxy (`session_host_test.go:3181`).
+
 **Created**: 2026-05-01
 **Source**: Security audit of WP3 (Codex Credential Injection Fallback)
 

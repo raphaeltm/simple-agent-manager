@@ -1,5 +1,23 @@
 # Graph-Based Task Execution Model
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the GraphRunner design below is superseded by the shipped Missions and
+>   ProjectOrchestrator system (PRs #818, #819, #820, #830, #831). Do not build a GraphRunner DO.
+>   - Dependency-gated scheduling via `scheduler_state`
+>     (`apps/api/src/durable-objects/project-orchestrator/scheduling.ts:163-186,282`).
+>   - Handoff packets routed to dependent tasks (`scheduling.ts:604-670`).
+>   - Graph-editing MCP tools: `add_dependency`, `remove_pending_subtask`, `retry_subtask` and
+>     `wait_for_subtasks` (`apps/api/src/routes/mcp/tool-definitions-orchestration-tools.ts`).
+>   - Per-mission parallelism cap `maxActiveTasks` (`scheduling.ts:329-337`).
+> - **Still open:**
+>   - Enforce the other `MissionBudgetConfig` fields (`maxRetriesPerTask`,
+>     `maxDescendantsPerSubtree`, `maxWallClockMs`, `maxVmMinutes`, `maxWorkspaces`) and set
+>     `blocked_budget`. The fields are typed (`packages/shared/src/types/mission.ts:43-50`,
+>     "Enforcement comes in later phases") but not referenced anywhere in `apps/api/src`.
+>   - Plan-first mode with human approval of the decomposition before execution.
+>   - Graph visualization.
+
 **Created**: 2026-03-19
 **Status**: Backlog
 **Priority**: Medium (exploratory — not ready for implementation yet)

@@ -1,5 +1,29 @@
 # Notification System — Security Follow-ups
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - `needs_input` dedup window (`apps/api/src/durable-objects/notification.ts:170-203`; test
+>     `notification-suppression.test.ts:382`).
+>   - The cursor is validated at the route and bad values get a 400
+>     (`apps/api/src/routes/notifications.ts:48-54`; tests in
+>     `notifications-validation.test.ts:77-94`).
+>   - `actionUrl`, partly: the DO now nulls anything that is not same-origin, including
+>     protocol-relative and backslash forms (`notification.ts:117-129`); the web-push click target
+>     is sanitized too (`notification-push.test.ts:57-75`).
+> - **Still open:**
+>   - DO WebSocket auth: `notification.ts:609-624` accepts any `/ws` upgrade.
+>   - A path allowlist for `actionUrl`, in the DO and in `NotificationCenter.tsx:137` (still
+>     `startsWith('/')`).
+>   - Validate `type`/`urgency` before the INSERT (`notification.ts:104-242`). Only reads validate
+>     (`notification-row-schemas.ts:18-38`), so one bad insert would break list reads.
+>   - Validate `notificationType`/`channel` inside the `updatePreference` DO method
+>     (`notification.ts:402-421`); today only the route validates.
+>   - WebSocket message size guard (`notification.ts:626-639`).
+>   - Typed `NotificationMetadata` (`packages/shared/src/types/notification.ts:32,94` still use
+>     `Record<string, unknown>`).
+>   - Security items carried over from the phase-1 follow-ups file (end of this file).
+
 **Created**: 2026-03-16
 **Source**: Late-arriving security-auditor review of PR #420 (merged)
 **Priority**: High
@@ -64,3 +88,15 @@ Post-merge security audit identified authentication gaps in the Notification DO 
 - [ ] `cursor` parameter validated before parseInt
 - [ ] WS message size guard added
 - [ ] `NotificationMetadata` typed interface replaces `Record<string, unknown>`
+
+## Carried over 2026-09-30
+
+From `tasks/backlog/2026-03-16-notification-system-phase1-followups.md`, dissolved in the
+2026-09-30 weekly queue audit:
+
+- [ ] Rate limiting on the non-push notification routes. Only the push-subscription routes are
+      rate-limited today (`apps/api/src/routes/notifications.ts:116,139`).
+- [ ] A size cap on notification `metadata`. Title and body are truncated by the service helpers
+      (`MAX_NOTIFICATION_TITLE_LENGTH`, `MAX_NOTIFICATION_BODY_LENGTH`); metadata is unbounded.
+- [ ] WebSocket identity tagging: connections are accepted without tags
+      (`apps/api/src/durable-objects/notification.ts:619`).

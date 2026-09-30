@@ -1,5 +1,23 @@
 # Fix: Git identity not configured in conversation-mode workspaces
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - `ensureGitIdentity` warns instead of skipping silently
+>     (`packages/vm-agent/internal/bootstrap/bootstrap.go:2800-2802`); the noreply fallback is at
+>     `:2770-2780`.
+>   - TaskRunner workspaces (task and conversation mode on VMs) pass the identity
+>     (`apps/api/src/durable-objects/task-runner/workspace-steps.ts:485-487`), and so does direct
+>     workspace creation (`apps/api/src/routes/workspaces/workspace-create.ts:534`).
+> - **Still open:**
+>   - The VM recovery path still builds `ProvisionState{}` without `GitUserName`, `GitUserEmail` or
+>     `GitHubID` (`packages/vm-agent/internal/server/workspace_provisioning.go:229-252`).
+>   - Instant (cf-container) chats get no identity at all: the create payload has none
+>     (`apps/api/src/services/instant-session.ts:432-451`), the standalone agent only sets up a
+>     credential helper (`packages/vm-agent/internal/server/standalone_git.go:90-127`), and
+>     `apps/api/Dockerfile.vm-agent-container` sets none. They likely hit the original "Author
+>     identity unknown" error.
+
 ## Problem
 
 Conversation-mode (lightweight) workspaces do not have `git user.name` and `git user.email` configured. Agents cannot commit without manually setting git identity first.
