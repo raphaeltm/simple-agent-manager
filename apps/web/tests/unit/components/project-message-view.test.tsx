@@ -50,6 +50,7 @@ const mocks = vi.hoisted(() => ({
   listChatMessages: vi.fn(),
   listActivityEvents: vi.fn(),
   listNotifications: vi.fn(),
+  listAcpInteractions: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -186,6 +187,11 @@ vi.mock('../../../src/lib/api/notifications', async (importOriginal) => ({
   listNotifications: mocks.listNotifications,
 }));
 
+vi.mock('../../../src/lib/api/acp-interactions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/acp-interactions')>()),
+  listAcpInteractions: mocks.listAcpInteractions,
+}));
+
 // Safe defaults so any expanded-header / timeline fetch resolves to empty rather
 // than `undefined` (SessionHeader chains `.then()` on listChatMessages). These
 // implementations survive `vi.clearAllMocks()` (which clears calls, not impls),
@@ -265,6 +271,7 @@ beforeEach(() => {
       comment: makeCommentThread({ id: commentId, status: 'sent' }),
     })
   );
+  mocks.listAcpInteractions.mockResolvedValue({ pending: [], settled: [], cursor: null });
 });
 
 // --- Test helpers ---
@@ -409,6 +416,41 @@ function renderWorkspaceBadgeFixture(sessionId: string, workspace: WorkspaceBadg
 
   render(<ProjectMessageView projectId="proj-1" sessionId={sessionId} />);
 }
+
+describe('ProjectMessageView — ACP permission refresh signal', () => {
+  it('refetches the snapshot through the real message view when its attention signal changes', async () => {
+    const pending = {
+      interactionId: '11111111-1111-4111-8111-111111111111',
+      kind: 'permission' as const,
+      state: 'pending' as const,
+      createdAt: Date.now(),
+      deadlineAt: Date.now() + 60_000,
+    };
+    mocks.getChatSession.mockResolvedValue({
+      ...makeSessionResponse('session-1', [makeMessage('m1', 'session-1', 'Hello')]),
+      session: { ...makeSession('session-1'), isMine: false },
+    });
+    mocks.listAcpInteractions
+      .mockResolvedValueOnce({ pending: [], settled: [], cursor: null })
+      .mockResolvedValueOnce({ pending: [pending], settled: [], cursor: null });
+
+    const { rerender } = render(
+      <ProjectMessageView projectId="proj-1" sessionId="session-1" permissionRefreshSignal={null} />
+    );
+    await waitFor(() => expect(mocks.listAcpInteractions).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <ProjectMessageView
+        projectId="proj-1"
+        sessionId="session-1"
+        permissionRefreshSignal="permission-marker-1:ACP permission required"
+      />
+    );
+
+    await waitFor(() => expect(mocks.listAcpInteractions).toHaveBeenCalledTimes(2));
+    expect(mocks.listAcpInteractions).toHaveBeenLastCalledWith('proj-1', 'session-1');
+  });
+});
 
 describe('ProjectMessageView — session isolation', () => {
   beforeEach(() => {

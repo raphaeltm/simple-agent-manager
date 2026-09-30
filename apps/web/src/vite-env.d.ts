@@ -31,6 +31,8 @@ interface ImportMetaEnv {
   readonly VITE_TRIAL_STATUS_STALE_TIME_MS?: string;
   readonly VITE_CACHED_COMMANDS_STALE_TIME_MS?: string;
   readonly VITE_ACP_PERMISSION_POLL_MS?: string;
+  readonly VITE_ACP_PERMISSION_RECOVERY_POLL_MS?: string;
+  readonly VITE_ACP_PERMISSION_QUERY_RETRY_COUNT?: string;
   readonly VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS?: string;
   readonly DEV: boolean;
   readonly PROD: boolean;

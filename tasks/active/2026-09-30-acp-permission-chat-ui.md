@@ -42,6 +42,28 @@ Selected: variant 1. The permission stays visible even when a tool group is coll
 - [x] Run scoped lint, typecheck, tests, build, task completion validation, and specialist reviews.
 - [x] Create a draft PR only. Do not mark ready, merge, deploy, mutate staging, or activate global flags.
 
+### Parent review follow-up (PR #2200)
+
+Preflight classification remains `cross-component-change`, `business-logic-change`,
+`security-sensitive-change`, and `ui-change`, scoped to `apps/web`. The project-level
+attention event already reaches `useSessionReducer`; the chat permission query needs an
+explicit refresh signal from that state plus a slow, visibility-aware recovery cadence.
+Choice acquisition needs a synchronous in-memory guard before Web Crypto yields. A
+snapshot authorization failure must evict the rendered card immediately so its transient
+detail component unmounts. The mobile jump control needs reserved clearance around exact
+permission option hit targets. No public API, Worker, shared schema, VM, or documentation
+contract changes are required.
+
+- [x] Refresh the permission snapshot when the active session attention marker changes.
+- [x] Keep a bounded idle recovery poll while preserving the faster pending/delivery poll.
+- [x] Prove empty → pending and a second post-settlement request without reconnect, focus, or remount, plus bounded request counts.
+- [x] Clear rendered interactions and unmount cached transient detail on observed 401/403 authorization failure.
+- [x] Acquire a synchronous option lock and answer key before hashing; re-check mount, identity, permission state, and deadline after hashing.
+- [x] Surface digest failure safely and block concurrent option/retry submissions with deterministic deferred-digest tests.
+- [x] Reserve mobile clearance between permission option hit targets and jump-to-latest; assert geometry at 320px, 375px, and desktop.
+- [ ] Capture, inspect, and post updated Playwright screenshots.
+- [ ] Re-run focused checks, specialist review, and CI; preserve draft-only handoff.
+
 ## Acceptance criteria
 
 - A permission with a known `toolCallId` is rendered directly after the matching tool activity row; a request with no/missing tool anchor still renders.

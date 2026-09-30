@@ -25,6 +25,8 @@ export type Submission = {
   message: string | null;
 };
 
+const CHOICE_PREPARATION_ERROR = 'Could not prepare this answer. Choose an option to try again.';
+
 interface UseAcpPermissionCardParams {
   interaction: AcpInteractionSnapshotItem;
   projectId: string;
@@ -164,11 +166,30 @@ function usePermissionSubmission(params: {
 }) {
   const { projectId, sessionId, interactionId, mayReveal, onRefresh, onRevoked } = params;
   const [submission, setSubmission] = useState<Submission | null>(null);
+  const [submissionLocked, setSubmissionLocked] = useState(false);
+  const inFlightRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const identityKey = `${projectId}:${sessionId}:${interactionId}`;
+  const latestRef = useRef({ identityKey, mayReveal });
+  latestRef.current = { identityKey, mayReveal };
   useEffect(() => {
-    if (!mayReveal) setSubmission(null);
-  }, [mayReveal]);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    inFlightRef.current = null;
+    setSubmissionLocked(false);
+    setSubmission(null);
+  }, [identityKey, mayReveal]);
   const submit = useCallback(
     async (next: Submission) => {
+      if (inFlightRef.current || !latestRef.current.mayReveal) return;
+      const submittedIdentity = identityKey;
+      const submissionToken = `${submittedIdentity}:${next.answerKey}`;
+      inFlightRef.current = submissionToken;
+      setSubmissionLocked(true);
       setSubmission({ ...next, status: 'submitting', message: null });
       try {
         await answerAcpInteraction(projectId, sessionId, interactionId, {
@@ -179,6 +200,7 @@ function usePermissionSubmission(params: {
             answerHash: next.answerHash,
           },
         });
+        if (!mountedRef.current || latestRef.current.identityKey !== submittedIdentity) return;
         setSubmission({
           ...next,
           status: 'accepted',
@@ -186,15 +208,25 @@ function usePermissionSubmission(params: {
         });
         await onRefresh();
       } catch (error: unknown) {
+        if (!mountedRef.current || latestRef.current.identityKey !== submittedIdentity) return;
         const failed = submissionFailure(error, next);
         if (failed.status === 'revoked') onRevoked();
         setSubmission(failed);
         if (failed.status === 'conflict') await onRefresh();
+      } finally {
+        if (inFlightRef.current === submissionToken) inFlightRef.current = null;
+        if (
+          mountedRef.current &&
+          latestRef.current.identityKey === submittedIdentity &&
+          inFlightRef.current === null
+        ) {
+          setSubmissionLocked(false);
+        }
       }
     },
-    [interactionId, onRefresh, onRevoked, projectId, sessionId]
+    [identityKey, interactionId, onRefresh, onRevoked, projectId, sessionId]
   );
-  return { submission, submit };
+  return { submission, submissionLocked, submit };
 }
 
 export function useAcpPermissionCard(params: UseAcpPermissionCardParams) {
@@ -217,23 +249,84 @@ export function useAcpPermissionCard(params: UseAcpPermissionCardParams) {
   });
   const { submission: currentSubmission, submit } = submission;
   const { deadlinePassed, setNow } = deadline;
+  const identityKey = `${projectId}:${sessionId}:${interaction.interactionId}`;
+  const mountedRef = useRef(true);
+  const choiceLockRef = useRef<string | null>(null);
+  const latestEligibilityRef = useRef({
+    identityKey,
+    mayReveal,
+    state: interaction.state,
+    deadlineAt: interaction.deadlineAt,
+  });
+  latestEligibilityRef.current = {
+    identityKey,
+    mayReveal,
+    state: interaction.state,
+    deadlineAt: interaction.deadlineAt,
+  };
+  const [choiceLocked, setChoiceLocked] = useState(false);
+  const [choiceError, setChoiceError] = useState<string | null>(null);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    choiceLockRef.current = null;
+    setChoiceLocked(false);
+    setChoiceError(null);
+  }, [identityKey, mayReveal]);
   const chooseOption = useCallback(
     async (option: PermissionOption) => {
-      if (currentSubmission || deadlinePassed) return;
-      const answerHash = await sha256Hex(option.id);
-      if (Date.now() >= interaction.deadlineAt) {
-        setNow(Date.now());
+      if (choiceLockRef.current || currentSubmission || deadlinePassed) return;
+      const answerKey = crypto.randomUUID();
+      choiceLockRef.current = answerKey;
+      setChoiceLocked(true);
+      setChoiceError(null);
+      let answerHash: string;
+      try {
+        answerHash = await sha256Hex(option.id);
+      } catch {
+        if (mountedRef.current && choiceLockRef.current === answerKey) {
+          choiceLockRef.current = null;
+          setChoiceLocked(false);
+          setChoiceError(CHOICE_PREPARATION_ERROR);
+        }
         return;
       }
-      await submit({
-        option,
-        answerKey: crypto.randomUUID(),
-        answerHash,
-        status: 'submitting',
-        message: null,
-      });
+      const latest = latestEligibilityRef.current;
+      const stillEligible =
+        mountedRef.current &&
+        choiceLockRef.current === answerKey &&
+        latest.identityKey === identityKey &&
+        latest.mayReveal &&
+        latest.state === 'pending' &&
+        Date.now() < latest.deadlineAt;
+      if (!stillEligible) {
+        if (mountedRef.current && choiceLockRef.current === answerKey) {
+          choiceLockRef.current = null;
+          setChoiceLocked(false);
+          if (Date.now() >= latest.deadlineAt) setNow(Date.now());
+        }
+        return;
+      }
+      try {
+        await submit({
+          option,
+          answerKey,
+          answerHash,
+          status: 'submitting',
+          message: null,
+        });
+      } finally {
+        if (mountedRef.current && choiceLockRef.current === answerKey) {
+          choiceLockRef.current = null;
+          setChoiceLocked(false);
+        }
+      }
     },
-    [currentSubmission, deadlinePassed, interaction.deadlineAt, setNow, submit]
+    [currentSubmission, deadlinePassed, identityKey, setNow, submit]
   );
   return {
     ...deadline,
@@ -241,6 +334,8 @@ export function useAcpPermissionCard(params: UseAcpPermissionCardParams) {
     secureDetail: mayReveal ? detail.detail : null,
     detailState: detail.state,
     retryDetail: detail.retry,
+    choiceLocked,
+    choiceError,
     ...submission,
     chooseOption,
   };

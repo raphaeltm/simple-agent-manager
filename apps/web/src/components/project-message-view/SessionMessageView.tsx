@@ -77,6 +77,8 @@ export interface ProjectMessageViewProps {
   targetMessageTimestamp?: number | null;
   /** Called once a route-level target has been consumed so refreshes do not re-jump. */
   onTargetMessageConsumed?: () => void;
+  /** Changes whenever project realtime attention state changes for this session. */
+  permissionRefreshSignal?: string | null;
 }
 
 export const SessionMessageView: FC<ProjectMessageViewProps> = ({
@@ -100,6 +102,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   targetMessageId,
   targetMessageTimestamp,
   onTargetMessageConsumed,
+  permissionRefreshSignal,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatLogRef = useRef<HTMLDivElement>(null);
@@ -133,9 +136,12 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     sessionId,
     viewerId,
     connectionState: lc.connectionState,
+    refreshSignal: permissionRefreshSignal,
   });
-  const { interactions: permissionItems, refresh: refreshPermissionInteractions } =
-    permissionInteractions;
+  const permissionItems = permissionInteractions.authorizationError
+    ? []
+    : permissionInteractions.interactions;
+  const refreshPermissionInteractions = permissionInteractions.refresh;
 
   // One derivation feeds the header chip, the drawer, and the timeline, so the
   // three can never disagree about how many comments are outstanding.

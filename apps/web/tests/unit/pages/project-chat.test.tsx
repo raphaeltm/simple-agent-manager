@@ -56,8 +56,7 @@ const mocks = vi.hoisted(() => ({
   }>,
   /** Captures the onSessionEvent callback passed to useProjectWebSocket. */
   capturedOnSessionEvent: null as
-    | ((event: { type: string; payload: Record<string, unknown> }) => void)
-    | null,
+    ((event: { type: string; payload: Record<string, unknown> }) => void) | null,
   /** Captures the onReconnected callback passed to useProjectWebSocket. */
   capturedOnReconnected: null as (() => void) | null,
 }));
@@ -1530,6 +1529,49 @@ describe('ProjectChat realtime sidebar updates (capability test)', () => {
     await waitFor(() => {
       expect(screen.getByText('New realtime session')).toBeInTheDocument();
     });
+  });
+
+  it('forwards realtime attention changes as the mounted permission refresh signal', async () => {
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [{ ...SESSION_1, attention: null }],
+      total: 1,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_1.id}`);
+    await waitFor(() => expect(screen.getByTestId('message-view')).toBeInTheDocument());
+    expect(capturedMessageViewProps.current?.permissionRefreshSignal).toBeNull();
+
+    const onSessionEvent = mocks.capturedOnSessionEvent;
+    expect(onSessionEvent).toBeTruthy();
+    await act(async () => {
+      onSessionEvent?.({
+        type: 'attention.created',
+        payload: {
+          sessionId: SESSION_1.id,
+          markerId: 'permission-marker-1',
+          kind: 'needs_input',
+          createdAt: 1_234,
+          expiresAt: 5_678,
+          reason: 'ACP permission required',
+          options: [],
+        },
+      });
+    });
+    await waitFor(() =>
+      expect(capturedMessageViewProps.current?.permissionRefreshSignal).toBe(
+        'permission-marker-1:ACP permission required'
+      )
+    );
+
+    await act(async () => {
+      onSessionEvent?.({
+        type: 'attention.resolved',
+        payload: { sessionId: SESSION_1.id, markerId: 'permission-marker-1' },
+      });
+    });
+    await waitFor(() =>
+      expect(capturedMessageViewProps.current?.permissionRefreshSignal).toBeNull()
+    );
   });
 
   it('does a full refetch on reconnect', async () => {

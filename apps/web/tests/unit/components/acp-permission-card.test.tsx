@@ -122,6 +122,192 @@ describe('AcpPermissionCard', () => {
     expect(mocks.answer.mock.calls[1]?.[3]).toEqual(mocks.answer.mock.calls[0]?.[3]);
   });
 
+  it('locks synchronously before a deferred digest so two different clicks submit one choice', async () => {
+    const digest = deferred<ArrayBuffer>();
+    const digestSpy = vi.spyOn(crypto.subtle, 'digest').mockReturnValueOnce(digest.promise);
+    try {
+      render(
+        <AcpPermissionCard
+          interaction={interaction()}
+          projectId="project-1"
+          sessionId="session-1"
+          canAnswer
+          onRefresh={vi.fn().mockResolvedValue(undefined)}
+        />
+      );
+
+      const reject = await screen.findByRole('button', { name: 'Reject once' });
+      const allow = screen.getByRole('button', { name: 'Allow once' });
+      fireEvent.click(reject);
+      fireEvent.click(allow);
+
+      expect(digestSpy).toHaveBeenCalledTimes(1);
+      expect(mocks.answer).not.toHaveBeenCalled();
+      digest.resolve(new Uint8Array(32).buffer);
+      await waitFor(() => expect(mocks.answer).toHaveBeenCalledTimes(1));
+      expect(mocks.answer.mock.calls[0]?.[3]).toMatchObject({
+        decision: { optionId: 'reject-exact' },
+      });
+    } finally {
+      digestSpy.mockRestore();
+    }
+  });
+
+  it('releases the synchronous lock and reports a digest failure without submitting', async () => {
+    const digestSpy = vi
+      .spyOn(crypto.subtle, 'digest')
+      .mockRejectedValueOnce(new Error('digest unavailable'));
+    try {
+      render(
+        <AcpPermissionCard
+          interaction={interaction()}
+          projectId="project-1"
+          sessionId="session-1"
+          canAnswer
+          onRefresh={vi.fn().mockResolvedValue(undefined)}
+        />
+      );
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Allow once' }));
+      expect(
+        await screen.findByText('Could not prepare this answer. Choose an option to try again.')
+      ).toBeInTheDocument();
+      expect(mocks.answer).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Reject once' })).toBeEnabled();
+    } finally {
+      digestSpy.mockRestore();
+    }
+  });
+
+  it('re-checks the current permission after hashing before it submits', async () => {
+    const digest = deferred<ArrayBuffer>();
+    const digestSpy = vi.spyOn(crypto.subtle, 'digest').mockReturnValueOnce(digest.promise);
+    const props = {
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      canAnswer: true,
+      onRefresh: vi.fn().mockResolvedValue(undefined),
+    };
+    try {
+      const { rerender } = render(
+        <AcpPermissionCard {...props} interaction={interaction({ state: 'pending' })} />
+      );
+      fireEvent.click(await screen.findByRole('button', { name: 'Allow once' }));
+      rerender(
+        <AcpPermissionCard {...props} interaction={interaction({ state: 'interrupted' })} />
+      );
+      digest.resolve(new Uint8Array(32).buffer);
+
+      await waitFor(() => expect(screen.getByText('Request interrupted')).toBeInTheDocument());
+      expect(mocks.answer).not.toHaveBeenCalled();
+    } finally {
+      digestSpy.mockRestore();
+    }
+  });
+
+  it('does not submit a deferred choice after the mounted card changes identity', async () => {
+    const digest = deferred<ArrayBuffer>();
+    const digestSpy = vi.spyOn(crypto.subtle, 'digest').mockReturnValueOnce(digest.promise);
+    const props = {
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      canAnswer: true,
+      onRefresh: vi.fn().mockResolvedValue(undefined),
+    };
+    try {
+      const { rerender } = render(<AcpPermissionCard {...props} interaction={interaction()} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Allow once' }));
+      rerender(
+        <AcpPermissionCard
+          {...props}
+          interaction={interaction({ interactionId: '22222222-2222-4222-8222-222222222222' })}
+        />
+      );
+      digest.resolve(new Uint8Array(32).buffer);
+
+      await act(async () => Promise.resolve());
+      expect(mocks.answer).not.toHaveBeenCalled();
+    } finally {
+      digestSpy.mockRestore();
+    }
+  });
+
+  it('does not submit a deferred choice after its deadline passes', async () => {
+    let now = 1_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const digest = deferred<ArrayBuffer>();
+    const digestSpy = vi.spyOn(crypto.subtle, 'digest').mockReturnValueOnce(digest.promise);
+    try {
+      render(
+        <AcpPermissionCard
+          interaction={interaction({ createdAt: 900, deadlineAt: 1_100 })}
+          projectId="project-1"
+          sessionId="session-1"
+          canAnswer
+          onRefresh={vi.fn().mockResolvedValue(undefined)}
+        />
+      );
+      fireEvent.click(await screen.findByRole('button', { name: 'Allow once' }));
+      now = 1_101;
+      digest.resolve(new Uint8Array(32).buffer);
+
+      await waitFor(() => expect(screen.getByText('Request expired')).toBeInTheDocument());
+      expect(mocks.answer).not.toHaveBeenCalled();
+    } finally {
+      digestSpy.mockRestore();
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('does not submit a deferred choice after the card unmounts', async () => {
+    const digest = deferred<ArrayBuffer>();
+    const digestSpy = vi.spyOn(crypto.subtle, 'digest').mockReturnValueOnce(digest.promise);
+    try {
+      const { unmount } = render(
+        <AcpPermissionCard
+          interaction={interaction()}
+          projectId="project-1"
+          sessionId="session-1"
+          canAnswer
+          onRefresh={vi.fn().mockResolvedValue(undefined)}
+        />
+      );
+      fireEvent.click(await screen.findByRole('button', { name: 'Allow once' }));
+      unmount();
+      digest.resolve(new Uint8Array(32).buffer);
+
+      await act(async () => Promise.resolve());
+      expect(mocks.answer).not.toHaveBeenCalled();
+    } finally {
+      digestSpy.mockRestore();
+    }
+  });
+
+  it('guards concurrent retry clicks while preserving the original idempotency body', async () => {
+    const retry = deferred<{ accepted: boolean; state: string }>();
+    mocks.answer
+      .mockRejectedValueOnce(new TypeError('network response lost'))
+      .mockReturnValueOnce(retry.promise);
+    render(
+      <AcpPermissionCard
+        interaction={interaction()}
+        projectId="project-1"
+        sessionId="session-1"
+        canAnswer
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject once' }));
+    const retryButton = await screen.findByRole('button', { name: 'Retry Reject once' });
+    fireEvent.click(retryButton);
+    fireEvent.click(retryButton);
+
+    expect(mocks.answer).toHaveBeenCalledTimes(2);
+    expect(mocks.answer.mock.calls[1]?.[3]).toEqual(mocks.answer.mock.calls[0]?.[3]);
+    retry.resolve({ accepted: true, state: 'answered' });
+  });
+
   it('refreshes canonical state when another tab commits first', async () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     mocks.answer.mockRejectedValue(new ApiClientError('CONFLICT', 'Already answered', 409));

@@ -31,6 +31,11 @@ function resolvePositiveInteger(raw: string | undefined, fallback: number): numb
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function resolveNonNegativeInteger(raw: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(raw ?? '', 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 function resolveRatio(raw: string | undefined, fallback: number): number {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : fallback;
@@ -136,6 +141,20 @@ export const DEFAULT_ACP_PERMISSION_POLL_MS = 2_000;
 export const ACP_PERMISSION_POLL_MS = resolveIntervalMs(
   import.meta.env.VITE_ACP_PERMISSION_POLL_MS,
   DEFAULT_ACP_PERMISSION_POLL_MS
+);
+
+/** Slow reconciliation when no ACP interaction currently needs delivery tracking. */
+export const DEFAULT_ACP_PERMISSION_RECOVERY_POLL_MS = 30_000;
+export const ACP_PERMISSION_RECOVERY_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_ACP_PERMISSION_RECOVERY_POLL_MS,
+  DEFAULT_ACP_PERMISSION_RECOVERY_POLL_MS
+);
+
+/** Retry budget for transient ACP permission snapshot failures; authorization failures never retry. */
+export const DEFAULT_ACP_PERMISSION_QUERY_RETRY_COUNT = 3;
+export const ACP_PERMISSION_QUERY_RETRY_COUNT = resolveNonNegativeInteger(
+  import.meta.env.VITE_ACP_PERMISSION_QUERY_RETRY_COUNT,
+  DEFAULT_ACP_PERMISSION_QUERY_RETRY_COUNT
 );
 
 /**

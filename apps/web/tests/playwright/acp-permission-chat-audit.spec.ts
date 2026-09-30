@@ -176,6 +176,8 @@ type PermissionBackend = {
   detailRequests: string[];
   dropFirstAnswerReceipt: boolean;
   holdSnapshot: boolean;
+  snapshotFailureStatus: 401 | 403 | null;
+  snapshotRequests: number;
   initialSnapshot: ReturnType<typeof ownerSnapshot>;
   snapshot: ReturnType<typeof ownerSnapshot>;
 };
@@ -187,6 +189,8 @@ function createPermissionBackend(): PermissionBackend {
     detailRequests: [],
     dropFirstAnswerReceipt: false,
     holdSnapshot: false,
+    snapshotFailureStatus: null,
+    snapshotRequests: 0,
     initialSnapshot: snapshot,
     snapshot,
   };
@@ -212,6 +216,13 @@ async function setupPermissionMocks(
   await page.route(
     `**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/interactions`,
     (route: Route) => {
+      backend.snapshotRequests += 1;
+      if (backend.snapshotFailureStatus) {
+        return route.fulfill({
+          status: backend.snapshotFailureStatus,
+          json: { error: 'FORBIDDEN', message: 'Forbidden' },
+        });
+      }
       const visibleSnapshot = backend.holdSnapshot ? backend.initialSnapshot : backend.snapshot;
       if (!isMine) {
         return route.fulfill({
@@ -307,6 +318,9 @@ async function setupPermissionMocks(
     answerBodies: backend.answerBodies,
     backend,
     detailRequests: backend.detailRequests,
+    revokeSnapshotAccess: () => {
+      backend.snapshotFailureStatus = 403;
+    },
     dropNextAnswerReceipt: () => {
       backend.dropFirstAnswerReceipt = true;
     },
@@ -392,6 +406,53 @@ async function positionAnchoredCardBelowStickyHeader(page: Page) {
     .toBeGreaterThanOrEqual(12);
 }
 
+async function assertPermissionHitTargetsClearOfJumpButton(page: Page) {
+  const jumpButton = page.getByRole('button', { name: 'Scroll to bottom' });
+  const optionButtons = page
+    .getByTestId(`acp-permission-${ANCHORED_ID}`)
+    .getByTestId('acp-permission-options')
+    .getByRole('button');
+  const count = await optionButtons.count();
+  expect(count).toBeGreaterThan(0);
+  for (let index = 0; index < count; index += 1) {
+    const option = optionButtons.nth(index);
+    await option.scrollIntoViewIfNeeded();
+    await expect(option).toBeVisible();
+    await expect(jumpButton).toBeVisible();
+    const jumpBox = await jumpButton.boundingBox();
+    const optionBox = await option.boundingBox();
+    expect(jumpBox).not.toBeNull();
+    expect(optionBox).not.toBeNull();
+    expect(optionBox!.height).toBeGreaterThanOrEqual(44);
+    expect(optionBox!.width).toBeGreaterThanOrEqual(44);
+    const horizontalOverlap = Math.max(
+      0,
+      Math.min(optionBox!.x + optionBox!.width, jumpBox!.x + jumpBox!.width) -
+        Math.max(optionBox!.x, jumpBox!.x)
+    );
+    const verticalOverlap = Math.max(
+      0,
+      Math.min(optionBox!.y + optionBox!.height, jumpBox!.y + jumpBox!.height) -
+        Math.max(optionBox!.y, jumpBox!.y)
+    );
+    expect(horizontalOverlap * verticalOverlap).toBe(0);
+    const optionId = await option.getAttribute('data-option-id');
+    expect(
+      await page.evaluate(
+        ({ x, y, expectedOptionId }) => {
+          const hit = document.elementFromPoint(x, y);
+          return hit?.closest('button')?.getAttribute('data-option-id') === expectedOptionId;
+        },
+        {
+          x: optionBox!.x + optionBox!.width / 2,
+          y: optionBox!.y + optionBox!.height / 2,
+          expectedOptionId: optionId,
+        }
+      )
+    ).toBe(true);
+  }
+}
+
 async function openDetailFailureSurface(page: Page, status: 403 | 500) {
   await setupPermissionMocks(page, true, createPermissionBackend(), status);
   await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
@@ -416,7 +477,25 @@ test.describe('ACP permission cards — Mobile', () => {
   test('renders anchored and unanchored owner requests with stress data', async ({ page }) => {
     await openPermissionSurface(page, true);
     await positionAnchoredCardBelowStickyHeader(page);
+    await assertPermissionHitTargetsClearOfJumpButton(page);
     await screenshot(page, 'acp-permission-chat-owner-mobile');
+  });
+
+  test('removes already-rendered secure detail after snapshot authorization is revoked', async ({
+    page,
+  }) => {
+    const evidence = await openPermissionSurface(page, true);
+    expect(evidence.detailRequests.length).toBeGreaterThan(0);
+    evidence.revokeSnapshotAccess();
+
+    await expect(page.getByText('Allow this command to modify deployment files? 🚀')).toHaveCount(
+      0,
+      { timeout: 5_000 }
+    );
+    await expect(
+      page.getByRole('button', { name: 'Allow this exact operation once — no future commands' })
+    ).toHaveCount(0);
+    expect(evidence.backend.snapshotRequests).toBeGreaterThanOrEqual(2);
   });
 
   test('shows generic waiting only to a noncreator', async ({ page }) => {
@@ -488,6 +567,7 @@ test.describe('ACP permission cards — Desktop', () => {
   test('renders anchored and unanchored owner requests with stress data', async ({ page }) => {
     await openPermissionSurface(page, true);
     await positionAnchoredCardBelowStickyHeader(page);
+    await assertPermissionHitTargetsClearOfJumpButton(page);
     await screenshot(page, 'acp-permission-chat-owner-desktop');
   });
 
@@ -505,5 +585,16 @@ test.describe('ACP permission cards — Desktop', () => {
   test('removes secure controls after detail access is revoked', async ({ page }) => {
     await openDetailFailureSurface(page, 403);
     await screenshot(page, 'acp-permission-chat-detail-revoked-desktop');
+  });
+});
+
+test.describe('ACP permission cards — Narrow mobile', () => {
+  test.use({ viewport: { width: 320, height: 667 }, isMobile: true, hasTouch: true });
+
+  test('keeps exact option hit targets clear of jump-to-latest at 320px', async ({ page }) => {
+    await openPermissionSurface(page, true);
+    await positionAnchoredCardBelowStickyHeader(page);
+    await assertPermissionHitTargetsClearOfJumpButton(page);
+    await screenshot(page, 'acp-permission-chat-owner-narrow-mobile');
   });
 });

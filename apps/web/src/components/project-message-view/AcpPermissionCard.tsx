@@ -170,14 +170,18 @@ function PermissionOptions({
   onChoose: (option: PermissionOption) => void;
 }) {
   return (
-    <div className="flex min-w-0 flex-wrap gap-2" aria-label="Permission options">
+    <div
+      className="flex min-w-0 flex-wrap gap-2 pr-14 sm:pr-0"
+      aria-label="Permission options"
+      data-testid="acp-permission-options"
+    >
       {options.map((option) => (
         <Button
           key={option.id}
           type="button"
           size="sm"
           variant={option.kind.startsWith('reject') ? 'danger' : 'secondary'}
-          className="h-auto min-w-0 max-w-full !whitespace-normal break-words text-left"
+          className="h-auto min-h-11 min-w-0 max-w-full !whitespace-normal break-words text-left"
           disabled={disabled}
           onClick={() => onChoose(option)}
           data-option-id={option.id}
@@ -193,12 +197,14 @@ function PermissionDetails({
   state,
   detail,
   submission,
+  choiceLocked,
   onRetry,
   onChoose,
 }: {
   state: 'idle' | 'loading' | 'ready' | 'error' | 'revoked';
   detail: PermissionDetail | null;
   submission: Submission | null;
+  choiceLocked: boolean;
   onRetry: () => void;
   onChoose: (option: PermissionOption) => void;
 }) {
@@ -231,7 +237,7 @@ function PermissionDetails({
       <PermissionDescription detail={detail} />
       <PermissionOptions
         options={detail.options}
-        disabled={submission !== null}
+        disabled={submission !== null || choiceLocked}
         onChoose={onChoose}
       />
     </>
@@ -241,9 +247,11 @@ function PermissionDetails({
 function SubmissionStatus({
   submission,
   onRetry,
+  disabled,
 }: {
   submission: Submission | null;
   onRetry: (submission: Submission) => void;
+  disabled: boolean;
 }) {
   if (!submission?.message) return null;
   return (
@@ -256,7 +264,13 @@ function SubmissionStatus({
         {submission.message}
       </p>
       {submission.status === 'uncertain' && (
-        <Button type="button" size="sm" variant="secondary" onClick={() => onRetry(submission)}>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          disabled={disabled}
+          onClick={() => onRetry(submission)}
+        >
           Retry {submission.option.name}
         </Button>
       )}
@@ -286,14 +300,21 @@ function PermissionCardContent({
             state={card.detailState}
             detail={card.secureDetail}
             submission={card.submission}
+            choiceLocked={card.choiceLocked}
             onRetry={card.retryDetail}
             onChoose={(option) => void card.chooseOption(option)}
           />
         </div>
       )}
+      {card.mayReveal && card.choiceError && (
+        <p className="mt-3 text-sm text-danger" role="alert">
+          {card.choiceError}
+        </p>
+      )}
       {card.mayReveal && (
         <SubmissionStatus
           submission={card.submission}
+          disabled={card.submissionLocked}
           onRetry={(submission) => void card.submit(submission)}
         />
       )}
