@@ -69,8 +69,8 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    A["Per-env host-port offset collision<br/>buildDeploymentRouteTargets uses route index only;<br/>two envs on one node both grab 35000.<br/>engine.go skips composeDown of prior release.<br/>(tasks/backlog/2026-06-13-deployment-per-env-host-port-offset.md)"]:::open
-    B["Compose preview omits route-target ports<br/>GET .../compose renders without routeTargets;<br/>preview != real node payload.<br/>(tasks/backlog/2026-06-13-compose-preview-endpoint-route-targets.md)"]:::open
+    A["Per-env host-port offset collision<br/>buildDeploymentRouteTargets uses route index only;<br/>two envs on one node both grab 35000.<br/>engine.go skips composeDown of prior release.<br/>(tasks/archive/2026-06-13-deployment-per-env-host-port-offset.md)"]:::open
+    B["Compose preview omits route-target ports<br/>GET .../compose renders without routeTargets;<br/>preview != real node payload.<br/>(tasks/archive/2026-06-13-compose-preview-endpoint-route-targets.md)"]:::open
     C["Compose-parser test coverage<br/>(tasks/backlog/2026-06-11-compose-parser-test-coverage.md)"]:::open
     D["Deployment-provisioning route tests<br/>(tasks/backlog/2026-06-12-deployment-provisioning-route-tests.md)"]:::open
     E["docker-exec env token exposure<br/>(tasks/archive/2026-03-18-docker-exec-env-token-exposure.md)"]:::open

@@ -42,3 +42,7 @@ host-port allocation does not account for what else is bound on the node.
       non-overlapping host ports.
 - [ ] Regression test: a redeploy (seq N → N+1) in the same environment does not fail to
       rebind the public host port.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: #1312: per-environment port band (deployment-routing.ts:71-100) + teardown-before-start (engine.go:255-275); tests deployment-routing.test.ts, TestEngine_RedeployPortRebind._

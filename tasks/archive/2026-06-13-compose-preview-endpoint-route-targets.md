@@ -28,3 +28,7 @@ make public routes work.
       intentionally omitted from the preview.
 - [ ] Test asserting preview output matches node-apply output for a manifest with a public
       route (or asserting the documented difference).
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: #1312 (8ccbcee41): deployment-releases.ts:353-376 passes routeTargets matching the apply payload; tests compose-preview-parity.test.ts:110,158,231._
