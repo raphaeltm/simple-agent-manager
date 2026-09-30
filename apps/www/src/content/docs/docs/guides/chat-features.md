@@ -11,6 +11,12 @@ Recent chat updates make the workspace feel more like a persistent work surface:
 
 Agent output streams directly to your browser via WebSocket. You see code being written, terminal commands executing, and the agent's thought process as it happens — no waiting for a complete response.
 
+## Agent Questions
+
+When an ACP agent asks for structured input in a conversation session, the question appears as a form in the chat. The session creator can select choices, enter supported short values, send an answer, or decline. Other project members see that the agent is waiting, without seeing the question or its answers. The card shows when an answer is saved, delivered, interrupted, or expired, including after reconnecting to the chat.
+
+Form questions are available when the operator enables `ACP_INTERACTIONS_ENABLED` and `ACP_INTERACTION_FORMS_ENABLED`. Unsupported form schemas are cancelled explicitly. Task-mode forms and URL-based elicitation are not available in this slice.
+
 ## The Session Tool Rail
 
 Most of what you can do _to_ a session — rather than _say_ to it — lives in the **tool rail** down

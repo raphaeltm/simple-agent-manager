@@ -26,6 +26,7 @@ export const CapabilitiesSchema = v.object({
       version: v.number(),
       answerEndpoint: v.boolean(),
       permissionBridge: v.optional(v.boolean(), false),
+      formBridge: v.optional(v.boolean(), false),
     })
   ),
   checkpointRollover: v.object({

@@ -106,6 +106,7 @@ async function deliverAcceptedAnswer(
   if (target.status === 'ready') {
     const delivery = await deliverAcpInteractionAnswer(env, target.target, {
       interactionId,
+      kind: answer.summary.kind,
       generation: answer.delivery.generation,
       runtimeIdentity: answer.delivery.runtimeIdentity,
       decision,

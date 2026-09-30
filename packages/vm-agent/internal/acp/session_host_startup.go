@@ -594,6 +594,7 @@ func (h *SessionHost) attachACPConnection(process agentProcess, agentType string
 	if serializeTimeout <= 0 {
 		serializeTimeout = DefaultNotifSerializeTimeout
 	}
-	orderedStdout := newOrderedPipe(process.Stdout(), processedCh, h.lifecycleContext().Done(), serializeTimeout)
+	orderedStdout := newOrderedPipe(process.Stdout(), processedCh, h.lifecycleContext().Done(), serializeTimeout,
+		h.loadMirroredSessionID)
 	h.acpConn = acpsdk.NewClientSideConnection(client, process.Stdin(), orderedStdout)
 }

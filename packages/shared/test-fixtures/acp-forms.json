@@ -1,0 +1,443 @@
+[
+  {
+    "name": "claude_mcp_flat",
+    "source": "claude-agent-acp@0.81.2 mcpElicitationToCreateRequest",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "title": "Email",
+          "minLength": 3,
+          "maxLength": 80
+        },
+        "copies": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "confirm": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "email",
+        "confirm"
+      ]
+    },
+    "validSchema": true,
+    "answers": [
+      {
+        "content": {
+          "email": "a@b",
+          "copies": 3,
+          "confirm": false
+        },
+        "valid": true
+      },
+      {
+        "content": {
+          "email": "a@b"
+        },
+        "valid": false
+      },
+      {
+        "content": {
+          "email": "ab",
+          "confirm": true
+        },
+        "valid": false
+      },
+      {
+        "content": {
+          "email": "a@b",
+          "copies": 6,
+          "confirm": true
+        },
+        "valid": false
+      },
+      {
+        "content": {
+          "email": "a@b",
+          "confirm": true,
+          "extra": "x"
+        },
+        "valid": false
+      }
+    ]
+  },
+  {
+    "name": "claude_ask_user_question_selection_and_other",
+    "source": "claude-agent-acp@0.81.2 askUserQuestionsToCreateRequest",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "question_0": {
+          "type": "string",
+          "title": "Store",
+          "oneOf": [
+            {
+              "const": "D1",
+              "title": "D1",
+              "description": "Managed SQL",
+              "_meta": {
+                "_claude/askUserQuestionOption": {
+                  "preview": "SQL tables and transactions"
+                }
+              }
+            },
+            {
+              "const": "KV",
+              "title": "KV"
+            }
+          ],
+          "description": "Choose a store"
+        },
+        "question_0_custom": {
+          "type": "string",
+          "title": "Other",
+          "_meta": {
+            "_askUserQuestionCustomAnswer": {
+              "questionId": "question_0",
+              "isCustomAnswer": true
+            }
+          },
+          "description": "Type your own answer, or add a note to the option you chose above (optional)."
+        },
+        "question_1": {
+          "type": "array",
+          "title": "Regions",
+          "items": {
+            "anyOf": [
+              {
+                "const": "EU",
+                "title": "EU",
+                "description": "Europe"
+              },
+              {
+                "const": "US",
+                "title": "US",
+                "description": "United States"
+              }
+            ]
+          },
+          "description": "Choose regions"
+        },
+        "question_1_custom": {
+          "type": "string",
+          "title": "Other",
+          "_meta": {
+            "_askUserQuestionCustomAnswer": {
+              "questionId": "question_1",
+              "isCustomAnswer": true
+            }
+          },
+          "description": "Type your own answer to add to your selection above (optional)."
+        }
+      }
+    },
+    "validSchema": true,
+    "answers": [
+      {
+        "content": {
+          "question_0": "D1",
+          "question_0_custom": "for state",
+          "question_1": [
+            "EU",
+            "US"
+          ]
+        },
+        "valid": true
+      },
+      {
+        "content": {
+          "question_0_custom": "A custom store"
+        },
+        "valid": true
+      },
+      {
+        "content": {
+          "question_1": [
+            "APAC"
+          ]
+        },
+        "valid": false
+      },
+      {
+        "content": {
+          "question_1": [
+            "EU",
+            "EU"
+          ]
+        },
+        "valid": false
+      }
+    ]
+  },
+  {
+    "name": "codex_request_user_input_choice_and_note",
+    "source": "codex-acp@1.13.1 CodexElicitationHandler.buildUserInputRequest",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "title": "Which path?",
+          "oneOf": [
+            {
+              "const": "Fast",
+              "title": "Fast"
+            },
+            {
+              "const": "None of the above",
+              "title": "None of the above",
+              "description": "Provide a different answer in the note field."
+            }
+          ],
+          "_meta": {
+            "codex": {
+              "isOther": true,
+              "isSecret": false
+            }
+          }
+        },
+        "question_note": {
+          "type": "string",
+          "title": "Additional answer or note",
+          "_meta": {
+            "codex": {
+              "questionId": "question",
+              "role": "user_note",
+              "isSecret": false
+            }
+          }
+        }
+      },
+      "required": [
+        "question"
+      ]
+    },
+    "validSchema": true,
+    "answers": [
+      {
+        "content": {
+          "question": "Fast",
+          "question_note": "Ship today"
+        },
+        "valid": true
+      },
+      {
+        "content": {
+          "question": "Other"
+        },
+        "valid": false
+      },
+      {
+        "content": {
+          "question_note": "A different path"
+        },
+        "valid": false
+      }
+    ]
+  },
+  {
+    "name": "reject_pattern",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "(a+)+$"
+        }
+      }
+    },
+    "validSchema": false,
+    "answers": []
+  },
+  {
+    "name": "reject_nested",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "validSchema": false,
+    "answers": []
+  },
+  {
+    "name": "reject_unknown_root_constraint",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "validSchema": false,
+    "answers": []
+  },
+  {
+    "name": "reject_arbitrary_metadata",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "string",
+          "_meta": {
+            "arbitrary": {
+              "recursive": {
+                "secret": "no"
+              }
+            }
+          }
+        }
+      }
+    },
+    "validSchema": false,
+    "answers": []
+  },
+  {
+    "name": "reject_null_metadata",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "string",
+          "_meta": null
+        }
+      }
+    },
+    "validSchema": false,
+    "answers": []
+  },
+  {
+    "name": "reject_unknown_format",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "string",
+          "format": "email"
+        }
+      }
+    },
+    "validSchema": false,
+    "answers": []
+  },
+  {
+    "name": "reject_unsatisfiable_required",
+    "schema": {
+      "type": "object",
+      "properties": {},
+      "required": [
+        "missing"
+      ]
+    },
+    "validSchema": false,
+    "answers": []
+  },
+  {
+    "name": "reject_property_count_bound",
+    "limits": {
+      "propertiesMax": 1
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "first": {
+          "type": "string"
+        },
+        "second": {
+          "type": "boolean"
+        }
+      }
+    },
+    "validSchema": false,
+    "answers": []
+  },
+  {
+    "name": "reject_choice_count_bound",
+    "limits": {
+      "enumMax": 1
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "enum": [
+            "A",
+            "B"
+          ]
+        }
+      }
+    },
+    "validSchema": false,
+    "answers": []
+  },
+  {
+    "name": "reject_schema_byte_bound",
+    "limits": {
+      "schemaMaxBytes": 40
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string"
+        }
+      }
+    },
+    "validSchema": false,
+    "answers": []
+  },
+  {
+    "name": "answer_byte_and_string_bounds",
+    "limits": {
+      "answerMaxBytes": 40,
+      "stringMaxBytes": 5
+    },
+    "schema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ]
+    },
+    "validSchema": true,
+    "answers": [
+      {
+        "content": {
+          "question": "small"
+        },
+        "valid": true
+      },
+      {
+        "content": {
+          "question": "longer"
+        },
+        "valid": false
+      },
+      {
+        "content": {
+          "question": "😀😀"
+        },
+        "valid": false
+      }
+    ]
+  }
+]

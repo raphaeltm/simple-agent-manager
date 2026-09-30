@@ -111,6 +111,7 @@ export async function deliverAcpInteractionAnswer(
   target: AcpInteractionDeliveryTarget,
   input: {
     interactionId: string;
+    kind: 'permission' | 'form' | 'url';
     generation: string;
     runtimeIdentity: string;
     decision: AcpInteractionAnswerDecision;
@@ -144,6 +145,12 @@ export async function deliverAcpInteractionAnswer(
       !capabilities.interactions.permissionBridge
     ) {
       return { outcome: 'interrupted', reason: 'runtime permission bridge unsupported' };
+    }
+    if (input.kind === 'url') {
+      return { outcome: 'interrupted', reason: 'runtime URL bridge unsupported' };
+    }
+    if (input.kind === 'form' && !capabilities.interactions.formBridge) {
+      return { outcome: 'interrupted', reason: 'runtime form bridge unsupported' };
     }
     const raw = await nodeAgentRequest(
       target.nodeId,
@@ -188,7 +195,7 @@ export async function deliverAcpInteractionAnswer(
     log.warn('acp_interaction.answer_delivery_unconfirmed', {
       interactionId: input.interactionId,
       workspaceId: target.workspaceId,
-      error: error instanceof Error ? error.message : String(error),
+      reason: error instanceof Error ? error.name : 'unknown',
     });
     return { outcome: 'unconfirmed', reason: 'transport outcome unknown' };
   }

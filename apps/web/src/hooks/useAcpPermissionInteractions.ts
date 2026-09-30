@@ -65,7 +65,9 @@ export function useAcpPermissionInteractions({
     if (authorizationError || !query.data) return [];
     const pending = Array.isArray(query.data.pending) ? query.data.pending : [];
     const settled = Array.isArray(query.data.settled) ? query.data.settled : [];
-    return [...pending, ...settled].filter((interaction) => interaction.kind === 'permission');
+    return [...pending, ...settled].filter((interaction) =>
+      interaction.kind === 'permission' || interaction.kind === 'form'
+    );
   }, [authorizationError, query.data]);
 
   return {

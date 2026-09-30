@@ -53,15 +53,19 @@ func (h *SessionHost) initializeACP(ctx context.Context, agentType string, timeo
 
 	slog.Info("ACP: sending Initialize request", "timeout", timeout)
 	h.reportLifecycle("info", "ACP Initialize started", map[string]interface{}{"agentType": agentType})
+	capabilities := acpsdk.ClientCapabilities{
+		Fs: acpsdk.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
+	}
+	if config := h.acpInteractionConfigSnapshot(); config.Enabled && config.FormsEnabled && config.validate() == nil {
+		capabilities.Elicitation = &acpsdk.ElicitationCapabilities{Form: &acpsdk.ElicitationFormCapabilities{}}
+	}
 	resp, err := h.acpConn.Initialize(initCtx, acpsdk.InitializeRequest{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		ClientInfo: &acpsdk.Implementation{
 			Name:    "sam",
 			Version: sysinfo.Version,
 		},
-		ClientCapabilities: acpsdk.ClientCapabilities{
-			Fs: acpsdk.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
-		},
+		ClientCapabilities: capabilities,
 	})
 	if err != nil {
 		h.reportLifecycle("warn", "ACP Initialize failed", map[string]interface{}{

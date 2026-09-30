@@ -1815,6 +1815,7 @@ func (s *Server) handleAcpInteractionAnswer(w http.ResponseWriter, r *http.Reque
 	}
 
 	var body acpInteractionAnswerRequest
+	r.Body = http.MaxBytesReader(w, r.Body, host.AcpInteractionResponseMaxBytes())
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -1845,7 +1846,7 @@ func (s *Server) handleAcpInteractionAnswer(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "generation must be a UUID")
 		return
 	}
-	if err := acp.ValidatePermissionAcpInteractionDecision(body.Decision); err != nil {
+	if err := acp.ValidateAcpInteractionDecision(body.Decision); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -1895,6 +1896,7 @@ func (s *Server) agentCapabilities() map[string]interface{} {
 			"version":           acpInteractionCapabilityVersion,
 			"answerEndpoint":    true,
 			"permissionBridge":  true,
+			"formBridge":        true,
 			"deliverySemantics": "best_effort_no_wake",
 			"noWaiterStatus":    "no_waiter",
 			"staleStatus":       "stale_generation",

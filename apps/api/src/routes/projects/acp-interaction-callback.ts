@@ -2,7 +2,7 @@ import {
   AcpInteractionRuntimeCreateSchema,
   AcpInteractionRuntimeSettleSchema,
 } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -64,6 +64,23 @@ async function verifyWorkspaceCallback(c: {
   };
 }
 
+async function assertConversationTask(env: Env, workspaceId: string, chatSessionId: string) {
+  const db = drizzle(env.DATABASE, { schema });
+  const task = await db
+    .select({ taskMode: schema.tasks.taskMode })
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.workspaceId, workspaceId),
+        eq(schema.tasks.chatSessionId, chatSessionId)
+      )
+    )
+    .get();
+  if (task?.taskMode !== 'conversation') {
+    throw errors.conflict('ACP forms are unsupported in task mode');
+  }
+}
+
 async function assertAgentSessionExists(
   env: Env,
   workspaceId: string,
@@ -97,6 +114,9 @@ acpInteractionCallbackRoute.post(
   async (c) => {
     const identity = await verifyWorkspaceCallback(c);
     const body = c.req.valid('json');
+    if (body.kind === 'form') {
+      await assertConversationTask(c.env, identity.workspaceId, identity.chatSessionId);
+    }
     await assertAgentSessionExists(c.env, identity.workspaceId, body.agentSessionId, true);
     const result = await createInteraction(c.env, {
       ...body,

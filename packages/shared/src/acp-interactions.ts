@@ -37,6 +37,7 @@ export const ACP_RUNTIME_ANSWER_STATUS_VALUES = [
 ] as const;
 
 export const DEFAULT_ACP_INTERACTIONS_ENABLED = false;
+export const DEFAULT_ACP_INTERACTION_FORMS_ENABLED = false;
 export const DEFAULT_ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS = 2 * 60 * 60 * 1000;
 export const DEFAULT_ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS = 30 * 60 * 1000;
 export const DEFAULT_ACP_INTERACTION_MAX_DEADLINE_MS = 4 * 60 * 60 * 1000;
@@ -141,6 +142,7 @@ export const AcpInteractionAnswerDecisionSchema = v.object({
   kind: AcpInteractionDecisionKindSchema,
   optionId: v.optional(v.string()),
   encryptedAnswer: v.optional(AcpInteractionEncryptedPayloadSchema),
+  content: v.optional(v.record(v.string(), v.unknown())),
   answerHash: AcpInteractionHashSchema,
 });
 
@@ -166,8 +168,10 @@ export const AcpRuntimeAnswerResponseSchema = v.object({
 
 export const AcpInteractionRuntimeConfigSchema = v.object({
   enabled: v.boolean(),
+  formsEnabled: v.optional(v.boolean()),
   protocolVersion: v.literal(ACP_INTERACTION_PROTOCOL_VERSION),
   permissionDeadlineMs: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  formDeadlineMs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
   maxDeadlineMs: v.pipe(v.number(), v.integer(), v.minValue(1)),
   deadlineMarginMs: v.pipe(v.number(), v.integer(), v.minValue(0)),
   requestMaxBytes: v.pipe(v.number(), v.integer(), v.minValue(1)),
@@ -176,6 +180,11 @@ export const AcpInteractionRuntimeConfigSchema = v.object({
   optionNameMaxChars: v.pipe(v.number(), v.integer(), v.minValue(1)),
   receiptLimit: v.pipe(v.number(), v.integer(), v.minValue(1)),
   responseMaxBytes: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  formSchemaMaxBytes: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  formSchemaMaxProperties: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  formSchemaMaxEnum: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  answerMaxBytes: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  answerStringMaxBytes: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
   settleRetryDelaysMs: v.array(v.pipe(v.number(), v.integer(), v.minValue(1))),
   settleRetrySteadyMs: v.pipe(v.number(), v.integer(), v.minValue(1)),
 });
@@ -195,6 +204,7 @@ export interface AcpInteractionCapabilities {
   version: typeof ACP_INTERACTION_CAPABILITY_VERSION;
   answerEndpoint: boolean;
   permissionBridge: boolean;
+  formBridge?: boolean;
 }
 
 export function buildAcpInteractionAnswerPath(

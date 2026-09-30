@@ -10,6 +10,7 @@ import {
   DEFAULT_ACP_INTERACTION_FORM_SCHEMA_MAX_BYTES,
   DEFAULT_ACP_INTERACTION_FORM_SCHEMA_MAX_ENUM,
   DEFAULT_ACP_INTERACTION_FORM_SCHEMA_MAX_PROPERTIES,
+  DEFAULT_ACP_INTERACTION_FORMS_ENABLED,
   DEFAULT_ACP_INTERACTION_MAX_DEADLINE_MS,
   DEFAULT_ACP_INTERACTION_MAX_PENDING_PER_SESSION,
   DEFAULT_ACP_INTERACTION_OPTION_ID_MAX_CHARS,
@@ -32,6 +33,7 @@ import {
 
 export interface AcpInteractionConfigEnv {
   ACP_INTERACTIONS_ENABLED?: string;
+  ACP_INTERACTION_FORMS_ENABLED?: string;
   ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS?: string;
   ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS?: string;
   ACP_INTERACTION_MAX_DEADLINE_MS?: string;
@@ -64,6 +66,7 @@ export interface AcpInteractionConfigEnv {
 
 export interface AcpInteractionConfig {
   enabled: boolean;
+  formsEnabled: boolean;
   permissionTaskDeadlineMs: number;
   permissionConversationDeadlineMs: number;
   maxDeadlineMs: number;
@@ -117,6 +120,7 @@ function positiveIntList(value: string | undefined, fallback: readonly number[])
 export function getAcpInteractionConfig(env: AcpInteractionConfigEnv): AcpInteractionConfig {
   return {
     enabled: envFlag(env.ACP_INTERACTIONS_ENABLED, DEFAULT_ACP_INTERACTIONS_ENABLED),
+    formsEnabled: envFlag(env.ACP_INTERACTION_FORMS_ENABLED, DEFAULT_ACP_INTERACTION_FORMS_ENABLED),
     permissionTaskDeadlineMs: positiveInt(
       env.ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS,
       DEFAULT_ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS

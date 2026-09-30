@@ -16,25 +16,33 @@ import (
 )
 
 const (
-	acpInteractionProtocolVersion = 1
+	acpInteractionProtocolVersion         = 1
+	defaultAcpInteractionResponseMaxBytes = 64 * 1024
 )
 
 // AcpInteractionRuntimeConfig is the versioned Worker -> vm-agent start contract.
 // A missing or disabled contract always fails closed.
 type AcpInteractionRuntimeConfig struct {
-	Enabled              bool  `json:"enabled"`
-	ProtocolVersion      int   `json:"protocolVersion"`
-	PermissionDeadlineMs int64 `json:"permissionDeadlineMs"`
-	MaxDeadlineMs        int64 `json:"maxDeadlineMs"`
-	DeadlineMarginMs     int64 `json:"deadlineMarginMs"`
-	RequestMaxBytes      int   `json:"requestMaxBytes"`
-	OptionsMaxCount      int   `json:"optionsMaxCount"`
-	OptionIDMaxChars     int   `json:"optionIdMaxChars"`
-	OptionNameMaxChars   int   `json:"optionNameMaxChars"`
-	ReceiptLimit         int   `json:"receiptLimit"`
-	ResponseMaxBytes     int64 `json:"responseMaxBytes"`
-	SettleRetryDelaysMs  []int `json:"settleRetryDelaysMs"`
-	SettleRetrySteadyMs  int   `json:"settleRetrySteadyMs"`
+	Enabled                 bool  `json:"enabled"`
+	FormsEnabled            bool  `json:"formsEnabled"`
+	ProtocolVersion         int   `json:"protocolVersion"`
+	PermissionDeadlineMs    int64 `json:"permissionDeadlineMs"`
+	FormDeadlineMs          int64 `json:"formDeadlineMs"`
+	MaxDeadlineMs           int64 `json:"maxDeadlineMs"`
+	DeadlineMarginMs        int64 `json:"deadlineMarginMs"`
+	RequestMaxBytes         int   `json:"requestMaxBytes"`
+	OptionsMaxCount         int   `json:"optionsMaxCount"`
+	OptionIDMaxChars        int   `json:"optionIdMaxChars"`
+	OptionNameMaxChars      int   `json:"optionNameMaxChars"`
+	ReceiptLimit            int   `json:"receiptLimit"`
+	ResponseMaxBytes        int64 `json:"responseMaxBytes"`
+	FormSchemaMaxBytes      int   `json:"formSchemaMaxBytes"`
+	FormSchemaMaxProperties int   `json:"formSchemaMaxProperties"`
+	FormSchemaMaxEnum       int   `json:"formSchemaMaxEnum"`
+	AnswerMaxBytes          int   `json:"answerMaxBytes"`
+	AnswerStringMaxBytes    int   `json:"answerStringMaxBytes"`
+	SettleRetryDelaysMs     []int `json:"settleRetryDelaysMs"`
+	SettleRetrySteadyMs     int   `json:"settleRetrySteadyMs"`
 }
 
 func (c AcpInteractionRuntimeConfig) validate() error {
@@ -52,6 +60,11 @@ func (c AcpInteractionRuntimeConfig) validate() error {
 		c.OptionNameMaxChars <= 0 || c.ReceiptLimit <= 0 || c.ResponseMaxBytes <= 0 ||
 		c.SettleRetrySteadyMs <= 0 {
 		return errors.New("invalid ACP interaction bounds")
+	}
+	if c.FormsEnabled && (c.FormDeadlineMs <= 0 || c.FormDeadlineMs > c.MaxDeadlineMs ||
+		c.FormSchemaMaxBytes <= 0 || c.FormSchemaMaxProperties <= 0 || c.FormSchemaMaxEnum <= 0 ||
+		c.AnswerMaxBytes <= 0 || c.AnswerStringMaxBytes <= 0) {
+		return errors.New("invalid ACP form bounds")
 	}
 	for _, delay := range c.SettleRetryDelaysMs {
 		if delay <= 0 {
@@ -73,21 +86,27 @@ type acpPermissionOption struct {
 }
 
 type acpPermissionDetail struct {
-	ToolCallID string                `json:"toolCallId"`
+	ToolCallID string                `json:"toolCallId,omitempty"`
 	Title      string                `json:"title,omitempty"`
 	ToolKind   string                `json:"toolKind,omitempty"`
-	Options    []acpPermissionOption `json:"options"`
+	Options    []acpPermissionOption `json:"options,omitempty"`
+}
+
+type acpInteractionDetail struct {
+	acpPermissionDetail
+	Message *string        `json:"message,omitempty"`
+	Schema  map[string]any `json:"schema,omitempty"`
 }
 
 type acpInteractionCreateRequest struct {
-	ProtocolVersion int                 `json:"protocolVersion"`
-	InteractionID   string              `json:"interactionId"`
-	Generation      string              `json:"generation"`
-	RuntimeIdentity string              `json:"runtimeIdentity"`
-	AgentSessionID  string              `json:"agentSessionId"`
-	Kind            string              `json:"kind"`
-	PayloadHash     string              `json:"payloadHash"`
-	Detail          acpPermissionDetail `json:"detail"`
+	ProtocolVersion int                  `json:"protocolVersion"`
+	InteractionID   string               `json:"interactionId"`
+	Generation      string               `json:"generation"`
+	RuntimeIdentity string               `json:"runtimeIdentity"`
+	AgentSessionID  string               `json:"agentSessionId"`
+	Kind            string               `json:"kind"`
+	PayloadHash     string               `json:"payloadHash"`
+	Detail          acpInteractionDetail `json:"detail"`
 	SafeSummary     struct {
 		ToolCallID  string `json:"toolCallId,omitempty"`
 		OptionCount int    `json:"optionCount"`
@@ -106,9 +125,10 @@ type acpInteractionSettleRequest struct {
 
 // AcpInteractionAnswerDecision is the bounded decision subset used by permissions.
 type AcpInteractionAnswerDecision struct {
-	Kind       string `json:"kind"`
-	OptionID   string `json:"optionId,omitempty"`
-	AnswerHash string `json:"answerHash"`
+	Kind       string         `json:"kind"`
+	OptionID   string         `json:"optionId,omitempty"`
+	Content    map[string]any `json:"content,omitempty"`
+	AnswerHash string         `json:"answerHash"`
 }
 
 // ValidatePermissionAcpInteractionDecision mirrors the shared permission answer
@@ -133,8 +153,20 @@ func ValidatePermissionAcpInteractionDecision(decision AcpInteractionAnswerDecis
 	return nil
 }
 
+func ValidateAcpInteractionDecision(decision AcpInteractionAnswerDecision) error {
+	if decision.Kind != "accepted" {
+		return ValidatePermissionAcpInteractionDecision(decision)
+	}
+	decodedHash, err := hex.DecodeString(decision.AnswerHash)
+	if err != nil || len(decodedHash) != sha256.Size || decision.OptionID != "" || decision.Content == nil {
+		return errors.New("invalid form decision")
+	}
+	return nil
+}
+
 type acpInteractionWaitResult struct {
 	optionID string
+	content  map[string]any
 	cancel   bool
 	reason   string
 }
@@ -143,6 +175,8 @@ type acpInteractionWaiter struct {
 	generation    string
 	attemptID     uint64
 	options       map[string]struct{}
+	formSchema    map[string]any
+	formLimits    acpFormLimits
 	result        chan acpInteractionWaitResult
 	cancelRequest context.CancelFunc
 }
@@ -173,6 +207,14 @@ func (h *SessionHost) ConfigureAcpInteractions(config AcpInteractionRuntimeConfi
 // contract enabled permission interactions for this host.
 func (h *SessionHost) AcpInteractionBridgeEnabled() bool {
 	return h.acpInteractionConfigSnapshot().Enabled
+}
+
+func (h *SessionHost) AcpInteractionResponseMaxBytes() int64 {
+	configured := h.acpInteractionConfigSnapshot().ResponseMaxBytes
+	if configured <= 0 {
+		return defaultAcpInteractionResponseMaxBytes
+	}
+	return configured
 }
 
 func (h *SessionHost) acpInteractionConfigSnapshot() AcpInteractionRuntimeConfig {
@@ -294,6 +336,8 @@ func (h *SessionHost) ResolveAcpInteractionAnswer(
 	generation string,
 	decision AcpInteractionAnswerDecision,
 ) string {
+	h.promptMu.Lock()
+	defer h.promptMu.Unlock()
 	h.interactionMu.Lock()
 	defer h.interactionMu.Unlock()
 	if h.interactionGeneration == "" {
@@ -319,16 +363,35 @@ func (h *SessionHost) ResolveAcpInteractionAnswer(
 	if waiter.generation != generation {
 		return "stale_generation"
 	}
+	if waiter.formSchema != nil && (!h.promptInFlight || h.promptAttempt == nil ||
+		h.promptAttempt.id != waiter.attemptID || h.promptAttempt.ctx.Err() != nil) {
+		delete(h.interactionWaiters, interactionID)
+		waiter.cancelRequest()
+		waiter.result <- acpInteractionWaitResult{cancel: true, reason: "wrapper_cancelled"}
+		return "no_waiter"
+	}
 	result := acpInteractionWaitResult{}
 	switch decision.Kind {
 	case "selected_option":
+		if waiter.formSchema != nil {
+			return "conflict"
+		}
 		if _, allowed := waiter.options[decision.OptionID]; !allowed {
 			return "conflict"
 		}
 		result.optionID = decision.OptionID
+	case "accepted":
+		if waiter.formSchema == nil || !validateAcpFormAnswer(waiter.formSchema, decision.Content, waiter.formLimits) {
+			return "conflict"
+		}
+		result.content = decision.Content
 	case "declined", "cancelled":
 		result.cancel = true
-		result.reason = "completed"
+		if decision.Kind == "declined" {
+			result.reason = "declined"
+		} else {
+			result.reason = "completed"
+		}
 	default:
 		return "conflict"
 	}
@@ -446,7 +509,7 @@ func (h *SessionHost) requestPermission(
 		RuntimeIdentity: h.config.RuntimeIdentity,
 		AgentSessionID:  h.config.SessionID,
 		Kind:            "permission",
-		Detail:          detail,
+		Detail:          acpInteractionDetail{acpPermissionDetail: detail},
 		DeadlineAt:      deadline.UnixMilli(),
 	}
 	request.SafeSummary.ToolCallID = detail.ToolCallID

@@ -13,11 +13,13 @@ export function buildAcpInteractionRuntimeConfig(
   const config = getAcpInteractionConfig(env);
   return {
     enabled: config.enabled,
+    formsEnabled: config.enabled && config.formsEnabled && taskMode === 'conversation',
     protocolVersion: ACP_INTERACTION_PROTOCOL_VERSION,
     permissionDeadlineMs:
       taskMode === 'conversation'
         ? config.permissionConversationDeadlineMs
         : config.permissionTaskDeadlineMs,
+    formDeadlineMs: config.permissionConversationDeadlineMs,
     maxDeadlineMs: config.maxDeadlineMs,
     deadlineMarginMs: config.deadlineMarginMs,
     requestMaxBytes: config.requestMaxBytes,
@@ -26,6 +28,11 @@ export function buildAcpInteractionRuntimeConfig(
     optionNameMaxChars: config.optionNameMaxChars,
     receiptLimit: config.runtimeReceiptLimit,
     responseMaxBytes: config.runtimeResponseMaxBytes,
+    formSchemaMaxBytes: config.formSchemaMaxBytes,
+    formSchemaMaxProperties: config.formSchemaMaxProperties,
+    formSchemaMaxEnum: config.formSchemaMaxEnum,
+    answerMaxBytes: config.answerMaxBytes,
+    answerStringMaxBytes: config.answerStringMaxBytes,
     settleRetryDelaysMs: config.retryDelaysMs,
     settleRetrySteadyMs: config.retrySteadyMs,
   };

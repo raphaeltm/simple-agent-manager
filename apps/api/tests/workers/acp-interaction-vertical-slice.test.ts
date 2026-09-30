@@ -16,6 +16,7 @@ import {
   seedNode,
   seedProject,
   seedSignedInUser,
+  seedTask,
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
@@ -23,6 +24,11 @@ import {
 const fetchMock = vi.fn<typeof fetch>();
 
 const testEnv = env as unknown as Env;
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 
 function callbackApp() {
   const app = new Hono<{ Bindings: Env }>();
@@ -48,6 +54,7 @@ describe('ACP interaction cross-boundary vertical slice', () => {
 
   afterEach(() => {
     delete (testEnv as unknown as Record<string, string>).ACP_INTERACTIONS_ENABLED;
+    delete (testEnv as unknown as Record<string, string>).ACP_INTERACTION_FORMS_ENABLED;
     vi.unstubAllGlobals();
   });
 
@@ -95,7 +102,7 @@ describe('ACP interaction cross-boundary vertical slice', () => {
           agentSessionId,
           kind: 'permission',
           payloadHash: 'a'.repeat(64),
-          detail: { permissionName: 'VERTICAL_SECRET' },
+          detail: { permissionName: 'VERTICAL_SECRET', options: [{ id: 'allow', kind: 'allow_once', name: 'Allow once' }] },
           safeSummary: { toolCallId: 'tool-vertical', optionCount: 1 },
           deadlineAt: Date.now() + 60_000,
         }),
@@ -122,7 +129,7 @@ describe('ACP interaction cross-boundary vertical slice', () => {
         },
         body: JSON.stringify({
           answerKey: 'callback-must-not-answer',
-          decision: { kind: 'accepted', answerHash: 'c'.repeat(64) },
+          decision: { kind: 'selected_option', optionId: 'allow', answerHash: 'c'.repeat(64) },
         }),
       },
       testEnv
@@ -181,7 +188,7 @@ describe('ACP interaction cross-boundary vertical slice', () => {
         },
         body: JSON.stringify({
           answerKey: 'vertical-answer-key',
-          decision: { kind: 'accepted', answerHash: 'b'.repeat(64) },
+          decision: { kind: 'selected_option', optionId: 'allow', answerHash: 'b'.repeat(64) },
         }),
       },
       testEnv
@@ -201,6 +208,77 @@ describe('ACP interaction cross-boundary vertical slice', () => {
       settled: [expect.objectContaining({ interactionId, state: 'delivery_confirmed' })],
     });
 
+    await runInDurableObject(store, async (_instance, state) => {
+      state.storage.sql.exec(`DELETE FROM outbox`);
+      await state.storage.deleteAlarm();
+    });
+  });
+
+  it('creates a form only for the workspace-linked conversation task', async () => {
+    const suffix = crypto.randomUUID();
+    const userId = `form-user-${suffix}`;
+    const installationId = `form-installation-${suffix}`;
+    const projectId = `form-project-${suffix}`;
+    const nodeId = `form-node-${suffix}`;
+    const workspaceId = `form-workspace-${suffix}`;
+    const agentSessionId = `form-agent-${suffix}`;
+    const formGeneration = crypto.randomUUID();
+    await seedUser(userId);
+    await seedInstallation(installationId, userId);
+    await seedProject(projectId, userId, installationId);
+    await seedNode(nodeId, userId);
+    const chatSessionId = await projectDataService.createSession(testEnv, projectId, workspaceId, 'Form mode', null, userId);
+    await seedWorkspace(workspaceId, nodeId, userId, { projectId, chatSessionId, status: 'running' });
+    await seedAgentSession(agentSessionId, workspaceId, userId, { status: 'running' });
+    await seedTask(`form-task-${suffix}`, projectId, userId, { workspaceId, chatSessionId, taskMode: 'task' });
+    (testEnv as unknown as Record<string, string>).ACP_INTERACTION_FORMS_ENABLED = 'true';
+    const callbackToken = await signCallbackToken(workspaceId, testEnv);
+    const request = () => callbackApp().request(`/api/projects/${projectId}/workspaces/${workspaceId}/acp-interactions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${callbackToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ protocolVersion: 1, interactionId: crypto.randomUUID(), generation: formGeneration,
+        runtimeIdentity: 'runtime-form-1', agentSessionId, kind: 'form', payloadHash: 'a'.repeat(64),
+        detail: { message: 'Which path?', schema: { type: 'object', properties: {
+          question: { type: 'string', enum: ['Fast', 'Slow'] },
+        }, required: ['question'] } }, safeSummary: { optionCount: 0 }, deadlineAt: Date.now() + 60_000 }),
+    }, testEnv);
+    expect((await request()).status).toBe(409);
+    await testEnv.DATABASE.prepare(`UPDATE tasks SET task_mode = 'conversation' WHERE workspace_id = ?`).bind(workspaceId).run();
+    const created = await request();
+    expect(created.status).toBe(201);
+    const result = await created.json() as { summary: { interactionId: string } };
+    const interactionId = result.summary.interactionId;
+    fetchMock.mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      return new Response(JSON.stringify(url.endsWith('/agent-capabilities') ? {
+        protocolVersion: 1, runtimeIdentity: 'runtime-form-1',
+        promptReceipts: { supported: true, lookup: true,
+          states: ['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous'] },
+        checkpointRollover: { supported: true, automatic: false, states: [],
+          defaultGraceMs: 30_000, maxGraceMs: 120_000, operationTimeoutMs: 120_000 },
+        interactions: {
+          supported: true, version: 1, answerEndpoint: true, permissionBridge: true, formBridge: true,
+        },
+      } : { status: 'consumed', interactionId, generation: formGeneration, runtimeIdentity: 'runtime-form-1' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    const cookie = await seedSignedInUser(userId);
+    const answer = await browserApp().request(
+      `/api/projects/${projectId}/sessions/${chatSessionId}/interactions/${interactionId}/answer`, {
+        method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json', Origin: 'https://app.test.example.com' },
+        body: JSON.stringify({ answerKey: 'form-vertical-answer', decision: { kind: 'accepted',
+          content: { question: 'Fast' }, answerHash: await sha256Hex('{"question":"Fast"}') } }),
+      }, testEnv
+    );
+    expect(answer.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, delivery] = fetchMock.mock.calls[1];
+    expect(delivery).toMatchObject({ method: 'POST', body: expect.stringContaining('"content":{"question":"Fast"}') });
+    const store = testEnv.INTERACTION_STORE.get(
+      testEnv.INTERACTION_STORE.idFromName(`${projectId}/${chatSessionId}`)
+    ) as DurableObjectStub<InteractionStore>;
+    expect((await store.snapshot(null)).settled).toEqual([expect.objectContaining({ interactionId, state: 'delivery_confirmed' })]);
     await runInDurableObject(store, async (_instance, state) => {
       state.storage.sql.exec(`DELETE FROM outbox`);
       await state.storage.deleteAlarm();
