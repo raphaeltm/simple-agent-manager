@@ -32,6 +32,22 @@ function app(): Hono<{ Bindings: Env }> {
   return hono;
 }
 
+function putDefaultModel(
+  honoApp: Hono<{ Bindings: Env }>,
+  defaultModel: unknown,
+  env: Env = bindings()
+) {
+  return honoApp.request(
+    '/api/admin/ai-proxy/config',
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ defaultModel }),
+    },
+    env
+  );
+}
+
 describe('admin AI proxy config routes — PUT /config (defaultModel)', () => {
   let honoApp: Hono<{ Bindings: Env }>;
 
@@ -41,15 +57,7 @@ describe('admin AI proxy config routes — PUT /config (defaultModel)', () => {
 
   it('accepts a valid workers-ai model and persists it to KV', async () => {
     const env = bindings();
-    const res = await honoApp.request(
-      '/api/admin/ai-proxy/config',
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ defaultModel: WORKERS_AI_MODEL_ID }),
-      },
-      env
-    );
+    const res = await putDefaultModel(honoApp, WORKERS_AI_MODEL_ID, env);
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { defaultModel: string; source: string };
@@ -74,15 +82,7 @@ describe('admin AI proxy config routes — PUT /config (defaultModel)', () => {
   });
 
   it('preserves the handler-produced message when defaultModel is missing', async () => {
-    const res = await honoApp.request(
-      '/api/admin/ai-proxy/config',
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      },
-      bindings()
-    );
+    const res = await putDefaultModel(honoApp, undefined);
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { message: string };
@@ -90,15 +90,7 @@ describe('admin AI proxy config routes — PUT /config (defaultModel)', () => {
   });
 
   it('preserves the handler-produced message when defaultModel is the wrong type', async () => {
-    const res = await honoApp.request(
-      '/api/admin/ai-proxy/config',
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ defaultModel: 123 }),
-      },
-      bindings()
-    );
+    const res = await putDefaultModel(honoApp, 123);
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { message: string };
@@ -106,15 +98,7 @@ describe('admin AI proxy config routes — PUT /config (defaultModel)', () => {
   });
 
   it('preserves the unknown-model message unchanged (edge case)', async () => {
-    const res = await honoApp.request(
-      '/api/admin/ai-proxy/config',
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ defaultModel: 'does-not-exist' }),
-      },
-      bindings()
-    );
+    const res = await putDefaultModel(honoApp, 'does-not-exist');
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { message: string };
@@ -122,15 +106,7 @@ describe('admin AI proxy config routes — PUT /config (defaultModel)', () => {
   });
 
   it('does not allow a Responses-only model as the chat-completions agent default', async () => {
-    const res = await honoApp.request(
-      '/api/admin/ai-proxy/config',
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ defaultModel: 'gpt-6.1-sol' }),
-      },
-      bindings()
-    );
+    const res = await putDefaultModel(honoApp, 'gpt-6.1-sol');
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { message: string };
