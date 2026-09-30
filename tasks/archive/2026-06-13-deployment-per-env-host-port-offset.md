@@ -45,4 +45,4 @@ host-port allocation does not account for what else is bound on the node.
 
 ---
 
-_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: #1312: per-environment port band (deployment-routing.ts:71-100) + teardown-before-start (engine.go:255-275); tests deployment-routing.test.ts, TestEngine_RedeployPortRebind._
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: #1312: per-environment port band (deployment-routing.ts:71-100) + teardown-before-start (engine.go:255-275); tests deployment-routing.test.ts, TestEngine_RedeployPortRebind. The residual 1-in-305 band collision risk (`deployment-routing.ts:21-28`) is tracked as a placement-time check in `tasks/backlog/2026-06-17-deploy-engine-security-hardening-followups.md`._
