@@ -35,10 +35,13 @@ Authorization: Bearer {API_TOKEN}
 
 ## Endpoints
 
-### Dormant ACP interaction foundation
+### ACP interaction foundation and runtime permission bridge
 
 These routes exist for the durable ACP interaction foundation. New interaction creation remains
 disabled while `ACP_INTERACTIONS_ENABLED=false`; existing records remain readable and serviceable.
+The Worker includes a versioned `acpInteractions` object in every agent-session start request. The
+VM agent only creates permission interactions when that per-session contract is enabled; missing,
+disabled, invalid, or unsupported contracts cancel the ACP permission request explicitly.
 
 - `POST /api/projects/:projectId/workspaces/:workspaceId/acp-interactions` creates an
   interaction. It requires a workspace-scoped callback JWT; project, workspace,
@@ -57,6 +60,13 @@ Runtime create/settle routes return `404` for mismatched workspace/project/sessi
 binding, `409` for stale or conflicting state, and `410` for terminal workspaces.
 Browser mutation routes reject callback/MCP bearer tokens because they require the
 normal authenticated browser session in addition to the Origin check.
+
+Permission requests use a fresh UUID generation for every ACP connection attachment. The VM agent
+persists bounded option labels and structural tool metadata through the callback route, waits for
+the durable answer, and accepts only an exact option ID. Raw tool input/content is never sent on the
+viewer WebSocket or copied into the interaction payload. Runtime answers use the dedicated
+node-management-JWT endpoint and an in-memory waiter/receipt registry; missing or stale runtimes
+return `no_waiter`/`stale_generation` and are never woken or recreated to consume an answer.
 
 ### GET /projects/:projectId/library/:fileId/preview
 

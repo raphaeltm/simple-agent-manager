@@ -46,6 +46,12 @@ describe('ACP interaction answer delivery', () => {
       lookup: true,
       states: ['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous'],
     },
+    interactions: {
+      supported: true,
+      version: 1,
+      answerEndpoint: true,
+      permissionBridge: true,
+    },
     checkpointRollover: {
       supported: true,
       automatic: false,
@@ -56,9 +62,14 @@ describe('ACP interaction answer delivery', () => {
     },
   });
 
-  it.each(['consumed', 'duplicate'] as const)(
-    'confirms %s runtime receipts without waking',
-    async (status) => {
+  it.each([
+    ['vm', 'consumed'],
+    ['vm', 'duplicate'],
+    ['cf-container', 'consumed'],
+    ['cf-container', 'duplicate'],
+  ] as const)(
+    'confirms %s %s runtime receipts without recovery',
+    async (runtime, status) => {
       nodeAgentRequest.mockResolvedValueOnce(capabilities()).mockResolvedValueOnce({
         status,
         interactionId: input.interactionId,
@@ -66,10 +77,9 @@ describe('ACP interaction answer delivery', () => {
         runtimeIdentity: input.runtimeIdentity,
       });
 
-      await expect(deliverAcpInteractionAnswer({} as never, target, input)).resolves.toMatchObject({
-        outcome: 'confirmed',
-        runtimeStatus: status,
-      });
+      await expect(
+        deliverAcpInteractionAnswer({} as never, { ...target, runtime }, input)
+      ).resolves.toMatchObject({ outcome: 'confirmed', runtimeStatus: status });
       expect(nodeAgentRequest).toHaveBeenCalledWith(
         'node-1',
         expect.anything(),
@@ -100,25 +110,43 @@ describe('ACP interaction answer delivery', () => {
     }
   );
 
-  it('interrupts dead runtime generations before sending', async () => {
-    nodeAgentRequest.mockResolvedValueOnce(capabilities('runtime-2'));
-    await expect(
-      deliverAcpInteractionAnswer({} as never, target, { ...input, runtimeIdentity: 'old-runtime' })
-    ).resolves.toMatchObject({
+  it.each(['vm', 'cf-container'] as const)(
+    'interrupts a dead %s runtime generation without recovery',
+    async (runtime) => {
+      nodeAgentRequest.mockResolvedValueOnce(capabilities('runtime-2'));
+      await expect(
+        deliverAcpInteractionAnswer(
+          {} as never,
+          { ...target, runtime },
+          { ...input, runtimeIdentity: 'old-runtime' }
+        )
+      ).resolves.toMatchObject({
+        outcome: 'interrupted',
+        reason: 'runtime identity changed before delivery',
+      });
+      expect(nodeAgentRequest).toHaveBeenCalledTimes(1);
+      expect(nodeAgentRequest).toHaveBeenCalledWith(
+        'node-1',
+        expect.anything(),
+        '/workspaces/workspace-1/agent-capabilities',
+        expect.objectContaining({
+          recoverContainerOnTimeout: false,
+          method: 'GET',
+          requestTimeoutMs: 5_000,
+        })
+      );
+    }
+  );
+
+  it('fails closed when the runtime does not advertise the permission bridge', async () => {
+    const { interactions: _interactions, ...unsupported } = capabilities();
+    nodeAgentRequest.mockResolvedValueOnce(unsupported);
+
+    await expect(deliverAcpInteractionAnswer({} as never, target, input)).resolves.toEqual({
       outcome: 'interrupted',
-      reason: 'runtime identity changed before delivery',
+      reason: 'runtime permission bridge unsupported',
     });
     expect(nodeAgentRequest).toHaveBeenCalledTimes(1);
-    expect(nodeAgentRequest).toHaveBeenCalledWith(
-      'node-1',
-      expect.anything(),
-      '/workspaces/workspace-1/agent-capabilities',
-      expect.objectContaining({
-        recoverContainerOnTimeout: false,
-        method: 'GET',
-        requestTimeoutMs: 5_000,
-      })
-    );
   });
 
   it('marks 404 as interrupted and ambiguous transport loss as unconfirmed', async () => {
@@ -136,6 +164,25 @@ describe('ACP interaction answer delivery', () => {
     await expect(deliverAcpInteractionAnswer({} as never, target, input)).resolves.toMatchObject({
       outcome: 'unconfirmed',
       reason: 'transport outcome unknown',
+    });
+  });
+
+  it('classifies a generation conflict returned after the capability probe', async () => {
+    nodeAgentRequest.mockResolvedValueOnce(capabilities()).mockRejectedValueOnce(
+      new NodeAgentHttpError(
+        409,
+        JSON.stringify({
+          status: 'stale_generation',
+          interactionId: input.interactionId,
+          generation: input.generation,
+          runtimeIdentity: 'runtime-2',
+        })
+      )
+    );
+
+    await expect(deliverAcpInteractionAnswer({} as never, target, input)).resolves.toEqual({
+      outcome: 'interrupted',
+      reason: 'stale_generation',
     });
   });
 });

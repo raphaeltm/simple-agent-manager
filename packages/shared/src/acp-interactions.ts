@@ -44,6 +44,7 @@ export const DEFAULT_ACP_INTERACTION_DEADLINE_MARGIN_MS = 60 * 1000;
 export const DEFAULT_ACP_INTERACTION_MAX_PENDING_PER_SESSION = 8;
 export const DEFAULT_ACP_INTERACTION_REQUEST_MAX_BYTES = 32 * 1024;
 export const DEFAULT_ACP_INTERACTION_OPTIONS_MAX_COUNT = 16;
+export const DEFAULT_ACP_INTERACTION_OPTION_ID_MAX_CHARS = 128;
 export const DEFAULT_ACP_INTERACTION_OPTION_NAME_MAX_CHARS = 200;
 export const DEFAULT_ACP_INTERACTION_FORM_SCHEMA_MAX_BYTES = 16 * 1024;
 export const DEFAULT_ACP_INTERACTION_FORM_SCHEMA_MAX_PROPERTIES = 20;
@@ -62,6 +63,7 @@ export const DEFAULT_ACP_INTERACTION_OUTBOX_BATCH_SIZE = 25;
 export const DEFAULT_ACP_INTERACTION_DELIVERY_BATCH_SIZE = 1;
 export const DEFAULT_ACP_INTERACTION_ALARM_WALL_TIME_MS = 15_000;
 export const DEFAULT_ACP_INTERACTION_ALARM_REARM_DELAY_MS = 1_000;
+export const DEFAULT_ACP_INTERACTION_RUNTIME_RECEIPT_LIMIT = 256;
 
 export const AcpInteractionIdSchema = v.pipe(v.string(), v.uuid());
 export const AcpInteractionGenerationSchema = v.pipe(v.string(), v.uuid());
@@ -161,6 +163,21 @@ export const AcpRuntimeAnswerResponseSchema = v.object({
   runtimeIdentity: v.string(),
 });
 
+export const AcpInteractionRuntimeConfigSchema = v.object({
+  enabled: v.boolean(),
+  protocolVersion: v.literal(ACP_INTERACTION_PROTOCOL_VERSION),
+  permissionDeadlineMs: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  maxDeadlineMs: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  deadlineMarginMs: v.pipe(v.number(), v.integer(), v.minValue(0)),
+  requestMaxBytes: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  optionsMaxCount: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  optionIdMaxChars: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  optionNameMaxChars: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  receiptLimit: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  settleRetryDelaysMs: v.array(v.pipe(v.number(), v.integer(), v.minValue(0))),
+  settleRetrySteadyMs: v.pipe(v.number(), v.integer(), v.minValue(1)),
+});
+
 export type AcpInteractionKind = v.InferOutput<typeof AcpInteractionKindSchema>;
 export type AcpInteractionState = v.InferOutput<typeof AcpInteractionStateSchema>;
 export type AcpInteractionSafeSummary = v.InferOutput<typeof AcpInteractionSafeSummarySchema>;
@@ -170,10 +187,14 @@ export type AcpInteractionAnswerDecision = v.InferOutput<typeof AcpInteractionAn
 export type AcpInteractionBrowserAnswer = v.InferOutput<typeof AcpInteractionBrowserAnswerSchema>;
 export type AcpRuntimeAnswerRequest = v.InferOutput<typeof AcpRuntimeAnswerRequestSchema>;
 export type AcpRuntimeAnswerResponse = v.InferOutput<typeof AcpRuntimeAnswerResponseSchema>;
+export type AcpInteractionRuntimeConfig = v.InferOutput<
+  typeof AcpInteractionRuntimeConfigSchema
+>;
 
 export interface AcpInteractionCapabilities {
   version: typeof ACP_INTERACTION_CAPABILITY_VERSION;
   answerEndpoint: boolean;
+  permissionBridge: boolean;
 }
 
 export function buildAcpInteractionAnswerPath(

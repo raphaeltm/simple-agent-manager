@@ -1,4 +1,5 @@
 import {
+  ACP_INTERACTION_CAPABILITY_VERSION,
   type AcpInteractionAnswerDecision,
   AcpRuntimeAnswerResponseSchema,
   buildAcpInteractionAnswerPath,
@@ -134,6 +135,14 @@ export async function deliverAcpInteractionAnswer(
     if (capabilities.runtimeIdentity !== input.runtimeIdentity) {
       return { outcome: 'interrupted', reason: 'runtime identity changed before delivery' };
     }
+    if (
+      !capabilities.interactions?.supported ||
+      capabilities.interactions.version !== ACP_INTERACTION_CAPABILITY_VERSION ||
+      !capabilities.interactions.answerEndpoint ||
+      !capabilities.interactions.permissionBridge
+    ) {
+      return { outcome: 'interrupted', reason: 'runtime permission bridge unsupported' };
+    }
     const raw = await nodeAgentRequest(
       target.nodeId,
       env,
@@ -159,6 +168,14 @@ export async function deliverAcpInteractionAnswer(
     }
     return { outcome: 'interrupted', reason: response.status };
   } catch (error) {
+    if (error instanceof NodeAgentHttpError && error.statusCode === 409) {
+      try {
+        const response = v.parse(AcpRuntimeAnswerResponseSchema, JSON.parse(error.responseBody));
+        return { outcome: 'interrupted', reason: response.status };
+      } catch {
+        return { outcome: 'unconfirmed', reason: 'runtime conflict response was invalid' };
+      }
+    }
     if (error instanceof NodeAgentHttpError && error.statusCode === 404) {
       return { outcome: 'interrupted', reason: 'runtime waiter missing' };
     }

@@ -20,6 +20,14 @@ export const CapabilitiesSchema = v.object({
     lookup: v.boolean(),
     states: v.array(v.picklist(['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous'])),
   }),
+  interactions: v.optional(
+    v.object({
+      supported: v.boolean(),
+      version: v.number(),
+      answerEndpoint: v.boolean(),
+      permissionBridge: v.optional(v.boolean(), false),
+    })
+  ),
   checkpointRollover: v.object({
     supported: v.boolean(),
     automatic: v.boolean(),

@@ -29,16 +29,16 @@ Slice B connects ACP `RequestPermission` to the shipped Cloudflare create/answer
 
 ## Implementation Checklist
 
-- [ ] Add an additive versioned ACP interaction start contract derived from the centralized Worker config and task mode; missing/off/unsupported remains explicit fail-closed.
-- [ ] Store per-session permission bridge settings in the VM agent and mint a new UUID generation for every ACP connection attachment.
-- [ ] Add a bounded, concurrency-safe in-memory waiter and receipt registry keyed by interaction ID and bound to agent session, execution runtime identity, and connection generation.
-- [ ] Replace raw viewer broadcast and first-option fallback with validated permission detail creation, durable Worker create, wait for exact option ID, and explicit cancellation on every unsupported/error path.
-- [ ] Implement deadline and inbound context cancellation, connection replacement/process loss, and explicit `Stop` settlement without waking or recreating a runtime.
-- [ ] Deliver settle callbacks with bounded retry on an independent bounded context and structural logging only.
-- [ ] Complete the trusted answer endpoint with consumed/duplicate/conflict/stale-generation/no-waiter receipts and bounded tombstones.
-- [ ] Add deterministic real ACP fixture behavior with reversed safety options for the coordinator's final staged roundtrip.
-- [ ] Add contract and race tests for callback JWT workspace/session identity, recreated `SessionHost` generation, reversed options, duplicate/conflicting answer, process loss, explicit Stop, deadlines/cancellation, feature-off/unsupported behavior, and VM/Instant no-wake transport.
-- [ ] Update narrow API/runtime contract documentation and fixtures without claiming unproven form/URL capability.
+- [x] Add an additive versioned ACP interaction start contract derived from the centralized Worker config and task mode; missing/off/unsupported remains explicit fail-closed.
+- [x] Store per-session permission bridge settings in the VM agent and mint a new UUID generation for every ACP connection attachment.
+- [x] Add a bounded, concurrency-safe in-memory waiter and receipt registry keyed by interaction ID and bound to agent session, execution runtime identity, and connection generation.
+- [x] Replace raw viewer broadcast and first-option fallback with validated permission detail creation, durable Worker create, wait for exact option ID, and explicit cancellation on every unsupported/error path.
+- [x] Implement deadline and inbound context cancellation, connection replacement/process loss, and explicit `Stop` settlement without waking or recreating a runtime.
+- [x] Deliver settle callbacks with bounded retry on an independent bounded context and structural logging only.
+- [x] Complete the trusted answer endpoint with consumed/duplicate/conflict/stale-generation/no-waiter receipts and bounded tombstones.
+- [x] Add deterministic real ACP fixture behavior with reversed safety options for the coordinator's final staged roundtrip.
+- [x] Add contract and race tests for callback JWT workspace/session identity, recreated `SessionHost` generation, reversed options, duplicate/conflicting answer, process loss, explicit Stop, deadlines/cancellation, feature-off/unsupported behavior, and VM/Instant no-wake transport.
+- [x] Update narrow API/runtime contract documentation and fixtures without claiming unproven form/URL capability.
 - [ ] Run package and repository validation, task-completion validation, and relevant Go, Cloudflare, security, constitution, test, and documentation reviews.
 - [ ] Open an implementation-ready draft PR and record exact branch/contracts/test/review evidence for the coordinator.
 

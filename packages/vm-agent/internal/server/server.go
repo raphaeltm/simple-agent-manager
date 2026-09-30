@@ -429,6 +429,7 @@ func New(cfg *config.Config) (*Server, error) {
 	if cfg.IsStandaloneMode() {
 		processLauncher = acp.LocalLauncher{}
 	}
+	executionRuntimeID := uuid.NewString()
 
 	// Build ACP gateway configuration
 	acpGatewayConfig := acp.GatewayConfig{
@@ -440,6 +441,7 @@ func New(cfg *config.Config) (*Server, error) {
 		ControlPlaneURL:                  cfg.ControlPlaneURL,
 		ProjectID:                        cfg.ProjectID,
 		NodeID:                           cfg.NodeID,
+		RuntimeIdentity:                  executionRuntimeID,
 		WorkspaceID:                      defaultWorkspaceScope(cfg.WorkspaceID, cfg.NodeID),
 		CallbackToken:                    cfg.CallbackToken,
 		ContainerResolver:                containerResolver,
@@ -594,7 +596,7 @@ func New(cfg *config.Config) (*Server, error) {
 		sessionProfileOvr:   make(map[string]profileOverrides),
 		sessionTaskCtx:      make(map[string]taskCallbackContext),
 		store:               store,
-		executionRuntimeID:  uuid.NewString(),
+		executionRuntimeID:  executionRuntimeID,
 		errorReporter:       errorReporter,
 		messageReporters:    messageReporters,
 		worktreeCache:       make(map[string]cachedWorktreeList),

@@ -12,6 +12,7 @@ import {
 import type { Env } from '../env';
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { AppError } from '../middleware/error';
+import { buildAcpInteractionRuntimeConfig } from './acp-interaction-runtime-config';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { signNodeManagementToken, signTerminalToken } from './jwt';
 import {
@@ -618,7 +619,11 @@ export async function startAgentSessionOnNode(
   injectedInstructions?: string,
   options?: GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
-  const body: Record<string, unknown> = { agentType, initialPrompt };
+  const body: Record<string, unknown> = {
+    agentType,
+    initialPrompt,
+    acpInteractions: buildAcpInteractionRuntimeConfig(env, taskContext?.taskMode),
+  };
   if (injectedInstructions != null && injectedInstructions !== '') {
     // SAM-injected system instructions delivered as a separate origin="system"
     // prompt block (see buildInjectedInstructions). The agent reads it as model
