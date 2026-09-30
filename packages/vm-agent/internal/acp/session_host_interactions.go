@@ -32,6 +32,7 @@ type AcpInteractionRuntimeConfig struct {
 	OptionIDMaxChars     int   `json:"optionIdMaxChars"`
 	OptionNameMaxChars   int   `json:"optionNameMaxChars"`
 	ReceiptLimit         int   `json:"receiptLimit"`
+	ResponseMaxBytes     int64 `json:"responseMaxBytes"`
 	SettleRetryDelaysMs  []int `json:"settleRetryDelaysMs"`
 	SettleRetrySteadyMs  int   `json:"settleRetrySteadyMs"`
 }
@@ -48,7 +49,8 @@ func (c AcpInteractionRuntimeConfig) validate() error {
 		return errors.New("invalid ACP interaction deadline configuration")
 	}
 	if c.RequestMaxBytes <= 0 || c.OptionsMaxCount <= 0 || c.OptionIDMaxChars <= 0 ||
-		c.OptionNameMaxChars <= 0 || c.ReceiptLimit <= 0 || c.SettleRetrySteadyMs <= 0 {
+		c.OptionNameMaxChars <= 0 || c.ReceiptLimit <= 0 || c.ResponseMaxBytes <= 0 ||
+		c.SettleRetrySteadyMs <= 0 {
 		return errors.New("invalid ACP interaction bounds")
 	}
 	for _, delay := range c.SettleRetryDelaysMs {

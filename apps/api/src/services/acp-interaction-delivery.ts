@@ -129,6 +129,7 @@ export async function deliverAcpInteractionAnswer(
           workspaceId: target.workspaceId,
           requestTimeoutMs,
           recoverContainerOnTimeout: false,
+          noWakeContainer: true,
         }
       )
     );
@@ -153,6 +154,7 @@ export async function deliverAcpInteractionAnswer(
         workspaceId: target.workspaceId,
         requestTimeoutMs,
         recoverContainerOnTimeout: false,
+        noWakeContainer: true,
         body: JSON.stringify({
           protocolVersion: 1,
           interactionId: input.interactionId,

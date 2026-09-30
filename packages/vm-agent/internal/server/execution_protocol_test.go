@@ -30,6 +30,16 @@ func TestLegacyPromptRequestRemainsCompatibleWithoutDeliveryFields(t *testing.T)
 	}
 }
 
+func TestAgentStartDeliveryFingerprintFencesInteractionContractChanges(t *testing.T) {
+	disabled := acp.AcpInteractionRuntimeConfig{ProtocolVersion: 1}
+	enabled := disabled
+	enabled.Enabled = true
+	if agentStartDeliveryFingerprint(1, "message", "prompt", "instructions", disabled) ==
+		agentStartDeliveryFingerprint(1, "message", "prompt", "instructions", enabled) {
+		t.Fatal("ACP interaction contract change did not change delivery fingerprint")
+	}
+}
+
 func TestExecutionProtocolRoutesRequireNodeManagementBearerToken(t *testing.T) {
 	s := newContractTestServer()
 	tests := []struct {

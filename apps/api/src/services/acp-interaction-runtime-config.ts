@@ -1,11 +1,6 @@
 import {
   ACP_INTERACTION_PROTOCOL_VERSION,
   type AcpInteractionRuntimeConfig,
-  DEFAULT_ACP_INTERACTION_DEADLINE_MARGIN_MS,
-  DEFAULT_ACP_INTERACTION_OPTION_ID_MAX_CHARS,
-  DEFAULT_ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS,
-  DEFAULT_ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS,
-  DEFAULT_ACP_INTERACTION_RUNTIME_RECEIPT_LIMIT,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
@@ -21,15 +16,16 @@ export function buildAcpInteractionRuntimeConfig(
     protocolVersion: ACP_INTERACTION_PROTOCOL_VERSION,
     permissionDeadlineMs:
       taskMode === 'conversation'
-        ? DEFAULT_ACP_INTERACTION_PERMISSION_CONVERSATION_DEADLINE_MS
-        : DEFAULT_ACP_INTERACTION_PERMISSION_TASK_DEADLINE_MS,
+        ? config.permissionConversationDeadlineMs
+        : config.permissionTaskDeadlineMs,
     maxDeadlineMs: config.maxDeadlineMs,
-    deadlineMarginMs: DEFAULT_ACP_INTERACTION_DEADLINE_MARGIN_MS,
+    deadlineMarginMs: config.deadlineMarginMs,
     requestMaxBytes: config.requestMaxBytes,
     optionsMaxCount: config.optionsMaxCount,
-    optionIdMaxChars: DEFAULT_ACP_INTERACTION_OPTION_ID_MAX_CHARS,
+    optionIdMaxChars: config.optionIdMaxChars,
     optionNameMaxChars: config.optionNameMaxChars,
-    receiptLimit: DEFAULT_ACP_INTERACTION_RUNTIME_RECEIPT_LIMIT,
+    receiptLimit: config.runtimeReceiptLimit,
+    responseMaxBytes: config.runtimeResponseMaxBytes,
     settleRetryDelaysMs: config.retryDelaysMs,
     settleRetrySteadyMs: config.retrySteadyMs,
   };

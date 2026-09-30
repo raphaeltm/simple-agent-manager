@@ -1370,16 +1370,14 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
 		return
 	}
-	host.ConfigureAcpInteractions(body.AcpInteractions)
-
 	s.appendNodeEvent(workspaceID, "info", "agent_session.starting", "Starting agent with initial prompt", map[string]interface{}{
 		"sessionId": sessionID,
 		"agentType": body.AgentType,
 	})
 
 	if body.DeliveryID != "" {
-		hash := promptDeliveryFingerprint(body.ProtocolVersion, body.MessageID,
-			body.InitialPrompt+"\x00"+body.InjectedInstructions)
+		hash := agentStartDeliveryFingerprint(body.ProtocolVersion, body.MessageID,
+			body.InitialPrompt, body.InjectedInstructions, body.AcpInteractions)
 		receipt, _, conflict, receiptErr := s.store.AcceptPromptDelivery(workspaceID, sessionID,
 			body.DeliveryID, body.ProtocolVersion, hash)
 		if receiptErr != nil {
@@ -1412,6 +1410,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 			})
 			return
 		}
+		host.ConfigureAcpInteractions(body.AcpInteractions)
 		observer := s.promptReceiptObserver(workspaceID, sessionID, body.DeliveryID)
 		go s.startAgentWithPromptObserved(host, workspaceID, sessionID, body.AgentType,
 			body.InitialPrompt, body.InjectedInstructions, body.MessageID, observer)
@@ -1423,6 +1422,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 
 	// Start agent and send initial prompt in a background goroutine.
 	// The endpoint returns 202 immediately — the agent runs asynchronously.
+	host.ConfigureAcpInteractions(body.AcpInteractions)
 	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt, body.InjectedInstructions)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
@@ -1652,6 +1652,18 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 func promptDeliveryFingerprint(protocolVersion int, messageID, prompt string) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s\x00%s", protocolVersion, messageID, prompt)))
 	return fmt.Sprintf("%x", sum[:])
+}
+
+func agentStartDeliveryFingerprint(
+	protocolVersion int,
+	messageID string,
+	prompt string,
+	injectedInstructions string,
+	interactions acp.AcpInteractionRuntimeConfig,
+) string {
+	encodedInteractions, _ := json.Marshal(interactions)
+	return promptDeliveryFingerprint(protocolVersion, messageID,
+		prompt+"\x00"+injectedInstructions+"\x00"+string(encodedInteractions))
 }
 
 type versionedPromptResponse struct {

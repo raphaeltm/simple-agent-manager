@@ -27,6 +27,14 @@ function callProxyHttp(fake: unknown, request: Request): Promise<Response> {
   ).proxyHttp.call(fake, request);
 }
 
+function callProxyHttpNoWake(fake: unknown, request: Request): Promise<Response> {
+  return (
+    VmAgentContainer.prototype as unknown as {
+      proxyHttpNoWake: (this: unknown, request: Request, port?: number) => Promise<Response>;
+    }
+  ).proxyHttpNoWake.call(fake, request);
+}
+
 function callProxyHttpGuarded(
   fake: unknown,
   request: Request,
@@ -70,6 +78,44 @@ function makeProxyFake(input: {
 }
 
 describe('VmAgentContainer proxy recovery boundaries', () => {
+  it.each(['sleeping', 'error', 'stopped'])(
+    'never wakes or recovers a %s runtime for a no-wake request',
+    async (status) => {
+      const containerFetch = vi.fn();
+      const ensureAwake = vi.fn();
+      const beginUnexpectedRecovery = vi.fn();
+      const response = await callProxyHttpNoWake(
+        {
+          ctx: { storage: { get: vi.fn().mockResolvedValue(status) } },
+          defaultPort: 8080,
+          containerFetch,
+          ensureAwake,
+          beginUnexpectedRecovery,
+        },
+        new Request('http://container/capabilities')
+      );
+
+      expect(response.status).toBe(410);
+      expect(containerFetch).not.toHaveBeenCalled();
+      expect(ensureAwake).not.toHaveBeenCalled();
+      expect(beginUnexpectedRecovery).not.toHaveBeenCalled();
+    }
+  );
+
+  it('forwards a no-wake request only when the runtime is already running', async () => {
+    const containerFetch = vi.fn().mockResolvedValue(new Response('live'));
+    const response = await callProxyHttpNoWake(
+      {
+        ctx: { storage: { get: vi.fn().mockResolvedValue('running') } },
+        defaultPort: 8080,
+        containerFetch,
+      },
+      new Request('http://container/capabilities')
+    );
+
+    expect(await response.text()).toBe('live');
+    expect(containerFetch).toHaveBeenCalledOnce();
+  });
   it('rejects a revoked source guard before proxy preparation can wake compute', async () => {
     const proxyHttp = vi.fn();
     const first = vi.fn().mockResolvedValue(null);

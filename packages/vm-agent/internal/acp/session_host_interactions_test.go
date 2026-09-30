@@ -20,6 +20,7 @@ func testInteractionConfig() AcpInteractionRuntimeConfig {
 		PermissionDeadlineMs: 2_000, MaxDeadlineMs: 4_000, DeadlineMarginMs: 10,
 		RequestMaxBytes: 32 * 1024, OptionsMaxCount: 16, OptionIDMaxChars: 128,
 		OptionNameMaxChars: 200, ReceiptLimit: 2,
+		ResponseMaxBytes:    64 * 1024,
 		SettleRetryDelaysMs: []int{1, 5}, SettleRetrySteadyMs: 10,
 	}
 }
@@ -280,6 +281,24 @@ func TestRequestPermissionFeatureOffAndCreateFailureNeverSelect(t *testing.T) {
 		t.Fatalf("create-failed response = %+v err=%v", response, err)
 	}
 	waitCreate(t, rejected)
+}
+
+func TestAcpInteractionRuntimeConfigRejectsNonPositiveRuntimeBounds(t *testing.T) {
+	tests := map[string]func(*AcpInteractionRuntimeConfig){
+		"response bytes": func(config *AcpInteractionRuntimeConfig) { config.ResponseMaxBytes = 0 },
+		"retry delay": func(config *AcpInteractionRuntimeConfig) {
+			config.SettleRetryDelaysMs = []int{0}
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			config := testInteractionConfig()
+			mutate(&config)
+			if err := ValidateAcpInteractionRuntimeConfig(config); err == nil {
+				t.Fatal("invalid runtime contract was accepted")
+			}
+		})
+	}
 }
 
 func TestAcpConnectionGenerationsAreOpaqueAndUniqueAcrossHosts(t *testing.T) {

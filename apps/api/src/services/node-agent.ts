@@ -24,6 +24,7 @@ import {
 import { recordNodeRoutingMetric } from './telemetry';
 import {
   fetchVmAgentContainer,
+  fetchVmAgentContainerNoWake,
   getVmAgentContainerConfig,
   markVmAgentContainerActiveWorkEndedBestEffort,
   markVmAgentContainerActiveWorkStarted,
@@ -54,12 +55,15 @@ interface NodeAgentRequestOptions extends RequestInit {
   beforeExternalMutation?: () => Promise<void>;
   /** Whether a cf-container timeout may initiate normal runtime recovery. */
   recoverContainerOnTimeout?: boolean;
+  /** Route an Instant request only to an already-running container. */
+  noWakeContainer?: boolean;
 }
 
 interface FetchNodeAgentControls {
   sourceTaskGuard?: VmAgentContainerRequestGuard;
   beforeExternalMutation?: () => Promise<void>;
   recoverContainerOnTimeout?: boolean;
+  noWakeContainer?: boolean;
 }
 
 export interface GuardedNodeAgentMutationOptions {
@@ -183,6 +187,7 @@ export async function nodeAgentRequest(
     sourceTaskGuard,
     beforeExternalMutation,
     recoverContainerOnTimeout = true,
+    noWakeContainer = false,
     ...requestOptions
   } = options;
   const { token } = await signNodeManagementToken(userId, nodeId, workspaceId, env);
@@ -216,7 +221,7 @@ export async function nodeAgentRequest(
     url,
     { ...requestOptions, headers },
     requestTimeoutMs,
-    { sourceTaskGuard, beforeExternalMutation, recoverContainerOnTimeout }
+    { sourceTaskGuard, beforeExternalMutation, recoverContainerOnTimeout, noWakeContainer }
   );
 
   recordNodeRoutingMetric(
@@ -283,7 +288,12 @@ export async function fetchNodeAgent(
   requestTimeoutMs: number,
   controls: FetchNodeAgentControls = {}
 ): Promise<Response> {
-  const { sourceTaskGuard, beforeExternalMutation, recoverContainerOnTimeout = true } = controls;
+  const {
+    sourceTaskGuard,
+    beforeExternalMutation,
+    recoverContainerOnTimeout = true,
+    noWakeContainer = false,
+  } = controls;
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
     await beforeExternalMutation?.();
     return fetchWithTimeout(url, options, requestTimeoutMs);
@@ -331,13 +341,20 @@ export async function fetchNodeAgent(
   try {
     await beforeExternalMutation?.();
     const response = await Promise.race([
-      fetchVmAgentContainer(
-        env,
-        nodeId,
-        new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
-        vmAgentPort,
-        sourceTaskGuard
-      ),
+      noWakeContainer
+        ? fetchVmAgentContainerNoWake(
+            env,
+            nodeId,
+            new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
+            vmAgentPort
+          )
+        : fetchVmAgentContainer(
+            env,
+            nodeId,
+            new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
+            vmAgentPort,
+            sourceTaskGuard
+          ),
       new Promise<Response>((_resolve, reject) => {
         timeoutHandle = setTimeout(
           () => reject(new Error(`Request timed out after ${requestTimeoutMs}ms`)),

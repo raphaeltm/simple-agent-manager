@@ -43,6 +43,32 @@ The Worker includes a versioned `acpInteractions` object in every agent-session 
 VM agent only creates permission interactions when that per-session contract is enabled; missing,
 disabled, invalid, or unsupported contracts cancel the ACP permission request explicitly.
 
+The start request uses this additive runtime contract (values shown are the centralized defaults):
+
+```json
+{
+  "acpInteractions": {
+    "enabled": false,
+    "protocolVersion": 1,
+    "permissionDeadlineMs": 1800000,
+    "maxDeadlineMs": 14400000,
+    "deadlineMarginMs": 60000,
+    "requestMaxBytes": 32768,
+    "optionsMaxCount": 16,
+    "optionIdMaxChars": 128,
+    "optionNameMaxChars": 200,
+    "receiptLimit": 256,
+    "responseMaxBytes": 65536,
+    "settleRetryDelaysMs": [1000, 5000, 30000, 120000, 300000],
+    "settleRetrySteadyMs": 300000
+  }
+}
+```
+
+Conversation-mode sessions use the separately configured conversation deadline in the serialized
+`permissionDeadlineMs` field. The global default remains disabled. The VM rejects unknown protocol
+versions and invalid or incomplete enabled contracts rather than inferring local defaults.
+
 - `POST /api/projects/:projectId/workspaces/:workspaceId/acp-interactions` creates an
   interaction. It requires a workspace-scoped callback JWT; project, workspace,
   chat-session, and running agent-session identity are resolved server-side.
@@ -55,6 +81,13 @@ disabled, invalid, or unsupported contracts cancel the ACP permission request ex
 - `POST /api/projects/:projectId/sessions/:sessionId/interactions/:interactionId/answer`
   requires `task:write`, session-creator ownership, and the exact configured app Origin.
   The accepted decision is committed before no-wake delivery is attempted.
+- `POST /workspaces/:workspaceId/agent-sessions/:sessionId/interactions/:interactionId/answer`
+  is the dedicated runtime answer endpoint. It requires a node-management JWT whose workspace and
+  node claims match the route and active runtime. Its JSON body contains `protocolVersion`, the same
+  UUID `interactionId` as the route, UUID `generation`, `runtimeIdentity`, a `decision` of
+  `selected_option`, `declined`, or `cancelled`, an exact `optionId` only for `selected_option`, and
+  the durable `answerHash`. It returns a structural receipt status of `consumed`, `duplicate`,
+  `conflict`, `stale_generation`, or `no_waiter`.
 
 Runtime create/settle routes return `404` for mismatched workspace/project/session
 binding, `409` for stale or conflicting state, and `410` for terminal workspaces.
@@ -66,7 +99,8 @@ persists bounded option labels and structural tool metadata through the callback
 the durable answer, and accepts only an exact option ID. Raw tool input/content is never sent on the
 viewer WebSocket or copied into the interaction payload. Runtime answers use the dedicated
 node-management-JWT endpoint and an in-memory waiter/receipt registry; missing or stale runtimes
-return `no_waiter`/`stale_generation` and are never woken or recreated to consume an answer.
+are never woken or recreated to consume an answer. A live runtime with no matching registry entry
+returns `no_waiter`; an absent or stopped runtime returns an HTTP error before registry lookup.
 
 ### GET /projects/:projectId/library/:fileId/preview
 

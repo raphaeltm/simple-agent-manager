@@ -169,6 +169,19 @@ export class VmAgentContainer extends Container<Env> {
     return this.proxyHttpAuthorized(request, port);
   }
 
+  /** Forward only to an already-running runtime; never wake or start recovery. */
+  async proxyHttpNoWake(request: Request, port?: number): Promise<Response> {
+    const status = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
+    if (status !== 'running') {
+      return recoveryResponse('RUNTIME_STOPPED', RUNTIME_STOPPED_MESSAGE, 410);
+    }
+    try {
+      return await this.containerFetch(request, port ?? this.defaultPort);
+    } catch {
+      return interruptedRequestResponse(request);
+    }
+  }
+
   private async proxyHttpAuthorized(
     request: Request,
     port?: number,

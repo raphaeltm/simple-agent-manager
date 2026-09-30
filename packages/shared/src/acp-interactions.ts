@@ -64,6 +64,7 @@ export const DEFAULT_ACP_INTERACTION_DELIVERY_BATCH_SIZE = 1;
 export const DEFAULT_ACP_INTERACTION_ALARM_WALL_TIME_MS = 15_000;
 export const DEFAULT_ACP_INTERACTION_ALARM_REARM_DELAY_MS = 1_000;
 export const DEFAULT_ACP_INTERACTION_RUNTIME_RECEIPT_LIMIT = 256;
+export const DEFAULT_ACP_INTERACTION_RUNTIME_RESPONSE_MAX_BYTES = 64 * 1024;
 
 export const AcpInteractionIdSchema = v.pipe(v.string(), v.uuid());
 export const AcpInteractionGenerationSchema = v.pipe(v.string(), v.uuid());
@@ -174,7 +175,8 @@ export const AcpInteractionRuntimeConfigSchema = v.object({
   optionIdMaxChars: v.pipe(v.number(), v.integer(), v.minValue(1)),
   optionNameMaxChars: v.pipe(v.number(), v.integer(), v.minValue(1)),
   receiptLimit: v.pipe(v.number(), v.integer(), v.minValue(1)),
-  settleRetryDelaysMs: v.array(v.pipe(v.number(), v.integer(), v.minValue(0))),
+  responseMaxBytes: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  settleRetryDelaysMs: v.array(v.pipe(v.number(), v.integer(), v.minValue(1))),
   settleRetrySteadyMs: v.pipe(v.number(), v.integer(), v.minValue(1)),
 });
 
@@ -187,9 +189,7 @@ export type AcpInteractionAnswerDecision = v.InferOutput<typeof AcpInteractionAn
 export type AcpInteractionBrowserAnswer = v.InferOutput<typeof AcpInteractionBrowserAnswerSchema>;
 export type AcpRuntimeAnswerRequest = v.InferOutput<typeof AcpRuntimeAnswerRequestSchema>;
 export type AcpRuntimeAnswerResponse = v.InferOutput<typeof AcpRuntimeAnswerResponseSchema>;
-export type AcpInteractionRuntimeConfig = v.InferOutput<
-  typeof AcpInteractionRuntimeConfigSchema
->;
+export type AcpInteractionRuntimeConfig = v.InferOutput<typeof AcpInteractionRuntimeConfigSchema>;
 
 export interface AcpInteractionCapabilities {
   version: typeof ACP_INTERACTION_CAPABILITY_VERSION;

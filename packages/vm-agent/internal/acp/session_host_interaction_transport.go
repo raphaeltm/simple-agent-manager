@@ -13,9 +13,8 @@ import (
 	"time"
 )
 
-const maxAcpInteractionResponseBytes = 64 * 1024
-
 func (h *SessionHost) createAcpInteraction(ctx context.Context, request acpInteractionCreateRequest) error {
+	config := h.acpInteractionConfigSnapshot()
 	body, err := json.Marshal(request)
 	if err != nil {
 		return fmt.Errorf("marshal ACP interaction create: %w", err)
@@ -37,7 +36,7 @@ func (h *SessionHost) createAcpInteraction(ctx context.Context, request acpInter
 	var result struct {
 		Status string `json:"status"`
 	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, maxAcpInteractionResponseBytes)).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(response.Body, config.ResponseMaxBytes)).Decode(&result); err != nil {
 		return fmt.Errorf("decode ACP interaction create response: %w", err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 ||
@@ -93,7 +92,7 @@ func (h *SessionHost) settleAcpInteraction(request acpInteractionSettleRequest, 
 		httpRequest.Header.Set("Content-Type", "application/json")
 		response, sendErr := h.httpClient().Do(httpRequest)
 		if sendErr == nil {
-			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, maxAcpInteractionResponseBytes))
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, config.ResponseMaxBytes))
 			response.Body.Close()
 			if response.StatusCode >= 200 && response.StatusCode < 300 {
 				return

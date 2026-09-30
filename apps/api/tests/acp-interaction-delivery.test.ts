@@ -67,31 +67,29 @@ describe('ACP interaction answer delivery', () => {
     ['vm', 'duplicate'],
     ['cf-container', 'consumed'],
     ['cf-container', 'duplicate'],
-  ] as const)(
-    'confirms %s %s runtime receipts without recovery',
-    async (runtime, status) => {
-      nodeAgentRequest.mockResolvedValueOnce(capabilities()).mockResolvedValueOnce({
-        status,
-        interactionId: input.interactionId,
-        generation: input.generation,
-        runtimeIdentity: input.runtimeIdentity,
-      });
+  ] as const)('confirms %s %s runtime receipts without recovery', async (runtime, status) => {
+    nodeAgentRequest.mockResolvedValueOnce(capabilities()).mockResolvedValueOnce({
+      status,
+      interactionId: input.interactionId,
+      generation: input.generation,
+      runtimeIdentity: input.runtimeIdentity,
+    });
 
-      await expect(
-        deliverAcpInteractionAnswer({} as never, { ...target, runtime }, input)
-      ).resolves.toMatchObject({ outcome: 'confirmed', runtimeStatus: status });
-      expect(nodeAgentRequest).toHaveBeenCalledWith(
-        'node-1',
-        expect.anything(),
-        '/workspaces/workspace-1/agent-sessions/agent-session-1/interactions/11111111-1111-4111-8111-111111111111/answer',
-        expect.objectContaining({
-          recoverContainerOnTimeout: false,
-          method: 'POST',
-          requestTimeoutMs: 5_000,
-        })
-      );
-    }
-  );
+    await expect(
+      deliverAcpInteractionAnswer({} as never, { ...target, runtime }, input)
+    ).resolves.toMatchObject({ outcome: 'confirmed', runtimeStatus: status });
+    expect(nodeAgentRequest).toHaveBeenCalledWith(
+      'node-1',
+      expect.anything(),
+      '/workspaces/workspace-1/agent-sessions/agent-session-1/interactions/11111111-1111-4111-8111-111111111111/answer',
+      expect.objectContaining({
+        recoverContainerOnTimeout: false,
+        noWakeContainer: true,
+        method: 'POST',
+        requestTimeoutMs: 5_000,
+      })
+    );
+  });
 
   it.each(['stale_generation', 'no_waiter', 'conflict'] as const)(
     'interrupts on %s runtime receipts',
@@ -131,6 +129,7 @@ describe('ACP interaction answer delivery', () => {
         '/workspaces/workspace-1/agent-capabilities',
         expect.objectContaining({
           recoverContainerOnTimeout: false,
+          noWakeContainer: true,
           method: 'GET',
           requestTimeoutMs: 5_000,
         })
