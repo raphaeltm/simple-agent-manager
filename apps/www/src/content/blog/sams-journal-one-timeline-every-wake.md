@@ -19,7 +19,7 @@ This matters when a session feels slow or stops unexpectedly. A short recent cha
 
 ## Keep the overview quick, fetch detail on demand
 
-The timeline does not download every five-second sample just to draw a long session. When SAM receives samples, it also saves a small per-minute summary. The browser uses those summaries for the full-session overview. Zooming in asks for the original five-second samples only for the time currently on screen; returning to an already loaded stretch reuses the cached data.
+The timeline does not download every five-second sample just to draw a long session. When SAM receives samples, it also saves a small per-minute summary. The browser uses those summaries for the full-session overview. Zooming in loads detail for the chunk containing the time currently on screen. The API may downsample those samples; returning to an already loaded chunk reuses the cached data.
 
 ```mermaid
 flowchart LR
