@@ -66,7 +66,11 @@ export function FloatingHeader({
     : '0 4px 24px rgba(0, 0, 0, 0.4)';
 
   return (
-    <div ref={containerRef} className="absolute top-0 left-0 right-0 z-10">
+    <div
+      ref={containerRef}
+      className="absolute top-0 left-0 right-0 z-10"
+      data-testid="session-floating-header"
+    >
       <SessionHeader
         projectId={projectId}
         session={lc.session}

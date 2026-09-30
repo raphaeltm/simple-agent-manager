@@ -1,4 +1,15 @@
 export type {
+  AcpInteractionAnswerResponse,
+  AcpInteractionDetailResponse,
+  AcpInteractionSnapshotItem,
+  AcpInteractionSnapshotResponse,
+} from './acp-interactions';
+export {
+  answerAcpInteraction,
+  getAcpInteractionDetail,
+  listAcpInteractions,
+} from './acp-interactions';
+export type {
   AdminErrorsFilter,
   AdminLogQueryParams,
   AdminProjectEventInspectorResponse,

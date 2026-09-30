@@ -162,6 +162,11 @@ export function ProjectChat() {
   // whole `state` object would invalidate these on every render and defeat the point.
   // `loadSessions`/`sessionId` are already destructured above.
   const { sessions: chatSessions, handleRetry, handleFork } = state;
+  const permissionRefreshSignal = useMemo(() => {
+    const attention = chatSessions.find((session) => session.id === sessionId)?.attention;
+    if (!attention) return null;
+    return `${attention.markerId}:${attention.reason ?? ''}`;
+  }, [chatSessions, sessionId]);
 
   const handleRetryActiveSession = useCallback(() => {
     const session = chatSessions.find((sess) => sess.id === sessionId);
@@ -556,6 +561,7 @@ export function ProjectChat() {
               targetMessageId={commentMessageTarget?.messageId ?? null}
               targetMessageTimestamp={commentMessageTarget?.timestamp ?? null}
               onTargetMessageConsumed={handleCommentMessageTargetConsumed}
+              permissionRefreshSignal={permissionRefreshSignal}
             />
           </div>
         )}
