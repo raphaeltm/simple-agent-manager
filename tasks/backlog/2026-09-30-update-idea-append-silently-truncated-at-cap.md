@@ -27,6 +27,13 @@ those records vanish, and neither the agent nor the reader can tell.
 - The dormant-ACP Slice A task (`tasks/archive/2026-09-29-dormant-acp-interactions-foundation.md`)
   required appending its outcome to that Idea after PRs #2182 and #2187 merged. No such note
   exists, and the Idea's `updatedAt` (2026-09-29 13:47Z) shows it was touched after #2182 merged.
+- Read-only production D1 on 2026-09-30 found four SAM Ideas at exactly 65,536 characters:
+  `01M0YZNBKSKQZ47NC0K7M8N5AX` (ProjectData storage relief, priority 10, the Idea the Monday
+  production health review appends to), `01M3P2E0JJNQRXX020P65ZRKEJ` (ACP interactions, priority 8),
+  `01KN0340ZP7VVR08QPTDESQ5HY` (event-driven triggers) and `01KRAHJ0R7Y9N0EVS27JKYT8PF`
+  (reservation-aware scheduler). `01M2TSPBDV1GDVRN9CS5A89EMH` (Jev research) has 130 characters
+  left. The two live Ideas now carry a "FULL at 64 KiB" title marker so writers stop losing
+  appends; remove it once this is fixed.
 
 ## Acceptance criteria
 
