@@ -16,6 +16,7 @@ import { Spinner } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useMemo, useRef, useState } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
 
+import { useAcpPermissionInteractions } from '../../hooks/useAcpPermissionInteractions';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { getMessageToolContent } from '../../lib/api/sessions';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
@@ -23,6 +24,7 @@ import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { SessionEventsDrawer } from '../chat/SessionEventsDrawer';
 import { ReportIssueDialog } from '../ReportIssueDialog';
+import { AcpPermissionCard } from './AcpPermissionCard';
 import { type CommentInboxItem, countBuckets, toInboxItem } from './comments/comment-inbox';
 import { CommentableConversationItem } from './comments/CommentableConversationItem';
 import { DesktopCommentRail } from './comments/MessageCommentPanels';
@@ -137,6 +139,14 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     onSessionMutated,
     messageComments.applyRealtimeEvent
   );
+  const permissionInteractions = useAcpPermissionInteractions({
+    projectId,
+    sessionId,
+    viewerId,
+    connectionState: lc.connectionState,
+  });
+  const { interactions: permissionItems, refresh: refreshPermissionInteractions } =
+    permissionInteractions;
 
   // One derivation feeds the header chip, the drawer, and the timeline, so the
   // three can never disagree about how many comments are outstanding.
@@ -225,6 +235,52 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   const fileClickHandler =
     lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined;
   const canWriteSession = lc.session?.isMine !== false;
+  const canAnswerPermissions = lc.session?.isMine === true;
+  const { anchoredInteractions, unanchoredInteractions } = useMemo(() => {
+    const rowIdByToolCallId = new Map<string, string>();
+    for (const item of displayItems) {
+      if (item.kind === 'tool_call') {
+        rowIdByToolCallId.set(item.toolCallId, item.id);
+      } else if (item.kind === 'tool_call_group') {
+        for (const grouped of item.items) {
+          if (grouped.kind === 'tool_call') rowIdByToolCallId.set(grouped.toolCallId, item.id);
+        }
+      }
+    }
+    const byRow = new Map<string, typeof permissionItems>();
+    const unanchored: typeof permissionItems = [];
+    for (const interaction of permissionItems) {
+      const rowId = interaction.toolCallId
+        ? rowIdByToolCallId.get(interaction.toolCallId)
+        : undefined;
+      if (!rowId) {
+        unanchored.push(interaction);
+        continue;
+      }
+      const existing = byRow.get(rowId);
+      if (existing) existing.push(interaction);
+      else byRow.set(rowId, [interaction]);
+    }
+    return { anchoredInteractions: byRow, unanchoredInteractions: unanchored };
+  }, [displayItems, permissionItems]);
+
+  const renderPermissionCards = useCallback(
+    (interactions: typeof permissionItems) => (
+      <div className="min-w-0" data-testid="acp-permission-stack">
+        {interactions.map((interaction) => (
+          <AcpPermissionCard
+            key={interaction.interactionId}
+            interaction={interaction}
+            projectId={projectId}
+            sessionId={sessionId}
+            canAnswer={canAnswerPermissions}
+            onRefresh={refreshPermissionInteractions}
+          />
+        ))}
+      </div>
+    ),
+    [canAnswerPermissions, refreshPermissionInteractions, projectId, sessionId]
+  );
   const commentUi = useProjectMessageCommentUi({
     messageComments,
     canWriteSession,
@@ -299,6 +355,11 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
           }
           onToggleGroup={groupRowState.onToggleGroup}
           groupLive={groupRowState.groupLiveFor(item.id)}
+          afterContent={
+            anchoredInteractions.has(item.id)
+              ? renderPermissionCards(anchoredInteractions.get(item.id) ?? [])
+              : null
+          }
         />
       );
     },
@@ -314,6 +375,8 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
       canWriteSession,
       commentUi.rowState,
       groupRowState,
+      anchoredInteractions,
+      renderPermissionCards,
     ]
   );
 
@@ -324,8 +387,19 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
       hasMore: lc.hasMore,
       loadingMore: lc.loadingMore,
       onLoadMore: lc.loadMore,
+      footer:
+        unanchoredInteractions.length > 0 ? (
+          <div className="px-4 pb-3">{renderPermissionCards(unanchoredInteractions)}</div>
+        ) : null,
     }),
-    [floatingHeaderHeight, lc.hasMore, lc.loadingMore, lc.loadMore]
+    [
+      floatingHeaderHeight,
+      lc.hasMore,
+      lc.loadingMore,
+      lc.loadMore,
+      renderPermissionCards,
+      unanchoredInteractions,
+    ]
   );
 
   useSessionFocusHandoff(Boolean(lc.session));
@@ -400,6 +474,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
         selectionControls={commentUi.selectionControls}
         commentRail={desktopCommentRail}
         toolRail={sessionToolRail}
+        tail={chatListContext.footer}
       />
 
       <SessionFooter

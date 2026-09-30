@@ -31,6 +31,8 @@ interface ConversationPaneProps {
   commentRail: ReactNode;
   /** Session tool rail on the pane's right edge. */
   toolRail: ReactNode;
+  /** Requests without a matching tool call render at the live conversation tail. */
+  tail: ReactNode;
 }
 
 /** Keys that scroll a focused conversation toward older messages. */
@@ -84,6 +86,7 @@ export function ConversationPane({
   selectionControls,
   commentRail,
   toolRail,
+  tail,
 }: Readonly<ConversationPaneProps>) {
   const [readerScrolledUp, scrollIntentHandlers] = useReaderScrolledUp();
 
@@ -93,16 +96,22 @@ export function ConversationPane({
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             {header}
-            <div
-              className="flex flex-1 items-center justify-center"
-              style={{ paddingTop: headerHeight }}
-            >
-              <span className="text-fg-muted text-sm">
-                {lc.sessionState === 'active'
-                  ? 'Waiting for messages...'
-                  : 'No messages in this session.'}
-              </span>
-            </div>
+            {tail ? (
+              <div className="min-h-0 flex-1 overflow-y-auto" style={{ paddingTop: headerHeight }}>
+                {tail}
+              </div>
+            ) : (
+              <div
+                className="flex flex-1 items-center justify-center"
+                style={{ paddingTop: headerHeight }}
+              >
+                <span className="text-fg-muted text-sm">
+                  {lc.sessionState === 'active'
+                    ? 'Waiting for messages...'
+                    : 'No messages in this session.'}
+                </span>
+              </div>
+            )}
           </div>
           {commentRail}
         </div>

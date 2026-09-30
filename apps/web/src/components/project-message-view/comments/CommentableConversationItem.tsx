@@ -1,4 +1,5 @@
 import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import type { ReactNode } from 'react';
 
 import { AcpConversationItemView } from '../AcpConversationItemView';
 import type { DisplayItem } from '../tool-call-groups';
@@ -41,6 +42,7 @@ export function CommentableConversationItem({
   groupExpanded,
   onToggleGroup,
   groupLive,
+  afterContent,
 }: {
   index: number;
   firstItemIndex: number;
@@ -61,6 +63,8 @@ export function CommentableConversationItem({
   onToggleGroup?: (groupId: string) => void;
   /** True when this group is the tail row and the agent is mid-turn. */
   groupLive?: boolean;
+  /** Durable interaction UI anchored directly after the message/tool row. */
+  afterContent?: ReactNode;
 }) {
   const isCommentableMessage =
     item.kind === 'agent_message' || (item.kind === 'user_message' && item.origin !== 'system');
@@ -102,6 +106,7 @@ export function CommentableConversationItem({
           onToggleGroup={onToggleGroup}
           groupLive={groupLive}
         />
+        {afterContent}
       </div>
 
       {isCommentableMessage && (canWriteSession || itemComments.length > 0) && (

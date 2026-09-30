@@ -37,7 +37,6 @@ export type { MessageActionsProps } from './components/MessageActions';
 export { MessageActions } from './components/MessageActions';
 export { MessageBubble } from './components/MessageBubble';
 export { ModeSelector } from './components/ModeSelector';
-export { PermissionDialog } from './components/PermissionDialog';
 export type { PlanModalProps } from './components/PlanModal';
 export { PlanModal } from './components/PlanModal';
 export { PlanView } from './components/PlanView';
