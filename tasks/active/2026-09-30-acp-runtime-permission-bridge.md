@@ -73,7 +73,7 @@ Slice B connects ACP `RequestPermission` to the shipped Cloudflare create/answer
 
 - Branch: `sam/execute-task-using-skill-zafwb6`
 - Draft PR: `#2201`
-- Final implementation commit: `ea3dbad82`
+- Original implementation commit: `ea3dbad82`; coordinator follow-up fixes: `d3e2b3f8c`, `7e6030174`.
 - Integrated staging: explicitly deferred to coordinator before readiness or merge
 
 ## Coordinator Review Follow-up (2026-09-30)
@@ -92,7 +92,7 @@ Slice B connects ACP `RequestPermission` to the shipped Cloudflare create/answer
 - [x] Preserve a valid answer that wins before an ambiguous/lost create acknowledgement and record its normal duplicate receipt.
 - [x] Test delayed-create expiry, Stop, replacement, and durable-create/lost-response outcomes with exact settle reasons and receipts.
 - [x] Add a real pinned-SDK fixture proving prompt deadline/cancel settles the matching permission while the connection remains usable, including a stale-cancel/new-attempt control.
-- [ ] Re-run focused race/contract tests, repository checks, specialist review, and CI; update the draft PR evidence without staging, readiness, or merge.
+- [x] Re-run focused race/contract tests, repository checks, specialist review, and CI; update the draft PR evidence without staging, readiness, or merge.
 
 ### Follow-up Acceptance Criteria
 
