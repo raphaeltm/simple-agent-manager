@@ -79,7 +79,7 @@ type TestEnv = {
   DATABASE: Record<string, never>;
   KV: { get: ReturnType<typeof vi.fn> };
   AI_PROXY_ENABLED: string;
-  AI_PROXY_ALLOWED_MODELS: string;
+  AI_PROXY_ALLOWED_MODELS?: string;
   CF_ACCOUNT_ID: string;
   CF_API_TOKEN: string;
   AI_PROXY_REQUEST_BODY_MAX_BYTES?: string;
@@ -376,6 +376,39 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
     expect(url).toBe('https://api.openai.com/v1/responses');
     expect(init.body).toBe(JSON.stringify({ model: 'gpt-4.1', input: 'Say hi' }));
     expectUsageIncrement(8, 3);
+  });
+
+  it('admits GPT-6.1 Sol through the default allowlist and forwards its Responses request', async () => {
+    allowProxyRequest();
+    mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 6, outputTokens: 2 });
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'resp_gpt_6_1_sol',
+          object: 'response',
+          usage: { input_tokens: 6, output_tokens: 2 },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+    );
+
+    const res = await postResponses(
+      {
+        model: 'gpt-6.1-sol',
+        input: 'Say hi',
+      },
+      { AI_PROXY_ALLOWED_MODELS: undefined }
+    );
+
+    expect(res.status).toBe(200);
+    await res.text();
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.openai.com/v1/responses');
+    expect(init.body).toBe(JSON.stringify({ model: 'gpt-6.1-sol', input: 'Say hi' }));
+    expectUsageIncrement(6, 2);
   });
 });
 
