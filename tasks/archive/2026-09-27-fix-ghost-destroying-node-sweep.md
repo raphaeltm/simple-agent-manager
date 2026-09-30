@@ -92,7 +92,7 @@ backs them off without reaching a terminal state.
 - PR #2157 / merge `8880c8761`
 - `apps/api/.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`
 - `packages/providers/.claude/rules/56-destructive-provider-ownership-proof.md`
-- `tasks/active/2026-09-26-terminal-node-cleanup-missing-provider-vm.md`
+- `tasks/archive/2026-09-26-terminal-node-cleanup-missing-provider-vm.md`
 
 ---
 

@@ -632,8 +632,10 @@ What changed since the last audit:
 - Drain tripled (18-minute sweep cadence, 2.4M daily write budget): PR #2161, merged 2026-09-27
   05:12Z. Its own 48-hour rollback trigger includes "the breaker opening"; the breaker opened
   eleven hours later and the trigger was never acted on.
-- Slice C (bounded root history indexing): no PR yet. The plan lives in idea
-  `01M0YZNBKSKQZ47NC0K7M8N5AX`.
+- Slice C (bounded root history indexing): no PR yet. Its code already exists as commit
+  `7868bc894` ("fix(search): complete bounded root history indexing", 2026-09-22) on the unmerged
+  parent branch `sam/implement-reliable-projectdata-archiving-tc49jm`, the same branch Slices A and
+  B were carved from. The plan lives in idea `01M0YZNBKSKQZ47NC0K7M8N5AX`.
 
 Next actions, in order. These are human-gated production operations, not code:
 

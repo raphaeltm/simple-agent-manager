@@ -17,7 +17,7 @@ Other debounce/timing tests in the package showed the same pattern
 ## Context
 
 Discovered 2026-09-29 while re-verifying the prompt-cancel watchdog fix
-(`tasks/active/2026-09-29-bind-prompt-cancel-watchdog-to-attempt.md`). That change
+(`tasks/archive/2026-09-29-bind-prompt-cancel-watchdog-to-attempt.md`). That change
 does not touch the harness activity reporter.
 
 ## Acceptance Criteria

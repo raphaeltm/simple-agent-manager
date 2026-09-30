@@ -212,7 +212,7 @@ mixed delta.
 
 ## References
 
-- Slice A: `tasks/active/2026-09-22-projectdata-archive-copy-reliability-slice-a.md`
+- Slice A: `tasks/archive/2026-09-22-projectdata-archive-copy-reliability-slice-a.md`
 - Parent task on the parent branch:
   `tasks/active/2026-09-21-projectdata-archive-search-reliability.md`
 - Idea `01M0YZNBKSKQZ47NC0K7M8N5AX`

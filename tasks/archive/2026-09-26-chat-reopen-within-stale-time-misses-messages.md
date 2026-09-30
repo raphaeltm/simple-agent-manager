@@ -33,7 +33,7 @@ Staging `hono` project, session `554d9f3c-1cb9-4d3c-b628-ffc4654cff44`, one brow
 
 Found during staging verification of the transcript-boundary fix (`tasks/archive/2026-09-25-transcript-boundary-and-reporter-payloads.md`). The gap predates that branch: `useChatWebSocket.ts`, the query `staleTime` and the cache persistence are unchanged by it. What that branch changed is what the refresh does once it runs, and the control step above exercises exactly that.
 
-Related: `tasks/active/2026-09-26-chat-recent-window-merge-can-leave-gap.md`.
+Related: `tasks/archive/2026-09-26-chat-recent-window-merge-can-leave-gap.md`.
 
 ## Implementation Notes
 
