@@ -6,7 +6,7 @@ FROM docker.io/cloudflare/sandbox:0.12.10@sha256:35c932d3e5b35f28d350800cf00551c
 COPY scripts/codex-device-auth.mjs /usr/local/bin/sam-codex-device-auth.mjs
 COPY scripts/claude-setup-token.mjs /usr/local/bin/sam-claude-setup-token.mjs
 
-# The base image already includes Node.js 24, Bun, git, curl, and common tools.
+# The base image already includes Node.js 22, Bun, git, curl, and common tools.
 # Add extra tools needed for SAM agent workloads here. The normal VM runtime
 # can install GitHub CLI during devcontainer bootstrap; standalone cf-container
 # sessions skip that bootstrap path, so the image must include gh for PR flows.
