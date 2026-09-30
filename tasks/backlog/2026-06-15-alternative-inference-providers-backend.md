@@ -1,5 +1,20 @@
 # Alternative Inference Provider Support — Backend-First (via SAM Proxy)
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the whole backend, in PR #1322 (`11c630bcb`): `harness-capabilities.ts` and
+>   `provider-presets.ts` in `packages/shared/src/`, a registry-driven assembler and
+>   `inferenceConfig` (`assemblers.ts:79`, `apps/api/src/routes/workspaces/runtime.ts:77-110`),
+>   a Go mirror (`packages/vm-agent/internal/acp/session_host_startup.go:364-398`), upstream
+>   forwarding (`apps/api/src/routes/ai-proxy-passthrough.ts:270-320`), write-path validation
+>   (`composable-credentials.ts:37,85`), per-provider usage (`routes/usage.ts:99-157`), tests.
+> - **Still open:** only the "Follow-up (UI)" section: provider presets in the Connect flow
+>   (grey out incompatible harnesses with `resolveHarnessDialect`) and a cross-provider cost
+>   comparison UI. Nothing in `apps/web/src` uses `PROVIDER_PRESETS` or `byProvider` yet.
+>   Optional cleanup: `runtime.ts` still has claude/codex conditionals (`:283-293`, `:972-1021`).
+> - **Moot/dropped:** the alternative-provider model-catalog rows. PR #1427 (`2f6e385bc`)
+>   replaced them with the dynamic OpenCode catalog.
+
 ## Goal
 Let users bring **alternative / third-party inference providers** to SAM agents.
 The world has more inference providers than the defaults SAM ships with, and many

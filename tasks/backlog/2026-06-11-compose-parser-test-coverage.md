@@ -1,5 +1,24 @@
 # Compose Parser Test Coverage Gaps
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** tests for tmpfs rejection, CPU-only default memory, `timeoutSeconds: 9999`,
+>   a bare numeric port, `80/tcp`, boolean env values, `KEY` without `=`, and `depends_on`
+>   absent from output (`packages/shared/tests/unit/compose-parser.test.ts:1415-1556`, PR #1294),
+>   plus the resolver validation-failure path (`:1218-1262`, PR #1378).
+> - **Still open:**
+>   - Test quality: `expectErrorAt` still uses `startsWith` (`:38`); no `beforeEach` reset of
+>     `mockResolver`.
+>   - HIGH error paths: wrong-type fields (raw numeric memory, scalar healthcheck, hooks as an
+>     array or string command, non-string command/env elements, env object without
+>     `x-sam-secret`, scalar service, top-level volumes array), `timeoutSeconds: 0`, long
+>     volumes missing `target`/`source`, IP-bound ports, bad `x-sam-routes` shapes, numeric
+>     `expose`.
+>   - MEDIUM: registry hosts with ports, multi-service partial failure, default route mode,
+>     port bounds 65535/65536, `driver: local`.
+>   - Docs/LOW: `depends_on` comment in `parseService`, rename the test at `:859`,
+>     `TOP_LEVEL_IGNORED` absence, the `/run/docker.sock` alias.
+
 ## Problem
 
 The compose-parser module (`packages/shared/src/compose-parser/`) shipped with 82% statement / 81% branch coverage. A post-merge test engineer review identified 22 HIGH-severity untested branches — mostly error/rejection paths in field parsers.

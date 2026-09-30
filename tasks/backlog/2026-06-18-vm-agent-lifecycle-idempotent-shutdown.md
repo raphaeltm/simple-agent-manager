@@ -1,5 +1,22 @@
 # VM Agent Lifecycle Ownership and Idempotent Shutdown
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - `Server.Stop` runs once and returns the first result
+>     (`packages/vm-agent/internal/server/server_shutdown.go:9-80`, tests
+>     `shutdown_test.go:80,95`, PR #1697), and it closes the resource monitor (`:58-62`).
+>   - `errorreport.Reporter.Shutdown` is idempotent (`internal/errorreport/reporter.go:158-185`,
+>     test `reporter_test.go:317`, PR #1750).
+> - **Still open:**
+>   - Close `eventStore` in `Stop` (created at `server.go:548`, never closed).
+>   - Stop session hosts outside `sessionHostMu` (`server_shutdown.go:26-33`,
+>     `workspaces.go:55-66`).
+>   - Close PTY sessions outside `workspaceMu` (`server_shutdown.go:36-40`).
+>   - Make `messagereport.Reporter.Shutdown` idempotent; it closes `stopC` directly
+>     (`internal/messagereport/reporter.go:290-298`).
+>   - Tests for lock discipline and for messagereport shutdown idempotency.
+
 **Created**: 2026-06-18
 **Priority**: High
 **Idea**: `01KVCX0T7DR7JAGK3AS6HSX9GA`

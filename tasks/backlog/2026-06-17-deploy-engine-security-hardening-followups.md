@@ -1,5 +1,24 @@
 # Deploy-engine security hardening follow-ups (deferred from PR #1312)
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** `go mod tidy` (`gopkg.in/yaml.v3` is now a direct require,
+>   `packages/vm-agent/go.mod:15`). The `fetchRelease` Bearer header is asserted
+>   (`packages/vm-agent/internal/deploy/engine_test.go:1421-1463`), but not its URL template.
+> - **Still open:**
+>   - Sign `RegistryCredentials.Server` in Go and TS (`signature.go:142-146` still excludes it).
+>   - Lower the registry credential TTL default from 60 to 15 min (`registry-credentials.ts:18`;
+>     production does not override it).
+>   - Escape `extractParam` (now `apps/api/src/services/image-resolver-outbound.ts:445-446`).
+>   - Redact the username in `DockerLogin` errors (`vm-agent/internal/cache/cache.go:100`).
+>   - Confirm the port is free, or retry, after a failed `composeDown` (`engine.go:265-270`).
+>   - Tests: `fetchRelease` URL template, post-sign `RegistryCredentials`, token-endpoint 403.
+>   - Add `DockerLogout` after apply (none exists).
+>   - Replaces the `nodeId` UNIQUE item: a placement-time check so two environments on one
+>     shared node cannot land in the same host-port band (`deployment-routing.ts:21-28`).
+> - **Moot/dropped:** the `deployment_environments.nodeId` UNIQUE constraint. Shared
+>   multi-environment deployment nodes are now the design (PRs #1356, #2114).
+
 ## Context
 
 Deferred MEDIUM/LOW findings from the PR #1312 (`app-deployment-mvp-hardening`)

@@ -1,5 +1,9 @@
 # Bind loopback git-credential requests to the calling container's own workspace
 
+> **Reconciliation 2026-09-30:** still open. It matters more now that GitLab-bound workspaces
+> hand out broad user OAuth tokens (`packages/vm-agent/internal/server/git_credential.go:44-56`).
+> Companion of `2026-06-09-git-credential-node-token-fallback-hardening.md`.
+
 **Origin:** Deferred defense-in-depth follow-up from the secondary-workspace git-credential
 gate fix (`tasks/archive/2026-06-09-fix-secondary-workspace-git-credential-gate.md`,
 SAM idea `01KTN1VGPM7Z3Z4YRHJ0JJJ5YZ`). Raised by `task-completion-validator` and

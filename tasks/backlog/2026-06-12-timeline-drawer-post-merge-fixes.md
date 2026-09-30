@@ -1,5 +1,21 @@
 # Timeline Drawer Post-Merge Fixes
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** H1, the focus trap on the timeline drawer (`useDialogFocusTrap` at
+>   `apps/web/src/components/chat/ChatTimelineDrawer.tsx:55`, PR #1897).
+> - **Still open:**
+>   - M1/M2: `hover:bg-bg-hover` and `group-hover:text-fg-accent` are still used
+>     (`ChatTimelineDrawer.tsx:108-286`) and are not defined in `apps/web/src/app.css`. The
+>     suggested `text-accent-primary` is undefined too; use `hover:bg-surface-hover` and
+>     `text-accent`. The same classes spread to `SessionCommentsDrawer.tsx`,
+>     `SessionEventsDrawer.tsx` and `comments/MessageCommentPanels.tsx`.
+>   - M3: `useSessionTimeline` exposes no error state
+>     (`apps/web/src/components/project-message-view/useSessionTimeline.ts:17-22`).
+>   - C1: drawers still open independently (`SessionMessageView.tsx:116-127`). Check it still
+>     reproduces first: each drawer has a click-to-close backdrop and is full-screen on mobile.
+>   - Focus trap for `ChatFilePanel`; the Playwright audit.
+
 **Source**: UI/UX specialist late review of PR #1304 (chat timeline feature)
 **Priority**: High (includes CRITICAL panel overlap)
 

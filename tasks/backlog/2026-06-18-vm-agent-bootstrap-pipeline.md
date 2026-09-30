@@ -1,5 +1,8 @@
 # Refactor VM Agent Bootstrap Pipeline
 
+> **Reconciliation 2026-09-30:** still open. PR #1354 was closed unmerged, and
+> `packages/vm-agent/internal/bootstrap/bootstrap.go` is now 3,297 lines.
+
 ## Problem
 
 `packages/vm-agent/internal/bootstrap/bootstrap.go` currently concentrates workspace bootstrap orchestration in large procedural flows. The task is to refactor bootstrap into an explicit step/pipeline shape so ordering, fatal/non-fatal behavior, cleanup ownership, and reporter behavior are easier to audit and test.

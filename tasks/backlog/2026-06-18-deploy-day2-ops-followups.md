@@ -1,5 +1,22 @@
 # Day-2 deploy ops follow-ups (deferred from PR #1313)
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** env-configurable log rotation, for compose-publish releases only
+>   (`DEPLOYMENT_LOG_MAX_SIZE` / `DEPLOYMENT_LOG_MAX_FILE`, `apps/api/src/env.ts:238-239`,
+>   `apps/api/src/routes/deploy-release-callback.ts:296-298`, PR #1356).
+> - **Still open:**
+>   - Manifest releases still hardcode `10m`/`3`
+>     (`apps/api/src/services/compose-renderer.ts:252-253`; `deploy-release-callback.ts:361`
+>     passes no `logRotation`).
+>   - Image GC: `PruneUnusedImages` (`packages/vm-agent/internal/deploy/imagegc.go:55`) has no
+>     production caller. Wire it up or delete it. If wired, protect in-use and digest refs and
+>     abort when protected-image reads fail (`imagegc.go:142-157` warns and continues).
+>   - fsync before rename in `internal/deploy/caddy.go:109-136` and `diskstate.go:151`.
+>   - Format validation for the log-rotation values.
+> - **Moot/dropped:** removing `ComposeCmd`. It is still used
+>   (`packages/vm-agent/internal/deploy/compose.go:52,177,434`).
+
 ## Context
 
 Deferred MEDIUM/LOW findings from the PR #1313 (`app-deployment-day2`)

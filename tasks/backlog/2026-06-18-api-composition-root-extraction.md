@@ -1,5 +1,8 @@
 # Extract API Composition Root Modules
 
+> **Reconciliation 2026-09-30:** still open. PR #1355 was closed unmerged on 2026-07-20, and
+> `apps/api/src/index.ts` is now 939 lines.
+
 ## Problem
 
 `apps/api/src/index.ts` currently owns Cloudflare runtime exports, Hono app creation, global error handling, subdomain proxying, app-wide middleware, well-known endpoints, route registration order, MCP CORS behavior, 404 handling, and scheduled cron dispatch. Route order is behavior in Hono, especially for BetterAuth catch-all routes and project callback JWT routes, so the composition root should make those constraints explicit and testable.

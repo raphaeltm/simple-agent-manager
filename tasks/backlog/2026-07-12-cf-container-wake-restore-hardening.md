@@ -1,5 +1,25 @@
 # cf-container wake/restore hardening follow-ups
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Restore runs as a detached job with a configurable timeout
+>     (`packages/vm-agent/internal/server/session_restore_retry.go:90-100`, PR #2148).
+>   - Snapshot tar size budgets (`session_snapshot.go:571-583`, PR #1785).
+>   - HTTP-level restore handler tests with a node-management JWT
+>     (`session_restore_retry_test.go:347-380`).
+> - **Still open:**
+>   - A deadline on the DO's `/restore` `containerFetch`
+>     (`apps/api/src/durable-objects/vm-agent-container.ts:877-893`).
+>   - Add `NODE_MANAGEMENT_TOKEN_EXPIRY_MS`; `apps/api/src/services/jwt.ts:175` reuses the
+>     terminal-token TTL.
+>   - A hostname check in `absoluteControlPlaneURL` (`session_snapshot.go:691-696`).
+>   - The circular import between `node-agent.ts:732-735` and `node-agent-session-snapshots.ts:7`.
+>   - Pass `ctx` into `skipOversizedUntracked` (`session_snapshot_archive.go:142-164`).
+> - **Moot/dropped:** the `restoreBody` leak and the `markWakeDegraded` accuracy items. PR #1660
+>   replaced `markWakeDegraded` with `degradeRecovery`, which stores only a failure kind and
+>   HTTP status and stops the container (`vm-agent-container.ts:963-990`).
+
 Deferred, non-blocking hardening items raised by the specialist reviewers during
 PR #1562 (cf-container session hibernate/wake/restore). None are regressions
 introduced by #1562 — the feature is verified working end-to-end on both the

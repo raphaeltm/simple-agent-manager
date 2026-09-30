@@ -1,5 +1,23 @@
 # Fix All Known Flaky Tests at the Root (No Retries)
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** item 1. The ToolCallCard test now awaits the final UI state
+>   (`packages/acp-client/tests/unit/components/ToolCallCard.test.tsx:159`, PR #1774). The two
+>   files this task superseded (`2026-02-28-fix-flaky-vm-agent-tests.md`,
+>   `2026-04-11-fix-flaky-useAvailableCommands-test.md`) were archived this week.
+> - **Still open:**
+>   - `asyncUtilTimeout` in `apps/web/tests/setup.ts` and `packages/acp-client/src/test-setup.ts`.
+>   - Make `TestSessionHost_ReplayDoesNotDropMessages` deterministic. It still uses a send
+>     buffer of 8 and a reader that starts after `AttachViewer` (`session_host_test.go:740-803`).
+>   - The fail-fast `fetch` stub in the web test setup, and the pattern audit.
+>   - Unfiled product bug: `session_host.go:435-439` sends `replay_done` even when
+>     `replayToViewer` aborted (`session_host_broadcast.go:79-95`), so clients believe replay
+>     finished. The fix belongs with the reconnect-replay integration test in
+>     `2026-02-20-acp-reconnect-replay-integration-test.md`.
+>   - Context: none of the named tests failed in the 400 most recent failed CI runs
+>     (2026-08-05 to 2026-09-30); `useAvailableCommands` now uses TanStack Query (PR #1872).
+
 ## Problem Statement
 
 CI has repeatedly gone red on tests unrelated to the changed code, blocking production deploys (most recently commits 95be06994/8591fb4e0, which touched only `packages/shared` yet failed on an acp-client component test). The user has explicitly rejected retry-based mitigation: **no vitest `retry` config, no CI auto-rerun logic anywhere**. Every known flaky test must be fixed at its root cause.

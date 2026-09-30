@@ -1,5 +1,10 @@
 # Split ProjectLibrary.tsx (approaching Rule-18 hard limit)
 
+> **Reconciliation 2026-09-30:** still open. The page is now 812 lines, past the 800-line hard
+> limit, and passes CI only through the hotfix `FILE SIZE EXCEPTION` comment added by PR #1898.
+> It is not listed in `2026-04-03-split-oversized-files.md` or in `EXEMPT_FILES`
+> (`scripts/quality/check-file-sizes.ts`).
+
 **Severity:** LOW (cleanup / maintainability)
 
 ## Problem Statement
