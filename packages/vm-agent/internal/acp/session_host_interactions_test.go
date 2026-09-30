@@ -283,6 +283,74 @@ func TestRequestPermissionFeatureOffAndCreateFailureNeverSelect(t *testing.T) {
 	waitCreate(t, rejected)
 }
 
+func TestRequestPermissionInvalidContractsAndRequestsFailClosedBeforeCreate(t *testing.T) {
+	tests := map[string]func(*AcpInteractionRuntimeConfig, *acpsdk.RequestPermissionRequest, *string){
+		"missing contract": func(config *AcpInteractionRuntimeConfig, _ *acpsdk.RequestPermissionRequest, _ *string) {
+			*config = AcpInteractionRuntimeConfig{}
+		},
+		"protocol version skew": func(config *AcpInteractionRuntimeConfig, _ *acpsdk.RequestPermissionRequest, _ *string) {
+			config.ProtocolVersion++
+		},
+		"missing generation": func(_ *AcpInteractionRuntimeConfig, _ *acpsdk.RequestPermissionRequest, generation *string) {
+			*generation = ""
+		},
+		"unsupported option kind": func(_ *AcpInteractionRuntimeConfig, request *acpsdk.RequestPermissionRequest, _ *string) {
+			request.Options[0].Kind = acpsdk.PermissionOptionKind("unsupported")
+		},
+		"empty options": func(_ *AcpInteractionRuntimeConfig, request *acpsdk.RequestPermissionRequest, _ *string) {
+			request.Options = nil
+		},
+		"too many options": func(config *AcpInteractionRuntimeConfig, _ *acpsdk.RequestPermissionRequest, _ *string) {
+			config.OptionsMaxCount = 1
+		},
+		"oversized option id": func(config *AcpInteractionRuntimeConfig, _ *acpsdk.RequestPermissionRequest, _ *string) {
+			config.OptionIDMaxChars = 3
+		},
+		"oversized option name": func(config *AcpInteractionRuntimeConfig, _ *acpsdk.RequestPermissionRequest, _ *string) {
+			config.OptionNameMaxChars = 3
+		},
+		"duplicate option ids": func(_ *AcpInteractionRuntimeConfig, request *acpsdk.RequestPermissionRequest, _ *string) {
+			request.Options[1].OptionId = request.Options[0].OptionId
+		},
+		"oversized encoded detail": func(config *AcpInteractionRuntimeConfig, _ *acpsdk.RequestPermissionRequest, _ *string) {
+			config.RequestMaxBytes = 1
+		},
+	}
+
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			recorder := newInteractionRecorder(t, http.StatusCreated)
+			host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{
+				ControlPlaneURL: recorder.server.URL,
+				ProjectID:       "project-1",
+				WorkspaceID:     "workspace-1",
+				SessionID:       "agent-session-1",
+				RuntimeIdentity: "runtime-1",
+				CallbackToken:   "callback-token",
+				HTTPClient:      recorder.server.Client(),
+			}})
+			t.Cleanup(host.Stop)
+			config := testInteractionConfig()
+			request := permissionRequest()
+			generation := host.attachAcpInteractionGeneration()
+			mutate(&config, &request, &generation)
+			host.ConfigureAcpInteractions(config)
+
+			response, err := (&sessionHostClient{host: host, interactionGeneration: generation}).RequestPermission(
+				context.Background(), request,
+			)
+			if err != nil || response.Outcome.Cancelled == nil || response.Outcome.Selected != nil {
+				t.Fatalf("response = %+v err=%v", response, err)
+			}
+			select {
+			case created := <-recorder.creates:
+				t.Fatalf("fail-closed path created durable interaction: %+v", created)
+			default:
+			}
+		})
+	}
+}
+
 func TestAcpInteractionRuntimeConfigRejectsNonPositiveRuntimeBounds(t *testing.T) {
 	tests := map[string]func(*AcpInteractionRuntimeConfig){
 		"response bytes": func(config *AcpInteractionRuntimeConfig) { config.ResponseMaxBytes = 0 },
