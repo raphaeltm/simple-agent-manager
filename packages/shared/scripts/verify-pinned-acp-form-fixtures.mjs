@@ -76,4 +76,4 @@ assert.equal(
   'Codex fixture must match the exact reviewed output of the pinned builder',
 );
 
-console.log('Pinned Claude 0.81.2 form output and Codex 1.13.1 builder source match fixtures.');
+console.log('Claude 0.81.2 builder output matches fixtures; Codex 1.13.1 source and full fixture fingerprints match the reviewed snapshot.');
