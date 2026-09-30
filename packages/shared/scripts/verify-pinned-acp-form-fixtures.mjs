@@ -3,6 +3,7 @@
 //   node packages/shared/scripts/verify-pinned-acp-form-fixtures.mjs
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -59,25 +60,20 @@ assert.equal(ask.mode, 'form');
 assert.deepEqual(ask.requestedSchema, fixtures[1].schema);
 
 // codex-acp publishes one executable bundle and no importable builder export.
-// Evaluate the unmodified builder method from that exact pinned bundle with its
-// two pure local constants/helpers. A changed builder fails this comparison.
+// Pin the exact builder/helper source that produced the checked-in corpus. This
+// detects a changed installed wrapper without executing extracted bundle text.
 const codexSource = readFileSync(join(codexDir, 'dist/index.js'), 'utf8');
 const helper = methodBody(codexSource, 'function userInputNoteFieldId(questionId, questionIds) {');
 const builder = methodBody(codexSource, '  buildUserInputRequest(params) {');
-const build = new Function('params', `
-  const USER_INPUT_OTHER_OPTION = 'None of the above';
-  const USER_INPUT_NOTE_FIELD_SUFFIX = '_note';
-  function userInputNoteFieldId(questionId, questionIds) ${helper}
-  ${builder}
-`);
-const codex = build({
-  threadId: 'pinned-session', itemId: 'tool-1', autoResolutionMs: 30000,
-  questions: [{
-    id: 'question', question: 'Which path?', isOther: true, isSecret: false,
-    options: [{ label: 'Fast' }],
-  }],
-});
-assert.equal(codex.mode, 'form');
-assert.deepEqual(codex.requestedSchema, fixtures[2].schema);
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
+assert.equal(sha256(helper), '1bbe92fc16e09779f7c880d212569ae6503f47c5e99c22218e855eec0a7f48d6');
+assert.equal(sha256(builder), 'e68832666416c87c3e4944a2bbee4c68516e86e1127709ed9229861816c23cf1');
+assert.match(codexSource, /var USER_INPUT_NOTE_FIELD_SUFFIX = "_note";/);
+assert.match(codexSource, /var USER_INPUT_OTHER_OPTION = "None of the above";/);
+assert.equal(
+  sha256(JSON.stringify(fixtures[2].schema)),
+  'ba0ebfdb264b5a64fdd001a97efb92735955f6d24b73d4eabceff1dc7af03234',
+  'Codex fixture must match the exact reviewed output of the pinned builder',
+);
 
-console.log('Pinned Claude 0.81.2 and Codex 1.13.1 form fixtures match adapter output.');
+console.log('Pinned Claude 0.81.2 form output and Codex 1.13.1 builder source match fixtures.');
