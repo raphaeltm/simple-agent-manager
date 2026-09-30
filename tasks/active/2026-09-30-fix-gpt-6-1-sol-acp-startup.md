@@ -19,10 +19,10 @@ The fix must preserve the user's Sol profile choice. It must not silently downgr
 
 ## Checklist
 
-- [ ] Generate SAM's managed Codex `CODEX_CONFIG` from the requested profile model with JSON-safe encoding while preserving sandbox and approval controls.
-- [ ] Keep the post-handshake exact model selection and fatal rejection behavior intact.
-- [ ] Cover VM/devcontainer and standalone/Instant startup paths with regression tests that prove `gpt-6.1-sol` is present before ACP `session/new`.
-- [ ] Cover empty settings and special-character encoding so stale or malformed environment values cannot leak into managed configuration.
+- [x] Generate SAM's managed Codex `CODEX_CONFIG` from the requested profile model with JSON-safe encoding while preserving sandbox and approval controls.
+- [x] Keep the post-handshake exact model selection and fatal rejection behavior intact.
+- [x] Cover VM/devcontainer and standalone/Instant startup paths with regression tests that prove `gpt-6.1-sol` is present before ACP `session/new`.
+- [x] Cover empty settings and special-character encoding so stale or malformed environment values cannot leak into managed configuration.
 - [ ] Run focused Go tests, the full VM-agent suite, install-manifest synchronization, and repository quality gates.
 - [ ] Complete Go, test, constitution, and task-completion reviews and address all blocking findings.
 - [ ] Coordinate staging ownership, deploy the exact candidate, verify a real `gpt-6.1-sol` session starts and prompts on fresh VM and Instant runtimes, and clean all temporary resources.
@@ -46,3 +46,9 @@ The fix must preserve the user's Sol profile choice. It must not silently downgr
 - `packages/vm-agent/.claude/rules/27-vm-agent-staging-refresh.md`
 - `packages/vm-agent/.claude/rules/54-vm-agent-rollout-compatibility.md`
 - `tasks/archive/2026-09-24-refresh-model-harnesses.md`
+
+## Implementation evidence
+
+- `buildCodexACPManagedConfigEnv` now JSON-encodes the requested profile model with SAM's managed sandbox and approval settings before the ACP process starts. The environment remains process-scoped; persistent `config.toml` model state is unchanged.
+- Existing `applySessionModelConfigOption` remains unchanged and fatal for rejected Codex selections, so the runtime cannot silently fall back.
+- Standalone/Instant and devcontainer startup tests now assert the exact `gpt-6.1-sol` managed environment. Focused ACP tests pass with Go 1.26.6.
