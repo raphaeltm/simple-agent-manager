@@ -1,5 +1,8 @@
+import { useMemo } from 'react';
+
 import type { MessageCommentAction } from '../../lib/api/comments';
 import { ChatTimelineDrawer } from '../chat/ChatTimelineDrawer';
+import { apiResourceHistorySource } from '../chat/resource-timeline/resource-source';
 import { SessionCommentsDrawer } from '../chat/SessionCommentsDrawer';
 import { SessionResourceHistoryDrawer } from '../chat/SessionResourceHistoryDrawer';
 import type { CommentInboxItem } from './comments/comment-inbox';
@@ -50,6 +53,11 @@ export function ProjectMessageViewDrawers({
   onReopen: (threadId: string) => Promise<unknown>;
   onSendToAgent: (threadId: string) => Promise<unknown>;
 }>) {
+  const resourceSource = useMemo(
+    () => apiResourceHistorySource(projectId, sessionId),
+    [projectId, sessionId]
+  );
+
   return (
     <>
       {showTimeline && (
@@ -64,11 +72,7 @@ export function ProjectMessageViewDrawers({
       )}
 
       {showResources && (
-        <SessionResourceHistoryDrawer
-          projectId={projectId}
-          sessionId={sessionId}
-          onClose={onCloseResources}
-        />
+        <SessionResourceHistoryDrawer source={resourceSource} onClose={onCloseResources} />
       )}
 
       {showComments && (

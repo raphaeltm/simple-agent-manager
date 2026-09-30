@@ -190,7 +190,8 @@ type GatewayConfig struct {
 	PongTimeout time.Duration
 	// PromptTimeout bounds how long a prompt can run before force-stop fallback.
 	PromptTimeout time.Duration
-	// PromptCancelGracePeriod waits after cancel before force-stopping unresponsive prompt.
+	// PromptCancelGracePeriod waits after cancel for the cancelled prompt to
+	// settle before finishing it as cancelled and restarting the agent.
 	PromptCancelGracePeriod time.Duration
 	// PromptRetryMaxRetries bounds transient provider prompt retries after the initial attempt.
 	PromptRetryMaxRetries int
