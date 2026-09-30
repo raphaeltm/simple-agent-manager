@@ -64,14 +64,21 @@ async function verifyWorkspaceCallback(c: {
   };
 }
 
-async function assertAgentSessionCurrent(env: Env, workspaceId: string, agentSessionId: string) {
+async function assertAgentSessionExists(
+  env: Env,
+  workspaceId: string,
+  agentSessionId: string,
+  requireRunning: boolean
+) {
   const row = await env.DATABASE.prepare(
     `SELECT id, status FROM agent_sessions WHERE id = ? AND workspace_id = ? LIMIT 1`
   )
     .bind(agentSessionId, workspaceId)
     .first<{ id: string; status: string }>();
   if (!row) throw errors.notFound('Agent session');
-  if (row.status !== 'running') throw errors.conflict(`Agent session is ${row.status}`);
+  if (requireRunning && row.status !== 'running') {
+    throw errors.conflict(`Agent session is ${row.status}`);
+  }
 }
 
 function settleStatusCode(status: string): 200 | 404 | 409 {
@@ -90,7 +97,7 @@ acpInteractionCallbackRoute.post(
   async (c) => {
     const identity = await verifyWorkspaceCallback(c);
     const body = c.req.valid('json');
-    await assertAgentSessionCurrent(c.env, identity.workspaceId, body.agentSessionId);
+    await assertAgentSessionExists(c.env, identity.workspaceId, body.agentSessionId, true);
     const result = await createInteraction(c.env, {
       ...body,
       projectId: identity.projectId,
@@ -122,7 +129,11 @@ acpInteractionCallbackRoute.post(
     if (body.interactionId !== c.req.param('interactionId')) {
       throw errors.badRequest('interactionId route/body mismatch');
     }
-    await assertAgentSessionCurrent(c.env, identity.workspaceId, body.agentSessionId);
+    // A terminal session may race the runtime's final settle callback. The
+    // InteractionStore still fences settlement by agentSessionId, generation,
+    // and runtimeIdentity, so accepting the existing row cannot settle another
+    // runtime's interaction.
+    await assertAgentSessionExists(c.env, identity.workspaceId, body.agentSessionId, false);
     const result = await settleInteraction(c.env, {
       ...body,
       projectId: identity.projectId,

@@ -311,6 +311,15 @@ type SessionHost struct {
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// Durable ACP permission waiters are in-memory by design: Cloudflare owns
+	// durable state, while only the live connection generation may consume an answer.
+	interactionMu           sync.Mutex
+	interactionConfig       AcpInteractionRuntimeConfig
+	interactionGeneration   string
+	interactionWaiters      map[string]*acpInteractionWaiter
+	interactionReceipts     map[string]acpInteractionReceipt
+	interactionReceiptOrder []string
 }
 
 func (h *SessionHost) now() time.Time {
@@ -336,12 +345,14 @@ func NewSessionHost(config SessionHostConfig) *SessionHost {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &SessionHost{
-		config:     config,
-		status:     HostIdle,
-		viewers:    make(map[string]*Viewer),
-		messageBuf: make([]BufferedMessage, 0, 256),
-		ctx:        ctx,
-		cancel:     cancel,
+		config:              config,
+		status:              HostIdle,
+		viewers:             make(map[string]*Viewer),
+		messageBuf:          make([]BufferedMessage, 0, 256),
+		interactionWaiters:  make(map[string]*acpInteractionWaiter),
+		interactionReceipts: make(map[string]acpInteractionReceipt),
+		ctx:                 ctx,
+		cancel:              cancel,
 	}
 }
 
@@ -528,6 +539,7 @@ func (h *SessionHost) autoSuspend() {
 // as stopped. This is the only way to terminate the agent — browser disconnects
 // do NOT call this.
 func (h *SessionHost) Stop() {
+	h.cancelInteractionWaiters("session_stopped")
 	h.promptMu.Lock()
 	attempt := h.promptAttempt
 	activePrompt := h.promptInFlight
@@ -625,6 +637,7 @@ func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentComman
 
 // stopCurrentAgentLocked stops the current agent process. Must hold h.mu.
 func (h *SessionHost) stopCurrentAgentLocked() {
+	h.cancelInteractionWaiters("connection_closed")
 	// Stop the process-scoped harness heartbeat before clearing the ACP
 	// connection. A replacement connection will establish fresh state.
 	h.clearHarnessWork()

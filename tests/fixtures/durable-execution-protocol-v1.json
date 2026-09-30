@@ -11,6 +11,7 @@
       "supported": true,
       "version": 1,
       "answerEndpoint": true,
+      "permissionBridge": true,
       "deliverySemantics": "best_effort_no_wake",
       "noWaiterStatus": "no_waiter",
       "staleStatus": "stale_generation"

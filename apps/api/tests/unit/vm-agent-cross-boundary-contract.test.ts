@@ -650,6 +650,14 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
       expect(parsedBody.projectId).toBe('proj-abc');
       expect(parsedBody.taskId).toBe('task-xyz');
       expect(parsedBody.taskMode).toBe('task');
+      expect(parsedBody.acpInteractions).toEqual(
+        expect.objectContaining({
+          enabled: false,
+          protocolVersion: 1,
+          permissionDeadlineMs: 30 * 60 * 1000,
+          receiptLimit: 256,
+        })
+      );
     });
 
     it('omits optional fields when not provided', async () => {
@@ -678,6 +686,9 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
       expect(parsedBody.opencodeBaseUrl).toBeUndefined();
       expect(parsedBody.projectId).toBeUndefined();
       expect(parsedBody.taskId).toBeUndefined();
+      expect(parsedBody.acpInteractions).toEqual(
+        expect.objectContaining({ enabled: false, permissionDeadlineMs: 30 * 60 * 1000 })
+      );
     });
 
     it('preserves OpenCode Go provider and GLM 5.2 model overrides', async () => {

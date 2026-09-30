@@ -19,10 +19,11 @@ import (
 // sessionHostClient implements the acp-go-sdk Client interface.
 // Instead of writing to a single WebSocket, it broadcasts to all viewers.
 type sessionHostClient struct {
-	host                *SessionHost
-	processedCh         chan struct{} // Signaled only after session/update completes (used by orderedPipe).
-	usageAttribution    credentialAttribution
-	hasUsageAttribution bool
+	host                  *SessionHost
+	processedCh           chan struct{} // Signaled only after session/update completes (used by orderedPipe).
+	usageAttribution      credentialAttribution
+	hasUsageAttribution   bool
+	interactionGeneration string
 }
 
 // signalProcessed signals that a session/update handler completed, allowing
@@ -89,31 +90,8 @@ func (c *sessionHostClient) SessionUpdate(_ context.Context, params acpsdk.Sessi
 	return nil
 }
 
-func (c *sessionHostClient) RequestPermission(_ context.Context, params acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
-	data, err := json.Marshal(map[string]interface{}{
-		"jsonrpc": "2.0",
-		"method":  "permission/request",
-		"params":  params,
-	})
-	if err != nil {
-		return acpsdk.RequestPermissionResponse{}, fmt.Errorf("failed to marshal permission request: %w", err)
-	}
-	c.host.broadcastMessage(data)
-
-	mode := c.host.permissionMode
-	if mode == "" {
-		mode = "default"
-	}
-	slog.Info("Permission request", "mode", mode, "optionsCount", len(params.Options))
-
-	if len(params.Options) > 0 {
-		return acpsdk.RequestPermissionResponse{
-			Outcome: acpsdk.NewRequestPermissionOutcomeSelected(params.Options[0].OptionId),
-		}, nil
-	}
-	return acpsdk.RequestPermissionResponse{
-		Outcome: acpsdk.NewRequestPermissionOutcomeCancelled(),
-	}, nil
+func (c *sessionHostClient) RequestPermission(ctx context.Context, params acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
+	return c.host.requestPermission(ctx, c.interactionGeneration, params)
 }
 
 func (c *sessionHostClient) ReadTextFile(ctx context.Context, params acpsdk.ReadTextFileRequest) (acpsdk.ReadTextFileResponse, error) {

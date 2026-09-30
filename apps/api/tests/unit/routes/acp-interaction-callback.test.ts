@@ -161,7 +161,7 @@ describe('ACP interaction callback routes', () => {
           reason: 'completed',
         }),
       },
-      env()
+      env('stopped')
     );
     expect(settle.status).toBe(200);
     expect(mocks.settleInteraction).toHaveBeenCalledWith(

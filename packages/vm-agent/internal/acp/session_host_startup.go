@@ -579,13 +579,15 @@ func (h *SessionHost) attachACPConnection(process agentProcess, agentType string
 	// startAgentWithSessionMode is called with h.mu held, so use the already
 	// resolved agent type instead of re-entering AgentType's RWMutex.
 	h.resetHarnessWorkForAgent(agentType)
+	interactionGeneration := h.attachAcpInteractionGeneration()
 	processedCh := make(chan struct{}, 1)
 	attr, hasAttr := h.credentialAttributionSnapshot()
 	client := &sessionHostClient{
-		host:                h,
-		processedCh:         processedCh,
-		usageAttribution:    attr,
-		hasUsageAttribution: hasAttr,
+		host:                  h,
+		processedCh:           processedCh,
+		usageAttribution:      attr,
+		hasUsageAttribution:   hasAttr,
+		interactionGeneration: interactionGeneration,
 	}
 
 	serializeTimeout := h.config.NotifSerializeTimeout

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/bootstrap"
@@ -1239,20 +1240,21 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	}
 
 	var body struct {
-		ProtocolVersion  int                  `json:"protocolVersion,omitempty"`
-		DeliveryID       string               `json:"deliveryId,omitempty"`
-		MessageID        string               `json:"messageId,omitempty"`
-		AgentType        string               `json:"agentType"`
-		InitialPrompt    string               `json:"initialPrompt"`
-		McpServers       []acp.McpServerEntry `json:"mcpServers,omitempty"`
-		Model            string               `json:"model,omitempty"`
-		PermissionMode   string               `json:"permissionMode,omitempty"`
-		Effort           string               `json:"effort,omitempty"`
-		OpencodeProvider string               `json:"opencodeProvider,omitempty"`
-		OpencodeBaseURL  string               `json:"opencodeBaseUrl,omitempty"`
-		ProjectID        string               `json:"projectId,omitempty"`
-		TaskID           string               `json:"taskId,omitempty"`
-		TaskMode         string               `json:"taskMode,omitempty"`
+		ProtocolVersion  int                             `json:"protocolVersion,omitempty"`
+		DeliveryID       string                          `json:"deliveryId,omitempty"`
+		MessageID        string                          `json:"messageId,omitempty"`
+		AgentType        string                          `json:"agentType"`
+		InitialPrompt    string                          `json:"initialPrompt"`
+		McpServers       []acp.McpServerEntry            `json:"mcpServers,omitempty"`
+		Model            string                          `json:"model,omitempty"`
+		PermissionMode   string                          `json:"permissionMode,omitempty"`
+		Effort           string                          `json:"effort,omitempty"`
+		OpencodeProvider string                          `json:"opencodeProvider,omitempty"`
+		OpencodeBaseURL  string                          `json:"opencodeBaseUrl,omitempty"`
+		ProjectID        string                          `json:"projectId,omitempty"`
+		TaskID           string                          `json:"taskId,omitempty"`
+		TaskMode         string                          `json:"taskMode,omitempty"`
+		AcpInteractions  acp.AcpInteractionRuntimeConfig `json:"acpInteractions,omitempty"`
 		// InjectedInstructions is SAM-managed system-injected prompt text (e.g. the
 		// get_instructions reminder). Delivered to the agent as model input but
 		// mirrored as a separate origin="system" user message the UI collapses.
@@ -1268,6 +1270,10 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	}
 	if strings.TrimSpace(body.InitialPrompt) == "" {
 		writeError(w, http.StatusBadRequest, "initialPrompt is required")
+		return
+	}
+	if err := acp.ValidateAcpInteractionRuntimeConfig(body.AcpInteractions); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	body.DeliveryID = strings.TrimSpace(body.DeliveryID)
@@ -1364,15 +1370,14 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
 		return
 	}
-
 	s.appendNodeEvent(workspaceID, "info", "agent_session.starting", "Starting agent with initial prompt", map[string]interface{}{
 		"sessionId": sessionID,
 		"agentType": body.AgentType,
 	})
 
 	if body.DeliveryID != "" {
-		hash := promptDeliveryFingerprint(body.ProtocolVersion, body.MessageID,
-			body.InitialPrompt+"\x00"+body.InjectedInstructions)
+		hash := agentStartDeliveryFingerprint(body.ProtocolVersion, body.MessageID,
+			body.InitialPrompt, body.InjectedInstructions, body.AcpInteractions)
 		receipt, _, conflict, receiptErr := s.store.AcceptPromptDelivery(workspaceID, sessionID,
 			body.DeliveryID, body.ProtocolVersion, hash)
 		if receiptErr != nil {
@@ -1405,6 +1410,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 			})
 			return
 		}
+		host.ConfigureAcpInteractions(body.AcpInteractions)
 		observer := s.promptReceiptObserver(workspaceID, sessionID, body.DeliveryID)
 		go s.startAgentWithPromptObserved(host, workspaceID, sessionID, body.AgentType,
 			body.InitialPrompt, body.InjectedInstructions, body.MessageID, observer)
@@ -1416,6 +1422,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 
 	// Start agent and send initial prompt in a background goroutine.
 	// The endpoint returns 202 immediately — the agent runs asynchronously.
+	host.ConfigureAcpInteractions(body.AcpInteractions)
 	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt, body.InjectedInstructions)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
@@ -1647,6 +1654,18 @@ func promptDeliveryFingerprint(protocolVersion int, messageID, prompt string) st
 	return fmt.Sprintf("%x", sum[:])
 }
 
+func agentStartDeliveryFingerprint(
+	protocolVersion int,
+	messageID string,
+	prompt string,
+	injectedInstructions string,
+	interactions acp.AcpInteractionRuntimeConfig,
+) string {
+	encodedInteractions, _ := json.Marshal(interactions)
+	return promptDeliveryFingerprint(protocolVersion, messageID,
+		prompt+"\x00"+injectedInstructions+"\x00"+string(encodedInteractions))
+}
+
 type versionedPromptResponse struct {
 	Status    string                            `json:"status"`
 	SessionID string                            `json:"sessionId"`
@@ -1761,11 +1780,11 @@ func (s *Server) writePromptReceiptNotFound(w http.ResponseWriter, deliveryID st
 }
 
 type acpInteractionAnswerRequest struct {
-	ProtocolVersion int             `json:"protocolVersion"`
-	InteractionID   string          `json:"interactionId"`
-	Generation      string          `json:"generation"`
-	RuntimeIdentity string          `json:"runtimeIdentity"`
-	Decision        json.RawMessage `json:"decision"`
+	ProtocolVersion int                              `json:"protocolVersion"`
+	InteractionID   string                           `json:"interactionId"`
+	Generation      string                           `json:"generation"`
+	RuntimeIdentity string                           `json:"runtimeIdentity"`
+	Decision        acp.AcpInteractionAnswerDecision `json:"decision"`
 }
 
 type acpInteractionAnswerResponse struct {
@@ -1814,12 +1833,20 @@ func (s *Server) handleAcpInteractionAnswer(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "interactionId has an invalid format")
 		return
 	}
+	if _, err := uuid.Parse(body.InteractionID); err != nil {
+		writeError(w, http.StatusBadRequest, "interactionId must be a UUID")
+		return
+	}
 	if !validExecutionProtocolID(body.Generation, maxAcpInteractionGenerationLength) {
 		writeError(w, http.StatusBadRequest, "generation has an invalid format")
 		return
 	}
-	if body.Decision == nil || !json.Valid(body.Decision) {
-		writeError(w, http.StatusBadRequest, "decision is required")
+	if _, err := uuid.Parse(body.Generation); err != nil {
+		writeError(w, http.StatusBadRequest, "generation must be a UUID")
+		return
+	}
+	if err := acp.ValidatePermissionAcpInteractionDecision(body.Decision); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if body.RuntimeIdentity != s.executionRuntimeID {
@@ -1832,8 +1859,9 @@ func (s *Server) handleAcpInteractionAnswer(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	status := host.ResolveAcpInteractionAnswer(body.InteractionID, body.Generation, body.Decision)
 	writeJSON(w, http.StatusOK, acpInteractionAnswerResponse{
-		Status:          "no_waiter",
+		Status:          status,
 		InteractionID:   body.InteractionID,
 		Generation:      body.Generation,
 		RuntimeIdentity: s.executionRuntimeID,
@@ -1866,6 +1894,7 @@ func (s *Server) agentCapabilities() map[string]interface{} {
 			"supported":         true,
 			"version":           acpInteractionCapabilityVersion,
 			"answerEndpoint":    true,
+			"permissionBridge":  true,
 			"deliverySemantics": "best_effort_no_wake",
 			"noWaiterStatus":    "no_waiter",
 			"staleStatus":       "stale_generation",

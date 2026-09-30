@@ -145,6 +145,8 @@ type GatewayConfig struct {
 	WorkspaceID string
 	// SessionID is the agent session identifier (used for persistence).
 	SessionID string
+	// RuntimeIdentity identifies this vm-agent process for delivery fencing.
+	RuntimeIdentity string
 	// CallbackToken is the JWT for authenticating with the control plane.
 	CallbackToken string
 	// ContainerResolver returns the devcontainer's Docker container ID.
