@@ -108,9 +108,13 @@ func (h *SessionHost) settleAcpInteraction(request acpInteractionSettleRequest, 
 			if response.StatusCode >= 200 && response.StatusCode < 300 {
 				return
 			}
+			// A create request can commit after its response is lost or after local
+			// cancellation wins. In that ordering the first settle may observe 404
+			// before the create becomes visible, so retry not-found within this
+			// already-bounded settle context.
 			if response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusUnauthorized ||
-				response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusNotFound ||
-				response.StatusCode == http.StatusConflict || response.StatusCode == http.StatusGone {
+				response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusConflict ||
+				response.StatusCode == http.StatusGone {
 				return
 			}
 		}

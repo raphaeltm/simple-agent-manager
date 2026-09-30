@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -433,6 +435,97 @@ func TestRequestPermissionAnswerWinsBeforeLostCreateAcknowledgement(t *testing.T
 	}
 	if status := host.ResolveAcpInteractionAnswer(created.InteractionID, created.Generation, decision); status != "duplicate" {
 		t.Fatalf("duplicate receipt = %q, want duplicate", status)
+	}
+}
+
+func TestRequestPermissionSettleRetriesNotFoundUntilDelayedCreateCommits(t *testing.T) {
+	createStarted := make(chan acpInteractionCreateRequest, 1)
+	commitCreate := make(chan struct{})
+	settles := make(chan acpInteractionSettleRequest, 2)
+	var settleCalls atomic.Int32
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(request.URL.Path, "/settle") {
+			var settle acpInteractionSettleRequest
+			if err := json.NewDecoder(request.Body).Decode(&settle); err != nil {
+				t.Errorf("decode settle: %v", err)
+			}
+			settles <- settle
+			if settleCalls.Add(1) == 1 {
+				close(commitCreate)
+				return &http.Response{
+					StatusCode: http.StatusNotFound,
+					Body:       http.NoBody,
+					Header:     make(http.Header),
+				}, nil
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       http.NoBody,
+				Header:     make(http.Header),
+			}, nil
+		}
+		var create acpInteractionCreateRequest
+		if err := json.NewDecoder(request.Body).Decode(&create); err != nil {
+			t.Errorf("decode create: %v", err)
+		}
+		createStarted <- create
+		// Deliberately let the first settle observe not-found before this durable
+		// create commits and returns its acknowledgement.
+		<-commitCreate
+		return &http.Response{
+			StatusCode: http.StatusCreated,
+			Body:       io.NopCloser(strings.NewReader(`{"status":"created"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{
+		ControlPlaneURL: "https://control-plane.test",
+		ProjectID:       "project-1",
+		WorkspaceID:     "workspace-1",
+		SessionID:       "agent-session-1",
+		RuntimeIdentity: "runtime-1",
+		CallbackToken:   "callback-token",
+		HTTPClient:      httpClient,
+	}})
+	host.ConfigureAcpInteractions(testInteractionConfig())
+	generation := host.attachAcpInteractionGeneration()
+	promptCtx, promptCancel := context.WithCancel(host.lifecycleContext())
+	if _, ok := host.beginPromptForDelivery(promptCtx, promptCancel, "delayed-commit-test", nil); !ok {
+		t.Fatal("test prompt was not accepted")
+	}
+	client := &sessionHostClient{host: host, interactionGeneration: generation}
+	done := make(chan acpsdk.RequestPermissionResponse, 1)
+	go func() {
+		response, _ := client.RequestPermission(context.Background(), permissionRequest())
+		done <- response
+	}()
+
+	select {
+	case <-createStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for delayed create")
+	}
+	host.Stop()
+	select {
+	case response := <-done:
+		if response.Outcome.Cancelled == nil || response.Outcome.Selected != nil {
+			t.Fatalf("outcome = %+v, want cancelled", response.Outcome)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("permission remained blocked behind delayed create")
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		select {
+		case settle := <-settles:
+			if settle.Reason != "session_stopped" {
+				t.Fatalf("settle attempt %d reason = %q, want session_stopped", attempt, settle.Reason)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for settle attempt %d", attempt)
+		}
+	}
+	if got := settleCalls.Load(); got != 2 {
+		t.Fatalf("settle calls = %d, want 2", got)
 	}
 }
 
