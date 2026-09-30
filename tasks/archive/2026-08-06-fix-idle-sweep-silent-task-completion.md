@@ -217,7 +217,7 @@ cron-side and DO-local adapters.
 - [`attention-expiry.ts` missing events](../backlog/2026-08-06-attention-expiry-task-status-events.md)
 - [`reconciliation-dead-target.ts` missing events](../backlog/2026-08-06-reconciliation-dead-target-task-status-events.md)
 - [`ProjectOrchestrator.cancelMission()` missing events](../backlog/2026-08-06-project-orchestrator-cancel-status-events.md)
-- [Staging VM-agent no-heartbeat before workspace creation](../backlog/2026-08-07-staging-vm-agent-no-heartbeat-before-workspace.md)
+- [Staging VM-agent no-heartbeat before workspace creation](../archive/2026-08-07-staging-vm-agent-no-heartbeat-before-workspace.md)
 - Idle-cleanup clock only advances on message persistence; consider advancing it on ACP heartbeat /
   tool activity so the *timer* also reflects real work, not just the terminalization gate.
 - Backfill/relabel the 36 historically mis-terminalized production tasks.

@@ -114,3 +114,7 @@ Relevant audit rows:
 - **Why it was not caught**: Existing callback-auth tests covered live/malformed paths and route-mounting regressions, but not expired JWTs against combined callback routing, tombstoned resource callbacks before mutation, log/error persistence severity, or agent-side terminal retry behavior.
 - **Class of bug**: Terminal callback/resource lifecycle states were not represented as a protocol contract across the control plane and VM agent, so retry loops amplified expected teardown responses into production error noise.
 - **Process fix**: `.claude/rules/34-vm-agent-callback-auth.md` now requires designed terminal status/severity classification and live-resource controls for callback routes. `.claude/rules/54-vm-agent-rollout-compatibility.md` now requires old-agent-compatible control-plane behavior and bounded new-agent retry handling for terminal callback responses.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: PR #1922 (01a827015): 410 for tombstoned nodes, JWT 401s, vm-agent terminal latch, MSG_RESPONSE_MAX_BYTES; staging evidence in file; cited by an archived task -> archive._

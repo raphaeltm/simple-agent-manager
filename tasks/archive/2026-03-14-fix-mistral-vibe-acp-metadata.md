@@ -49,3 +49,7 @@ Monitor the [mistral-vibe releases](https://github.com/mistralai/mistral-vibe/re
 - [Mistral Vibe GitHub](https://github.com/mistralai/mistral-vibe)
 - [DeepWiki Config Reference](https://deepwiki.com/mistralai/mistral-vibe/8.1-configuration-reference)
 - [Reverse-engineered config.toml guide](https://gist.github.com/chris-hatton/6e1a62be8412473633f7ef02d067547d)
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: #386 (c3a190e7d): ACP ClientInfo + VIBE_CLIENT_* (gateway.go:1136-1142) and generated ~/.vibe/config.toml aliases (vibe_config.go:45-143)._

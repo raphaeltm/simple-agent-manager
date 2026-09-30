@@ -183,3 +183,7 @@ The project header row (project name, repo link, Status/Settings buttons) needs 
 - [ ] Hamburger menu on the right side, matching drawer direction
 - [ ] Chat panel fills available vertical space without page-level scroll conflicts
 - [ ] All desktop layouts unaffected
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: #220: AppShell mobile header, MobileSessionDrawer, full-bleed chat._

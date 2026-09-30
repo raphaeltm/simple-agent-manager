@@ -43,4 +43,4 @@ The VM agent sends Bearer JWT tokens for callbacks, but `requireAuth()` expects 
 - `apps/api/src/routes/workspaces/lifecycle.ts:189-306` — callback-auth routes
 - `apps/api/src/routes/workspaces/runtime.ts` — more callback-auth routes
 - `apps/api/src/middleware/auth.ts:44` — "Authentication required" error source
-- `tasks/backlog/2026-03-12-provisioning-failed-callback-401.md` — initial bug report
+- `tasks/archive/2026-03-12-provisioning-failed-callback-401.md` — initial bug report

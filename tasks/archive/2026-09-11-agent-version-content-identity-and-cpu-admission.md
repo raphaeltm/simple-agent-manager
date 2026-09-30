@@ -199,7 +199,7 @@ recorded as such.
    trailing load average up to `metricsTtlMs` stale, `cpuMillis` is never enforced as a
    cgroup limit so this ceiling is the only backstop against under-declaration, and
    sustained saturation has previously starved the vm-agent heartbeat
-   (`tasks/backlog/2026-08-25-build-concurrency-backpressure.md`).
+   (`tasks/archive/2026-08-25-build-concurrency-backpressure.md`).
 6. *(test-engineer, HIGH)* `@simple-agent-manager/shared` resolves to a COMPILED dist and
    `apps/api`'s own `test` script has no build step, so running vitest directly against a
    stale dist evaluated the old ceiling and every new test passed for the wrong reason.
@@ -598,7 +598,7 @@ workspace container is parented under it while the agent runs in `sam-infra.slic
 `CPUWeight` / `CPUQuota` / `CPUAccounting` across the whole template returned nothing —
 so under CPU contention the agent competed with workload containers on equal CFS footing
 and its heartbeat could be delayed until the control plane declared the node dead
-(`tasks/backlog/2026-08-25-build-concurrency-backpressure.md`).
+(`tasks/archive/2026-08-25-build-concurrency-backpressure.md`).
 
 Both slices now carry `CPUAccounting=yes` and a `CPUWeight`: `sam-infra.slice` 1000,
 `sam-workload.slice` 100 (the cgroup v2 default). CFS weights are proportional and apply

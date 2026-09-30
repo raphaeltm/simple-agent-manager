@@ -16,3 +16,7 @@
 - [ ] `sam workspace <id> forward --port 3000 --local 8080` binds to localhost:8080 and proxies to remote port 3000
 - [ ] Mismatched `--port` and `--local` counts produce a clear error
 - [ ] Tests cover the remapping logic
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: #1370 (2686df375) added --local-port (workspace.go:151-164,233-254) with tests._

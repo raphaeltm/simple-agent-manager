@@ -3,7 +3,7 @@
 **Created**: 2026-08-23
 **Status**: Active
 **Idea**: `01M0QDASJCK3YWVX1GETZTSFWZ`
-**Prior art**: `tasks/backlog/2026-02-15-user-configurable-mcp-servers.md` (stale mechanism — predates the ACP `mcpServers` pipeline; this task supersedes it)
+**Prior art**: `tasks/archive/2026-02-15-user-configurable-mcp-servers.md` (stale mechanism — predates the ACP `mcpServers` pipeline; this task supersedes it)
 
 ## Problem
 

@@ -12,7 +12,7 @@ These failures are unrelated to product changes and delayed production validatio
 ## Research Findings
 
 - SAM task `01M3FED1QMBY9R6P17DSSAQ7X9` captured CI evidence showing the ProjectData test had two alarm completions: the manual `instance.alarm()` and a second runtime-fired gated alarm.
-- The 2026-09-25 backlog item `tasks/backlog/2026-09-25-timing-sensitive-workers-tests.md` names the TaskRunner overlap test as the sibling timing-sensitive failure.
+- The 2026-09-25 backlog item `tasks/archive/2026-09-25-timing-sensitive-workers-tests.md` names the TaskRunner overlap test as the sibling timing-sensitive failure.
 - Rule 62 applies: ordering-dependent tests must own the critical ordering rather than sampling after an uncontrolled scheduler turn.
 - The attention-expiry worker test already controls this class by deleting the runtime alarm and pausing timer delivery around the manual alarm.
 

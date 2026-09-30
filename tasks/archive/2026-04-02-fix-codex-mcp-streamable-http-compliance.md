@@ -137,3 +137,7 @@ Claude Code and Mistral Vibe can use the same SAM MCP server successfully, so th
 - `tasks/archive/2026-04-02-fix-codex-acp-home-directory-resolution.md`
 - OpenAI Codex config reference
 - MCP Streamable HTTP lifecycle and transport specs
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as superseded (not built as written). Evidence: Shipped as PR #601 under tasks/archive/2026-04-03-fix-mcp-streamable-http-compliance.md._

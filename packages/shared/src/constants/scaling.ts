@@ -66,7 +66,7 @@ export const MAX_WARM_NODE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
  *   ceiling is the only backstop against real usage exceeding declared usage.
  * - Sustained CPU saturation is not purely a slowdown on this platform: it has
  *   previously starved the vm-agent heartbeat loop and produced false
- *   `node_not_live` task failures (`tasks/backlog/2026-08-25-build-concurrency-backpressure.md`).
+ *   `node_not_live` task failures (`tasks/archive/2026-08-25-build-concurrency-backpressure.md`).
  *   That incident's own mitigation — a per-node build queue — covers concurrent
  *   devcontainer builds but not steady-state contention between running
  *   workspaces, so admission keeps a real margin.

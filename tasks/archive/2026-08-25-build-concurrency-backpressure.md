@@ -31,3 +31,7 @@ VM nodes can receive multiple concurrent devcontainer build requests while the c
 - VM agent sends a callback when a queued build starts, using callback JWT Bearer auth.
 - TaskRunner resets its workspace-ready timeout from that callback.
 - Required Go and TypeScript tests cover the new behavior.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: PR #1904 (1d7fab947): build semaphore server.go:583, creatingWorkspaces health.go:169, build-started callback, TaskRunner reset, TS+Go tests; cited by scaling.ts:69 and generate.test.ts:560 -> archive + repoint._

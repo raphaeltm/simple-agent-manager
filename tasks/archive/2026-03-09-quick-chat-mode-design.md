@@ -25,3 +25,7 @@ Design document at `docs/design/quick-chat-mode.md` exploring five approaches:
 ## Status
 
 Complete — design document written at `docs/design/quick-chat-mode.md`.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: Design-only task, all 5 criteria checked; approaches since built (sam-session DO, project-agent, Instant sessions)._

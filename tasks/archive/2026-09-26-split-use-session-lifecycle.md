@@ -13,3 +13,7 @@ The transcript-boundary fix (branch `sam/fix-silent-transcript-loss-rtg8mb`) mov
 - [ ] The hook is split into focused hooks or modules named for what each decides (for example the fallback poll, reconnect catch-up, and history paging), each under 500 lines.
 - [ ] Existing `useSessionLifecycle` and `ProjectMessageView` tests pass unchanged, or are moved alongside the code they cover without weakening an assertion.
 - [ ] No behavior change: the Playwright chat audits produce the same screenshots before and after.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: PR #2165 (77372abba) took useSessionLifecycle.ts 787 -> 489 lines (useSessionTranscript.ts, useFallbackSessionPoll.ts)._

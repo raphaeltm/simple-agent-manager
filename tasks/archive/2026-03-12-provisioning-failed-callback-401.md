@@ -38,3 +38,7 @@ Observed during production verification of the same-zone routing fix. The route 
 - `docs/notes/2026-03-12-same-zone-routing-postmortem.md`
 - `apps/api/src/routes/workspaces.ts` — provisioning-failed handler
 - `apps/api/src/durable-objects/task-runner.ts` — alarm-based state machine
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: #325 (9c7875b8c) same-day fix; route uses callback JWT only (lifecycle.ts:580-583); tests workspace-callback-auth-routing.test.ts:157,202._

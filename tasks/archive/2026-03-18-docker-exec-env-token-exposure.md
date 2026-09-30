@@ -20,3 +20,7 @@ Discovered during security audit. The main agent process startup uses `-e` flags
 
 - `packages/vm-agent/internal/acp/process.go:150-152`
 - Security audit finding: HIGH severity
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: #516 (0cd0fc6e8): /dev/shm 0600 --env-file (process.go:127-160,276-309); tests process_test.go:160-214 assert secrets never in args._

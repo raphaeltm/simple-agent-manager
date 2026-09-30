@@ -70,3 +70,7 @@ Debug package analysis revealed several cloud-init and firewall hygiene issues t
 - `packages/cloud-init/tests/generate.test.ts` — existing tests
 - `packages/vm-agent/internal/provision/provision.go` — vm-agent provisioning
 - `tasks/backlog/2026-05-12-fix-vm-agent-stability.md` — broader task (this is a subset)
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: #968 (cbd2ad1d3): template.ts:35-39, :632-650; tests generate.test.ts:1486-1508,1548-1570._

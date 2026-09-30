@@ -7,8 +7,8 @@ CI has repeatedly gone red on tests unrelated to the changed code, blocking prod
 Known flaky tests and noise sources:
 
 1. **acp-client** `ToolCallCard › lazy-loads empty tool content and keeps the card expandable` (`packages/acp-client/tests/unit/components/ToolCallCard.test.tsx:75-92`)
-2. **web** `useAvailableCommands › re-fetches when refreshKey changes (new session)` (`apps/web/tests/unit/hooks/useAvailableCommands.test.ts:150-176`) — tracked in `tasks/backlog/2026-04-11-fix-flaky-useAvailableCommands-test.md`
-3. **vm-agent (Go)** `TestSessionHost_ReplayDoesNotDropMessages` (`packages/vm-agent/internal/acp/session_host_test.go:435`) — tracked in `tasks/backlog/2026-02-28-fix-flaky-vm-agent-tests.md`
+2. **web** `useAvailableCommands › re-fetches when refreshKey changes (new session)` (`apps/web/tests/unit/hooks/useAvailableCommands.test.ts:150-176`) — tracked in `tasks/archive/2026-04-11-fix-flaky-useAvailableCommands-test.md`
+3. **vm-agent (Go)** `TestSessionHost_ReplayDoesNotDropMessages` (`packages/vm-agent/internal/acp/session_host_test.go:435`) — tracked in `tasks/archive/2026-02-28-fix-flaky-vm-agent-tests.md`
 4. **web** unit tests hit real `fetch` in jsdom (no stub in `apps/web/tests/setup.ts`), producing "Failed to load skills: fetch failed" console noise and background state updates during unrelated tests (e.g. `apps/web/src/pages/project-chat/useProjectSkills.ts:16` fetches on mount)
 5. Other instances of the sync-assert-after-async-boundary pattern across `apps/web/tests` and `packages/acp-client/tests`
 
@@ -70,7 +70,7 @@ Historically flaky files to re-check: `repo-selector.test.tsx`, `agents-section.
 - [ ] File backlog task for the vm-agent product bug: silent replay abort still sends `replay_done` (suffix loss invisible to clients)
 - [ ] Add fail-fast fetch stub to `apps/web/tests/setup.ts`; fix all tests that break because they relied on real fetch
 - [ ] Audit web + acp-client tests for the sync-assert-after-async pattern; fix instances found
-- [ ] Archive `tasks/backlog/2026-04-11-fix-flaky-useAvailableCommands-test.md` and `tasks/backlog/2026-02-28-fix-flaky-vm-agent-tests.md` through the tasks/ flow (resolved by this work)
+- [ ] Archive `tasks/archive/2026-04-11-fix-flaky-useAvailableCommands-test.md` and `tasks/archive/2026-02-28-fix-flaky-vm-agent-tests.md` through the tasks/ flow (resolved by this work)
 - [ ] Verification: 5x consecutive green `--coverage` runs for each touched JS suite (matching CI conditions); `go test -race -count=100 ./internal/acp/` green
 
 ## Hard Constraints
@@ -92,6 +92,6 @@ Historically flaky files to re-check: `repo-selector.test.tsx`, `agents-section.
 
 - `.claude/rules/02-quality-gates.md` — regression tests, prohibited patterns
 - `.claude/rules/46-vm-agent-diagnostic-getter-sync.md` — vm-agent concurrency test conventions
-- `tasks/backlog/2026-04-11-fix-flaky-useAvailableCommands-test.md` (superseded analysis)
-- `tasks/backlog/2026-02-28-fix-flaky-vm-agent-tests.md` (superseded analysis — Option A invalid, ingestion is synchronous)
+- `tasks/archive/2026-04-11-fix-flaky-useAvailableCommands-test.md` (superseded analysis)
+- `tasks/archive/2026-02-28-fix-flaky-vm-agent-tests.md` (superseded analysis — Option A invalid, ingestion is synchronous)
 - Prior flake fixes: PRs #867, #878, commit 3217faa06

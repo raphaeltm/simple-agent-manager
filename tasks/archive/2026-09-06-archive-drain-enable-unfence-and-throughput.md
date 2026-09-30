@@ -4,7 +4,7 @@
 **Branch:** `sam/get-sams-production-projectdata-ztxn42`
 **SAM task:** `01M1V0NPQB3E5TNB8D0QZTXN42`
 **Parent work:** `tasks/archive/2026-09-05-archive-sharding-streaming-hash-abandon-and-size-budget.md` (PR #2024),
-`tasks/backlog/2026-09-05-archive-precopy-refusal-should-not-fence-session.md` (folded into this task)
+`tasks/archive/2026-09-05-archive-precopy-refusal-should-not-fence-session.md` (folded into this task)
 
 ## Problem
 

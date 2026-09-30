@@ -23,3 +23,7 @@ Found while validating PR #2145 (failed-task work preservation), 2026-09-25.
 - [ ] Each test owns the ordering it asserts: stop the alarm before the step can advance (or
       drive the step explicitly), and await the re-arm the alarm performs rather than sampling it.
 - [ ] Each is run 20 times in a loaded run without a failure.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: PR #2156 fixed both named tests (reserved-task-submission-task-runner.test.ts:83/:704; project-data-storage-safety.test.ts:61/:1688); #2158 helper._

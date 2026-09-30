@@ -67,3 +67,7 @@ A `time.Sleep(50*time.Millisecond)` before attaching the replay viewer. Simple b
 - [ ] No `time.Sleep` used as the fix (Options A or B preferred)
 - [ ] Other replay-related tests still pass
 - [ ] Run with `-race` flag to verify no data races
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as superseded (not built as written). Evidence: Survivor tasks/backlog/2026-07-04-fix-flaky-tests-at-root.md (item 3 says this file's root cause is wrong)._

@@ -61,6 +61,6 @@ The lightweight workspace profile feature (`WorkspaceProfile = 'full' | 'lightwe
 ## References
 
 - Design doc: `docs/design/quick-chat-mode.md`
-- Prior task: `tasks/backlog/2026-03-09-quick-chat-mode-design.md`
+- Prior task: `tasks/archive/2026-03-09-quick-chat-mode-design.md`
 - VM agent contract: `packages/shared/src/vm-agent-contract.ts`
 - Rule 10 (e2e verification): `.claude/rules/10-e2e-verification.md`

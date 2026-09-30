@@ -292,7 +292,7 @@ Probe it directly against a staging VM; file an idea with the finding if it is n
 - `.claude/rules/74-proxy-signals-must-match-the-condition.md`, `.claude/rules/39-debug-before-redesign.md`
 - `apps/api/.claude/rules/53-...`, `47-...`, `51-server-side-node-class-gates.md`, `57-...`, `58-...`, `67-...`
 - `packages/vm-agent/.claude/rules/34-vm-agent-callback-auth.md`, `54-vm-agent-rollout-compatibility.md`
-- Prior incidents: `tasks/backlog/2026-08-26-stop-zombie-callback-storms.md` (the latch),
+- Prior incidents: `tasks/archive/2026-08-26-stop-zombie-callback-storms.md` (the latch),
   `tasks/archive/2026-08-27-checkin-watchdog-busy-agents.md` (check-in ceilings),
   `tasks/archive/2026-08-06-fix-node-reaping-orphan-reconciliation.md` (reaper isolation)
 - Composability: PR #2145 (`sam/preserve-failed-tasks-work-fn8ba7`) rebases onto this change

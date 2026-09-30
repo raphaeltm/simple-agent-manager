@@ -41,3 +41,7 @@ hygiene gap: a terminal session ended more than 7 days ago still holds an active
 - `apps/api/src/durable-objects/project-data/archive-sharding.ts` (`prepareArchiveSourceIntent`)
 - `tasks/archive/2026-09-05-archive-sharding-streaming-hash-abandon-and-size-budget.md`
 - `.claude/rules/47-control-loop-io-budget.md`, `.claude/rules/57-write-only-cross-boundary-state.md`
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: Folded into and shipped by PR #2027 (refusePreCopyMigration + restoreSessionLocationToRootStatement, project-data-archive-sharding.ts:2127,2171; tests :2753,:2910); leftover session_state decision lives in idea 01M1V3WYT6D88Z41WQWP0ASVC3._

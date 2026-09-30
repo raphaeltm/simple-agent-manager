@@ -317,3 +317,7 @@ If implementing hybrid approach, need clear precedence:
 - [ ] Configuration is persistent across workspace restarts
 - [ ] Clear documentation for adding custom MCP servers
 - [ ] (Optional) Visual UI for managing MCP servers without editing JSON
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as superseded (not built as written). Evidence: Shipped as BYO MCP servers (#1892, #2186; mcp_connections schema.ts:2069; SettingsMcpServers.tsx); survivor tasks/archive/2026-08-23-byo-mcp-servers.md; file already bannered "SUPERSEDED, do not execute"._

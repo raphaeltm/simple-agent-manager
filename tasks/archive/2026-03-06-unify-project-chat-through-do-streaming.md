@@ -75,3 +75,7 @@ Unify the project chat message flow through the DO as the single source of truth
 - [ ] `useProjectAgentSession` removed from project chat (kept for workspace chat)
 - [ ] No "Agent offline" banner in project chat
 - [ ] Message history fully preserved when switching between conversations
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as superseded (not built as written). Evidence: #978 / tasks/archive/2026-05-12-do-only-chat-typewriter.md: all chat through the DO with typewriter rendering._

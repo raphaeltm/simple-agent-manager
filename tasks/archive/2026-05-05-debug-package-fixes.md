@@ -141,3 +141,7 @@ The error reporter sends to `/api/nodes/{nodeId}/errors` with a Bearer token. If
 - JWT service: `apps/api/src/services/jwt.ts`
 - Node provisioning: `apps/api/src/services/nodes.ts`
 - CI build: `.github/workflows/deploy-reusable.yml:630`
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: All seven fix groups landed via #901 (template.ts mirror script, 15-min timeout), #966 (callback 401 + logged bodies), #1010 (cloud-init schema), VERSION pinned in deploy-reusable.yml:1057._

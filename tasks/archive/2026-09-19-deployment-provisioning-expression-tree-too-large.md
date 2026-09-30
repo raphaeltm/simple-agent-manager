@@ -181,3 +181,7 @@ thing in months to try creating a deployment environment.
 - `apps/api/.claude/rules/51-server-side-node-class-gates.md` — the predicate that must not be
   weakened
 - Blocked task: `tasks/archive/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: Resolved in PR #2102 (all criteria ticked with staging evidence); regression test tests/workers/deployment-provisioning-expression-depth.test.ts; resolved record -> move to archive._

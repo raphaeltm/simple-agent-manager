@@ -73,7 +73,7 @@ flowchart TD
     B["Compose preview omits route-target ports<br/>GET .../compose renders without routeTargets;<br/>preview != real node payload.<br/>(tasks/backlog/2026-06-13-compose-preview-endpoint-route-targets.md)"]:::open
     C["Compose-parser test coverage<br/>(tasks/backlog/2026-06-11-compose-parser-test-coverage.md)"]:::open
     D["Deployment-provisioning route tests<br/>(tasks/backlog/2026-06-12-deployment-provisioning-route-tests.md)"]:::open
-    E["docker-exec env token exposure<br/>(tasks/backlog/2026-03-18-docker-exec-env-token-exposure.md)"]:::open
+    E["docker-exec env token exposure<br/>(tasks/archive/2026-03-18-docker-exec-env-token-exposure.md)"]:::open
     F["Route-level error message leakage<br/>(tasks/backlog/2026-04-10-route-level-error-message-leakage.md)"]:::open
     classDef open fill:#3a2f1b,stroke:#ffb300,color:#fff8e1;
 ```

@@ -42,3 +42,7 @@ production VM-agent fleet health is intact, while new staging node bootstrap nee
 - Capture VM bootstrap/cloud-init/systemd logs for a failing staging node.
 - Fix staging bootstrap or configuration so a controlled real task reaches a usable workspace.
 - Verify cleanup returns staging to zero running nodes/workspaces.
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as obsolete (not built; premise gone). Evidence: Fresh staging VMs have heartbeated repeatedly since (archived 2026-08-09, 2026-09-08, 2026-09-25 evidence); symptom never recurred._

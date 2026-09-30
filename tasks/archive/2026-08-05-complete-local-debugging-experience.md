@@ -247,7 +247,7 @@ scheduled reconciliation + R2 lifecycle
 - `tasks/archive/2026-03-12-fix-workspace-callback-auth-middleware-leak.md`
 - `tasks/archive/2026-03-30-fix-r2-upload-cors.md`
 - `tasks/archive/2026-04-01-fix-vm-agent-concurrency-errors.md`
-- `tasks/backlog/2026-05-05-debug-package-fixes.md`
+- `tasks/archive/2026-05-05-debug-package-fixes.md`
 - `.claude/rules/23-cross-boundary-api-contracts.md`
 - `.claude/rules/31-migration-safety.md`
 - `.claude/rules/34-vm-agent-callback-auth.md`

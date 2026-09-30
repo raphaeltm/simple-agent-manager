@@ -2,7 +2,7 @@
 
 **Created**: 2026-05-05
 **Priority**: CRITICAL
-**Related**: `tasks/backlog/2026-05-05-debug-package-fixes.md` (Issues 1-3)
+**Related**: `tasks/archive/2026-05-05-debug-package-fixes.md` (Issues 1-3)
 
 ## Problem Statement
 
@@ -77,7 +77,7 @@ User wants lightweight containers to support Docker usage with fast boot via pri
 ## References
 
 - Failed task: `01KQVADC1ZF9ESQH70KWJDY7FB` (workspace timeout after apt failures)
-- Debug package analysis: `tasks/backlog/2026-05-05-debug-package-fixes.md`
+- Debug package analysis: `tasks/archive/2026-05-05-debug-package-fixes.md`
 - Cloud-init template: `packages/cloud-init/src/template.ts`
 - VM agent bootstrap: `packages/vm-agent/internal/bootstrap/bootstrap.go`
 - Node provisioning: `apps/api/src/services/nodes.ts`

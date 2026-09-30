@@ -51,3 +51,7 @@ PR #874 ("Fix oversized chat session message loads", May 1st) introduced two com
 - PR #874: `091f2b67` — the regression commit
 - `packages/shared/src/constants/sam.ts` — SAM history limit constants
 - `docs/notes/2026-03-17-chat-message-duplication-report.md` — related message handling
+
+---
+
+_Reconciled 2026-09-30 (weekly queue reconciliation): moved from `tasks/backlog/` to `tasks/archive/` as shipped. Evidence: #898 did every item; the 3000 default was deliberately replaced by paging in #2165._

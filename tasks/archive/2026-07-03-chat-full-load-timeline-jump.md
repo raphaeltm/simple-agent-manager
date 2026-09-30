@@ -43,7 +43,7 @@ a size-capped fallback to pagination only for the rare oversized tail.
   (`:151`) call `getChatSession` with NO limit and `mergeMessages(..., 'replace')`.
 
 ### Critical gotcha (already partially mitigated)
-- Backlog `tasks/backlog/2026-05-05-fix-chat-message-loading-regression.md`
+- Backlog `tasks/archive/2026-05-05-fix-chat-message-loading-regression.md`
   documented poll/catch-up discarding earlier-loaded messages. `mergeReplace`
   (`merge-messages.ts:113`) has SINCE been fixed to preserve prev messages older
   than the incoming window, and poll/`onCatchUp` no longer call `setHasMore`. So
@@ -202,4 +202,4 @@ test FAILS on the pre-fix code (`expected [ 100001 ] to include 1`).
 - Rule 02 (interactive-element behavioral tests), Rule 06 (React interaction-effect
   analysis — jump vs. auto-scroll effects), Rule 16 (no reload on mutation),
   Rule 17 (visual testing), Rule 26 (project-chat-first), Rule 35 (vertical slice).
-- `tasks/backlog/2026-05-05-fix-chat-message-loading-regression.md` (poll/merge history).
+- `tasks/archive/2026-05-05-fix-chat-message-loading-regression.md` (poll/merge history).

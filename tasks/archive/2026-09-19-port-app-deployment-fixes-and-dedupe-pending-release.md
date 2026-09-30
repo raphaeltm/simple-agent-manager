@@ -307,7 +307,7 @@ Deployment node placement failed: D1_ERROR: Expression tree is too large (maximu
 Reproduced 3/3 (08:45:07Z, 08:49:19Z, 08:53:06Z), with and without a named volume. It is raised
 inside `provisionDeploymentNode`, and this branch touches **no** provisioning, placement or
 capacity file. Filed as
-`tasks/backlog/2026-09-19-deployment-provisioning-expression-tree-too-large.md`.
+`tasks/archive/2026-09-19-deployment-provisioning-expression-tree-too-large.md`.
 
 That leaves these unverified in their live form: fix 1's `Promise.all` app-route upsert, fix 3's
 `claimJob`, fix 4's compose liveness watchdog, fix 5's volume `attached` status, and fix 6's

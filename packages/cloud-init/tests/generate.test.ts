@@ -557,7 +557,7 @@ describe('slice CPU shares', () => {
   // Memory already had a reservation for the vm-agent because starvation there
   // KILLS it. CPU had none, so a workspace saturating the box could delay the
   // heartbeat until the control plane declared the node dead — the failure mode
-  // recorded in tasks/backlog/2026-08-25-build-concurrency-backpressure.md.
+  // recorded in tasks/archive/2026-08-25-build-concurrency-backpressure.md.
   function sliceDirectives(path: string, overrides?: Partial<CloudInitVariables>): string {
     return getWriteFile(path, overrides).content;
   }
