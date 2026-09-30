@@ -329,7 +329,9 @@ func TestInteractionAnswerRaceAndReceiptEvictionAreBounded(t *testing.T) {
 	for status := range statuses {
 		seen[status]++
 	}
-	if seen["consumed"]+seen["cancelled"] != 1 || seen["lost_race"] != 1 {
+	answerWon := seen["consumed"] == 1 && seen["lost_race"] == 1
+	cancelWon := seen["cancelled"] == 1 && seen["no_waiter"] == 1
+	if len(seen) != 2 || (!answerWon && !cancelWon) {
 		t.Fatalf("race statuses = %+v", seen)
 	}
 	if len(first.result) != 1 {
