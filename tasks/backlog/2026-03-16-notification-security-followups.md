@@ -91,7 +91,7 @@ Post-merge security audit identified authentication gaps in the Notification DO 
 
 ## Carried over 2026-09-30
 
-From `tasks/backlog/2026-03-16-notification-system-phase1-followups.md`, dissolved in the
+From `2026-03-16-notification-system-phase1-followups` (removed from the backlog 2026-09-30; see git history), dissolved in the
 2026-09-30 weekly queue audit:
 
 - [ ] Rate limiting on the non-push notification routes. Only the push-subscription routes are

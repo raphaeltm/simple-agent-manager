@@ -101,7 +101,7 @@ The auth gap predates the port exposure feature (the standard workspace proxy ha
 
 ## Carried over 2026-09-30
 
-From `tasks/backlog/2026-03-17-port-proxy-ownership-verification.md`, merged into this file in the
+From `2026-03-17-port-proxy-ownership-verification` (removed from the backlog 2026-09-30; see git history), merged into this file in the
 2026-09-30 weekly queue audit. Its session, ownership and 401 items shipped in PRs #928 and #936.
 
 - [ ] Put the real user id in the Worker→VM port-proxy JWT instead of the literal `'port-proxy'`

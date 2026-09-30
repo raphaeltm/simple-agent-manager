@@ -30,7 +30,7 @@ the chat sees up to four failed requests per open.
 
 ## Carried over 2026-09-30
 
-From the duplicate `tasks/backlog/2026-09-29-chat-page-404s-on-deleted-session-workspace.md`,
+From the duplicate `2026-09-29-chat-page-404s-on-deleted-session-workspace` (removed from the backlog 2026-09-30; see git history),
 consolidated here by the weekly queue audit:
 
 - Staging repro, 2026-09-29: project `01KWHD8XS7MQ7R6KWXJYRHDVH4`, session
