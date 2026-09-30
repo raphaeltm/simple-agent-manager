@@ -102,7 +102,7 @@ All checkboxes below are mandatory for any PR that changes runtime code (`.ts`, 
 
 ## Specialist Review Evidence (Required for agent-authored PRs)
 
-If local subagents were used during Phase 5, list every reviewer below. **Do NOT merge until every row shows PASS or ADDRESSED.** If any reviewer could not complete (timeout, workspace killed, error), you MUST add the `needs-human-review` label and stop — do not self-merge. See `.claude/rules/25-review-merge-gate.md`.
+If local subagents were used during Phase 5, list every reviewer below. **Do NOT merge until every row shows PASS or ADDRESSED.** If any reviewer could not complete (timeout, workspace killed, error), you MUST add the `needs-human-review` label and stop — do not self-merge. CodeRabbit is not a local reviewer: record it in the CodeRabbit section below, not in this table. See `.claude/rules/25-review-merge-gate.md`.
 
 - [ ] **All local reviewers completed and findings addressed before merge**
 - [ ] **If any reviewer did NOT complete: `needs-human-review` label added and merge deferred to human**
@@ -125,16 +125,15 @@ If this is not an agent-authored PR, write `N/A: human-authored PR`.
 
 ## CodeRabbit Review Evidence (Required for agent-authored PRs)
 
-When every non-CodeRabbit gate is satisfied, the agent must apply the `coderabbit-review` label to this PR. Do **not** merge until all CodeRabbit feedback is either implemented or explicitly reviewed and closed/resolved. Keep the label on the PR so pushed fixes receive incremental CodeRabbit reviews; repeat until the latest review has no unresolved feedback and the agent agrees the PR is ready.
+Once every other gate is satisfied and the PR is not a draft, the agent applies the `coderabbit-review` label (or dispatches the trusted workflow) and waits about 15 minutes. A CodeRabbit review is **not** required. **If CodeRabbit reviews, its feedback blocks merge** until every finding is implemented or explicitly resolved with a reason. **If it does not review** (silence, `Review skipped`, rate limit), record what you observed below and merge on the remaining gates. A missing review never calls for `needs-human-review` or a waiver. See `.claude/rules/25-review-merge-gate.md`.
 
-- [ ] `coderabbit-review` label applied after local review, staging if applicable, and CI gates passed
-- [ ] All CodeRabbit findings implemented or explicitly reviewed and closed/resolved
-- [ ] Incremental CodeRabbit review completed after final pushed fixes, or no fixes were needed
-- [ ] Latest CodeRabbit review has no unresolved feedback
+- [ ] CodeRabbit requested after local review, staging if applicable, and CI gates passed
+- [ ] Waited about 15 minutes, or up to about 45 minutes in total while a review CodeRabbit had started was still in progress
+- [ ] Either CodeRabbit reviewed and no CodeRabbit feedback is unresolved, or it did not review and the observed outcome is recorded below
 
 ### CodeRabbit Notes
 
-<!-- Include label application, findings addressed, commit hashes for fixes, incremental review status, and final no-unresolved-feedback status. If this is not an agent-authored PR, write `N/A: human-authored PR`. -->
+<!-- Record when and how CodeRabbit was requested, then what happened: either a review (findings addressed, fix commits, incremental review status) or no review (how long you waited and the exact status, skip reason, or rate-limit message). If this is not an agent-authored PR, write `N/A: human-authored PR`. -->
 
 ## Exceptions (If any)
 

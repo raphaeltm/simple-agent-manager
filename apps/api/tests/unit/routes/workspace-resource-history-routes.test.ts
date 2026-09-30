@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   db: { id: 'mock-db' },
   requireProjectAccess: vi.fn(),
   getWorkspaceResourceHistory: vi.fn(),
+  getSessionResourceTimeline: vi.fn(),
+  getSessionResourceTimelineChunk: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -26,6 +28,11 @@ vi.mock('../../../src/middleware/project-auth', () => ({
 
 vi.mock('../../../src/services/workspace-resource-history', () => ({
   getWorkspaceResourceHistory: mocks.getWorkspaceResourceHistory,
+}));
+
+vi.mock('../../../src/services/workspace-resource-timeline', () => ({
+  getSessionResourceTimeline: mocks.getSessionResourceTimeline,
+  getSessionResourceTimelineChunk: mocks.getSessionResourceTimelineChunk,
 }));
 
 describe('workspace resource history project routes', () => {
@@ -107,5 +114,65 @@ describe('workspace resource history project routes', () => {
 
     expect(res.status).toBe(404);
     expect(mocks.getWorkspaceResourceHistory).not.toHaveBeenCalled();
+  });
+
+  it('serves the whole-session timeline index after project authorization', async () => {
+    mocks.getSessionResourceTimeline.mockResolvedValueOnce({ sessionId: 'sess-1', chunks: [] });
+
+    const res = await app.request(
+      '/api/projects/proj-1/sessions/sess-1/resource-timeline',
+      {},
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(mocks.requireProjectAccess).toHaveBeenCalledWith(mocks.db, 'proj-1', 'member-1');
+    expect(mocks.getSessionResourceTimeline).toHaveBeenCalledWith(env, {
+      projectId: 'proj-1',
+      sessionId: 'sess-1',
+    });
+    expect(await res.json()).toEqual({ sessionId: 'sess-1', chunks: [] });
+  });
+
+  it('serves one timeline chunk scoped to the project and session in the path', async () => {
+    mocks.getSessionResourceTimelineChunk.mockResolvedValueOnce({
+      chunkId: 'wrchunk:1',
+      samples: [],
+    });
+
+    const res = await app.request(
+      '/api/projects/proj-1/sessions/sess-1/resource-timeline/chunks/wrchunk%3A1',
+      {},
+      env
+    );
+
+    expect(res.status).toBe(200);
+    expect(mocks.getSessionResourceTimelineChunk).toHaveBeenCalledWith(env, {
+      projectId: 'proj-1',
+      sessionId: 'sess-1',
+      chunkId: 'wrchunk:1',
+    });
+  });
+
+  it('reads no timeline data when project access is denied', async () => {
+    mocks.requireProjectAccess.mockRejectedValue(
+      Object.assign(new Error('Project not found'), { statusCode: 404, error: 'NOT_FOUND' })
+    );
+
+    const index = await app.request(
+      '/api/projects/proj-1/sessions/sess-1/resource-timeline',
+      {},
+      env
+    );
+    const chunk = await app.request(
+      '/api/projects/proj-1/sessions/sess-1/resource-timeline/chunks/wrchunk%3A1',
+      {},
+      env
+    );
+
+    expect(index.status).toBe(404);
+    expect(chunk.status).toBe(404);
+    expect(mocks.getSessionResourceTimeline).not.toHaveBeenCalled();
+    expect(mocks.getSessionResourceTimelineChunk).not.toHaveBeenCalled();
   });
 });

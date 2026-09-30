@@ -689,7 +689,7 @@ func TestPromptReportsUpdateHarnessCoalescerSuccessfulSnapshot(t *testing.T) {
 	}})
 	t.Cleanup(host.Stop)
 
-	host.markPromptStarted(acpsdk.SessionId("acp-session"), 1, "viewer-1")
+	host.markPromptStarted(nil, acpsdk.SessionId("acp-session"), 1, "viewer-1")
 	waitForActivitySnapshot(t, host, "prompting")
 	host.nudgeHarnessActivityReport()
 	time.Sleep(3 * debounce)

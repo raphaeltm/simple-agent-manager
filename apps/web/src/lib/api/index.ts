@@ -448,6 +448,16 @@ export {
 } from './repo-browse';
 export { getReportIssueConfig, submitReportIssue } from './report';
 export type {
+  ResourceTimelineChunkEntry,
+  ResourceTimelineChunkResponse,
+  ResourceTimelineIndexResponse,
+  ResourceTimelineRollup,
+  ResourceTimelineRunEntry,
+  WorkspaceResourceSample,
+  WorkspaceResourceToolSpan,
+} from './resource-timeline';
+export { getSessionResourceTimeline, getSessionResourceTimelineChunk } from './resource-timeline';
+export type {
   ActivityEventResponse,
   ActivityEventsListResponse,
   AllChatsApiResponse,
@@ -465,11 +475,6 @@ export type {
   SessionSummaryResponse,
   StartInstantChatSessionRequest,
   StartInstantChatSessionResponse,
-  WorkspaceResourceChunk,
-  WorkspaceResourceHistoryResponse,
-  WorkspaceResourceSample,
-  WorkspaceResourceSummary,
-  WorkspaceResourceToolSpan,
 } from './sessions';
 export {
   cancelAgentPrompt,
@@ -478,7 +483,6 @@ export {
   getChatSession,
   getChatSessionState,
   getRecentChats,
-  getSessionResourceHistory,
   listActivityEvents,
   listChatMessages,
   listChatSessions,

@@ -7,6 +7,10 @@ import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectAccess } from '../../middleware/project-auth';
 import { getWorkspaceResourceHistory } from '../../services/workspace-resource-history';
+import {
+  getSessionResourceTimeline,
+  getSessionResourceTimelineChunk,
+} from '../../services/workspace-resource-timeline';
 
 const projectResourceHistoryRoutes = new Hono<{ Bindings: Env }>();
 
@@ -37,6 +41,25 @@ projectResourceHistoryRoutes.get('/:id/sessions/:sessionId/resource-history', as
     })
   );
 });
+
+projectResourceHistoryRoutes.get('/:id/sessions/:sessionId/resource-timeline', async (c) => {
+  const projectId = c.req.param('id');
+  const sessionId = c.req.param('sessionId');
+  await requireAccess(c.env, projectId, getUserId(c));
+  return c.json(await getSessionResourceTimeline(c.env, { projectId, sessionId }));
+});
+
+projectResourceHistoryRoutes.get(
+  '/:id/sessions/:sessionId/resource-timeline/chunks/:chunkId',
+  async (c) => {
+    const projectId = c.req.param('id');
+    const sessionId = c.req.param('sessionId');
+    await requireAccess(c.env, projectId, getUserId(c));
+    const chunkId = optionalDetailChunkId(c.req.param('chunkId'));
+    if (!chunkId) throw errors.badRequest('chunkId is required');
+    return c.json(await getSessionResourceTimelineChunk(c.env, { projectId, sessionId, chunkId }));
+  }
+);
 
 projectResourceHistoryRoutes.get('/:id/tasks/:taskId/resource-history', async (c) => {
   const projectId = c.req.param('id');

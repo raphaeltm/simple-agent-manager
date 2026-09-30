@@ -169,8 +169,8 @@ func TestPromptTimeoutConvergesToErrorAndSingleFatalCallback(t *testing.T) {
 		t.Fatal("prompt was not accepted")
 	}
 	host.setStatus(HostPrompting, "")
-	host.triggerPromptForceStopIfStuck(attempt.id, "hard deadline")
-	host.triggerPromptForceStopIfStuck(attempt.id, "late process exit")
+	host.triggerPromptForceStopIfStuck(attempt, "hard deadline")
+	host.triggerPromptForceStopIfStuck(attempt, "late process exit")
 	if host.Status() != HostError {
 		t.Fatalf("status = %s, want error", host.Status())
 	}

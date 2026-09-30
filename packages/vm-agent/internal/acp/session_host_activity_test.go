@@ -43,7 +43,7 @@ func TestPromptActivityRereportStopsBeforeIdle(t *testing.T) {
 		},
 	})
 
-	host.markPromptStarted(acpsdk.SessionId("sdk-1"), 1, "viewer-1")
+	host.markPromptStarted(nil, acpsdk.SessionId("sdk-1"), 1, "viewer-1")
 	waitFor(t, 250*time.Millisecond, func() bool {
 		return countActivity(&mu, &activities, "prompting") >= 2
 	})
