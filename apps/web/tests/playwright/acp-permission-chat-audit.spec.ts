@@ -480,13 +480,14 @@ async function assertTextClearOfJumpButton(page: Page) {
   await expect(description).toBeVisible();
   await expect(jumpButton).toBeVisible();
 
-  const overlapArea = await description.evaluate((element) => {
+  const evidence = await description.evaluate((element) => {
     const jump = document.querySelector<HTMLElement>('[aria-label="Scroll to bottom"]');
     if (!jump) throw new Error('Jump-to-latest button is missing');
     const jumpBox = jump.getBoundingClientRect();
     const range = document.createRange();
     range.selectNodeContents(element);
-    return [...range.getClientRects()].reduce((total, textBox) => {
+    const textBoxes = [...range.getClientRects()];
+    const overlapArea = textBoxes.reduce((total, textBox) => {
       const width = Math.max(
         0,
         Math.min(textBox.right, jumpBox.right) - Math.max(textBox.left, jumpBox.left)
@@ -497,13 +498,31 @@ async function assertTextClearOfJumpButton(page: Page) {
       );
       return total + width * height;
     }, 0);
+    const boxesAlongsideJump = textBoxes.filter(
+      (textBox) => textBox.bottom > jumpBox.top && textBox.top < jumpBox.bottom
+    );
+    return {
+      boxesAlongsideJump: boxesAlongsideJump.length,
+      hitOwnership: boxesAlongsideJump.every((textBox) => {
+        const hit = document.elementFromPoint(
+          Math.min(textBox.right - 1, jumpBox.left - 1),
+          textBox.top + textBox.height / 2
+        );
+        return element.contains(hit);
+      }),
+      overlapArea,
+    };
   });
-  expect(overlapArea).toBe(0);
+  expect(evidence.boxesAlongsideJump).toBeGreaterThan(0);
+  expect(evidence.hitOwnership).toBe(true);
+  expect(evidence.overlapArea).toBe(0);
 }
 
-async function assertRetryControlClearOfJumpButton(page: Page) {
+async function assertRetryControlClearOfJumpButton(
+  page: Page,
+  retryButton: Locator
+) {
   const jumpButton = page.getByRole('button', { name: 'Scroll to bottom' });
-  const retryButton = page.getByRole('button', { name: 'Retry Reject this operation once' });
   await alignWithJumpButton(page, retryButton);
   await expect(retryButton).toBeVisible();
   await expect(jumpButton).toBeVisible();
@@ -522,6 +541,15 @@ async function assertRetryControlClearOfJumpButton(page: Page) {
       Math.max(retryBox!.y, jumpBox!.y)
   );
   expect(horizontalOverlap * verticalOverlap).toBe(0);
+  expect(
+    await retryButton.evaluate(
+      (button, { x, y }) => document.elementFromPoint(x, y)?.closest('button') === button,
+      {
+        x: retryBox!.x + retryBox!.width / 2,
+        y: retryBox!.y + retryBox!.height / 2,
+      }
+    )
+  ).toBe(true);
 }
 
 async function openDetailFailureSurface(page: Page, status: 403 | 500) {
@@ -536,7 +564,9 @@ async function openDetailFailureSurface(page: Page, status: 403 | 500) {
     )
   ).toBeVisible();
   if (status === 500) {
-    await expect(anchored.getByRole('button', { name: 'Retry details' })).toBeVisible();
+    const retryDetails = anchored.getByRole('button', { name: 'Retry details' });
+    await expect(retryDetails).toBeVisible();
+    await assertRetryControlClearOfJumpButton(page, retryDetails);
   }
   await expect(page.getByRole('button', { name: 'Reject this operation once' })).toHaveCount(0);
   await positionAnchoredCardBelowStickyHeader(page);
@@ -580,7 +610,10 @@ test.describe('ACP permission cards — Mobile', () => {
     const evidence = await openPermissionSurface(page, true);
     evidence.dropNextAnswerReceipt();
     await page.getByRole('button', { name: 'Reject this operation once' }).click();
-    await assertRetryControlClearOfJumpButton(page);
+    await assertRetryControlClearOfJumpButton(
+      page,
+      page.getByRole('button', { name: 'Retry Reject this operation once' })
+    );
     await screenshot(page, 'acp-permission-chat-retry-mobile');
     await page.getByRole('button', { name: 'Retry Reject this operation once' }).click();
     await expect(page.getByTestId(`acp-permission-${ANCHORED_ID}`)).toHaveAttribute(
@@ -639,10 +672,18 @@ test.describe('ACP permission cards — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
   test('renders anchored and unanchored owner requests with stress data', async ({ page }) => {
-    await openPermissionSurface(page, true);
+    const evidence = await openPermissionSurface(page, true);
     await positionAnchoredCardBelowStickyHeader(page);
     await assertPermissionHitTargetsClearOfJumpButton(page);
+    await assertTextClearOfJumpButton(page);
     await screenshot(page, 'acp-permission-chat-owner-desktop');
+    evidence.dropNextAnswerReceipt();
+    await page.getByRole('button', { name: 'Reject this operation once' }).click();
+    await assertRetryControlClearOfJumpButton(
+      page,
+      page.getByRole('button', { name: 'Retry Reject this operation once' })
+    );
+    await screenshot(page, 'acp-permission-chat-retry-desktop');
   });
 
   test('shows generic waiting only to a noncreator', async ({ page }) => {
@@ -673,7 +714,10 @@ test.describe('ACP permission cards — Narrow mobile', () => {
     await screenshot(page, 'acp-permission-chat-owner-narrow-mobile');
     evidence.dropNextAnswerReceipt();
     await page.getByRole('button', { name: 'Reject this operation once' }).click();
-    await assertRetryControlClearOfJumpButton(page);
+    await assertRetryControlClearOfJumpButton(
+      page,
+      page.getByRole('button', { name: 'Retry Reject this operation once' })
+    );
     await screenshot(page, 'acp-permission-chat-retry-narrow-mobile');
   });
 });
