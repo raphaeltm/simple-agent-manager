@@ -145,4 +145,25 @@ describe('dependency governance', () => {
       '/scripts/e2e/workspace-mock',
     ]);
   });
+
+  it('keeps the Cloudflare sandbox image and npm client in lockstep', () => {
+    const dockerfile = read('apps/api/Dockerfile.sandbox');
+    const imageRef = dockerFromRefs(['apps/api/Dockerfile.sandbox'])[0];
+    const imageVersion = /cloudflare\/sandbox:(\d+\.\d+\.\d+)@sha256:[a-f0-9]{64}$/.exec(
+      imageRef ?? ''
+    )?.[1];
+    const packageJson = JSON.parse(read('apps/api/package.json')) as {
+      dependencies?: Record<string, string>;
+    };
+    const packageVersion = packageJson.dependencies?.['@cloudflare/sandbox'];
+
+    expect(imageVersion, 'sandbox image must use a plain release tag plus digest').toBeDefined();
+    expect(packageVersion, 'sandbox npm client must use an exact version pin').toMatch(
+      /^\d+\.\d+\.\d+$/
+    );
+    expect(packageVersion).toBe(imageVersion);
+    expect(dockerfile).toContain(
+      `reviewed source tag for this digest is cloudflare/sandbox:${imageVersion}`
+    );
+  });
 });
