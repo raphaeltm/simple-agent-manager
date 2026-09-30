@@ -79,4 +79,21 @@ describe('useAcpPermissionInteractions', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 25));
     expect(mocks.list).not.toHaveBeenCalled();
   });
+
+  it('fails closed when an older fixture or malformed response omits snapshot arrays', async () => {
+    mocks.list.mockResolvedValueOnce({});
+    const { result } = renderHook(
+      () =>
+        useAcpPermissionInteractions({
+          projectId: 'project-1',
+          sessionId: 'session-1',
+          viewerId: 'viewer-1',
+          connectionState: 'connected',
+        }),
+      { wrapper: createWrapper() }
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.interactions).toEqual([]);
+  });
 });

@@ -21,7 +21,7 @@ export function useAcpPermissionInteractions({
     queryFn: () => listAcpInteractions(projectId, sessionId),
     enabled: Boolean(projectId && sessionId && viewerId),
     refetchInterval: (current) =>
-      (current.state.data?.pending.length ?? 0) > 0 ? ACP_PERMISSION_POLL_MS : false,
+      (current.state.data?.pending?.length ?? 0) > 0 ? ACP_PERMISSION_POLL_MS : false,
     refetchIntervalInBackground: false,
   });
 
@@ -34,7 +34,9 @@ export function useAcpPermissionInteractions({
 
   const interactions = useMemo<AcpInteractionSnapshotItem[]>(() => {
     if (!query.data) return [];
-    return [...query.data.pending, ...query.data.settled].filter(
+    const pending = Array.isArray(query.data.pending) ? query.data.pending : [];
+    const settled = Array.isArray(query.data.settled) ? query.data.settled : [];
+    return [...pending, ...settled].filter(
       (interaction) => interaction.kind === 'permission'
     );
   }, [query.data]);
