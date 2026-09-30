@@ -1,5 +1,28 @@
 # Debugging Overhaul — Deferred Review Follow-ups
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** classic OpenAI `sk-` keys are now redacted. `services/secret-redaction.ts` applies
+>   the shared token shapes in `lib/credential-token-redaction.ts:22-28` first (PR #2168). The
+>   optional high-entropy heuristic near key/token/secret/password words was not added.
+> - **Still open:** every other item below, checked unchanged in `main`:
+>   - `NodeAgentHttpError` still puts the raw body in `err.message`
+>     (`apps/api/src/services/node-agent.ts:93-98`). `:766` parses the HTTP status out of that
+>     message, so change both together.
+>   - `scheduleErrorPersistence` still writes one row per 500, with no sampling or dedupe
+>     (`middleware/app-error-handler.ts:51-97`).
+>   - `GET /api/admin/observability/nodes` still uses the `OR` + `datetime()` predicate
+>     (`routes/admin/observability.ts:203-211`), and `nodes` still has no status/heartbeat index.
+>   - UI: the scroll button can still overlap the expanded FailureCard; `DashboardTask` still has
+>     no `errorMessage` (`packages/shared/src/types/task.ts:684-698`); LogViewer's Apply button
+>     still sits with the search input (`components/admin/LogViewer.tsx:122-136`);
+>     `failure-card-audit.spec.ts` is still a static mockup; `idExpanded` is still set only at
+>     mount (`components/admin/ObservabilityFilters.tsx:82-84`); "Copy report" still has no hover
+>     state (`packages/acp-client/src/components/AgentCrashReportView.tsx:97-109`). The
+>     "Last 24l" label was not checked; the source reads "Last 24h" (`ObservabilityFilters.tsx:46`).
+>   - Tests: both `useActivityVerifyTimer` test files still exist; no rendered-text assertion for
+>     a long `CopyableIdPill`; no env-override tests for the new `OBSERVABILITY_*` limits.
+
 Non-blocking findings from the five specialist reviews of PR #1765 (debugging-experience overhaul). All CRITICAL/HIGH findings were fixed in the PR; these are the explicitly deferred MEDIUM/LOW items.
 
 ## Security (MEDIUM, hardening)

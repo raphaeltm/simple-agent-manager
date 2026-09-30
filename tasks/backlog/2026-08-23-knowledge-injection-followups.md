@@ -1,5 +1,11 @@
 # Follow-ups from knowledge-injection relevance ranking (R3)
 
+> **Reconciliation 2026-09-30:** still open; all six items remain. Correction to item 2:
+> `knowledge.ts` is now 747 lines and `instruction-tools.ts` 699. PR #1893 moved policy formatting
+> into `routes/mcp/instruction-formatting.ts`, so `instruction-tools.ts` is no longer near the
+> 800-line ceiling, but both files are still over 500. Sequence item 2 with
+> `2026-08-23-get-instructions-missing-observation-ids.md`, since both edit `instruction-tools.ts`.
+
 Deferred findings from the Phase 5 specialist review of
 `tasks/archive/2026-08-23-knowledge-injection-relevance-ranking.md`. Each was judged
 MEDIUM/LOW and not merge-blocking; the CRITICAL/HIGH findings from that review were fixed

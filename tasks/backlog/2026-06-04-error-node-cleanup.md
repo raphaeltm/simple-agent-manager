@@ -1,5 +1,23 @@
 # Failed-Provisioning Node Cleanup
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - The capacity case cited here: in the TaskRunner descent loop, a capacity failure that
+>     never created a VM now deletes the node row instead of leaving it in `error`
+>     (`apps/api/src/services/node-provisioning.ts:727-747`; #1210, #2030).
+>   - A slow backstop for task-provisioned nodes: the max-lifetime sweep covers every status
+>     except stopped/destroying/deleted, so an `error` node is destroyed (with a provider delete)
+>     once it passes `MAX_AUTO_NODE_LIFETIME_MS`, 4h by default
+>     (`apps/api/src/scheduled/node-cleanup/node-phases.ts:133-160`).
+> - **Still open:**
+>   - A dedicated sweep for `status='error'` nodes of every origin, not only task-provisioned
+>     ones, with a configurable threshold (about 30 min by default) and an idempotent provider
+>     delete. Other provisioning failures still write `status='error'`
+>     (`node-provisioning.ts:749-780`); staging produced such rows on 2026-09-25 (see
+>     `tasks/backlog/2026-09-25-staging-allocation-plan-no-longer-current.md`).
+>   - Tests for the error-node path; none exist today.
+
 ## Problem
 
 Nodes that fail provisioning (e.g., capacity exhaustion 422) remain in `status='error'` indefinitely. The cleanup sweep (`apps/api/src/scheduled/node-cleanup.ts`) only scans `status='running'` nodes for staleness. Error-state nodes must be manually deleted, wasting ~30 min per incident.

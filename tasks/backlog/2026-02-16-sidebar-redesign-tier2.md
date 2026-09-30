@@ -1,5 +1,20 @@
 # Sidebar Redesign — Tier 2: Contextual Panels and Agent Activity
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the Port Forwarding stretch goal, as the "Active Ports" section in
+>   `apps/web/src/components/WorkspaceSidebar.tsx:386-416` (PR #419, 2fbbeb219). The Tier 1
+>   dependency is done (`tasks/archive/2026-02-16-sidebar-redesign-tier1.md`).
+> - **Still open:**
+>   - Contextual panel. Chat tab: files touched (from `ToolCallItem.locations`), agent type,
+>     model, permission mode, session duration. Terminal tab: name, status, working directory,
+>     server session ID.
+>   - Agent activity log: tool calls across sessions, with icons, relative times,
+>     click-to-navigate and a capped list.
+>   - Unit tests and a mobile Playwright check for both.
+>   - Note: this targets the legacy workspace page (`apps/web/src/pages/workspace/`), which is
+>     now secondary to project chat (rule 26). Confirm the surface is still wanted first.
+
 **Created**: 2026-02-16
 **Status**: Backlog
 **Priority**: Medium

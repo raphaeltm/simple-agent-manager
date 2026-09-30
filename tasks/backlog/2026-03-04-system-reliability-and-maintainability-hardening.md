@@ -1,5 +1,23 @@
 # System Reliability and Maintainability Hardening
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - `packages/providers` no longer reads `process.env` (`packages/providers/src/index.ts:209`).
+>   - Cron handler extracted to `apps/api/src/scheduled/handler.ts`; agent port configurable via
+>     `VM_AGENT_PORT` (`apps/api/src/index.ts:583`).
+>   - Provisioning waits run in Durable Object state machines (TaskRunner steps; direct creation
+>     continues from `apps/api/src/durable-objects/node-lifecycle-provisioning.ts`).
+>   - API structured logging enforced by `no-console` (PR #581; `eslint.config.mjs:387-392`);
+>     wrangler binding check in CI (`.github/workflows/ci.yml:576`).
+> - **Still open:**
+>   - Split `Env` into focused config objects behind one config service (`apps/api/src/env.ts`
+>     is 1,500 lines; the file split alone is tracked in `2026-07-19-split-env-interface.md`).
+>   - Extract the subdomain proxy from `apps/api/src/index.ts:189-620` (939 lines; also listed in
+>     `2026-04-03-split-oversized-files.md`).
+>   - VM agent `/health` states (still static `healthy` in
+>     `packages/vm-agent/internal/server/routes.go:13-18`); consistent API/VM agent error codes.
+
 **Status:** backlog
 **Priority:** high
 **Estimated Effort:** 2 weeks

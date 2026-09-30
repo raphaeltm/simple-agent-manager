@@ -1,5 +1,22 @@
 # Fix stuck-task sweep pattern complexity failures
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the fix, in 8eed3b740 (PR #1765). The failing statement was the TaskRunner-mismatch
+>   dedupe lookup. It bound `%do_task_status_mismatch%<taskId>%`, 52 bytes with a 26-char ULID,
+>   over D1's 50-byte LIKE limit (`apps/api/src/lib/search-query-limits.ts:44`). It now filters on
+>   `task_id = ?` and binds a fixed 25-byte pattern (`scheduled/stuck-tasks.ts:1451-1456`). The
+>   sweep runs isolated from the other sweeps (`scheduled/handler.ts:133`).
+> - **Still open:**
+>   - A discriminating regression guard that bound LIKE patterns stay at or under 50 bytes. The
+>     existing dedupe test uses a mock D1 that ignores pattern length
+>     (`apps/api/tests/unit/stuck-tasks.test.ts:1943-1960`), so it would pass against the old code.
+>   - Confirm in production observability that `stuck_tasks` sweeps complete without errors.
+>   - Latent risk for the same guard: `services/trigger-execution-sync.ts:58`, which every terminal
+>     transition calls (this sweep included), binds `TRIGGER_EXECUTION_HARD_MAX_FAILURE_PREFIX`
+>     plus `%`: exactly 50 bytes. One more character in that constant brings the error back. The
+>     call is best-effort, so it would silently stop syncing trigger executions, not fail the sweep.
+
 ## Problem
 
 Production observability shows the `stuck_tasks` scheduled sweep failing every five

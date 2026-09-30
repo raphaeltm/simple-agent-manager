@@ -1,5 +1,22 @@
 # Migrate File Proxy Token to Auth Header
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the VM agent side. `requireWorkspaceRequestAuth` accepts
+>   `Authorization: Bearer` and falls back to `?token=`
+>   (`packages/vm-agent/internal/server/workspace_routing.go:108–124`; PR #570 a7254b4bc,
+>   PR #651 ccccbcec7). Current VM agents accept the header, so the API side should be able to
+>   switch without a compatibility window.
+> - **Still open:** this file owns all token-in-URL work, including the `getFileRawUrl`
+>   `<img src>`. `2026-03-28-file-raw-security-hardening.md` keeps the size-limit, symlink and
+>   MIME items.
+>   - The API file proxy still sends the terminal token as `?token=`:
+>     `apps/api/src/routes/projects/files.ts:168` (`proxyToVmAgent`: list, find, view, git
+>     status, git diff), `:378` (raw), `:471` (upload), `:527` (download).
+>   - `getFileRawUrl` (`apps/web/src/lib/api/files.ts:394–404`) puts the token in the
+>     `<img src>` that `FileViewerPanel.tsx:218` renders; needs a blob or API-proxy approach.
+>   - No test yet proves terminal tokens stay out of query strings and logs.
+
 **Created**: 2026-03-28
 **Context**: Discovered during workspace-file-upload-download implementation
 

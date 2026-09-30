@@ -1,5 +1,36 @@
 # Knowledge Graph Test Coverage — Post-Merge Gap
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - REST suite `apps/api/tests/unit/routes/knowledge.test.ts`: search, create entity, patch
+>     entity, add observation and patch observation (validation and happy paths).
+>   - MCP tests in `apps/api/tests/unit/routes/mcp-knowledge-policy-tools.test.ts:205–447`:
+>     missing params, bad enums, confidence range, `add_knowledge` happy path, search and list
+>     limits.
+>   - `get_instructions` knowledge paths (with results, empty, DO throws) in
+>     `apps/api/tests/unit/routes/mcp-instruction-context.test.ts:88–126,257–266,302–338`. The
+>     code now calls `getAllHighConfidenceKnowledge`, not `getRelevantKnowledge`.
+>   - DO ranking and injection (`apps/api/tests/workers/knowledge-injection-ranking.test.ts`)
+>     and long-query search (`apps/api/tests/workers/project-data-search-query-limits.test.ts`,
+>     lines 87–98).
+> - **Still open:**
+>   - MCP: happy and not-found paths for `update_knowledge`, `remove_knowledge` (no test
+>     references at all), `confirm_knowledge`, `flag_contradiction`, `get_related`,
+>     `relate_knowledge` (source/target not found) and `get_knowledge` (not found). The
+>     tools-list test (`apps/api/tests/unit/routes/mcp.test.ts:639`) names none of the 11
+>     knowledge tools.
+>   - DO module: entity and observation limits, superseding update, soft delete, cascade
+>     delete, LIKE fallback, `createRelation` with a missing entity, `flagContradiction`.
+>   - REST: `GET /` with `entityType`, `GET /:entityId` 404, `DELETE /:entityId`,
+>     `DELETE /observations/:observationId`, and the confidence-only PATCH that should call
+>     confirm (mocks exist at `knowledge.test.ts:19–28` but no test uses them).
+>   - Row parsers: no `parseKnowledge*Row` tests.
+>   - UI: behavioral tests for `apps/web/src/pages/AgentContextPage/MemoryTab.tsx`, which has
+>     only Playwright audits.
+> - **Moot/dropped:** the planned `knowledge-page.test.tsx`. `KnowledgePage.tsx` was deleted in
+>   PR #1137 (0b9dbcb9c) and replaced by the Agent Context page's Memory tab.
+
 **Created**: 2026-04-13
 **Source**: Late-arriving test-engineer review on PR #693
 

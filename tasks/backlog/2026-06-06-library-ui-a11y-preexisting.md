@@ -1,5 +1,21 @@
 # Pre-existing library UI accessibility & styling fixes
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the invalid Tailwind class `bg-[rgba(8,15,12,0.5)]-inset` is gone. The light-mode
+>   PR #1239 (`0c3f3e3be`) removed every occurrence; `apps/web/src` has no `]-inset` left.
+> - **Still open:**
+>   - `apps/web/src/components/library/FileActionsMenu.tsx`: the focus ring is only on the trigger
+>     and the Preview item (:64, :94), not on Download, Edit Tags or Delete (:99-120). There is no
+>     Escape to close and no `role="menu"`/`menuitem`; `aria-haspopup` is `"true"` rather than
+>     `"menu"`, and there is no `aria-controls` (:66-67).
+>   - `CreateDirectoryDialog.tsx`: it focuses the input and closes on Escape (:24-42), but has no
+>     focus trap and does not return focus to the opener.
+>   - `FileGridCard.tsx`: the tag markup is unchanged (:73-85); long tags still need truncation.
+>   - Playwright coverage exists: `portal-overlay-audit.spec.ts:548` opens the menu and
+>     `library-ui-audit.spec.ts:411, 523` open the new-folder dialog. Both specs are quarantined
+>     (listed in `apps/web/tests/playwright/visual-audit-quarantine.txt`), so neither runs in CI.
+
 ## Problem
 
 While implementing the client-side library search index (idea `01KTEGHZ8DA0ATXQAZTXGCEK54`,

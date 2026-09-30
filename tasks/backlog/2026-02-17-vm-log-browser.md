@@ -1,5 +1,24 @@
 # VM Log Browser: Unified Log Aggregation, Tailing, and Browsing
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the node log viewer (PR #173, 5abe2516d, spec `specs/020-node-observability`),
+>   built on journald and a WebSocket stream instead of the SQLite store and SSE design below.
+>   - VM agent `GET /logs` and `/logs/stream` with source, level, container, time, search and
+>     cursor filters (`packages/vm-agent/internal/server/server.go:1179-1180`).
+>   - API proxy (`apps/api/src/routes/nodes/diagnostics.ts:87,145`) and node page UI
+>     (`apps/web/src/components/node/LogsSection.tsx`).
+>   - Docker `journald` log driver and persistent journald with retention
+>     (`packages/cloud-init/src/template.ts:714-735`).
+> - **Still open:**
+>   - Secret redaction of node log content (none in `packages/vm-agent/internal/logreader/`).
+>   - Capture successful devcontainer and lifecycle-command output; it is discarded on success
+>     (`packages/vm-agent/internal/bootstrap/bootstrap.go:1044-1048`).
+>   - Large-volume performance: 200-entry pages, no virtualization
+>     (`apps/web/src/hooks/useNodeLogs.ts:43`). Optional: log download/export.
+> - **Moot/dropped:** the SQLite `logs` table, ring-buffer broadcaster, SSE tail and the
+>   `LOG_STORE_*` / `LOG_TAIL_*` settings; the shipped journald design replaces them.
+
 **Status:** backlog
 **Priority:** high
 **Estimated Effort:** 2-3 weeks

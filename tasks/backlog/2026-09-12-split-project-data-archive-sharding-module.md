@@ -1,5 +1,9 @@
 # Split `project-data-archive-sharding.ts` (3,663 lines, 4.5x the mandatory ceiling)
 
+> **Reconciliation 2026-09-30:** still open, and bigger: the file is now 4,182 lines. Widen the
+> scope to its DO-side twin, `apps/api/src/durable-objects/project-data/archive-sharding.ts`, which
+> is 4,140 lines and has no split task.
+
 **Status**: backlog
 **Raised by**: `architecture-reviewer` and `constitution-validator` during Phase 5 of
 `tasks/archive/2026-09-12-deadlocked-projectdata-archive-sweep-budget-mismatch.md`

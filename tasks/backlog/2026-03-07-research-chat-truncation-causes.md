@@ -1,5 +1,24 @@
 # Research: Chat Messages Appear Truncated While Agent Still Working
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the research itself (every failure mode below is cited), plus two fixes:
+>   - C2: thought and plan chunks now persist
+>     (`packages/vm-agent/internal/acp/message_extract.go:178-193`).
+>   - A1: the DO socket stays open while a session is active or waking, plus a fallback poll
+>     (`apps/web/src/components/project-message-view/useSessionLifecycle.ts:146,315`).
+> - **Still open:**
+>   - B5: `packages/vm-agent/internal/acp/ordered_reader.go:98-155` never checks `scanner.Err()`;
+>     a line over 10 MB ends the stream with no log (it now surfaces as EOF and crash recovery).
+>   - B1: the focused fix is `tasks/backlog/2026-09-25-reporter-session-switch-unsent-rows.md`.
+>   - B2 (verify): rejects are now dropped per row or per session
+>     (`packages/vm-agent/internal/messagereport/sender.go:174-205`); confirm an auth
+>     misconfiguration cannot silently drop a whole session. B3, B4, C3 were not re-verified.
+>   - C1 (optional): no outbox flush before the `awaiting_followup` callback
+>     (`packages/vm-agent/internal/server/server.go:1493-1556`).
+> - **Moot/dropped:** A2, A3 and C4 went with the DO-only chat (PR #978); A4 is now sleep/wake
+>   (PR #1785).
+
 ## Problem Statement
 
 Project chats sometimes appear to "end" prematurely — the last visible message is a tool call, but opening the workspace directly reveals many more messages (additional tool calls, agent responses) in the underlying ACP session. The chat UI stops updating while the agent is still actively working.

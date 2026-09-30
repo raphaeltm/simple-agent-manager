@@ -1,5 +1,24 @@
 # Simplify Web App Components and Pages
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - `Workspace.tsx` split into `apps/web/src/pages/workspace/` hooks (tabs, core, and navigation
+>     with git state); boot-log streaming moved to `apps/web/src/hooks/useBootLogStream.ts`.
+>   - ProjectChat subcomponents extracted to `apps/web/src/pages/project-chat/`; provisioning
+>     state lives in `useProjectChatState.ts:250-257`. `lib/api.ts` is split into `lib/api/*.ts`.
+> - **Still open:**
+>   - `pages/workspace/index.tsx` is 679 lines (target under 500); `WorkspaceSidebar.tsx` is 741
+>     lines with 23 props.
+>   - A shared reconnect hook (backoff duplicated in `useChatWebSocket.ts:18-19,116` and
+>     `useAdminLogStream.ts:36-70`); one command palette instead of two; a `lib/formatting.ts`
+>     (`formatTokens` and `formatBytes` are each defined 4 times).
+>   - Dead code: `apps/web/src/hooks/useProjectAgentSession.ts` plus its test (no consumer since
+>     PR #978) and `apps/web/src/components/task/TaskSubmitForm.tsx` (556 lines, used only by
+>     tests and a Playwright harness). Rule 01 says remove dead code.
+> - **Moot/dropped:** merging thin wrapper pages; they are now `React.lazy` route chunks in tab
+>   layouts (`apps/web/src/App.tsx:39,150,352,394`), as rule 60 requires.
+
 **Status:** backlog
 **Priority:** high
 **Estimated Effort:** 1 week

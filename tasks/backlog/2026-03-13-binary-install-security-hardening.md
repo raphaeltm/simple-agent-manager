@@ -1,5 +1,22 @@
 # Binary Install Security Hardening
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Mistral Vibe installs via `uv tool install` (PR #391) pinned to `mistral-vibe==2.25.8` in
+>     `packages/shared/src/agent-install-manifest.json:31-37` (pinned manifest from PR #1565).
+>   - Agent stderr and error text are redacted before reporting, for every agent
+>     (`packages/vm-agent/internal/acp/session_host_reporting.go:17-19`,
+>     `session_host_crash.go:26-75`; PR #1099).
+> - **Still open:**
+>   - The uv installer is fetched unpinned and unverified
+>     (`curl -LsSf https://astral.sh/uv/install.sh | sh`) in
+>     `packages/vm-agent/internal/acp/gateway.go:1031,1050` and
+>     `apps/api/Dockerfile.vm-agent-container:19`; pin a version and verify a checksum.
+>   - Optionally require hashes for the `uv tool install` packages.
+> - **Moot/dropped:** the GitHub-release download, the `uname -m` allowlist and the ELF check.
+>   Agents now install only via npm or `uv tool`, so no raw binary download remains.
+
 **Created**: 2026-03-13
 **Source**: Security audit of Mistral Vibe integration (PR #361)
 

@@ -1,5 +1,33 @@
 # Expand Frontend Query Caching and Safe Persistence
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Persistence (PR #1858): an IndexedDB store keyed by the signed-in user's namespace, a
+>     content-based allowlist (`apps/web/src/lib/query-persist-config.ts:88-92`), a schema
+>     buster (`:110`) and `maxAge`. It is cleared on sign-out and account switch and falls back
+>     to the in-memory cache when storage fails. Tests:
+>     `apps/web/tests/unit/lib/query-persistence.test.ts`, `query-persistence-allowlist.test.ts`.
+>   - Chat summaries and active tasks moved onto query factories (PR #1860, landed via #1852):
+>     `lib/query-options/chats.ts:61-97`, `lib/query-options/tasks.ts:37`.
+>   - Hover prefetch on the same keys: `hooks/useProjectIntentPrefetch.ts`.
+> - **Still open:**
+>   - Rank and migrate the remaining hand-rolled loaders. A heuristic count (a read-API call plus
+>     `useEffect`/`useState`, no `useQuery`) finds 83 files, against 47 that use TanStack Query.
+>     Start with the project subpages: ProjectDeployments, ProjectDeploymentEnvironmentDetail,
+>     ProjectLibrary, ProjectActivity, ProjectTasks, ProjectTriggerDetail, ProjectNotifications,
+>     ProjectMembersSection, ProjectRuntimeConfigSection, the deployment panels and
+>     AgentContextPage; then the admin pages and hooks.
+>   - Staging validation of persistence (reload, offline/online, account switch, quota failure,
+>     cache buster). PR #1858 skipped staging by instruction.
+> - **Moot/dropped:**
+>   - `sessionStorage` as the store: the shipped layer uses IndexedDB instead. Rationale:
+>     `query-persist-config.ts:22-26` and
+>     `tasks/archive/2026-08-18-query-cache-persistence-and-http-cache-headers.md`.
+>   - Chat messages on the "Never Persist" list below: the project owner has since approved local
+>     persistence of the project-chat message cache (`query-persist-config.ts:45-46`). Keep the
+>     rest of that list; `query-persist-config.ts:41-46` and two tests cite it.
+
 ## Problem
 
 The first frontend performance PR covers responsive route preservation plus the highest-leverage project list/detail cache. Many other pages still use isolated `useState`/`useEffect` loaders, and a true full document reload still loses the in-memory QueryClient.

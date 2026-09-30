@@ -1,4 +1,27 @@
-# ResourceSparkline gap/counter-reset markers draw no line
+# Undefined --sam-color-* tokens in apps/web (was: ResourceSparkline gap marker has no colour)
+
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** PR #2185 (`2075aa074`) replaced the sparkline with the uPlot timeline in
+>   `apps/web/src/components/chat/resource-timeline/`. `--sam-color-border-strong` no longer appears
+>   anywhere; gaps now break the line (`resource-timeline/resource-source.ts:215-245`, covered by
+>   `resource-source.test.ts` and `time-axis.test.ts`); and the guide
+>   `apps/www/src/content/docs/docs/guides/session-resources.md:138-141,269` was rewritten to match.
+> - **Still open:** acceptance criterion 3, the undefined-token sweep. None of these is defined in
+>   `packages/ui/src/tokens/theme.css`:
+>   - `--sam-color-fg-secondary`, no fallback: `apps/web/src/components/debug/FailureCard.tsx:173,214`
+>     and `apps/web/src/pages/admin-analytics/chartTokens.ts:16`.
+>   - `--sam-color-surface-hover`, no fallback:
+>     `apps/web/src/components/project-message-view/SessionHeader.tsx:466` (the defined token is
+>     `--sam-color-bg-surface-hover`).
+>   - `--sam-color-accent-tint`, hardcoded blue fallback: `SessionHeader.tsx:281,465` (the defined
+>     token is `--sam-color-accent-primary-tint`).
+>   - `--sam-color-accent`, with fallback: `apps/web/src/app.css:180`.
+>   - The Tailwind class `text-fg-secondary` maps to no defined token (`app.css:27-29` defines only
+>     `fg-primary`, `fg-muted` and `fg-on-accent`) and is used in 24 apps/web files
+>     (NotificationCenter, SessionItem, ChatInput, SessionHeader, admin charts, ...).
+> - **Moot/dropped:** criteria 1, 2 and 4 (marker token, painted-marker test, docs screenshot and
+>   guide wording). The marker no longer exists, and #2185 refreshed the docs.
 
 ## Problem
 

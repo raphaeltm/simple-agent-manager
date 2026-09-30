@@ -1,5 +1,21 @@
 # Volume status presentation and create-time provider snapshot
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** a `StatusBadge` entry for `attached` (success palette) at
+>   `packages/ui/src/components/StatusBadge.tsx:53`, added by PR #2102 (`d8f3b1cb9`).
+> - **Still open:**
+>   - `statusConfig` entries for the other volume states: `available`, `attaching`, `detaching`,
+>     `resizing`, `deleting` (`VolumeStatus` at `packages/providers/src/types.ts:141-149`). Volume
+>     `creating` still borrows the workspace info-blue entry.
+>   - The Playwright visual audit of `DeploymentVolumesPanel` at 375px and 1280px.
+>   - `createEnvironmentVolume` still stores the provider's create-time status
+>     (`apps/api/src/services/deployment-volumes.ts:254`): persist a settled status or document why
+>     the snapshot is authoritative, plus the regression test.
+>   - Item 1 overlaps the `StatusBadge` coverage audit in
+>     `tasks/backlog/2026-08-04-sleeping-status-renders-as-unknown.md:49` ("audit the other statuses
+>     … not in `statusConfig`"). Do the badge work once, in whichever task runs first.
+
 **Status:** backlog
 **Discovered:** 2026-09-19, during local specialist review of the app-deployment fix port
 (`tasks/archive/2026-09-19-port-app-deployment-fixes-and-dedupe-pending-release.md`). Both items

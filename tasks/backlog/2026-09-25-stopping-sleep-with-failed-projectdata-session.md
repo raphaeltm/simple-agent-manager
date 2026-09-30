@@ -1,5 +1,11 @@
 # A `stopping` sleep whose ProjectData session is already `failed` retries forever
 
+> **Reconciliation 2026-09-30:** still open (`session-sleep-lifecycle-repair.ts:48,171` unchanged).
+> Same class as SAM idea `01M3MFDMZ5AS0BXPHZWS3CRFED`, also unfixed:
+> `apps/api/src/durable-objects/task-runner/state-machine.ts:582-589` finalizes recovery workspaces
+> with `agentSessionStatus: 'failed'`, which fails a conversation its snapshot says is recoverable.
+> Fix the two together.
+
 ## Problem
 
 A sleep that has passed its point of no return (`session_snapshots.sleep_status = 'stopping'`)

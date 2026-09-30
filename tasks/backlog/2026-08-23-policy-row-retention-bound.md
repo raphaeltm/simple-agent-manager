@@ -1,5 +1,11 @@
 # Bound total `project_policies` row growth (retention, not just an active cap)
 
+> **Reconciliation 2026-09-30:** still open; there is still no retention or hard-delete path.
+> Note that the 100-policy cap (`DEFAULT_POLICY_MAX_PER_PROJECT`,
+> `packages/shared/src/constants/policies.ts:8`) counts only active, unexpired rows
+> (`project-data/policies.ts:79-97`). On 2026-09-30 it was at 97/100 after one new policy. This
+> file is about total row growth, not the active cap.
+
 **Filed from**: PR review of the policy lifecycle controls work
 (`tasks/archive/2026-08-23-policy-lifecycle-controls.md`). Raised independently by the
 security-auditor (MEDIUM) and the performance-reviewer (MEDIUM).

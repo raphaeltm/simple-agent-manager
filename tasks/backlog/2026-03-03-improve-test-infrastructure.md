@@ -1,5 +1,23 @@
 # Improve Test Infrastructure and Patterns
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Coverage thresholds (`vitest.coverage.ts`, used by the api/web/providers/shared configs);
+>     CI runs `pnpm test:coverage` (`.github/workflows/ci.yml:364`).
+>   - Go `-race` in CI (`.github/workflows/ci.yml:761,782`); Miniflare DO tests
+>     `apps/api/tests/workers/task-runner-do.test.ts` and `node-lifecycle-do.test.ts:533`.
+>   - Source-contract detector `scripts/quality/check-source-contract-tests.ts`.
+> - **Still open:**
+>   - Shared typed web mock factories (7 web test files still define their own).
+>   - Raise thresholds toward 70/70/60/70 (api 45/40/44/45, web 53/49/46/55); add thresholds for
+>     acp-client, terminal, ui and tail-worker.
+>   - Standard mock cleanup (no `clearMocks`/`restoreMocks`, no global `afterEach`); move the
+>     hardcoded Miniflare bindings (`apps/api/vitest.workers.config.ts:119-150`) to constants.
+> - **Moot/dropped:** splitting large test files (rule 18 exempts tests); `@structural-test` tags,
+>   replaced by the detector (migration tracked in `2026-04-01-replace-source-contract-tests.md`
+>   and `2026-08-11-migrate-remaining-source-contract-ui-tests.md`).
+
 **Status:** backlog
 **Priority:** medium
 **Estimated Effort:** 4 days

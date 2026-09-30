@@ -1,5 +1,21 @@
 # Wire Provider Env Var Overrides
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the HIGH Scaleway item. Placement falls back to the provider's default location
+>   before `DEFAULT_VM_LOCATION` (`getDefaultLocationForProvider` in
+>   `apps/api/src/services/placement-field-resolution.ts:112-126`).
+> - **Still open:**
+>   - `HETZNER_DATACENTER` is not in `Env` and not read by `buildProviderConfig`
+>     (`apps/api/src/services/provider-credential-codecs.ts:140-165`, which wires the other
+>     `HETZNER_*` vars); the comment at `packages/shared/src/constants/hetzner.ts:5` claims an
+>     override that does not exist.
+>   - No `DEFAULT_VM_LOCATION` env override: `apps/api/src/routes/nodes.ts:124`,
+>     `routes/workspaces/workspace-create.ts:103` and `services/canonical-vm-allocation.ts:390`
+>     use the `'nbg1'` constant (in direct creation it can outrank the provider default).
+>   - Document that the D1 default `vm_location = 'nbg1'` cannot be overridden
+>     (`apps/api/src/db/schema.ts:1330`).
+
 **Created**: 2026-03-13
 **Context**: Constitution validator review of PR #373
 

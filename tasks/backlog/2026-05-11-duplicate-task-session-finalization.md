@@ -1,5 +1,27 @@
 # Fix Duplicate Task Sessions And Finalization Drift
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** this task's own PR #964 was closed unmerged (merge conflicts), but later PRs
+>   delivered most of it:
+>   - Repeat scheduling cycles no longer re-pick a task that already has a session. The query
+>     requires `chat_session_id IS NULL` and the claim binds the session atomically (#1876,
+>     `apps/api/src/durable-objects/project-orchestrator/scheduling.ts:279-296, 468-501`).
+>   - One shared terminal cleanup path, `apps/api/src/services/task-terminal-cleanup.ts` (#1560),
+>     used by `complete_task` (`routes/mcp/task-tools.ts:559`), the task callback
+>     (`routes/tasks/callback.ts:289, 422`) and task CRUD (`routes/tasks/crud.ts:417, 502`).
+>   - A TaskRunner failure fails the chat session and runs workspace finalization
+>     (`durable-objects/task-runner/state-machine.ts:378-390, 582`; #1917).
+>   - A repair sweep stops sessions left active after their task ended (#1969,
+>     `scheduled/terminal-session-ledger-reconciliation.ts`, with workers tests).
+> - **Still open:**
+>   - The chat session is still created before the claim (`scheduling.ts:447` vs :468). If the
+>     claim loses, or `startTaskRunnerDO` throws after it, the catch block (:573-588) only logs:
+>     the new session stays active, and in the second case the scheduler never re-picks the task
+>     (only the stuck-task sweep ends it). Claim first, or stop the session on failure.
+>   - Behavioral tests for repeated scheduler cycles and duplicate TaskRunner starts.
+>   - The postmortem.
+
 ## Problem
 
 Production incident on 2026-05-11 showed one canonical D1 task (`01KRB7ZM0N4WGQRE52QM7D8JHV`) with multiple ProjectData chat sessions linked to the same task. The legitimate session had a workspace and normal message history; five orphan sessions had the same task ID/title, `workspaceId = null`, one message, and stayed active.

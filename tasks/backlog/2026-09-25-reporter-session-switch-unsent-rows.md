@@ -1,5 +1,9 @@
 # Recover unsent VM reporter rows across warm session switches
 
+> **Reconciliation 2026-09-30:** still open (`reporter.go:165,185` still deletes the old session's
+> rows). This is the focused fix for hypothesis B1 in
+> `tasks/backlog/2026-03-07-research-chat-truncation-causes.md`.
+
 ## Evidence
 
 `Reporter.SetSessionID` (`packages/vm-agent/internal/messagereport/reporter.go`) deletes the previous session's outbox rows when a reused workspace is linked to a new chat session. It has to: the callback route rejects a message for any session other than the workspace's current `chatSessionId` with `400 Session mismatch` (`rejectMessageSessionMismatch` in `apps/api/src/routes/workspaces/runtime.ts`), so those rows can no longer be delivered and would otherwise occupy the bounded outbox.

@@ -1,5 +1,27 @@
 # Consolidate remaining hand-rolled visibility-aware polls onto `useVisibilityAwarePoll`
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** `useRecentChats` moved to TanStack Query (PR #1860), which pauses
+>   `refetchInterval` on a hidden tab. Its listener pair is gone, and the comment at
+>   `apps/web/src/hooks/useRecentChats.ts:19-27` explains the change.
+> - **Still open:**
+>   - `usePushSubscription` still hand-rolls a `visibilitychange` + `focus` listener
+>     (`hooks/usePushSubscription.ts:154-164`), with no comment saying why it cannot use the
+>     shared hook.
+>   - The git-status `setInterval` at `pages/workspace/useWorkspaceNavigation.ts:115` is still not
+>     gated on tab visibility.
+>   - Optional: `useDocumentVisible` still adds one listener per call site
+>     (`hooks/useVisibilityAwarePoll.ts:9-25`).
+>   - Outside this file's named scope, these `setInterval` data polls are also not gated on tab
+>     visibility:
+>     - `hooks/useAdminAnalytics.ts:118`, `hooks/useAdminErrors.ts:193`,
+>       `hooks/useAdminHealth.ts:70`.
+>     - `pages/ProjectDeploymentEnvironmentDetail.tsx:162` (hardcoded 5000 ms) and `:208`
+>       (hardcoded 15000 ms).
+>     - `components/onboarding/choose-path/StepExecution.tsx:134`.
+>     - `components/CodexConnectModal.tsx:205`, a short-lived device-code poll (arguably fine).
+
 ## Problem
 
 `apps/web/src/hooks/useVisibilityAwarePoll.ts` (added by the UI-performance program,

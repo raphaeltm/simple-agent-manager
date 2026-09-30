@@ -1,5 +1,9 @@
 # Implement Encrypted Swap for SAM VMs
 
+> **Reconciliation 2026-09-30:** still open. `packages/cloud-init/src/template.ts:48-52` still
+> enables `/swapfile` directly. An implementation exists only on the unmerged branch
+> `origin/sam/implement-encrypted-swap-ephemeral-01ksk1` (commit `187c342c1`); no PR was opened.
+
 ## Problem
 
 SAM VM cloud-init currently creates and enables `/swapfile` directly. Swap can contain sensitive workspace data, so ephemeral VMs should avoid leaving recoverable plaintext swap contents on disk.

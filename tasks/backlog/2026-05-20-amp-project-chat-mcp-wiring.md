@@ -1,5 +1,25 @@
 # Amp Project Chat MCP Wiring
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the code, via #1094 (`afdcfde9f`). The archived task
+>   `tasks/archive/2026-05-21-amp-sam-mcp-bridge.md` took over this file's scope.
+>   - Direct project-chat session creation mints a scoped SAM MCP token (it carries
+>     `chatSessionId` and `agentSessionId`) and sends the MCP config before ACP starts
+>     (`apps/api/src/routes/workspaces/agent-sessions.ts:131-181`,
+>     `apps/api/src/services/node-agent.ts:528-548`).
+>   - The VM agent accepts and stores MCP config on create-session, and Amp gets `sam-mcp` as a
+>     stdio server through `mcp-remote`.
+>   - Tests: `apps/api/tests/unit/routes/amp-agent-session-mcp-wiring.test.ts`,
+>     `packages/vm-agent/internal/server/agent_sessions_test.go`,
+>     `packages/vm-agent/internal/acp/mcp_headers_test.go`.
+> - **Still open:** staging proof that Amp actually calls at least one SAM MCP tool in a real
+>   project-chat session, uses the result in its reply, and ends cleanly. The archived task left
+>   both verification boxes unticked, and #1094's staging evidence showed a chat error:
+>   "Process exited with code 1".
+> - **Moot/dropped:** the branch named here, `sam/use-command-workflow-handle-01ks2x` (PR #1089),
+>   was closed unmerged, so the worktree, branch and merge steps in the checklist no longer apply.
+
 ## Problem
 
 Amp direct project-chat sessions must receive SAM MCP configuration before ACP `NewSession` starts. Prior staging evidence only proved Amp can install/start and reach the ACP lifecycle; it did not prove Amp called SAM MCP tools during a direct project-chat run. The integration is not complete until staging evidence shows Amp using at least one SAM MCP tool and using the result in its chat response.

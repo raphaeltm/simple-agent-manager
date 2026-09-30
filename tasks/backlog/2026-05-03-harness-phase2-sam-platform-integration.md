@@ -1,5 +1,10 @@
 # Harness Phase 2: SAM Platform Integration (MCP Client + Orchestration Mode)
 
+> **Reconciliation 2026-09-30:** still open. Nothing from this task is in `main`. The MCP client
+> (#951), the orchestrator prompt (#953) and the `sam-harness` agent type (#955) were merged into
+> `origin/harness/develop` only. Same decision as phase 1: land or retire that branch (61 commits
+> ahead of `main`, idle since 2026-07-04).
+
 ## Context
 
 Phase 1 (`2026-05-03-harness-phase1-capable-coding-agent.md`) produces a capable coding agent with grep, glob, git tools, tree-sitter repo maps, and context management. It runs against real models via SAM's AI proxy but has no awareness of SAM as a platform — it cannot read tasks, dispatch work, manage missions, or interact with project knowledge.

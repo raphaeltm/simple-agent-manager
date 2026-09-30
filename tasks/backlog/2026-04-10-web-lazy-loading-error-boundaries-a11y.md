@@ -1,5 +1,24 @@
 # Web App: Lazy Loading, Error Boundaries, and Accessibility
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - Route-level lazy loading with a Suspense boundary per route (`apps/web/src/App.tsx:22–195`
+>     lazy pages, `:198–208` `page()` wrapper; PR #1850 1197facfc).
+>   - `AuthProvider` context defaults to `null` and `useAuth()` throws outside the provider
+>     (`apps/web/src/components/AuthProvider.tsx:54`; 860ee4a10).
+> - **Still open:**
+>   - A resettable `RouteErrorBoundary` per route, a boundary around `MarkdownRenderer`, and
+>     their tests. Only the global `ErrorBoundary` exists (`App.tsx:250`).
+>   - `aria-label` on the workspace rename input (`WorkspaceSidebar.tsx:226–237`) and on the
+>     follow-up textarea, which now lives in `project-chat/ProjectChatComposer.tsx:294`.
+>   - `type="button"` audit: a rough scan finds ~190 native buttons without `type` across ~72
+>     `apps/web` files. A lint rule may beat a one-off sweep.
+>   - `crypto.randomUUID()` instead of the `Math.random()` UUID in
+>     `packages/terminal/src/hooks/useTerminalSessions.ts:127–133`.
+> - **Moot/dropped:** keeping ProjectChat and Project eager. Rule 60 and #1850 made only
+>   Dashboard and Landing static imports (`App.tsx:19–20`).
+
 ## Problem Statement
 
 The web app eagerly imports all page components, increasing initial bundle size. There are no granular error boundaries (only one global), so a crash in any component takes down the whole page. Several accessibility issues exist (missing aria-labels, missing button types). AuthProvider's context default makes it impossible to detect usage outside the provider. Terminal session IDs use `Math.random()` instead of `crypto.randomUUID()`.

@@ -1,5 +1,22 @@
 # ACP Session Error Observability & Reconnection Reliability
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - The six items already ticked below (client error codes and messages, offline detection).
+>   - VM-agent error-reporter retry: a durable outbox with scheduled retries (`next_attempt_at`)
+>     (`packages/vm-agent/internal/errorreport/store.go:16-46`, PR #1750, a857a337e).
+>   - A fresh WebSocket URL/token on every reconnect attempt
+>     (`packages/acp-client/src/hooks/useAcpSession.ts:525-529,626`, commit f75b4c34f).
+> - **Still open:**
+>   - The per-session event timeline: session-scoped events on the VM agent, the
+>     `GET /workspaces/:id/agent-sessions/:sessionId/events` API (does not exist), and a
+>     "Session Log" view from the error state.
+>   - Error codes in Go lifecycle and error-reporter payloads (today free-form `step` strings,
+>     `packages/vm-agent/internal/acp/session_host_reporting.go:17-35`).
+>   - Banners for silent failures; reconnection-progress UI; longer timeout for close code 1001;
+>     server-side connection migration; Phase 5 error metrics, dashboards and connection quality.
+
 **Created**: 2026-02-20
 **Priority**: High
 **Tags**: observability, debugging, reliability, acp, websocket

@@ -1,5 +1,27 @@
 # AgentKeyCard accessibility refactor
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** none of the accessibility items. The delete-scope fix shipped earlier (see
+>   Moot/dropped).
+> - **Still open:** (all in `apps/web/src/components/AgentKeyCard.tsx`)
+>   - A-1: Update and Remove are ~20px text buttons with no `aria-label` or design-system
+>     focus ring (`:151–163`).
+>   - A-2: `window.confirm()` in `handleDelete` (`:122`).
+>   - A-3: the credential-type buttons have no `role="group"` or `aria-pressed` (`:172–205`).
+>   - From the merged file: disclosure semantics (`aria-expanded`, `aria-controls`, a labelled
+>     region) for the Update button that reveals the form; re-check the colour/emoji-only
+>     status finding (the standalone card now shows a text `StatusBadge`); unit tests for the
+>     new ARIA; Playwright (375px, 1280px) and axe checks.
+> - **Moot/dropped:**
+>   - Delete-scope decision: already shipped in PR #1027 (95049646b, 2026-05-16) before it was
+>     carried in here. The card passes the kind (`AgentKeyCard.tsx:130`); user scope calls
+>     `deleteAgentCredentialByKind` (`AgentsSection.tsx:94`) and project scope calls
+>     `deleteProjectAgentCredential(projectId, agentType, kind)` (`ProjectAgentsSection.tsx:92`).
+>   - Show/hide toggle ARIA: the card has no reveal toggle now (plain `type="password"` inputs).
+>   - Memoizing credential-kind select options: the kind is chosen with two buttons, not a
+>     select.
+
 **Created**: 2026-04-18
 **Priority**: HIGH
 **Source**: ui-ux-specialist review of PR `sam/project-credential-overrides`

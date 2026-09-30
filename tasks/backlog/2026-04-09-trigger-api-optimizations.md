@@ -1,5 +1,27 @@
 # Trigger API Optimizations
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - The `executionStats` N+1 is gone; the list route batch-loads configs with `inArray`
+>     (`apps/api/src/routes/triggers/crud.ts:331–352`; removed in 47041f099, PR #1581).
+>   - Execution log purge using `TRIGGER_EXECUTION_LOG_RETENTION_DAYS`
+>     (`apps/api/src/scheduled/trigger-execution-cleanup.ts:332–365`, called at `:473` from the
+>     cron in `scheduled/handler.ts:163`; PR #671 cdfb80413).
+>   - skipIfRunning and maxConcurrent share one atomic count (`CASE WHEN skip_if_running`) in
+>     the reservation INSERT (`apps/api/src/services/trigger-admission.ts:193–211`; PR #1581).
+>   - The DELETE route relies on the cascade, with no manual execution delete
+>     (`crud.ts:528–540`).
+> - **Still open:**
+>   - MCP `handleCreateTrigger` still uses raw SQL
+>     (`apps/api/src/routes/mcp/trigger-create-tool.ts:147,157,178,196`).
+>   - `CRON_SWEEP_ENABLED`, `CRON_MAX_FIRE_PER_SWEEP` and `TRIGGER_AUTO_PAUSE_AFTER_FAILURES`
+>     are not in `wrangler.toml [vars]` (code defaults exist: `scheduled/cron-triggers.ts:25,42`,
+>     `trigger-admission.ts:172`).
+>   - The consecutive-failure query still runs before the reservation
+>     (`trigger-admission.ts:170–186`). The skip checks now live inside the atomic INSERT, so
+>     first decide whether reordering still makes sense.
+
 **Created**: 2026-04-09
 **Source**: Cloudflare-specialist review of PR #645 (event-driven triggers)
 

@@ -1,5 +1,23 @@
 # TDF-1: Task State Machine — Hardened State Transitions & Execution Step Tracking
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - PR #210 (1722b5b05): exhaustive transition matrix, invalid and backward-step rejection,
+>     property-based tests (`apps/api/tests/unit/services/task-status.test.ts`), typed steps
+>     (`packages/shared/src/types/task.ts:57`) and ordering checks (`task-status.ts:73-96`).
+>   - PR #2167 (dacd0c208): failure transitions and their status events are written in one
+>     guarded `database.batch`, tested on real SQL (`apps/api/src/services/task-failure.ts:40-50`).
+> - **Still open:**
+>   - Atomic writes for non-failure transitions plus their status events; today they are separate
+>     (`apps/api/src/routes/tasks/_helpers.ts:77-96`, TaskRunner `state-machine.ts:152-162`).
+>   - A real-SQL test for concurrent non-failure transitions (PR #210's tests only checked source
+>     text and were deleted in PR #212).
+>   - This is the only remaining TDF item: TDF-2 is archived, and the TDF index and TDF-3 to
+>     TDF-8 are being removed from the backlog as shipped (PRs #213-#219).
+> - **Moot/dropped:** "cannot skip steps"; forward skips are deliberate (a warm node skips
+>   provisioning), and only backward moves are rejected.
+
 **Created**: 2026-02-27
 **Priority**: High (Foundation — blocks TDF-2, TDF-7)
 **Classification**: `business-logic-change`

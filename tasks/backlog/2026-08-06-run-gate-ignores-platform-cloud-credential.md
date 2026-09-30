@@ -1,5 +1,29 @@
 # `/tasks/:taskId/run` pre-check ignores the platform cloud credential
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** the gate fix, in f2f29eb62 (landed via PR #1943).
+>   - `routes/tasks/run.ts:268-280` now resolves credentials through
+>     `resolveTaskStartPlacementCredentialAttributionFromPlacement`, which calls the tiered
+>     `resolveCredentialSource` (`services/placement-resolver.ts:433-468`). An enabled platform
+>     credential now satisfies the gate.
+>   - Route test: the task owner, with only a platform credential and no `credentials` rows,
+>     runs a task via POST `/run` and gets 202
+>     (`apps/api/tests/unit/routes/node-pool-upgrade-admission.test.ts:39-62`).
+>   - Resolver branch tests (project, inactive project, user, platform, none):
+>     `apps/api/tests/unit/resolve-credential-source.test.ts:203-260`.
+>   - Audit done: every provisioning entry point uses the shared resolvers (`routes/nodes.ts:162`,
+>     `workspaces/workspace-create.ts:190`, `tasks/submit.ts:466`, `mcp/dispatch-tool.ts:433`,
+>     `mcp/orchestration-tools.ts:291`). The remaining raw `credentialType='cloud-provider'`
+>     lookups are credential CRUD, catalog and quota-display reads, not gates.
+> - **Still open:**
+>   - A route test where a non-owner member with no personal credential runs another member's
+>     task via POST `/run`, with only a platform credential enabled, and gets 202.
+>   - A route test where no credential resolves at any tier: 400 with the actionable message.
+>   - Fix the stale comment at
+>     `apps/api/tests/unit/routes/shared-project-task-lifecycle-positive.test.ts:166-167`. It still
+>     says the member must have their own credential, which is no longer true.
+
 ## Problem
 
 `POST /api/projects/:projectId/tasks/:taskId/run` gates on the **caller's own** cloud-provider

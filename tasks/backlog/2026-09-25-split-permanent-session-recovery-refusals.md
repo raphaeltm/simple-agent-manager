@@ -1,5 +1,34 @@
 # Give permanent session-recovery refusals their own names
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:**
+>   - A `retry`/`report`/`drop` action table that consumers branch on:
+>     `apps/api/src/services/session-recovery-refusals.ts` (module from PR #2145, table from
+>     PR #2155 `371801cce`).
+>   - Producer split: `stored_resource_plan_invalid` (`session-recovery-request.ts:76-124`),
+>     `placement_unsatisfiable` and `placement_credentials_missing` (`session-recovery.ts:~372-392`),
+>     and the generic catch is now `session_recovery_placement_lookup_failed`
+>     (`session-recovery.ts:456`). `session_recovery_placement_placement` no longer exists.
+>   - Tests pin `stored_resource_plan_invalid` and `lookup_failed`
+>     (`apps/api/tests/unit/services/session-recovery.test.ts:~754-800`) and
+>     `placement_credentials_missing` (`apps/api/tests/workers/node-lifecycle-do.test.ts:2582`,
+>     `apps/api/tests/workers/scheduled-node-cleanup.test.ts:1331`).
+>   - Criterion 3 decided: `recovery_attempts_exhausted` is `report`.
+> - **Still open:**
+>   - `archive_migration_fenced` (`retry`) is returned for any non-`root` session location,
+>     archived sessions included (`session-snapshot-recovery-lifecycle.ts:146-158,361-362`), so a
+>     permanent condition retries until the TTL. `archive_migration_in_progress` and
+>     `session_archived` are in the table, but nothing produces them.
+>   - Producer tests: nothing references `placement_unsatisfiable` (add one per
+>     `PlacementResolutionError` kind: `invalid-location`, `invalid-credential-attribution`,
+>     `invalid-resource-requirements`), and no producer test pins a dead-lettered deletion.
+>   - Remove the `session_recovery_placement_transient` table entry; nothing produces it.
+> - **Moot/dropped:** distinct names for the deletion-fence causes (dead-lettered deletion, legacy
+>   `deleted` row without proof). It was decided to keep them `retry`: node termination proof can
+>   still release them, the 1 h delivery TTL bounds them, and TTL expiry is now visible
+>   (`tasks/archive/2026-09-25-durable-wakes-must-wake.md`, research finding 4).
+
 ## Problem
 
 `isTransientSessionRecoveryRefusal` (`apps/api/src/services/session-recovery-refusals.ts`) lets

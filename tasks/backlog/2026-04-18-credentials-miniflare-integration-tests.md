@@ -1,5 +1,21 @@
 # Miniflare + real D1 integration tests for project-scoped credentials
 
+> **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
+>
+> - **Shipped:** real-D1 (Miniflare) tests of `getDecryptedAgentKey` in
+>   `apps/api/tests/workers/composable-credentials-wiring.test.ts` cover resolution after the
+>   composable-credential backfill, legacy fallback, the Rule 28 inactive-project halt
+>   (`:273–310`), and user vs platform precedence (`:563–865`).
+> - **Still open:**
+>   - CRITICAL #1: an active project-scoped row beating the user row, with real seeded rows.
+>   - CRITICAL #2: cross-user and cross-project isolation for GET/PUT/DELETE. The route tests in
+>     `apps/api/tests/unit/routes/project-credentials.test.ts` still use chainable mocked
+>     Drizzle (`:47–53`).
+>   - HIGH #5: the autoActivate sweep touching only project rows (mock-only, `:278`).
+>   - HIGH #6: DELETE removing only the project row (mock-only, `:502`).
+>   - HIGH #7: CodexRefreshLock choosing the row by `projectId` is tested only against a D1
+>     mock (`apps/api/tests/unit/durable-objects/codex-refresh-lock.test.ts:539`).
+
 **Created**: 2026-04-18
 **Priority**: HIGH
 **Source**: test-engineer review of PR `sam/project-credential-overrides`

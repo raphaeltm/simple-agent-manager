@@ -1,5 +1,13 @@
 # Emit task status events when cancelling an orchestrator mission
 
+> **Reconciliation 2026-09-30:** still open. `ProjectOrchestrator.cancelMission()`
+> (`durable-objects/project-orchestrator/index.ts:175-206`) still cancels by `mission_id` alone,
+> with no status events and no trigger sync. PR #1916 moved the dead-target and attention-expiry
+> writers onto `transitionTaskToTerminal` (`services/task-terminal-transition.ts`); the other raw
+> terminal writers this audit found insert their own event. That leaves this the only one that
+> appends no `task_status_events` row. The natural fix is to route each non-terminal mission task
+> through that helper with status `cancelled`.
+
 **Status**: backlog
 **Created**: 2026-08-06
 **Source**: idle-cleanup silent-terminalization recovery
