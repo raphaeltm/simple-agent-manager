@@ -162,6 +162,12 @@ func (h *SessionHost) ConfigureAcpInteractions(config AcpInteractionRuntimeConfi
 	h.configureAcpInteractions(config)
 }
 
+// AcpInteractionBridgeEnabled reports whether the trusted session-start
+// contract enabled permission interactions for this host.
+func (h *SessionHost) AcpInteractionBridgeEnabled() bool {
+	return h.acpInteractionConfigSnapshot().Enabled
+}
+
 func (h *SessionHost) acpInteractionConfigSnapshot() AcpInteractionRuntimeConfig {
 	h.interactionMu.Lock()
 	defer h.interactionMu.Unlock()
