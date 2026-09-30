@@ -343,6 +343,46 @@ func TestStartLocalProcessRunsWithoutDockerExec(t *testing.T) {
 	}
 }
 
+func TestStartLocalProcessResolvesCommandFromRuntimePath(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	binDir := filepath.Join(workDir, "fixture-bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("create fixture bin: %v", err)
+	}
+	const command = "sam-acp-path-fixture"
+	if err := os.WriteFile(
+		filepath.Join(binDir, command),
+		[]byte("#!/bin/sh\nprintf '%s' \"$SAM_TEST_VALUE\"\n"),
+		0o755,
+	); err != nil {
+		t.Fatalf("write fixture command: %v", err)
+	}
+
+	proc, err := StartLocalProcess(ProcessConfig{
+		AcpCommand: command,
+		EnvVars: []string{
+			"PATH=fixture-bin:/usr/bin:/bin",
+			"SAM_TEST_VALUE=runtime-path-ok",
+		},
+		WorkDir: workDir,
+	})
+	if err != nil {
+		t.Fatalf("StartLocalProcess returned error: %v", err)
+	}
+	output, err := io.ReadAll(proc.Stdout())
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if err := proc.Wait(); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if string(output) != "runtime-path-ok" {
+		t.Fatalf("stdout=%q, want runtime-path-ok", output)
+	}
+}
+
 // TestStartLocalProcessCreatesMissingWorkDir is the regression test for the
 // standalone cf-container chdir bug: the ACP process work dir is derived as
 // /workspaces/<repo>, which does not exist in standalone mode. Before the fix,

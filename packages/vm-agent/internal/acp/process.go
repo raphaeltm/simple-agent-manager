@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -401,8 +402,10 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 }
 
 func startLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
-	cmd := exec.Command(cfg.AcpCommand, cfg.AcpArgs...)
-	cmd.Env = mergeProcessEnv(os.Environ(), cfg.EnvVars)
+	processEnv := mergeProcessEnv(os.Environ(), cfg.EnvVars)
+	command := resolveLocalProcessCommand(cfg.AcpCommand, processEnv, cfg.WorkDir)
+	cmd := exec.Command(command, cfg.AcpArgs...)
+	cmd.Env = processEnv
 	if cfg.WorkDir != "" {
 		// In standalone (cf-container) mode the vm-agent owns the local
 		// filesystem and there is no devcontainer to create the workspace
@@ -464,6 +467,31 @@ func startLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		stopTimeout:     stopTimeout,
 		waitDone:        make(chan struct{}),
 	}, nil
+}
+
+func resolveLocalProcessCommand(command string, envVars []string, workDir string) string {
+	if command == "" || strings.ContainsRune(command, os.PathSeparator) {
+		return command
+	}
+	pathValue := ""
+	for _, entry := range envVars {
+		if key, value, ok := strings.Cut(entry, "="); ok && key == "PATH" {
+			pathValue = value
+		}
+	}
+	for _, dir := range filepath.SplitList(pathValue) {
+		if dir == "" {
+			dir = workDir
+		} else if !filepath.IsAbs(dir) && workDir != "" {
+			dir = filepath.Join(workDir, dir)
+		}
+		candidate := filepath.Join(dir, command)
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
+			return candidate
+		}
+	}
+	return command
 }
 
 func mergeProcessEnv(ambient, overrides []string) []string {
