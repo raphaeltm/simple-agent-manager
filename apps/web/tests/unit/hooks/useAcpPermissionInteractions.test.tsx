@@ -28,7 +28,21 @@ describe('useAcpPermissionInteractions', () => {
   });
 
   it('refetches once when a disconnected session reconnects without entering a fetch loop', async () => {
-    const { rerender } = renderHook(
+    const pending = {
+      interactionId: '11111111-1111-4111-8111-111111111111',
+      kind: 'permission' as const,
+      state: 'pending' as const,
+      createdAt: 1,
+      deadlineAt: Date.now() + 60_000,
+    };
+    mocks.list
+      .mockResolvedValueOnce({ pending: [pending], settled: [], cursor: null })
+      .mockResolvedValue({
+        pending: [],
+        settled: [{ ...pending, state: 'interrupted' }],
+        cursor: null,
+      });
+    const { result, rerender } = renderHook(
       ({ connectionState }) =>
         useAcpPermissionInteractions({
           projectId: 'project-1',
@@ -42,9 +56,10 @@ describe('useAcpPermissionInteractions', () => {
       }
     );
 
-    await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.interactions[0]?.state).toBe('pending'));
     rerender({ connectionState: 'connected' });
-    await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.interactions[0]?.state).toBe('interrupted'));
+    expect(mocks.list).toHaveBeenCalledTimes(2);
     await new Promise((resolve) => window.setTimeout(resolve, 25));
     expect(mocks.list).toHaveBeenCalledTimes(2);
   });

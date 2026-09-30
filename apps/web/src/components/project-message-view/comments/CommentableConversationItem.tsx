@@ -88,6 +88,7 @@ export function CommentableConversationItem({
     <div
       className={`sam-message-entry px-4 pb-3${highlighted ? ' sam-message-highlight' : ''}${commentAccentClass}`}
       data-commented={itemComments.length > 0 ? 'true' : undefined}
+      data-conversation-item-id={item.id}
     >
       <div data-comment-anchor={isCommentableMessage ? item.id : undefined}>
         <AcpConversationItemView

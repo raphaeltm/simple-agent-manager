@@ -2,8 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
 
 import { type AcpInteractionSnapshotItem, listAcpInteractions } from '../lib/api/acp-interactions';
-
-const ACTIVE_INTERACTION_POLL_MS = 2_000;
+import { ACP_PERMISSION_POLL_MS } from '../lib/poll-intervals';
 
 export function useAcpPermissionInteractions({
   projectId,
@@ -22,7 +21,7 @@ export function useAcpPermissionInteractions({
     queryFn: () => listAcpInteractions(projectId, sessionId),
     enabled: Boolean(projectId && sessionId && viewerId),
     refetchInterval: (current) =>
-      (current.state.data?.pending.length ?? 0) > 0 ? ACTIVE_INTERACTION_POLL_MS : false,
+      (current.state.data?.pending.length ?? 0) > 0 ? ACP_PERMISSION_POLL_MS : false,
     refetchIntervalInBackground: false,
   });
 

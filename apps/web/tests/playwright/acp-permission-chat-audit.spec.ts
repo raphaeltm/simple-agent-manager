@@ -121,6 +121,7 @@ function ownerSnapshot() {
       },
     ],
     settled: [
+      'answered',
       'delivery_confirmed',
       'delivery_unconfirmed',
       'expired',
@@ -170,7 +171,33 @@ const DETAILS: Record<string, Record<string, unknown>> = {
   },
 };
 
-async function setupPermissionMocks(page: Page, isMine: boolean) {
+type PermissionBackend = {
+  answerBodies: unknown[];
+  detailRequests: string[];
+  dropFirstAnswerReceipt: boolean;
+  holdSnapshot: boolean;
+  initialSnapshot: ReturnType<typeof ownerSnapshot>;
+  snapshot: ReturnType<typeof ownerSnapshot>;
+};
+
+function createPermissionBackend(): PermissionBackend {
+  const snapshot = ownerSnapshot();
+  return {
+    answerBodies: [],
+    detailRequests: [],
+    dropFirstAnswerReceipt: false,
+    holdSnapshot: false,
+    initialSnapshot: snapshot,
+    snapshot,
+  };
+}
+
+async function setupPermissionMocks(
+  page: Page,
+  isMine: boolean,
+  backend = createPermissionBackend(),
+  detailFailureStatus?: 403 | 500
+) {
   const mockSession = session(isMine);
   await setupProjectChatMocks(page, {
     projectId: PROJECT_ID,
@@ -182,19 +209,15 @@ async function setupPermissionMocks(page: Page, isMine: boolean) {
       : { id: 'member-user', name: 'Project Member', email: 'member@example.com' },
   });
 
-  let snapshot = ownerSnapshot();
-  const detailRequests: string[] = [];
-  const answerBodies: unknown[] = [];
-  let dropFirstAnswerReceipt = false;
-
   await page.route(
     `**/api/projects/${PROJECT_ID}/sessions/${SESSION_ID}/interactions`,
     (route: Route) => {
+      const visibleSnapshot = backend.holdSnapshot ? backend.initialSnapshot : backend.snapshot;
       if (!isMine) {
         return route.fulfill({
           status: 200,
           json: {
-            pending: snapshot.pending.map(
+            pending: visibleSnapshot.pending.map(
               ({ interactionId, kind, state, createdAt, deadlineAt }) => ({
                 interactionId,
                 kind,
@@ -208,7 +231,7 @@ async function setupPermissionMocks(page: Page, isMine: boolean) {
           },
         });
       }
-      return route.fulfill({ status: 200, json: snapshot });
+      return route.fulfill({ status: 200, json: visibleSnapshot });
     }
   );
 
@@ -218,9 +241,18 @@ async function setupPermissionMocks(page: Page, isMine: boolean) {
     ),
     (route: Route) => {
       const interactionId = new URL(route.request().url()).pathname.split('/').at(-1) ?? '';
-      detailRequests.push(interactionId);
+      backend.detailRequests.push(interactionId);
       if (!isMine) return route.fulfill({ status: 403, json: { error: 'FORBIDDEN' } });
-      const summary = [...snapshot.pending, ...snapshot.settled].find(
+      if (detailFailureStatus) {
+        return route.fulfill({
+          status: detailFailureStatus,
+          json: {
+            error: detailFailureStatus === 403 ? 'FORBIDDEN' : 'INTERNAL_ERROR',
+            message: detailFailureStatus === 403 ? 'Forbidden' : 'Detail temporarily unavailable',
+          },
+        });
+      }
+      const summary = [...backend.snapshot.pending, ...backend.snapshot.settled].find(
         (item) => item.interactionId === interactionId
       );
       return route.fulfill({
@@ -239,22 +271,23 @@ async function setupPermissionMocks(page: Page, isMine: boolean) {
     ),
     async (route: Route) => {
       const body = route.request().postDataJSON();
-      answerBodies.push(body);
-      if (dropFirstAnswerReceipt) {
-        dropFirstAnswerReceipt = false;
+      backend.answerBodies.push(body);
+      if (backend.dropFirstAnswerReceipt) {
+        backend.dropFirstAnswerReceipt = false;
         return route.abort('connectionreset');
       }
       const interactionId = new URL(route.request().url()).pathname.split('/').at(-2) ?? '';
-      const pending = snapshot.pending.find((item) => item.interactionId === interactionId);
+      const pending = backend.snapshot.pending.find((item) => item.interactionId === interactionId);
       if (!pending) {
+        backend.holdSnapshot = false;
         return route.fulfill({
           status: 409,
           json: { error: 'CONFLICT', message: 'another decision is already committed' },
         });
       }
-      snapshot = {
-        ...snapshot,
-        pending: snapshot.pending.filter((item) => item.interactionId !== interactionId),
+      backend.snapshot = {
+        ...backend.snapshot,
+        pending: backend.snapshot.pending.filter((item) => item.interactionId !== interactionId),
         settled: [
           {
             ...pending,
@@ -263,7 +296,7 @@ async function setupPermissionMocks(page: Page, isMine: boolean) {
             updatedAt: Date.now(),
             deliveryState: 'pending',
           },
-          ...snapshot.settled,
+          ...backend.snapshot.settled,
         ],
       };
       return route.fulfill({ status: 200, json: { accepted: true, state: 'answered' } });
@@ -271,10 +304,11 @@ async function setupPermissionMocks(page: Page, isMine: boolean) {
   );
 
   return {
-    answerBodies,
-    detailRequests,
+    answerBodies: backend.answerBodies,
+    backend,
+    detailRequests: backend.detailRequests,
     dropNextAnswerReceipt: () => {
-      dropFirstAnswerReceipt = true;
+      backend.dropFirstAnswerReceipt = true;
     },
   };
 }
@@ -289,6 +323,36 @@ async function openPermissionSurface(page: Page, isMine: boolean) {
       page.getByRole('button', { name: 'Allow this exact operation once — no future commands' })
     ).toBeVisible();
     await expect(page.locator('[aria-checked="true"]')).toHaveCount(0);
+    await expect(page.getByText('Permission without a tool-call anchor')).toBeAttached();
+    for (const label of [
+      'Answer saved',
+      'Delivered to agent',
+      'Delivery unconfirmed',
+      'Request expired',
+      'Request cancelled',
+      'Request interrupted',
+    ]) {
+      await expect(page.getByText(label, { exact: true })).toBeAttached();
+    }
+
+    const anchored = page.getByTestId(`acp-permission-${ANCHORED_ID}`);
+    const anchoredRow = anchored.locator('xpath=ancestor::*[@data-conversation-item-id][1]');
+    await expect(anchoredRow.getByText('1 tool call', { exact: false })).toBeAttached();
+    await expect(anchored).toHaveAttribute('data-tool-call-id', TOOL_CALL_ID);
+    const unanchored = page.getByTestId(`acp-permission-${UNANCHORED_ID}`);
+    await expect(unanchored).not.toHaveAttribute('data-tool-call-id', /.+/u);
+    await expect(unanchored.locator('xpath=ancestor::*[@data-conversation-item-id]')).toHaveCount(
+      0
+    );
+    const anchoredHandle = await anchored.elementHandle();
+    const unanchoredHandle = await unanchored.elementHandle();
+    expect(
+      await page.evaluate(
+        ([first, second]) =>
+          Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING),
+        [anchoredHandle!, unanchoredHandle!] as const
+      )
+    ).toBe(true);
   } else {
     await expect(
       page.getByText('Waiting for the session creator to review this permission request.').first()
@@ -301,17 +365,51 @@ async function openPermissionSurface(page: Page, isMine: boolean) {
 
 async function positionAnchoredCardBelowStickyHeader(page: Page) {
   const card = page.getByTestId(`acp-permission-${ANCHORED_ID}`);
-  await card.evaluate((element) => {
-    let ancestor = element.parentElement;
-    while (ancestor) {
-      const overflowY = window.getComputedStyle(ancestor).overflowY;
-      if (overflowY === 'auto' || overflowY === 'scroll') {
-        ancestor.scrollBy({ top: -64 });
-        return;
+  const header = page.getByTestId('session-floating-header');
+  await card.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  await page.evaluate(
+    ([cardElement, headerElement]) => {
+      let ancestor = cardElement.parentElement;
+      while (ancestor) {
+        const overflowY = window.getComputedStyle(ancestor).overflowY;
+        if (overflowY === 'auto' || overflowY === 'scroll') {
+          const desiredTop = headerElement.getBoundingClientRect().bottom + 16;
+          const currentTop = cardElement.getBoundingClientRect().top;
+          ancestor.scrollBy({ top: currentTop - desiredTop });
+          return;
+        }
+        ancestor = ancestor.parentElement;
       }
-      ancestor = ancestor.parentElement;
-    }
-  });
+    },
+    [(await card.elementHandle())!, (await header.elementHandle())!] as const
+  );
+  await expect
+    .poll(async () => {
+      const cardBox = await card.boundingBox();
+      const headerBox = await header.boundingBox();
+      return cardBox && headerBox ? cardBox.y - (headerBox.y + headerBox.height) : -1;
+    })
+    .toBeGreaterThanOrEqual(12);
+}
+
+async function openDetailFailureSurface(page: Page, status: 403 | 500) {
+  await setupPermissionMocks(page, true, createPermissionBackend(), status);
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+  const anchored = page.getByTestId(`acp-permission-${ANCHORED_ID}`);
+  await expect(
+    anchored.getByText(
+      status === 403
+        ? 'You no longer have access to view or answer this request.'
+        : 'Secure permission details are unavailable. No option was inferred.'
+    )
+  ).toBeVisible();
+  if (status === 500) {
+    await expect(anchored.getByRole('button', { name: 'Retry details' })).toBeVisible();
+  }
+  await expect(page.getByRole('button', { name: 'Reject this operation once' })).toHaveCount(0);
+  await positionAnchoredCardBelowStickyHeader(page);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
 }
 
 test.describe('ACP permission cards — Mobile', () => {
@@ -332,9 +430,55 @@ test.describe('ACP permission cards — Mobile', () => {
     evidence.dropNextAnswerReceipt();
     await page.getByRole('button', { name: 'Reject this operation once' }).click();
     await page.getByRole('button', { name: 'Retry Reject this operation once' }).click();
-    await expect(page.getByText('Answer saved')).toBeVisible();
+    await expect(page.getByTestId(`acp-permission-${ANCHORED_ID}`)).toHaveAttribute(
+      'data-interaction-state',
+      'answered'
+    );
     expect(evidence.answerBodies).toHaveLength(2);
     expect(evidence.answerBodies[1]).toEqual(evidence.answerBodies[0]);
+  });
+
+  test('refreshes both tabs to the canonical answer after a conflict', async ({
+    page,
+    context,
+  }) => {
+    const backend = createPermissionBackend();
+    backend.holdSnapshot = true;
+    const otherTab = await context.newPage();
+    await setupPermissionMocks(page, true, backend);
+    await setupPermissionMocks(otherTab, true, backend);
+    await Promise.all([
+      page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`),
+      otherTab.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`),
+    ]);
+    await expect(
+      page.getByRole('button', { name: 'Allow this exact operation once — no future commands' })
+    ).toBeVisible();
+    await expect(
+      otherTab.getByRole('button', { name: 'Reject this operation once' })
+    ).toBeVisible();
+
+    await page
+      .getByRole('button', { name: 'Allow this exact operation once — no future commands' })
+      .click();
+    await expect.poll(() => backend.answerBodies.length).toBe(1);
+    await otherTab.getByRole('button', { name: 'Reject this operation once' }).click();
+
+    const canonicalCard = otherTab.getByTestId(`acp-permission-${ANCHORED_ID}`);
+    await expect(canonicalCard).toHaveAttribute('data-interaction-state', 'answered');
+    await expect(canonicalCard.getByText('Answer saved', { exact: true })).toBeVisible();
+    expect(backend.answerBodies).toHaveLength(2);
+    await otherTab.close();
+  });
+
+  test('shows secure detail retry without inferred options', async ({ page }) => {
+    await openDetailFailureSurface(page, 500);
+    await screenshot(page, 'acp-permission-chat-detail-error-mobile');
+  });
+
+  test('removes secure controls after detail access is revoked', async ({ page }) => {
+    await openDetailFailureSurface(page, 403);
+    await screenshot(page, 'acp-permission-chat-detail-revoked-mobile');
   });
 });
 
@@ -343,6 +487,7 @@ test.describe('ACP permission cards — Desktop', () => {
 
   test('renders anchored and unanchored owner requests with stress data', async ({ page }) => {
     await openPermissionSurface(page, true);
+    await positionAnchoredCardBelowStickyHeader(page);
     await screenshot(page, 'acp-permission-chat-owner-desktop');
   });
 
@@ -350,5 +495,15 @@ test.describe('ACP permission cards — Desktop', () => {
     const evidence = await openPermissionSurface(page, false);
     expect(evidence.detailRequests).toEqual([]);
     await screenshot(page, 'acp-permission-chat-noncreator-desktop');
+  });
+
+  test('shows secure detail retry without inferred options', async ({ page }) => {
+    await openDetailFailureSurface(page, 500);
+    await screenshot(page, 'acp-permission-chat-detail-error-desktop');
+  });
+
+  test('removes secure controls after detail access is revoked', async ({ page }) => {
+    await openDetailFailureSurface(page, 403);
+    await screenshot(page, 'acp-permission-chat-detail-revoked-desktop');
   });
 });

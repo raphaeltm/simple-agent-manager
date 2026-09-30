@@ -1,14 +1,3 @@
-/**
- * SessionMessageView — the chat view for ONE project session.
- *
- * All messages flow through a single source: the Durable Object WebSocket.
- * Prompts are sent via the REST API. Agent state is derived from message flow.
- * TypewriterText animates the latest assistant message; historical messages
- * render instantly.
- *
- * Mounted per session by `ProjectMessageView` (index.tsx), so every piece of
- * state here belongs to exactly one session.
- */
 import type { SlashCommand, ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
@@ -24,7 +13,6 @@ import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { SessionEventsDrawer } from '../chat/SessionEventsDrawer';
 import { ReportIssueDialog } from '../ReportIssueDialog';
-import { AcpPermissionCard } from './AcpPermissionCard';
 import { type CommentInboxItem, countBuckets, toInboxItem } from './comments/comment-inbox';
 import { CommentableConversationItem } from './comments/CommentableConversationItem';
 import { DesktopCommentRail } from './comments/MessageCommentPanels';
@@ -42,6 +30,7 @@ import { SessionToolRail } from './SessionToolRail';
 import type { DisplayItem } from './tool-call-groups';
 import { groupToolCallItems } from './tool-call-groups';
 import { chatMessagesToConversationItems } from './types';
+import { useAcpPermissionPlacement } from './useAcpPermissionPlacement';
 import { useAnimatedUserMessages } from './useAnimatedUserMessages';
 import { useConversationJump } from './useConversationJump';
 import { useSessionLifecycle } from './useSessionLifecycle';
@@ -221,12 +210,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     return -1;
   }, [displayItems]);
 
-  /*
-   * Expansion survives virtualization because it lives here, and the live-tail
-   * glyph keys on `completionDockWorking` rather than `isWorkingActivity`. Both
-   * chat surfaces share this hook; see its doc comment for why that signal is
-   * the correct one (`.claude/rules/24`).
-   */
+  // Expansion survives virtualization; the hook documents its live-tail signal.
   const groupRowState = useToolCallGroupRowState(displayItems, lc.completionDockWorking);
 
   // Only pass a file-click handler through when the session can actually serve
@@ -236,51 +220,14 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined;
   const canWriteSession = lc.session?.isMine !== false;
   const canAnswerPermissions = lc.session?.isMine === true;
-  const { anchoredInteractions, unanchoredInteractions } = useMemo(() => {
-    const rowIdByToolCallId = new Map<string, string>();
-    for (const item of displayItems) {
-      if (item.kind === 'tool_call') {
-        rowIdByToolCallId.set(item.toolCallId, item.id);
-      } else if (item.kind === 'tool_call_group') {
-        for (const grouped of item.items) {
-          if (grouped.kind === 'tool_call') rowIdByToolCallId.set(grouped.toolCallId, item.id);
-        }
-      }
-    }
-    const byRow = new Map<string, typeof permissionItems>();
-    const unanchored: typeof permissionItems = [];
-    for (const interaction of permissionItems) {
-      const rowId = interaction.toolCallId
-        ? rowIdByToolCallId.get(interaction.toolCallId)
-        : undefined;
-      if (!rowId) {
-        unanchored.push(interaction);
-        continue;
-      }
-      const existing = byRow.get(rowId);
-      if (existing) existing.push(interaction);
-      else byRow.set(rowId, [interaction]);
-    }
-    return { anchoredInteractions: byRow, unanchoredInteractions: unanchored };
-  }, [displayItems, permissionItems]);
-
-  const renderPermissionCards = useCallback(
-    (interactions: typeof permissionItems) => (
-      <div className="min-w-0" data-testid="acp-permission-stack">
-        {interactions.map((interaction) => (
-          <AcpPermissionCard
-            key={interaction.interactionId}
-            interaction={interaction}
-            projectId={projectId}
-            sessionId={sessionId}
-            canAnswer={canAnswerPermissions}
-            onRefresh={refreshPermissionInteractions}
-          />
-        ))}
-      </div>
-    ),
-    [canAnswerPermissions, refreshPermissionInteractions, projectId, sessionId]
-  );
+  const permissionPlacement = useAcpPermissionPlacement({
+    displayItems,
+    interactions: permissionItems,
+    projectId,
+    sessionId,
+    canAnswer: canAnswerPermissions,
+    onRefresh: refreshPermissionInteractions,
+  });
   const commentUi = useProjectMessageCommentUi({
     messageComments,
     canWriteSession,
@@ -320,19 +267,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     />
   ) : null;
 
-  /**
-   * Row renderer for the virtualized conversation.
-   *
-   * Memoized so the identity only changes when something a row actually reads
-   * changes. An inline arrow here gives Virtuoso a new `itemContent` on every
-   * parent render, which re-renders every row currently inside the scroll window
-   * — the exact cost `React.memo` on `AcpConversationItemView` exists to avoid.
-   *
-   * `index` is Virtuoso's `firstItemIndex`-OFFSET coordinate, which is why the
-   * animation comparison subtracts `lc.firstItemIndex` to get back to the
-   * zero-based data index. Do not "simplify" that away — see the coordinate-space
-   * note on `itemIndexById` in `useConversationJump`.
-   */
+  // Virtuoso supplies an offset index, so compare it after subtracting `firstItemIndex`.
   const renderConversationItem = useCallback(
     (index: number, item: DisplayItem) => {
       return (
@@ -356,8 +291,8 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
           onToggleGroup={groupRowState.onToggleGroup}
           groupLive={groupRowState.groupLiveFor(item.id)}
           afterContent={
-            anchoredInteractions.has(item.id)
-              ? renderPermissionCards(anchoredInteractions.get(item.id) ?? [])
+            permissionPlacement.anchored.has(item.id)
+              ? permissionPlacement.render(permissionPlacement.anchored.get(item.id) ?? [])
               : null
           }
         />
@@ -375,8 +310,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
       canWriteSession,
       commentUi.rowState,
       groupRowState,
-      anchoredInteractions,
-      renderPermissionCards,
+      permissionPlacement,
     ]
   );
 
@@ -388,18 +322,13 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
       loadingMore: lc.loadingMore,
       onLoadMore: lc.loadMore,
       footer:
-        unanchoredInteractions.length > 0 ? (
-          <div className="px-4 pb-3">{renderPermissionCards(unanchoredInteractions)}</div>
+        permissionPlacement.unanchored.length > 0 ? (
+          <div className="px-4 pb-3">
+            {permissionPlacement.render(permissionPlacement.unanchored)}
+          </div>
         ) : null,
     }),
-    [
-      floatingHeaderHeight,
-      lc.hasMore,
-      lc.loadingMore,
-      lc.loadMore,
-      renderPermissionCards,
-      unanchoredInteractions,
-    ]
+    [floatingHeaderHeight, lc.hasMore, lc.loadingMore, lc.loadMore, permissionPlacement]
   );
 
   useSessionFocusHandoff(Boolean(lc.session));

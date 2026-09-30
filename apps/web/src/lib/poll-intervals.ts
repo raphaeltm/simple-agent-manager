@@ -131,6 +131,13 @@ export const ACTIVE_TASKS_POLL_MS = resolveIntervalMs(
   DEFAULT_DASHBOARD_POLL_INTERVAL_MS
 );
 
+/** Active ACP permission snapshot refresh while at least one request is pending. */
+export const DEFAULT_ACP_PERMISSION_POLL_MS = 2_000;
+export const ACP_PERMISSION_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_ACP_PERMISSION_POLL_MS,
+  DEFAULT_ACP_PERMISSION_POLL_MS
+);
+
 /**
  * Chat-summary cadences and limits live in `lib/chat-query-config.ts`, mirroring the
  * `lib/project-query-config.ts` convention of keeping a domain's cadence and its

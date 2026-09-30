@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiClientError } from '../../../src/lib/api/client';
@@ -18,6 +18,14 @@ import { AcpPermissionCard } from '../../../src/components/project-message-view/
 import type { AcpInteractionSnapshotItem } from '../../../src/lib/api/acp-interactions';
 
 const INTERACTION_ID = '11111111-1111-4111-8111-111111111111';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
 
 function interaction(
   overrides: Partial<AcpInteractionSnapshotItem> = {}
@@ -73,6 +81,11 @@ describe('AcpPermissionCard', () => {
     const allow = screen.getByRole('button', { name: 'Allow once' });
     expect(reject).toHaveAttribute('data-option-id', 'reject-exact');
     expect(allow).toHaveAttribute('data-option-id', 'allow-exact');
+    expect(
+      within(screen.getByLabelText('Permission options'))
+        .getAllByRole('button')
+        .map((button) => button.textContent)
+    ).toEqual(['Reject once', 'Allow once']);
     expect(document.querySelector('[aria-checked="true"]')).toBeNull();
     expect(screen.getByText('<script>alert(1)</script>', { exact: false })).toBeInTheDocument();
 
@@ -83,7 +96,9 @@ describe('AcpPermissionCard', () => {
       decision: { kind: 'selected_option', optionId: 'allow-exact' },
     });
     expect(body.answerKey).toMatch(/^[0-9a-f-]{36}$/u);
-    expect(body.decision.answerHash).toMatch(/^[a-f0-9]{64}$/u);
+    expect(body.decision.answerHash).toBe(
+      '0a6d30a1e6cb660b86948474e405c1c72046e72dd5b8e5abb2aef6a6e2d87d6b'
+    );
     expect(refresh).toHaveBeenCalled();
   });
 
@@ -192,6 +207,69 @@ describe('AcpPermissionCard', () => {
     expect(screen.queryByRole('button', { name: 'Allow once' })).not.toBeInTheDocument();
   });
 
+  it('removes secure detail and retry actions immediately when creator access changes', async () => {
+    mocks.answer.mockRejectedValueOnce(new TypeError('network response lost'));
+    const props = {
+      interaction: interaction(),
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      onRefresh: vi.fn().mockResolvedValue(undefined),
+    };
+    const { rerender } = render(<AcpPermissionCard {...props} canAnswer />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject once' }));
+    expect(await screen.findByRole('button', { name: 'Retry Reject once' })).toBeInTheDocument();
+    rerender(<AcpPermissionCard {...props} canAnswer={false} />);
+
+    expect(screen.queryByText('Run deploy <script>alert(1)</script> 🚀')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry Reject once' })).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Waiting for the session creator to review this permission request.')
+    ).toBeInTheDocument();
+  });
+
+  it('ignores an in-flight secure detail response after the request becomes terminal', async () => {
+    const pendingDetail = deferred<typeof detail>();
+    mocks.detail.mockReturnValue(pendingDetail.promise);
+    const props = {
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      canAnswer: true,
+      onRefresh: vi.fn().mockResolvedValue(undefined),
+    };
+    const { rerender } = render(
+      <AcpPermissionCard {...props} interaction={interaction({ state: 'pending' })} />
+    );
+    expect(await screen.findByText('Loading secure details…')).toBeInTheDocument();
+
+    rerender(<AcpPermissionCard {...props} interaction={interaction({ state: 'interrupted' })} />);
+    pendingDetail.resolve(detail);
+
+    expect(await screen.findByText('Request interrupted')).toBeInTheDocument();
+    expect(screen.queryByText('Run deploy <script>alert(1)</script> 🚀')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Allow once' })).not.toBeInTheDocument();
+  });
+
+  it('clears secure detail when answer authorization is revoked', async () => {
+    mocks.answer.mockRejectedValue(new ApiClientError('FORBIDDEN', 'Forbidden', 403));
+    render(
+      <AcpPermissionCard
+        interaction={interaction()}
+        projectId="project-1"
+        sessionId="session-1"
+        canAnswer
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow once' }));
+    expect(
+      await screen.findByText('Your access changed before the answer was accepted.')
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Run deploy <script>alert(1)</script> 🚀')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Allow once' })).not.toBeInTheDocument();
+  });
+
   it.each([
     ['answered', 'Answer saved'],
     ['delivery_confirmed', 'Delivered to agent'],
@@ -231,5 +309,30 @@ describe('AcpPermissionCard', () => {
     ).toBeInTheDocument();
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
     expect(mocks.detail).not.toHaveBeenCalled();
+  });
+
+  it('expires a mounted pending request when its future deadline passes', async () => {
+    vi.useFakeTimers();
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    try {
+      render(
+        <AcpPermissionCard
+          interaction={interaction({ deadlineAt: Date.now() + 1_500 })}
+          projectId="project-1"
+          sessionId="session-1"
+          canAnswer
+          onRefresh={refresh}
+        />
+      );
+      await act(async () => vi.advanceTimersByTimeAsync(2_000));
+
+      expect(
+        screen.getByText('The permission deadline passed without an accepted answer.')
+      ).toBeInTheDocument();
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('button', { name: 'Allow once' })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
