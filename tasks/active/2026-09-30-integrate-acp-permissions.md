@@ -32,7 +32,7 @@ The reviewed ACP runtime bridge in PR #2201 and project-chat permission UI in PR
 - [x] Add only narrow integration/harness fixes required for the combined candidate and identify them separately.
 - [x] Run focused web, Worker vertical-slice, VM agent, fixture, lint, typecheck, build, and relevant repository checks.
 - [x] Re-run desktop/mobile permission-card screenshots against the integrated candidate and review layout, overflow, accessibility, and normal-chat behavior.
-- [ ] Complete task-completion, Cloudflare, Go, UI/UX, security, environment, constitution, documentation, and test reviews; resolve blocking findings.
+- [x] Complete task-completion, Cloudflare, Go, UI/UX, security, environment, constitution, documentation, and test reviews; resolve blocking findings.
 - [x] Wait for the current staging owner to release the environment, then query active GitHub deploys and Cloudflare live state before any mutation.
 - [ ] Deploy exactly one pinned integration commit to staging with staging-only ACP permission enablement and record the deploy/run/commit.
 - [ ] Exercise the real UI → Worker `InteractionStore` → live runtime → ACP callback roundtrip on both VM and Instant using the deterministic reversed-option fixture.
