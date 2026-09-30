@@ -567,6 +567,7 @@ async function openDetailFailureSurface(page: Page, status: 403 | 500) {
   if (status === 500) {
     const retryDetails = anchored.getByRole('button', { name: 'Retry details' });
     await expect(retryDetails).toBeVisible();
+    await positionAnchoredCardBelowStickyHeader(page);
     await assertRetryControlClearOfJumpButton(page, retryDetails);
   }
   await expect(page.getByRole('button', { name: 'Reject this operation once' })).toHaveCount(0);
