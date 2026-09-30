@@ -152,7 +152,7 @@ describe('InteractionStore durable ACP foundation', () => {
         interactionId: INTERACTION_ID,
         answerKey: 'answer-key-1',
         answerBodyHash: HASH_A,
-        decision: { kind: 'accepted', answerHash: HASH_A },
+        decision: { kind: 'selected_option', optionId: 'allow', answerHash: HASH_A },
       });
       expect(answered).toMatchObject({ status: 'answered' });
       expect(answered.status === 'answered' ? answered.summary.state : null).toBe('answered');
@@ -163,7 +163,7 @@ describe('InteractionStore durable ACP foundation', () => {
         interactionId: INTERACTION_ID,
         answerKey: 'answer-key-1',
         answerBodyHash: HASH_A,
-        decision: { kind: 'accepted', answerHash: HASH_A },
+        decision: { kind: 'selected_option', optionId: 'allow', answerHash: HASH_A },
       });
       expect(replay.status).toBe('already_answered');
 
@@ -212,7 +212,7 @@ describe('InteractionStore durable ACP foundation', () => {
         interactionId: INTERACTION_ID,
         answerKey: 'projection-independent-answer',
         answerBodyHash: HASH_A,
-        decision: { kind: 'accepted', answerHash: HASH_A },
+        decision: { kind: 'selected_option', optionId: 'allow', answerHash: HASH_A },
       });
       expect(answered.status).toBe('answered');
       const pendingProjection = await runInDurableObject(store, (_instance, state) =>
@@ -249,7 +249,7 @@ describe('InteractionStore durable ACP foundation', () => {
             interactionId: INTERACTION_ID,
             answerKey: 'answer-key-a',
             answerBodyHash: HASH_A,
-            decision: { kind: 'accepted', answerHash: HASH_A },
+            decision: { kind: 'selected_option', optionId: 'allow', answerHash: HASH_A },
           }),
           answerStore.answer({
             projectId: PROJECT_ID,
@@ -364,7 +364,7 @@ describe('InteractionStore durable ACP foundation', () => {
           interactionId: INTERACTION_ID,
           answerKey: 'answer-key-1',
           answerBodyHash: HASH_A,
-          decision: { kind: 'accepted', answerHash: HASH_A },
+          decision: { kind: 'selected_option', optionId: 'allow', answerHash: HASH_A },
         });
 
         await runInDurableObject(store, async (instance) => instance.alarm());
@@ -392,12 +392,17 @@ describe('InteractionStore durable ACP foundation', () => {
         interactionId: INTERACTION_ID,
         answerKey: 'answer-key-1',
         answerBodyHash: HASH_A,
-        decision: {
-          kind: 'accepted',
-          encryptedAnswer: { ciphertext: 'SECRET_CANARY_ANSWER', iv: 'iv' },
-          answerHash: HASH_A,
-        },
+        decision: { kind: 'selected_option', optionId: 'allow', answerHash: HASH_A },
       });
+      // Old permission records may still carry an encrypted_answer column.
+      // The purge must scrub it alongside the current encrypted decision.
+      await runInDurableObject(store, (_instance, state) => {
+        state.storage.sql.exec(
+          `UPDATE interactions SET encrypted_answer = ?, answer_iv = ? WHERE interaction_id = ?`,
+          'SECRET_CANARY_ANSWER', 'iv', INTERACTION_ID
+        );
+      });
+      await store.recordDelivery(INTERACTION_ID, 'confirmed');
       await new Promise((resolve) => setTimeout(resolve, 5));
       await runInDurableObject(store, async (instance) => instance.alarm());
       await new Promise((resolve) => setTimeout(resolve, 5));
