@@ -175,8 +175,18 @@ export class VmAgentContainer extends Container<Env> {
     if (status !== 'running') {
       return recoveryResponse('RUNTIME_STOPPED', RUNTIME_STOPPED_MESSAGE, 410);
     }
+    const container = this.ctx.container;
+    if (!container?.running) {
+      return recoveryResponse('RUNTIME_STOPPED', RUNTIME_STOPPED_MESSAGE, 410);
+    }
     try {
-      return await this.containerFetch(request, port ?? this.defaultPort);
+      // Container.containerFetch() is intentionally forbidden here: the pinned
+      // SDK starts compute when either the real runtime is stopped or its own
+      // persisted health state is stale. The direct port primitive never starts
+      // a container; if stop/crash wins after the running check, fetch rejects.
+      const tcpPort = container.getTcpPort(port ?? this.defaultPort);
+      const containerUrl = request.url.replace('https:', 'http:');
+      return await tcpPort.fetch(containerUrl, request);
     } catch {
       return interruptedRequestResponse(request);
     }

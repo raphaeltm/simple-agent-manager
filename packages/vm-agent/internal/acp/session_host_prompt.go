@@ -67,7 +67,7 @@ func (h *SessionHost) AcceptPrompt(
 	}
 
 	promptCtx, promptCancel, promptTimeout := h.newPromptContext(ctx)
-	attempt, ok := h.beginPromptForDelivery(promptCancel, deliveryID, observer)
+	attempt, ok := h.beginPromptForDelivery(promptCtx, promptCancel, deliveryID, observer)
 	if !ok {
 		promptCancel()
 		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, "Prompt already in progress")

@@ -86,7 +86,10 @@ describe('VmAgentContainer proxy recovery boundaries', () => {
       const beginUnexpectedRecovery = vi.fn();
       const response = await callProxyHttpNoWake(
         {
-          ctx: { storage: { get: vi.fn().mockResolvedValue(status) } },
+          ctx: {
+            storage: { get: vi.fn().mockResolvedValue(status) },
+            container: { running: false },
+          },
           defaultPort: 8080,
           containerFetch,
           ensureAwake,
@@ -102,19 +105,85 @@ describe('VmAgentContainer proxy recovery boundaries', () => {
     }
   );
 
-  it('forwards a no-wake request only when the runtime is already running', async () => {
-    const containerFetch = vi.fn().mockResolvedValue(new Response('live'));
+  it.each([
+    ['capability', new Request('https://container/capabilities')],
+    ['answer', new Request('https://container/interactions/id/answer', { method: 'POST' })],
+  ] as const)(
+    'never starts a stale persisted-running container for the %s path',
+    async (_path, request) => {
+      const start = vi.fn();
+      const getTcpPort = vi.fn();
+      const containerFetch = vi.fn();
+      const response = await callProxyHttpNoWake(
+        {
+          ctx: {
+            storage: { get: vi.fn().mockResolvedValue('running') },
+            container: { running: false, start, getTcpPort },
+          },
+          defaultPort: 8080,
+          containerFetch,
+        },
+        request
+      );
+
+      expect(response.status).toBe(410);
+      expect(getTcpPort).not.toHaveBeenCalled();
+      expect(containerFetch).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ['capability', new Request('https://container/capabilities'), 503],
+    ['answer', new Request('https://container/interactions/id/answer', { method: 'POST' }), 409],
+  ] as const)(
+    'does not restart when stop wins at the %s forwarding boundary',
+    async (_path, request, expectedStatus) => {
+      const start = vi.fn();
+      const directFetch = vi.fn().mockRejectedValue(new Error('container stopped'));
+      const getTcpPort = vi.fn(() => ({ fetch: directFetch }));
+      const containerFetch = vi.fn();
+      const response = await callProxyHttpNoWake(
+        {
+          ctx: {
+            storage: { get: vi.fn().mockResolvedValue('running') },
+            container: { running: true, start, getTcpPort },
+          },
+          defaultPort: 8080,
+          containerFetch,
+        },
+        request
+      );
+
+      expect(response.status).toBe(expectedStatus);
+      expect(getTcpPort).toHaveBeenCalledWith(8080);
+      expect(directFetch).toHaveBeenCalledWith(request.url.replace('https:', 'http:'), request);
+      expect(containerFetch).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+    }
+  );
+
+  it('forwards a no-wake request only through the already-running container port', async () => {
+    const directFetch = vi.fn().mockResolvedValue(new Response('live'));
+    const getTcpPort = vi.fn(() => ({ fetch: directFetch }));
+    const containerFetch = vi.fn();
+    const request = new Request('https://container/capabilities');
     const response = await callProxyHttpNoWake(
       {
-        ctx: { storage: { get: vi.fn().mockResolvedValue('running') } },
+        ctx: {
+          storage: { get: vi.fn().mockResolvedValue('running') },
+          container: { running: true, getTcpPort },
+        },
         defaultPort: 8080,
         containerFetch,
       },
-      new Request('http://container/capabilities')
+      request
     );
 
     expect(await response.text()).toBe('live');
-    expect(containerFetch).toHaveBeenCalledOnce();
+    expect(getTcpPort).toHaveBeenCalledWith(8080);
+    expect(directFetch).toHaveBeenCalledWith('http://container/capabilities', request);
+    expect(containerFetch).not.toHaveBeenCalled();
   });
   it('rejects a revoked source guard before proxy preparation can wake compute', async () => {
     const proxyHttp = vi.fn();

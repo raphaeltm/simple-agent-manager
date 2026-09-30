@@ -31,10 +31,10 @@ func (h *SessionHost) promptCancelGracePeriod() time.Duration {
 }
 
 func (h *SessionHost) beginPrompt(cancel context.CancelFunc, observer PromptTerminalObserver) (*promptAttempt, bool) {
-	return h.beginPromptForDelivery(cancel, "", observer)
+	return h.beginPromptForDelivery(context.Background(), cancel, "", observer)
 }
 
-func (h *SessionHost) beginPromptForDelivery(cancel context.CancelFunc, deliveryID string, observer PromptTerminalObserver) (*promptAttempt, bool) {
+func (h *SessionHost) beginPromptForDelivery(ctx context.Context, cancel context.CancelFunc, deliveryID string, observer PromptTerminalObserver) (*promptAttempt, bool) {
 	h.promptMu.Lock()
 	defer h.promptMu.Unlock()
 	if h.promptInFlight {
@@ -44,6 +44,7 @@ func (h *SessionHost) beginPromptForDelivery(cancel context.CancelFunc, delivery
 	promptID := atomic.AddUint64(&h.promptSeq, 1)
 	attempt := &promptAttempt{
 		id:         promptID,
+		ctx:        ctx,
 		startedAt:  h.now(),
 		cancel:     cancel,
 		deliveryID: deliveryID,
@@ -59,6 +60,15 @@ func (h *SessionHost) beginPromptForDelivery(cancel context.CancelFunc, delivery
 	h.promptCancelRequested = false
 	h.promptCancelMu.Unlock()
 	return attempt, true
+}
+
+func (h *SessionHost) activePromptAttempt() (*promptAttempt, bool) {
+	h.promptMu.Lock()
+	defer h.promptMu.Unlock()
+	if !h.promptInFlight || h.promptAttempt == nil {
+		return nil, false
+	}
+	return h.promptAttempt, true
 }
 
 func (h *SessionHost) releasePrompt(attempt *promptAttempt) {

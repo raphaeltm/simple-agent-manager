@@ -14,6 +14,10 @@ type PromptTerminalObserver func(stopReason string, promptErr error)
 
 type promptAttempt struct {
 	id uint64
+	// ctx is the exact outgoing Prompt attempt lifetime. The ACP SDK creates
+	// inbound RequestPermission contexts from the connection instead, so nested
+	// permission work must explicitly inherit this context.
+	ctx context.Context
 	// deliveryID is the control-plane prompt delivery that created this
 	// attempt, empty for viewer prompts. Immutable after beginPrompt.
 	deliveryID          string

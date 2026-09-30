@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,12 @@ import (
 
 	acpsdk "github.com/coder/acp-go-sdk"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 func testInteractionConfig() AcpInteractionRuntimeConfig {
 	return AcpInteractionRuntimeConfig{
@@ -44,9 +51,10 @@ func permissionRequest() acpsdk.RequestPermissionRequest {
 }
 
 type interactionRecorder struct {
-	server  *httptest.Server
-	creates chan acpInteractionCreateRequest
-	settles chan acpInteractionSettleRequest
+	server      *httptest.Server
+	creates     chan acpInteractionCreateRequest
+	settles     chan acpInteractionSettleRequest
+	createBlock <-chan struct{}
 }
 
 func newInteractionRecorder(t *testing.T, createStatus int) *interactionRecorder {
@@ -67,6 +75,13 @@ func newInteractionRecorder(t *testing.T, createStatus int) *interactionRecorder
 				t.Errorf("decode create: %v", err)
 			}
 			recorder.creates <- request
+			if recorder.createBlock != nil {
+				select {
+				case <-recorder.createBlock:
+				case <-r.Context().Done():
+					return
+				}
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(createStatus)
 			status := "created"
@@ -104,7 +119,64 @@ func newInteractionHost(recorder *interactionRecorder) (*SessionHost, *sessionHo
 	}})
 	host.ConfigureAcpInteractions(testInteractionConfig())
 	generation := host.attachAcpInteractionGeneration()
+	promptCtx, promptCancel := context.WithCancel(host.lifecycleContext())
+	if _, ok := host.beginPromptForDelivery(promptCtx, promptCancel, "test-prompt", nil); !ok {
+		panic("test prompt was not accepted")
+	}
 	return host, &sessionHostClient{host: host, interactionGeneration: generation}
+}
+
+func newBlockedCreateInteractionHost(t *testing.T) (
+	*SessionHost,
+	*sessionHostClient,
+	<-chan acpInteractionCreateRequest,
+	<-chan acpInteractionSettleRequest,
+	chan struct{},
+) {
+	t.Helper()
+	creates := make(chan acpInteractionCreateRequest, 1)
+	settles := make(chan acpInteractionSettleRequest, 1)
+	releaseCreate := make(chan struct{})
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(request.URL.Path, "/settle") {
+			var settle acpInteractionSettleRequest
+			if err := json.NewDecoder(request.Body).Decode(&settle); err != nil {
+				t.Errorf("decode settle: %v", err)
+			}
+			settles <- settle
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       http.NoBody,
+				Header:     make(http.Header),
+			}, nil
+		}
+		var create acpInteractionCreateRequest
+		if err := json.NewDecoder(request.Body).Decode(&create); err != nil {
+			t.Errorf("decode create: %v", err)
+		}
+		creates <- create
+		// Deliberately ignore request.Context(). This models an injected client
+		// with no transport timeout and proves the permission callback itself is
+		// bounded even if the transport does not return on cancellation.
+		<-releaseCreate
+		return nil, errors.New("create acknowledgement lost")
+	})}
+	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{
+		ControlPlaneURL: "https://control-plane.test",
+		ProjectID:       "project-1",
+		WorkspaceID:     "workspace-1",
+		SessionID:       "agent-session-1",
+		RuntimeIdentity: "runtime-1",
+		CallbackToken:   "callback-token",
+		HTTPClient:      httpClient,
+	}})
+	host.ConfigureAcpInteractions(testInteractionConfig())
+	generation := host.attachAcpInteractionGeneration()
+	promptCtx, promptCancel := context.WithCancel(host.lifecycleContext())
+	if _, ok := host.beginPromptForDelivery(promptCtx, promptCancel, "blocked-create-test", nil); !ok {
+		t.Fatal("test prompt was not accepted")
+	}
+	return host, &sessionHostClient{host: host, interactionGeneration: generation}, creates, settles, releaseCreate
 }
 
 func waitCreate(t *testing.T, recorder *interactionRecorder) acpInteractionCreateRequest {
@@ -256,6 +328,114 @@ func TestRequestPermissionContextCancelAndDeadlineFailClosed(t *testing.T) {
 	})
 }
 
+func TestRequestPermissionDelayedCreateObeysDeadlineAndLifecycle(t *testing.T) {
+	tests := []struct {
+		name        string
+		cancel      func(*SessionHost)
+		wantReason  string
+		wantReceipt string
+		deadlineMs  int64
+	}{
+		{name: "deadline", wantReason: "expired", wantReceipt: "no_waiter", deadlineMs: 30},
+		{
+			name:       "Stop",
+			cancel:     func(host *SessionHost) { host.Stop() },
+			wantReason: "session_stopped", wantReceipt: "no_waiter",
+		},
+		{
+			name:       "connection replacement",
+			cancel:     func(host *SessionHost) { host.attachAcpInteractionGeneration() },
+			wantReason: "connection_replaced", wantReceipt: "stale_generation",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			host, client, creates, settles, releaseCreate := newBlockedCreateInteractionHost(t)
+			defer close(releaseCreate)
+			defer host.Stop()
+			if test.deadlineMs > 0 {
+				config := testInteractionConfig()
+				config.PermissionDeadlineMs = test.deadlineMs
+				host.ConfigureAcpInteractions(config)
+			}
+
+			done := make(chan acpsdk.RequestPermissionResponse, 1)
+			go func() {
+				response, _ := client.RequestPermission(context.Background(), permissionRequest())
+				done <- response
+			}()
+			var created acpInteractionCreateRequest
+			select {
+			case created = <-creates:
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for blocked durable create")
+			}
+			if test.cancel != nil {
+				test.cancel(host)
+			}
+			select {
+			case response := <-done:
+				if response.Outcome.Cancelled == nil || response.Outcome.Selected != nil {
+					t.Fatalf("outcome = %+v, want cancelled", response.Outcome)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("permission remained blocked behind delayed create")
+			}
+			select {
+			case settle := <-settles:
+				if settle.Reason != test.wantReason {
+					t.Fatalf("settle reason = %q, want %q", settle.Reason, test.wantReason)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for durable settle")
+			}
+			decision := AcpInteractionAnswerDecision{
+				Kind: "selected_option", OptionID: "allow", AnswerHash: "late-answer",
+			}
+			if status := host.ResolveAcpInteractionAnswer(created.InteractionID, created.Generation, decision); status != test.wantReceipt {
+				t.Fatalf("late answer receipt = %q, want %q", status, test.wantReceipt)
+			}
+		})
+	}
+}
+
+func TestRequestPermissionAnswerWinsBeforeLostCreateAcknowledgement(t *testing.T) {
+	blockCreate := make(chan struct{})
+	recorder := newInteractionRecorder(t, http.StatusCreated)
+	recorder.createBlock = blockCreate
+	host, client := newInteractionHost(recorder)
+	defer host.Stop()
+
+	type result struct {
+		response acpsdk.RequestPermissionResponse
+		err      error
+	}
+	done := make(chan result, 1)
+	go func() {
+		response, err := client.RequestPermission(context.Background(), permissionRequest())
+		done <- result{response: response, err: err}
+	}()
+	created := waitCreate(t, recorder)
+	decision := AcpInteractionAnswerDecision{
+		Kind: "selected_option", OptionID: "allow", AnswerHash: "durable-answer",
+	}
+	if status := host.ResolveAcpInteractionAnswer(created.InteractionID, created.Generation, decision); status != "consumed" {
+		t.Fatalf("answer receipt = %q, want consumed", status)
+	}
+
+	permissionResult := <-done
+	if permissionResult.err != nil || permissionResult.response.Outcome.Selected == nil ||
+		permissionResult.response.Outcome.Selected.OptionId != "allow" {
+		t.Fatalf("permission result = %+v err=%v", permissionResult.response, permissionResult.err)
+	}
+	if settle := waitSettle(t, recorder); settle.Reason != "completed" {
+		t.Fatalf("settle reason = %q, want completed", settle.Reason)
+	}
+	if status := host.ResolveAcpInteractionAnswer(created.InteractionID, created.Generation, decision); status != "duplicate" {
+		t.Fatalf("duplicate receipt = %q, want duplicate", status)
+	}
+}
+
 func TestRequestPermissionFeatureOffAndCreateFailureNeverSelect(t *testing.T) {
 	recorder := newInteractionRecorder(t, http.StatusCreated)
 	host, client := newInteractionHost(recorder)
@@ -330,6 +510,10 @@ func TestRequestPermissionInvalidContractsAndRequestsFailClosedBeforeCreate(t *t
 				HTTPClient:      recorder.server.Client(),
 			}})
 			t.Cleanup(host.Stop)
+			promptCtx, promptCancel := context.WithCancel(host.lifecycleContext())
+			if _, ok := host.beginPromptForDelivery(promptCtx, promptCancel, "invalid-request-test", nil); !ok {
+				t.Fatal("test prompt was not accepted")
+			}
 			config := testInteractionConfig()
 			request := permissionRequest()
 			generation := host.attachAcpInteractionGeneration()
@@ -390,7 +574,7 @@ func TestInteractionAnswerRaceAndReceiptEvictionAreBounded(t *testing.T) {
 	host.ConfigureAcpInteractions(config)
 	generation := host.attachAcpInteractionGeneration()
 	options := map[string]struct{}{"allow": {}}
-	first, err := host.registerInteractionWaiter("first", generation, options)
+	first, err := host.registerInteractionWaiter("first", generation, 1, options, func() {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +609,7 @@ func TestInteractionAnswerRaceAndReceiptEvictionAreBounded(t *testing.T) {
 		t.Fatalf("waiter resolved %d times", len(first.result))
 	}
 
-	second, err := host.registerInteractionWaiter("second", generation, options)
+	second, err := host.registerInteractionWaiter("second", generation, 2, options, func() {})
 	if err != nil {
 		t.Fatal(err)
 	}

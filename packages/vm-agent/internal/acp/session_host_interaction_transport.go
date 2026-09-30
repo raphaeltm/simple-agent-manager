@@ -13,37 +13,48 @@ import (
 	"time"
 )
 
-func (h *SessionHost) createAcpInteraction(ctx context.Context, request acpInteractionCreateRequest) error {
+type acpInteractionCreateOutcome string
+
+const (
+	acpInteractionCreateAcknowledged acpInteractionCreateOutcome = "acknowledged"
+	acpInteractionCreateRejected     acpInteractionCreateOutcome = "rejected"
+	acpInteractionCreateUnknown      acpInteractionCreateOutcome = "unknown"
+)
+
+func (h *SessionHost) createAcpInteraction(ctx context.Context, request acpInteractionCreateRequest) (acpInteractionCreateOutcome, error) {
 	config := h.acpInteractionConfigSnapshot()
 	body, err := json.Marshal(request)
 	if err != nil {
-		return fmt.Errorf("marshal ACP interaction create: %w", err)
+		return acpInteractionCreateRejected, fmt.Errorf("marshal ACP interaction create: %w", err)
 	}
 	endpoint := strings.TrimRight(h.config.ControlPlaneURL, "/") + "/api/projects/" +
 		url.PathEscape(h.config.ProjectID) + "/workspaces/" + url.PathEscape(h.config.WorkspaceID) +
 		"/acp-interactions"
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("build ACP interaction create: %w", err)
+		return acpInteractionCreateRejected, fmt.Errorf("build ACP interaction create: %w", err)
 	}
 	httpRequest.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
 	httpRequest.Header.Set("Content-Type", "application/json")
 	response, err := h.httpClient().Do(httpRequest)
 	if err != nil {
-		return fmt.Errorf("send ACP interaction create: %w", err)
+		return acpInteractionCreateUnknown, fmt.Errorf("send ACP interaction create: %w", err)
 	}
 	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, config.ResponseMaxBytes))
+		return acpInteractionCreateRejected, fmt.Errorf("ACP interaction create rejected with status %d", response.StatusCode)
+	}
 	var result struct {
 		Status string `json:"status"`
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, config.ResponseMaxBytes)).Decode(&result); err != nil {
-		return fmt.Errorf("decode ACP interaction create response: %w", err)
+		return acpInteractionCreateUnknown, fmt.Errorf("decode ACP interaction create response: %w", err)
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 ||
-		(result.Status != "created" && result.Status != "existing") {
-		return fmt.Errorf("ACP interaction create rejected with status %d (%s)", response.StatusCode, result.Status)
+	if result.Status != "created" && result.Status != "existing" {
+		return acpInteractionCreateUnknown, fmt.Errorf("ACP interaction create returned unknown status %q", result.Status)
 	}
-	return nil
+	return acpInteractionCreateAcknowledged, nil
 }
 
 func (h *SessionHost) settleAcpInteraction(request acpInteractionSettleRequest, deadline time.Time) {

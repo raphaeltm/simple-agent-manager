@@ -75,3 +75,29 @@ Slice B connects ACP `RequestPermission` to the shipped Cloudflare create/answer
 - Draft PR: `#2201`
 - Final implementation commit: `ea3dbad82`
 - Integrated staging: explicitly deferred to coordinator before readiness or merge
+
+## Coordinator Review Follow-up (2026-09-30)
+
+### Findings
+
+- The pinned `@cloudflare/containers@0.3.7` implementation of `containerFetch()` calls `startAndWaitForPorts()` whenever the actual container is stopped or its SDK state is not healthy. The persisted lifecycle guard therefore cannot make `proxyHttpNoWake` non-starting.
+- Permission create currently runs before the deadline/lifecycle select. A slow create can outlive expiry, Stop, or connection replacement, and an answer committed before a lost create acknowledgement is discarded.
+- Pinned `acp-go-sdk@v0.13.5` creates inbound request contexts from its connection context, independently of the outgoing Prompt context. Permission ownership must therefore come from SAM's active prompt attempt.
+
+### Follow-up Checklist
+
+- [x] Forward Instant no-wake requests through the direct Durable Object container TCP port without calling an auto-starting SDK helper.
+- [x] Test persisted-running/actual-stopped and stop-between-check-and-forward races for both capability and answer request shapes.
+- [x] Bind create and wait to the permission deadline, prompt attempt, Stop, process loss, and connection generation.
+- [x] Preserve a valid answer that wins before an ambiguous/lost create acknowledgement and record its normal duplicate receipt.
+- [x] Test delayed-create expiry, Stop, replacement, and durable-create/lost-response outcomes with exact settle reasons and receipts.
+- [x] Add a real pinned-SDK fixture proving prompt deadline/cancel settles the matching permission while the connection remains usable, including a stale-cancel/new-attempt control.
+- [ ] Re-run focused race/contract tests, repository checks, specialist review, and CI; update the draft PR evidence without staging, readiness, or merge.
+
+### Follow-up Acceptance Criteria
+
+- Capability and answer delivery cannot start or wake Instant compute even when persisted lifecycle state is stale or the container stops during forwarding.
+- Permission create cannot hold the callback beyond its bounded attempt/deadline, and lifecycle cancellation retains its exact durable settle reason.
+- Ambiguous create acknowledgement does not override an answer already consumed by the runtime; the matching receipt remains duplicate-safe.
+- Permission cancellation is owned by the exact prompt attempt. An old attempt's cancellation cannot cancel a newer attempt's permission.
+- The real `acp-go-sdk@v0.13.5` connection remains usable after prompt deadline/cancel closes the matching permission.

@@ -140,14 +140,21 @@ type acpInteractionWaitResult struct {
 }
 
 type acpInteractionWaiter struct {
-	generation string
-	options    map[string]struct{}
-	result     chan acpInteractionWaitResult
+	generation    string
+	attemptID     uint64
+	options       map[string]struct{}
+	result        chan acpInteractionWaitResult
+	cancelRequest context.CancelFunc
 }
 
 type acpInteractionReceipt struct {
 	generation   string
 	decisionHash string
+}
+
+type acpInteractionCreateResult struct {
+	outcome acpInteractionCreateOutcome
+	err     error
 }
 
 func (h *SessionHost) configureAcpInteractions(config AcpInteractionRuntimeConfig) {
@@ -194,6 +201,7 @@ func (h *SessionHost) cancelInteractionWaiters(reason string) {
 func (h *SessionHost) cancelInteractionWaitersLocked(reason string) {
 	for interactionID, waiter := range h.interactionWaiters {
 		delete(h.interactionWaiters, interactionID)
+		waiter.cancelRequest()
 		waiter.result <- acpInteractionWaitResult{cancel: true, reason: reason}
 	}
 }
@@ -201,7 +209,9 @@ func (h *SessionHost) cancelInteractionWaitersLocked(reason string) {
 func (h *SessionHost) registerInteractionWaiter(
 	interactionID string,
 	generation string,
+	attemptID uint64,
 	options map[string]struct{},
+	cancelRequest context.CancelFunc,
 ) (*acpInteractionWaiter, error) {
 	h.interactionMu.Lock()
 	defer h.interactionMu.Unlock()
@@ -212,9 +222,11 @@ func (h *SessionHost) registerInteractionWaiter(
 		return nil, errors.New("ACP interaction waiter already exists")
 	}
 	waiter := &acpInteractionWaiter{
-		generation: generation,
-		options:    options,
-		result:     make(chan acpInteractionWaitResult, 1),
+		generation:    generation,
+		attemptID:     attemptID,
+		options:       options,
+		result:        make(chan acpInteractionWaitResult, 1),
+		cancelRequest: cancelRequest,
 	}
 	h.interactionWaiters[interactionID] = waiter
 	return waiter, nil
@@ -230,6 +242,25 @@ func (h *SessionHost) cancelAcpInteractionWaiter(interactionID, generation, reas
 		return false
 	}
 	delete(h.interactionWaiters, interactionID)
+	waiter.cancelRequest()
+	waiter.result <- acpInteractionWaitResult{cancel: true, reason: reason}
+	return true
+}
+
+func (h *SessionHost) cancelAcpInteractionWaiterForAttempt(
+	interactionID string,
+	generation string,
+	attemptID uint64,
+	reason string,
+) bool {
+	h.interactionMu.Lock()
+	defer h.interactionMu.Unlock()
+	waiter, ok := h.interactionWaiters[interactionID]
+	if !ok || waiter.generation != generation || waiter.attemptID != attemptID {
+		return false
+	}
+	delete(h.interactionWaiters, interactionID)
+	waiter.cancelRequest()
 	waiter.result <- acpInteractionWaitResult{cancel: true, reason: reason}
 	return true
 }
@@ -302,6 +333,7 @@ func (h *SessionHost) ResolveAcpInteractionAnswer(
 		return "conflict"
 	}
 	delete(h.interactionWaiters, interactionID)
+	waiter.cancelRequest()
 	h.rememberInteractionReceiptLocked(interactionID, acpInteractionReceipt{
 		generation: generation, decisionHash: decisionHash,
 	})
@@ -309,7 +341,7 @@ func (h *SessionHost) ResolveAcpInteractionAnswer(
 	return "consumed"
 }
 
-func (h *SessionHost) permissionDeadline(ctx context.Context, config AcpInteractionRuntimeConfig) (time.Time, bool) {
+func (h *SessionHost) permissionDeadline(promptCtx context.Context, config AcpInteractionRuntimeConfig) (time.Time, bool) {
 	now := h.now()
 	duration := time.Duration(config.PermissionDeadlineMs) * time.Millisecond
 	maxDuration := time.Duration(config.MaxDeadlineMs) * time.Millisecond
@@ -317,7 +349,7 @@ func (h *SessionHost) permissionDeadline(ctx context.Context, config AcpInteract
 		duration = maxDuration
 	}
 	deadline := now.Add(duration)
-	if promptDeadline, ok := ctx.Deadline(); ok {
+	if promptDeadline, ok := promptCtx.Deadline(); ok {
 		promptDeadline = promptDeadline.Add(-time.Duration(config.DeadlineMarginMs) * time.Millisecond)
 		if !promptDeadline.After(now) {
 			return time.Time{}, false
@@ -380,7 +412,7 @@ func cancelledPermissionResponse() acpsdk.RequestPermissionResponse {
 }
 
 func (h *SessionHost) requestPermission(
-	ctx context.Context,
+	inboundCtx context.Context,
 	generation string,
 	params acpsdk.RequestPermissionRequest,
 ) (acpsdk.RequestPermissionResponse, error) {
@@ -391,7 +423,12 @@ func (h *SessionHost) requestPermission(
 		slog.Info("acp_interaction.permission_cancelled", "reason", "unsupported")
 		return cancelledPermissionResponse(), nil
 	}
-	deadline, ok := h.permissionDeadline(ctx, config)
+	attempt, ok := h.activePromptAttempt()
+	if !ok {
+		slog.Info("acp_interaction.permission_cancelled", "reason", "prompt_unavailable")
+		return cancelledPermissionResponse(), nil
+	}
+	deadline, ok := h.permissionDeadline(attempt.ctx, config)
 	if !ok {
 		slog.Info("acp_interaction.permission_cancelled", "reason", "deadline_elapsed")
 		return cancelledPermissionResponse(), nil
@@ -421,7 +458,13 @@ func (h *SessionHost) requestPermission(
 	}
 	payloadHash := sha256.Sum256(canonical)
 	request.PayloadHash = hex.EncodeToString(payloadHash[:])
-	waiter, err := h.registerInteractionWaiter(interactionID, generation, optionIDs)
+	requestCtx, cancelRequest := context.WithDeadline(attempt.ctx, deadline)
+	stopInboundCancel := context.AfterFunc(inboundCtx, cancelRequest)
+	defer stopInboundCancel()
+	defer cancelRequest()
+	waiter, err := h.registerInteractionWaiter(
+		interactionID, generation, attempt.id, optionIDs, cancelRequest,
+	)
 	if err != nil {
 		slog.Info("acp_interaction.permission_cancelled", "reason", "generation_unavailable")
 		return cancelledPermissionResponse(), nil
@@ -436,25 +479,43 @@ func (h *SessionHost) requestPermission(
 			Reason:          reason,
 		}, deadline)
 	}
-	if err := h.createAcpInteraction(ctx, request); err != nil {
-		h.cancelAcpInteractionWaiter(interactionID, generation, "wrapper_cancelled")
-		settle("wrapper_cancelled")
-		slog.Warn("acp_interaction.create_failed", "interactionId", interactionID,
-			"reason", "control_plane_rejected")
-		return cancelledPermissionResponse(), nil
-	}
-
-	timer := time.NewTimer(deadline.Sub(h.now()))
-	defer timer.Stop()
 	var result acpInteractionWaitResult
+	var createResult acpInteractionCreateResult
+	createDone := make(chan acpInteractionCreateResult, 1)
+	go func() {
+		outcome, err := h.createAcpInteraction(requestCtx, request)
+		createDone <- acpInteractionCreateResult{outcome: outcome, err: err}
+	}()
+	waitForResult := func() acpInteractionWaitResult {
+		select {
+		case waiterResult := <-waiter.result:
+			return waiterResult
+		case <-requestCtx.Done():
+			reason := "wrapper_cancelled"
+			if errors.Is(requestCtx.Err(), context.DeadlineExceeded) {
+				reason = "expired"
+			}
+			h.cancelAcpInteractionWaiterForAttempt(interactionID, generation, attempt.id, reason)
+			return <-waiter.result
+		}
+	}
 	select {
 	case result = <-waiter.result:
-	case <-ctx.Done():
-		h.cancelAcpInteractionWaiter(interactionID, generation, "wrapper_cancelled")
-		result = <-waiter.result
-	case <-timer.C:
-		h.cancelAcpInteractionWaiter(interactionID, generation, "expired")
-		result = <-waiter.result
+	case createResult = <-createDone:
+		if createResult.outcome == acpInteractionCreateRejected {
+			h.cancelAcpInteractionWaiter(interactionID, generation, "wrapper_cancelled")
+		}
+		result = waitForResult()
+	case <-requestCtx.Done():
+		result = waitForResult()
+	}
+	if createResult.err != nil {
+		if result.cancel {
+			slog.Warn("acp_interaction.create_failed", "interactionId", interactionID,
+				"outcome", createResult.outcome, "reason", "control_plane_unconfirmed")
+		} else {
+			slog.Info("acp_interaction.create_ack_unconfirmed_answered", "interactionId", interactionID)
+		}
 	}
 	if result.cancel {
 		reason := result.reason
