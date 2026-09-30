@@ -139,7 +139,8 @@ describe('ACP interaction answer delivery', () => {
   );
 
   it('fails closed when the runtime does not advertise the permission bridge', async () => {
-    const { interactions: _interactions, ...unsupported } = capabilities();
+    const unsupported: Partial<ReturnType<typeof capabilities>> = capabilities();
+    delete unsupported.interactions;
     nodeAgentRequest.mockResolvedValueOnce(unsupported);
 
     await expect(deliverAcpInteractionAnswer({} as never, target, input)).resolves.toEqual({
