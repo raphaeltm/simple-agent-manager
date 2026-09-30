@@ -39,8 +39,8 @@ Slice B connects ACP `RequestPermission` to the shipped Cloudflare create/answer
 - [x] Add deterministic real ACP fixture behavior with reversed safety options for the coordinator's final staged roundtrip.
 - [x] Add contract and race tests for callback JWT workspace/session identity, recreated `SessionHost` generation, reversed options, duplicate/conflicting answer, process loss, explicit Stop, deadlines/cancellation, feature-off/unsupported behavior, and VM/Instant no-wake transport.
 - [x] Update narrow API/runtime contract documentation and fixtures without claiming unproven form/URL capability.
-- [ ] Run package and repository validation, task-completion validation, and relevant Go, Cloudflare, security, constitution, test, and documentation reviews.
-- [ ] Open an implementation-ready draft PR and record exact branch/contracts/test/review evidence for the coordinator.
+- [x] Run package and repository validation, task-completion validation, and relevant Go, Cloudflare, security, constitution, test, and documentation reviews.
+- [x] Open an implementation-ready draft PR and record exact branch/contracts/test/review evidence for the coordinator.
 
 ## Acceptance Criteria
 
@@ -68,3 +68,10 @@ Slice B connects ACP `RequestPermission` to the shipped Cloudflare create/answer
 - `.claude/rules/34-vm-agent-callback-auth.md`
 - `packages/vm-agent/.claude/rules/54-vm-agent-rollout-compatibility.md`
 - `packages/vm-agent/.claude/rules/71-request-context-must-not-outlive-its-request.md`
+
+## Delivery
+
+- Branch: `sam/execute-task-using-skill-zafwb6`
+- Draft PR: `#2201`
+- Final implementation commit: `ea3dbad82`
+- Integrated staging: explicitly deferred to coordinator before readiness or merge
