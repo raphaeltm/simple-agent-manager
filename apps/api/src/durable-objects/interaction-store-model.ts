@@ -59,6 +59,39 @@ export interface InteractionStoreAnswerInput {
   decision: AcpInteractionAnswerDecision;
 }
 
+export function answerResultForCommittedRow(
+  row: InteractionRow,
+  input: InteractionStoreAnswerInput,
+  storedBodyHash: string
+): InteractionStoreAnswerResult {
+  if (row.answer_key === input.answerKey && row.answer_body_hash === storedBodyHash) {
+    return {
+      status: 'already_answered',
+      summary: parseSummary(row),
+      delivery: {
+        generation: row.generation,
+        runtimeIdentity: row.runtime_identity,
+        agentSessionId: row.agent_session_id,
+      },
+    };
+  }
+  if (row.answer_key === input.answerKey) {
+    return { status: 'answer_key_conflict', reason: 'answer key was reused with another body' };
+  }
+  if (row.answer_key)
+    return { status: 'conflict', reason: 'another decision is already committed' };
+  return { status: 'stale', reason: `interaction is ${row.state}` };
+}
+
+export function pendingInteractionCount(sql: SqlStorage): number {
+  const row = sql
+    .exec<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM interactions WHERE state IN ('pending', 'answered')`
+    )
+    .toArray()[0];
+  return row?.count ?? 0;
+}
+
 export interface InteractionStoreSettleInput extends AcpInteractionRuntimeSettle {
   projectId: string;
   chatSessionId: string;

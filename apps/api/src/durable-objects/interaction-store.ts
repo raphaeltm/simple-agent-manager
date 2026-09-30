@@ -4,8 +4,6 @@ import {
   AcpInteractionAnswerDecisionSchema,
   type AcpInteractionSafeSummary,
   isJsonRecord,
-  validateAcpFormAnswer,
-  validateAcpFormSchema,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 import * as v from 'valibot';
@@ -24,7 +22,13 @@ import {
 } from '../services/acp-interaction-delivery';
 import { decrypt, encrypt } from '../services/encryption';
 import {
+  protectedFormReceiptHash,
+  validFormAnswerDecision,
+  validFormCreateDetail,
+} from './interaction-store-form';
+import {
   answerBoundsViolation,
+  answerResultForCommittedRow,
   detailBoundsViolation,
   type InteractionRow,
   type InteractionStoreAnswerInput,
@@ -35,7 +39,7 @@ import {
   type InteractionStoreSnapshot,
   nowMs,
   parseSummary,
-  sha256,
+  pendingInteractionCount,
   terminalState,
 } from './interaction-store-model';
 import type { ProjectData } from './project-data';
@@ -46,18 +50,6 @@ type CreateValidationResult = Exclude<
   InteractionStoreCreateResult,
   { status: 'created' | 'existing' }
 >;
-
-type EncryptedNullablePayload = {
-  ciphertext: string | null;
-  iv: string | null;
-};
-
-async function protectedFormReceiptHash(secret: string, interactionId: string, bodyHash: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const mac = await crypto.subtle.sign('HMAC', key, encoder.encode(`acp-form-receipt:${interactionId}:${bodyHash}`));
-  return Array.from(new Uint8Array(mac), (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
 
 export type {
   InteractionStoreAnswerInput,
@@ -201,19 +193,9 @@ export class InteractionStore extends DurableObject<Env> {
     if (input.kind === 'url') return { status: 'disabled', reason: 'ACP URL elicitation is unsupported' };
     if (input.kind === 'form') {
       if (!config.formsEnabled) return { status: 'disabled', reason: 'ACP forms are disabled' };
-      const detail = isJsonRecord(input.detail) ? input.detail : null;
-      if (!detail || Object.keys(detail).some((key) => !['message', 'schema', 'toolCallId'].includes(key)) ||
-          typeof detail.message !== 'string' || new TextEncoder().encode(detail.message).byteLength > config.requestMaxBytes ||
-          (detail.toolCallId !== undefined && typeof detail.toolCallId !== 'string') ||
-          !validateAcpFormSchema(detail.schema, {
-            schemaMaxBytes: config.formSchemaMaxBytes,
-            propertiesMax: config.formSchemaMaxProperties,
-            enumMax: config.formSchemaMaxEnum,
-            answerMaxBytes: config.answerMaxBytes,
-            stringMaxBytes: config.answerStringMaxBytes,
-            keyMaxChars: config.optionIdMaxChars,
-            labelMaxChars: config.optionNameMaxChars,
-          })) return { status: 'invalid', reason: 'unsupported form schema' };
+      if (!validFormCreateDetail(input.detail, config)) {
+        return { status: 'invalid', reason: 'unsupported form schema' };
+      }
     }
     if (input.protocolVersion !== ACP_INTERACTION_PROTOCOL_VERSION) {
       return { status: 'invalid', reason: 'unsupported protocol version' };
@@ -222,7 +204,7 @@ export class InteractionStore extends DurableObject<Env> {
     if (input.deadlineAt - now > config.maxDeadlineMs) {
       return { status: 'invalid', reason: 'deadline exceeds configured maximum' };
     }
-    if (this.pendingCount() >= config.maxPendingPerSession) {
+    if (pendingInteractionCount(this.sql) >= config.maxPendingPerSession) {
       return { status: 'too_many_pending', reason: 'too many pending interactions for session' };
     }
     const detailPlaintext = canonicalJson(input.detail);
@@ -244,7 +226,7 @@ export class InteractionStore extends DurableObject<Env> {
       ? await protectedFormReceiptHash(getCredentialEncryptionKey(this.env), input.interactionId, input.answerBodyHash)
       : input.answerBodyHash;
     if (row.state !== 'pending') {
-      return this.answerResultForCommittedRow(row, input, storedBodyHash);
+      return answerResultForCommittedRow(row, input, storedBodyHash);
     }
     if (row.deadline_at <= nowMs()) {
       this.markTerminal(input.interactionId, 'expired', nowMs(), 'deadline');
@@ -269,28 +251,11 @@ export class InteractionStore extends DurableObject<Env> {
     }
     if (row.kind === 'form') {
       const detail = await this.detail(input.interactionId);
-      const schema = detail?.detail?.schema;
-      const limits = {
-        schemaMaxBytes: config.formSchemaMaxBytes,
-        propertiesMax: config.formSchemaMaxProperties,
-        enumMax: config.formSchemaMaxEnum,
-        answerMaxBytes: config.answerMaxBytes,
-        stringMaxBytes: config.answerStringMaxBytes,
-        keyMaxChars: config.optionIdMaxChars,
-        labelMaxChars: config.optionNameMaxChars,
-      };
-      if (!validateAcpFormSchema(schema, limits)) {
+      const verdict = await validFormAnswerDecision(detail?.detail?.schema, input.decision, config);
+      if (verdict === 'schema_unavailable') {
         return { status: 'conflict', reason: 'form schema unavailable' };
       }
-      if (input.decision.kind === 'accepted') {
-        if (!validateAcpFormAnswer(schema, input.decision.content, limits) ||
-            input.decision.optionId !== undefined || input.decision.encryptedAnswer !== undefined ||
-            await sha256(JSON.stringify(Object.fromEntries(Object.entries(input.decision.content).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)))) !== input.decision.answerHash) {
-          return { status: 'conflict', reason: 'invalid form answer' };
-        }
-      } else if (!['declined', 'cancelled'].includes(input.decision.kind) ||
-          input.decision.content !== undefined || input.decision.optionId !== undefined ||
-          input.decision.encryptedAnswer !== undefined) {
+      if (verdict === 'invalid_answer') {
         return { status: 'conflict', reason: 'invalid form decision' };
       }
     }
@@ -302,13 +267,13 @@ export class InteractionStore extends DurableObject<Env> {
     if (answerBounds) return { status: 'payload_too_large', reason: answerBounds };
     const encryptionKey = getCredentialEncryptionKey(this.env);
     const encryptedDecision = await encrypt(answerPlaintext, encryptionKey);
-    const encryptedAnswer: EncryptedNullablePayload = input.decision.encryptedAnswer
+    const encryptedAnswer = input.decision.encryptedAnswer
       ? await encrypt(canonicalJson(input.decision.encryptedAnswer), encryptionKey)
       : { ciphertext: null, iv: null };
     const now = nowMs();
     if (now >= row.deadline_at) {
       const current = this.readRequired(input.interactionId);
-      if (current.state !== 'pending') return this.answerResultForCommittedRow(current, input, storedBodyHash);
+      if (current.state !== 'pending') return answerResultForCommittedRow(current, input, storedBodyHash);
       this.markTerminal(input.interactionId, 'expired', now, 'deadline');
       await this.scheduleNextAlarm();
       return { status: 'stale', reason: 'interaction is expired' };
@@ -346,12 +311,12 @@ export class InteractionStore extends DurableObject<Env> {
       now
     );
     const updated = this.readRequired(input.interactionId);
-    if (updated.state !== 'answered') return this.answerResultForCommittedRow(updated, input, storedBodyHash);
+    if (updated.state !== 'answered') return answerResultForCommittedRow(updated, input, storedBodyHash);
     if (
       updated.answer_key !== input.answerKey ||
       updated.answer_body_hash !== storedBodyHash
     ) {
-      return this.answerResultForCommittedRow(updated, input, storedBodyHash);
+      return answerResultForCommittedRow(updated, input, storedBodyHash);
     }
     this.enqueue(`delivery:${input.interactionId}`, input.interactionId, 'delivery', now);
     await this.scheduleNextAlarm();
@@ -364,30 +329,6 @@ export class InteractionStore extends DurableObject<Env> {
         agentSessionId: updated.agent_session_id,
       },
     };
-  }
-
-  private answerResultForCommittedRow(
-    row: InteractionRow,
-    input: InteractionStoreAnswerInput,
-    storedBodyHash: string
-  ): InteractionStoreAnswerResult {
-    if (row.answer_key === input.answerKey && row.answer_body_hash === storedBodyHash) {
-      return {
-        status: 'already_answered',
-        summary: parseSummary(row),
-        delivery: {
-          generation: row.generation,
-          runtimeIdentity: row.runtime_identity,
-          agentSessionId: row.agent_session_id,
-        },
-      };
-    }
-    if (row.answer_key === input.answerKey) {
-      return { status: 'answer_key_conflict', reason: 'answer key was reused with another body' };
-    }
-    if (row.answer_key)
-      return { status: 'conflict', reason: 'another decision is already committed' };
-    return { status: 'stale', reason: `interaction is ${row.state}` };
   }
 
   async settle(
@@ -545,15 +486,6 @@ export class InteractionStore extends DurableObject<Env> {
     const row = this.read(interactionId);
     if (!row) throw new Error('interaction row disappeared after write');
     return row;
-  }
-
-  private pendingCount(): number {
-    const row = this.sql
-      .exec<{ count: number }>(
-        `SELECT COUNT(*) AS count FROM interactions WHERE state IN ('pending', 'answered')`
-      )
-      .toArray()[0];
-    return row?.count ?? 0;
   }
 
   private enqueue(id: string, interactionId: string, kind: string, dueAt: number): void {
