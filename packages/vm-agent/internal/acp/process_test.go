@@ -363,7 +363,7 @@ func TestStartLocalProcessResolvesCommandFromRuntimePath(t *testing.T) {
 	proc, err := StartLocalProcess(ProcessConfig{
 		AcpCommand: command,
 		EnvVars: []string{
-			"PATH=fixture-bin:/usr/bin:/bin",
+			"PATH=" + binDir + ":/usr/bin:/bin",
 			"SAM_TEST_VALUE=runtime-path-ok",
 		},
 		WorkDir: workDir,
@@ -380,6 +380,25 @@ func TestStartLocalProcessResolvesCommandFromRuntimePath(t *testing.T) {
 	}
 	if string(output) != "runtime-path-ok" {
 		t.Fatalf("stdout=%q, want runtime-path-ok", output)
+	}
+}
+
+func TestStartLocalProcessDoesNotResolveCommandFromRelativeRuntimePath(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	command := "sam-acp-relative-path-fixture"
+	if err := os.WriteFile(filepath.Join(workDir, command), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write fixture command: %v", err)
+	}
+
+	_, err := StartLocalProcess(ProcessConfig{
+		AcpCommand: command,
+		EnvVars:    []string{"PATH=.:/usr/bin:/bin"},
+		WorkDir:    workDir,
+	})
+	if err == nil {
+		t.Fatal("StartLocalProcess unexpectedly resolved command from relative PATH")
 	}
 }
 
