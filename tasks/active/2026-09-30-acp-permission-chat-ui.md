@@ -61,8 +61,8 @@ contract changes are required.
 - [x] Acquire a synchronous option lock and answer key before hashing; re-check mount, identity, permission state, and deadline after hashing.
 - [x] Surface digest failure safely and block concurrent option/retry submissions with deterministic deferred-digest tests.
 - [x] Reserve mobile clearance between permission option hit targets and jump-to-latest; assert geometry at 320px, 375px, and desktop.
-- [ ] Capture, inspect, and post updated Playwright screenshots.
-- [ ] Re-run focused checks, specialist review, and CI; preserve draft-only handoff.
+- [x] Capture, inspect, and post updated Playwright screenshots.
+- [x] Re-run focused checks, specialist review, and CI; preserve draft-only handoff.
 
 ## Acceptance criteria
 
