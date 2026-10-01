@@ -42,8 +42,8 @@ function seed(
 ) {
   sqlite
     .prepare(
-      `INSERT INTO nodes (id, user_id, status, node_role, node_class, created_at, updated_at)
-    VALUES ('old-node', 'user-1', 'running', 'workspace', 'managed', ?, ?)`
+      `INSERT INTO nodes (id, user_id, status, node_role, node_class, runtime, created_at, updated_at)
+    VALUES ('old-node', 'user-1', 'running', 'workspace', 'managed', 'vm', ?, ?)`
     )
     .run(node.created_at, node.created_at);
   sqlite
@@ -81,8 +81,10 @@ describe('absolute lifetime active-workspace preservation', () => {
       schema.tasks,
       schema.workspaces,
       schema.sessionSnapshots,
+      schema.agentSessions,
       schema.nodeHealthEvents,
     ]);
+    sqlite.exec(`CREATE UNIQUE INDEX session_snapshots_chat_session_id_unique ON session_snapshots(chat_session_id)`);
     env = {
       DATABASE: createSqliteD1(sqlite),
       SESSION_SLEEP_MAX_ATTEMPTS: '9',
@@ -145,8 +147,34 @@ describe('absolute lifetime active-workspace preservation', () => {
   });
 
   it('does not pull a future failed-sleep retry forward during repeated cleanup sweeps', async () => {
-    const retryAt = '2026-10-01T06:05:00.000Z';
+    const retryAt = new Date(Date.now() + 5 * 60_000).toISOString();
     seed(sqlite, 2, 'failed', retryAt);
+    sqlite
+      .prepare(
+        `INSERT INTO agent_sessions (id, workspace_id, user_id, status, created_at, updated_at) VALUES ('agent-1', 'old-workspace', 'user-1', 'running', ?, ?)`
+      )
+      .run(node.created_at, node.created_at);
+    const actualQueue = await vi.importActual<
+      typeof import('../../../src/services/session-sleep-queue')
+    >('../../../src/services/session-sleep-queue');
+    await actualQueue.queueWorkspaceSessionSleep(env, {
+      workspaceId: 'old-workspace',
+      userId: 'user-1',
+      reason: 'regression_probe',
+      sleepAfterMs: 0,
+      expectedNodeId: 'old-node',
+    });
+    expect(
+      sqlite
+        .prepare(`SELECT sleep_after FROM session_snapshots WHERE id = 'snapshot-1'`)
+        .pluck()
+        .get()
+    ).not.toBe(retryAt);
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots SET sleep_status = 'failed', sleep_after = ? WHERE id = 'snapshot-1'`
+      )
+      .run(retryAt);
     const config = resolveCleanupConfig(env);
     await prepareAbsoluteLifetimeRelease(env, node, now, config);
     await prepareAbsoluteLifetimeRelease(env, node, now, config);
