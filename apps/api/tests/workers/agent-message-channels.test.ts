@@ -4,10 +4,9 @@
  * Every test enters through the authenticated MCP route (SELF.fetch) and reads
  * the real ProjectData SQLite and D1 state it produced.
  */
+import { DEFAULT_PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION } from '@simple-agent-manager/shared';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-
-import { DEFAULT_PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION } from '@simple-agent-manager/shared';
 
 import {
   eventMatches,
