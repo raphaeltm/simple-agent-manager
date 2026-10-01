@@ -10,6 +10,7 @@ import * as schema from '../../db/schema';
 import type { KnowledgeEntityIndexEntry } from '../../durable-objects/project-data/knowledge';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { resolveAgentMessageChannelsConfig } from '../../services/agent-message-channels';
 import * as projectDataService from '../../services/project-data';
 import {
   INTERNAL_ERROR,
@@ -18,6 +19,7 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+import { buildEventingInstructions } from './instruction-eventing-guidance';
 import {
   buildKnowledgeInstructions,
   buildPolicyInstructions,
@@ -281,6 +283,9 @@ export async function handleGetInstructions(
             status: context.task.status,
             priority: context.task.priority,
             outputBranch: context.task.outputBranch,
+            ...(context.task.coordinationChannel
+              ? { coordinationChannel: context.task.coordinationChannel }
+              : {}),
           },
         }
       : {}),
@@ -318,6 +323,13 @@ export async function handleGetInstructions(
             'Push your changes to the output branch before calling the SAM MCP `complete_task` tool.',
             'If you encounter blockers, report them via the SAM MCP `update_task_status` tool with a clear description.',
           ]),
+      // Event tools need a task-backed agent token.
+      ...(tokenData.taskId
+        ? buildEventingInstructions({
+            coordinationChannel: context.task?.coordinationChannel ?? null,
+            agentMessageChannelsEnabled: resolveAgentMessageChannelsConfig(env).enabled,
+          })
+        : []),
       ...knowledgeInstructions,
       ...policyInstructions,
       ...(project.repoProvider === 'artifacts'

@@ -6,12 +6,14 @@
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as projectDataService from '../../services/project-data';
+import { coordinationChannelSection } from './dispatch-coordination-channel';
 
 export interface BuildDispatchDescriptionInput {
   projectId: string;
   description: string;
   references: readonly string[];
   missionId: string | null;
+  coordinationChannel: string | null;
   maxLength: number;
 }
 
@@ -22,6 +24,10 @@ export async function buildDispatchDescription(
   let fullDescription = input.description;
   if (input.references.length > 0) {
     fullDescription += '\n\n## References\n' + input.references.map((r) => `- ${r}`).join('\n');
+  }
+  // Before inherited policies, so a long policy list cannot truncate it away.
+  if (input.coordinationChannel) {
+    fullDescription += '\n\n' + coordinationChannelSection(input.coordinationChannel);
   }
 
   // ── Propagate active project policies to child tasks ──────────────────

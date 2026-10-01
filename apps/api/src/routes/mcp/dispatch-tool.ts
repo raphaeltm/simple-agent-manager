@@ -77,7 +77,7 @@ export async function handleDispatchTask(
   const limits = getMcpLimits(env);
   const db = drizzle(env.DATABASE, { schema });
 
-  const parsedParams = parseDispatchTaskParams(requestId, params, limits);
+  const parsedParams = parseDispatchTaskParams(requestId, params, limits, env);
   if ('error' in parsedParams) {
     return parsedParams.error;
   }
@@ -98,6 +98,7 @@ export async function handleDispatchTask(
     explicitVmLocation,
     explicitMissionId,
     resourceRequirements,
+    explicitCoordinationChannel,
   } = parsedParams.parsed;
 
   const projectOrError = await requireMcpTaskWriteProject(
@@ -116,6 +117,7 @@ export async function handleDispatchTask(
       dispatchDepth: schema.tasks.dispatchDepth,
       status: schema.tasks.status,
       missionId: schema.tasks.missionId,
+      coordinationChannel: schema.tasks.coordinationChannel,
       credentialAttributionUserId: schema.tasks.credentialAttributionUserId,
       credentialAttributionProjectId: schema.tasks.credentialAttributionProjectId,
       credentialAttributionSource: schema.tasks.credentialAttributionSource,
@@ -267,11 +269,15 @@ export async function handleDispatchTask(
   const taskRunnerResourceRequirements = firstResourceRequirementLayer(resourceRequirementLayers);
 
   // ── Build the task description with references (+ inherited mission policies) ──
+  // Explicit, else inherited: descendants share the coordinator's channel.
+  const coordinationChannel =
+    explicitCoordinationChannel ?? currentTask.coordinationChannel ?? null;
   const fullDescription = await buildDispatchDescription(env, {
     projectId: tokenData.projectId,
     description,
     references,
     missionId: explicitMissionId ?? currentTask.missionId ?? null,
+    coordinationChannel,
     maxLength: limits.dispatchDescriptionMaxLength,
   });
 
@@ -439,13 +445,13 @@ export async function handleDispatchTask(
   const conditionalInsertResult = await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
-     task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, triggered_by,
+     task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, coordination_channel, triggered_by,
      requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirement_plan_json, resource_requirements_source, resolved_reservation_json,
      credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
      ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
      created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
-     ?, ?, ?, ?, ?, 'mcp',
+     ?, ?, ?, ?, ?, ?, 'mcp',
      ?, ?, ?, ?, ?, ?,
      ?, ?, ?,
      ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
@@ -478,6 +484,7 @@ export async function handleDispatchTask(
       resolvedProfile?.skillId ?? null,
       skillId ?? null,
       explicitMissionId ?? currentTask.missionId ?? null,
+      coordinationChannel,
       resolvedVmSize,
       vmSizeSource,
       persistedResourceRequirementsJson,

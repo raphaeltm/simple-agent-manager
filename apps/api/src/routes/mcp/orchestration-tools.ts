@@ -374,6 +374,8 @@ export async function handleRetrySubtask(
     requestedVmSizeSource: vmSizeSource,
     agentProfileHint: childTask.agentProfileHint,
     skillId: childTask.skillId,
+    // The replacement keeps its predecessor's feature coordination channel.
+    coordinationChannel: childTask.coordinationChannel,
     resourceRequirementsJson: persistedResourceRequirementsJson,
     resourceRequirementPlanJson: persistedResourceRequirementPlanJson,
     resourceRequirementsSource: resolvedReservation.source,
