@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -239,33 +239,6 @@ function manifestArtifactSize(
   }
 }
 
-function manifestArtifact(
-  manifestJson: string | null,
-  artifact: 'home' | 'wip'
-): { sizeBytes: number; sha256: string } | null {
-  if (!manifestJson) return null;
-  try {
-    const manifest = parseJsonRecord(manifestJson, 'session snapshot manifest');
-    const artifacts = maybeJsonRecord(manifest.artifacts);
-    const artifactEntry = maybeJsonRecord(artifacts?.[artifact]);
-    if (!artifactEntry) return null;
-    const sizeBytes = artifactEntry.sizeBytes;
-    const sha256 = artifactEntry.sha256;
-    if (
-      typeof sizeBytes !== 'number' ||
-      !Number.isSafeInteger(sizeBytes) ||
-      sizeBytes < 0 ||
-      typeof sha256 !== 'string' ||
-      !/^[a-f0-9]{64}$/i.test(sha256)
-    ) {
-      return null;
-    }
-    return { sizeBytes, sha256: sha256.toLowerCase() };
-  } catch {
-    return null;
-  }
-}
-
 export function buildSessionSnapshotR2Key(
   env: Env,
   chatSessionId: string,
@@ -359,34 +332,22 @@ export async function verifyRestorableSessionSnapshotArtifacts(
 /**
  * Re-certify a snapshot generation that is safe to release compute for sleep.
  *
- * `available/none` keeps the stricter restorable contract: HOME must exist and
- * match the manifest. Degraded snapshots can release compute only after the
- * manifest is durable and every artifact still claimed by the manifest is
- * present with the expected key, size, and checksum. Transcript-only degraded
- * snapshots therefore verify the manifest and intentionally have no artifacts.
+ * Only a complete `available/none` capture can release live compute. HOME
+ * must exist and match the manifest; degraded captures remain wakeable but do
+ * not prove that the live agent home was preserved.
  */
 export async function verifySessionSnapshotArtifactsForSleep(
   env: Env,
   snapshot: schema.SessionSnapshot
 ): Promise<boolean> {
-  if (!isSessionSnapshotSleepReleasable(snapshot) || !snapshot.snapshotGeneration) return false;
-  if (snapshot.status === 'available' && snapshot.degradation === 'none') {
-    return verifyRestorableSessionSnapshotArtifacts(env, snapshot);
-  }
-
-  const expectedManifestKey = buildSessionSnapshotR2Key(
-    env,
-    snapshot.chatSessionId,
-    snapshot.snapshotGeneration,
-    'manifest'
-  );
-  if (snapshot.manifestR2Key !== expectedManifestKey) return false;
-
-  const manifestJson = snapshot.manifestJson;
-  if (!manifestJson) return false;
+  // Releasing a live runtime requires its complete agent home. A degraded
+  // snapshot remains useful for explicit recovery, but cannot authorize the
+  // irreversible stop/sleep that would discard an uncaptured home.
+  if (snapshot.status !== 'available' || snapshot.degradation !== 'none') return false;
+  if (!snapshot.manifestJson) return false;
   let manifest: Record<string, unknown>;
   try {
-    manifest = parseJsonRecord(manifestJson, 'session snapshot manifest');
+    manifest = parseJsonRecord(snapshot.manifestJson, 'session snapshot manifest');
   } catch {
     return false;
   }
@@ -394,42 +355,22 @@ export async function verifySessionSnapshotArtifactsForSleep(
     manifest.version !== 1 ||
     manifest.chatSessionId !== snapshot.chatSessionId ||
     manifest.workspaceId !== snapshot.workspaceId ||
-    manifest.status !== snapshot.status ||
-    manifest.degradation !== snapshot.degradation
+    manifest.status !== 'available' ||
+    manifest.degradation !== 'none' ||
+    (manifest.agentSessionId !== undefined && manifest.agentSessionId !== snapshot.agentSessionId)
   ) {
     return false;
   }
-
-  const manifestHead = await env.R2.head(snapshot.manifestR2Key);
-  if (!manifestHead) return false;
-
-  for (const artifact of ['home', 'wip'] as const) {
-    const claimed = manifestArtifact(snapshot.manifestJson, artifact);
-    const key = artifact === 'home' ? snapshot.homeR2Key : snapshot.wipR2Key;
-    const sha256 = artifact === 'home' ? snapshot.homeSha256 : snapshot.wipSha256;
-    if (!claimed) {
-      if (key || sha256) return false;
-      continue;
-    }
-    if (!key || !sha256 || sha256.toLowerCase() !== claimed.sha256) return false;
-    const expectedKey = buildSessionSnapshotR2Key(
-      env,
-      snapshot.chatSessionId,
-      snapshot.snapshotGeneration,
-      artifact
-    );
-    if (key !== expectedKey) return false;
-    const object = await env.R2.head(key);
-    if (
-      !object ||
-      object.size !== claimed.sizeBytes ||
-      !objectChecksumMatchesOrIsAbsent(object, claimed.sha256)
-    ) {
-      return false;
-    }
+  const artifacts = maybeJsonRecord(manifest.artifacts);
+  const home = maybeJsonRecord(artifacts?.home);
+  const wip = maybeJsonRecord(artifacts?.wip);
+  if (
+    home?.sha256 !== snapshot.homeSha256 ||
+    (snapshot.wipR2Key ? wip?.sha256 !== snapshot.wipSha256 : wip !== null)
+  ) {
+    return false;
   }
-
-  return true;
+  return verifyRestorableSessionSnapshotArtifacts(env, snapshot);
 }
 
 function snapshotExpiry(now: Date, ttlDays: number): string {
@@ -511,15 +452,26 @@ export async function prepareSessionSnapshot(
 
   if (existing[0]) {
     const current = existing[0];
-    if (current.sleepingAt || current.sleepStatus === 'sleeping') {
-      // A background capture can outlive the sleep operation that requested it.
-      // Once the session is durably sleeping, a stale prepare must not overwrite
-      // the terminal restorable generation or re-open capture_generation.
-    } else if (current.status === 'available' || current.status === 'degraded') {
+    if (
+      current.sleepingAt ||
+      current.sleepStatus === 'sleeping' ||
+      current.sleepStatus === 'stopping'
+    ) {
+      throw new Error('Snapshot capture cannot start after sleep teardown was claimed');
+    }
+    const captureAllowed = and(
+      eq(schema.sessionSnapshots.id, snapshotId),
+      isNull(schema.sessionSnapshots.sleepingAt),
+      or(
+        isNull(schema.sessionSnapshots.sleepStatus),
+        inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed', 'preparing'])
+      )
+    );
+    if (current.status === 'available' || current.status === 'degraded') {
       // A checkpoint upload is not the current snapshot until completion
       // certifies it. Preserve the last complete generation and lifecycle state
       // so an interrupted capture cannot make a sleeping session unwakeable.
-      await db
+      const result = await db
         .update(schema.sessionSnapshots)
         .set({
           workspaceId: input.workspaceId,
@@ -536,12 +488,15 @@ export async function prepareSessionSnapshot(
           authorizedWipSha256: null,
           updatedAt: now.toISOString(),
         })
-        .where(eq(schema.sessionSnapshots.id, snapshotId));
+        .where(captureAllowed);
+      if ((result.meta.changes ?? 0) === 0) {
+        throw new Error('Snapshot capture lost the sleep teardown race');
+      }
     } else {
-      await db
-        .update(schema.sessionSnapshots)
-        .set(row)
-        .where(eq(schema.sessionSnapshots.id, snapshotId));
+      const result = await db.update(schema.sessionSnapshots).set(row).where(captureAllowed);
+      if ((result.meta.changes ?? 0) === 0) {
+        throw new Error('Snapshot capture lost the sleep teardown race');
+      }
     }
   } else {
     await db.insert(schema.sessionSnapshots).values({ ...row, createdAt: now.toISOString() });

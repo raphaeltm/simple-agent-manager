@@ -48,7 +48,7 @@ export async function waitForFinalSessionSnapshot(
     acpSessionId?: string;
     userId: string;
   }
-): Promise<void> {
+): Promise<string> {
   const requestTimeoutMs = parsePositiveInt(
     env.SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS,
     DEFAULT_SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS
@@ -133,7 +133,7 @@ export async function waitForFinalSessionSnapshot(
           chatSessionId: input.chatSessionId,
           generation: current.captureGeneration,
         });
-        return;
+        return current.captureGeneration;
       }
     }
     if (
@@ -145,7 +145,8 @@ export async function waitForFinalSessionSnapshot(
         (current.status === 'available' && current.degradation === 'none') ||
         (current.status === 'degraded' && current.degradation !== 'none')
       ) {
-        return;
+        if (!current.snapshotGeneration) throw new Error('Final snapshot generation is missing');
+        return current.snapshotGeneration;
       }
       throw new Error(
         `Workspace snapshot is not usable (${current.status}/${current.degradation})`
@@ -179,7 +180,7 @@ export async function waitForFinalSessionSnapshot(
               generation: activeCaptureGeneration,
               progressIdleTimeoutMs,
             });
-            return;
+            return activeCaptureGeneration;
           }
           log.warn('session_sleep.snapshot_degraded_after_no_progress', {
             workspaceId: input.workspaceId,

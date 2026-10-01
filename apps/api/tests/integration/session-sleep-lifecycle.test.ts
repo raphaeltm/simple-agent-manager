@@ -190,8 +190,8 @@ describe('terminal session sleep lifecycle integration', () => {
     mocks.hibernateAgentSessionOnNode.mockImplementation(
       async (
         _nodeId: string,
-        _workspaceId: string,
-        _agentSessionId: string,
+        workspaceId: string,
+        agentSessionId: string,
         _env: Env,
         _userId: string,
         options?: { chatSessionId?: string }
@@ -213,7 +213,15 @@ describe('terminal session sleep lifecycle integration', () => {
             `${prefix}/home.tar`,
             HOME_SHA256,
             `${prefix}/manifest.json`,
-            JSON.stringify({ artifacts: { home: { sizeBytes: 4 } } }),
+            JSON.stringify({
+              version: 1,
+              chatSessionId,
+              workspaceId,
+              agentSessionId,
+              status: 'available',
+              degradation: 'none',
+              artifacts: { home: { sizeBytes: 4, sha256: HOME_SHA256 } },
+            }),
             chatSessionId
           );
         order.push(`final-snapshot:${chatSessionId}`);

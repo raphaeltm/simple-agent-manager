@@ -172,7 +172,7 @@ async function verifyAndBeginSleepTeardown(
     .getAcpSession(env, workspace.projectId, agentSession.id)
     .catch(() => null);
 
-  await waitForFinalSessionSnapshot(db, env, {
+  const finalGeneration = await waitForFinalSessionSnapshot(db, env, {
     nodeId: workspace.nodeId,
     workspaceId: workspace.id,
     agentSessionId: agentSession.id,
@@ -184,8 +184,20 @@ async function verifyAndBeginSleepTeardown(
   });
 
   const verified = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
-  if (!isSessionSnapshotSleepReleasable(verified)) {
-    throw new Error('Workspace snapshot completion was not durably verified');
+  if (
+    !isSessionSnapshotSleepReleasable(verified) ||
+    verified.status !== 'available' ||
+    verified.degradation !== 'none' ||
+    verified.workspaceId !== workspace.id ||
+    verified.agentSessionId !== agentSession.id ||
+    verified.nodeId !== workspace.nodeId ||
+    verified.runtime !== workspace.nodeRuntime ||
+    verified.snapshotGeneration !== finalGeneration ||
+    verified.captureGeneration
+  ) {
+    throw new Error(
+      'Workspace snapshot completion was not durably verified (complete final generation required)'
+    );
   }
   const stateAfter = await projectDataService.getSessionState(
     env,
@@ -218,7 +230,9 @@ async function verifyAndBeginSleepTeardown(
   ) {
     throw new Error('Workspace activity changed during snapshot artifact verification');
   }
-  if (!(await beginSessionSnapshotStopping(db, workspace.chatSessionId, claimId))) {
+  if (
+    !(await beginSessionSnapshotStopping(db, workspace.chatSessionId, claimId, finalGeneration))
+  ) {
     throw new Error('Workspace sleep claim was cancelled before teardown');
   }
   return verified;
@@ -307,7 +321,7 @@ async function completeSleepTeardown(
     workspace.chatSessionId,
     claimId,
     new Date(),
-    { sleepWarning }
+    { sleepWarning, expectedGeneration: verified?.snapshotGeneration ?? undefined }
   );
   if (!finalized) {
     const snapshot = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
@@ -463,6 +477,24 @@ export async function sleepWorkspaceSession(
     if (!pointOfNoReturn) {
       verified = await verifyAndBeginSleepTeardown(env, workspace, agentSession, claimId);
       pointOfNoReturn = true;
+    } else {
+      // A stopping claim can survive a Worker crash or an older deployment.
+      // Recheck it before retrying the runtime stop; a legacy degraded claim
+      // must not become an authority to discard the still-live agent home.
+      verified = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
+      if (
+        !verified ||
+        verified.status !== 'available' ||
+        verified.degradation !== 'none' ||
+        verified.workspaceId !== workspace.id ||
+        verified.agentSessionId !== agentSession.id ||
+        verified.nodeId !== workspace.nodeId ||
+        verified.runtime !== workspace.nodeRuntime ||
+        verified.captureGeneration ||
+        !(await verifySessionSnapshotArtifactsForSleep(env, verified))
+      ) {
+        throw new Error('Stopping claim lacks a complete verified workspace snapshot');
+      }
     }
 
     verified = await completeSleepTeardown(env, workspace, agentSession, claimId, verified);

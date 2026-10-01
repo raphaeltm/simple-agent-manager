@@ -98,7 +98,7 @@ describe('session snapshot sleep artifact verification', () => {
     return Uint8Array.from(hex.match(/.{2}/g) ?? [], (byte) => Number.parseInt(byte, 16)).buffer;
   }
 
-  it('allows a transcript-only degraded snapshot to release compute after manifest verification', async () => {
+  it('refuses to release compute from a transcript-only degraded snapshot', async () => {
     const testEnv = env({
       SESSION_SNAPSHOT_R2_PREFIX: 'snapshots',
       R2: {
@@ -130,7 +130,7 @@ describe('session snapshot sleep artifact verification', () => {
     } as any;
 
     expect(isSessionSnapshotSleepReleasable(snapshot)).toBe(true);
-    await expect(verifySessionSnapshotArtifactsForSleep(testEnv, snapshot)).resolves.toBe(true);
+    await expect(verifySessionSnapshotArtifactsForSleep(testEnv, snapshot)).resolves.toBe(false);
     await expect(
       verifySessionSnapshotArtifactsForSleep(testEnv, {
         ...snapshot,
@@ -139,7 +139,7 @@ describe('session snapshot sleep artifact verification', () => {
     ).resolves.toBe(false);
   });
 
-  it('requires every artifact claimed by a degraded manifest to match R2', async () => {
+  it('refuses to release compute when the final capture skipped home', async () => {
     const testEnv = env({
       SESSION_SNAPSHOT_R2_PREFIX: 'snapshots',
       R2: {
@@ -174,7 +174,7 @@ describe('session snapshot sleep artifact verification', () => {
       wipSha256: sha,
     } as any;
 
-    await expect(verifySessionSnapshotArtifactsForSleep(testEnv, snapshot)).resolves.toBe(true);
+    await expect(verifySessionSnapshotArtifactsForSleep(testEnv, snapshot)).resolves.toBe(false);
     await expect(
       verifySessionSnapshotArtifactsForSleep(testEnv, { ...snapshot, wipSha256: '0'.repeat(64) })
     ).resolves.toBe(false);
@@ -219,6 +219,18 @@ describe('session snapshot sleep artifact verification', () => {
     await expect(
       verifySessionSnapshotArtifactsForSleep(testEnv, {
         ...snapshot,
+        workspaceId: 'another-workspace',
+      })
+    ).resolves.toBe(false);
+    await expect(
+      verifySessionSnapshotArtifactsForSleep(testEnv, {
+        ...snapshot,
+        manifestJson: snapshot.manifestJson.replace(sha, '0'.repeat(64)),
+      })
+    ).resolves.toBe(false);
+    await expect(
+      verifySessionSnapshotArtifactsForSleep(testEnv, {
+        ...snapshot,
         manifestJson: JSON.stringify({
           version: 1,
           chatSessionId: 'chat-1',
@@ -260,17 +272,17 @@ describe('session snapshot progress persistence', () => {
       });
       const db = drizzle(testEnv.DATABASE, { schema });
 
-      const prepared = await prepareSessionSnapshot(db, testEnv, {
-        workspaceId: 'workspace-1',
-        nodeId: 'node-1',
-        projectId: 'project-1',
-        userId: 'user-1',
-        chatSessionId: 'chat-1',
-        agentSessionId: 'agent-1',
-        runtime: 'vm',
-      });
-
-      expect(prepared.generation).not.toBe('generation-final');
+      await expect(
+        prepareSessionSnapshot(db, testEnv, {
+          workspaceId: 'workspace-1',
+          nodeId: 'node-1',
+          projectId: 'project-1',
+          userId: 'user-1',
+          chatSessionId: 'chat-1',
+          agentSessionId: 'agent-1',
+          runtime: 'vm',
+        })
+      ).rejects.toThrow('cannot start after sleep teardown');
       expect(
         sqlite
           .prepare(
@@ -287,6 +299,116 @@ describe('session snapshot progress persistence', () => {
         sleep_status: 'sleeping',
         sleeping_at: '2026-08-15T00:00:00.000Z',
         manifest_json: '{"status":"degraded"}',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('does not let a capture reopen the generation after teardown claims stopping', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      sqlite
+        .prepare(
+          `INSERT INTO session_snapshots
+        (id, workspace_id, node_id, project_id, user_id, chat_session_id,
+         agent_session_id, runtime, status, degradation, manifest_r2_key,
+         snapshot_generation, expires_at, sleep_status, updated_at)
+        VALUES ('snapshot-1', 'workspace-1', 'node-1', 'project-1', 'user-1',
+          'chat-1', 'agent-1', 'vm', 'available', 'none', 'manifest',
+          'generation-final', '2026-08-20T00:00:00.000Z', 'stopping',
+          '2026-08-15T00:00:00.000Z')`
+        )
+        .run();
+      const testEnv = env({ DATABASE: createSqliteD1(sqlite) });
+      await expect(
+        prepareSessionSnapshot(drizzle(testEnv.DATABASE, { schema }), testEnv, {
+          workspaceId: 'workspace-1',
+          nodeId: 'node-1',
+          projectId: 'project-1',
+          userId: 'user-1',
+          chatSessionId: 'chat-1',
+          agentSessionId: 'agent-1',
+          runtime: 'vm',
+        })
+      ).rejects.toThrow('cannot start after sleep teardown');
+      expect(
+        sqlite
+          .prepare(
+            `SELECT snapshot_generation, capture_generation FROM session_snapshots WHERE id = 'snapshot-1'`
+          )
+          .get()
+      ).toEqual({ snapshot_generation: 'generation-final', capture_generation: null });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('rejects preparation when sleep finalizes between the read and capture update', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      sqlite
+        .prepare(
+          `INSERT INTO session_snapshots
+        (id, workspace_id, node_id, project_id, user_id, chat_session_id,
+         agent_session_id, runtime, status, degradation, manifest_r2_key,
+         snapshot_generation, expires_at, sleep_status, updated_at)
+        VALUES ('snapshot-1', 'workspace-1', 'node-1', 'project-1', 'user-1',
+          'chat-1', 'agent-1', 'vm', 'available', 'none', 'manifest',
+          'generation-final', '2026-08-20T00:00:00.000Z', 'preparing',
+          '2026-08-15T00:00:00.000Z')`
+        )
+        .run();
+      const d1 = createSqliteD1(sqlite);
+      const database = {
+        ...d1,
+        prepare: (sql: string) => {
+          const statement = d1.prepare(sql);
+          if (!/update "session_snapshots"/i.test(sql)) return statement;
+          return {
+            ...statement,
+            bind: (...params: unknown[]) => {
+              const bound = statement.bind(...params);
+              return {
+                ...bound,
+                run: async () => {
+                  sqlite
+                    .prepare(
+                      `UPDATE session_snapshots SET sleep_status = 'sleeping',
+                    sleeping_at = '2026-08-15T00:01:00.000Z' WHERE id = 'snapshot-1'`
+                    )
+                    .run();
+                  return bound.run();
+                },
+              };
+            },
+          };
+        },
+      } as D1Database;
+      const testEnv = env({ DATABASE: database });
+      await expect(
+        prepareSessionSnapshot(drizzle(database, { schema }), testEnv, {
+          workspaceId: 'workspace-1',
+          nodeId: 'node-1',
+          projectId: 'project-1',
+          userId: 'user-1',
+          chatSessionId: 'chat-1',
+          agentSessionId: 'agent-1',
+          runtime: 'vm',
+        })
+      ).rejects.toThrow('lost the sleep teardown race');
+      expect(
+        sqlite
+          .prepare(
+            `SELECT snapshot_generation, capture_generation, sleep_status FROM session_snapshots WHERE id = 'snapshot-1'`
+          )
+          .get()
+      ).toEqual({
+        snapshot_generation: 'generation-final',
+        capture_generation: null,
+        sleep_status: 'sleeping',
       });
     } finally {
       sqlite.close();

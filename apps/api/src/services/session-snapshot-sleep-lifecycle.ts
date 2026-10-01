@@ -206,6 +206,7 @@ export async function beginSessionSnapshotStopping(
   db: Db,
   chatSessionId: string,
   claimId: string,
+  expectedGeneration: string,
   now = new Date()
 ): Promise<boolean> {
   const nowIso = now.toISOString();
@@ -223,6 +224,10 @@ export async function beginSessionSnapshotStopping(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
         eq(schema.sessionSnapshots.sleepStatus, 'preparing'),
         eq(schema.sessionSnapshots.sleepClaimId, claimId),
+        eq(schema.sessionSnapshots.snapshotGeneration, expectedGeneration),
+        eq(schema.sessionSnapshots.status, 'available'),
+        eq(schema.sessionSnapshots.degradation, 'none'),
+        isNull(schema.sessionSnapshots.captureGeneration),
         isNull(schema.sessionSnapshots.sleepingAt)
       )
     );
@@ -323,19 +328,29 @@ export async function markSessionSnapshotSleeping(
   db: Db,
   env: Env,
   chatSessionId: string,
-  now?: Date
+  now?: Date,
+  expectedGeneration?: string
 ): Promise<boolean>;
 export async function markSessionSnapshotSleeping(
   db: Db,
   envOrChatSessionId: Env | string,
   chatSessionIdOrNow?: string | Date,
-  maybeNow = new Date()
+  maybeNow = new Date(),
+  expectedGeneration?: string
 ): Promise<boolean> {
   const env = typeof envOrChatSessionId === 'string' ? undefined : envOrChatSessionId;
   const chatSessionId =
     typeof envOrChatSessionId === 'string' ? envOrChatSessionId : String(chatSessionIdOrNow);
   const now = chatSessionIdOrNow instanceof Date ? chatSessionIdOrNow : maybeNow;
-  return markSessionSnapshotSleepingWithConfig(db, env, chatSessionId, now);
+  return markSessionSnapshotSleepingWithConfig(
+    db,
+    env,
+    chatSessionId,
+    now,
+    undefined,
+    undefined,
+    expectedGeneration
+  );
 }
 
 async function markSessionSnapshotSleepingWithConfig(
@@ -344,7 +359,8 @@ async function markSessionSnapshotSleepingWithConfig(
   chatSessionId: string,
   now: Date,
   claimId?: string,
-  sleepWarning?: string | null
+  sleepWarning?: string | null,
+  expectedGeneration?: string
 ): Promise<boolean> {
   const ttlDays = env ? getSessionSnapshotConfig(env).ttlDays : DEFAULT_SESSION_SNAPSHOT_TTL_DAYS;
   const warning = sleepWarning && env ? sessionLifecycleError(env, sleepWarning) : null;
@@ -367,6 +383,14 @@ async function markSessionSnapshotSleepingWithConfig(
     .where(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
+        ...(expectedGeneration
+          ? [
+              eq(schema.sessionSnapshots.snapshotGeneration, expectedGeneration),
+              eq(schema.sessionSnapshots.status, 'available'),
+              eq(schema.sessionSnapshots.degradation, 'none'),
+              isNull(schema.sessionSnapshots.captureGeneration),
+            ]
+          : []),
         or(
           and(
             eq(schema.sessionSnapshots.status, 'available'),
@@ -394,7 +418,7 @@ export async function finalizeSessionSnapshotSleeping(
   chatSessionId: string,
   claimId: string,
   now = new Date(),
-  options: { sleepWarning?: string | null } = {}
+  options: { sleepWarning?: string | null; expectedGeneration?: string } = {}
 ): Promise<boolean> {
   const finalized = await markSessionSnapshotSleepingWithConfig(
     db,
@@ -402,7 +426,8 @@ export async function finalizeSessionSnapshotSleeping(
     chatSessionId,
     now,
     claimId,
-    options.sleepWarning
+    options.sleepWarning,
+    options.expectedGeneration
   );
   if (finalized) {
     // Every sleep finalizes here — the sleep sweep and an Instant container's own

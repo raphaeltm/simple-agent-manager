@@ -767,6 +767,7 @@ describe('session sleep sweep', () => {
       .prepare(
         `UPDATE session_snapshots
          SET sleep_status = 'preparing', sleep_after = NULL,
+             snapshot_generation = 'generation-stable',
              sleep_claim_id = 'owner', sleep_claimed_at = '2026-08-12T00:10:00.000Z',
              sleep_stopping_since = '2026-08-12T00:05:00.000Z'
          WHERE id = 'snapshot-stable-stopping'`
@@ -780,6 +781,7 @@ describe('session sleep sweep', () => {
       db,
       'snapshot-stable-stopping-chat',
       'owner',
+      'generation-stable',
       new Date('2026-08-12T01:00:00.000Z')
     );
 
@@ -795,6 +797,47 @@ describe('session sleep sweep', () => {
       sleep_claimed_at: '2026-08-12T01:00:00.000Z',
       sleep_stopping_since: '2026-08-12T00:05:00.000Z',
     });
+  });
+
+  it('refuses the stopping transition for a stale or degraded snapshot generation', async () => {
+    addDueSnapshot('snapshot-fenced-stopping');
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots SET sleep_status = 'preparing', sleep_after = NULL,
+        sleep_claim_id = 'owner', snapshot_generation = 'generation-current'
+       WHERE id = 'snapshot-fenced-stopping'`
+      )
+      .run();
+    const db = await import('drizzle-orm/d1').then(({ drizzle }) =>
+      drizzle(env.DATABASE, { schema })
+    );
+    expect(
+      await beginSessionSnapshotStopping(
+        db,
+        'snapshot-fenced-stopping-chat',
+        'owner',
+        'generation-old'
+      )
+    ).toBe(false);
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots SET status = 'degraded', degradation = 'home-skipped'
+       WHERE id = 'snapshot-fenced-stopping'`
+      )
+      .run();
+    expect(
+      await beginSessionSnapshotStopping(
+        db,
+        'snapshot-fenced-stopping-chat',
+        'owner',
+        'generation-current'
+      )
+    ).toBe(false);
+    expect(
+      sqlite
+        .prepare(`SELECT sleep_status FROM session_snapshots WHERE id = 'snapshot-fenced-stopping'`)
+        .get()
+    ).toEqual({ sleep_status: 'preparing' });
   });
 
   it('rolls a stale stopping claim forward without consuming another attempt', async () => {

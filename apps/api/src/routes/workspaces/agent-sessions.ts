@@ -17,6 +17,7 @@ import { getRuntimeLimits } from '../../services/limits';
 import { buildSessionMcpServers } from '../../services/mcp-connection-resolution';
 import { generateMcpToken, revokeMcpToken, storeMcpToken } from '../../services/mcp-token';
 import { createAgentSessionOnNode, stopAgentSessionOnNode } from '../../services/node-agent';
+import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import { isSleepingContainerNode } from '../../services/sleeping-container-runtime';
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
@@ -94,6 +95,14 @@ agentSessionRoutes.post(
 
     const node = await getOwnedNode(db, workspace.nodeId, userId);
     assertNodeOperational(node, 'create agent session');
+    // This route creates directly on an existing workspace and bypasses the
+    // scheduler's required-version placement check.
+    if (
+      node.runtime === 'vm' &&
+      !isNodeAgentVersionCompatible(node.agentVersion, c.env.VM_AGENT_REQUIRED_VERSION)
+    ) {
+      throw errors.conflict('Workspace node is running an incompatible VM agent build');
+    }
     await requireWorkspaceAgentGitHubAccess(c.env, db, workspace, userId);
 
     const existingRunning = await db

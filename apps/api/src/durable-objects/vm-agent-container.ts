@@ -1,5 +1,6 @@
 // FILE SIZE EXCEPTION: Durable Object recovery state machine — method groups are already extracted into vm-agent-container-{recovery,recovery-failure,runtime,lifecycle,active-work}.ts; the remaining class body is the interlocking mutex-guarded lifecycle critical sections (rule 45), which must stay reviewable as one unit. See .claude/rules/18-file-size-limits.md
 import { Container, switchPort } from '@cloudflare/containers';
+import { and, eq } from 'drizzle-orm';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -1174,9 +1175,29 @@ export class VmAgentContainer extends Container<Env> {
     } = await import('../services/session-snapshots');
     const db = drizzle(this.env.DATABASE, { schema });
     const snapshot = await getRestorableSessionSnapshot(db, config.chatSessionId);
+    const liveAgentSession = snapshot?.agentSessionId
+      ? await db
+          .select({ id: schema.agentSessions.id })
+          .from(schema.agentSessions)
+          .where(
+            and(
+              eq(schema.agentSessions.id, snapshot.agentSessionId),
+              eq(schema.agentSessions.workspaceId, config.workspaceId),
+              eq(schema.agentSessions.status, 'running')
+            )
+          )
+          .get()
+      : null;
     const snapshotStatus = snapshot?.status ?? null;
     const snapshotDegradation = snapshot?.degradation ?? null;
-    if (!isSessionSnapshotSleepReleasable(snapshot)) {
+    if (
+      !isSessionSnapshotSleepReleasable(snapshot) ||
+      !snapshot.snapshotGeneration ||
+      !liveAgentSession ||
+      snapshot.workspaceId !== config.workspaceId ||
+      snapshot.nodeId !== config.nodeId ||
+      snapshot.runtime !== 'cf-container'
+    ) {
       log.warn('vm_agent_container_sleep_preserved_without_snapshot', {
         nodeId: config.nodeId,
         workspaceId: config.workspaceId,
@@ -1185,6 +1206,7 @@ export class VmAgentContainer extends Container<Env> {
       });
       return 'aborted';
     }
+    const snapshotGeneration = snapshot.snapshotGeneration;
     const claimId = crypto.randomUUID();
     let pointOfNoReturn = snapshot.sleepStatus === 'sleeping' && Boolean(snapshot.sleepingAt);
     if (!pointOfNoReturn) {
@@ -1210,7 +1232,14 @@ export class VmAgentContainer extends Container<Env> {
         if (!(await verifySessionSnapshotArtifactsForSleep(this.env, snapshot))) {
           throw new Error('Container snapshot artifacts failed durable R2 verification');
         }
-        if (!(await beginSessionSnapshotStopping(db, config.chatSessionId, claimId))) {
+        if (
+          !(await beginSessionSnapshotStopping(
+            db,
+            config.chatSessionId,
+            claimId,
+            snapshotGeneration
+          ))
+        ) {
           throw new Error('Container sleep claim was cancelled before teardown');
         }
         pointOfNoReturn = true;
@@ -1233,7 +1262,7 @@ export class VmAgentContainer extends Container<Env> {
             config.chatSessionId,
             claimId,
             new Date(),
-            { sleepWarning }
+            { sleepWarning, expectedGeneration: snapshotGeneration }
           ))
         ) {
           throw new Error('Container sleep finalization lost its durable claim');
