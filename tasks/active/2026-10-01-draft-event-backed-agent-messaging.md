@@ -97,7 +97,7 @@ coordination channel to descendants.
 - Optional `idempotencyKey` on both tools: lost-response retry replays the same event;
   changed content conflicts without mutating the original.
 - Recipient sees a SAM-authored notice (not human input) with event IDs, channel, and read/reply/ack steps.
-- Truthful receipts: `accepted` + `recipientNotification: 'pending_wake'`, never "delivered".
+- Truthful receipts: `accepted: true, delivered: false` plus `recipient.subscriptionMatched`, `eventId`, `channel`, `sequence`; never "delivered" or "read".
 - Self-echo suppression for every prompt-delivery channel subscription (record-only feeds unchanged).
 - Coordination channel: `dispatch_task.coordinationChannel` (validated), inherited by
   descendants, copied by retry and session recovery, surfaced in the child description and
@@ -120,68 +120,68 @@ coordination channel to descendants.
 ## Implementation checklist
 
 ### Refactor (separate commits, no behavior change)
-- [ ] Extract mailbox helpers from `mailbox-tools.ts` to stay well under the size limits
-- [ ] Extract `handleStopSubtask` from `orchestration-comms.ts`
-- [ ] Extract knowledge formatting helpers from `instruction-tools.ts`
-- [ ] Extract dispatch description building from `dispatch-tool.ts`
+- [x] Extract mailbox helpers from `mailbox-tools.ts` to stay well under the size limits
+- [x] Extract `handleStopSubtask` from `orchestration-comms.ts`
+- [x] Extract knowledge formatting helpers from `instruction-tools.ts`
+- [x] Extract dispatch description building from `dispatch-tool.ts`
 
 ### Shared
-- [ ] Constants: reserved prefix, DM channel cap, rotation grace, flag default
-- [ ] Types: `SendAgentChannelMessageInput` / `SendAgentChannelMessageResult`
+- [x] Constants: reserved prefix, DM channel cap, rotation grace, flag default
+- [x] Types: `SendAgentChannelMessageInput` / `SendAgentChannelMessageResult`
 
 ### ProjectData DO
-- [ ] Self-echo suppression helper + use in `createMatchesForEvent` and `catchUpChannel`
-- [ ] Reserved prefix rejected in generic publish; namespace-aware channel capacity
-- [ ] `agent-message-channels.ts`: pair channel name, prepare, ensure/rotate managed
+- [x] Self-echo suppression helper + use in `createMatchesForEvent` and `catchUpChannel`
+- [x] Reserved prefix rejected in generic publish; namespace-aware channel capacity
+- [x] `agent-message-channels.ts`: pair channel name, prepare, ensure/rotate managed
       subscriptions, transactional send with replay/conflict handling
-- [ ] `sendAgentChannelMessage` RPC + service wrapper
-- [ ] Agent-message wake notice text in `buildWakePromptInput`
+- [x] `sendAgentChannelMessage` RPC + service wrapper
+- [x] Agent-message wake notice text in `buildWakePromptInput`
 
 ### API / MCP
-- [ ] `services/agent-message-channels.ts`: config resolution, recipient wake-authority
+- [x] `services/agent-message-channels.ts`: config resolution, recipient wake-authority
       precheck, DO call, receipts, safe-identifier error mapping
-- [ ] Route `send_durable_message` notify/deliver + `send_message_to_subtask` through it
-- [ ] Optional `idempotencyKey` param; tool descriptions updated
-- [ ] D1 migration `tasks.coordination_channel` + schema
-- [ ] `dispatch_task.coordinationChannel` parse/validate/inherit/persist + description section
-- [ ] Copy in `retry_subtask` and session recovery
-- [ ] `get_instructions`: eventing guidance + `task.coordinationChannel`
+- [x] Route `send_durable_message` notify/deliver + `send_message_to_subtask` through it
+- [x] Optional `idempotencyKey` param; tool descriptions updated
+- [x] D1 migration `tasks.coordination_channel` + schema
+- [x] `dispatch_task.coordinationChannel` parse/validate/inherit/persist + description section
+- [x] Copy in `retry_subtask` and session recovery
+- [x] `get_instructions`: eventing guidance + `task.coordinationChannel`
 
 ### Docs / guidance
-- [ ] `apps/www` API reference + agents guide
-- [ ] `.claude/commands/workflow.md`, `.claude/commands/do.md`
-- [ ] `apps/api/.env.example` + env reference skill
+- [x] `apps/www` API reference + agents guide
+- [x] `.claude/commands/workflow.md`, `.claude/commands/do.md`
+- [x] `apps/api/.env.example` + env reference skill
 
 ### Tests
-- [ ] Worker test via real MCP route: A→B creates one channel + two subscriptions, recipient
+- [x] Worker test via real MCP route: A→B creates one channel + two subscriptions, recipient
       matched, sender not matched, SAM notice materialized for recipient only
-- [ ] Concurrent first sends A→B and B→A: one channel, no duplicate subscriptions, each
+- [x] Concurrent first sends A→B and B→A: one channel, no duplicate subscriptions, each
       event matched only to the other participant
-- [ ] Retry with same key replays; changed content conflicts and leaves the original intact
-- [ ] Provenance: forged `metadata.actor` cannot shadow server actor
-- [ ] Authorization: cross-project target rejected; recipient without wake authority rejected
-- [ ] Reserved prefix rejected by generic publish
-- [ ] Flag off / prerequisites off → legacy path unchanged
-- [ ] Urgent class keeps stop-and-deliver path
-- [ ] Rotation when the managed subscription cannot wake; no duplicate wake after rotation
-- [ ] Self-echo suppression on generic prompt follow (catch-up and live); record-only unchanged
-- [ ] Dispatch coordination channel: validation, inheritance, retry, recovery copy, instructions
-- [ ] Each new guard proven discriminating (remove → test red → restore)
+- [x] Retry with same key replays; changed content conflicts and leaves the original intact
+- [x] Provenance: forged `metadata.actor` cannot shadow server actor
+- [x] Authorization: cross-project target rejected; recipient without wake authority rejected
+- [x] Reserved prefix rejected by generic publish
+- [x] Flag off / prerequisites off → legacy path unchanged
+- [x] Urgent class keeps stop-and-deliver path
+- [x] Rotation when the managed subscription cannot wake; no duplicate wake after rotation
+- [x] Self-echo suppression on generic prompt follow (catch-up and live); record-only unchanged
+- [x] Dispatch coordination channel: validation, inheritance, retry, recovery copy, instructions
+- [x] Each new guard proven discriminating (remove → test red → restore)
 
 ## Acceptance criteria (draft)
 
-- [ ] With the flag off, existing messaging behavior and tests are unchanged.
-- [ ] With the flag on, an existing send creates one reusable shared channel and both
+- [x] With the flag off, existing messaging behavior and tests are unchanged. (worker: "keeps the legacy raw-prompt path…"; full route/service unit suites green)
+- [x] With the flag on, an existing send creates one reusable shared channel and both
       subscriptions without manual setup.
-- [ ] Simultaneous first sends cannot create duplicate channels/subscriptions or miss the
+- [x] Simultaneous first sends cannot create duplicate channels/subscriptions or miss the
       first event; retries never duplicate a message.
-- [ ] Publishing never wakes the publisher for its own event.
-- [ ] Recipient sees a SAM-authored notice; content is retrieved via tools with verified authorship.
-- [ ] Sender identity is token-derived; forged actor metadata and cross-project targets rejected.
-- [ ] Urgent delivery keeps its documented behavior; accepted is never reported as processed.
-- [ ] Bounded: message bytes, DM channel cardinality, subscriptions per pair, retention.
-- [ ] Coordination channel reaches children and grandchildren and survives retry/recovery.
-- [ ] Guidance is concise, at entry points, and does not claim unverified families/modes work.
+- [x] Publishing never wakes the publisher for its own event. (G1/G2 tests)
+- [x] Recipient sees a SAM-authored notice; content is retrieved via tools with verified authorship. (worker: "records the message once…")
+- [x] Sender identity is token-derived; forged actor metadata and cross-project targets rejected. (G7, cross-project test)
+- [x] Urgent delivery keeps its documented behavior; accepted is never reported as processed. (G9; receipts assert delivered:false)
+- [x] Bounded: message bytes, DM channel cardinality, subscriptions per pair, retention. (payload-cap, G10, rotation tests; retention reuses canonical event retention)
+- [x] Coordination channel reaches children and grandchildren and survives retry/recovery. (C1, C4, C5)
+- [x] Guidance is concise, at entry points, and does not claim unverified families/modes work. (instruction tests pin "not verified yet" wording)
 - [ ] Draft PR documents scope, architecture, before/after, implemented vs remaining,
       compatibility questions, checks, risks, and deferred staging validation.
 
@@ -189,3 +189,20 @@ coordination channel to descendants.
 
 - Read-only production evidence only (one D1 aggregate, one Workers Logs query); no probes,
   no mutations.
+- Commits: cbfb7f1cb refactor (pure moves), e8ff06808 messaging slice, bf5672943 coordination
+  channel + guidance, e5ee3c2d9 worker tests, fdc73c8cd dispatch/recovery/retry/instruction
+  tests, c9662c62a docs.
+- Discrimination evidence (guard removed → exactly these went red, then restored):
+  G1 live echo guard → 8 tests; G2 catch-up echo → 1; G3 changed-retry conflict precheck → 1;
+  G4 recipient wake-authority precheck → 1; G5 reserved prefix → 1; G6 rotation wake budget → 1;
+  G7 metadata nesting/precedence → 1; G8 wake prerequisite gate → 1; G9 urgent exclusion → 1;
+  G10 separate DM cap → 1; C1 dispatch inheritance → 2; C2 description section → 1;
+  C3 reserved prefix on dispatch → 1; C4 recovery copy → 1; C5 retry copy → 1;
+  C6 task-token gate → 1; C7 effective-preview gate → 1.
+- Pre-existing bug found and filed (not fixed here): SAM Idea 01M3WTZATH40CGC2JZ16201E0G —
+  `list_subscription_events`/`get_event` fail with "Project event pull match claim lost
+  contention" once a wake match is terminalized `recorded_not_injected` without a batch.
+  Reproduced locally through the MCP route. The managed messaging path avoids it by retiring an
+  exhausted subscription before publishing.
+- Formatting: only files already Prettier-clean were reformatted; `index.ts`,
+  `configuration.md` and `agents.md` (pre-existing format debt) got minimal hand edits.
