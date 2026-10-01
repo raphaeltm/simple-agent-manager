@@ -142,6 +142,37 @@ describe('absolute lifetime active-workspace preservation', () => {
     );
   });
 
+  it('holds a shared node while any of its active workspaces still needs preservation', async () => {
+    seed(sqlite, 9, 'failed');
+    sqlite
+      .prepare(
+        `INSERT INTO workspaces
+      (id, node_id, user_id, project_id, chat_session_id, status, created_at, updated_at)
+      VALUES ('second-workspace', 'old-node', 'user-1', 'project-1', 'chat-2', 'running', ?, ?)`
+      )
+      .run(node.created_at, node.created_at);
+    const result = emptyResult();
+    await sweepMaxLifetimeNodes(
+      drizzle(env.DATABASE, { schema }),
+      env,
+      now,
+      resolveCleanupConfig(env),
+      result
+    );
+    expect(result).toMatchObject({ lifetimeDestroyed: 0, lifetimeSkipped: 1 });
+    expect(sqlite.prepare(`SELECT status FROM nodes WHERE id = 'old-node'`).pluck().get()).toBe(
+      'running'
+    );
+    expect(
+      sqlite
+        .prepare(
+          `SELECT reason FROM node_health_events WHERE event = 'absolute_lifetime_preservation_requested' ORDER BY reason`
+        )
+        .pluck()
+        .all()
+    ).toEqual(['old-workspace', 'second-workspace']);
+  });
+
   it('refuses the node cleanup claim even after preservation escalation', async () => {
     seed(sqlite, 9, 'failed');
     const claimed = await claimNodeForCleanup(env, node, now.toISOString(), {
