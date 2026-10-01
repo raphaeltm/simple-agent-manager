@@ -55,6 +55,7 @@ import {
   recomputeDispatchMissionSchedulerState,
   recordDispatchActivityEvent,
 } from './dispatch-activity';
+import { buildDispatchDescription } from './dispatch-description';
 import {
   type DispatchExecutionContext,
   getRuntimeValidationError,
@@ -265,43 +266,14 @@ export async function handleDispatchTask(
     firstResourceRequirementLayerJson(resourceRequirementLayers);
   const taskRunnerResourceRequirements = firstResourceRequirementLayer(resourceRequirementLayers);
 
-  // ── Build the task description with references ──────────────────────────
-  let fullDescription = description;
-  if (references.length > 0) {
-    fullDescription += '\n\n## References\n' + references.map((r) => `- ${r}`).join('\n');
-  }
-
-  // ── Propagate active project policies to child tasks ──────────────────
-  // When dispatching within a mission, append active policies so sub-agents
-  // inherit the same rules/constraints without needing to call get_instructions.
-  if (explicitMissionId ?? currentTask.missionId) {
-    try {
-      const activePolicies = await projectDataService.getActivePolicies(env, tokenData.projectId);
-      if (activePolicies.length > 0) {
-        const categoryLabels: Record<string, string> = {
-          rule: 'RULE',
-          constraint: 'CONSTRAINT',
-          delegation: 'DELEGATION',
-          preference: 'PREFERENCE',
-        };
-        const policyLines = activePolicies.map(
-          (p) =>
-            `- [${categoryLabels[p.category] || p.category.toUpperCase()}] ${p.title}: ${p.content}`
-        );
-        fullDescription += '\n\n## Project Policies (inherited)\n' + policyLines.join('\n');
-      }
-    } catch (err) {
-      log.warn('mcp.dispatch_task.policy_propagation_failed', {
-        projectId: tokenData.projectId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  // Enforce length limit on the final description (after reference + policy concatenation)
-  if (fullDescription.length > limits.dispatchDescriptionMaxLength) {
-    fullDescription = fullDescription.slice(0, limits.dispatchDescriptionMaxLength);
-  }
+  // ── Build the task description with references (+ inherited mission policies) ──
+  const fullDescription = await buildDispatchDescription(env, {
+    projectId: tokenData.projectId,
+    description,
+    references,
+    missionId: explicitMissionId ?? currentTask.missionId ?? null,
+    maxLength: limits.dispatchDescriptionMaxLength,
+  });
 
   // ── Create the task ─────────────────────────────────────────────────────
   const taskId = ulid();
@@ -569,11 +541,16 @@ export async function handleDispatchTask(
       await requireRepositoryOwnerAccess(env, db, project, tokenData.userId, 'mcp-dispatch');
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Repository access check failed: ${errorMsg}`, {
-        env,
-        projectId: tokenData.projectId,
-        source: 'mcp.dispatch_task.instant_access_check',
-      });
+      await markTaskFailedIfNonTerminal(
+        env.DATABASE,
+        taskId,
+        `Repository access check failed: ${errorMsg}`,
+        {
+          env,
+          projectId: tokenData.projectId,
+          source: 'mcp.dispatch_task.instant_access_check',
+        }
+      );
       log.error('mcp.dispatch_task.instant_access_check_failed', {
         taskId,
         projectId: tokenData.projectId,
@@ -635,11 +612,16 @@ export async function handleDispatchTask(
     } catch (err) {
       // Session creation failed — mark task as failed
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Session creation failed: ${errorMsg}`, {
-        env,
-        projectId: tokenData.projectId,
-        source: 'mcp.dispatch_task.session_creation',
-      });
+      await markTaskFailedIfNonTerminal(
+        env.DATABASE,
+        taskId,
+        `Session creation failed: ${errorMsg}`,
+        {
+          env,
+          projectId: tokenData.projectId,
+          source: 'mcp.dispatch_task.session_creation',
+        }
+      );
       log.error('mcp.dispatch_task.session_failed', {
         taskId,
         projectId: tokenData.projectId,
@@ -720,12 +702,17 @@ export async function handleDispatchTask(
     } catch (err) {
       // TaskRunner DO startup failed — mark task as failed
       const errorMsg = err instanceof Error ? err.message : String(err);
-      await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Task runner startup failed: ${errorMsg}`, {
-        env,
-        projectId: tokenData.projectId,
-        source: 'mcp.dispatch_task.task_runner_startup',
-        sessionId,
-      });
+      await markTaskFailedIfNonTerminal(
+        env.DATABASE,
+        taskId,
+        `Task runner startup failed: ${errorMsg}`,
+        {
+          env,
+          projectId: tokenData.projectId,
+          source: 'mcp.dispatch_task.task_runner_startup',
+          sessionId,
+        }
+      );
       log.error('mcp.dispatch_task.do_startup_failed', {
         taskId,
         projectId: tokenData.projectId,
