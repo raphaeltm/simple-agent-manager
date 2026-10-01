@@ -188,4 +188,44 @@ describe('retry_subtask preserves full reservation provenance on the replacement
       sqlite.close();
     }
   });
+
+  it('keeps the child feature coordination channel on the replacement task', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createAllSchemaTables(sqlite, schema);
+      seedUser(sqlite, 'user-1');
+      seedProjectWithMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+      seedCloudCredential(sqlite, { id: 'cloud-1', userId: 'user-1', projectId: 'project-1' });
+      const env = {
+        DATABASE: createSqliteD1WithBindLimit(sqlite, 100),
+        BASE_DOMAIN: 'sammy.party',
+        BRANCH_NAME_PREFIX: 'sam/',
+        BRANCH_NAME_MAX_LENGTH: '60',
+        COMPUTE_QUOTA_ENFORCEMENT_ENABLED: 'false',
+      } as Env;
+      await ensureDefaultCapacityPoolsForExistingCredentials(drizzle(env.DATABASE, { schema }), {
+        userId: 'user-1',
+        projectId: 'project-1',
+        includeInstallation: false,
+      });
+      seedTask(sqlite, { id: 'parent-task-1', parentTaskId: null, status: 'in_progress' });
+      seedTask(sqlite, { id: 'child-1', parentTaskId: 'parent-task-1', status: 'failed' });
+      sqlite
+        .prepare(`UPDATE tasks SET coordination_channel = 'feature.retry' WHERE id = 'child-1'`)
+        .run();
+
+      const response = await handleRetrySubtask(1, { taskId: 'child-1' }, TOKEN, env);
+      expect(response.error).toBeUndefined();
+      expect(
+        sqlite
+          .prepare(
+            `SELECT coordination_channel FROM tasks
+              WHERE parent_task_id = 'parent-task-1' AND id != 'child-1'`
+          )
+          .get()
+      ).toEqual({ coordination_channel: 'feature.retry' });
+    } finally {
+      sqlite.close();
+    }
+  });
 });
