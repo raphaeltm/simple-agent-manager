@@ -107,14 +107,25 @@ coordination channel to descendants.
 
 ### Remaining (documented in the PR, not implemented)
 - Staging/live validation of everything above (deferred by the task boundary).
-- Messaging targets that are sleeping or have no running agent session (draft keeps the
-  existing target eligibility).
+- Target eligibility is unchanged: the channel path accepts a sleeping recipient chat and
+  queues its wake (tested), but the existing tool target resolution still decides which
+  tasks can be messaged, and restoring a genuinely sleeping session on delivery is unverified.
 - Urgent classes over channels (need per-message urgency on a shared subscription).
 - Messages > 4096 bytes (rejected with an actionable error when enabled).
 - Sender-visible receipt progression (notified/fetched/acked) and UI attribution of notices.
 - Migration/drain of in-flight legacy mailbox entries is not needed (one path per message),
   but rollout/rollback observation is.
-- SAM-session (top-level SAM agent) dispatch/retry tools do not carry `coordinationChannel`.
+- SAM-session (top-level SAM agent) `dispatch_task` does not accept `coordinationChannel`
+  (its `retry_subtask` copies it).
+- Known limit: a managed subscription that has used its wake budget is retired even when its
+  last wake is still queued, which fails that wake (messages stay in channel history).
+  Keeping it active would also match new messages and hit the pull bug in Idea
+  01M3WTZATH40CGC2JZ16201E0G; a clean fix needs canonical "stop matching, keep delivering".
+- Activation prerequisite: the `AGENT_MESSAGE_*` vars are not yet in
+  `getOptionalProcessEnvVars` (`scripts/deploy/sync-wrangler-config.ts`) or the
+  `wrangler_sync_env` mapping (`.github/workflows/deploy-reusable.yml`), so a GitHub
+  Environment value cannot reach the Worker. Add them (and list overrides per rule 70)
+  before enabling anywhere.
 - Following a not-yet-published channel; adoption/delivery measurement.
 
 ## Implementation checklist
@@ -152,6 +163,20 @@ coordination channel to descendants.
 - [x] `.claude/commands/workflow.md`, `.claude/commands/do.md`
 - [x] `apps/api/.env.example` + env reference skill
 
+### Review fixes (Phase 5)
+- [x] Pair-channel events match only participant subscriptions (security HIGH)
+- [x] `follow_event_channel` rejects `agent-dm.`; `sam-agent-message:` subscription keys reserved
+- [x] Managed subscriptions limited to a share of the project cap with idle-LRU release
+      (`agent-message-subscriptions.ts`; security/performance MEDIUM)
+- [x] Indexed pending-wake check (cloudflare LOW/MEDIUM)
+- [x] Oversized/over-deep stored envelope rejected before any write as `rejected`, not
+      retryable `capacity` (test-engineer MEDIUM)
+- [x] Inactive recipient chat reported as `recipient_unavailable` via one typed error across
+      the DO boundary (rule 72)
+- [x] Generated pair name re-validated against the configured name limit (constitution LOW)
+- [x] SAM-session `retry_subtask` copies `coordination_channel` (cloudflare MEDIUM)
+- [x] api-reference skill, API/config/env docs updated
+
 ### Tests
 - [x] Worker test via real MCP route: A→B creates one channel + two subscriptions, recipient
       matched, sender not matched, SAM notice materialized for recipient only
@@ -166,6 +191,14 @@ coordination channel to descendants.
 - [x] Rotation when the managed subscription cannot wake; no duplicate wake after rotation
 - [x] Self-echo suppression on generic prompt follow (catch-up and live); record-only unchanged
 - [x] Dispatch coordination channel: validation, inheritance, retry, recovery copy, instructions
+- [x] Sleeping recipient queued; inactive recipient refused with nothing committed; reply wakes
+      the original sender who reads verified authorship (test-engineer HIGH x3)
+- [x] Replay after rotation; rotation records why it ended the old match
+- [x] Envelope too deep / too large; lowered name limit fails closed
+- [x] Third-party subscriber not woken by a pair (with coordination-channel liveness control);
+      follow and reserved key refused
+- [x] Capacity share: busy share refuses visibly and rolls back, idle share is released, the
+      released pair resumes; least recently matched released first
 - [x] Each new guard proven discriminating (remove → test red → restore)
 
 ## Acceptance criteria (draft)
@@ -204,5 +237,11 @@ coordination channel to descendants.
   contention" once a wake match is terminalized `recorded_not_injected` without a batch.
   Reproduced locally through the MCP route. The managed messaging path avoids it by retiring an
   exhausted subscription before publishing.
+- Review-fix discrimination (guard removed → exactly these went red, then restored):
+  G11a DO recipient-chat check → 1; G11b typed recipient category → 1; G12 envelope precheck →
+  2; G13 participant-only matching → 1; G14 follow guard → 1; G15 reserved key prefix → 1;
+  G16a share enforced → 2; G16b busy never released → 1; G16c LRU order → 1; G17 name
+  re-validation → 1; C8 SAM-session retry copy → 1. Results: `.tmp/discrimination-results-3.json`.
+- Full worker suite before the review fixes: 1284/1284 passed (100 files, 30 min).
 - Formatting: only files already Prettier-clean were reformatted; `index.ts`,
   `configuration.md` and `agents.md` (pre-existing format debt) got minimal hand edits.
