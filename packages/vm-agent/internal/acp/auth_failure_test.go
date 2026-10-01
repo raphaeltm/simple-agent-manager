@@ -17,15 +17,17 @@ func TestClassifyPromptFailure(t *testing.T) {
 		{"unsupported model after successful login", "Provider HTTP 400 unsupported_model with ChatGPT account " + canary, "model_unavailable"},
 		{"Claude provider rejection", "Provider HTTP 401 invalid authentication " + canary, "model_provider_credential_rejected"},
 		{"Codex provider rejection", "API Error: 401 invalid_api_key " + canary, "model_provider_credential_rejected"},
-		{"MCP endpoint", "MCP service returned HTTP 401 " + canary, "mcp_endpoint_needs_auth"},
-		{"MCP loopback OAuth", "MCP OAuth loopback callback required at http://localhost:1234/?token=" + canary, "unsupported_loopback_auth"},
+		{"MCP structural reason", "mcp_endpoint_needs_auth", "mcp_endpoint_needs_auth"},
+		{"untrusted MCP 401 wrapper", "MCP service returned HTTP 401 " + canary, ""},
+		{"untrusted loopback reason text", "unsupported_loopback_auth", ""},
+		{"untrusted loopback wrapper", "MCP OAuth loopback callback required at http://localhost:1234/?token=" + canary, ""},
 		{"generic bad request", "Provider HTTP 400 bad request", ""},
 		{"MCP network failure", "MCP connection refused", ""},
 		{"generic provider timeout", "Provider HTTP 504 timeout", ""},
 		{"generic unauthorized tool output", "Tool text says unauthorized file", ""},
 		{"metadata cannot spoof model", "Provider HTTP 400 url=https://evil.example/unsupported_model", ""},
 		{"schema cannot spoof MCP", "Provider HTTP 400 schema=mcp_endpoint_needs_auth", ""},
-		{"MCP 401 is not model auth", "MCP service returned HTTP 401 API Error: 401", "mcp_endpoint_needs_auth"},
+		{"MCP 401 is not model auth", "MCP service returned HTTP 401 API Error: 401", ""},
 		{"provider overload", "Provider HTTP 429 rate limit " + canary, "provider_overloaded"},
 		{"provider outage", "API Error: HTTP 503 overloaded " + canary, "provider_overloaded"},
 		{"agent process crash", "Agent process exited unexpectedly " + canary, "agent_crash"},
@@ -53,8 +55,10 @@ func TestFetchAgentKeyMissingCredentialIsDistinctFromControlPlaneFailure(t *test
 		body    string
 		missing bool
 	}{
-		{"not found", http.StatusNotFound, "", true},
-		{"empty credential", http.StatusOK, `{}`, true},
+		{"credential not found", http.StatusNotFound, `{"error":"NOT_FOUND","message":"Agent credential not found"}`, true},
+		{"workspace not found", http.StatusNotFound, `{"error":"NOT_FOUND","message":"Workspace not found"}`, false},
+		{"unspecified not found", http.StatusNotFound, "", false},
+		{"empty credential response", http.StatusOK, `{}`, false},
 		{"control plane error", http.StatusServiceUnavailable, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -78,6 +78,7 @@ describe('classifyFailure', () => {
     'MCP tool failed for a network error',
     'The agent mentioned an unauthorized file while working',
     'Sign-in cancelled by the user',
+    'MCP OAuth loopback callback required at http://localhost:1234',
   ])('does not prescribe credential changes for %s', (message) => {
     expect(classifyFailure(message).code).not.toMatch(/model-credential|mcp-auth-required/);
   });

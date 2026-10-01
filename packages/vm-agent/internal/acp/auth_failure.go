@@ -19,12 +19,7 @@ func ClassifyPromptFailure(message string) string {
 				(strings.Contains(text, "model") && (strings.Contains(text, "not supported") || strings.Contains(text, "not available for"))))) {
 		return "model_unavailable"
 	}
-	if text == "unsupported_loopback_auth" ||
-		(strings.HasPrefix(text, "mcp ") && strings.Contains(text, "loopback") && strings.Contains(text, "callback") && strings.Contains(text, "oauth")) {
-		return "unsupported_loopback_auth"
-	}
-	if text == "mcp_endpoint_needs_auth" ||
-		(strings.HasPrefix(text, "mcp ") && (strings.Contains(text, "http 401") || strings.Contains(text, "unauthorized") || strings.Contains(text, "needs authentication"))) {
+	if text == "mcp_endpoint_needs_auth" {
 		return "mcp_endpoint_needs_auth"
 	}
 	if text == "model_provider_credential_rejected" ||

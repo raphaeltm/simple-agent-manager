@@ -50,10 +50,12 @@ func (h *SessionHost) selectAgent(ctx context.Context, agentType string, require
 
 	cred, err := h.fetchAgentKey(ctx, agentType)
 	if err != nil {
-		message := fmt.Sprintf("Failed to fetch credential for %s — check Settings", agentType)
+		message := "Agent connection could not be checked"
 		if errors.Is(err, errAgentCredentialMissing) {
 			message = "model_provider_credential_missing"
 			err = errAgentCredentialMissing
+		} else {
+			err = errors.New("agent credential lookup failed")
 		}
 		h.failAgentSelection(agentType, "agent_key_fetch", message, err)
 		return err

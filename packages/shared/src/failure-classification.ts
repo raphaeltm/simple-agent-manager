@@ -125,7 +125,7 @@ const FAILURE_RULES: FailureRule[] = [
     guidance: 'Use a connection method supported by that service. This session cannot complete its local callback flow.',
     retryable: false,
     diagnosable: true,
-    patterns: [/\bunsupported_loopback_auth\b/, /\bloopback[_ -]callback[_ -]unsupported\b/],
+    patterns: [/\bunsupported_loopback_auth\b/],
   },
   {
     code: 'mcp-auth-required',
