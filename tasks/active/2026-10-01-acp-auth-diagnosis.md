@@ -31,6 +31,8 @@ The VM only identifies a missing connection when the existing agent-key endpoint
 
 For provider failures, the VM reads the pinned ACP SDK's top-level `RequestError` (`-32603`, `Internal error`) and the pinned Claude adapter's categorical `Data.errorKind`; it emits only a bounded reason code. Claude `authentication_failed` means rejected provider credentials and `model_not_found` means unavailable model; ambiguous categories remain generic. Adjacent tests cover SDK error → prompt broadcast, callback sanitization, shared classification, and the real chat. The pinned Codex adapter holds MCP `reauthenticationRequired` internally but forwards only failed tool-call text over ACP, so SAM has no trusted MCP auth signal on the wire; this slice does not infer MCP auth from that prose. Existing GPT-6.1 provider HTTP 400 unsupported-model evidence after successful ACP selection is model availability, not credential failure.
 
+Review correction: the missing-connection startup banner remains visible when the same selection failure has set `task.errorMessage`. It requires the exact VM-authored `system` transcript message; assistant/tool content cannot trigger it. The exact `agent_prompt_failed` task reason shows retry/debug guidance without suggesting a credential change, including when unrelated execution-step text mentions authentication.
+
 ## Verification
 
 - Shared failure-classification tests: 47 passed. Web failure-card tests: 21 passed. VM agent `go test ./...` and local mock/Worker VM smoke passed; focused SDK callback, prompt broadcast, and credential tests passed after final edits. Smoke fixtures now use the current API error envelope and fixed reason code.

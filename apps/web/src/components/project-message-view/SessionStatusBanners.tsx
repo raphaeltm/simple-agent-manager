@@ -8,17 +8,15 @@ import { WakeProgressBanner } from './WakeProgressBanner';
 /** The status strips stacked above the conversation: connection, resume and wake. */
 export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleResult }>) {
   let missingAgentConnection = false;
-  if (!lc.taskEmbed?.errorMessage) {
-    // Match only the VM's fixed system transcript. Assistant/tool prose must
-    // never create credential guidance; a later conversation turn clears it.
-    for (let i = lc.messages.length - 1; i >= 0; i--) {
-      const message = lc.messages[i];
-      if (!message) break;
-      if (message.role !== 'system') break;
-      if (message.content === 'Agent startup failed because its provider connection is missing.') {
-        missingAgentConnection = true;
-        break;
-      }
+  // The selection failure also sets the task error, so that error must not
+  // suppress its persisted transcript guidance. Only the VM's fixed system
+  // message has this provenance; assistant/tool prose cannot trigger the CTA.
+  for (let i = lc.messages.length - 1; i >= 0; i--) {
+    const message = lc.messages[i];
+    if (!message || message.role !== 'system') break;
+    if (message.content === 'Agent startup failed because its provider connection is missing.') {
+      missingAgentConnection = true;
+      break;
     }
   }
   return (

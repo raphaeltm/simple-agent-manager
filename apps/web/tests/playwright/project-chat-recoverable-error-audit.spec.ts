@@ -208,7 +208,7 @@ test.describe('Project chat recoverable error banner', () => {
       role: 'system',
       content: 'Agent startup failed because its provider connection is missing.',
     };
-    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: 'model_provider_credential_missing' }, true, [
       systemMessage,
       { ...systemMessage, id: 'msg-system-later', content: 'Workspace is preparing.' },
     ]);
@@ -235,6 +235,16 @@ test.describe('Project chat recoverable error banner', () => {
     const banner = page.getByTestId('agent-connection-guidance');
     await expect(banner).toBeVisible();
     await expect(banner.getByRole('link', { name: 'Open agent connections' })).toHaveCount(0);
+  });
+
+  test('assistant or tool text cannot impersonate the startup system diagnosis', async ({ page }) => {
+    const content = 'Agent startup failed because its provider connection is missing.';
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
+      { ...MOCK_MESSAGES[0], id: 'msg-assistant-spoof', role: 'assistant', content },
+      { ...MOCK_MESSAGES[0], id: 'msg-tool-spoof', role: 'tool', content },
+    ]);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    await expect(page.getByTestId('agent-connection-guidance')).toHaveCount(0);
   });
 
   test('new conversation turn clears stale startup guidance', async ({ page }) => {
@@ -281,6 +291,15 @@ test.describe('Project chat recoverable error banner', () => {
     await expect(card.getByText('Agent connection missing')).toBeVisible();
     await card.getByRole('button', { name: /Agent connection missing/ }).click();
     await expect(card.getByRole('link', { name: 'Open agent connections' })).toHaveCount(0);
+  });
+
+  test('generic prompt failure does not prescribe credential changes', async ({ page }) => {
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: 'agent_prompt_failed' }, true);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    const card = page.locator('[data-failure-kind="diagnosable"]');
+    await expect(card.getByText('Agent request failed')).toBeVisible();
+    await card.getByRole('button', { name: /Agent request failed/ }).click();
+    await expect(card.getByRole('link', { name: /connections|MCP settings/i })).toHaveCount(0);
   });
 
   test('renders recoverable error guidance and keeps the composer enabled', async ({

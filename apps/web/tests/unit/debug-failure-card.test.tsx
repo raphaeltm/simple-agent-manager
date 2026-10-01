@@ -67,6 +67,14 @@ const defaultEvents = [
 ];
 
 describe('FailureCard', () => {
+  it('shows safe generic prompt guidance without a credential settings action', async () => {
+    renderWithQuery(
+      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed({ errorMessage: 'agent_prompt_failed' })}
+        isSessionCreator />
+    );
+    expect(screen.getByText('Agent request failed')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /connections|MCP settings/i })).not.toBeInTheDocument();
+  });
   beforeEach(() => {
     mocks.useAuth.mockReturnValue({ isSuperadmin: false });
     mocks.listTaskEvents.mockResolvedValue({ events: defaultEvents });

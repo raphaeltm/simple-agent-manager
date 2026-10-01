@@ -23,6 +23,7 @@ export type FailureCode =
   | 'unsupported-loopback-auth'
   | 'model-unavailable'
   | 'provider-overload'
+  | 'agent-prompt-failed'
   | 'prompt-timeout'
   | 'agent-crash'
   | 'runtime-lost'
@@ -143,6 +144,15 @@ const FAILURE_RULES: FailureRule[] = [
     retryable: true,
     diagnosable: true,
     patterns: [/^model_provider_credential_missing$/],
+  },
+  {
+    code: 'agent-prompt-failed',
+    label: 'Agent request failed',
+    explanation: 'The agent could not complete this request. The cause is not yet known.',
+    guidance: 'Retry the request. If it fails again, copy the debug report for investigation.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [/^agent_prompt_failed$/],
   },
   {
     code: 'model-credential-rejected',
@@ -324,7 +334,7 @@ const UNKNOWN_CLASSIFICATION: FailureClassification = {
 
 const AUTH_FAILURE_CODES = new Set<FailureCode>([
   'model-unavailable', 'unsupported-loopback-auth', 'mcp-auth-required',
-  'model-credential-missing', 'model-credential-rejected',
+  'model-credential-missing', 'model-credential-rejected', 'agent-prompt-failed',
 ]);
 
 function boundedAuthEvidence(message: string | null | undefined): string {

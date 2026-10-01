@@ -3,6 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { classifyFailure } from '../../src/failure-classification';
 
 describe('classifyFailure', () => {
+  it('keeps an unclassified prompt failure generic even when step metadata looks like auth', () => {
+    expect(classifyFailure('agent_prompt_failed', 'model_provider_credential_missing')).toMatchObject({
+      code: 'agent-prompt-failed',
+      label: 'Agent request failed',
+    });
+    expect(classifyFailure('Tool output: agent_prompt_failed').code).not.toBe('agent-prompt-failed');
+  });
   it.each([
     ['cancelled', 'Task was cancelled by the user'],
     ['input-expired', 'Human input request expired after timeout'],
