@@ -8,6 +8,7 @@ import { WakeProgressBanner } from './WakeProgressBanner';
 /** The status strips stacked above the conversation: connection, resume and wake. */
 export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleResult }>) {
   let missingAgentConnection = false;
+  let unsupportedLoopbackAuth = false;
   // The selection failure also sets the task error, so that error must not
   // suppress its persisted transcript guidance. Only the VM's fixed system
   // message has this provenance; assistant/tool prose cannot trigger the CTA.
@@ -16,7 +17,9 @@ export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleR
     if (!message || message.role !== 'system') break;
     if (message.content === 'Agent startup failed because its provider connection is missing.') {
       missingAgentConnection = true;
-      break;
+    }
+    if (message.content === 'This sign-in flow requires a local callback that this session cannot complete.') {
+      unsupportedLoopbackAuth = true;
     }
   }
   return (
@@ -31,6 +34,20 @@ export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleR
             <a href="/settings/connections"
               className="inline-flex items-center rounded-md border border-border-default px-3 py-2 font-medium text-accent no-underline hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary">
               Open agent connections
+            </a>
+          )}
+        </div>
+      )}
+      {unsupportedLoopbackAuth && (
+        <div role="alert" data-testid="loopback-auth-guidance"
+          className="flex flex-col items-start gap-2 border-b border-border-default bg-danger-tint px-4 py-2 text-xs text-danger-fg sm:flex-row sm:items-center">
+          <span className="min-w-0 flex-1">This sign-in flow needs a local callback that this session cannot complete. {lc.session?.isMine === true
+            ? 'Review your MCP connection for a supported sign-in method.'
+            : 'Ask the session creator to review the MCP connection.'}</span>
+          {lc.session?.isMine === true && (
+            <a href="/settings/mcp-servers"
+              className="inline-flex items-center rounded-md border border-border-default px-3 py-2 font-medium text-accent no-underline hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary">
+              Review MCP connections
             </a>
           )}
         </div>

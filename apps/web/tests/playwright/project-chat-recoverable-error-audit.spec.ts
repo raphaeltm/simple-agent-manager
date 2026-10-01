@@ -264,6 +264,59 @@ test.describe('Project chat recoverable error banner', () => {
     await expect(page.getByTestId('agent-connection-guidance')).toHaveCount(0);
   });
 
+  test('creator sees fixed loopback guidance and reaches existing MCP settings', async ({ page }, testInfo) => {
+    const systemMessage = {
+      ...MOCK_MESSAGES[0], id: 'msg-system-loopback', role: 'system',
+      content: 'This sign-in flow requires a local callback that this session cannot complete.',
+    };
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
+      systemMessage,
+      { ...systemMessage, id: 'msg-system-later', content: 'Workspace is preparing.' },
+    ]);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    const banner = page.getByTestId('loopback-auth-guidance');
+    await expect(banner).toBeVisible();
+    const link = banner.getByRole('link', { name: 'Review MCP connections' });
+    await expect(link).toHaveAttribute('href', '/settings/mcp-servers');
+    await assertNoHorizontalOverflow(page);
+    await screenshot(page, `acp-loopback-auth-${testInfo.project.name.includes('Desktop') ? 'desktop' : 'mobile'}`);
+    await link.click();
+    await expect(page).toHaveURL(/\/settings\/mcp-servers$/);
+  });
+
+  test('loopback guidance is creator-gated and cannot be spoofed by assistant or tool text', async ({ page }) => {
+    const content = 'This sign-in flow requires a local callback that this session cannot complete.';
+    const message = { ...MOCK_MESSAGES[0], id: 'msg-loopback', content };
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, false, [
+      { ...message, role: 'system' },
+    ]);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    const banner = page.getByTestId('loopback-auth-guidance');
+    await expect(banner).toBeVisible();
+    await expect(banner.getByRole('link')).toHaveCount(0);
+
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
+      { ...message, id: 'msg-assistant-spoof', role: 'assistant' },
+      { ...message, id: 'msg-tool-spoof', role: 'tool' },
+    ]);
+    await page.reload();
+    await expect(page.getByTestId('loopback-auth-guidance')).toHaveCount(0);
+  });
+
+  test('new turn clears loopback guidance even after an unrelated system row', async ({ page }) => {
+    const message = {
+      ...MOCK_MESSAGES[0], id: 'msg-system-loopback', role: 'system',
+      content: 'This sign-in flow requires a local callback that this session cannot complete.',
+    };
+    await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
+      message,
+      { ...message, id: 'msg-user-later', role: 'user', content: 'I tried another method.' },
+      { ...message, id: 'msg-system-later', content: 'Workspace is preparing.' },
+    ]);
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+    await expect(page.getByTestId('loopback-auth-guidance')).toHaveCount(0);
+  });
+
   test('creator can open existing auth settings from a classified chat failure', async ({ page }, testInfo) => {
     await setupApiMocks(page, {
       ...MOCK_TASK,
