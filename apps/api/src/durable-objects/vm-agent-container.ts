@@ -1192,6 +1192,9 @@ export class VmAgentContainer extends Container<Env> {
     const snapshotDegradation = snapshot?.degradation ?? null;
     if (
       !isSessionSnapshotSleepReleasable(snapshot) ||
+      snapshot.status !== 'available' ||
+      snapshot.degradation !== 'none' ||
+      snapshot.captureGeneration !== null ||
       !snapshot.snapshotGeneration ||
       !liveAgentSession ||
       snapshot.workspaceId !== config.workspaceId ||
@@ -1251,10 +1254,6 @@ export class VmAgentContainer extends Container<Env> {
       await projectDataService.sleepSession(this.env, config.projectId, config.chatSessionId);
       await persistRuntimeSleeping(this.env, config);
       if (!(snapshot.sleepStatus === 'sleeping' && snapshot.sleepingAt)) {
-        const sleepWarning =
-          snapshot.status === 'degraded'
-            ? `Workspace slept with degraded snapshot (${snapshot.degradation})`
-            : null;
         if (
           !(await finalizeSessionSnapshotSleeping(
             db,
@@ -1262,7 +1261,7 @@ export class VmAgentContainer extends Container<Env> {
             config.chatSessionId,
             claimId,
             new Date(),
-            { sleepWarning, expectedGeneration: snapshotGeneration }
+            { expectedGeneration: snapshotGeneration }
           ))
         ) {
           throw new Error('Container sleep finalization lost its durable claim');

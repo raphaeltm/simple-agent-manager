@@ -101,7 +101,10 @@ describe('absolute lifetime active-workspace preservation', () => {
       return { runtimeTerminationConfirmedAt: proof, runtimeIncarnationId: null };
     });
   });
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    vi.useRealTimers();
+    sqlite.close();
+  });
 
   it('holds the old-node shape with home-skipped and nine failed attempts even after escalation', async () => {
     seed(sqlite, 9, 'failed');
@@ -149,7 +152,9 @@ describe('absolute lifetime active-workspace preservation', () => {
   });
 
   it('does not pull a future failed-sleep retry forward during repeated cleanup sweeps', async () => {
-    const retryAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const retryAt = new Date(now.getTime() + 5 * 60_000).toISOString();
     seed(sqlite, 2, 'failed', retryAt);
     sqlite
       .prepare(
