@@ -100,6 +100,15 @@ export async function prepareAbsoluteLifetimeRelease(
       continue;
     }
 
+    const blockedReason = `${workspace.id}:${workspace.chat_session_id ?? ''}:${workspace.snapshot_generation ?? ''}:${workspace.snapshot_status ?? 'missing'}:${workspace.degradation ?? 'unknown'}:${attempts}`;
+    const recorded = await env.DATABASE.prepare(
+      `SELECT 1 FROM node_health_events
+       WHERE node_id = ? AND episode_started_at = ? AND event = ? AND reason = ? LIMIT 1`
+    )
+      .bind(node.id, episode, BLOCKED, blockedReason)
+      .first();
+    if (recorded) continue;
+
     // Exhausted attempts or elapsed budget is an escalation, never authority
     // to discard an uncaptured agent home. A separate verified migration or
     // owner-directed operation is required to release this active workspace.
@@ -124,7 +133,7 @@ export async function prepareAbsoluteLifetimeRelease(
       nodeId: node.id,
       episodeStartedAt: episode,
       event: BLOCKED,
-      reason: `${workspace.id}:${workspace.chat_session_id ?? ''}:${workspace.snapshot_generation ?? ''}:${workspace.snapshot_status ?? 'missing'}:${workspace.degradation ?? 'unknown'}:${attempts}`,
+      reason: blockedReason,
       createdAt: nowIso,
     });
     log.error('node_cleanup.absolute_lifetime_preservation_blocked', {

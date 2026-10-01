@@ -110,6 +110,8 @@ describe('absolute lifetime active-workspace preservation', () => {
         .pluck()
         .all()
     ).toContain('absolute_lifetime_preservation_blocked');
+    await prepareAbsoluteLifetimeRelease(env, node, now, config);
+    expect(mocks.message).toHaveBeenCalledTimes(1);
   });
 
   it('queues a bounded capture attempt while retaining the active workspace', async () => {
@@ -140,6 +142,9 @@ describe('absolute lifetime active-workspace preservation', () => {
     expect(sqlite.prepare(`SELECT status FROM nodes WHERE id = 'old-node'`).pluck().get()).toBe(
       'running'
     );
+    expect(
+      sqlite.prepare(`SELECT cleanup_backoff_until FROM nodes WHERE id = 'old-node'`).pluck().get()
+    ).toEqual(expect.any(String));
   });
 
   it('holds a shared node while any of its active workspaces still needs preservation', async () => {
@@ -171,6 +176,42 @@ describe('absolute lifetime active-workspace preservation', () => {
         .pluck()
         .all()
     ).toEqual(['old-workspace', 'second-workspace']);
+  });
+
+  it('prioritizes empty nodes ahead of protected old nodes in a bounded candidate page', async () => {
+    seed(sqlite, 9, 'failed');
+    sqlite
+      .prepare(
+        `INSERT INTO nodes
+      (id, user_id, status, node_role, node_class, created_at, updated_at)
+      VALUES ('empty-node', 'user-1', 'running', 'workspace', 'managed',
+        '2026-09-30T01:00:00.000Z', '2026-09-30T01:00:00.000Z')`
+      )
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO tasks (id, auto_provisioned_node_id, created_at, updated_at)
+      VALUES ('task-2', 'empty-node', '2026-09-30T01:00:00.000Z', '2026-09-30T01:00:00.000Z')`
+      )
+      .run();
+    const result = emptyResult();
+    await sweepMaxLifetimeNodes(
+      drizzle(env.DATABASE, { schema }),
+      env,
+      now,
+      {
+        ...resolveCleanupConfig(env),
+        nodeSweepLimit: 1,
+      },
+      result
+    );
+    expect(
+      sqlite
+        .prepare(`SELECT count(*) FROM node_health_events WHERE node_id = 'old-node'`)
+        .pluck()
+        .get()
+    ).toBe(0);
+    expect(result.lifetimeSkipped + result.lifetimeDestroyed + result.errors).toBe(1);
   });
 
   it('refuses the node cleanup claim even after preservation escalation', async () => {

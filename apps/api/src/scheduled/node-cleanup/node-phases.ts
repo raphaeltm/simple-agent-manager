@@ -24,6 +24,7 @@ import {
   destroyNodeForCleanup,
   getNodeWorkspaceIdleThresholdIso,
   LAST_WORKSPACE_ACTIVITY_SQL,
+  markNodeCleanupBackoff,
   type NodeCleanupResult,
 } from './shared';
 
@@ -159,7 +160,7 @@ export async function sweepMaxLifetimeNodes(
        ${boundedWarmPlacementClaimGuardSql('n.id')}
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at
-     ORDER BY n.created_at ASC
+     ORDER BY active_ws_count ASC, n.created_at ASC
      LIMIT ?`
   )
     .bind(now.toISOString(), idleThreshold, lifetimeThreshold, config.nodeSweepLimit)
@@ -214,6 +215,11 @@ export async function sweepMaxLifetimeNodes(
     if (viaAbsoluteCeiling) {
       try {
         if (!(await prepareAbsoluteLifetimeRelease(env, node, now, config))) {
+          await markNodeCleanupBackoff(
+            env,
+            node.id,
+            new Date(now.getTime() + config.failureBackoffMs).toISOString()
+          );
           result.lifetimeSkipped++;
           continue;
         }
