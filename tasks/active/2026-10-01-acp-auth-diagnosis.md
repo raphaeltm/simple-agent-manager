@@ -21,7 +21,7 @@ Session failures need to distinguish agent credential problems, MCP endpoint aut
 - [x] Add real-chat Playwright click tests on mobile and desktop and personally inspect screenshots.
 - [x] Update public agent/MCP troubleshooting guidance.
 - [x] Finish full checks and specialist validation.
-- [ ] Create draft PR and send exact handoff evidence to coordinator before staging.
+- [x] Create draft PR [#2209](https://github.com/raphaeltm/simple-agent-manager/pull/2209) and send exact handoff evidence to coordinator before staging.
 
 ## Acceptance / limits
 
