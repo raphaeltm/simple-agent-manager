@@ -17,7 +17,6 @@ import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
 import {
-  failedTaskIncompleteSnapshotMessage,
   failedTaskNoticeId,
   failedTaskWorkLossMessage,
 } from '../../src/services/failed-task-preservation';
@@ -327,7 +326,16 @@ describe('failed-task work preservation vertical slice', () => {
             WIP_SHA256,
             `${prefix}/manifest.json`,
             JSON.stringify({
-              artifacts: { home: { sizeBytes: 4 }, wip: { sizeBytes: 9, sha256: WIP_SHA256 } },
+              version: 1,
+              chatSessionId: 'chat-1',
+              workspaceId: 'workspace-1',
+              agentSessionId: 'agent-1',
+              status: 'available',
+              degradation: 'none',
+              artifacts: {
+                home: { sizeBytes: 4, sha256: HOME_SHA256 },
+                wip: { sizeBytes: 9, sha256: WIP_SHA256 },
+              },
             })
           );
       }
@@ -422,36 +430,26 @@ describe('failed-task work preservation vertical slice', () => {
     expect(mocks.failSession).not.toHaveBeenCalled();
   });
 
-  it('surfaces an incomplete snapshot instead of implying the work was saved', async () => {
+  it('retains a failed task runtime when its final snapshot lacks the agent home', async () => {
     seedFailedTask('vm');
     capture = 'transcript-only';
 
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
     const sweep = await runSessionSleepSweep(env, START);
 
-    expect(sweep).toMatchObject({ slept: 1 });
+    expect(sweep).toMatchObject({ slept: 0, failed: 1 });
     expect(snapshotRow()).toMatchObject({
       status: 'degraded',
       degradation: 'transcript-only',
-      sleep_status: 'sleeping',
+      sleep_status: 'failed',
     });
-    expect(mocks.persistMessage).toHaveBeenCalledWith(
-      env,
-      'project-1',
-      'chat-1',
-      'system',
-      failedTaskIncompleteSnapshotMessage('transcript-only', 'vm'),
-      null,
-      failedTaskNoticeId('snapshot-incomplete', 'task-1', 'chat-1')
-    );
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(statusOf('workspaces', 'workspace-1')).toBe('running');
+    expect(mocks.persistMessage).not.toHaveBeenCalled();
     expect(mocks.failSession).not.toHaveBeenCalled();
   });
 
-  it('says so when an Instant container sleeps a failed task on its own idle timeout', async () => {
-    // Staging, 2026-09-25: the container's own idle sleep won the race with the
-    // sweep 22s after the failure, from a checkpoint whose WIP bundle had failed.
-    // That path finalizes through the same writer (as `VmAgentContainer` calls it),
-    // so the chat still hears that the files were not captured.
+  it('refuses a legacy degraded Instant stopping claim during checked finalization', async () => {
     seedFailedTask('cf-container');
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
     sqlite
@@ -472,20 +470,13 @@ describe('failed-task work preservation vertical slice', () => {
         START,
         {
           sleepWarning: 'Workspace slept with degraded snapshot (wip-skipped)',
+          expectedGeneration: 'generation-final',
         }
       )
-    ).resolves.toBe(true);
+    ).resolves.toBe(false);
 
-    expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping', degradation: 'wip-skipped' });
-    expect(mocks.persistMessage).toHaveBeenCalledWith(
-      env,
-      'project-1',
-      'chat-1',
-      'system',
-      failedTaskIncompleteSnapshotMessage('wip-skipped', 'cf-container'),
-      null,
-      failedTaskNoticeId('snapshot-incomplete', 'task-1', 'chat-1')
-    );
+    expect(snapshotRow()).toMatchObject({ sleep_status: 'stopping', degradation: 'wip-skipped' });
+    expect(mocks.persistMessage).not.toHaveBeenCalled();
     expect(mocks.failSession).not.toHaveBeenCalled();
   });
 
