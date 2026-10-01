@@ -19,8 +19,9 @@ func TestTaskCallbackAuthFailureUsesOnlyReasonCode(t *testing.T) {
 func TestTaskCallbackPinnedSDKErrorUsesOnlyReasonCode(t *testing.T) {
 	const canary = "sk-secret-canary-123456789"
 	err := acpsdk.NewInternalError(map[string]any{
-		"error": "API Error: 400 unsupported_model with ChatGPT account",
-		"url":   "https://evil.example/?token=" + canary,
+		"errorKind": "model_not_found",
+		"error":     "API Error: 401 invalid authentication",
+		"url":       "https://evil.example/?token=" + canary,
 	})
 	if got := taskCallbackErrorMessage(err); got != "model_unavailable" || strings.Contains(got, canary) {
 		t.Fatalf("unsafe SDK callback reason: %q", got)
