@@ -31,7 +31,7 @@ The VM only identifies a missing connection when the existing agent-key endpoint
 
 ## Verification
 
-- Shared failure-classification tests: 41 passed. Web failure-card tests: 21 passed. VM agent `go test ./...` passed; focused callback and credential tests passed after final edits.
+- Shared failure-classification tests: 41 passed. Web failure-card tests: 21 passed. VM agent `go test ./...` and local mock/Worker VM smoke passed; focused callback and credential tests passed after final edits. Smoke fixtures now use the current API error envelope and fixed reason code.
 - Root lint, typecheck, and build passed. Root test had three API timeouts under parallel load; the exact three files passed on isolated rerun (104 tests).
 - Real-chat Playwright includes creator/member restrictions, actual settings navigation, trailing-status persistence, and clearing after a new turn across phone, tablet, and desktop viewports. Reviewed screenshots are under `tasks/evidence/acp-slice-d/`.
 - Security/Go, UI/docs, constitution, and task-completion reviews found no remaining blocker.
