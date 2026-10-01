@@ -14,7 +14,6 @@ describe('classifyFailure', () => {
     ['cancelled', 'Task was cancelled by the user'],
     ['input-expired', 'Human input request expired after timeout'],
     ['capacity', 'Cloud provider reported server limit reached'],
-    ['credentials', 'Authentication failed: token expired'],
     ['provider-overload', 'Provider returned 529 overloaded'],
     ['agent-install', 'Codex installation failed in the workspace'],
     ['provisioning', 'Workspace creation timed out'],
@@ -63,7 +62,7 @@ describe('classifyFailure', () => {
       'cancelled'
     );
     expect(classifyFailure('Unauthorized request was also rate limited with 429').code).toBe(
-      'credentials'
+      'provider-overload'
     );
   });
 
@@ -126,11 +125,15 @@ describe('classifyFailure', () => {
   });
 
   it.each([
-    'MCP service returned HTTP 401 invalid authentication',
-    'API Error: 401 invalid authentication',
-    'Tool output: unauthorized',
-  ])('does not treat ambiguous protocol text as provider credentials: %s', (message) => {
-    expect(classifyFailure(message).code).not.toBe('credentials');
+    ['https://example.test/callback?error=unauthorized', 'running'],
+    ['schema={"error":"invalid token"}', 'running'],
+    ['Provider HTTP 401 invalid authentication', 'running'],
+    ['agent_prompt_failed', 'unauthorized'],
+    ['Authentication failed: token expired', 'running'],
+  ])('does not infer credentials from untrusted message or step: %s / %s', (message, step) => {
+    const result = classifyFailure(message, step);
+    expect(result.code).not.toMatch(/credential|mcp-auth-required/);
+    expect(result.guidance).not.toMatch(/credential|connect the agent|sign.in|login/i);
   });
 
   it.each([

@@ -271,7 +271,7 @@ test.describe('Project chat recoverable error banner', () => {
     };
     await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
       systemMessage,
-      { ...systemMessage, id: 'msg-system-later', content: 'Workspace is preparing.' },
+      { ...systemMessage, id: 'msg-system-later', content: 'Workspace is preparing. '.repeat(12) },
     ]);
     await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
     const banner = page.getByTestId('loopback-auth-guidance');

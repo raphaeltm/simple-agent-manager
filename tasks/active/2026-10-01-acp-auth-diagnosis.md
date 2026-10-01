@@ -43,6 +43,8 @@ Post-C2 additive hook: when an enabled, well-formed `requestURL` is rejected by 
 
 The independent chat consumer now recognizes only the fixed VM-authored system text `This sign-in flow requires a local callback that this session cannot complete.` It shows a creator-only link to existing MCP settings, asks other members to contact the creator, and clears after a later user or assistant turn. Assistant/tool text and unrelated system rows cannot synthesize the banner. The producer remains pending C2 freeze release; this consumer alone does not claim runtime loopback coverage.
 
+Review correction: the legacy display classifier no longer infers `credentials` from combined free-text message and execution step. URL query text, schema fields, Provider 401 prose, and `unauthorized` step text stay generic unless the task carries an exact trusted reason code. Historical untyped auth/billing prose can therefore fall back to general investigation guidance; that tradeoff avoids prescribing credential changes without provenance.
+
 Parent-owned final runtime matrix: exact agent-credential 404 versus workspace 404; real Claude `authentication_failed` and `model_not_found` when reproducible; actual Codex GPT-6.1 unsupported-model HTTP 400 after successful ACP selection; MCP auth failure remaining generic without a trusted ACP source; accepted C2 HTTPS URL versus explicit loopback callback; creator/member desktop and mobile settings navigation; canary absence from callback, logs, events, and transcript; retry after updating a connection; cross-project authorization. Distinguish fixture results from real provider-account outcomes.
 
 ## Verification

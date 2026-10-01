@@ -16,7 +16,6 @@ export type FailureCode =
   | 'capacity'
   | 'provisioning'
   | 'agent-install'
-  | 'credentials'
   | 'model-credential-missing'
   | 'model-credential-rejected'
   | 'mcp-auth-required'
@@ -159,25 +158,6 @@ const FAILURE_RULES: FailureRule[] = [
     retryable: true,
     diagnosable: true,
     patterns: [/^model_provider_credential_rejected$/],
-  },
-  {
-    code: 'credentials',
-    label: 'Credentials / billing',
-    explanation: 'An API key, OAuth token, or account balance problem stopped the agent.',
-    guidance:
-      'Check the agent credential in Settings (API key validity, OAuth login, or provider credit balance), then retry.',
-    retryable: true,
-    diagnosable: true,
-    patterns: [
-      /credit balance/,
-      /insufficient (credit|funds|quota)/,
-      /invalid (api key|x-api-key|token|credential)/,
-      /(authentication|authorization) (failed|error)/,
-      /\bunauthorized\b/,
-      /token (expired|revoked|invalid)/,
-      /refresh token/,
-      /billing/,
-    ],
   },
   {
     code: 'provider-overload',
@@ -345,12 +325,10 @@ export function classifyFailure(
 ): FailureClassification {
   const haystack = `${message ?? ''} ${step ?? ''}`.toLowerCase();
   const structuralEvidence = (message ?? '').trim().toLowerCase();
-  const ambiguousProtocolAuth = /^(?:mcp\b|tool\b|assistant\b|api error\b)/.test(structuralEvidence);
   if (!haystack.trim()) {
     return UNKNOWN_CLASSIFICATION;
   }
   for (const rule of FAILURE_RULES) {
-    if (rule.code === 'credentials' && ambiguousProtocolAuth) continue;
     const evidence = STRUCTURAL_FAILURE_CODES.has(rule.code) ? structuralEvidence : haystack;
     if (rule.patterns.some((p) => p.test(evidence))) {
       return {
