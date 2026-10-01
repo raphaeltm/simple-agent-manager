@@ -63,8 +63,12 @@ func TestTaskCallbackPinnedSDKErrorOnlyMetadataStaysGeneric(t *testing.T) {
 		"error": "API Error: 400 unsupported_model with ChatGPT account",
 		"url":   "https://evil.example/?token=" + canary,
 	})
-	if got := taskCallbackErrorMessage(err); got != "agent_prompt_failed" || strings.Contains(got, canary) {
-		t.Fatalf("untrusted SDK metadata changed callback reason: %q", got)
+	body := runTaskCompletionCallback(t, config.TaskModeTask, "error", err)
+	if body["errorMessage"] != "agent_prompt_failed" || body["toStatus"] != "failed" {
+		t.Fatalf("untrusted SDK metadata changed callback result: %#v", body)
+	}
+	if encoded, _ := json.Marshal(body); strings.Contains(string(encoded), canary) || strings.Contains(string(encoded), "evil.example") {
+		t.Fatal("untrusted SDK metadata leaked in callback")
 	}
 }
 
