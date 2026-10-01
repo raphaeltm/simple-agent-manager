@@ -84,7 +84,9 @@ describe('absolute lifetime active-workspace preservation', () => {
       schema.agentSessions,
       schema.nodeHealthEvents,
     ]);
-    sqlite.exec(`CREATE UNIQUE INDEX session_snapshots_chat_session_id_unique ON session_snapshots(chat_session_id)`);
+    sqlite.exec(
+      `CREATE UNIQUE INDEX session_snapshots_chat_session_id_unique ON session_snapshots(chat_session_id)`
+    );
     env = {
       DATABASE: createSqliteD1(sqlite),
       SESSION_SLEEP_MAX_ATTEMPTS: '9',
@@ -214,6 +216,17 @@ describe('absolute lifetime active-workspace preservation', () => {
         .pluck()
         .get()
     ).toBe(1);
+  });
+
+  it('stops scheduling new capture attempts once the bounded hold has escalated', async () => {
+    seed(sqlite, 2, 'failed');
+    const config = resolveCleanupConfig(env);
+    await prepareAbsoluteLifetimeRelease(env, node, now, config);
+    expect(mocks.queue).toHaveBeenCalledTimes(1);
+    sqlite.prepare(`UPDATE node_health_events SET created_at = '2026-10-01T05:00:00.000Z'`).run();
+    await prepareAbsoluteLifetimeRelease(env, node, now, config);
+    expect(mocks.queue).toHaveBeenCalledTimes(1);
+    expect(mocks.message).toHaveBeenCalledTimes(1);
   });
 
   it('does not destroy the old-node shape in the absolute-lifetime sweep', async () => {

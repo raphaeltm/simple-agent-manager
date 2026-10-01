@@ -76,6 +76,7 @@ export async function prepareAbsoluteLifetimeRelease(
 
     const attempts = workspace.sleep_attempts ?? 0;
     if (
+      now.getTime() - Date.parse(requested.created_at) < holdMs &&
       attempts < maxAttempts &&
       workspace.sleep_status !== 'preparing' &&
       workspace.sleep_status !== 'stopping' &&
