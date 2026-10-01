@@ -28,6 +28,17 @@ func TestTaskCallbackPinnedSDKErrorUsesOnlyReasonCode(t *testing.T) {
 	}
 }
 
+func TestTaskCallbackPinnedSDKErrorOnlyMetadataStaysGeneric(t *testing.T) {
+	const canary = "sk-secret-canary-123456789"
+	err := acpsdk.NewInternalError(map[string]any{
+		"error": "API Error: 400 unsupported_model with ChatGPT account",
+		"url":   "https://evil.example/?token=" + canary,
+	})
+	if got := taskCallbackErrorMessage(err); got != "agent_prompt_failed" || strings.Contains(got, canary) {
+		t.Fatalf("untrusted SDK metadata changed callback reason: %q", got)
+	}
+}
+
 func TestTaskCallbackUnknownFailureIsSafe(t *testing.T) {
 	const canary = "sk-secret-canary-123456789"
 	got := taskCallbackErrorMessage(errors.New("Unknown wrapper failure https://example.test/?token=" + canary))
