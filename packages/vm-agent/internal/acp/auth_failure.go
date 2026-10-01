@@ -24,11 +24,18 @@ func ClassifyPromptError(err error) string {
 		if !ok {
 			return ""
 		}
-		providerError, ok := data["error"].(string)
-		if !ok {
+		// claude-agent-acp 0.81.2 attaches this categorical field to
+		// RequestError.internalError. Other data is untrusted wrapper metadata.
+		switch data["errorKind"] {
+		case "authentication_failed":
+			return "model_provider_credential_rejected"
+		case "model_not_found":
+			return "model_unavailable"
+		case "rate_limit", "overloaded":
+			return "provider_overloaded"
+		default:
 			return ""
 		}
-		return ClassifyPromptFailure(providerError)
 	}
 	return ClassifyPromptFailure(err.Error())
 }

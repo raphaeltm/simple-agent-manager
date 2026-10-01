@@ -16,17 +16,21 @@ import (
 func TestClassifyPinnedSDKRequestErrorWithoutReadingUntrustedMetadata(t *testing.T) {
 	const canary = "sk-secret-canary-123456789"
 	for _, tc := range []struct {
-		name, providerError, want string
+		name, errorKind, want string
 	}{
-		{"Claude 401", "API Error: 401 invalid authentication", "model_provider_credential_rejected"},
-		{"Codex unsupported model", "API Error: 400 unsupported_model with ChatGPT account", "model_unavailable"},
-		{"MCP 401 lacks source provenance", "MCP service returned HTTP 401", ""},
+		{"Claude authentication failed", "authentication_failed", "model_provider_credential_rejected"},
+		{"Claude model not found", "model_not_found", "model_unavailable"},
+		{"Claude rate limit", "rate_limit", "provider_overloaded"},
+		{"ambiguous bad request", "invalid_request", ""},
+		{"organization authorization", "oauth_org_not_allowed", ""},
+		{"MCP 401 lacks source provenance", "mcp_endpoint_needs_auth", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := acpsdk.NewInternalError(map[string]any{
-				"error":  tc.providerError,
-				"url":    "https://evil.example/?token=" + canary,
-				"schema": "model_provider_credential_rejected",
+				"errorKind": tc.errorKind,
+				"error":     "API Error: 401 invalid authentication",
+				"url":       "https://evil.example/?token=" + canary,
+				"schema":    "model_provider_credential_rejected",
 			})
 			if got := ClassifyPromptError(err); got != tc.want || strings.Contains(got, canary) {
 				t.Fatalf("SDK error reason = %q, want %q", got, tc.want)
@@ -46,8 +50,9 @@ func TestPinnedSDKProviderErrorPromptPathBroadcastsOnlyReasonCode(t *testing.T) 
 		context.Background(), json.RawMessage(`"req-auth"`),
 		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"},
 		acpsdk.NewInternalError(map[string]any{
-			"error": "API Error: 401 invalid authentication",
-			"url":   "https://evil.example/?token=" + canary,
+			"errorKind": "authentication_failed",
+			"error":     "untrusted wrapper text",
+			"url":       "https://evil.example/?token=" + canary,
 		}),
 	)
 	host.bufMu.RLock()
