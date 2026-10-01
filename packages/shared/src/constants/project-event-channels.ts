@@ -24,3 +24,11 @@ export const DEFAULT_AGENT_MESSAGE_CHANNEL_MAX_CHANNELS = 1024;
  * Override: AGENT_MESSAGE_SUBSCRIPTION_ROTATION_GRACE_MS.
  */
 export const DEFAULT_AGENT_MESSAGE_SUBSCRIPTION_ROTATION_GRACE_MS = 5 * 60 * 1000;
+/**
+ * Share of the project's active-subscription cap that SAM-managed agent-message
+ * subscriptions may hold, so messaging cannot starve other subscriptions. It lives
+ * inside DEFAULT_PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT on purpose:
+ * strict channel fanout must never see more candidates than that cap.
+ * Override: AGENT_MESSAGE_MAX_ACTIVE_SUBSCRIPTIONS.
+ */
+export const DEFAULT_AGENT_MESSAGE_MAX_ACTIVE_SUBSCRIPTIONS = 100;

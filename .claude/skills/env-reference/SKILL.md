@@ -404,6 +404,7 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `AGENT_MESSAGE_CHANNELS_ENABLED` — Preview: send notify/deliver agent messages over SAM-managed `agent-dm.*` pair channels; effective only while `PROJECT_EVENT_WAKE_ENABLED` and durable prompt delivery are on (default: `false`)
 - `AGENT_MESSAGE_CHANNEL_MAX_CHANNELS` — Maximum `agent-dm.*` pair channels per project, separate from `PROJECT_EVENT_CHANNEL_MAX_CHANNELS` (default: `1024`)
 - `AGENT_MESSAGE_SUBSCRIPTION_ROTATION_GRACE_MS` — Replace a managed pair subscription this close to the end of its wake lifetime when it owes no pending wake (default: `300000`)
+- `AGENT_MESSAGE_MAX_ACTIVE_SUBSCRIPTIONS` — Share of `PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT` that SAM-managed agent-message subscriptions may hold; idle ones on other pairs are released first (default: `100`)
 - `PROJECT_EVENT_LIST_LIMIT` — Default ProjectData event-subscription list/status page size (default: `50`)
 - `PROJECT_EVENT_LIST_MAX` — Maximum ProjectData event-subscription list/status page size (default: `200`)
 - `PROJECT_EVENT_SUBSCRIPTION_EVENT_CURSOR_MAX_LENGTH` — Maximum opaque `list_subscription_events` cursor length accepted by ProjectData pull delivery (default: `512`)

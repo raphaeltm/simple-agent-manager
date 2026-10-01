@@ -12,6 +12,8 @@ import {
   PROJECT_EVENT_CHANNEL_TYPE,
 } from '@simple-agent-manager/shared';
 
+import { isAgentMessageChannelName } from './agent-message-notice';
+
 function metadataText(
   metadata: Record<string, ProjectEventJsonValue> | undefined,
   key: string
@@ -77,10 +79,41 @@ function subscriptionOwnerMatchesCredentialAudience(
   return false;
 }
 
+/**
+ * An `agent-dm.*` pair channel routes only to its two participants. Without this,
+ * any agent could subscribe to `sam.agent_channel` and be woken with another
+ * pair's agent-message notices. Participants come from the server-derived actor
+ * and recipient recorded on the event; history stays project-visible.
+ */
+function subscriptionTargetsAgentMessageParticipant(
+  subscription: ProjectEventSubscriptionRecord,
+  event: ProjectEventRecord
+): boolean {
+  const target = subscription.deliveryPreference.target?.sessionId;
+  if (!target) return false;
+  const actor = event.metadata?.actor;
+  const recipient = event.metadata?.recipient;
+  return (
+    (isJsonRecord(actor) && actor.chatSessionId === target) ||
+    (isJsonRecord(recipient) && recipient.chatSessionId === target)
+  );
+}
+
+function isAgentMessageEvent(event: ProjectEventRecord): boolean {
+  return (
+    event.source === PROJECT_EVENT_CHANNEL_SOURCE &&
+    event.subject.type === 'agent_channel' &&
+    isAgentMessageChannelName(event.subject.id)
+  );
+}
+
 export function subscriptionCanMatchProjectEvent(
   subscription: ProjectEventSubscriptionRecord,
   event: ProjectEventRecord
 ): boolean {
+  if (isAgentMessageEvent(event)) {
+    return subscriptionTargetsAgentMessageParticipant(subscription, event);
+  }
   if (!isCredentialEvent(event)) return true;
   const audience = authorizedCredentialAudience(event);
   if (!audience) return false;

@@ -103,6 +103,18 @@ export type PreparedChannelPublish = {
   displayTitle?: string;
 };
 
+/** The stored envelope of a channel event; the canonical keys always win over extras. */
+export function channelEventMetadata(
+  input: PreparedChannelPublish
+): NonNullable<AdmitProjectEventInput['metadata']> {
+  return {
+    ...input.extraMetadata,
+    message: input.message,
+    actor: input.actor,
+    channel: input.channel,
+  };
+}
+
 /** Agent-message pair channels and all other channels have separate catalog caps. */
 function namespaceChannelCount(
   sql: SqlStorage,
@@ -192,12 +204,7 @@ export function publishChannel(
     subject: { type: 'agent_channel', id: channel.name },
     deliveryKey: input.deliveryKey,
     payloadFingerprint: input.payloadFingerprint,
-    metadata: {
-      ...input.extraMetadata,
-      message: input.message,
-      actor: input.actor,
-      channel: input.channel,
-    },
+    metadata: channelEventMetadata(input),
     display: { title: input.displayTitle ?? 'Agent channel message' },
     occurredAt: now,
     receivedAt: now,

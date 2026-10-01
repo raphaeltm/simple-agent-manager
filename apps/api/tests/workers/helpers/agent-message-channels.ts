@@ -131,7 +131,11 @@ export function okBody<T>(reply: ToolReply): T {
   return JSON.parse(reply.result!.content[0]!.text) as T;
 }
 
-/** Run with the preview and its prerequisites enabled, then restore the env. */
+/**
+ * Run with the preview and its prerequisites enabled, then restore the env.
+ * This mutates the shared cloudflare:test env, so tests using it must not run
+ * with test.concurrent.
+ */
 export async function withAgentMessageChannels<T>(
   fn: () => Promise<T>,
   overrides: Record<string, string> = {}
@@ -221,3 +225,68 @@ export function eventMatches(
     eventId
   );
 }
+
+/**
+ * Override env values seen by one ProjectData Durable Object instance (limits are
+ * read there), then restore them. Same no-test.concurrent caveat as above.
+ */
+export async function withProjectDataEnv<T>(
+  stub: DurableObjectStub<ProjectDataTestDouble>,
+  overrides: Record<string, string>,
+  fn: () => Promise<T>
+): Promise<T> {
+  const previous = await runInDurableObject(stub, (instance) => {
+    const doEnv = (instance as unknown as { env: Record<string, string | undefined> }).env;
+    const saved = Object.fromEntries(Object.keys(overrides).map((key) => [key, doEnv[key]]));
+    Object.assign(doEnv, overrides);
+    return saved;
+  });
+  try {
+    return await fn();
+  } finally {
+    await runInDurableObject(stub, (instance) => {
+      const doEnv = (instance as unknown as { env: Record<string, string | undefined> }).env;
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete doEnv[key];
+        else doEnv[key] = value;
+      }
+    });
+  }
+}
+
+export type ChannelReceipt = {
+  accepted: true;
+  delivered: false;
+  deliveryState?: string;
+  queued?: boolean;
+  messageId: string;
+  transport: 'agent_message_channel';
+  channel: string;
+  eventId: string;
+  sequence: number;
+  replayed: boolean;
+  idempotencyKey: string;
+  recipient: { taskId: string; subscriptionMatched: boolean };
+};
+
+export type InboxRow = {
+  id: string;
+  target_session_id: string;
+  source_kind: string;
+  sender_type: string;
+  content: string;
+  metadata: string | null;
+};
+
+export const inboxRows = (stub: Parameters<typeof sqlRows>[0]) =>
+  sqlRows<InboxRow>(
+    stub,
+    `SELECT id, target_session_id, source_kind, sender_type, content, metadata
+     FROM session_inbox ORDER BY created_at, id`
+  );
+
+export const channelRows = (stub: Parameters<typeof sqlRows>[0]) =>
+  sqlRows<{ name: string; lifetime_count: number }>(
+    stub,
+    'SELECT name, lifetime_count FROM project_event_channels ORDER BY name'
+  );

@@ -5,11 +5,14 @@
  * the real ProjectData SQLite and D1 state it produced.
  */
 import { DEFAULT_PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION } from '@simple-agent-manager/shared';
-import { env, runInDurableObject } from 'cloudflare:test';
+import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import {
+  type ChannelReceipt,
+  channelRows,
   eventMatches,
+  inboxRows,
   managedSubscriptions,
   materializeWakes,
   okBody,
@@ -18,44 +21,8 @@ import {
   sqlRows,
   twoAgentProject,
   withAgentMessageChannels,
+  withProjectDataEnv,
 } from './helpers/agent-message-channels';
-
-type ChannelReceipt = {
-  accepted: true;
-  delivered: false;
-  deliveryState?: string;
-  queued?: boolean;
-  messageId: string;
-  transport: 'agent_message_channel';
-  channel: string;
-  eventId: string;
-  sequence: number;
-  replayed: boolean;
-  idempotencyKey: string;
-  recipient: { taskId: string; subscriptionMatched: boolean };
-};
-
-type InboxRow = {
-  id: string;
-  target_session_id: string;
-  source_kind: string;
-  sender_type: string;
-  content: string;
-  metadata: string | null;
-};
-
-const inboxRows = (stub: Parameters<typeof sqlRows>[0]) =>
-  sqlRows<InboxRow>(
-    stub,
-    `SELECT id, target_session_id, source_kind, sender_type, content, metadata
-     FROM session_inbox ORDER BY created_at, id`
-  );
-
-const channelRows = (stub: Parameters<typeof sqlRows>[0]) =>
-  sqlRows<{ name: string; lifetime_count: number }>(
-    stub,
-    'SELECT name, lifetime_count FROM project_event_channels ORDER BY name'
-  );
 
 describe('agent messages over shared channels: activation', () => {
   it('keeps the legacy raw-prompt path when the preview flag is off', async () => {
@@ -473,12 +440,7 @@ describe('agent message channels: bounded catalog', () => {
   it('caps pair channels separately so agent messaging cannot exhaust coordination channels', async () => {
     const f = await twoAgentProject();
     const d = await seedTaskAgent(f.projectId, f.ownerId, f.ownerNodeId, 'd');
-    await runInDurableObject(f.stub, (instance) => {
-      (
-        instance as unknown as { env: Record<string, string> }
-      ).env.AGENT_MESSAGE_CHANNEL_MAX_CHANNELS = '1';
-    });
-    try {
+    await withProjectDataEnv(f.stub, { AGENT_MESSAGE_CHANNEL_MAX_CHANNELS: '1' }, async () => {
       const { first, second } = await withAgentMessageChannels(async () => ({
         first: await f.a.tool('send_durable_message', { targetTaskId: f.b.taskId, message: 'ok' }),
         second: await f.a.tool('send_durable_message', { targetTaskId: d.taskId, message: 'full' }),
@@ -499,11 +461,6 @@ describe('agent message channels: bounded catalog', () => {
           (s) => s.target_session_id === d.sessionId
         )
       ).toEqual([]);
-    } finally {
-      await runInDurableObject(f.stub, (instance) => {
-        delete (instance as unknown as { env: Record<string, string | undefined> }).env
-          .AGENT_MESSAGE_CHANNEL_MAX_CHANNELS;
-      });
-    }
+    });
   });
 });

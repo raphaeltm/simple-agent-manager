@@ -127,6 +127,6 @@ export type SendAgentChannelMessageResult = {
   /** Recipient subscription holding the canonical match (null only for an unmatched replay). */
   recipientSubscriptionId: string | null;
   senderSubscriptionId: string | null;
-  /** Managed subscriptions retired because they could no longer wake their session. */
-  rotatedSubscriptionIds: string[];
+  /** Managed subscriptions this send retired (could no longer wake, or idle and over the share). */
+  retiredSubscriptionIds: string[];
 };

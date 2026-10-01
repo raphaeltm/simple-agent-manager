@@ -19,7 +19,6 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import {
-  AgentMessageRecipientUnavailableError,
   resolveAgentMessageChannelsConfig,
   sendAgentMessageOverChannel,
 } from '../../services/agent-message-channels';
@@ -154,7 +153,7 @@ export async function trySendOverAgentMessageChannel(
       channel: result.channel.name,
       eventId: result.eventId,
       outcome: result.outcome,
-      rotatedSubscriptionCount: result.rotatedSubscriptionIds.length,
+      retiredSubscriptionCount: result.retiredSubscriptionIds.length,
     });
     return jsonRpcSuccess(requestId, {
       content: [{ type: 'text', text: JSON.stringify(receipt(request, idempotencyKey, result)) }],
@@ -196,7 +195,7 @@ function channelSendError(
   error: unknown
 ): JsonRpcResponse {
   const message = error instanceof Error ? error.message : String(error);
-  if (error instanceof AgentMessageRecipientUnavailableError) {
+  if (error instanceof projectData.AgentMessageRecipientUnavailableError) {
     return jsonRpcError(requestId, INVALID_PARAMS, message, {
       ...diagnostics,
       outcome: 'recipient_unavailable',

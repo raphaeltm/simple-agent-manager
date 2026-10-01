@@ -96,6 +96,21 @@ and changed content under the same key is rejected as a conflict. Messages are c
 by `PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES` and pair channels by
 `AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. This preview has not been validated on staging.
 
+Pair-channel events match only subscriptions targeting one of the two participant
+chats (`subscriptionCanMatchProjectEvent`), `follow_event_channel` rejects
+`agent-dm.` names, and subscription idempotency keys starting with
+`sam-agent-message:` are reserved, so other agents cannot be woken by a pair's
+messages. History stays project-visible through `get_channel_history`. Managed
+subscriptions may hold at most `AGENT_MESSAGE_MAX_ACTIVE_SUBSCRIPTIONS` of the
+project's active-subscription cap; at that share SAM releases the least recently
+matched idle pair subscriptions on other channels (the pair's next message recreates
+them), and refuses the send with `outcome: "capacity"` (retryable) while every
+candidate still owes a wake. Failed sends report `outcome` as `recipient_unavailable`
+(the recipient's chat or authority is gone; not retryable), `conflict`, `capacity` or
+`rejected`, and commit nothing. Known limit: a managed subscription that has used its
+wake budget is replaced even when its last wake is still queued, which fails that wake;
+those messages remain in channel history.
+
 ## Authentication
 
 ### `POST /api/auth/sign-in/social`

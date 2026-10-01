@@ -6,6 +6,7 @@ import {
   PROJECT_EVENT_CHANNEL_TYPE,
 } from '@simple-agent-manager/shared';
 
+import { isAgentMessageChannelName } from './agent-message-notice';
 import { channelLimits, channelName } from './project-event-channels-config';
 import {
   decodeChannelCursor,
@@ -19,6 +20,7 @@ import {
   ProjectEventIdempotencyConflictError,
   ProjectEventLimitExceededError,
   ProjectEventNotFoundError,
+  ProjectEventValidationError,
 } from './project-events-contracts';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { assertProjectBinding, normalizeListLimit } from './project-events-normalization';
@@ -62,7 +64,13 @@ export function followChannel(
   input: FollowProjectEventChannelInput
 ): FollowProjectEventChannelResult {
   assertProjectBinding(storedProjectId, input.projectId);
-  const row = readChannel(sql, input.projectId, channelName(input.channel, env));
+  const name = channelName(input.channel, env);
+  if (isAgentMessageChannelName(name)) {
+    throw new ProjectEventValidationError(
+      'agent-dm. channels are managed by SAM agent messaging; read them with get_channel_history'
+    );
+  }
+  const row = readChannel(sql, input.projectId, name);
   if (!row) throw new ProjectEventNotFoundError('Project event');
   const now = Date.now();
   const idempotencyKey = normalizeText(

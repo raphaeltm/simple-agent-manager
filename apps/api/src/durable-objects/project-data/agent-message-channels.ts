@@ -13,37 +13,38 @@
 import {
   type AgentChannelMessageParticipant,
   PROJECT_EVENT_CHANNEL_SOURCE,
-  PROJECT_EVENT_CHANNEL_TYPE,
   type SendAgentChannelMessageInput,
   type SendAgentChannelMessageResult,
 } from '@simple-agent-manager/shared';
 
-import {
-  AGENT_MESSAGE_SUBSCRIPTION_KEY_PREFIX,
-  agentMessageChannelName,
-} from './agent-message-notice';
-import { channelLimits } from './project-event-channels-config';
+import { agentMessageChannelName } from './agent-message-notice';
+import { ensureManagedSubscription } from './agent-message-subscriptions';
+import { channelLimits, channelName } from './project-event-channels-config';
 import {
   channelDeliveryKey,
+  channelEventMetadata,
   normalizeChannelActor,
   type PreparedChannelPublish,
   publishChannel,
 } from './project-event-channels-publish';
 import { channelDto, readChannel } from './project-event-channels-storage';
-import { createProjectEventSubscription } from './project-events';
 import {
+  AgentMessageRecipientUnavailableError,
   ProjectEventIdempotencyConflictError,
+  ProjectEventLimitExceededError,
   ProjectEventValidationError,
 } from './project-events-contracts';
 import { resolveProjectEventLimits } from './project-events-limits';
-import { assertProjectBinding, normalizeProjectId } from './project-events-normalization';
-import { expireSubscriptionIds, readEventByDeliveryKey } from './project-events-storage-helpers';
+import {
+  assertProjectBinding,
+  normalizeMetadataWithinBudget,
+  normalizeProjectId,
+} from './project-events-normalization';
+import { readEventByDeliveryKey } from './project-events-storage-helpers';
 import { normalizeText, sha256Hex, stableStringify } from './project-events-values';
-import { type Env, generateId } from './types';
+import type { Env } from './types';
 
-const MANAGED_OWNER_NAME = 'SAM agent messaging';
 const CHANNEL_MESSAGE_CLASSES = new Set(['notify', 'deliver']);
-const ROTATION_REASON = 'agent message subscription renewed';
 
 export type PreparedAgentChannelMessage = PreparedChannelPublish & {
   recipient: AgentChannelMessageParticipant;
@@ -84,12 +85,12 @@ export async function prepareAgentChannelMessage(
     maxBytes
   );
   const senderMetadata = input.senderMetadata ?? null;
-  const channel = await agentMessageChannelName(
-    projectId,
-    actor.chatSessionId,
-    recipient.chatSessionId
+  // Re-validated so a lowered PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES fails closed.
+  const channel = channelName(
+    await agentMessageChannelName(projectId, actor.chatSessionId, recipient.chatSessionId),
+    env
   );
-  return {
+  const prepared: PreparedAgentChannelMessage = {
     channel,
     projectId,
     message,
@@ -118,6 +119,29 @@ export async function prepareAgentChannelMessage(
     recipient,
     senderSourceTaskId,
   };
+  assertStoredEnvelopeFits(prepared, limits);
+  return prepared;
+}
+
+/**
+ * Check the stored envelope before any write. Oversized or over-deep caller
+ * metadata is a payload the caller must fix, not capacity to retry, so it
+ * surfaces as a validation error rather than a limit error.
+ */
+function assertStoredEnvelopeFits(
+  prepared: PreparedAgentChannelMessage,
+  limits: ReturnType<typeof resolveProjectEventLimits>
+): void {
+  try {
+    normalizeMetadataWithinBudget(channelEventMetadata(prepared), limits);
+  } catch (error) {
+    if (error instanceof ProjectEventLimitExceededError) {
+      throw new ProjectEventValidationError(
+        `Agent message is too large to store: ${error.message}`
+      );
+    }
+    throw error;
+  }
 }
 
 /** Must run inside one storage transaction after the sender's chat was re-verified. */
@@ -147,7 +171,7 @@ export function sendAgentChannelMessage(
     return replayResult(sql, prepared, existing.id);
   }
 
-  const rotatedSubscriptionIds: string[] = [];
+  const retiredSubscriptionIds: string[] = [];
   const recipientSubscriptionId = ensureManagedSubscription(
     sql,
     env,
@@ -156,7 +180,7 @@ export function sendAgentChannelMessage(
     prepared.channel,
     prepared.actor.taskId,
     now,
-    rotatedSubscriptionIds
+    retiredSubscriptionIds
   );
   const senderSubscriptionId = ensureManagedSubscription(
     sql,
@@ -170,7 +194,7 @@ export function sendAgentChannelMessage(
     prepared.channel,
     prepared.recipient.taskId,
     now,
-    rotatedSubscriptionIds
+    retiredSubscriptionIds
   );
   const published = publishChannel(sql, env, storedProjectId, prepared);
   // Accepted must mean "the recipient will be notified": never commit a message
@@ -187,7 +211,7 @@ export function sendAgentChannelMessage(
     sequence: published.sequence,
     recipientSubscriptionId,
     senderSubscriptionId,
-    rotatedSubscriptionIds,
+    retiredSubscriptionIds,
   };
 }
 
@@ -200,132 +224,11 @@ function requireRecipientChat(sql: SqlStorage, recipient: AgentChannelMessagePar
       recipient.taskId
     )
     .toArray()[0];
-  if (!row) throw new ProjectEventValidationError('The recipient chat is not active for its task');
-}
-
-type ManagedSubscriptionRow = {
-  id: string;
-  expires_at: number | null;
-  delivery_lifetime_expires_at: number | null;
-  prompt_delivery_count: number;
-};
-
-/**
- * Reuse the participant's managed subscription for this channel while it can
- * still wake the chat; otherwise retire it and create a fresh one. At most one
- * managed subscription per (chat, channel) stays active. Ownership mirrors an
- * agent's own subscriptions (`${projectId}:${chatSessionId}`), so the canonical
- * list/get/ack tools serve it, and `ownerTaskId` is the participant's stable
- * source task, which the wake path re-checks before every delivery.
- */
-function ensureManagedSubscription(
-  sql: SqlStorage,
-  env: Env,
-  projectId: string,
-  participant: AgentChannelMessageParticipant,
-  channel: string,
-  peerTaskId: string,
-  now: number,
-  rotated: string[]
-): string {
-  const limits = resolveProjectEventLimits(env);
-  const graceMs = channelLimits(env).agentMessageRotationGraceMs;
-  const ownerId = `${projectId}:${participant.chatSessionId}`;
-  const keyPrefix = `${AGENT_MESSAGE_SUBSCRIPTION_KEY_PREFIX}${channel}:`;
-  const rows = sql
-    .exec<ManagedSubscriptionRow>(
-      `SELECT id, expires_at, delivery_lifetime_expires_at, prompt_delivery_count
-       FROM project_event_subscriptions
-       WHERE project_id = ? AND owner_type = 'agent' AND owner_id = ? AND target_session_id = ?
-         AND lifecycle_state = 'active' AND substr(idempotency_key, 1, ?) = ?
-       ORDER BY created_at DESC, id DESC`,
-      projectId,
-      ownerId,
-      participant.chatSessionId,
-      keyPrefix.length,
-      keyPrefix
-    )
-    .toArray();
-  let reusable: string | null = null;
-  const retire: string[] = [];
-  for (const row of rows) {
-    const end = Math.min(
-      row.expires_at ?? Number.POSITIVE_INFINITY,
-      row.delivery_lifetime_expires_at ?? Number.POSITIVE_INFINITY
+  if (!row) {
+    throw new AgentMessageRecipientUnavailableError(
+      'Recipient cannot be notified: its chat is no longer active for its task'
     );
-    const canWake = row.prompt_delivery_count < limits.wakeMaxPerSubscription && end > now;
-    // Near its end, keep it only while it still owes a wake: retiring would fail it.
-    if (
-      reusable === null &&
-      canWake &&
-      (end > now + graceMs || hasPendingWake(sql, projectId, row.id))
-    ) {
-      reusable = row.id;
-    } else {
-      retire.push(row.id);
-    }
   }
-  if (retire.length > 0) {
-    for (const id of retire) {
-      sql.exec(
-        `UPDATE project_event_subscriptions SET expires_at = ?
-         WHERE project_id = ? AND id = ? AND (expires_at IS NULL OR expires_at > ?)`,
-        now,
-        projectId,
-        id,
-        now
-      );
-    }
-    expireSubscriptionIds(sql, projectId, retire, now, ROTATION_REASON);
-    rotated.push(...retire);
-  }
-  if (reusable) return reusable;
-  return createProjectEventSubscription(sql, env, projectId, {
-    projectId,
-    owner: { type: 'agent', id: ownerId, name: MANAGED_OWNER_NAME },
-    idempotencyKey: `${keyPrefix}${generateId()}`,
-    filter: {
-      version: 1,
-      source: PROJECT_EVENT_CHANNEL_SOURCE,
-      eventType: PROJECT_EVENT_CHANNEL_TYPE,
-      subjectType: 'agent_channel',
-      subjectId: channel,
-    },
-    deliveryPreference: {
-      requested: 'existing_session_prompt',
-      resolved: 'queued_for_prompt_delivery',
-      // Stable chat identity only: runtime/agent IDs change across sleep/wake.
-      target: {
-        sessionId: participant.chatSessionId,
-        taskId: participant.taskId,
-        runtimeId: null,
-        agentId: null,
-      },
-    },
-    ownerTaskId: participant.sourceTaskId,
-    reason: `SAM agent messaging on ${channel} with task ${peerTaskId}`,
-    expiresAt: now + limits.wakeSubscriptionLifetimeMs,
-  }).subscription.id;
-}
-
-function hasPendingWake(sql: SqlStorage, projectId: string, subscriptionId: string): boolean {
-  return (
-    sql
-      .exec(
-        `SELECT 1 FROM project_event_matches
-         WHERE project_id = ? AND subscription_id = ? AND state = 'matched' AND batch_id IS NULL
-         UNION ALL
-         SELECT 1 FROM project_event_delivery_batches
-         WHERE project_id = ? AND subscription_id = ? AND delivery_channel = 'prompt_queue'
-           AND state = 'pending'
-         LIMIT 1`,
-        projectId,
-        subscriptionId,
-        projectId,
-        subscriptionId
-      )
-      .toArray().length > 0
-  );
 }
 
 function replayResult(
@@ -364,6 +267,6 @@ function replayResult(
     sequence: position.channel_sequence,
     recipientSubscriptionId: recipientMatch?.subscription_id ?? null,
     senderSubscriptionId: null,
-    rotatedSubscriptionIds: [],
+    retiredSubscriptionIds: [],
   };
 }

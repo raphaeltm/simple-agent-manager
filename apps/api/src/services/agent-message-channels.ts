@@ -43,16 +43,6 @@ export function resolveAgentMessageChannelsConfig(env: Env): AgentMessageChannel
   return { enabled: true };
 }
 
-/** The recipient's wake authority is revoked or its task no longer owns its chat. */
-export class AgentMessageRecipientUnavailableError extends Error {
-  constructor() {
-    super(
-      'Recipient cannot be notified: its task no longer owns its chat, or its owner lacks active write access in this project'
-    );
-    this.name = 'AgentMessageRecipientUnavailableError';
-  }
-}
-
 export interface SendAgentMessageOverChannelInput {
   projectId: string;
   actor: ProjectEventChannelActor;
@@ -77,7 +67,7 @@ export async function sendAgentMessageOverChannel(
     projectId: input.projectId,
     chatSessionId: input.recipient.chatSessionId,
   });
-  if (!recipientCanWake) throw new AgentMessageRecipientUnavailableError();
+  if (!recipientCanWake) throw new projectData.AgentMessageRecipientUnavailableError();
   return projectData.sendAgentChannelMessage(env, input.projectId, {
     actor: input.actor,
     senderSourceTaskId: input.senderSourceTaskId,

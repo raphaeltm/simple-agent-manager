@@ -87,6 +87,7 @@ import {
 import type { ProjectDataGroupedFtsCleanupResult } from '../durable-objects/project-data/grouped-fts-cleanup';
 import type { SearchResult } from '../durable-objects/project-data/message-search';
 import {
+  AgentMessageRecipientUnavailableError,
   ProjectEventAckPolicyError,
   ProjectEventAckStateError,
   ProjectEventCursorError,
@@ -120,6 +121,7 @@ export {
   CommentValidationError,
 } from '../durable-objects/project-data/comment-contracts';
 export {
+  AgentMessageRecipientUnavailableError,
   ProjectEventAckPolicyError,
   ProjectEventAckStateError,
   ProjectEventCursorError,
@@ -323,6 +325,10 @@ function normalizeProjectDataEventRpcError(err: unknown): Error | null {
   const ackStatePrefix = 'ProjectEventAckStateError: ';
   if (err.message.startsWith(ackStatePrefix)) {
     return new ProjectEventAckStateError(err.message.slice(ackStatePrefix.length));
+  }
+  const recipientPrefix = 'AgentMessageRecipientUnavailableError: ';
+  if (err.message.startsWith(recipientPrefix)) {
+    return new AgentMessageRecipientUnavailableError(err.message.slice(recipientPrefix.length));
   }
 
   switch (err.message) {
