@@ -1,6 +1,7 @@
 import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import type { GithubProfile, SocialProviders } from 'better-auth/social-providers';
 import { ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
@@ -69,7 +70,8 @@ const GITHUB_API_VERSION = '2022-11-28';
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 
 const githubUserSchema = v.object({
-  id: v.union([v.number(), v.string()]),
+  // GitHub sends a number; normalised to the string stored in `accounts.account_id`.
+  id: v.pipe(v.union([v.number(), v.string()]), v.transform(String)),
   login: v.optional(v.nullable(v.string())),
   name: v.optional(v.nullable(v.string())),
   email: v.optional(v.nullable(v.string())),
@@ -217,7 +219,9 @@ export async function createAuth(env: Env) {
   const githubOAuth = selectGitHubOAuthConfig(platformConfig);
   const googleOAuth = selectGoogleLoginOAuthConfig(platformConfig);
   const gitlabOAuth = selectGitLabOAuthConfig(platformConfig);
-  const socialProviders: Record<string, unknown> = {};
+  // Typed with better-auth's own provider contract so a library upgrade that changes what a
+  // provider hook must return fails `pnpm typecheck` instead of failing sign-in in production.
+  const socialProviders: SocialProviders = {};
   const trustedProviders: string[] = [];
 
   if (githubOAuth) {
@@ -230,7 +234,7 @@ export async function createAuth(env: Env) {
       // Ensure existing linked users are refreshed with latest provider profile data on sign-in.
       overrideUserInfoOnSignIn: true,
       // Custom getUserInfo to ensure we persist the account's primary email when available.
-      getUserInfo: async (token: { accessToken?: string }) => {
+      getUserInfo: async (token) => {
         const accessToken = token.accessToken;
         if (!accessToken) {
           log.error('missing_github_access_token');
@@ -293,16 +297,16 @@ export async function createAuth(env: Env) {
 
         return {
           user: {
-            id: String(user.id),
             email,
             name: (user.name || user.login || '').trim(),
             image: user.avatar_url || undefined,
             emailVerified: true,
           },
-          data: {
-            githubId: String(user.id),
-            avatarUrl: user.avatar_url || undefined,
-          },
+          // better-auth keys the linked account on `data.id` (its GitHub provider declares
+          // `accountSubject: ({ profile }) => profile.id`); without it every sign-in fails
+          // with `unable_to_get_user_info`. The cast covers the GithubProfile fields SAM does
+          // not validate, none of which are read when deriving the account key.
+          data: user as GithubProfile,
         };
       },
     };
