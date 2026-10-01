@@ -61,7 +61,7 @@ describe('classifyFailure', () => {
   });
 
   it.each([
-    ['model-credential-missing', 'agent_key_fetch: no credential configured for openai-codex'],
+    ['model-credential-missing', 'model_provider_credential_missing'],
     ['model-credential-rejected', 'model_provider_credential_rejected'],
     ['mcp-auth-required', 'mcp_endpoint_needs_auth'],
     ['unsupported-loopback-auth', 'unsupported_loopback_auth'],
@@ -79,6 +79,7 @@ describe('classifyFailure', () => {
     'The agent mentioned an unauthorized file while working',
     'Sign-in cancelled by the user',
     'MCP OAuth loopback callback required at http://localhost:1234',
+    'agent_key_fetch: no credential configured for openai-codex',
   ])('does not prescribe credential changes for %s', (message) => {
     expect(classifyFailure(message).code).not.toMatch(/model-credential|mcp-auth-required/);
   });
@@ -98,6 +99,16 @@ describe('classifyFailure', () => {
     expect(JSON.stringify(result)).not.toContain(canary);
     expect(JSON.stringify(result)).not.toContain('evil.example');
     expect(JSON.stringify(result)).not.toContain('schema=');
+  });
+
+  it.each([
+    'https://evil.example/model_provider_credential_missing',
+    'Provider HTTP 400 url=https://evil.example/unsupported_model',
+    'Provider HTTP 400 schema=model_unavailable',
+    'Assistant said mcp_endpoint_needs_auth in its answer',
+    'Tool output: model_provider_credential_rejected',
+  ])('does not turn untrusted metadata or conversation prose into auth guidance: %s', (message) => {
+    expect(classifyFailure(message).code).not.toMatch(/model-credential|mcp-auth-required|model-unavailable/);
   });
 
   it.each([

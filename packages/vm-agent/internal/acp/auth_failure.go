@@ -1,6 +1,37 @@
 package acp
 
-import "strings"
+import (
+	"errors"
+	"strings"
+
+	acpsdk "github.com/coder/acp-go-sdk"
+)
+
+// ClassifyPromptError reads the pinned SDK's top-level session/prompt error shape.
+// Its Error() method serializes data as JSON, so matching that whole string
+// would either miss provider failures or let untrusted metadata spoof one.
+// MCP tool errors without explicit source evidence stay generic.
+func ClassifyPromptError(err error) string {
+	if err == nil {
+		return ""
+	}
+	var requestError *acpsdk.RequestError
+	if errors.As(err, &requestError) {
+		if requestError.Code != -32603 || requestError.Message != "Internal error" {
+			return ""
+		}
+		data, ok := requestError.Data.(map[string]any)
+		if !ok {
+			return ""
+		}
+		providerError, ok := data["error"].(string)
+		if !ok {
+			return ""
+		}
+		return ClassifyPromptFailure(providerError)
+	}
+	return ClassifyPromptFailure(err.Error())
+}
 
 // ClassifyPromptFailure extracts only a stable reason code from a prompt
 // error. Wrapper error strings are untrusted and may contain URLs or tokens;
@@ -18,9 +49,6 @@ func ClassifyPromptFailure(message string) string {
 			(strings.Contains(text, "unsupported_model") || strings.Contains(text, "model_not_supported") ||
 				(strings.Contains(text, "model") && (strings.Contains(text, "not supported") || strings.Contains(text, "not available for"))))) {
 		return "model_unavailable"
-	}
-	if text == "mcp_endpoint_needs_auth" {
-		return "mcp_endpoint_needs_auth"
 	}
 	if text == "model_provider_credential_rejected" ||
 		(strings.HasPrefix(text, "provider ") && (strings.Contains(text, "http 401") || strings.Contains(text, "invalid_api_key") || strings.Contains(text, "invalid authentication"))) ||

@@ -29,9 +29,11 @@ This slice diagnoses recognized task error reasons and displays static guidance.
 
 The VM only identifies a missing connection when the existing agent-key endpoint returns its exact `NOT_FOUND` / `Agent credential not found` response. Workspace 404 and malformed/empty 200 responses remain generic. MCP and loopback reason codes require a structural source; arbitrary MCP 401 or localhost text in an ACP error is deliberately not promoted to an auth diagnosis. The final C2/activation matrix must verify when those structural reasons are emitted.
 
+For provider failures, the VM reads the pinned ACP SDK's top-level `RequestError` (`-32603`, `Internal error`, `Data.error`) and emits only a bounded reason code. Adjacent tests cover SDK error → prompt broadcast, callback sanitization, shared classification, and the real chat. If an MCP failure is surfaced as an indistinguishable top-level `API Error: 401`, source metadata is needed to distinguish it; this slice does not invent that metadata or infer MCP auth from prose.
+
 ## Verification
 
-- Shared failure-classification tests: 41 passed. Web failure-card tests: 21 passed. VM agent `go test ./...` and local mock/Worker VM smoke passed; focused callback and credential tests passed after final edits. Smoke fixtures now use the current API error envelope and fixed reason code.
+- Shared failure-classification tests: 47 passed. Web failure-card tests: 21 passed. VM agent `go test ./...` and local mock/Worker VM smoke passed; focused SDK callback, prompt broadcast, and credential tests passed after final edits. Smoke fixtures now use the current API error envelope and fixed reason code.
 - Root lint, typecheck, and build passed. Root test had three API timeouts under parallel load; the exact three files passed on isolated rerun (104 tests).
 - Real-chat Playwright includes creator/member restrictions, actual settings navigation, trailing-status persistence, and clearing after a new turn across phone, tablet, and desktop viewports. Reviewed screenshots are under `tasks/evidence/acp-slice-d/`.
 - Security/Go, UI/docs, constitution, and task-completion reviews found no remaining blocker.

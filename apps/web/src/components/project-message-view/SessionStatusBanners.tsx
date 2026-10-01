@@ -9,6 +9,8 @@ import { WakeProgressBanner } from './WakeProgressBanner';
 export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleResult }>) {
   let missingAgentConnection = false;
   if (!lc.taskEmbed?.errorMessage) {
+    // Match only the VM's fixed system transcript. Assistant/tool prose must
+    // never create credential guidance; a later conversation turn clears it.
     for (let i = lc.messages.length - 1; i >= 0; i--) {
       const message = lc.messages[i];
       if (!message) break;

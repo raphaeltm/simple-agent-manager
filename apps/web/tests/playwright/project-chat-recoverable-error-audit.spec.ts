@@ -247,6 +247,7 @@ test.describe('Project chat recoverable error banner', () => {
     await setupApiMocks(page, { ...MOCK_TASK, errorMessage: null }, true, [
       systemMessage,
       { ...systemMessage, id: 'msg-user-later', role: 'user', content: 'I connected the agent.' },
+      { ...systemMessage, id: 'msg-assistant-later', role: 'assistant', content: 'Connection restored.' },
     ]);
     await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
     await expect(page.getByTestId('agent-connection-guidance')).toHaveCount(0);

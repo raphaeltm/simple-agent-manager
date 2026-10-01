@@ -651,7 +651,7 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 	}
 
 	errMsg := "agent_prompt_failed"
-	if reasonCode := ClassifyPromptFailure(err.Error()); reasonCode != "" {
+	if reasonCode := ClassifyPromptError(err); reasonCode != "" {
 		errMsg = reasonCode
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(promptCtx.Err(), context.DeadlineExceeded) {

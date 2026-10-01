@@ -2,12 +2,78 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	acpsdk "github.com/coder/acp-go-sdk"
 )
+
+func TestClassifyPinnedSDKRequestErrorWithoutReadingUntrustedMetadata(t *testing.T) {
+	const canary = "sk-secret-canary-123456789"
+	for _, tc := range []struct {
+		name, providerError, want string
+	}{
+		{"Claude 401", "API Error: 401 invalid authentication", "model_provider_credential_rejected"},
+		{"Codex unsupported model", "API Error: 400 unsupported_model with ChatGPT account", "model_unavailable"},
+		{"MCP 401 lacks source provenance", "MCP service returned HTTP 401", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := acpsdk.NewInternalError(map[string]any{
+				"error":  tc.providerError,
+				"url":    "https://evil.example/?token=" + canary,
+				"schema": "model_provider_credential_rejected",
+			})
+			if got := ClassifyPromptError(err); got != tc.want || strings.Contains(got, canary) {
+				t.Fatalf("SDK error reason = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if got := ClassifyPromptError(acpsdk.NewAuthRequired(map[string]any{"error": "API Error: 401"})); got != "" {
+		t.Fatalf("ambiguous protocol auth classified as provider: %q", got)
+	}
+}
+
+func TestPinnedSDKProviderErrorPromptPathBroadcastsOnlyReasonCode(t *testing.T) {
+	const canary = "sk-secret-canary-123456789"
+	host := newTestSessionHost(t)
+	defer host.Stop()
+	host.finishPromptWithError(
+		context.Background(), json.RawMessage(`"req-auth"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"},
+		acpsdk.NewInternalError(map[string]any{
+			"error": "API Error: 401 invalid authentication",
+			"url":   "https://evil.example/?token=" + canary,
+		}),
+	)
+	host.bufMu.RLock()
+	defer host.bufMu.RUnlock()
+	if len(host.messageBuf) == 0 {
+		t.Fatal("prompt path broadcast no JSON-RPC error")
+	}
+	found := false
+	for _, buffered := range host.messageBuf {
+		if strings.Contains(string(buffered.Data), canary) {
+			t.Fatal("prompt broadcast copied untrusted metadata")
+		}
+		var result struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(buffered.Data, &result); err != nil {
+			t.Fatal(err)
+		}
+		found = found || result.Error.Message == "model_provider_credential_rejected"
+	}
+	if !found {
+		t.Fatal("prompt path did not broadcast the safe provider reason")
+	}
+}
 
 func TestClassifyPromptFailure(t *testing.T) {
 	const canary = "sk-secret-canary-123456789"
@@ -17,7 +83,7 @@ func TestClassifyPromptFailure(t *testing.T) {
 		{"unsupported model after successful login", "Provider HTTP 400 unsupported_model with ChatGPT account " + canary, "model_unavailable"},
 		{"Claude provider rejection", "Provider HTTP 401 invalid authentication " + canary, "model_provider_credential_rejected"},
 		{"Codex provider rejection", "API Error: 401 invalid_api_key " + canary, "model_provider_credential_rejected"},
-		{"MCP structural reason", "mcp_endpoint_needs_auth", "mcp_endpoint_needs_auth"},
+		{"MCP structural reason needs a trusted source", "mcp_endpoint_needs_auth", ""},
 		{"untrusted MCP 401 wrapper", "MCP service returned HTTP 401 " + canary, ""},
 		{"untrusted loopback reason text", "unsupported_loopback_auth", ""},
 		{"untrusted loopback wrapper", "MCP OAuth loopback callback required at http://localhost:1234/?token=" + canary, ""},
@@ -92,5 +158,33 @@ func TestMissingCredentialTranscriptContainsOnlyStaticGuidance(t *testing.T) {
 	}
 	if strings.Contains(messages[0].Content, canary) || strings.Contains(messages[0].Content, "model_provider_credential_missing") {
 		t.Fatal("transcript leaked raw diagnostic")
+	}
+}
+
+func TestAgentSelectionCredentialResponseControlsTranscriptGuidance(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"credential missing", `{"error":"NOT_FOUND","message":"Agent credential not found"}`, "Agent startup failed because its provider connection is missing."},
+		{"workspace missing", `{"error":"NOT_FOUND","message":"Workspace not found"}`, "Agent startup failed: Agent connection could not be checked"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			reporter := &mockMessageReporter{}
+			host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{
+				ControlPlaneURL: server.URL, HTTPClient: server.Client(),
+				SessionID: "session-1", WorkspaceID: "workspace-1", MessageReporter: reporter,
+			}})
+			defer host.Stop()
+			host.SelectAgent(context.Background(), "openai-codex")
+			messages := reporter.Messages()
+			if len(messages) != 1 || messages[0].Role != "system" || messages[0].Content != tc.want {
+				t.Fatalf("unexpected startup transcript: %+v", messages)
+			}
+		})
 	}
 }

@@ -113,9 +113,8 @@ const FAILURE_RULES: FailureRule[] = [
     retryable: false,
     diagnosable: true,
     patterns: [
-      /\b(?:model_unavailable|unsupported_model|model_not_supported|model_not_available|model_not_found)\b/,
-      /\bmodel\b.{0,80}\b(?:unsupported|not supported|not available|not enabled|no access)\b/,
-      /\b(?:unsupported|not supported)\b.{0,80}\bmodel\b/,
+      /^model_unavailable$/,
+      /^(?:provider (?:http )?400|(?:internal error: )?api error:? 400)\b.{0,160}\b(?:unsupported_model|model_not_supported|model_not_available|model_not_found|model is not supported|model is not available)\b/,
     ],
   },
   {
@@ -125,7 +124,7 @@ const FAILURE_RULES: FailureRule[] = [
     guidance: 'Use a connection method supported by that service. This session cannot complete its local callback flow.',
     retryable: false,
     diagnosable: true,
-    patterns: [/\bunsupported_loopback_auth\b/],
+    patterns: [/^unsupported_loopback_auth$/],
   },
   {
     code: 'mcp-auth-required',
@@ -134,7 +133,7 @@ const FAILURE_RULES: FailureRule[] = [
     guidance: 'Review the personal or project MCP connection. A project administrator may need to update a shared server. Its service may require sign-in rather than a bearer token.',
     retryable: true,
     diagnosable: true,
-    patterns: [/\bmcp_endpoint_needs_auth\b/, /\bmcp[_ -]auth[_ -]required\b/],
+    patterns: [/^mcp_endpoint_needs_auth$/],
   },
   {
     code: 'model-credential-missing',
@@ -143,10 +142,7 @@ const FAILURE_RULES: FailureRule[] = [
     guidance: 'The session creator can connect the agent in Settings using the guided sign-in or supported key method.',
     retryable: true,
     diagnosable: true,
-    patterns: [
-      /\bmodel_provider_credential_missing\b/,
-      /\bagent_key_fetch\b.*\b(?:missing|not found|no credential)\b/,
-    ],
+    patterns: [/^model_provider_credential_missing$/],
   },
   {
     code: 'model-credential-rejected',
@@ -155,10 +151,7 @@ const FAILURE_RULES: FailureRule[] = [
     guidance: 'The session creator can check or reconnect the agent in Settings, then retry.',
     retryable: true,
     diagnosable: true,
-    patterns: [
-      /\bmodel_provider_credential_rejected\b/,
-      /\bprovider\b.{0,60}\b(?:invalid_api_key|invalid_authentication|expired_token)\b/,
-    ],
+    patterns: [/^model_provider_credential_rejected$/],
   },
   {
     code: 'credentials',
@@ -329,6 +322,20 @@ const UNKNOWN_CLASSIFICATION: FailureClassification = {
   diagnosable: true,
 };
 
+const AUTH_FAILURE_CODES = new Set<FailureCode>([
+  'model-unavailable', 'unsupported-loopback-auth', 'mcp-auth-required',
+  'model-credential-missing', 'model-credential-rejected',
+]);
+
+function boundedAuthEvidence(message: string | null | undefined): string {
+  let text = (message ?? '').trim().toLowerCase().split('\n', 1)[0] ?? '';
+  for (const marker of [' url=', ' schema=', ' http://', ' https://']) {
+    const at = text.indexOf(marker);
+    if (at >= 0) text = text.slice(0, at);
+  }
+  return text;
+}
+
 /**
  * Classify a failure from its free-text message (and optional execution step).
  * Returns a stable classification; falls back to `unknown` when no rule matches.
@@ -338,11 +345,13 @@ export function classifyFailure(
   step?: string | null
 ): FailureClassification {
   const haystack = `${message ?? ''} ${step ?? ''}`.toLowerCase();
+  const authEvidence = boundedAuthEvidence(message);
   if (!haystack.trim()) {
     return UNKNOWN_CLASSIFICATION;
   }
   for (const rule of FAILURE_RULES) {
-    if (rule.patterns.some((p) => p.test(haystack))) {
+    const evidence = AUTH_FAILURE_CODES.has(rule.code) ? authEvidence : haystack;
+    if (rule.patterns.some((p) => p.test(evidence))) {
       return {
         code: rule.code,
         label: rule.label,

@@ -1535,7 +1535,7 @@ func taskCallbackErrorMessage(promptErr error) string {
 	if promptErr == nil {
 		return ""
 	}
-	if reasonCode := acp.ClassifyPromptFailure(promptErr.Error()); reasonCode != "" {
+	if reasonCode := acp.ClassifyPromptError(promptErr); reasonCode != "" {
 		return reasonCode
 	}
 	if safePromptTimeoutMessage.MatchString(promptErr.Error()) {

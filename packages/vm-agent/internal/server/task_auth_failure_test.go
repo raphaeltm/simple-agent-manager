@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	acpsdk "github.com/coder/acp-go-sdk"
 )
 
 func TestTaskCallbackAuthFailureUsesOnlyReasonCode(t *testing.T) {
@@ -11,6 +13,17 @@ func TestTaskCallbackAuthFailureUsesOnlyReasonCode(t *testing.T) {
 	got := taskCallbackErrorMessage(errors.New("Provider HTTP 400 unsupported_model url=https://example.test/?token=" + canary))
 	if got != "model_unavailable" || strings.Contains(got, canary) || strings.Contains(got, "example.test") {
 		t.Fatalf("unsafe callback reason: %q", got)
+	}
+}
+
+func TestTaskCallbackPinnedSDKErrorUsesOnlyReasonCode(t *testing.T) {
+	const canary = "sk-secret-canary-123456789"
+	err := acpsdk.NewInternalError(map[string]any{
+		"error": "API Error: 400 unsupported_model with ChatGPT account",
+		"url":   "https://evil.example/?token=" + canary,
+	})
+	if got := taskCallbackErrorMessage(err); got != "model_unavailable" || strings.Contains(got, canary) {
+		t.Fatalf("unsafe SDK callback reason: %q", got)
 	}
 }
 
