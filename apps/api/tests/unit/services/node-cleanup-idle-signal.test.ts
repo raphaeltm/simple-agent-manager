@@ -278,7 +278,7 @@ describe('idle reaping is immune to heartbeat activity', () => {
     expect(deleteCalls).toContain('past-max-lifetime');
   });
 
-  it('uses stale workspace activity to discriminate the 24h active-row backstop', async () => {
+  it('preserves active workspace rows at the 24h ceiling regardless of stale activity', async () => {
     seedNode({ id: 'absolute-stale', createdAt: ago(25 * HOUR), updatedAt: ago(1000) });
     seedAutoProvisionedTask('absolute-stale', 'in_progress', ago(25 * HOUR));
     seedWorkspace({
@@ -303,9 +303,9 @@ describe('idle reaping is immune to heartbeat activity', () => {
 
     const result = await runNodeCleanupSweep(env);
 
-    expect(result.lifetimeDestroyed).toBe(1);
+    expect(result.lifetimeDestroyed).toBe(0);
     expect(result.lifetimeSkipped).toBeGreaterThanOrEqual(1);
-    expect(deleteCalls).toContain('absolute-stale');
+    expect(deleteCalls).not.toContain('absolute-stale');
     expect(deleteCalls).not.toContain('absolute-recent');
   });
 

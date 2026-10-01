@@ -17,6 +17,7 @@ type ActiveWorkspace = {
   project_id: string | null;
   chat_session_id: string | null;
   sleep_status: string | null;
+  sleep_after: string | null;
   sleep_attempts: number | null;
   snapshot_status: string | null;
   degradation: string | null;
@@ -31,7 +32,7 @@ export async function prepareAbsoluteLifetimeRelease(
 ): Promise<boolean> {
   const rows = await env.DATABASE.prepare(
     `SELECT w.id, w.user_id, w.project_id, w.chat_session_id,
-            s.sleep_status, s.sleep_attempts, s.status AS snapshot_status, s.degradation,
+            s.sleep_status, s.sleep_after, s.sleep_attempts, s.status AS snapshot_status, s.degradation,
             s.snapshot_generation
      FROM workspaces w
      LEFT JOIN session_snapshots s ON s.chat_session_id = w.chat_session_id
@@ -77,7 +78,10 @@ export async function prepareAbsoluteLifetimeRelease(
     if (
       attempts < maxAttempts &&
       workspace.sleep_status !== 'preparing' &&
-      workspace.sleep_status !== 'stopping'
+      workspace.sleep_status !== 'stopping' &&
+      // The sleep scheduler keeps the earliest deadline. Re-queueing a future
+      // retry with zero delay would silently erase its configured backoff.
+      (!workspace.sleep_after || workspace.sleep_after <= nowIso)
     ) {
       try {
         await queueWorkspaceSessionSleep(env, {
@@ -113,21 +117,26 @@ export async function prepareAbsoluteLifetimeRelease(
     // to discard an uncaptured agent home. A separate verified migration or
     // owner-directed operation is required to release this active workspace.
     if (workspace.project_id && workspace.chat_session_id) {
-      await persistMessage(
-        env,
-        workspace.project_id,
-        workspace.chat_session_id,
-        'system',
-        `SAM could not preserve workspace ${workspace.id} before the managed node reached its absolute lifetime. Its snapshot is ${workspace.snapshot_status ?? 'missing'}/${workspace.degradation ?? 'unknown'} after ${attempts} sleep attempts. Automatic deletion is blocked to protect its agent home and unpublished files; an operator must resolve the preservation failure.`,
-        { source: 'node_cleanup', kind: 'absolute_lifetime_preservation_blocked' },
-        `absolute-lifetime-preservation-${node.id}-${workspace.id}`
-      ).catch((error: unknown) => {
+      try {
+        await persistMessage(
+          env,
+          workspace.project_id,
+          workspace.chat_session_id,
+          'system',
+          `SAM could not preserve workspace ${workspace.id} before the managed node reached its absolute lifetime. Its snapshot is ${workspace.snapshot_status ?? 'missing'}/${workspace.degradation ?? 'unknown'} after ${attempts} sleep attempts. Automatic deletion is blocked to protect its agent home and unpublished files; an operator must resolve the preservation failure.`,
+          { source: 'node_cleanup', kind: 'absolute_lifetime_preservation_blocked' },
+          `absolute-lifetime-preservation-${node.id}-${workspace.id}`
+        );
+      } catch (error) {
         log.error('node_cleanup.absolute_lifetime_notice_failed', {
           nodeId: node.id,
           workspaceId: workspace.id,
           error: error instanceof Error ? error.message : String(error),
         });
-      });
+        // Keep the notice eligible for retry on the next sweep. The stable
+        // message ID makes an ambiguous delivery safe to repeat.
+        continue;
+      }
     }
     await recordNodeHealthEvent(env, {
       nodeId: node.id,

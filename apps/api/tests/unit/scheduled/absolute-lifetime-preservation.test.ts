@@ -14,6 +14,10 @@ import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 const mocks = vi.hoisted(() => ({
   queue: vi.fn(async () => {}),
   message: vi.fn(async () => 'notice-1'),
+  delete: vi.fn(),
+}));
+vi.mock('../../../src/services/nodes', () => ({
+  deleteNodeResourcesStrict: (...args: unknown[]) => mocks.delete(...args),
 }));
 vi.mock('../../../src/services/session-sleep', () => ({
   queueWorkspaceSessionSleep: (...args: unknown[]) => mocks.queue(...args),
@@ -30,7 +34,12 @@ const node = {
 };
 const now = new Date('2026-10-01T06:00:00.000Z');
 
-function seed(sqlite: Database.Database, attempts: number, sleepStatus: string) {
+function seed(
+  sqlite: Database.Database,
+  attempts: number,
+  sleepStatus: string,
+  sleepAfter?: string
+) {
   sqlite
     .prepare(
       `INSERT INTO nodes (id, user_id, status, node_role, node_class, created_at, updated_at)
@@ -54,11 +63,11 @@ function seed(sqlite: Database.Database, attempts: number, sleepStatus: string) 
     .prepare(
       `INSERT INTO session_snapshots
     (id, workspace_id, node_id, project_id, user_id, chat_session_id, runtime,
-     status, degradation, sleep_status, sleep_attempts, expires_at, created_at, updated_at)
+     status, degradation, sleep_status, sleep_after, sleep_attempts, expires_at, created_at, updated_at)
     VALUES ('snapshot-1', 'old-workspace', 'old-node', 'project-1', 'user-1', 'chat-1',
-      'vm', 'degraded', 'home-skipped', ?, ?, '2026-10-02T00:00:00.000Z', ?, ?)`
+      'vm', 'degraded', 'home-skipped', ?, ?, ?, '2026-10-02T00:00:00.000Z', ?, ?)`
     )
-    .run(sleepStatus, attempts, node.created_at, node.created_at);
+    .run(sleepStatus, sleepAfter ?? null, attempts, node.created_at, node.created_at);
 }
 
 describe('absolute lifetime active-workspace preservation', () => {
@@ -80,6 +89,13 @@ describe('absolute lifetime active-workspace preservation', () => {
       SESSION_SLEEP_RETRY_DELAY_MS: '300000',
       NODE_UNHEALTHY_RELEASE_AFTER_MS: '1800000',
     } as Env;
+    mocks.delete.mockImplementation(async (nodeId: string) => {
+      const proof = now.toISOString();
+      sqlite
+        .prepare(`UPDATE nodes SET runtime_termination_confirmed_at = ? WHERE id = ?`)
+        .run(proof, nodeId);
+      return { runtimeTerminationConfirmedAt: proof, runtimeIncarnationId: null };
+    });
   });
   afterEach(() => sqlite.close());
 
@@ -126,6 +142,50 @@ describe('absolute lifetime active-workspace preservation', () => {
       sleepAfterMs: 0,
       expectedNodeId: 'old-node',
     });
+  });
+
+  it('does not pull a future failed-sleep retry forward during repeated cleanup sweeps', async () => {
+    const retryAt = '2026-10-01T06:05:00.000Z';
+    seed(sqlite, 2, 'failed', retryAt);
+    const config = resolveCleanupConfig(env);
+    await prepareAbsoluteLifetimeRelease(env, node, now, config);
+    await prepareAbsoluteLifetimeRelease(env, node, now, config);
+    expect(mocks.queue).not.toHaveBeenCalled();
+    expect(
+      sqlite
+        .prepare(`SELECT sleep_after FROM session_snapshots WHERE id = 'snapshot-1'`)
+        .pluck()
+        .get()
+    ).toBe(retryAt);
+  });
+
+  it('retries a failed owner notice before marking escalation delivered', async () => {
+    seed(sqlite, 9, 'failed');
+    const config = resolveCleanupConfig(env);
+    await prepareAbsoluteLifetimeRelease(env, node, now, config);
+    sqlite.prepare(`UPDATE node_health_events SET created_at = '2026-10-01T05:00:00.000Z'`).run();
+    mocks.message.mockRejectedValueOnce(new Error('Durable Object unavailable'));
+    await prepareAbsoluteLifetimeRelease(env, node, now, config);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT count(*) FROM node_health_events WHERE event = 'absolute_lifetime_preservation_blocked'`
+        )
+        .pluck()
+        .get()
+    ).toBe(0);
+    await prepareAbsoluteLifetimeRelease(env, node, now, config);
+    await prepareAbsoluteLifetimeRelease(env, node, now, config);
+    expect(mocks.message).toHaveBeenCalledTimes(2);
+    expect(mocks.message.mock.calls[0]?.at(-1)).toBe(mocks.message.mock.calls[1]?.at(-1));
+    expect(
+      sqlite
+        .prepare(
+          `SELECT count(*) FROM node_health_events WHERE event = 'absolute_lifetime_preservation_blocked'`
+        )
+        .pluck()
+        .get()
+    ).toBe(1);
   });
 
   it('does not destroy the old-node shape in the absolute-lifetime sweep', async () => {
@@ -178,40 +238,50 @@ describe('absolute lifetime active-workspace preservation', () => {
     ).toEqual(['old-workspace', 'second-workspace']);
   });
 
-  it('prioritizes empty nodes ahead of protected old nodes in a bounded candidate page', async () => {
+  it('deletes eligible empty nodes across bounded sweeps despite a larger protected backlog', async () => {
     seed(sqlite, 9, 'failed');
-    sqlite
-      .prepare(
-        `INSERT INTO nodes
-      (id, user_id, status, node_role, node_class, created_at, updated_at)
-      VALUES ('empty-node', 'user-1', 'running', 'workspace', 'managed',
-        '2026-09-30T01:00:00.000Z', '2026-09-30T01:00:00.000Z')`
-      )
-      .run();
-    sqlite
-      .prepare(
-        `INSERT INTO tasks (id, auto_provisioned_node_id, created_at, updated_at)
-      VALUES ('task-2', 'empty-node', '2026-09-30T01:00:00.000Z', '2026-09-30T01:00:00.000Z')`
-      )
-      .run();
-    const result = emptyResult();
-    await sweepMaxLifetimeNodes(
-      drizzle(env.DATABASE, { schema }),
-      env,
-      now,
-      {
-        ...resolveCleanupConfig(env),
-        nodeSweepLimit: 1,
-      },
-      result
-    );
-    expect(
+    for (const id of ['protected-2', 'protected-3']) {
       sqlite
-        .prepare(`SELECT count(*) FROM node_health_events WHERE node_id = 'old-node'`)
-        .pluck()
-        .get()
-    ).toBe(0);
-    expect(result.lifetimeSkipped + result.lifetimeDestroyed + result.errors).toBe(1);
+        .prepare(
+          `INSERT INTO nodes (id, user_id, status, node_role, node_class, created_at, updated_at) VALUES (?, 'user-1', 'running', 'workspace', 'managed', ?, ?)`
+        )
+        .run(id, node.created_at, node.created_at);
+      sqlite
+        .prepare(
+          `INSERT INTO tasks (id, auto_provisioned_node_id, created_at, updated_at) VALUES (?, ?, ?, ?)`
+        )
+        .run(`task-${id}`, id, node.created_at, node.created_at);
+      sqlite
+        .prepare(
+          `INSERT INTO workspaces (id, node_id, user_id, status, created_at, updated_at) VALUES (?, ?, 'user-1', 'running', ?, ?)`
+        )
+        .run(`workspace-${id}`, id, node.created_at, node.created_at);
+    }
+    for (const id of ['empty-1', 'empty-2']) {
+      sqlite
+        .prepare(
+          `INSERT INTO nodes (id, user_id, status, node_role, node_class, created_at, updated_at) VALUES (?, 'user-1', 'running', 'workspace', 'managed', '2026-09-30T01:00:00.000Z', '2026-09-30T01:00:00.000Z')`
+        )
+        .run(id);
+      sqlite
+        .prepare(
+          `INSERT INTO tasks (id, auto_provisioned_node_id, created_at, updated_at) VALUES (?, ?, ?, ?)`
+        )
+        .run(`task-${id}`, id, node.created_at, node.created_at);
+    }
+    const config = { ...resolveCleanupConfig(env), nodeSweepLimit: 1 };
+    for (let i = 0; i < 2; i++) {
+      const result = emptyResult();
+      await sweepMaxLifetimeNodes(drizzle(env.DATABASE, { schema }), env, now, config, result);
+      expect(result).toMatchObject({ lifetimeDestroyed: 1, errors: 0 });
+    }
+    expect(mocks.delete.mock.calls.map((call) => call[0])).toEqual(['empty-1', 'empty-2']);
+    expect(
+      sqlite.prepare(`SELECT id FROM nodes WHERE status = 'deleted' ORDER BY id`).pluck().all()
+    ).toEqual(['empty-1', 'empty-2']);
+    expect(
+      sqlite.prepare(`SELECT count(*) FROM nodes WHERE status = 'running'`).pluck().get()
+    ).toBe(3);
   });
 
   it('refuses the node cleanup claim even after preservation escalation', async () => {
