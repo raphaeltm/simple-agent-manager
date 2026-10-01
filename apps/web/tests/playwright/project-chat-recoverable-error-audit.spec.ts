@@ -247,7 +247,7 @@ test.describe('Project chat recoverable error banner', () => {
     await expect(page.getByTestId('agent-connection-guidance')).toHaveCount(0);
   });
 
-  test('new conversation turn clears stale startup guidance', async ({ page }) => {
+  test('successful retry turn clears stale startup guidance even after a later system row', async ({ page }) => {
     const systemMessage = {
       ...MOCK_MESSAGES[0],
       id: 'msg-system-auth',
@@ -258,6 +258,7 @@ test.describe('Project chat recoverable error banner', () => {
       systemMessage,
       { ...systemMessage, id: 'msg-user-later', role: 'user', content: 'I connected the agent.' },
       { ...systemMessage, id: 'msg-assistant-later', role: 'assistant', content: 'Connection restored.' },
+      { ...systemMessage, id: 'msg-system-later', content: 'Workspace is preparing.' },
     ]);
     await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
     await expect(page.getByTestId('agent-connection-guidance')).toHaveCount(0);

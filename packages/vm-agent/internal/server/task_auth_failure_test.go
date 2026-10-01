@@ -1,12 +1,41 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/workspace/vm-agent/internal/config"
 )
+
+func TestPinnedAdapterWireErrorTaskCallbackSanitizer(t *testing.T) {
+	const canary = "sk-secret-canary-123456789"
+	for _, tc := range []struct{ name, wire, want string }{
+		{"Claude provider 401", `{"code":-32603,"message":"Internal error","data":{"errorKind":"authentication_failed","message":"API Error: 401","url":"https://evil.example/?token=` + canary + `"}}`, "model_provider_credential_rejected"},
+		{"Codex configured provider unauthorized", `{"code":-32603,"message":"Internal error","data":{"message":"API Error: 401 ` + canary + `","codexErrorInfo":"unauthorized"}}`, "model_provider_credential_rejected"},
+		{"MCP 401 without source", `{"code":-32603,"message":"Internal error","data":{"message":"MCP HTTP 401 ` + canary + `"}}`, "agent_prompt_failed"},
+		{"unsupported 400 without model source", `{"code":-32603,"message":"Internal error","data":{"message":"API Error: 400 unsupported_model ` + canary + `","codexErrorInfo":"badRequest"}}`, "agent_prompt_failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requestError acpsdk.RequestError
+			if err := json.Unmarshal([]byte(tc.wire), &requestError); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(requestError.Error(), canary) {
+				t.Fatal("SDK Error() did not include test canary")
+			}
+			body := runTaskCompletionCallback(t, config.TaskModeTask, "error", &requestError)
+			if body["errorMessage"] != tc.want || body["toStatus"] != "failed" {
+				t.Fatalf("callback = %#v, want reason %q", body, tc.want)
+			}
+			if encoded, _ := json.Marshal(body); strings.Contains(string(encoded), canary) || strings.Contains(string(encoded), "evil.example") {
+				t.Fatal("task callback leaked untrusted SDK metadata")
+			}
+		})
+	}
+}
 
 func TestTaskCallbackAuthFailureUsesOnlyReasonCode(t *testing.T) {
 	const canary = "sk-secret-canary-123456789"
@@ -44,6 +73,18 @@ func TestTaskCallbackUnknownFailureIsSafe(t *testing.T) {
 	got := taskCallbackErrorMessage(errors.New("Unknown wrapper failure https://example.test/?token=" + canary))
 	if got != "agent_prompt_failed" {
 		t.Fatalf("unsafe callback fallback: %q", got)
+	}
+}
+
+func TestTaskCallbackPreservesOnlyTypedMissingCredential(t *testing.T) {
+	for _, tc := range []struct{ message, want string }{
+		{"model_provider_credential_missing", "model_provider_credential_missing"},
+		{"agent_key_fetch: no credential configured", "agent_prompt_failed"},
+	} {
+		body := runTaskCompletionCallback(t, config.TaskModeTask, "error", errors.New(tc.message))
+		if body["errorMessage"] != tc.want {
+			t.Fatalf("callback errorMessage = %v, want %q", body["errorMessage"], tc.want)
+		}
 	}
 }
 

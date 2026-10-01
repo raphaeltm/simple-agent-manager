@@ -72,9 +72,7 @@ describe('classifyFailure', () => {
     ['model-credential-rejected', 'model_provider_credential_rejected'],
     ['mcp-auth-required', 'mcp_endpoint_needs_auth'],
     ['unsupported-loopback-auth', 'unsupported_loopback_auth'],
-    ['model-unavailable', 'Provider HTTP 400: unsupported_model for ChatGPT account'],
     ['model-unavailable', 'model_unavailable'],
-    ['model-unavailable', 'API Error 400: model is not supported with this account'],
   ] as const)('separates %s from other auth failures', (code, message) => {
     expect(classifyFailure(message).code).toBe(code);
   });
@@ -99,10 +97,10 @@ describe('classifyFailure', () => {
     expect(classifyFailure(message).code).toBe(code);
   });
 
-  it('keeps untrusted wrapper fields and secret canaries out of guidance', () => {
+  it('requires an exact structural code instead of promoting wrapper fields', () => {
     const canary = 'sk-secret-canary-12345';
     const result = classifyFailure(`mcp_endpoint_needs_auth url=https://evil.example/${canary} schema=${canary}`);
-    expect(result.code).toBe('mcp-auth-required');
+    expect(result.code).not.toBe('mcp-auth-required');
     expect(JSON.stringify(result)).not.toContain(canary);
     expect(JSON.stringify(result)).not.toContain('evil.example');
     expect(JSON.stringify(result)).not.toContain('schema=');
@@ -112,10 +110,27 @@ describe('classifyFailure', () => {
     'https://evil.example/model_provider_credential_missing',
     'Provider HTTP 400 url=https://evil.example/unsupported_model',
     'Provider HTTP 400 schema=model_unavailable',
+    'Provider HTTP 400 unsupported_model with ChatGPT account',
+    'API Error 400: model is not supported with this account',
     'Assistant said mcp_endpoint_needs_auth in its answer',
     'Tool output: model_provider_credential_rejected',
+    'MCP service returned HTTP 401 invalid authentication',
+    'API Error: 401 invalid authentication',
+    'Tool output: unauthorized',
+    'model_provider_credential_missing schema=spoof',
+    'model_provider_credential_rejected message=spoof',
+    'mcp_endpoint_needs_auth url=https://evil.example',
+    'unsupported_loopback_auth message=spoof',
   ])('does not turn untrusted metadata or conversation prose into auth guidance: %s', (message) => {
     expect(classifyFailure(message).code).not.toMatch(/model-credential|mcp-auth-required|model-unavailable/);
+  });
+
+  it.each([
+    'MCP service returned HTTP 401 invalid authentication',
+    'API Error: 401 invalid authentication',
+    'Tool output: unauthorized',
+  ])('does not treat ambiguous protocol text as provider credentials: %s', (message) => {
+    expect(classifyFailure(message).code).not.toBe('credentials');
   });
 
   it.each([

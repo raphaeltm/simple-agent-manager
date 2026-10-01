@@ -42,6 +42,63 @@ func TestClassifyPinnedSDKRequestErrorWithoutReadingUntrustedMetadata(t *testing
 	}
 }
 
+func TestPinnedAdapterRequestErrorWireShapeAndPromptCompletion(t *testing.T) {
+	const canary = "sk-secret-canary-123456789"
+	for _, tc := range []struct {
+		name, wire, want string
+	}{
+		{"Claude provider 401", `{"code":-32603,"message":"Internal error","data":{"errorKind":"authentication_failed","message":"API Error: 401","url":"https://evil.example/?token=` + canary + `"}}`, "model_provider_credential_rejected"},
+		{"Codex configured provider unauthorized", `{"code":-32603,"message":"Internal error","data":{"message":"API Error: 401 ` + canary + `","codexErrorInfo":"unauthorized"}}`, "model_provider_credential_rejected"},
+		{"Codex MCP 401 has no turn auth source", `{"code":-32603,"message":"Internal error","data":{"message":"MCP server returned HTTP 401 ` + canary + `"}}`, "agent_prompt_failed"},
+		{"Codex unsupported 400 without model source", `{"code":-32603,"message":"Internal error","data":{"message":"API Error: 400 unsupported_model ` + canary + `","codexErrorInfo":"badRequest"}}`, "agent_prompt_failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requestError acpsdk.RequestError
+			if err := json.Unmarshal([]byte(tc.wire), &requestError); err != nil {
+				t.Fatal(err)
+			}
+			// The pinned Go SDK Error() serializes the whole data object. The
+			// classifier must use typed fields, not search that JSON string.
+			if !strings.Contains(requestError.Error(), canary) {
+				t.Fatal("SDK Error() did not exercise the untrusted wrapper")
+			}
+			if got := ClassifyPromptError(errors.New(requestError.Error())); got != "" {
+				t.Fatalf("serialized wrapper classified as trusted error: %q", got)
+			}
+			host := newTestSessionHost(t)
+			defer host.Stop()
+			completed := make(chan error, 1)
+			host.config.OnPromptComplete = func(_ string, promptErr error) { completed <- promptErr }
+			host.finishPromptWithError(context.Background(), json.RawMessage(`"req-wire"`),
+				promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"}, &requestError)
+			select {
+			case promptErr := <-completed:
+				wantReason := tc.want
+				if wantReason == "agent_prompt_failed" {
+					wantReason = ""
+				}
+				if got := ClassifyPromptError(promptErr); got != wantReason {
+					t.Fatalf("prompt callback reason = %q, want %q", got, wantReason)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("prompt completion callback not called")
+			}
+			host.bufMu.RLock()
+			defer host.bufMu.RUnlock()
+			found := false
+			for _, buffered := range host.messageBuf {
+				if strings.Contains(string(buffered.Data), canary) {
+					t.Fatal("prompt broadcast leaked wrapper metadata")
+				}
+				found = found || strings.Contains(string(buffered.Data), tc.want)
+			}
+			if !found {
+				t.Fatalf("prompt did not broadcast safe reason %q", tc.want)
+			}
+		})
+	}
+}
+
 func TestPinnedSDKProviderErrorPromptPathBroadcastsOnlyReasonCode(t *testing.T) {
 	const canary = "sk-secret-canary-123456789"
 	host := newTestSessionHost(t)
@@ -86,6 +143,7 @@ func TestClassifyPromptFailure(t *testing.T) {
 		name, message, want string
 	}{
 		{"unsupported model after successful login", "Provider HTTP 400 unsupported_model with ChatGPT account " + canary, "model_unavailable"},
+		{"typed missing credential", "model_provider_credential_missing", "model_provider_credential_missing"},
 		{"Claude provider rejection", "Provider HTTP 401 invalid authentication " + canary, "model_provider_credential_rejected"},
 		{"Codex provider rejection", "API Error: 401 invalid_api_key " + canary, "model_provider_credential_rejected"},
 		{"MCP structural reason needs a trusted source", "mcp_endpoint_needs_auth", ""},
@@ -97,6 +155,8 @@ func TestClassifyPromptFailure(t *testing.T) {
 		{"generic provider timeout", "Provider HTTP 504 timeout", ""},
 		{"generic unauthorized tool output", "Tool text says unauthorized file", ""},
 		{"metadata cannot spoof model", "Provider HTTP 400 url=https://evil.example/unsupported_model", ""},
+		{"metadata cannot spoof missing", "model_provider_credential_missing url=https://evil.example/?token=" + canary, ""},
+		{"metadata cannot spoof rejection", "model_provider_credential_rejected schema=spoof", ""},
 		{"schema cannot spoof MCP", "Provider HTTP 400 schema=mcp_endpoint_needs_auth", ""},
 		{"MCP 401 is not model auth", "MCP service returned HTTP 401 API Error: 401", ""},
 		{"provider overload", "Provider HTTP 429 rate limit " + canary, "provider_overloaded"},
@@ -128,6 +188,9 @@ func TestFetchAgentKeyMissingCredentialIsDistinctFromControlPlaneFailure(t *test
 	}{
 		{"credential not found", http.StatusNotFound, `{"error":"NOT_FOUND","message":"Agent credential not found"}`, true},
 		{"workspace not found", http.StatusNotFound, `{"error":"NOT_FOUND","message":"Workspace not found"}`, false},
+		{"wrong error code", http.StatusNotFound, `{"error":"FORBIDDEN","message":"Agent credential not found"}`, false},
+		{"unauthorized callback", http.StatusUnauthorized, `{"error":"UNAUTHORIZED","message":"Agent credential not found"}`, false},
+		{"forbidden workspace", http.StatusForbidden, `{"error":"FORBIDDEN","message":"Agent credential not found"}`, false},
 		{"unspecified not found", http.StatusNotFound, "", false},
 		{"empty credential response", http.StatusOK, `{}`, false},
 		{"control plane error", http.StatusServiceUnavailable, "", false},
@@ -144,6 +207,39 @@ func TestFetchAgentKeyMissingCredentialIsDistinctFromControlPlaneFailure(t *test
 			_, err := host.fetchAgentKey(context.Background(), "openai-codex")
 			if err == nil || errors.Is(err, errAgentCredentialMissing) != tc.missing {
 				t.Fatalf("error = %v; missing = %v", err, tc.missing)
+			}
+		})
+	}
+}
+
+type selectionErrorRecorder struct{ message string }
+
+func (*selectionErrorRecorder) UpdateAcpSessionID(_, _, _, _ string) error { return nil }
+func (r *selectionErrorRecorder) MarkError(_, _, _, message string) error {
+	r.message = message
+	return nil
+}
+
+func TestAgentSelectionOnlyPersistsTypedCredentialMissing(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"credential missing", `{"error":"NOT_FOUND","message":"Agent credential not found"}`, "model_provider_credential_missing"},
+		{"workspace missing", `{"error":"NOT_FOUND","message":"Workspace not found"}`, "Agent connection could not be checked"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			recorder := &selectionErrorRecorder{}
+			host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{
+				ControlPlaneURL: server.URL, HTTPClient: server.Client(),
+				SessionID: "session-1", WorkspaceID: "workspace-1", SessionManager: recorder,
+			}})
+			defer host.Stop()
+			host.SelectAgent(context.Background(), "openai-codex")
+			if recorder.message != tc.want {
+				t.Fatalf("persisted selection error = %q, want %q", recorder.message, tc.want)
 			}
 		})
 	}

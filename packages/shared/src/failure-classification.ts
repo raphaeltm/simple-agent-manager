@@ -113,10 +113,7 @@ const FAILURE_RULES: FailureRule[] = [
     guidance: 'Check model access with the provider. Changing a working login alone may not grant access.',
     retryable: false,
     diagnosable: true,
-    patterns: [
-      /^model_unavailable$/,
-      /^(?:provider (?:http )?400|(?:internal error: )?api error:? 400)\b.{0,160}\b(?:unsupported_model|model_not_supported|model_not_available|model_not_found|model is not supported|model is not available)\b/,
-    ],
+    patterns: [/^model_unavailable$/],
   },
   {
     code: 'unsupported-loopback-auth',
@@ -177,7 +174,6 @@ const FAILURE_RULES: FailureRule[] = [
       /invalid (api key|x-api-key|token|credential)/,
       /(authentication|authorization) (failed|error)/,
       /\bunauthorized\b/,
-      /\b401\b/,
       /token (expired|revoked|invalid)/,
       /refresh token/,
       /billing/,
@@ -332,19 +328,12 @@ const UNKNOWN_CLASSIFICATION: FailureClassification = {
   diagnosable: true,
 };
 
-const AUTH_FAILURE_CODES = new Set<FailureCode>([
+// These codes are emitted by the VM task callback. Never infer them from an
+// execution step, conversation text, URL, schema field, or wrapper metadata.
+const STRUCTURAL_FAILURE_CODES = new Set<FailureCode>([
   'model-unavailable', 'unsupported-loopback-auth', 'mcp-auth-required',
   'model-credential-missing', 'model-credential-rejected', 'agent-prompt-failed',
 ]);
-
-function boundedAuthEvidence(message: string | null | undefined): string {
-  let text = (message ?? '').trim().toLowerCase().split('\n', 1)[0] ?? '';
-  for (const marker of [' url=', ' schema=', ' http://', ' https://']) {
-    const at = text.indexOf(marker);
-    if (at >= 0) text = text.slice(0, at);
-  }
-  return text;
-}
 
 /**
  * Classify a failure from its free-text message (and optional execution step).
@@ -355,12 +344,14 @@ export function classifyFailure(
   step?: string | null
 ): FailureClassification {
   const haystack = `${message ?? ''} ${step ?? ''}`.toLowerCase();
-  const authEvidence = boundedAuthEvidence(message);
+  const structuralEvidence = (message ?? '').trim().toLowerCase();
+  const ambiguousProtocolAuth = /^(?:mcp\b|tool\b|assistant\b|api error\b)/.test(structuralEvidence);
   if (!haystack.trim()) {
     return UNKNOWN_CLASSIFICATION;
   }
   for (const rule of FAILURE_RULES) {
-    const evidence = AUTH_FAILURE_CODES.has(rule.code) ? authEvidence : haystack;
+    if (rule.code === 'credentials' && ambiguousProtocolAuth) continue;
+    const evidence = STRUCTURAL_FAILURE_CODES.has(rule.code) ? structuralEvidence : haystack;
     if (rule.patterns.some((p) => p.test(evidence))) {
       return {
         code: rule.code,

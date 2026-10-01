@@ -107,7 +107,7 @@ describe('FailureCard', () => {
 
   it('does not suggest changing credentials for unsupported model access', () => {
     renderWithQuery(
-      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed({ errorMessage: 'Provider HTTP 400: unsupported_model' })}
+      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed({ errorMessage: 'model_unavailable' })}
         recoverable={false} isSessionCreator />
     );
     fireEvent.click(screen.getByRole('button', { name: /model unavailable for this account/i }));
