@@ -1,11 +1,15 @@
 import {
   type AdmitProjectEventInput,
+  AGENT_MESSAGE_CHANNEL_PREFIX,
   PROJECT_EVENT_CHANNEL_SOURCE,
   PROJECT_EVENT_CHANNEL_TYPE,
+  type ProjectEventChannelActor,
+  type ProjectEventJsonValue,
   type PublishProjectEventChannelInput,
   type PublishProjectEventChannelResult,
 } from '@simple-agent-manager/shared';
 
+import { isAgentMessageChannelName } from './agent-message-notice';
 import { channelLimits, channelName } from './project-event-channels-config';
 import { channelDto, readChannel } from './project-event-channels-storage';
 import { admitProjectEvent } from './project-events';
@@ -16,52 +20,108 @@ import {
 import { resolveProjectEventLimits } from './project-events-limits';
 import { assertProjectBinding, normalizeProjectId } from './project-events-normalization';
 import { readEventByDeliveryKey } from './project-events-storage-helpers';
-import { normalizeNullableText, normalizeText, stableStringify } from './project-events-values';
+import {
+  normalizeNullableText,
+  normalizeText,
+  sha256Hex,
+  stableStringify,
+} from './project-events-values';
 import { type Env, generateId } from './types';
 
-async function sha256(value: string): Promise<string> {
-  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
+export type NormalizedChannelActor = {
+  userId: string;
+  taskId: string;
+  chatSessionId: string;
+  workspaceId: string;
+  agentSessionId: string | null;
+};
+
+export function normalizeChannelActor(
+  actor: ProjectEventChannelActor,
+  maxBytes: number
+): NormalizedChannelActor {
+  return {
+    userId: normalizeText(actor.userId, 'actor.userId', maxBytes),
+    taskId: normalizeText(actor.taskId, 'actor.taskId', maxBytes),
+    chatSessionId: normalizeText(actor.chatSessionId, 'actor.chatSessionId', maxBytes),
+    workspaceId: normalizeText(actor.workspaceId, 'actor.workspaceId', maxBytes),
+    agentSessionId: normalizeNullableText(
+      actor.agentSessionId ?? null,
+      'actor.agentSessionId',
+      maxBytes
+    ),
+  };
+}
+
+/**
+ * Stable same-chat replay survives a runtime/task recovery. The first committed
+ * event retains its original task/workspace provenance.
+ */
+export function channelDeliveryKey(
+  projectId: string,
+  actor: NormalizedChannelActor,
+  channel: string,
+  idempotencyKey: string
+): Promise<string> {
+  return sha256Hex(
+    stableStringify([projectId, actor.userId, actor.chatSessionId, channel, idempotencyKey])
+  );
 }
 
 /** Normalize and capture all fields before the asynchronous hash boundary. */
-export async function prepareChannelPublish(env: Env, input: PublishProjectEventChannelInput) {
+export async function prepareChannelPublish(
+  env: Env,
+  input: PublishProjectEventChannelInput
+): Promise<PreparedChannelPublish> {
   const limits = resolveProjectEventLimits(env);
   const channel = channelName(input.channel, env);
+  if (isAgentMessageChannelName(channel)) {
+    throw new ProjectEventValidationError(
+      `Channel names starting with ${AGENT_MESSAGE_CHANNEL_PREFIX} are reserved for SAM agent messaging; use send_durable_message`
+    );
+  }
   const projectId = normalizeProjectId(input.projectId, limits);
   const message = normalizeText(input.message, 'message', channelLimits(env).messageBytes);
   const key = normalizeText(input.idempotencyKey, 'idempotencyKey', limits.maxFilterStringBytes);
-  const actor = {
-    userId: normalizeText(input.actor.userId, 'actor.userId', limits.maxFilterStringBytes),
-    taskId: normalizeText(input.actor.taskId, 'actor.taskId', limits.maxFilterStringBytes),
-    chatSessionId: normalizeText(
-      input.actor.chatSessionId,
-      'actor.chatSessionId',
-      limits.maxFilterStringBytes
-    ),
-    workspaceId: normalizeText(
-      input.actor.workspaceId,
-      'actor.workspaceId',
-      limits.maxFilterStringBytes
-    ),
-    agentSessionId: normalizeNullableText(
-      input.actor.agentSessionId ?? null,
-      'actor.agentSessionId',
-      limits.maxFilterStringBytes
-    ),
-  };
-  // Stable same-chat replay survives a runtime/task recovery. The first committed
-  // event retains its original task/workspace provenance.
-  const deliveryKey = await sha256(
-    stableStringify([projectId, actor.userId, actor.chatSessionId, channel, key])
-  );
-  const payloadFingerprint = await sha256(
+  const actor = normalizeChannelActor(input.actor, limits.maxFilterStringBytes);
+  const deliveryKey = await channelDeliveryKey(projectId, actor, channel, key);
+  const payloadFingerprint = await sha256Hex(
     stableStringify([actor.userId, actor.chatSessionId, channel, message])
   );
   return { channel, projectId, message, actor, deliveryKey, payloadFingerprint };
 }
 
-export type PreparedChannelPublish = Awaited<ReturnType<typeof prepareChannelPublish>>;
+export type PreparedChannelPublish = {
+  channel: string;
+  projectId: string;
+  message: string;
+  actor: NormalizedChannelActor;
+  deliveryKey: string;
+  payloadFingerprint: string;
+  /** Server-derived extras; the canonical message/actor/channel keys always win. */
+  extraMetadata?: Record<string, ProjectEventJsonValue>;
+  displayTitle?: string;
+};
+
+/** Agent-message pair channels and all other channels have separate catalog caps. */
+function namespaceChannelCount(
+  sql: SqlStorage,
+  projectId: string,
+  agentMessage: boolean,
+  cap: number
+): number {
+  // Prefix range over the (project_id, name) unique index: '/' sorts right after '.'.
+  const range = `name >= ? AND name < ?`;
+  return sql
+    .exec(
+      `SELECT id FROM project_event_channels WHERE project_id = ? AND ${agentMessage ? '' : 'NOT '}(${range}) LIMIT ?`,
+      projectId,
+      AGENT_MESSAGE_CHANNEL_PREFIX,
+      `${AGENT_MESSAGE_CHANNEL_PREFIX.slice(0, -1)}/`,
+      cap
+    )
+    .toArray().length;
+}
 
 /** Must execute in one storage transaction, including canonical strict fanout. */
 export function publishChannel(
@@ -94,15 +154,14 @@ export function publishChannel(
       throw new ProjectEventLimitExceededError('Project channel publish rate exceeded');
     }
     if (!channel) {
-      const count = sql
-        .exec(
-          'SELECT id FROM project_event_channels WHERE project_id = ? LIMIT ?',
-          input.projectId,
-          limits.maxChannels
-        )
-        .toArray().length;
-      if (count >= limits.maxChannels)
-        throw new ProjectEventLimitExceededError('Project channel capacity exceeded');
+      const agentMessage = isAgentMessageChannelName(input.channel);
+      const cap = agentMessage ? limits.agentMessageMaxChannels : limits.maxChannels;
+      if (namespaceChannelCount(sql, input.projectId, agentMessage, cap) >= cap)
+        throw new ProjectEventLimitExceededError(
+          agentMessage
+            ? 'Project agent message channel capacity exceeded'
+            : 'Project channel capacity exceeded'
+        );
       const id = generateId();
       sql.exec(
         `INSERT INTO project_event_channels (id, project_id, name, last_published_at) VALUES (?, ?, ?, ?)`,
@@ -133,8 +192,13 @@ export function publishChannel(
     subject: { type: 'agent_channel', id: channel.name },
     deliveryKey: input.deliveryKey,
     payloadFingerprint: input.payloadFingerprint,
-    metadata: { message: input.message, actor: input.actor, channel: input.channel },
-    display: { title: 'Agent channel message' },
+    metadata: {
+      ...input.extraMetadata,
+      message: input.message,
+      actor: input.actor,
+      channel: input.channel,
+    },
+    display: { title: input.displayTitle ?? 'Agent channel message' },
     occurredAt: now,
     receivedAt: now,
   };

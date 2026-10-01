@@ -21,7 +21,11 @@ export interface ResolvedAgentTarget {
     status: string;
     workspaceId: string | null;
     projectId: string;
+    /** Stable source-task authority (recovery_source_task_id ?? id). */
+    sourceTaskId: string;
   };
+  /** The caller's stable source task; null when the caller row was not required. */
+  callerSourceTaskId: string | null;
   workspace: {
     id: string;
     nodeId: string;
@@ -68,6 +72,7 @@ export async function resolveAgentTarget(
       workspaceId: schema.tasks.workspaceId,
       projectId: schema.tasks.projectId,
       parentTaskId: schema.tasks.parentTaskId,
+      recoverySourceTaskId: schema.tasks.recoverySourceTaskId,
     })
     .from(schema.tasks)
     .where(
@@ -213,7 +218,9 @@ export async function resolveAgentTarget(
       status: targetTask.status,
       workspaceId: targetTask.workspaceId,
       projectId: targetTask.projectId,
+      sourceTaskId: targetTask.recoverySourceTaskId ?? targetTask.id,
     },
+    callerSourceTaskId: callerTask ? (callerTask.recoverySourceTaskId ?? callerTask.id) : null,
     workspace: {
       id: workspace.id,
       nodeId: workspace.nodeId,

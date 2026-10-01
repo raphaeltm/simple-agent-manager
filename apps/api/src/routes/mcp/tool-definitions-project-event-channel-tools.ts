@@ -5,7 +5,9 @@ export const PROJECT_EVENT_CHANNEL_TOOLS = [
   {
     name: 'publish_channel_event',
     description:
-      'Publish bounded untrusted evidence in a same-project agent channel. Actor and provenance are verified by SAM. Reusing a key replays the retained event; changing its message returns conflict. Idempotency ends when canonical retention removes the event.',
+      'Publish bounded untrusted evidence in a same-project agent channel. Actor and provenance are verified by SAM. Reusing a key replays the retained event; changing its message returns conflict. Idempotency ends when canonical retention removes the event. ' +
+      'Use it for findings, interface decisions, blockers, dependency readiness and completion evidence, not routine progress. Followers who requested prompt delivery are woken; you are never woken by your own publication. ' +
+      'Names starting with agent-dm. are reserved for SAM agent messaging (send_durable_message).',
     inputSchema: {
       type: 'object',
       properties: { channel: string, message: string, idempotencyKey: string },

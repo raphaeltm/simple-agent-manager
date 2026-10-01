@@ -26,6 +26,9 @@ export interface ResolvedMailboxTarget {
   nodeId: string;
   workspaceId: string;
   agentSessionId: string;
+  /** Stable source-task authority (recovery_source_task_id ?? id) of each participant. */
+  callerSourceTaskId: string;
+  targetSourceTaskId: string;
 }
 
 /**
@@ -48,6 +51,7 @@ export async function resolveProjectAgentForMailbox(
       status: schema.tasks.status,
       workspaceId: schema.tasks.workspaceId,
       projectId: schema.tasks.projectId,
+      recoverySourceTaskId: schema.tasks.recoverySourceTaskId,
     })
     .from(schema.tasks)
     .where(
@@ -144,6 +148,8 @@ export async function resolveProjectAgentForMailbox(
     nodeId: workspace.nodeId,
     workspaceId: workspace.id,
     agentSessionId: agentSession?.id ?? '',
+    callerSourceTaskId: callerTask.recoverySourceTaskId ?? callerTask.id,
+    targetSourceTaskId: targetTask.recoverySourceTaskId ?? targetTask.id,
   };
 }
 

@@ -5,7 +5,12 @@ import type {
   ProjectEventRecord,
   ProjectEventSubscriptionRecord,
 } from '@simple-agent-manager/shared';
-import { CREDENTIAL_LIMIT_EVENT_SOURCE } from '@simple-agent-manager/shared';
+import {
+  CREDENTIAL_LIMIT_EVENT_SOURCE,
+  isJsonRecord,
+  PROJECT_EVENT_CHANNEL_SOURCE,
+  PROJECT_EVENT_CHANNEL_TYPE,
+} from '@simple-agent-manager/shared';
 
 function metadataText(
   metadata: Record<string, ProjectEventJsonValue> | undefined,
@@ -82,6 +87,29 @@ export function subscriptionCanMatchProjectEvent(
   if (audience.scope === 'project') return true;
   if (!subscriptionOwnerMatchesCredentialAudience(subscription, audience)) return false;
   return targetMatchesCredentialEvent(event, subscription.deliveryPreference.target ?? {});
+}
+
+/**
+ * A channel publication never wakes its own publisher. A prompt-delivery
+ * subscription whose target chat is the publishing chat gets no match at all, so
+ * no wake work can be queued for the echo. Record-only subscriptions keep
+ * matching: they never wake anyone, and their pull feed stays unchanged.
+ * `metadata.actor` is server-derived; only the channel publish path admits the
+ * reserved channel source.
+ */
+export function isSelfOriginatedChannelWake(
+  subscription: ProjectEventSubscriptionRecord,
+  event: ProjectEventRecord
+): boolean {
+  if (event.source !== PROJECT_EVENT_CHANNEL_SOURCE) return false;
+  if (event.eventType !== PROJECT_EVENT_CHANNEL_TYPE) return false;
+  if (subscription.deliveryPreference.resolved !== 'queued_for_prompt_delivery') return false;
+  const actor = event.metadata?.actor;
+  const publisherChat =
+    isJsonRecord(actor) && typeof actor.chatSessionId === 'string' ? actor.chatSessionId : null;
+  return (
+    publisherChat !== null && publisherChat === subscription.deliveryPreference.target?.sessionId
+  );
 }
 
 export function agentCanSeeProjectEvent(

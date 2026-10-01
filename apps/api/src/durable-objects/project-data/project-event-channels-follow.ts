@@ -28,6 +28,7 @@ import {
   readSubscriptionByIdempotencyKey,
 } from './project-events-storage-helpers';
 import { normalizeText, stableStringify } from './project-events-values';
+import { isSelfOriginatedChannelWake } from './project-events-visibility';
 import type { Env } from './types';
 
 type CatchupRow = {
@@ -188,6 +189,9 @@ export function catchUpChannel(
     );
   }
   for (const { event } of page) {
+    // Historical admission follows the live rule: the follower's own
+    // publications never become wake work for it.
+    if (isSelfOriginatedChannelWake(subscription, event)) continue;
     const existing = sql
       .exec(
         `SELECT id FROM project_event_matches

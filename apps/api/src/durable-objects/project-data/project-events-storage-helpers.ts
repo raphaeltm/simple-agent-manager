@@ -29,7 +29,10 @@ import {
 } from './project-events-mappers';
 import { filterMatchesProjectEvent, projectEventKeys } from './project-events-normalization';
 import { normalizeNullableText, normalizeText } from './project-events-values';
-import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
+import {
+  isSelfOriginatedChannelWake,
+  subscriptionCanMatchProjectEvent,
+} from './project-events-visibility';
 import { PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_UNALIASED_SQL } from './project-events-wake-config';
 import { generateId } from './types';
 
@@ -129,6 +132,7 @@ export function createMatchesForEvent(
     }
     if (!filterMatchesProjectEvent(subscription.filter, event)) continue;
     if (!subscriptionCanMatchProjectEvent(subscription, event)) continue;
+    if (isSelfOriginatedChannelWake(subscription, event)) continue;
     if (requireCompleteFanout && matches.length >= limits.maxMatchesPerEvent) {
       // The enclosing channel transaction rolls back all earlier match writes.
       throw new ProjectEventLimitExceededError('Channel event fanout capacity exceeded');
@@ -257,7 +261,22 @@ export function expireDueSubscriptions(
     )
     .toArray();
   const ids = rows.filter(isIdRow).map((row) => row.id);
-  if (ids.length === 0) return 0;
+  expireSubscriptionIds(sql, projectId, ids, now, 'subscription expired');
+  return ids.length;
+}
+
+/**
+ * Expire specific subscriptions. Unbatched matches expire with them; batches
+ * already delivered stay readable until their own read grace ends.
+ */
+export function expireSubscriptionIds(
+  sql: SqlStorage,
+  projectId: string,
+  ids: readonly string[],
+  now: number,
+  reason: string
+): void {
+  if (ids.length === 0) return;
   for (const chunk of chunkIdsForBindBudget(ids, 2)) {
     const placeholders = chunk.map(() => '?').join(', ');
     sql.exec(
@@ -279,12 +298,11 @@ export function expireDueSubscriptions(
          AND batch_id IS NULL
          AND state = 'matched'`,
       now,
-      'subscription expired',
+      reason,
       projectId,
       ...chunk
     );
   }
-  return ids.length;
 }
 
 export function normalizeOwnerForRead(

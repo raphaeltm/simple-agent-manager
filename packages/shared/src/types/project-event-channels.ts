@@ -2,6 +2,7 @@ import type {
   CreateProjectEventSubscriptionInput,
   ProjectEventAdmissionResult,
   ProjectEventAgentVisibility,
+  ProjectEventJsonValue,
   ProjectEventRecord,
   ProjectEventSubscriptionMutationResult,
 } from './project-events';
@@ -9,6 +10,12 @@ import type {
 /** Reserved provenance. Agent input is always evidence, never wake instructions. */
 export const PROJECT_EVENT_CHANNEL_SOURCE = 'sam.agent_channel';
 export const PROJECT_EVENT_CHANNEL_TYPE = 'agent.channel.published';
+
+/**
+ * Reserved name prefix for SAM-managed agent-to-agent message channels. Only the
+ * messaging tools publish here; generic `publish_channel_event` rejects it.
+ */
+export const AGENT_MESSAGE_CHANNEL_PREFIX = 'agent-dm.';
 
 export type ProjectEventChannelActor = {
   userId: string;
@@ -88,4 +95,38 @@ export type CatchUpProjectEventChannelInput = {
   visibility: ProjectEventAgentVisibility;
   actor: ProjectEventChannelActor;
   limit?: number | null;
+};
+
+/** Ordinary message classes carried over agent message channels. Urgent classes keep stop-and-deliver. */
+export type AgentChannelMessageClass = 'notify' | 'deliver';
+
+export type AgentChannelMessageParticipant = {
+  taskId: string;
+  /** Stable source-task authority (recovery_source_task_id ?? id) for the managed subscription. */
+  sourceTaskId: string;
+  chatSessionId: string;
+};
+
+export type SendAgentChannelMessageInput = {
+  projectId: string;
+  /** Server-derived sender identity; ProjectData re-verifies it before committing. */
+  actor: ProjectEventChannelActor;
+  senderSourceTaskId: string;
+  recipient: AgentChannelMessageParticipant;
+  message: string;
+  messageClass: AgentChannelMessageClass;
+  idempotencyKey: string;
+  senderMetadata?: Record<string, ProjectEventJsonValue> | null;
+};
+
+export type SendAgentChannelMessageResult = {
+  outcome: 'created' | 'duplicate_replay';
+  channel: ProjectEventChannel;
+  eventId: string;
+  sequence: number;
+  /** Recipient subscription holding the canonical match (null only for an unmatched replay). */
+  recipientSubscriptionId: string | null;
+  senderSubscriptionId: string | null;
+  /** Managed subscriptions retired because they could no longer wake their session. */
+  rotatedSubscriptionIds: string[];
 };

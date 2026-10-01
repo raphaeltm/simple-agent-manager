@@ -27,6 +27,10 @@ import {
   sanitizeUserInput,
 } from './_helpers';
 import {
+  parseIdempotencyKeyParam,
+  trySendOverAgentMessageChannel,
+} from './agent-message-channel-send';
+import {
   attemptImmediateDelivery,
   resolveCallerChatSession,
   resolveProjectAgentForMailbox,
@@ -73,6 +77,9 @@ export async function handleSendDurableMessage(
     metadata = expectJsonRecord(params.metadata, 'mcp.mailbox.metadata');
   }
 
+  const idempotencyKey = parseIdempotencyKeyParam(requestId, params.idempotencyKey, env);
+  if ('jsonrpc' in idempotencyKey) return idempotencyKey;
+
   // Validate caller is a task agent
   if (!tokenData.taskId) {
     return jsonRpcError(
@@ -86,6 +93,22 @@ export async function handleSendDurableMessage(
   const db = drizzle(env.DATABASE, { schema });
   const resolution = await resolveProjectAgentForMailbox(requestId, targetTaskId, tokenData, db);
   if ('jsonrpc' in resolution) return resolution;
+
+  // Preview: notify/deliver over the SAM-managed pair channel when enabled.
+  const channelResponse = await trySendOverAgentMessageChannel(requestId, tokenData, env, {
+    tool: 'send_durable_message',
+    messageClass,
+    message,
+    idempotencyKey: idempotencyKey.value,
+    metadata,
+    senderSourceTaskId: resolution.callerSourceTaskId,
+    recipient: {
+      taskId: targetTaskId,
+      sourceTaskId: resolution.targetSourceTaskId,
+      chatSessionId: resolution.chatSessionId,
+    },
+  });
+  if (channelResponse) return channelResponse;
 
   const { resolveDurableExecutionConfig } =
     await import('../../durable-objects/project-data/durable-execution-config');

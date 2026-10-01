@@ -24,6 +24,10 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
+import {
+  parseIdempotencyKeyParam,
+  trySendOverAgentMessageChannel,
+} from './agent-message-channel-send';
 import { isError, resolveAgentTarget } from './orchestration-target';
 
 export { handleStopSubtask } from './orchestration-stop';
@@ -50,6 +54,8 @@ export async function handleSendMessageToSubtask(
   }
 
   const message = sanitizeUserInput(rawMessage).slice(0, limits.orchestratorMessageMaxLength);
+  const idempotencyKey = parseIdempotencyKeyParam(requestId, params.idempotencyKey, env);
+  if ('jsonrpc' in idempotencyKey) return idempotencyKey;
 
   // Resolve same-project target agent
   const db = drizzle(env.DATABASE, { schema });
@@ -66,6 +72,22 @@ export async function handleSendMessageToSubtask(
   if (!workspace.chatSessionId) {
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Child workspace has no chat session');
   }
+
+  // Preview: the shared pair channel replaces raw prompt injection when enabled.
+  const channelResponse = await trySendOverAgentMessageChannel(requestId, tokenData, env, {
+    tool: 'send_message_to_subtask',
+    messageClass: 'deliver',
+    message,
+    idempotencyKey: idempotencyKey.value,
+    metadata: null,
+    senderSourceTaskId: resolution.callerSourceTaskId ?? tokenData.taskId,
+    recipient: {
+      taskId,
+      sourceTaskId: resolution.task.sourceTaskId,
+      chatSessionId: workspace.chatSessionId,
+    },
+  });
+  if (channelResponse) return channelResponse;
 
   const { resolveDurableExecutionConfig } =
     await import('../../durable-objects/project-data/durable-execution-config');

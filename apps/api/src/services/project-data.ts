@@ -60,6 +60,8 @@ import type {
   PublishProjectEventChannelResult,
   RecordProjectEventDeliveryAttemptInput,
   RunProjectEventRetentionInput,
+  SendAgentChannelMessageInput,
+  SendAgentChannelMessageResult,
   SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-manager/shared';
@@ -413,6 +415,9 @@ type ProjectDataEventRpc = {
   publishProjectEventChannel(
     input: PublishProjectEventChannelInput
   ): Promise<PublishProjectEventChannelResult>;
+  sendAgentChannelMessage(
+    input: SendAgentChannelMessageInput
+  ): Promise<SendAgentChannelMessageResult>;
   listProjectEventChannels(input: ListProjectEventChannelsInput): Promise<ProjectEventChannelList>;
   getProjectEventChannelHistory(
     input: ProjectEventChannelHistoryInput
@@ -1818,6 +1823,15 @@ export function publishProjectEventChannel(
   input: ProjectDataEventInput<PublishProjectEventChannelInput>
 ) {
   return callProjectDataEvent(env, projectId, 'publishProjectEventChannel', input);
+}
+
+/** Preview: send an ordinary agent message over its SAM-managed pair channel. */
+export function sendAgentChannelMessage(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<SendAgentChannelMessageInput>
+) {
+  return callProjectDataEvent(env, projectId, 'sendAgentChannelMessage', input);
 }
 
 export function listProjectEventChannels(
