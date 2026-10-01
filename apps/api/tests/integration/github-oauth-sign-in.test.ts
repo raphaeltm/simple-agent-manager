@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
-import { AppError } from '../../src/middleware/error';
+import { handleAppError } from '../../src/middleware/app-error-handler';
 import { authRoutes } from '../../src/routes/auth';
 import { __resetPlatformConfigCacheForTest } from '../../src/services/platform-config';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
@@ -136,14 +136,9 @@ function createCookieJar() {
 }
 
 function buildApp() {
-  // Mounted exactly as `src/index.ts` mounts it.
+  // Mounted, and its errors handled, exactly as `src/index.ts` does.
   const app = new Hono<{ Bindings: Env }>();
-  app.onError((err, c) => {
-    if (err instanceof AppError) {
-      return c.json(err.toJSON(), err.statusCode as never);
-    }
-    return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
-  });
+  app.onError(handleAppError);
   app.route('/api/auth', authRoutes);
   return app;
 }

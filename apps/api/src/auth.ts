@@ -304,8 +304,10 @@ export async function createAuth(env: Env) {
           },
           // better-auth keys the linked account on `data.id` (its GitHub provider declares
           // `accountSubject: ({ profile }) => profile.id`); without it every sign-in fails
-          // with `unable_to_get_user_info`. The cast covers the GithubProfile fields SAM does
-          // not validate, none of which are read when deriving the account key.
+          // with `unable_to_get_user_info`. Only the fields `githubUserSchema` validates exist
+          // at runtime; the cast covers the rest of GithubProfile, which nothing reads today
+          // (better-auth also passes `data` to `user.validateUserInfo`, which SAM leaves
+          // unset). Validate a field there before any hook relies on it.
           data: user as GithubProfile,
         };
       },
