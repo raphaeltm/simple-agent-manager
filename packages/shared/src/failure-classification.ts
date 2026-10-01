@@ -17,6 +17,11 @@ export type FailureCode =
   | 'provisioning'
   | 'agent-install'
   | 'credentials'
+  | 'model-credential-missing'
+  | 'model-credential-rejected'
+  | 'mcp-auth-required'
+  | 'unsupported-loopback-auth'
+  | 'model-unavailable'
   | 'provider-overload'
   | 'prompt-timeout'
   | 'agent-crash'
@@ -101,6 +106,61 @@ const FAILURE_RULES: FailureRule[] = [
     ],
   },
   {
+    code: 'model-unavailable',
+    label: 'Model unavailable for this account',
+    explanation: 'The provider rejected this model for the current account or credential.',
+    guidance: 'Check model access with the provider. Changing a working login alone may not grant access.',
+    retryable: false,
+    diagnosable: true,
+    patterns: [
+      /\b(?:model_unavailable|unsupported_model|model_not_supported|model_not_available|model_not_found)\b/,
+      /\bmodel\b.{0,80}\b(?:unsupported|not supported|not available|not enabled|no access)\b/,
+      /\b(?:unsupported|not supported)\b.{0,80}\bmodel\b/,
+    ],
+  },
+  {
+    code: 'unsupported-loopback-auth',
+    label: 'Sign-in flow unavailable',
+    explanation: 'This service requires a local browser callback that this session cannot complete.',
+    guidance: 'Use a connection method supported by that service. This session cannot complete its local callback flow.',
+    retryable: false,
+    diagnosable: true,
+    patterns: [/\bunsupported_loopback_auth\b/, /\bloopback[_ -]callback[_ -]unsupported\b/],
+  },
+  {
+    code: 'mcp-auth-required',
+    label: 'Tool connection needs sign-in',
+    explanation: 'An MCP service rejected the tool connection because it needs authentication.',
+    guidance: 'Review the personal or project MCP connection. A project administrator may need to update a shared server. Its service may require sign-in rather than a bearer token.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [/\bmcp_endpoint_needs_auth\b/, /\bmcp[_ -]auth[_ -]required\b/],
+  },
+  {
+    code: 'model-credential-missing',
+    label: 'Agent connection missing',
+    explanation: 'The selected agent has no usable provider connection for this session.',
+    guidance: 'The session creator can connect the agent in Settings using the guided sign-in or supported key method.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [
+      /\bmodel_provider_credential_missing\b/,
+      /\bagent_key_fetch\b.*\b(?:missing|not found|no credential)\b/,
+    ],
+  },
+  {
+    code: 'model-credential-rejected',
+    label: 'Agent connection rejected',
+    explanation: 'The model provider rejected the credential used by this agent.',
+    guidance: 'The session creator can check or reconnect the agent in Settings, then retry.',
+    retryable: true,
+    diagnosable: true,
+    patterns: [
+      /\bmodel_provider_credential_rejected\b/,
+      /\bprovider\b.{0,60}\b(?:invalid_api_key|invalid_authentication|expired_token)\b/,
+    ],
+  },
+  {
     code: 'credentials',
     label: 'Credentials / billing',
     explanation: 'An API key, OAuth token, or account balance problem stopped the agent.',
@@ -128,6 +188,7 @@ const FAILURE_RULES: FailureRule[] = [
     retryable: true,
     diagnosable: true,
     patterns: [
+      /provider_overloaded/,
       /\boverloaded\b/,
       /rate.?limit/,
       /\b429\b/,
@@ -214,6 +275,7 @@ const FAILURE_RULES: FailureRule[] = [
     retryable: true,
     diagnosable: true,
     patterns: [
+      /agent_crash/,
       /peer disconnected/,
       /process (exited|crashed|terminated)/,
       /agent (process )?(crashed|exited|died)/,
@@ -246,6 +308,7 @@ const FAILURE_RULES: FailureRule[] = [
     retryable: true,
     diagnosable: true,
     patterns: [
+      /network_error/,
       /\betimedout\b|\beconnrefused\b|\benotfound\b/,
       /network (error|failure|unreachable)/,
       /fetch failed/,

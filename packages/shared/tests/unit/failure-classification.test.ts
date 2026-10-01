@@ -61,6 +61,45 @@ describe('classifyFailure', () => {
   });
 
   it.each([
+    ['model-credential-missing', 'agent_key_fetch: no credential configured for openai-codex'],
+    ['model-credential-rejected', 'model_provider_credential_rejected'],
+    ['mcp-auth-required', 'mcp_endpoint_needs_auth'],
+    ['unsupported-loopback-auth', 'unsupported_loopback_auth'],
+    ['model-unavailable', 'Provider HTTP 400: unsupported_model for ChatGPT account'],
+    ['model-unavailable', 'model_unavailable'],
+    ['model-unavailable', 'API Error 400: model is not supported with this account'],
+  ] as const)('separates %s from other auth failures', (code, message) => {
+    expect(classifyFailure(message).code).toBe(code);
+  });
+
+  it.each([
+    'Provider HTTP 400: bad request',
+    'agent_key_fetch: Failed to fetch credential for openai-codex — backend timeout',
+    'MCP tool failed for a network error',
+    'The agent mentioned an unauthorized file while working',
+    'Sign-in cancelled by the user',
+  ])('does not prescribe credential changes for %s', (message) => {
+    expect(classifyFailure(message).code).not.toMatch(/model-credential|mcp-auth-required/);
+  });
+
+  it.each([
+    ['provider_overloaded', 'provider-overload'],
+    ['network_error', 'network'],
+    ['agent_crash', 'agent-crash'],
+  ] as const)('keeps safe non-auth reason %s diagnosable', (message, code) => {
+    expect(classifyFailure(message).code).toBe(code);
+  });
+
+  it('keeps untrusted wrapper fields and secret canaries out of guidance', () => {
+    const canary = 'sk-secret-canary-12345';
+    const result = classifyFailure(`mcp_endpoint_needs_auth url=https://evil.example/${canary} schema=${canary}`);
+    expect(result.code).toBe('mcp-auth-required');
+    expect(JSON.stringify(result)).not.toContain(canary);
+    expect(JSON.stringify(result)).not.toContain('evil.example');
+    expect(JSON.stringify(result)).not.toContain('schema=');
+  });
+
+  it.each([
     ['stopped_by_parent: Session stalled', 'cancelled'],
     ['Stopped by parent: No longer needed', 'cancelled'],
     ['Human input request expired after timeout', 'input-expired'],

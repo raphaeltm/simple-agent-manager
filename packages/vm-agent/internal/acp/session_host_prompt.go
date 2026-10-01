@@ -650,7 +650,10 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 		return
 	}
 
-	errMsg := fmt.Sprintf("Prompt failed: %v", err)
+	errMsg := "agent_prompt_failed"
+	if reasonCode := ClassifyPromptFailure(err.Error()); reasonCode != "" {
+		errMsg = reasonCode
+	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
 		if info.timeout > 0 {
 			errMsg = fmt.Sprintf("Prompt timed out after %s", info.timeout)
@@ -658,7 +661,7 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 			errMsg = "Prompt cancelled (context deadline exceeded)"
 		}
 	}
-	slog.Warn("ACP Prompt failed (non-fatal)", "error", err)
+	slog.Warn("ACP Prompt failed (non-fatal)", "reason", errMsg)
 	h.reportLifecycle("warn", "ACP Prompt failed", map[string]interface{}{
 		"error":    errMsg,
 		"duration": time.Since(info.startedAt).String(),

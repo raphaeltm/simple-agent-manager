@@ -72,6 +72,41 @@ describe('FailureCard', () => {
     mocks.listTaskEvents.mockResolvedValue({ events: defaultEvents });
   });
 
+  it.each([
+    ['model_provider_credential_missing', 'Open agent connections', '/settings/connections'],
+    ['model_provider_credential_rejected', 'Open agent connections', '/settings/connections'],
+    ['mcp_endpoint_needs_auth', 'Review personal MCP settings', '/settings/mcp-servers'],
+  ] as const)('links a creator to existing settings for %s', (errorMessage, label, href) => {
+    renderWithQuery(
+      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed({ errorMessage })}
+        recoverable={false} isSessionCreator />
+    );
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(label === 'Review personal MCP settings' ? 'Tool connection needs sign-in' : 'Agent connection', 'i') }));
+    expect(screen.getByRole('link', { name: label })).toHaveAttribute('href', href);
+    if (label === 'Review personal MCP settings') {
+      expect(screen.getByRole('link', { name: 'View project MCP settings' })).toHaveAttribute('href', '/projects/proj-1/settings/runtime');
+    }
+  });
+
+  it('does not offer credential management to another session member', () => {
+    renderWithQuery(
+      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed({ errorMessage: 'mcp_endpoint_needs_auth' })}
+        recoverable={false} isSessionCreator={false} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /tool connection needs sign-in/i }));
+    expect(screen.queryByRole('link', { name: /MCP settings/ })).not.toBeInTheDocument();
+  });
+
+  it('does not suggest changing credentials for unsupported model access', () => {
+    renderWithQuery(
+      <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed({ errorMessage: 'Provider HTTP 400: unsupported_model' })}
+        recoverable={false} isSessionCreator />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /model unavailable for this account/i }));
+    expect(screen.getByText(/changing a working login alone may not grant access/i)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /connections|MCP settings/i })).not.toBeInTheDocument();
+  });
+
   it('renders classification label and explanation for agent crash', () => {
     renderWithQuery(
       <FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />

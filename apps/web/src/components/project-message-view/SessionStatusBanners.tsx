@@ -7,8 +7,34 @@ import { WakeProgressBanner } from './WakeProgressBanner';
 
 /** The status strips stacked above the conversation: connection, resume and wake. */
 export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleResult }>) {
+  let missingAgentConnection = false;
+  if (!lc.taskEmbed?.errorMessage) {
+    for (let i = lc.messages.length - 1; i >= 0; i--) {
+      const message = lc.messages[i];
+      if (!message) break;
+      if (message.role !== 'system') break;
+      if (message.content === 'Agent startup failed because its provider connection is missing.') {
+        missingAgentConnection = true;
+        break;
+      }
+    }
+  }
   return (
     <>
+      {missingAgentConnection && (
+        <div role="alert" data-testid="agent-connection-guidance"
+          className="flex flex-wrap items-center gap-2 border-b border-border-default bg-danger-tint px-4 py-2 text-xs text-danger-fg">
+          <span className="min-w-0 flex-1">Agent connection missing. {lc.session?.isMine === true
+            ? 'Connect the agent in Settings to continue.'
+            : 'Ask the session creator to connect the agent.'}</span>
+          {lc.session?.isMine === true && (
+            <a href="/settings/connections"
+              className="inline-flex items-center rounded-md border border-border-default px-3 py-2 font-medium text-accent no-underline hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary">
+              Open agent connections
+            </a>
+          )}
+        </div>
+      )}
       {/* Connection indicator (DO WebSocket) */}
       {lc.sessionState === 'active' &&
         lc.connectionState !== 'connected' &&

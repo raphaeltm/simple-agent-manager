@@ -56,6 +56,8 @@ If a project server and a personal server share a name, the project one wins. Ad
 
 Use the **Disable** toggle to stop injecting a server without deleting it and losing the credential.
 
+If a chat says a **tool connection needs sign-in**, review its entry under **Settings → MCP Servers** (or ask a project administrator to check **Project Settings → Runtime** for a shared server). A bearer token works only when that service accepts bearer authentication; some services require a separate browser sign-in. A service that requires a callback to `localhost` cannot complete that callback through the remote SAM session. Use an authentication method the service supports for remote clients. The chat's personal-settings shortcut appears for its creator; project administrators manage shared server settings according to their project permissions.
+
 ## Security
 
 Tools from a connected MCP server run inside your agent's session, which already has full repository and shell access. Their descriptions and their output both enter the agent's context, which makes a third-party MCP server a prompt-injection surface.

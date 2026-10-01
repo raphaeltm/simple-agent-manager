@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 )
@@ -49,7 +50,12 @@ func (h *SessionHost) selectAgent(ctx context.Context, agentType string, require
 
 	cred, err := h.fetchAgentKey(ctx, agentType)
 	if err != nil {
-		h.failAgentSelection(agentType, "agent_key_fetch", fmt.Sprintf("Failed to fetch credential for %s — check Settings", agentType), err)
+		message := fmt.Sprintf("Failed to fetch credential for %s — check Settings", agentType)
+		if errors.Is(err, errAgentCredentialMissing) {
+			message = "model_provider_credential_missing"
+			err = errAgentCredentialMissing
+		}
+		h.failAgentSelection(agentType, "agent_key_fetch", message, err)
 		return err
 	}
 	h.reportCredentialFetched(agentType, cred)

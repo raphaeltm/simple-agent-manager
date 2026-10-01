@@ -115,6 +115,7 @@ export function FloatingHeader({
             workspaceId={lc.workspace?.id ?? lc.session?.workspaceId}
             nodeId={lc.node?.id ?? lc.workspace?.nodeId}
             recoverable={hasRecoverableTaskError}
+            isSessionCreator={lc.session.isMine === true}
           />
         </div>
       )}

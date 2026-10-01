@@ -72,6 +72,8 @@ var taskCallbackDiagnosticRedactionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\b(sam_test_[A-Za-z0-9_-]{12,})\b`),
 }
 
+var safePromptTimeoutMessage = regexp.MustCompile(`^Prompt timed out after [0-9hms.µ]+$`)
+
 // Server is the HTTP server for the VM Agent.
 type Server struct {
 	systemProvisioning     *systemProvisioningBarrier
@@ -1533,7 +1535,13 @@ func taskCallbackErrorMessage(promptErr error) string {
 	if promptErr == nil {
 		return ""
 	}
-	return redactTaskCallbackDiagnosticText(promptErr.Error())
+	if reasonCode := acp.ClassifyPromptFailure(promptErr.Error()); reasonCode != "" {
+		return reasonCode
+	}
+	if safePromptTimeoutMessage.MatchString(promptErr.Error()) {
+		return promptErr.Error()
+	}
+	return "agent_prompt_failed"
 }
 
 func redactTaskCallbackDiagnosticText(text string) string {
