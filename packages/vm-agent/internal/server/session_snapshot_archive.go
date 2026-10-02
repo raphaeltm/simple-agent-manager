@@ -618,6 +618,8 @@ var homeExcludePrefixes = []string{
 	".cache", ".npm", ".cargo", ".rustup", ".local/bin", ".local/lib", "node_modules", ".docker",
 	".codex/tmp", ".claude/debug", ".oh-my-zsh", ".vscode-server",
 	"go/pkg", ".local/share/pnpm", ".nvm", ".bun/install/cache", ".gradle", ".m2",
+	// Native Claude executables are reinstalled; resumable state lives in .claude.
+	".local/share/claude/versions",
 	// Credential-bearing paths — plaintext secrets must never be uploaded.
 	".ssh", ".aws", ".netrc", ".npmrc", ".config/gh", ".kube", ".azure", ".config/gcloud",
 	// Reserved snapshot namespace. HOME content must never be able to masquerade

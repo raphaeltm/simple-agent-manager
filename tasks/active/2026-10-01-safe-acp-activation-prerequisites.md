@@ -27,3 +27,9 @@ ACP permissions and conversation forms are merged but dormant. The prior activat
 ## Acceptance
 
 An unsafe final capture cannot stop VM or Instant compute or be repaired into sleeping state. Complete captures retain normal sleep behavior. Direct session creation rejects an incompatible VM without creating a row or token. The activation candidate keeps production false until the parent explicitly opts in after reviewing production evidence, with independent permissions and conversation-form controls.
+
+## Shipping continuation — 2026-10-02
+
+Raphaël explicitly authorized readiness, staging, merge, and production delivery in task `01M3XX0EQD8NF9MDS5PDMSKH2T`. This supersedes the earlier draft-only handoff for #2208. Current main was merged to retain the GitHub sign-in fix.
+
+Fresh local Cloudflare/task-completion review found that the stricter sleep gate would hold ordinary Claude sessions awake because native executables under `.local/share/claude/versions` exhausted snapshot limits. The shared capture exclusion now omits only that reinstallable directory. A behavioral regression exercises both standalone tar capture and the actual container inventory command: transcripts, user files, and neighboring paths survive, while omitted oversized user files still mark capture degraded. Both runtime cases fail before the fix and pass after it. Fresh Go and completion re-review passed; live staging and final CI remain required.
