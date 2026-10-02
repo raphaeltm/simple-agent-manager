@@ -253,6 +253,14 @@ coordination channel to descendants.
   G16a share enforced → 2; G16b busy never released → 1; G16c LRU order → 1; G17 name
   re-validation → 1; C8 SAM-session retry copy → 1; G16d candidates not capped at the share
   → 1. Results: `.tmp/discrimination-results-3.json`.
-- Full worker suite before the review fixes: 1284/1284 passed (100 files, 30 min).
+- Full worker suite before the review fixes: 1284/1284 passed (100 files, 30 min); after
+  them 1295/1295 (101 files) at 8d3f5d51b.
+- Later commits: 523e82420 (lowered share converges; idea cited at the known limit),
+  6e9d91350 (static channel-count SQL for `quality:ast-checks`; refusals logged as
+  `mcp.agent_message_channels.refused`, G18 discriminating), c456900b6 (SonarCloud
+  reliability fix: explicit code-unit comparator, names unchanged; S107/S3358/S4323).
+- Draft PR #2213: CI green at c456900b6 except Specialist Review Evidence, which is held
+  by the `needs-human-review` label for the open privacy decision. SonarCloud maintainability
+  notes that remain are in code moved verbatim by cbfb7f1cb.
 - Formatting: only files already Prettier-clean were reformatted; `index.ts`,
   `configuration.md` and `agents.md` (pre-existing format debt) got minimal hand edits.
