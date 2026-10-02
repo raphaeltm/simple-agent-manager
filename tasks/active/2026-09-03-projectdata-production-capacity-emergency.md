@@ -643,3 +643,26 @@ Next actions, in order. These are human-gated production operations, not code:
 2. Abandon or retry the failed/poisoned migrations first. Closing the breaker while `156046f1`,
    `5ed87b67` and `ff721a49` are still failed risks re-poisoning it at once.
 3. Close SAM's breaker from Admin → Storage (phone-usable, PR #2135).
+
+## Incident — 2026-10-02: the root object hit the hard 10 GiB cap
+
+Read-only production D1 evidence:
+
+- `project_data_storage_telemetry`: `database_size_bytes = 10,737,418,240` (exactly 10 GiB) at
+  09:34:29Z, still exactly that at 10:04:17Z. Daily growth after the breaker opened on 09-27:
+  +218, +171, +210 MB/day (10.03 GB at 09-28 16:37Z, 10.63 GB at 10-01 16:39Z).
+- First `PROJECT_DATA_STORAGE_FULL` 507 at 09:28:58Z (`GET .../sessions/ws`), then
+  `tasks/submit` (507), workspace sleep (500), `GET .../sessions/:id/state` (507), and the
+  admin abandon of `6d6f3099` (500, `Exceeded the maximum database size.`).
+- Breaker closed from the admin UI at 09:35:34Z; the 09:51:50Z sweep picked `156046f1`, failed
+  on the full object, poisoned it, and re-opened the breaker.
+
+Why nothing in-app could recover it: the archive drain, migration abandon and tool-payload
+cleanup all insert bookkeeping before freeing anything, and the alarm grouped/FTS cleanup
+refuses at >= `PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO` (0.98) of the configured
+10^10 limit, i.e. since about Sep 3, at 91% of the real cap.
+
+Relief shipped: superadmin `POST /api/admin/project-data/storage/:projectId/grouped-fts-wall-recovery`
+(branch `claude/friendly-planck-qziggg`), which prunes grouped/FTS search rows delete-first.
+Staging verification was skipped on Raphaël's explicit instruction for this emergency; the
+at-cap behaviour is proven by the first bounded production call.
