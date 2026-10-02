@@ -84,7 +84,8 @@ export function ensureManagedSubscription(
     } else {
       // Known limit: a subscription out of wakes is retired even if its last wake
       // is still queued, which fails that wake; the messages stay in channel
-      // history. Keeping it active instead would also match every new message.
+      // history. Keeping it active instead would also match every new message and
+      // hit the pull bug tracked in Idea 01M3WTZATH40CGC2JZ16201E0G.
       stale.push(row.id);
     }
   }
@@ -152,6 +153,7 @@ function makeRoomForManagedSubscription(
       prefix
     )
     .one().cnt;
+  // More than one is needed only after the share was lowered below the active count.
   const needed = active - share + 1;
   if (needed <= 0) return;
   const channelPrefix = `${prefix}${channel}:`;
@@ -167,7 +169,7 @@ function makeRoomForManagedSubscription(
       prefix,
       channelPrefix.length,
       channelPrefix,
-      share
+      active
     )
     .toArray();
   const victims: string[] = [];

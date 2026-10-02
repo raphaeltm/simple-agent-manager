@@ -265,6 +265,33 @@ describe('agent message channels: capacity share', () => {
     );
   });
 
+  it('converges after the share is lowered below the subscriptions already active', async () => {
+    const f = await twoAgentProject();
+    const d = await seedTaskAgent(f.projectId, f.ownerId, f.ownerNodeId, 'd');
+    await withAgentMessageChannels(async () => {
+      okBody<ChannelReceipt>(await send(f.a, f.b, 'one'));
+      okBody<ChannelReceipt>(await send(f.a, d, 'two'));
+      await materializeWakes(f.stub, f.projectId);
+      await ackWakes(f, f.b);
+      await ackWakes(f, d);
+      const before = await managedSubscriptions(f.stub);
+      expect(before).toHaveLength(4);
+      await withProjectDataEnv(
+        f.stub,
+        { AGENT_MESSAGE_MAX_ACTIVE_SUBSCRIPTIONS: '2' },
+        async () => {
+          const bd = okBody<ChannelReceipt>(await send(f.b, d, 'three'));
+          expect(bd.recipient.subscriptionMatched).toBe(true);
+          const states = await subscriptionStates(f);
+          for (const s of before) expect(states[s.id]).toBe('expired');
+          expect(
+            (await managedSubscriptions(f.stub)).map((s) => s.target_session_id).sort()
+          ).toEqual([f.b.sessionId, d.sessionId].sort());
+        }
+      );
+    });
+  });
+
   it('releases the least recently matched idle subscription first', async () => {
     const f = await twoAgentProject();
     const d = await seedTaskAgent(f.projectId, f.ownerId, f.ownerNodeId, 'd');
