@@ -12,6 +12,7 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import {
+  GROUPED_PAGE_SIZES_SQL,
   type GroupedFtsWallRecoveryInput,
   runGroupedFtsWallRecovery,
 } from '../../src/durable-objects/project-data/grouped-fts-wall-recovery';
@@ -152,6 +153,58 @@ const GENEROUS = {
   maxSessions: 50,
   skipSessionIds: [] as string[],
 };
+
+/**
+ * Runs the module with `sql.exec` failing FTS `'delete'` commands on the attempts
+ * listed in `failOnFtsAttempts` (1-based, counted per attempt to delete the page's
+ * first FTS entry), using Cloudflare's own storage-full message.
+ */
+async function runWithStorageFullOnFts(
+  stub: DurableObjectStub<ProjectDataTestDouble>,
+  projectId: string,
+  failOnFtsAttempts: number[]
+) {
+  return runInDurableObject(stub, async (_instance, state) => {
+    const real = state.storage.sql;
+    let attempt = 0;
+    let failingAttempt = false;
+    let sawFirstFtsDelete = false;
+    const failing = new Proxy(real, {
+      get(target, prop) {
+        if (prop === 'exec') {
+          return (query: string, ...bindings: unknown[]) => {
+            if (query.includes(`VALUES('delete'`)) {
+              if (!sawFirstFtsDelete) {
+                sawFirstFtsDelete = true;
+                attempt++;
+                failingAttempt = failOnFtsAttempts.includes(attempt);
+              }
+              if (failingAttempt) throw new Error('Exceeded the maximum database size.');
+            } else {
+              sawFirstFtsDelete = false;
+            }
+            return target.exec(query, ...bindings);
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    return runGroupedFtsWallRecovery(
+      failing,
+      projectId,
+      {
+        reason: 'test: at-cap fallback',
+        dryRun: false,
+        ...GENEROUS,
+        transactionRows: 500,
+        transactionBytes: 8 * 1024 * 1024,
+      },
+      resolveStorageSafetyConfig(testEnv),
+      { transactionSync: (callback) => state.storage.transactionSync(callback) }
+    );
+  });
+}
 
 describe('ProjectData grouped FTS wall recovery', () => {
   it('prunes old terminal sessions largest-first, leaves message text and other sessions intact', async () => {
@@ -452,6 +505,78 @@ describe('ProjectData grouped FTS wall recovery', () => {
     expect(result.groupedRowsDeleted).toBe(0);
     expect(await snapshotSession(stub, sessionId!, token)).toEqual(before);
     await assertFtsIntegrity(stub);
+  });
+
+  it('at the cap, retries a storage-full page as delete-then-FTS and keeps the index exact', async () => {
+    const projectId = `wall-recovery-fallback-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const token = uniqueToken('fallback');
+    const [sessionId] = await seedSessions(stub, [
+      { topic: 'fallback', token, turns: 3, end: 'stop', ageDays: 30 },
+    ]);
+    const before = await snapshotSession(stub, sessionId!, token);
+
+    // Only the atomic attempt fails; the separate FTS transaction fits.
+    const result = await runWithStorageFullOnFts(stub, projectId, [1]);
+
+    expect(result.error).toBeNull();
+    expect(result.ftsStaleRows).toBe(0);
+    expect(result.ftsEntriesDeleted).toBe(before.groupedRows);
+    const after = await snapshotSession(stub, sessionId!, token);
+    expect(after.groupedRows).toBe(0);
+    expect(after.ftsMatches).toBe(0);
+    expect(after.searchIndexState).toBe('grouped_fts_pruned');
+    expect(after.messageDigest).toBe(before.messageDigest);
+    await assertFtsIntegrity(stub);
+  });
+
+  it('at the cap, frees the rows and reports stale FTS entries when the markers never fit', async () => {
+    const projectId = `wall-recovery-stale-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const token = uniqueToken('stale');
+    const [sessionId] = await seedSessions(stub, [
+      { topic: 'stale', token, turns: 3, end: 'stop', ageDays: 30 },
+    ]);
+    const before = await snapshotSession(stub, sessionId!, token);
+
+    const result = await runWithStorageFullOnFts(stub, projectId, [1, 2]);
+
+    expect(result.error).toBeNull();
+    expect(result.stopReason).toBe('candidates_exhausted');
+    expect(result.ftsStaleRows).toBe(before.groupedRows);
+    expect(result.ftsEntriesDeleted).toBe(0);
+    expect(result.afterBytes).toBeLessThanOrEqual(result.beforeBytes);
+    const after = await snapshotSession(stub, sessionId!, token);
+    expect(after.groupedRows).toBe(0);
+    expect(after.searchIndexState).toBe('grouped_fts_pruned');
+    expect(after.messageDigest).toBe(before.messageDigest);
+    // The stale postings are still in the index...
+    expect(after.ftsMatches).toBeGreaterThan(0);
+    // ...but search drops them and still finds the session through raw messages.
+    const found = await runInDurableObject(stub, async (instance) =>
+      instance.searchMessages(token, null, null, 5)
+    );
+    expect(found.some((r: { sessionId: string }) => r.sessionId === sessionId)).toBe(true);
+  });
+
+  it('pages grouped rows by index walk, without sorting the rest of the session', async () => {
+    const projectId = `wall-recovery-plan-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const plan = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.sql
+        .exec(`EXPLAIN QUERY PLAN ${GROUPED_PAGE_SIZES_SQL}`, 'session', 0, 0, 10)
+        .toArray()
+        .map((row) => String(row.detail))
+        .join('\n')
+    );
+    expect(plan).toContain('idx_grouped_messages_session');
+    expect(plan).not.toContain('TEMP B-TREE');
   });
 
   it('leaves sessions in skipSessionIds untouched and prunes the rest', async () => {

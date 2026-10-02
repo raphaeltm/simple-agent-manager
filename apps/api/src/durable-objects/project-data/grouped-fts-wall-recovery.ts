@@ -15,13 +15,20 @@
  * 1. Candidates are terminal sessions older than the grouped-FTS minimum age that
  *    still have grouped rows and no archive source intent, ranked by
  *    `message_count` so the largest sessions go first (rule 65).
- * 2. Each transaction reads a bounded page of `(rowid, content)`, DELETEs those
- *    `chat_messages_grouped` rows (freeing their pages), then removes the matching
- *    external-content FTS entries with FTS5 `'delete'` commands (whose segment data
- *    is flushed into the pages just freed), then marks the session
- *    `grouped_fts_pruned` exactly like the alarm cleanup does.
- * 3. Each transaction runs in `transactionSync`, so a failure rolls the whole page
- *    back: the FTS index is never left out of step with its content table.
+ * 2. Each page is pruned in one `transactionSync`: DELETE the `chat_messages_grouped`
+ *    rows (freeing their pages), mark the session `grouped_fts_pruned` exactly like
+ *    the alarm cleanup does, then remove the matching external-content FTS entries
+ *    with FTS5 `'delete'` commands. Any failure rolls the whole page back, so the
+ *    index stays in step with its content table.
+ * 3. FTS5 records a delete as a new segment roughly as large as the postings it
+ *    cancels. For content made mostly of unique tokens (hashes, hex, base64) that can
+ *    exceed what the row DELETE freed, so at the cap the whole page fails with a
+ *    storage-full error. Only then, the page is retried as two transactions: the row
+ *    DELETE and session mark (always net-negative), then the FTS deletes. If the
+ *    second one still does not fit, those entries are left stale and counted in
+ *    `ftsStaleRows`. Stale postings point at rowids with no content row, so search
+ *    joins drop them; they waste index space until the FTS index is rebuilt
+ *    (tracked in `tasks/backlog/2026-10-02-rebuild-grouped-fts-after-wall-recovery.md`).
  *
  * Message text (`chat_messages`) is never read or written. Pruned sessions fall
  * back to raw-message LIKE search, which covers less than FTS: project-wide LIKE
@@ -34,9 +41,12 @@
  * wall-clock budget: `Date.now()` does not advance during synchronous execution in
  * Workers (see `alarm-sections.ts`), so a deadline check could never fire. Each
  * call is bounded by rows and bytes instead, with ceilings sized well under the
- * object's CPU limit (2026-10-02 workerd measurement: 32 MiB pruned in ~215 ms).
+ * object's CPU limit. Local workerd measurements on 2026-10-02 ranged from ~7 ms/MiB
+ * (low-entropy text) to 55-180 ms/MiB (prose and unique-token content); production
+ * storage is slower still, so the 32 MiB ceiling keeps a call to a few seconds.
  */
 import { createModuleLogger, serializeError } from '../../lib/logger';
+import { isDurableObjectStorageFullError } from '../../services/durable-object-retry';
 import { SEARCH_INDEX_STATE_PRUNED } from './materialization';
 import type { StorageSafetyConfig } from './storage-safety';
 import type { Env } from './types';
@@ -44,8 +54,8 @@ import type { Env } from './types';
 const log = createModuleLogger('project_data.grouped_fts_wall_recovery');
 
 /** Per-call ceilings. Production storage is slower than local workerd; keep margin. */
-export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS = 20_000;
-export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES = 128 * 1024 * 1024;
+export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS = 10_000;
+export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES = 32 * 1024 * 1024;
 /** Also bounds the length of `skipSessionIds`. */
 export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS = 500;
 /** Rows per transaction. Bounds the work one rollback can discard. */
@@ -114,6 +124,8 @@ export interface GroupedFtsWallRecoveryResult {
   sessionsDrained: number;
   groupedRowsDeleted: number;
   ftsEntriesDeleted: number;
+  /** Grouped rows deleted at the cap whose FTS entries did not fit and were left stale. */
+  ftsStaleRows: number;
   contentBytes: number;
   transactions: number;
   stopReason: GroupedFtsWallRecoveryStopReason;
@@ -155,7 +167,23 @@ export function resolveGroupedFtsWallRecoveryConfig(env: Env): GroupedFtsWallRec
 }
 
 type Candidate = { sessionId: string; messageCount: number };
-type PageRow = { rowid: number; bytes: number };
+type PageRow = { rowid: number; createdAt: number; bytes: number };
+type ContentRow = { rowid: number; content: string };
+/** Position after the last row read: `(created_at, rowid)`, the index's own order. */
+type PageCursor = { createdAt: number; rowid: number };
+
+const PAGE_START: PageCursor = { createdAt: Number.MIN_SAFE_INTEGER, rowid: 0 };
+
+/**
+ * Exported so a test can pin its plan against the real engine: an index walk in
+ * `(created_at, rowid)` order with no temp sort, which is what keeps `LIMIT` a
+ * bound on rows read.
+ */
+export const GROUPED_PAGE_SIZES_SQL = `SELECT rowid, created_at, length(CAST(content AS BLOB))
+  FROM chat_messages_grouped
+  WHERE session_id = ? AND (created_at, rowid) > (?, ?)
+  ORDER BY created_at ASC, rowid ASC
+  LIMIT ?`;
 
 function readCandidates(sql: SqlStorage, cutoff: number, limit: number): Candidate[] {
   const rows = sql
@@ -166,6 +194,9 @@ function readCandidates(sql: SqlStorage, cutoff: number, limit: number): Candida
          AND s.updated_at <= ?
          AND NOT EXISTS (
            SELECT 1 FROM project_data_archive_source_intents i WHERE i.session_id = s.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM project_data_archive_target_sessions t WHERE t.session_id = s.id
          )
          AND EXISTS (
            SELECT 1 FROM chat_messages_grouped g WHERE g.session_id = s.id
@@ -190,104 +221,82 @@ function readCandidates(sql: SqlStorage, cutoff: number, limit: number): Candida
 }
 
 /**
- * The next page of the session's grouped rows after `afterRowid`, cut to the row
- * and byte limits. Sizes are read without the content so a page's memory is
- * decided before any content is loaded.
+ * The next page of the session's grouped rows after `cursor`, cut to the row and
+ * byte limits. It walks `idx_grouped_messages_session (session_id, created_at)` in
+ * order, so `LIMIT` bounds the rows read: ordering by `rowid` alone would sort, and
+ * size, every remaining row of the session on every page. Sizes are read without
+ * the content so a page's memory is decided before any content is loaded.
  */
 function readPage(
   sql: SqlStorage,
   sessionId: string,
-  afterRowid: number,
+  cursor: PageCursor,
   rowLimit: number,
   byteLimit: number,
   callBytesLeft: number
 ): PageRow[] {
   const rows = sql
-    .exec(
-      `SELECT rowid, length(CAST(content AS BLOB))
-       FROM chat_messages_grouped
-       WHERE session_id = ? AND rowid > ?
-       ORDER BY rowid ASC
-       LIMIT ?`,
-      sessionId,
-      afterRowid,
-      rowLimit
-    )
+    .exec(GROUPED_PAGE_SIZES_SQL, sessionId, cursor.createdAt, cursor.rowid, rowLimit)
     .raw();
   const page: PageRow[] = [];
   let bytes = 0;
   for (const row of rows) {
     const rowid = Number(row[0]);
-    const rowBytes = Number(row[1]);
-    if (!Number.isSafeInteger(rowid) || !Number.isFinite(rowBytes)) {
-      throw new Error(`grouped row ${String(row[0])} has an unreadable size`);
+    const createdAt = Number(row[1]);
+    const rowBytes = Number(row[2]);
+    if (
+      !Number.isSafeInteger(rowid) ||
+      !Number.isSafeInteger(createdAt) ||
+      !Number.isFinite(rowBytes)
+    ) {
+      throw new Error(`grouped row ${String(row[0])} has an unreadable rowid, created_at or size`);
     }
     if (bytes + rowBytes > byteLimit) {
       // A legacy row larger than one transaction's byte bound would otherwise
       // stop every call on the same session. Take it alone while the call's own
       // byte budget still covers it.
       if (page.length === 0 && rowBytes <= callBytesLeft) {
-        page.push({ rowid, bytes: rowBytes });
+        page.push({ rowid, createdAt, bytes: rowBytes });
       }
       break;
     }
-    page.push({ rowid, bytes: rowBytes });
+    page.push({ rowid, createdAt, bytes: rowBytes });
     bytes += rowBytes;
   }
   return page;
 }
 
-function readPageContent(
-  sql: SqlStorage,
-  sessionId: string,
-  firstRowid: number,
-  lastRowid: number
-): Array<{ rowid: number; content: string }> {
-  const rows = sql
-    .exec(
-      `SELECT rowid, content
-       FROM chat_messages_grouped
-       WHERE session_id = ? AND rowid BETWEEN ? AND ?
-       ORDER BY rowid ASC`,
-      sessionId,
-      firstRowid,
-      lastRowid
-    )
-    .raw();
-  const content: Array<{ rowid: number; content: string }> = [];
-  for (const row of rows) {
-    const rowid = Number(row[0]);
-    const text = row[1];
-    if (!Number.isSafeInteger(rowid) || typeof text !== 'string') {
-      throw new Error(`grouped row ${String(row[0])} has unreadable content`);
+/** Point lookups by rowid; each row must still belong to the session. */
+function readPageContent(sql: SqlStorage, sessionId: string, page: PageRow[]): ContentRow[] {
+  return page.map(({ rowid }) => {
+    const row = sql
+      .exec(
+        `SELECT content FROM chat_messages_grouped WHERE rowid = ? AND session_id = ?`,
+        rowid,
+        sessionId
+      )
+      .raw()
+      .next();
+    const content = row.done ? undefined : row.value[0];
+    if (typeof content !== 'string') {
+      throw new Error(`grouped row ${rowid} is missing or has unreadable content`);
     }
-    content.push({ rowid, content: text });
-  }
-  return content;
+    return { rowid, content };
+  });
 }
 
-/** Delete-first: free the grouped pages, then drop the FTS entries, then mark the session. */
-function pruneGroupedPage(
+/** Free the grouped rows' pages, then mark the session. Never grows the database net. */
+function deleteGroupedRowsAndMarkSession(
   sql: SqlStorage,
   sessionId: string,
-  page: { firstRowid: number; lastRowid: number },
-  rows: Array<{ rowid: number; content: string }>,
+  page: PageRow[],
   now: number
 ): void {
-  const { firstRowid, lastRowid } = page;
-  sql.exec(
-    `DELETE FROM chat_messages_grouped
-     WHERE session_id = ? AND rowid BETWEEN ? AND ?`,
-    sessionId,
-    firstRowid,
-    lastRowid
-  );
-  for (const row of rows) {
+  for (const { rowid } of page) {
     sql.exec(
-      `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
-       VALUES('delete', ?, ?)`,
-      row.rowid,
-      row.content
+      `DELETE FROM chat_messages_grouped WHERE rowid = ? AND session_id = ?`,
+      rowid,
+      sessionId
     );
   }
   // Same state change as `grouped-fts-cleanup.ts`: the watermark dies with the rows
@@ -308,16 +317,81 @@ function pruneGroupedPage(
   );
 }
 
-function hasGroupedRowsAfter(sql: SqlStorage, sessionId: string, afterRowid: number): boolean {
+/** External-content FTS5 delete: the indexed values must be supplied verbatim. */
+function deleteFtsEntries(sql: SqlStorage, rows: ContentRow[]): void {
+  for (const row of rows) {
+    sql.exec(
+      `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
+       VALUES('delete', ?, ?)`,
+      row.rowid,
+      row.content
+    );
+  }
+}
+
+function hasGroupedRowsAfter(sql: SqlStorage, sessionId: string, cursor: PageCursor): boolean {
   return (
     sql
       .exec(
-        `SELECT 1 FROM chat_messages_grouped WHERE session_id = ? AND rowid > ? LIMIT 1`,
+        `SELECT 1 FROM chat_messages_grouped
+         WHERE session_id = ? AND (created_at, rowid) > (?, ?)
+         LIMIT 1`,
         sessionId,
-        afterRowid
+        cursor.createdAt,
+        cursor.rowid
       )
       .toArray().length > 0
   );
+}
+
+type PagePruneOutcome = { ok: true; ftsStale: boolean } | { ok: false; error: unknown };
+
+/**
+ * One atomic transaction when it fits; the two-step fallback only for a
+ * storage-full failure (see the module comment). Any other failure is returned
+ * untouched, with the page fully rolled back.
+ */
+function prunePage(
+  sql: SqlStorage,
+  sessionId: string,
+  page: PageRow[],
+  now: number,
+  transactionSync: <T>(callback: () => T) => T
+): PagePruneOutcome {
+  // Read before the transaction; nothing can interleave because nothing awaits.
+  let rows: ContentRow[];
+  try {
+    rows = readPageContent(sql, sessionId, page);
+  } catch (error) {
+    return { ok: false, error };
+  }
+  try {
+    transactionSync(() => {
+      deleteGroupedRowsAndMarkSession(sql, sessionId, page, now);
+      deleteFtsEntries(sql, rows);
+    });
+    return { ok: true, ftsStale: false };
+  } catch (error) {
+    if (!isDurableObjectStorageFullError(error)) return { ok: false, error };
+  }
+  try {
+    transactionSync(() => deleteGroupedRowsAndMarkSession(sql, sessionId, page, now));
+  } catch (error) {
+    return { ok: false, error };
+  }
+  try {
+    transactionSync(() => deleteFtsEntries(sql, rows));
+    return { ok: true, ftsStale: false };
+  } catch (error) {
+    log.warn('fts_entries_left_stale', {
+      sessionId,
+      rows: rows.length,
+      firstRowid: rows[0]?.rowid ?? null,
+      lastRowid: rows[rows.length - 1]?.rowid ?? null,
+      ...serializeError(error),
+    });
+    return { ok: true, ftsStale: true };
+  }
 }
 
 function assertPositiveInteger(name: string, value: unknown): void {
@@ -376,6 +450,7 @@ export function runGroupedFtsWallRecovery(
   let groupedRowsDeleted = 0;
   let contentBytes = 0;
   let transactions = 0;
+  let ftsStaleRows = 0;
   let stopReason: GroupedFtsWallRecoveryStopReason =
     candidates.length > input.maxSessions ? 'session_budget' : 'candidates_exhausted';
   let error: string | null = null;
@@ -390,7 +465,7 @@ export function runGroupedFtsWallRecovery(
       drained: false,
     };
     sessions.push(session);
-    let cursor = 0;
+    let cursor = PAGE_START;
 
     for (;;) {
       const rowsLeft = input.maxRows - groupedRowsDeleted;
@@ -418,22 +493,11 @@ export function runGroupedFtsWallRecovery(
         break;
       }
       const pageBytes = page.reduce((sum, row) => sum + row.bytes, 0);
-      const firstRowid = page[0]?.rowid ?? 0;
-      const lastRowid = page[page.length - 1]?.rowid ?? 0;
 
       if (!input.dryRun) {
-        try {
-          deps.transactionSync(() => {
-            const rows = readPageContent(sql, candidate.sessionId, firstRowid, lastRowid);
-            if (rows.length !== page.length) {
-              throw new Error(
-                `grouped page changed between size read and prune: expected ${page.length} rows, read ${rows.length}`
-              );
-            }
-            pruneGroupedPage(sql, candidate.sessionId, { firstRowid, lastRowid }, rows, now);
-          });
-        } catch (err) {
-          error = err instanceof Error ? err.message : String(err);
+        const outcome = prunePage(sql, candidate.sessionId, page, now, deps.transactionSync);
+        if (!outcome.ok) {
+          error = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
           failedSessionId = candidate.sessionId;
           stopReason = 'transaction_failed';
           log.error('transaction_failed', {
@@ -441,18 +505,20 @@ export function runGroupedFtsWallRecovery(
             sessionId: candidate.sessionId,
             pageRows: page.length,
             pageBytes,
-            ...serializeError(err),
+            ...serializeError(outcome.error),
           });
           break candidateLoop;
         }
         transactions++;
+        if (outcome.ftsStale) ftsStaleRows += page.length;
       }
 
       session.groupedRowsDeleted += page.length;
       session.contentBytes += pageBytes;
       groupedRowsDeleted += page.length;
       contentBytes += pageBytes;
-      cursor = lastRowid;
+      const last = page[page.length - 1];
+      if (last) cursor = { createdAt: last.createdAt, rowid: last.rowid };
     }
   }
 
@@ -469,7 +535,8 @@ export function runGroupedFtsWallRecovery(
     sessionsTouched: reported.filter((s) => s.groupedRowsDeleted > 0).length,
     sessionsDrained: reported.filter((s) => s.drained).length,
     groupedRowsDeleted,
-    ftsEntriesDeleted: input.dryRun ? 0 : groupedRowsDeleted,
+    ftsEntriesDeleted: input.dryRun ? 0 : groupedRowsDeleted - ftsStaleRows,
+    ftsStaleRows,
     contentBytes,
     transactions,
     stopReason,
@@ -490,6 +557,7 @@ export function runGroupedFtsWallRecovery(
     groupedRowsDeleted,
     contentBytes,
     transactions,
+    ftsStaleRows,
     stopReason,
     error,
     failedSessionId,
