@@ -15,6 +15,11 @@ export function byteLength(value: string): number {
   return TEXT_ENCODER.encode(value).byteLength;
 }
 
+export async function sha256Hex(value: string): Promise<string> {
+  const bytes = await crypto.subtle.digest('SHA-256', TEXT_ENCODER.encode(value));
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 export function normalizeText(value: unknown, field: string, maxBytes: number): string {
   if (typeof value !== 'string') throw new ProjectEventValidationError(`${field} must be a string`);
   const normalized = value.trim();

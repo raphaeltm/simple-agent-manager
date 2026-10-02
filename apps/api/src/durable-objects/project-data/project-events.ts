@@ -8,6 +8,7 @@ import {
   type ProjectEventSubscriptionRecord,
 } from '@simple-agent-manager/shared';
 
+import { AGENT_MESSAGE_SUBSCRIPTION_KEY_PREFIX } from './agent-message-notice';
 import {
   type AdmitProjectEventInput,
   type CancelProjectEventSubscriptionInput,
@@ -273,11 +274,22 @@ export function createProjectEventSubscription(
   sql: SqlStorage,
   env: Env,
   storedProjectId: string | null,
-  input: CreateProjectEventSubscriptionInput
+  input: CreateProjectEventSubscriptionInput,
+  options: { managedAgentMessage?: boolean } = {}
 ): ProjectEventSubscriptionMutationResult {
   const limits = resolveProjectEventLimits(env);
   const normalized = normalizeSubscriptionInput(input, limits);
   assertProjectBinding(storedProjectId, normalized.projectId);
+  // The key prefix marks SAM-managed agent-message subscriptions, which have their
+  // own capacity share; only the managed path may use it.
+  if (
+    normalized.idempotencyKey.startsWith(AGENT_MESSAGE_SUBSCRIPTION_KEY_PREFIX) !==
+    (options.managedAgentMessage === true)
+  ) {
+    throw new ProjectEventValidationError(
+      `idempotencyKey prefix ${AGENT_MESSAGE_SUBSCRIPTION_KEY_PREFIX} is reserved for SAM agent messaging`
+    );
+  }
   const now = Date.now();
   expireDueSubscriptions(sql, normalized.projectId, now, limits.retentionBatchRows);
 

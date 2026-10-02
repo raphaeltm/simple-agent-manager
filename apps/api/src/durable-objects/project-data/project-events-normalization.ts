@@ -147,15 +147,11 @@ export function normalizeProjectEventInput(
     'payloadFingerprint',
     limits.maxFilterStringBytes
   );
-  const metadata = normalizeMetadata(input.metadata ?? {}, limits);
+  const { metadata, metadataJson, metadataBytes } = normalizeMetadataWithinBudget(
+    input.metadata ?? {},
+    limits
+  );
   const audience = deriveProjectEventAudience(projectId, source, metadata);
-  const metadataJson = stableStringify(metadata);
-  const metadataBytes = byteLength(metadataJson);
-  if (metadataBytes > limits.maxMetadataBytes) {
-    throw new ProjectEventLimitExceededError(
-      `metadata must be ${limits.maxMetadataBytes} bytes or fewer`
-    );
-  }
   const display = normalizeDisplay(input.display, limits);
   const displayJson = stableStringify(display);
   const displayBytes = byteLength(displayJson);
@@ -576,6 +572,22 @@ function normalizeFilterValues(
     for (const item of normalized) normalizeSeverity(item);
   }
   return normalized;
+}
+
+/** Canonical metadata normalization plus the stored byte budget. */
+export function normalizeMetadataWithinBudget(
+  input: ProjectEventMetadata,
+  limits: ProjectEventLimits
+): { metadata: ProjectEventMetadata; metadataJson: string; metadataBytes: number } {
+  const metadata = normalizeMetadata(input, limits);
+  const metadataJson = stableStringify(metadata);
+  const metadataBytes = byteLength(metadataJson);
+  if (metadataBytes > limits.maxMetadataBytes) {
+    throw new ProjectEventLimitExceededError(
+      `metadata must be ${limits.maxMetadataBytes} bytes or fewer`
+    );
+  }
+  return { metadata, metadataJson, metadataBytes };
 }
 
 function normalizeMetadata(

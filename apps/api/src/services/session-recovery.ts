@@ -147,7 +147,7 @@ async function createRecoveryTask(
           `INSERT INTO tasks
              (id, project_id, user_id, chat_session_id, recovery_source_task_id,
               title, description, status, execution_step, priority,
-              agent_profile_hint, skill_id, skill_hint, task_mode, output_branch,
+              agent_profile_hint, skill_id, skill_hint, coordination_channel, task_mode, output_branch,
               requested_vm_size, requested_vm_size_source,
               resource_requirements_json, resource_requirements_source,
               resolved_reservation_json, credential_attribution_user_id,
@@ -158,7 +158,7 @@ async function createRecoveryTask(
                   COALESCE(NULLIF(source.title, ''), 'Resume conversation'), ?,
                   'queued', 'node_selection', COALESCE(source.priority, 0),
                   COALESCE(source.agent_profile_hint, ?), source.skill_id,
-                  source.skill_hint, 'conversation', source.output_branch, ?,
+                  source.skill_hint, source.coordination_channel, 'conversation', source.output_branch, ?,
                   COALESCE(source.requested_vm_size_source, 'session-recovery'),
                   source.resource_requirements_json, source.resource_requirements_source,
                   source.resolved_reservation_json,

@@ -956,6 +956,11 @@ export const tasks = sqliteTable(
     credentialBlockedAt: text('credential_blocked_at'),
     /** Null for standalone tasks; set when task belongs to a mission. Set null on mission delete. */
     missionId: text('mission_id').references(() => missions.id, { onDelete: 'set null' }),
+    /**
+     * Project event channel shared by a feature's coordinator and its descendants.
+     * Inherited through dispatch; copied by retry and session recovery. Null = none.
+     */
+    coordinationChannel: text('coordination_channel'),
     /** Scheduler classification for mission tasks. Null for standalone tasks. */
     schedulerState: text('scheduler_state'),
     /** Resolved VM size for audit (e.g. 'small', 'medium', 'large'). */

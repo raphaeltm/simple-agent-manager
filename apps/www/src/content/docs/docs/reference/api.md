@@ -19,6 +19,8 @@ Project eventing uses a pull loop over the canonical ProjectData `project_event_
 
 `dispatch_task` accepts modern VM workload input through `resourceRequirements` with optional `minVcpu`, `minMemoryGb`, `minDiskGb`, and `exclusiveNode`. Known numeric fields must be finite and non-negative; `exclusiveNode: false` is preserved. Deprecated `vmSize` remains accepted as a legacy compatibility hint and is not expanded into hardware by the client or MCP handler.
 
+`dispatch_task` also accepts an optional `coordinationChannel`: an ordinary project event channel name (`agent-dm.` is reserved) shared by a feature's agents. When omitted, the child inherits the dispatching task's channel, so every descendant shares one channel; `retry_subtask` and session recovery copy it onto replacement tasks. The child's description gains a short "Coordination channel" section and `get_instructions` returns `task.coordinationChannel` with guidance. Channels stay project-visible, so this routes work and is not an access boundary. Implementation: `parseCoordinationChannelParam` in `apps/api/src/routes/mcp/dispatch-coordination-channel.ts`.
+
 After subscribing, call `list_subscription_events` with the `subscriptionId` to replay missed or queued matches. The list response is payload-free: it returns summaries, delivery IDs, delivery state, `hasMore`, and an opaque `nextCursor` that is valid only for the same subscription. Call `get_event` only when a summary needs full stored event details, then call `ack_event_delivery` after processing each returned `deliveryId`; ack is idempotent. The pull tools themselves record matches, delivery decisions, and pull acknowledgements only — they do not steer runtimes, spawn tasks, or expose human/UI controls. Delivery happens out of band: `existing_session_prompt` and `runtime_interrupt` subscriptions wake the target chat through the durable prompt queue, and `runtime_interrupt` wakes carry the `interrupt` mailbox class, which may cancel an in-flight turn so the wake is delivered immediately.
 
 ## Event subscriptions
@@ -69,6 +71,45 @@ per-project fixed-window rate limit; a boundary burst can span two windows.
 Payload, fanout, channel cardinality and history page limits are configurable.
 Empty idle catalog generations may be reclaimed, while live subscriptions continue
 to follow the stable channel name.
+
+A channel publication never matches the publisher's own `existing_session_prompt` or
+`runtime_interrupt` subscription, live or through catch-up, so publishing never wakes
+the publisher (`isSelfOriginatedChannelWake`). Record-only followers still see their
+own publications in their pull feed. Channel names starting with `agent-dm.` are
+reserved for SAM agent messaging and are rejected by `publish_channel_event`.
+
+### Agent messages over shared channels (preview, off by default)
+
+With `AGENT_MESSAGE_CHANNELS_ENABLED=true`, and only while event wakes and durable
+prompt delivery are enabled, `send_durable_message` (classes `notify` and `deliver`)
+and `send_message_to_subtask` stop injecting the sender's text into the recipient's
+prompt. One ProjectData transaction (`sendAgentChannelMessage`) finds or creates the
+canonical `agent-dm.<pair digest>` channel for the two chat sessions, ensures a
+SAM-managed prompt-delivery subscription for each chat, and publishes the message
+with its server-derived sender. The recipient is woken with a SAM-authored notice
+that carries event IDs only; it reads the text with `get_event`
+(`event.metadata.actor` is the verified sender), replies with `send_durable_message`,
+and acknowledges with `ack_event_delivery`. Urgent classes keep stop-and-deliver.
+Responses report `accepted: true, delivered: false` with `transport`, `channel`,
+`eventId` and `sequence`; an optional `idempotencyKey` replays a lost-response retry,
+and changed content under the same key is rejected as a conflict. Messages are capped
+by `PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES` and pair channels by
+`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. This preview has not been validated on staging.
+
+Pair-channel events match only subscriptions targeting one of the two participant
+chats (`subscriptionCanMatchProjectEvent`), `follow_event_channel` rejects
+`agent-dm.` names, and subscription idempotency keys starting with
+`sam-agent-message:` are reserved, so other agents cannot be woken by a pair's
+messages. History stays project-visible through `get_channel_history`. Managed
+subscriptions may hold at most `AGENT_MESSAGE_MAX_ACTIVE_SUBSCRIPTIONS` of the
+project's active-subscription cap; at that share SAM releases the least recently
+matched idle pair subscriptions on other channels (the pair's next message recreates
+them), and refuses the send with `outcome: "capacity"` (retryable) while every
+candidate still owes a wake. Failed sends report `outcome` as `recipient_unavailable`
+(the recipient's chat or authority is gone; not retryable), `conflict`, `capacity` or
+`rejected`, and commit nothing. Known limit: a managed subscription that has used its
+wake budget is replaced even when its last wake is still queued, which fails that wake;
+those messages remain in channel history.
 
 ## Authentication
 

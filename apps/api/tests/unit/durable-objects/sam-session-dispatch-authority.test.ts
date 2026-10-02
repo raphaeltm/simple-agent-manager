@@ -222,6 +222,40 @@ describe('SAM session dispatch_task current project authority', () => {
     }
   );
 
+  it('retry_subtask keeps the original feature coordination channel on the replacement', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      const env = await seedRunnableProject(sqlite);
+      const insertOriginal = sqlite.prepare(
+        `INSERT INTO tasks
+           (id, project_id, user_id, title, description, status, coordination_channel,
+            created_at, updated_at)
+         VALUES (?, 'project-1', 'owner-1', 'Original', 'Retry me', 'failed', ?, ?, ?)`
+      );
+      const now = new Date().toISOString();
+      insertOriginal.run('with-channel', 'feature.retry', now, now);
+      insertOriginal.run('without-channel', null, now, now);
+
+      await retrySubtask({ taskId: 'with-channel' }, makeContext(env, 'owner-1'));
+      await retrySubtask({ taskId: 'without-channel' }, makeContext(env, 'owner-1'));
+
+      expect(
+        sqlite
+          .prepare(
+            `SELECT description, coordination_channel FROM tasks
+             WHERE id NOT IN ('with-channel', 'without-channel')
+             ORDER BY coordination_channel IS NULL, id`
+          )
+          .all()
+      ).toEqual([
+        { description: 'Retry me', coordination_channel: 'feature.retry' },
+        { description: 'Retry me', coordination_channel: null },
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('rejects removed project members before task/session/runner side effects', async () => {
     const sqlite = new Database(':memory:');
     try {

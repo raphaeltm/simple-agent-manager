@@ -11,11 +11,13 @@ import {
   isValidAgentType,
 } from '@simple-agent-manager/shared';
 
+import type { ProjectEventChannelEnv } from '../../durable-objects/project-data/project-event-channels-config';
 import {
   normalizeResourceRequirementsInput,
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
 import { INVALID_PARAMS, jsonRpcError, type JsonRpcResponse } from './_helpers';
+import { parseCoordinationChannelParam } from './dispatch-coordination-channel';
 import { parseDispatchRuntime } from './dispatch-instant';
 
 const VALID_TASK_MODES: TaskMode[] = ['task', 'conversation'];
@@ -45,12 +47,15 @@ export interface ParsedDispatchTaskParams {
   explicitVmLocation?: string;
   explicitMissionId?: string;
   resourceRequirements?: ResourceRequirements;
+  /** Feature coordination channel; omitted means inherit the dispatching task's. */
+  explicitCoordinationChannel?: string;
 }
 
 export function parseDispatchTaskParams(
   requestId: string | number | null,
   params: Record<string, unknown>,
-  limits: DispatchTaskLimits
+  limits: DispatchTaskLimits,
+  env: ProjectEventChannelEnv = {}
 ): { parsed: ParsedDispatchTaskParams } | { error: JsonRpcResponse } {
   const description = typeof params.description === 'string' ? params.description.trim() : '';
   if (!description) {
@@ -243,6 +248,13 @@ export function parseDispatchTaskParams(
     }
   }
 
+  const coordinationChannel = parseCoordinationChannelParam(
+    requestId,
+    params.coordinationChannel,
+    env
+  );
+  if ('jsonrpc' in coordinationChannel) return { error: coordinationChannel };
+
   return {
     parsed: {
       description,
@@ -261,6 +273,7 @@ export function parseDispatchTaskParams(
       explicitVmLocation,
       explicitMissionId,
       resourceRequirements,
+      explicitCoordinationChannel: coordinationChannel.value,
     },
   };
 }

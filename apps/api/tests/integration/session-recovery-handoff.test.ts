@@ -383,6 +383,24 @@ describe('session recovery handoff', () => {
     }
   });
 
+  it('carries the feature coordination channel onto the recovery task', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      sqlite
+        .prepare(`UPDATE tasks SET coordination_channel = 'feature.wake' WHERE id = 'parent-1'`)
+        .run();
+      const wake = await expectWakingRecovery(createSqliteD1(sqlite));
+      expect(
+        sqlite
+          .prepare(`SELECT coordination_channel, recovery_source_task_id FROM tasks WHERE id = ?`)
+          .get(wake.taskId)
+      ).toEqual({ coordination_channel: 'feature.wake', recovery_source_task_id: 'parent-1' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('carries scheduled creator authority through actual VM recovery submission', async () => {
     const sqlite = new Database(':memory:');
     try {

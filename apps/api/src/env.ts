@@ -822,6 +822,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW?: string;
   PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS?: string;
   PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS?: string;
+  /** Preview (default off): route ordinary agent messages through `agent-dm.*` channels. */
+  AGENT_MESSAGE_CHANNELS_ENABLED?: string;
+  AGENT_MESSAGE_CHANNEL_MAX_CHANNELS?: string;
+  AGENT_MESSAGE_SUBSCRIPTION_ROTATION_GRACE_MS?: string;
+  AGENT_MESSAGE_MAX_ACTIVE_SUBSCRIPTIONS?: string;
   PROJECT_EVENT_SUBSCRIPTION_EVENT_CURSOR_MAX_LENGTH?: string;
   PROJECT_EVENT_RECENT_STATUS_LIMIT?: string;
   PROJECT_EVENT_RETENTION_DAYS?: string;
