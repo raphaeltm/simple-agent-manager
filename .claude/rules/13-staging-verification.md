@@ -6,4 +6,5 @@ Keep this root rule compact. The full procedure is preserved at `.agent-instruct
 - Check active staging runs before triggering `deploy-staging.yml`, then verify the live staging app as a user.
 - Authenticate Playwright against `https://api.sammy.party/api/auth/token-login` with `SAM_PLAYWRIGHT_PRIMARY_USER`; do not exchange staging tokens against production.
 - For VM/cloud-init/DNS/TLS infrastructure, provision a real VM, verify heartbeat and access, then clean it up.
+- Before repeated, concurrent, or long-running staging tests that may materially increase the Cloudflare or VM bill, estimate the incremental cost or a conservative upper bound and check with Raphaël before starting. Keep routine verification bounded and promptly clean up test resources.
 - If staging fails, inspect Cloudflare state/logs before changing code and do not merge with a known staging failure.
