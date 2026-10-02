@@ -43,6 +43,16 @@ export const ProjectDataStorageReliefMeasureSchema = v.object({
   ),
 });
 
+/** Budgets are required: a destructive emergency call states its own bounds. */
+export const ProjectDataGroupedFtsWallRecoverySchema = v.object({
+  reason: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(500)),
+  dryRun: v.optional(v.boolean(), false),
+  maxRows: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  maxBytes: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  maxSessions: v.pipe(v.number(), v.integer(), v.minValue(1)),
+  wallTimeMs: v.pipe(v.number(), v.integer(), v.minValue(1)),
+});
+
 export const ProjectDataManualToolPayloadCleanupSchema = v.object({
   reason: v.pipe(v.string(), v.minLength(1), v.maxLength(500)),
   idempotencyKey: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),

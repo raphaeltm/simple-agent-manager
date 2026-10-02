@@ -83,6 +83,10 @@ import {
   CommentValidationError,
 } from '../durable-objects/project-data/comment-contracts';
 import type { ProjectDataGroupedFtsCleanupResult } from '../durable-objects/project-data/grouped-fts-cleanup';
+import type {
+  GroupedFtsWallRecoveryRequest,
+  GroupedFtsWallRecoveryResult,
+} from '../durable-objects/project-data/grouped-fts-wall-recovery';
 import type { SearchResult } from '../durable-objects/project-data/message-search';
 import {
   ProjectEventAckPolicyError,
@@ -2479,6 +2483,16 @@ export async function runProjectDataGroupedFtsCleanup(
 ): Promise<ProjectDataGroupedFtsCleanupResult | null> {
   return callProjectDataNoRetry(env, projectId, 'runProjectDataGroupedFtsCleanup', (stub) =>
     stub.runGroupedFtsCleanup()
+  );
+}
+
+export async function runProjectDataGroupedFtsWallRecovery(
+  env: Env,
+  projectId: string,
+  request: GroupedFtsWallRecoveryRequest
+): Promise<GroupedFtsWallRecoveryResult> {
+  return callProjectDataNoRetry(env, projectId, 'runProjectDataGroupedFtsWallRecovery', (stub) =>
+    stub.runGroupedFtsWallRecovery(request)
   );
 }
 

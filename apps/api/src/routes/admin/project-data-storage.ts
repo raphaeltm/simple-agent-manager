@@ -1,5 +1,9 @@
 import { Hono } from 'hono';
 
+import {
+  type GroupedFtsWallRecoveryConfig,
+  resolveGroupedFtsWallRecoveryConfig,
+} from '../../durable-objects/project-data/grouped-fts-wall-recovery';
 import { resolveStorageSafetyConfig } from '../../durable-objects/project-data/storage-safety';
 import { ProjectDataManualToolPayloadCleanupStateError } from '../../durable-objects/project-data/tool-payload-cleanup-types';
 import type { Env } from '../../env';
@@ -19,6 +23,7 @@ import {
   ProjectDataArchiveCircuitBreakerSchema,
   ProjectDataArchiveFreezeProjectSchema,
   ProjectDataArchiveRecoveryControlSchema,
+  ProjectDataGroupedFtsWallRecoverySchema,
   ProjectDataManualToolPayloadCleanupSchema,
   ProjectDataStorageEmergencyPurgeSchema,
   ProjectDataStorageReliefMeasureSchema,
@@ -27,6 +32,7 @@ import {
   measureProjectDataStorage,
   measureProjectDataStorageRelief,
   runProjectDataGroupedFtsCleanup,
+  runProjectDataGroupedFtsWallRecovery,
   runProjectDataManualToolPayloadCleanup,
   runProjectDataStorageEmergencyPurge,
 } from '../../services/project-data';
@@ -137,6 +143,28 @@ function assertManualToolPayloadCleanupBudgetBounds(
     throw errors.badRequest(
       `wallTimeMs must be between 1 and ${config.toolPayloadManualCleanupMaxWallTimeMs}`
     );
+  }
+}
+
+const GROUPED_FTS_WALL_RECOVERY_BOUNDS: Array<{
+  field: 'maxRows' | 'maxBytes' | 'maxSessions' | 'wallTimeMs';
+  ceiling: keyof GroupedFtsWallRecoveryConfig;
+}> = [
+  { field: 'maxRows', ceiling: 'maxRows' },
+  { field: 'maxBytes', ceiling: 'maxBytes' },
+  { field: 'maxSessions', ceiling: 'maxSessions' },
+  { field: 'wallTimeMs', ceiling: 'maxWallTimeMs' },
+];
+
+function assertGroupedFtsWallRecoveryBounds(
+  body: Record<'maxRows' | 'maxBytes' | 'maxSessions' | 'wallTimeMs', number>,
+  env: Env
+): void {
+  const config = resolveGroupedFtsWallRecoveryConfig(env);
+  for (const { field, ceiling } of GROUPED_FTS_WALL_RECOVERY_BOUNDS) {
+    if (body[field] > config[ceiling]) {
+      throw errors.badRequest(`${field} must be between 1 and ${config[ceiling]}`);
+    }
   }
 }
 
@@ -558,6 +586,33 @@ adminProjectDataStorageRoutes.post('/:projectId/grouped-fts-cleanup', async (c) 
   const result = await runProjectDataGroupedFtsCleanup(c.env, projectId);
   return c.json({ result });
 });
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/grouped-fts-wall-recovery
+ *
+ * Superadmin storage relief that works at the hard per-object cap: prunes
+ * grouped/FTS search rows of old terminal sessions delete-first, never touching
+ * message text. Every budget is required and bounded by env ceilings; `dryRun`
+ * reports what would be pruned without writing.
+ */
+adminProjectDataStorageRoutes.post(
+  '/:projectId/grouped-fts-wall-recovery',
+  jsonValidator(ProjectDataGroupedFtsWallRecoverySchema),
+  async (c) => {
+    const projectId = assertProjectId(c.req.param('projectId'));
+    const body = c.req.valid('json');
+    assertGroupedFtsWallRecoveryBounds(body, c.env);
+    const result = await runProjectDataGroupedFtsWallRecovery(c.env, projectId, {
+      reason: body.reason,
+      dryRun: body.dryRun,
+      maxRows: body.maxRows,
+      maxBytes: body.maxBytes,
+      maxSessions: body.maxSessions,
+      wallTimeMs: body.wallTimeMs,
+    });
+    return c.json({ result });
+  }
+);
 
 /**
  * POST /api/admin/project-data/storage/:projectId/emergency-purge
