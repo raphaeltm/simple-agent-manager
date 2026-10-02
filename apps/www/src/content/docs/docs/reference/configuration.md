@@ -1410,7 +1410,7 @@ lifecycle bookkeeping.
 | `GCP_API_TIMEOUT_MS`                       | `30000`            | GCP OAuth, IAM, and Compute request timeout                           |
 | `NODE_AGENT_REQUEST_TIMEOUT_MS`            | `30000`            | VM Agent request timeout                                              |
 | `DIGITALOCEAN_API_TIMEOUT_MS`              | `30000`            | DigitalOcean API request timeout                                      |
-| `DIGITALOCEAN_IP_POLL_TIMEOUT_MS`          | `10000`            | Bounded best-effort public IPv4 poll budget                           |
+| `DIGITALOCEAN_IP_POLL_TIMEOUT_MS`          | `20000`            | Bounded best-effort public IPv4 poll budget                           |
 | `DIGITALOCEAN_IP_POLL_INTERVAL_MS`         | `3000`             | Public IPv4 poll interval                                             |
 | `DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS`      | `60000`            | Block Storage action completion budget                                |
 | `DIGITALOCEAN_ACTION_POLL_INTERVAL_MS`     | `1000`             | Block Storage action poll interval                                    |

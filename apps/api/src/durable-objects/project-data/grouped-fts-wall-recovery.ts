@@ -344,12 +344,23 @@ function hasGroupedRowsAfter(sql: SqlStorage, sessionId: string, cursor: PageCur
   );
 }
 
-type PagePruneOutcome = { ok: true; ftsStale: boolean } | { ok: false; error: unknown };
+/**
+ * - `pruned`: rows and FTS entries gone.
+ * - `fts_stale`: rows gone; the FTS deletes did not fit at the cap (documented degradation).
+ * - `fts_failed`: rows gone; the FTS deletes failed for another reason. The rows still
+ *   count as deleted and stale, but the call stops and reports the error.
+ * - `failed`: nothing changed.
+ */
+type PagePruneOutcome =
+  | { kind: 'pruned' }
+  | { kind: 'fts_stale' }
+  | { kind: 'fts_failed'; error: unknown }
+  | { kind: 'failed'; error: unknown };
 
 /**
  * One atomic transaction when it fits; the two-step fallback only for a
- * storage-full failure (see the module comment). Any other failure is returned
- * untouched, with the page fully rolled back.
+ * storage-full failure (see the module comment). Any other failure of the atomic
+ * attempt is returned untouched, with the page fully rolled back.
  */
 function prunePage(
   sql: SqlStorage,
@@ -363,26 +374,27 @@ function prunePage(
   try {
     rows = readPageContent(sql, sessionId, page);
   } catch (error) {
-    return { ok: false, error };
+    return { kind: 'failed', error };
   }
   try {
     transactionSync(() => {
       deleteGroupedRowsAndMarkSession(sql, sessionId, page, now);
       deleteFtsEntries(sql, rows);
     });
-    return { ok: true, ftsStale: false };
+    return { kind: 'pruned' };
   } catch (error) {
-    if (!isDurableObjectStorageFullError(error)) return { ok: false, error };
+    if (!isDurableObjectStorageFullError(error)) return { kind: 'failed', error };
   }
   try {
     transactionSync(() => deleteGroupedRowsAndMarkSession(sql, sessionId, page, now));
   } catch (error) {
-    return { ok: false, error };
+    return { kind: 'failed', error };
   }
   try {
     transactionSync(() => deleteFtsEntries(sql, rows));
-    return { ok: true, ftsStale: false };
+    return { kind: 'pruned' };
   } catch (error) {
+    if (!isDurableObjectStorageFullError(error)) return { kind: 'fts_failed', error };
     log.warn('fts_entries_left_stale', {
       sessionId,
       rows: rows.length,
@@ -390,7 +402,7 @@ function prunePage(
       lastRowid: rows[rows.length - 1]?.rowid ?? null,
       ...serializeError(error),
     });
-    return { ok: true, ftsStale: true };
+    return { kind: 'fts_stale' };
   }
 }
 
@@ -496,7 +508,7 @@ export function runGroupedFtsWallRecovery(
 
       if (!input.dryRun) {
         const outcome = prunePage(sql, candidate.sessionId, page, now, deps.transactionSync);
-        if (!outcome.ok) {
+        if (outcome.kind === 'failed' || outcome.kind === 'fts_failed') {
           error = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
           failedSessionId = candidate.sessionId;
           stopReason = 'transaction_failed';
@@ -505,12 +517,13 @@ export function runGroupedFtsWallRecovery(
             sessionId: candidate.sessionId,
             pageRows: page.length,
             pageBytes,
+            rowsDeleted: outcome.kind === 'fts_failed',
             ...serializeError(outcome.error),
           });
-          break candidateLoop;
         }
+        if (outcome.kind === 'failed') break candidateLoop;
         transactions++;
-        if (outcome.ftsStale) ftsStaleRows += page.length;
+        if (outcome.kind !== 'pruned') ftsStaleRows += page.length;
       }
 
       session.groupedRowsDeleted += page.length;
@@ -519,6 +532,7 @@ export function runGroupedFtsWallRecovery(
       contentBytes += pageBytes;
       const last = page[page.length - 1];
       if (last) cursor = { createdAt: last.createdAt, rowid: last.rowid };
+      if (stopReason === 'transaction_failed') break candidateLoop;
     }
   }
 

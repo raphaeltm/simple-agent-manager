@@ -154,20 +154,27 @@ const GENEROUS = {
   skipSessionIds: [] as string[],
 };
 
+const STORAGE_FULL = 'Exceeded the maximum database size.';
+
 /**
- * Runs the module with `sql.exec` failing FTS `'delete'` commands on the attempts
- * listed in `failOnFtsAttempts` (1-based, counted per attempt to delete the page's
- * first FTS entry), using Cloudflare's own storage-full message.
+ * Runs the module with `sql.exec` failing FTS `'delete'` commands per attempt
+ * (1-based, counted per attempt to delete the page's first FTS entry). Each listed
+ * attempt fails with the given message; Cloudflare's own storage-full text by default.
  */
 async function runWithStorageFullOnFts(
   stub: DurableObjectStub<ProjectDataTestDouble>,
   projectId: string,
-  failOnFtsAttempts: number[]
+  failOnFtsAttempts: Array<number | { attempt: number; message: string }>
 ) {
+  const failures = new Map(
+    failOnFtsAttempts.map((f) =>
+      typeof f === 'number' ? [f, STORAGE_FULL] : [f.attempt, f.message]
+    )
+  );
   return runInDurableObject(stub, async (_instance, state) => {
     const real = state.storage.sql;
     let attempt = 0;
-    let failingAttempt = false;
+    let failingMessage: string | undefined;
     let sawFirstFtsDelete = false;
     const failing = new Proxy(real, {
       get(target, prop) {
@@ -177,9 +184,9 @@ async function runWithStorageFullOnFts(
               if (!sawFirstFtsDelete) {
                 sawFirstFtsDelete = true;
                 attempt++;
-                failingAttempt = failOnFtsAttempts.includes(attempt);
+                failingMessage = failures.get(attempt);
               }
-              if (failingAttempt) throw new Error('Exceeded the maximum database size.');
+              if (failingMessage) throw new Error(failingMessage);
             } else {
               sawFirstFtsDelete = false;
             }
@@ -561,6 +568,36 @@ describe('ProjectData grouped FTS wall recovery', () => {
       instance.searchMessages(token, null, null, 5)
     );
     expect(found.some((r: { sessionId: string }) => r.sessionId === sessionId)).toBe(true);
+  });
+
+  it('at the cap, stops with the error when the FTS step fails for another reason', async () => {
+    const projectId = `wall-recovery-fts-error-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const tokens = { first: uniqueToken('ftserrfirst'), second: uniqueToken('ftserrsecond') };
+    const [first, second] = await seedSessions(stub, [
+      { topic: 'first', token: tokens.first, turns: 3, end: 'stop', ageDays: 30 },
+      { topic: 'second', token: tokens.second, turns: 2, end: 'stop', ageDays: 30 },
+    ]);
+    const before = await snapshotSession(stub, first!, tokens.first);
+    const secondBefore = await snapshotSession(stub, second!, tokens.second);
+
+    // Storage-full on the atomic attempt, then an unrelated failure in the FTS step.
+    const result = await runWithStorageFullOnFts(stub, projectId, [
+      1,
+      { attempt: 2, message: 'SQLITE_CORRUPT: database disk image is malformed' },
+    ]);
+
+    expect(result.stopReason).toBe('transaction_failed');
+    expect(result.error).toContain('SQLITE_CORRUPT');
+    expect(result.failedSessionId).toBe(first);
+    // The rows were already deleted by the fallback's first step, so they are counted.
+    expect(result.groupedRowsDeleted).toBe(before.groupedRows);
+    expect(result.ftsStaleRows).toBe(before.groupedRows);
+    expect((await snapshotSession(stub, first!, tokens.first)).groupedRows).toBe(0);
+    // The call stopped: the next session was not touched.
+    expect(await snapshotSession(stub, second!, tokens.second)).toEqual(secondBefore);
   });
 
   it('pages grouped rows by index walk, without sorting the rest of the session', async () => {
