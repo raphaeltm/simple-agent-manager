@@ -20,9 +20,9 @@ ACP permissions and conversation forms are merged but dormant. The prior activat
 - [x] Apply the shared strict artifact gate to Instant sleep and stale sleep repair.
 - [x] Refuse direct new agent sessions on incompatible old VM nodes before credential minting.
 - [x] Fence absolute-lifetime node cleanup against active workspaces; bound retry/escalation and test the old-node shape.
-- [ ] Complete focused and full repository validation; review with relevant specialists.
-- [ ] Coordinate staging slot with parent, then verify real VM heartbeat and applicable VM/Instant paths.
-- [ ] Create reviewed draft prerequisite PR and reconcile activation PR #2204 with merged forms and CodeRabbit finding.
+- [x] Complete focused and full repository validation; review with relevant specialists.
+- [x] Coordinate staging slot, then verify real VM heartbeat and VM/Instant paths.
+- [x] Create reviewed prerequisite PR #2208; original activation reconciliation completed by its parent. This shipping continuation does not enable ACP feature flags.
 
 ## Acceptance
 
@@ -32,4 +32,12 @@ An unsafe final capture cannot stop VM or Instant compute or be repaired into sl
 
 Raphaël explicitly authorized readiness, staging, merge, and production delivery in task `01M3XX0EQD8NF9MDS5PDMSKH2T`. This supersedes the earlier draft-only handoff for #2208. Current main was merged to retain the GitHub sign-in fix.
 
-Fresh local Cloudflare/task-completion review found that the stricter sleep gate would hold ordinary Claude sessions awake because native executables under `.local/share/claude/versions` exhausted snapshot limits. The shared capture exclusion now omits only that reinstallable directory. A behavioral regression exercises both standalone tar capture and the actual container inventory command: transcripts, user files, and neighboring paths survive, while omitted oversized user files still mark capture degraded. Both runtime cases fail before the fix and pass after it. Fresh Go and completion re-review passed; live staging and final CI remain required.
+Fresh local Cloudflare/task-completion review found that the stricter sleep gate would hold ordinary Claude sessions awake because native executables under `.local/share/claude/versions` exhausted snapshot limits. The shared capture exclusion now omits only that reinstallable directory. A behavioral regression exercises both standalone tar capture and the actual container inventory command: transcripts, user files, and neighboring paths survive, while omitted oversized user files still mark capture degraded. Both runtime cases fail before the fix and pass after it. Fresh Go and completion re-review passed; live staging and final CI subsequently passed as recorded below.
+
+## Staging verification — 2026-10-02
+
+Run `36990491551` succeeded at code head `1f9b5bb1e`; all CI passed. One CX23 (2 vCPU/4 GB) VM reported the exact agent build. Initial submit before its first heartbeat was rejected as incompatible with no workspace created; retry after version confirmation succeeded. A 300 MiB sparse HOME fixture caused `entries-skipped`; explicit sleep refused teardown and retained the live workspace. Removing only that fixture yielded `available/none` and successful sleep. The queued follow-up waited for the normal five-minute predecessor-deletion grace, then automatically restored onto a replacement workspace on the same VM. The agent recalled its phrase without history tools and read unchanged HOME and untracked repository files.
+
+A brief Instant fixture also slept and restored with `restore_status=restored`, retained HOME/untracked files, and recalled its phrase without transcript replay. Its initial background capture transiently failed Git bundle creation; the bounded diagnostic and next capture succeeded without a repository repair. Follow-up idea `01M3Y155DFBR93NVRZ10A93BFZ` tracks the unknown transient cause; the final sleep/wake verification passed. Staging browser authentication and real chat rendering were checked with Playwright. No UI changes. Cleanup is tracked in the PR evidence.
+
+Both disposable staging nodes and all created workspaces were deleted through the API. Read-only D1 verification confirmed zero active nodes after cleanup; preexisting sleeping/stopping workspaces were left untouched. Final task-completion review approved archive.
