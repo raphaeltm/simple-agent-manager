@@ -224,8 +224,9 @@ coordination channel to descendants.
 - [x] Bounded: message bytes, DM channel cardinality, subscriptions per pair, retention. (payload-cap, G10, rotation tests; retention reuses canonical event retention)
 - [x] Coordination channel reaches children and grandchildren and survives retry/recovery. (C1, C4, C5)
 - [x] Guidance is concise, at entry points, and does not claim unverified families/modes work. (instruction tests pin "not verified yet" wording)
-- [ ] Draft PR documents scope, architecture, before/after, implemented vs remaining,
+- [x] Draft PR documents scope, architecture, before/after, implemented vs remaining,
       compatibility questions, checks, risks, and deferred staging validation.
+      (PR #2213, draft, `needs-human-review` for the open privacy decision)
 
 ## Notes
 
