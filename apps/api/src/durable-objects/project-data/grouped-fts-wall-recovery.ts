@@ -23,13 +23,18 @@
  * 3. Each transaction runs in `transactionSync`, so a failure rolls the whole page
  *    back: the FTS index is never left out of step with its content table.
  *
- * Message text (`chat_messages`) is never read or written. Pruned sessions keep
- * working search through the raw-message LIKE fallback, and materialization
- * refuses to re-index them (`SEARCH_INDEX_STATE_PRUNED`).
+ * Message text (`chat_messages`) is never read or written. Pruned sessions fall
+ * back to raw-message LIKE search, which covers less than FTS: project-wide LIKE
+ * scans only the newest raw rows, and streamed assistant text split across token
+ * rows may not match. Materialization refuses to re-index a pruned session
+ * (`SEARCH_INDEX_STATE_PRUNED`).
  *
  * The whole call is synchronous (no `await`), so no other request interleaves
- * with a page between its read and its transaction. It blocks the object for up
- * to `wallTimeMs`; operators choose that budget per call.
+ * with a page between its read and its transaction. That also means there is no
+ * wall-clock budget: `Date.now()` does not advance during synchronous execution in
+ * Workers (see `alarm-sections.ts`), so a deadline check could never fire. Each
+ * call is bounded by rows and bytes instead, with ceilings sized well under the
+ * object's CPU limit (2026-10-02 workerd measurement: 32 MiB pruned in ~215 ms).
  */
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { SEARCH_INDEX_STATE_PRUNED } from './materialization';
@@ -38,10 +43,11 @@ import type { Env } from './types';
 
 const log = createModuleLogger('project_data.grouped_fts_wall_recovery');
 
-export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS = 100_000;
-export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES = 512 * 1024 * 1024;
+/** Per-call ceilings. Production storage is slower than local workerd; keep margin. */
+export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS = 20_000;
+export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES = 128 * 1024 * 1024;
+/** Also bounds the length of `skipSessionIds`. */
 export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS = 500;
-export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_MAX_WALL_TIME_MS = 25_000;
 /** Rows per transaction. Bounds the work one rollback can discard. */
 export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_ROWS = 500;
 /**
@@ -58,7 +64,6 @@ export interface GroupedFtsWallRecoveryConfig {
   maxRows: number;
   maxBytes: number;
   maxSessions: number;
-  maxWallTimeMs: number;
   transactionRows: number;
   transactionBytes: number;
 }
@@ -71,7 +76,12 @@ export interface GroupedFtsWallRecoveryRequest {
   maxRows: number;
   maxBytes: number;
   maxSessions: number;
-  wallTimeMs: number;
+  /**
+   * Sessions to leave alone this call. The operator's escape hatch when one
+   * session's page fails the same way every time, which would otherwise stop
+   * every call at the same place.
+   */
+  skipSessionIds: string[];
 }
 
 export interface GroupedFtsWallRecoveryInput extends GroupedFtsWallRecoveryRequest {
@@ -80,12 +90,7 @@ export interface GroupedFtsWallRecoveryInput extends GroupedFtsWallRecoveryReque
 }
 
 export type GroupedFtsWallRecoveryStopReason =
-  | 'candidates_exhausted'
-  | 'row_budget'
-  | 'byte_budget'
-  | 'session_budget'
-  | 'wall_time'
-  | 'transaction_failed';
+  'candidates_exhausted' | 'row_budget' | 'byte_budget' | 'session_budget' | 'transaction_failed';
 
 export interface GroupedFtsWallRecoverySessionResult {
   sessionId: string;
@@ -113,8 +118,9 @@ export interface GroupedFtsWallRecoveryResult {
   transactions: number;
   stopReason: GroupedFtsWallRecoveryStopReason;
   error: string | null;
+  /** The session whose page failed, to pass back in `skipSessionIds` if it keeps failing. */
+  failedSessionId: string | null;
   sessions: GroupedFtsWallRecoverySessionResult[];
-  durationMs: number;
 }
 
 function parsePositiveInteger(raw: string | undefined, fallback: number): number {
@@ -136,10 +142,6 @@ export function resolveGroupedFtsWallRecoveryConfig(env: Env): GroupedFtsWallRec
     maxSessions: parsePositiveInteger(
       env.PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS,
       DEFAULT_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS
-    ),
-    maxWallTimeMs: parsePositiveInteger(
-      env.PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_WALL_TIME_MS,
-      DEFAULT_GROUPED_FTS_WALL_RECOVERY_MAX_WALL_TIME_MS
     ),
     transactionRows: parsePositiveInteger(
       env.PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_ROWS,
@@ -318,6 +320,33 @@ function hasGroupedRowsAfter(sql: SqlStorage, sessionId: string, afterRowid: num
   );
 }
 
+function assertPositiveInteger(name: string, value: unknown): void {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`grouped FTS wall recovery: ${name} must be a positive integer`);
+  }
+}
+
+/** The route validates too; the RPC boundary does not trust its caller (rule 51). */
+function assertInput(input: GroupedFtsWallRecoveryInput): void {
+  if (typeof input.reason !== 'string' || input.reason.trim().length === 0) {
+    throw new Error('grouped FTS wall recovery: reason is required');
+  }
+  if (typeof input.dryRun !== 'boolean') {
+    throw new Error('grouped FTS wall recovery: dryRun must be a boolean');
+  }
+  assertPositiveInteger('maxRows', input.maxRows);
+  assertPositiveInteger('maxBytes', input.maxBytes);
+  assertPositiveInteger('maxSessions', input.maxSessions);
+  assertPositiveInteger('transactionRows', input.transactionRows);
+  assertPositiveInteger('transactionBytes', input.transactionBytes);
+  if (
+    !Array.isArray(input.skipSessionIds) ||
+    input.skipSessionIds.some((id) => typeof id !== 'string')
+  ) {
+    throw new Error('grouped FTS wall recovery: skipSessionIds must be an array of strings');
+  }
+}
+
 export function runGroupedFtsWallRecovery(
   sql: SqlStorage,
   projectId: string | null,
@@ -331,13 +360,17 @@ export function runGroupedFtsWallRecovery(
   if (!projectId) {
     throw new Error('ProjectData grouped FTS wall recovery requires a persisted projectId');
   }
-  const nowMs = deps.nowMs ?? Date.now;
-  const startedAt = nowMs();
-  const deadline = startedAt + input.wallTimeMs;
+  assertInput(input);
+  const now = (deps.nowMs ?? Date.now)();
   const beforeBytes = sql.databaseSize;
-  const cutoff = startedAt - storageConfig.groupedFtsCleanupMinSessionAgeMs;
-  // One extra row tells a budget stop apart from running out of candidates.
-  const candidates = readCandidates(sql, cutoff, input.maxSessions + 1);
+  const cutoff = now - storageConfig.groupedFtsCleanupMinSessionAgeMs;
+  // Skipped ids are filtered here rather than bound into SQL: Cloudflare caps a
+  // statement at 100 bound parameters (rule 69). One extra row tells a session
+  // budget stop apart from running out of candidates.
+  const skip = new Set(input.skipSessionIds);
+  const candidates = readCandidates(sql, cutoff, input.maxSessions + skip.size + 1).filter(
+    (candidate) => !skip.has(candidate.sessionId)
+  );
 
   const sessions: GroupedFtsWallRecoverySessionResult[] = [];
   let groupedRowsDeleted = 0;
@@ -346,6 +379,7 @@ export function runGroupedFtsWallRecovery(
   let stopReason: GroupedFtsWallRecoveryStopReason =
     candidates.length > input.maxSessions ? 'session_budget' : 'candidates_exhausted';
   let error: string | null = null;
+  let failedSessionId: string | null = null;
 
   candidateLoop: for (const candidate of candidates.slice(0, input.maxSessions)) {
     const session: GroupedFtsWallRecoverySessionResult = {
@@ -359,22 +393,20 @@ export function runGroupedFtsWallRecovery(
     let cursor = 0;
 
     for (;;) {
-      if (nowMs() >= deadline) {
-        stopReason = 'wall_time';
-        break candidateLoop;
-      }
       const rowsLeft = input.maxRows - groupedRowsDeleted;
       if (rowsLeft <= 0) {
+        session.drained = !hasGroupedRowsAfter(sql, candidate.sessionId, cursor);
         stopReason = 'row_budget';
         break candidateLoop;
       }
+      const bytesLeft = input.maxBytes - contentBytes;
       const page = readPage(
         sql,
         candidate.sessionId,
         cursor,
         Math.min(input.transactionRows, rowsLeft),
-        Math.min(input.transactionBytes, input.maxBytes - contentBytes),
-        input.maxBytes - contentBytes
+        Math.min(input.transactionBytes, bytesLeft),
+        bytesLeft
       );
       if (page.length === 0) {
         if (hasGroupedRowsAfter(sql, candidate.sessionId, cursor)) {
@@ -398,10 +430,11 @@ export function runGroupedFtsWallRecovery(
                 `grouped page changed between size read and prune: expected ${page.length} rows, read ${rows.length}`
               );
             }
-            pruneGroupedPage(sql, candidate.sessionId, { firstRowid, lastRowid }, rows, nowMs());
+            pruneGroupedPage(sql, candidate.sessionId, { firstRowid, lastRowid }, rows, now);
           });
         } catch (err) {
           error = err instanceof Error ? err.message : String(err);
+          failedSessionId = candidate.sessionId;
           stopReason = 'transaction_failed';
           log.error('transaction_failed', {
             projectId,
@@ -441,8 +474,8 @@ export function runGroupedFtsWallRecovery(
     transactions,
     stopReason,
     error,
+    failedSessionId,
     sessions: reported,
-    durationMs: nowMs() - startedAt,
   };
   log.warn('completed', {
     projectId,
@@ -451,6 +484,7 @@ export function runGroupedFtsWallRecovery(
     beforeBytes,
     afterBytes,
     candidateSessions: result.candidateSessions,
+    skippedSessions: skip.size,
     sessionsTouched: result.sessionsTouched,
     sessionsDrained: result.sessionsDrained,
     groupedRowsDeleted,
@@ -458,7 +492,7 @@ export function runGroupedFtsWallRecovery(
     transactions,
     stopReason,
     error,
-    durationMs: result.durationMs,
+    failedSessionId,
   });
   return result;
 }

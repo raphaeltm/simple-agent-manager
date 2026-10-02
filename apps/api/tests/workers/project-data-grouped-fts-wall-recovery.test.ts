@@ -15,6 +15,7 @@ import {
   type GroupedFtsWallRecoveryInput,
   runGroupedFtsWallRecovery,
 } from '../../src/durable-objects/project-data/grouped-fts-wall-recovery';
+import { materializeSession } from '../../src/durable-objects/project-data/materialization';
 import { resolveStorageSafetyConfig } from '../../src/durable-objects/project-data/storage-safety';
 import type { Env as WorkerEnv } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
@@ -132,11 +133,15 @@ async function snapshotSession(
   });
 }
 
-/** FTS5's own consistency check between the external-content table and the index. */
+/**
+ * FTS5's consistency check. For an external-content table only the `rank = 1` form
+ * compares the index against the content table; without it, a stale entry for a
+ * deleted row or a 'delete' issued with the wrong content both pass.
+ */
 async function assertFtsIntegrity(stub: DurableObjectStub<ProjectDataTestDouble>): Promise<void> {
   await runInDurableObject(stub, async (_instance, state) => {
     state.storage.sql.exec(
-      `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts) VALUES('integrity-check')`
+      `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rank) VALUES('integrity-check', 1)`
     );
   });
 }
@@ -145,8 +150,8 @@ const GENEROUS = {
   maxRows: 10_000,
   maxBytes: 64 * 1024 * 1024,
   maxSessions: 50,
-  wallTimeMs: 20_000,
-} as const;
+  skipSessionIds: [] as string[],
+};
 
 describe('ProjectData grouped FTS wall recovery', () => {
   it('prunes old terminal sessions largest-first, leaves message text and other sessions intact', async () => {
@@ -227,11 +232,20 @@ describe('ProjectData grouped FTS wall recovery', () => {
     );
     expect(found.some((r: { sessionId: string }) => r.sessionId === large)).toBe(true);
 
-    // Materialization must not re-index a pruned session.
-    await runInDurableObject(stub, async (instance) => {
-      await instance.stopSession(large!);
+    // Materialization must not re-index a pruned session...
+    await runInDurableObject(stub, async (_instance, state) => {
+      materializeSession(state.storage.sql, large!);
     });
     expect((await snapshotSession(stub, large!, tokens.large)).groupedRows).toBe(0);
+    // ...and the pruned state is what stops it: the same session without it re-indexes.
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        'UPDATE chat_sessions SET search_index_state = NULL WHERE id = ?',
+        large!
+      );
+      materializeSession(state.storage.sql, large!);
+    });
+    expect((await snapshotSession(stub, large!, tokens.large)).groupedRows).toBeGreaterThan(0);
   });
 
   it('dry run reports the prunable stock and writes nothing', async () => {
@@ -433,48 +447,55 @@ describe('ProjectData grouped FTS wall recovery', () => {
 
     expect(result.stopReason).toBe('transaction_failed');
     expect(result.error).toContain('injected FTS failure');
+    expect(result.failedSessionId).toBe(sessionId);
     expect(result.transactions).toBe(0);
     expect(result.groupedRowsDeleted).toBe(0);
     expect(await snapshotSession(stub, sessionId!, token)).toEqual(before);
     await assertFtsIntegrity(stub);
   });
 
-  it('stops at the wall-time budget before starting another page', async () => {
-    const projectId = `wall-recovery-deadline-${crypto.randomUUID()}`;
+  it('leaves sessions in skipSessionIds untouched and prunes the rest', async () => {
+    const projectId = `wall-recovery-skip-${crypto.randomUUID()}`;
     await seedProjectGraph(projectId);
     const stub = getStub(projectId);
     await stub.ensureProjectId(projectId);
-    const token = uniqueToken('deadline');
+    const tokens = { skipped: uniqueToken('skipped'), pruned: uniqueToken('pruned') };
+    const [skipped, pruned] = await seedSessions(stub, [
+      { topic: 'skipped', token: tokens.skipped, turns: 3, end: 'stop', ageDays: 30 },
+      { topic: 'pruned', token: tokens.pruned, turns: 2, end: 'stop', ageDays: 30 },
+    ]);
+    const skippedBefore = await snapshotSession(stub, skipped!, tokens.skipped);
+
+    const result = await projectDataService.runProjectDataGroupedFtsWallRecovery(
+      testEnv,
+      projectId,
+      { reason: 'test: skip', dryRun: false, ...GENEROUS, skipSessionIds: [skipped!] }
+    );
+
+    expect(result.sessions.map((s) => s.sessionId)).toEqual([pruned]);
+    expect(await snapshotSession(stub, skipped!, tokens.skipped)).toEqual(skippedBefore);
+    expect((await snapshotSession(stub, pruned!, tokens.pruned)).groupedRows).toBe(0);
+  });
+
+  it('rejects malformed budgets at the RPC boundary before touching data', async () => {
+    const projectId = `wall-recovery-invalid-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const token = uniqueToken('invalid');
     const [sessionId] = await seedSessions(stub, [
-      { topic: 'deadline', token, turns: 3, end: 'stop', ageDays: 30 },
+      { topic: 'invalid', token, turns: 2, end: 'stop', ageDays: 30 },
     ]);
     const before = await snapshotSession(stub, sessionId!, token);
 
-    const result = await runInDurableObject(stub, async (_instance, state) => {
-      let clock = Date.now();
-      return runGroupedFtsWallRecovery(
-        state.storage.sql,
-        projectId,
-        {
-          reason: 'test: deadline',
-          dryRun: false,
-          ...GENEROUS,
-          wallTimeMs: 10,
-          transactionRows: 1,
-          transactionBytes: 8 * 1024 * 1024,
-        },
-        resolveStorageSafetyConfig(testEnv),
-        {
-          transactionSync: (callback) => state.storage.transactionSync(callback),
-          // Each clock read advances 6 ms: the first page fits, the second does not.
-          nowMs: () => (clock += 6),
-        }
-      );
-    });
-
-    expect(result.stopReason).toBe('wall_time');
-    expect(result.groupedRowsDeleted).toBeGreaterThan(0);
-    expect(result.groupedRowsDeleted).toBeLessThan(before.groupedRows);
-    await assertFtsIntegrity(stub);
+    await expect(
+      projectDataService.runProjectDataGroupedFtsWallRecovery(testEnv, projectId, {
+        reason: 'test: invalid',
+        dryRun: false,
+        ...GENEROUS,
+        maxRows: Number.NaN,
+      })
+    ).rejects.toThrow(/maxRows must be a positive integer/);
+    expect(await snapshotSession(stub, sessionId!, token)).toEqual(before);
   });
 });
