@@ -70,9 +70,30 @@ type agentStartup struct {
 	settings     *agentSettingsPayload
 }
 
-const codexACPManagedConfigEnv = `CODEX_CONFIG={"sandbox_mode":"danger-full-access","approval_policy":"never"}`
 const codexACPManagedAgentModeEnv = "INITIAL_AGENT_MODE=agent-full-access"
 const codexACPManagedCodexPathEnv = "CODEX_PATH=codex"
+
+type codexACPManagedConfig struct {
+	SandboxMode    string `json:"sandbox_mode"`
+	ApprovalPolicy string `json:"approval_policy"`
+	Model          string `json:"model,omitempty"`
+}
+
+func buildCodexACPManagedConfigEnv(settings *agentSettingsPayload) (string, error) {
+	config := codexACPManagedConfig{
+		SandboxMode:    "danger-full-access",
+		ApprovalPolicy: "never",
+	}
+	if settings != nil {
+		config.Model = settings.Model
+	}
+
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("encode managed Codex config: %w", err)
+	}
+	return "CODEX_CONFIG=" + string(encoded), nil
+}
 
 func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload) (*agentStartup, error) {
 	var containerID string
@@ -456,6 +477,10 @@ func (h *SessionHost) writeAgentStartupConfig(ctx context.Context, agentType str
 }
 
 func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCredential, startup *agentStartup) error {
+	managedConfigEnv, err := buildCodexACPManagedConfigEnv(startup.settings)
+	if err != nil {
+		return fmt.Errorf("cannot start Codex: %w", err)
+	}
 	proxyConfig := codexProxyProviderConfigFromCredential(cred, h.config.CallbackToken)
 	effort := ""
 	if startup.settings != nil {
@@ -483,7 +508,6 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	}
 
 	var codexMcpEnvVars []string
-	var err error
 	if startup.containerID != "" {
 		codexMcpEnvVars, err = writeCodexConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, h.config.McpServers, proxyConfig, effort)
 	} else {
@@ -493,7 +517,11 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 		return fmt.Errorf("cannot start Codex: write SAM MCP config.toml: %w", err)
 	}
 	// codex-acp (verified through 1.13.1) ignores Codex CLI -c arguments. CODEX_CONFIG is merged into
-	// each app-server thread, but every turn then applies the ACP agent mode's
+	// each app-server thread. Seed the requested model before session/new: newly
+	// released Codex models may be valid provider models before they appear in the
+	// adapter's default configOptions, while a configured current model is advertised
+	// and can be verified by the exact post-handshake selection RPC. Every turn then
+	// applies the ACP agent mode's
 	// approval and sandbox policy on top. Select the wrapper's supported full-access
 	// mode as well so main turns and spawned subagents cannot fall back to bwrap
 	// inside SAM-managed containers. CODEX_PATH makes the adapter execute the
@@ -502,7 +530,7 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	startup.envVars = removeEnvVar(startup.envVars, "CODEX_CONFIG")
 	startup.envVars = removeEnvVar(startup.envVars, "INITIAL_AGENT_MODE")
 	startup.envVars = removeEnvVar(startup.envVars, "CODEX_PATH")
-	startup.envVars = append(startup.envVars, codexACPManagedConfigEnv)
+	startup.envVars = append(startup.envVars, managedConfigEnv)
 	startup.envVars = append(startup.envVars, codexACPManagedAgentModeEnv)
 	startup.envVars = append(startup.envVars, codexACPManagedCodexPathEnv)
 	for _, envVar := range codexMcpEnvVars {
