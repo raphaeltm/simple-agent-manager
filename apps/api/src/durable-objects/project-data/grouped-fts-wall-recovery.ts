@@ -46,8 +46,7 @@
  * storage is slower still, so the 32 MiB ceiling keeps a call to a few seconds.
  */
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import { isDurableObjectStorageFullError } from '../../services/durable-object-retry';
-import { SEARCH_INDEX_STATE_PRUNED } from './materialization';
+import { type PageRow, prunePage } from './grouped-fts-wall-recovery-prune';
 import type { StorageSafetyConfig } from './storage-safety';
 import type { Env } from './types';
 
@@ -66,9 +65,6 @@ export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_ROWS = 500;
  * the isolate memory limit that has already reset this object (rule 69).
  */
 export const DEFAULT_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_BYTES = 8 * 1024 * 1024;
-
-const PRUNED_REASON =
-  'Grouped/FTS derived rows were pruned by operator wall recovery; search uses raw-message LIKE fallback for this terminal session.';
 
 export interface GroupedFtsWallRecoveryConfig {
   maxRows: number;
@@ -167,8 +163,6 @@ export function resolveGroupedFtsWallRecoveryConfig(env: Env): GroupedFtsWallRec
 }
 
 type Candidate = { sessionId: string; messageCount: number };
-type PageRow = { rowid: number; createdAt: number; bytes: number };
-type ContentRow = { rowid: number; content: string };
 /** Position after the last row read: `(created_at, rowid)`, the index's own order. */
 type PageCursor = { createdAt: number; rowid: number };
 
@@ -249,7 +243,9 @@ function readPage(
       !Number.isSafeInteger(createdAt) ||
       !Number.isFinite(rowBytes)
     ) {
-      throw new Error(`grouped row ${String(row[0])} has an unreadable rowid, created_at or size`);
+      throw new TypeError(
+        `grouped row ${String(row[0])} has an unreadable rowid, created_at or size`
+      );
     }
     if (bytes + rowBytes > byteLimit) {
       // A legacy row larger than one transaction's byte bound would otherwise
@@ -264,69 +260,6 @@ function readPage(
     bytes += rowBytes;
   }
   return page;
-}
-
-/** Point lookups by rowid; each row must still belong to the session. */
-function readPageContent(sql: SqlStorage, sessionId: string, page: PageRow[]): ContentRow[] {
-  return page.map(({ rowid }) => {
-    const row = sql
-      .exec(
-        `SELECT content FROM chat_messages_grouped WHERE rowid = ? AND session_id = ?`,
-        rowid,
-        sessionId
-      )
-      .raw()
-      .next();
-    const content = row.done ? undefined : row.value[0];
-    if (typeof content !== 'string') {
-      throw new Error(`grouped row ${rowid} is missing or has unreadable content`);
-    }
-    return { rowid, content };
-  });
-}
-
-/** Free the grouped rows' pages, then mark the session. Never grows the database net. */
-function deleteGroupedRowsAndMarkSession(
-  sql: SqlStorage,
-  sessionId: string,
-  page: PageRow[],
-  now: number
-): void {
-  for (const { rowid } of page) {
-    sql.exec(
-      `DELETE FROM chat_messages_grouped WHERE rowid = ? AND session_id = ?`,
-      rowid,
-      sessionId
-    );
-  }
-  // Same state change as `grouped-fts-cleanup.ts`: the watermark dies with the rows
-  // it described, and the pruned state makes materialization refuse to re-index.
-  sql.exec(
-    `UPDATE chat_sessions
-     SET materialized_at = NULL,
-         materialized_through_created_at = NULL,
-         materialized_through_sequence = NULL,
-         search_index_state = ?,
-         search_index_updated_at = ?,
-         search_index_degradation_reason = ?
-     WHERE id = ?`,
-    SEARCH_INDEX_STATE_PRUNED,
-    now,
-    PRUNED_REASON,
-    sessionId
-  );
-}
-
-/** External-content FTS5 delete: the indexed values must be supplied verbatim. */
-function deleteFtsEntries(sql: SqlStorage, rows: ContentRow[]): void {
-  for (const row of rows) {
-    sql.exec(
-      `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
-       VALUES('delete', ?, ?)`,
-      row.rowid,
-      row.content
-    );
-  }
 }
 
 function hasGroupedRowsAfter(sql: SqlStorage, sessionId: string, cursor: PageCursor): boolean {
@@ -344,81 +277,19 @@ function hasGroupedRowsAfter(sql: SqlStorage, sessionId: string, cursor: PageCur
   );
 }
 
-/**
- * - `pruned`: rows and FTS entries gone.
- * - `fts_stale`: rows gone; the FTS deletes did not fit at the cap (documented degradation).
- * - `fts_failed`: rows gone; the FTS deletes failed for another reason. The rows still
- *   count as deleted and stale, but the call stops and reports the error.
- * - `failed`: nothing changed.
- */
-type PagePruneOutcome =
-  | { kind: 'pruned' }
-  | { kind: 'fts_stale' }
-  | { kind: 'fts_failed'; error: unknown }
-  | { kind: 'failed'; error: unknown };
-
-/**
- * One atomic transaction when it fits; the two-step fallback only for a
- * storage-full failure (see the module comment). Any other failure of the atomic
- * attempt is returned untouched, with the page fully rolled back.
- */
-function prunePage(
-  sql: SqlStorage,
-  sessionId: string,
-  page: PageRow[],
-  now: number,
-  transactionSync: <T>(callback: () => T) => T
-): PagePruneOutcome {
-  // Read before the transaction; nothing can interleave because nothing awaits.
-  let rows: ContentRow[];
-  try {
-    rows = readPageContent(sql, sessionId, page);
-  } catch (error) {
-    return { kind: 'failed', error };
-  }
-  try {
-    transactionSync(() => {
-      deleteGroupedRowsAndMarkSession(sql, sessionId, page, now);
-      deleteFtsEntries(sql, rows);
-    });
-    return { kind: 'pruned' };
-  } catch (error) {
-    if (!isDurableObjectStorageFullError(error)) return { kind: 'failed', error };
-  }
-  try {
-    transactionSync(() => deleteGroupedRowsAndMarkSession(sql, sessionId, page, now));
-  } catch (error) {
-    return { kind: 'failed', error };
-  }
-  try {
-    transactionSync(() => deleteFtsEntries(sql, rows));
-    return { kind: 'pruned' };
-  } catch (error) {
-    if (!isDurableObjectStorageFullError(error)) return { kind: 'fts_failed', error };
-    log.warn('fts_entries_left_stale', {
-      sessionId,
-      rows: rows.length,
-      firstRowid: rows[0]?.rowid ?? null,
-      lastRowid: rows[rows.length - 1]?.rowid ?? null,
-      ...serializeError(error),
-    });
-    return { kind: 'fts_stale' };
-  }
-}
-
 function assertPositiveInteger(name: string, value: unknown): void {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
-    throw new Error(`grouped FTS wall recovery: ${name} must be a positive integer`);
+    throw new TypeError(`grouped FTS wall recovery: ${name} must be a positive integer`);
   }
 }
 
 /** The route validates too; the RPC boundary does not trust its caller (rule 51). */
 function assertInput(input: GroupedFtsWallRecoveryInput): void {
   if (typeof input.reason !== 'string' || input.reason.trim().length === 0) {
-    throw new Error('grouped FTS wall recovery: reason is required');
+    throw new TypeError('grouped FTS wall recovery: reason is required');
   }
   if (typeof input.dryRun !== 'boolean') {
-    throw new Error('grouped FTS wall recovery: dryRun must be a boolean');
+    throw new TypeError('grouped FTS wall recovery: dryRun must be a boolean');
   }
   assertPositiveInteger('maxRows', input.maxRows);
   assertPositiveInteger('maxBytes', input.maxBytes);
@@ -429,7 +300,118 @@ function assertInput(input: GroupedFtsWallRecoveryInput): void {
     !Array.isArray(input.skipSessionIds) ||
     input.skipSessionIds.some((id) => typeof id !== 'string')
   ) {
-    throw new Error('grouped FTS wall recovery: skipSessionIds must be an array of strings');
+    throw new TypeError('grouped FTS wall recovery: skipSessionIds must be an array of strings');
+  }
+}
+
+/** Fixed inputs for one call. */
+interface RunContext {
+  sql: SqlStorage;
+  projectId: string;
+  input: GroupedFtsWallRecoveryInput;
+  now: number;
+  transactionSync: <T>(callback: () => T) => T;
+}
+
+/** Running totals for one call. `error` is set once, by the page that stops the call. */
+interface RunTotals {
+  groupedRowsDeleted: number;
+  contentBytes: number;
+  transactions: number;
+  ftsStaleRows: number;
+  error: string | null;
+  failedSessionId: string | null;
+}
+
+function recordFailure(
+  run: RunContext,
+  totals: RunTotals,
+  sessionId: string,
+  page: PageRow[],
+  pageBytes: number,
+  error: unknown,
+  rowsDeleted: boolean
+): void {
+  totals.error = error instanceof Error ? error.message : String(error);
+  totals.failedSessionId = sessionId;
+  log.error('transaction_failed', {
+    projectId: run.projectId,
+    sessionId,
+    pageRows: page.length,
+    pageBytes,
+    rowsDeleted,
+    ...serializeError(error),
+  });
+}
+
+/**
+ * Prunes one page (unless this is a dry run) and adds it to the totals. Returns
+ * false when the call must stop. A page that failed outright changed nothing and is
+ * not counted; a page whose FTS step failed did delete its rows, so it is counted.
+ */
+function applyPage(
+  run: RunContext,
+  totals: RunTotals,
+  session: GroupedFtsWallRecoverySessionResult,
+  page: PageRow[]
+): boolean {
+  const pageBytes = page.reduce((sum, row) => sum + row.bytes, 0);
+  let keepGoing = true;
+  if (!run.input.dryRun) {
+    const outcome = prunePage(run.sql, session.sessionId, page, run.now, run.transactionSync);
+    if (outcome.kind === 'failed') {
+      recordFailure(run, totals, session.sessionId, page, pageBytes, outcome.error, false);
+      return false;
+    }
+    if (outcome.kind === 'fts_failed') {
+      recordFailure(run, totals, session.sessionId, page, pageBytes, outcome.error, true);
+      keepGoing = false;
+    }
+    totals.transactions++;
+    if (outcome.kind !== 'pruned') totals.ftsStaleRows += page.length;
+  }
+  session.groupedRowsDeleted += page.length;
+  session.contentBytes += pageBytes;
+  totals.groupedRowsDeleted += page.length;
+  totals.contentBytes += pageBytes;
+  return keepGoing;
+}
+
+/**
+ * Prunes one session page by page from its first grouped row. Returns why the whole
+ * call must stop, or null once the session is drained.
+ */
+function drainSession(
+  run: RunContext,
+  totals: RunTotals,
+  session: GroupedFtsWallRecoverySessionResult
+): GroupedFtsWallRecoveryStopReason | null {
+  const { sql, input } = run;
+  let cursor = PAGE_START;
+  for (;;) {
+    const rowsLeft = input.maxRows - totals.groupedRowsDeleted;
+    if (rowsLeft <= 0) {
+      session.drained = !hasGroupedRowsAfter(sql, session.sessionId, cursor);
+      return 'row_budget';
+    }
+    const bytesLeft = input.maxBytes - totals.contentBytes;
+    const page = readPage(
+      sql,
+      session.sessionId,
+      cursor,
+      Math.min(input.transactionRows, rowsLeft),
+      Math.min(input.transactionBytes, bytesLeft),
+      bytesLeft
+    );
+    const last = page.at(-1);
+    if (!last) {
+      // Rows remain but the next one does not fit what is left of the byte budget.
+      if (hasGroupedRowsAfter(sql, session.sessionId, cursor)) return 'byte_budget';
+      session.drained = true;
+      return null;
+    }
+    if (!applyPage(run, totals, session, page)) return 'transaction_failed';
+    cursor = { createdAt: last.createdAt, rowid: last.rowid };
   }
 }
 
@@ -458,17 +440,19 @@ export function runGroupedFtsWallRecovery(
     (candidate) => !skip.has(candidate.sessionId)
   );
 
+  const run: RunContext = { sql, projectId, input, now, transactionSync: deps.transactionSync };
+  const totals: RunTotals = {
+    groupedRowsDeleted: 0,
+    contentBytes: 0,
+    transactions: 0,
+    ftsStaleRows: 0,
+    error: null,
+    failedSessionId: null,
+  };
   const sessions: GroupedFtsWallRecoverySessionResult[] = [];
-  let groupedRowsDeleted = 0;
-  let contentBytes = 0;
-  let transactions = 0;
-  let ftsStaleRows = 0;
   let stopReason: GroupedFtsWallRecoveryStopReason =
     candidates.length > input.maxSessions ? 'session_budget' : 'candidates_exhausted';
-  let error: string | null = null;
-  let failedSessionId: string | null = null;
-
-  candidateLoop: for (const candidate of candidates.slice(0, input.maxSessions)) {
+  for (const candidate of candidates.slice(0, input.maxSessions)) {
     const session: GroupedFtsWallRecoverySessionResult = {
       sessionId: candidate.sessionId,
       messageCount: candidate.messageCount,
@@ -477,62 +461,10 @@ export function runGroupedFtsWallRecovery(
       drained: false,
     };
     sessions.push(session);
-    let cursor = PAGE_START;
-
-    for (;;) {
-      const rowsLeft = input.maxRows - groupedRowsDeleted;
-      if (rowsLeft <= 0) {
-        session.drained = !hasGroupedRowsAfter(sql, candidate.sessionId, cursor);
-        stopReason = 'row_budget';
-        break candidateLoop;
-      }
-      const bytesLeft = input.maxBytes - contentBytes;
-      const page = readPage(
-        sql,
-        candidate.sessionId,
-        cursor,
-        Math.min(input.transactionRows, rowsLeft),
-        Math.min(input.transactionBytes, bytesLeft),
-        bytesLeft
-      );
-      if (page.length === 0) {
-        if (hasGroupedRowsAfter(sql, candidate.sessionId, cursor)) {
-          // The next row does not fit what is left of the byte budget.
-          stopReason = 'byte_budget';
-          break candidateLoop;
-        }
-        session.drained = true;
-        break;
-      }
-      const pageBytes = page.reduce((sum, row) => sum + row.bytes, 0);
-
-      if (!input.dryRun) {
-        const outcome = prunePage(sql, candidate.sessionId, page, now, deps.transactionSync);
-        if (outcome.kind === 'failed' || outcome.kind === 'fts_failed') {
-          error = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-          failedSessionId = candidate.sessionId;
-          stopReason = 'transaction_failed';
-          log.error('transaction_failed', {
-            projectId,
-            sessionId: candidate.sessionId,
-            pageRows: page.length,
-            pageBytes,
-            rowsDeleted: outcome.kind === 'fts_failed',
-            ...serializeError(outcome.error),
-          });
-        }
-        if (outcome.kind === 'failed') break candidateLoop;
-        transactions++;
-        if (outcome.kind !== 'pruned') ftsStaleRows += page.length;
-      }
-
-      session.groupedRowsDeleted += page.length;
-      session.contentBytes += pageBytes;
-      groupedRowsDeleted += page.length;
-      contentBytes += pageBytes;
-      const last = page[page.length - 1];
-      if (last) cursor = { createdAt: last.createdAt, rowid: last.rowid };
-      if (stopReason === 'transaction_failed') break candidateLoop;
+    const stop = drainSession(run, totals, session);
+    if (stop) {
+      stopReason = stop;
+      break;
     }
   }
 
@@ -548,14 +480,14 @@ export function runGroupedFtsWallRecovery(
     candidateSessions: Math.min(candidates.length, input.maxSessions),
     sessionsTouched: reported.filter((s) => s.groupedRowsDeleted > 0).length,
     sessionsDrained: reported.filter((s) => s.drained).length,
-    groupedRowsDeleted,
-    ftsEntriesDeleted: input.dryRun ? 0 : groupedRowsDeleted - ftsStaleRows,
-    ftsStaleRows,
-    contentBytes,
-    transactions,
+    groupedRowsDeleted: totals.groupedRowsDeleted,
+    ftsEntriesDeleted: input.dryRun ? 0 : totals.groupedRowsDeleted - totals.ftsStaleRows,
+    ftsStaleRows: totals.ftsStaleRows,
+    contentBytes: totals.contentBytes,
+    transactions: totals.transactions,
     stopReason,
-    error,
-    failedSessionId,
+    error: totals.error,
+    failedSessionId: totals.failedSessionId,
     sessions: reported,
   };
   log.warn('completed', {
@@ -568,13 +500,13 @@ export function runGroupedFtsWallRecovery(
     skippedSessions: skip.size,
     sessionsTouched: result.sessionsTouched,
     sessionsDrained: result.sessionsDrained,
-    groupedRowsDeleted,
-    contentBytes,
-    transactions,
-    ftsStaleRows,
+    groupedRowsDeleted: totals.groupedRowsDeleted,
+    contentBytes: totals.contentBytes,
+    transactions: totals.transactions,
+    ftsStaleRows: totals.ftsStaleRows,
     stopReason,
-    error,
-    failedSessionId,
+    error: totals.error,
+    failedSessionId: totals.failedSessionId,
   });
   return result;
 }
