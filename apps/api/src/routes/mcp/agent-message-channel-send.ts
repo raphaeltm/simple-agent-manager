@@ -49,12 +49,14 @@ const RECEIPT_NOTE =
   "Recorded on the shared channel and matched to the recipient's notification subscription. " +
   'This is not proof that the recipient has read or acted on it.';
 
+type ParsedIdempotencyKey = { value: string | undefined } | JsonRpcResponse;
+
 /** Optional caller retry key; honored only by the agent message channel transport. */
 export function parseIdempotencyKeyParam(
   requestId: string | number | null,
   value: unknown,
   env: Env
-): { value: string | undefined } | JsonRpcResponse {
+): ParsedIdempotencyKey {
   if (value === undefined) return { value: undefined };
   const maxBytes = resolveProjectEventLimits(env).maxFilterStringBytes;
   if (

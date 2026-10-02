@@ -45,9 +45,9 @@ export function ensureManagedSubscription(
   participant: AgentChannelMessageParticipant,
   channel: string,
   peerTaskId: string,
-  now: number,
-  retired: string[]
-): string {
+  now: number
+): { id: string; retired: string[] } {
+  const retired: string[] = [];
   const limits = resolveProjectEventLimits(env);
   const graceMs = channelLimits(env).agentMessageRotationGraceMs;
   const ownerId = `${projectId}:${participant.chatSessionId}`;
@@ -90,9 +90,9 @@ export function ensureManagedSubscription(
     }
   }
   retireManagedSubscriptions(sql, projectId, stale, now, ROTATION_REASON, retired);
-  if (reusable) return reusable;
+  if (reusable) return { id: reusable, retired };
   makeRoomForManagedSubscription(sql, env, projectId, channel, now, retired);
-  return createProjectEventSubscription(
+  const created = createProjectEventSubscription(
     sql,
     env,
     projectId,
@@ -123,7 +123,8 @@ export function ensureManagedSubscription(
       expiresAt: now + limits.wakeSubscriptionLifetimeMs,
     },
     { managedAgentMessage: true }
-  ).subscription.id;
+  );
+  return { id: created.subscription.id, retired };
 }
 
 /**

@@ -29,9 +29,15 @@ export async function agentMessageChannelName(
   chatSessionA: string,
   chatSessionB: string
 ): Promise<string> {
-  const pair = [chatSessionA, chatSessionB].sort();
+  const pair = [chatSessionA, chatSessionB].sort(compareCodeUnits);
   const digest = await sha256Hex(stableStringify(['agent-message-channel', projectId, pair]));
   return `${AGENT_MESSAGE_CHANNEL_PREFIX}${digest.slice(0, PAIR_DIGEST_HEX_LENGTH)}`;
+}
+
+/** Code-unit order, not locale order: a pair name must be identical in every runtime. */
+function compareCodeUnits(x: string, y: string): number {
+  if (x === y) return 0;
+  return x < y ? -1 : 1;
 }
 
 export function isAgentMessageChannelName(name: string): boolean {

@@ -171,18 +171,16 @@ export function sendAgentChannelMessage(
     return replayResult(sql, prepared, existing.id);
   }
 
-  const retiredSubscriptionIds: string[] = [];
-  const recipientSubscriptionId = ensureManagedSubscription(
+  const recipientSubscription = ensureManagedSubscription(
     sql,
     env,
     prepared.projectId,
     prepared.recipient,
     prepared.channel,
     prepared.actor.taskId,
-    now,
-    retiredSubscriptionIds
+    now
   );
-  const senderSubscriptionId = ensureManagedSubscription(
+  const senderSubscription = ensureManagedSubscription(
     sql,
     env,
     prepared.projectId,
@@ -193,9 +191,9 @@ export function sendAgentChannelMessage(
     },
     prepared.channel,
     prepared.recipient.taskId,
-    now,
-    retiredSubscriptionIds
+    now
   );
+  const recipientSubscriptionId = recipientSubscription.id;
   const published = publishChannel(sql, env, storedProjectId, prepared);
   // Accepted must mean "the recipient will be notified": never commit a message
   // its recipient's subscription did not match.
@@ -210,8 +208,8 @@ export function sendAgentChannelMessage(
     eventId: published.event.id,
     sequence: published.sequence,
     recipientSubscriptionId,
-    senderSubscriptionId,
-    retiredSubscriptionIds,
+    senderSubscriptionId: senderSubscription.id,
+    retiredSubscriptionIds: [...recipientSubscription.retired, ...senderSubscription.retired],
   };
 }
 

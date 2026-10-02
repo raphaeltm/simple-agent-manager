@@ -33,18 +33,19 @@ export function buildWakePromptInput(
   // deliver this batch immediately (urgent delivery phase 1).
   const interruptWake = options.subscription.deliveryPreference.requested === 'runtime_interrupt';
   const agentMessageChannel = agentMessageChannelForSubscription(options.subscription);
+  const urgentPrefix = interruptWake
+    ? 'Urgent project event wake (runtime_interrupt) — this batch was important enough ' +
+      'to stop an in-flight turn for immediate delivery. If your previous turn was cut ' +
+      'short, review the transcript above to see where you left off, then process this ' +
+      'batch first. '
+    : '';
   const content = agentMessageChannel
     ? agentMessageWakeContent({
         batchId: options.batchId,
         channel: agentMessageChannel,
         eventIds: options.eventIds,
       })
-    : (interruptWake
-        ? 'Urgent project event wake (runtime_interrupt) — this batch was important enough ' +
-          'to stop an in-flight turn for immediate delivery. If your previous turn was cut ' +
-          'short, review the transcript above to see where you left off, then process this ' +
-          'batch first. '
-        : '') +
+    : urgentPrefix +
       `Project event wake batch ${options.batchId} is ready for this chat. ` +
       `Event IDs: ${eventIds}. ` +
       'Read the events through the ProjectData event MCP tools before acting on their contents. ' +
