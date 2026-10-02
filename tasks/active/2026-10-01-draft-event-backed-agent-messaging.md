@@ -121,6 +121,11 @@ coordination channel to descendants.
   last wake is still queued, which fails that wake (messages stay in channel history).
   Keeping it active would also match new messages and hit the pull bug in Idea
   01M3WTZATH40CGC2JZ16201E0G; a clean fix needs canonical "stop matching, keep delivering".
+- Open decision before enabling (security re-review, HIGH): pair history and catalog entries
+  are readable by every project agent (`get_channel_history`, `list_event_channels`). Not a
+  regression (legacy text is readable through `get_session_messages`, which checks project
+  scope only), and the design treats channels as routing, not privacy. Options: keep
+  project-visible, or restrict `agent-dm.*` reads to the two participants.
 - Activation prerequisite: the `AGENT_MESSAGE_*` vars are not yet in
   `getOptionalProcessEnvVars` (`scripts/deploy/sync-wrangler-config.ts`) or the
   `wrangler_sync_env` mapping (`.github/workflows/deploy-reusable.yml`), so a GitHub
@@ -176,6 +181,10 @@ coordination channel to descendants.
 - [x] Generated pair name re-validated against the configured name limit (constitution LOW)
 - [x] SAM-session `retry_subtask` copies `coordination_channel` (cloudflare MEDIUM)
 - [x] api-reference skill, API/config/env docs updated
+- [x] Focused re-reviews of the fixes: cloudflare-specialist PASS (2 LOW fixed in 523e82420:
+      release candidates not capped at the share; idea cited at the known limit); security-auditor
+      verified all fixes, LOW capacity churn accepted, HIGH project-visible history escalated
+      as an open human decision (see Remaining)
 
 ### Tests
 - [x] Worker test via real MCP route: A→B creates one channel + two subscriptions, recipient
@@ -241,7 +250,8 @@ coordination channel to descendants.
   G11a DO recipient-chat check → 1; G11b typed recipient category → 1; G12 envelope precheck →
   2; G13 participant-only matching → 1; G14 follow guard → 1; G15 reserved key prefix → 1;
   G16a share enforced → 2; G16b busy never released → 1; G16c LRU order → 1; G17 name
-  re-validation → 1; C8 SAM-session retry copy → 1. Results: `.tmp/discrimination-results-3.json`.
+  re-validation → 1; C8 SAM-session retry copy → 1; G16d candidates not capped at the share
+  → 1. Results: `.tmp/discrimination-results-3.json`.
 - Full worker suite before the review fixes: 1284/1284 passed (100 files, 30 min).
 - Formatting: only files already Prettier-clean were reformatted; `index.ts`,
   `configuration.md` and `agents.md` (pre-existing format debt) got minimal hand edits.
