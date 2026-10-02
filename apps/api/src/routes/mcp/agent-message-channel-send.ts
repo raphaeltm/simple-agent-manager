@@ -195,35 +195,17 @@ function channelSendError(
   error: unknown
 ): JsonRpcResponse {
   const message = error instanceof Error ? error.message : String(error);
-  if (error instanceof projectData.AgentMessageRecipientUnavailableError) {
-    return jsonRpcError(requestId, INVALID_PARAMS, message, {
+  const refusal = classifyRefusal(error);
+  if (refusal) {
+    // Expected refusals are logged so capacity and recipient failures can be counted.
+    log.warn('mcp.agent_message_channels.refused', {
       ...diagnostics,
-      outcome: 'recipient_unavailable',
-      retryable: false,
+      projectId: tokenData.projectId,
+      senderTaskId: tokenData.taskId,
+      outcome: refusal.outcome,
+      error: message,
     });
-  }
-  if (error instanceof projectData.ProjectEventIdempotencyConflictError) {
-    return jsonRpcError(requestId, INVALID_PARAMS, message, {
-      ...diagnostics,
-      outcome: 'conflict',
-      httpStatus: 409,
-      retryable: false,
-    });
-  }
-  if (error instanceof projectData.ProjectEventLimitExceededError) {
-    return jsonRpcError(requestId, INVALID_PARAMS, message, {
-      ...diagnostics,
-      outcome: 'capacity',
-      httpStatus: 429,
-      retryable: true,
-    });
-  }
-  if (error instanceof projectData.ProjectEventValidationError) {
-    return jsonRpcError(requestId, INVALID_PARAMS, message, {
-      ...diagnostics,
-      outcome: 'rejected',
-      retryable: false,
-    });
+    return jsonRpcError(requestId, INVALID_PARAMS, message, { ...diagnostics, ...refusal });
   }
   log.error('mcp.agent_message_channels.send_failed', {
     ...diagnostics,
@@ -236,4 +218,23 @@ function channelSendError(
     outcome: 'error',
     retryable: true,
   });
+}
+
+/** Each outcome names the caller's recovery action (rule 72). */
+function classifyRefusal(
+  error: unknown
+): { outcome: string; retryable: boolean; httpStatus?: number } | null {
+  if (error instanceof projectData.AgentMessageRecipientUnavailableError) {
+    return { outcome: 'recipient_unavailable', retryable: false };
+  }
+  if (error instanceof projectData.ProjectEventIdempotencyConflictError) {
+    return { outcome: 'conflict', httpStatus: 409, retryable: false };
+  }
+  if (error instanceof projectData.ProjectEventLimitExceededError) {
+    return { outcome: 'capacity', httpStatus: 429, retryable: true };
+  }
+  if (error instanceof projectData.ProjectEventValidationError) {
+    return { outcome: 'rejected', retryable: false };
+  }
+  return null;
 }

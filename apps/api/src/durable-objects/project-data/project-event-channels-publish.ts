@@ -123,16 +123,26 @@ function namespaceChannelCount(
   cap: number
 ): number {
   // Prefix range over the (project_id, name) unique index: '/' sorts right after '.'.
-  const range = `name >= ? AND name < ?`;
-  return sql
-    .exec(
-      `SELECT id FROM project_event_channels WHERE project_id = ? AND ${agentMessage ? '' : 'NOT '}(${range}) LIMIT ?`,
-      projectId,
-      AGENT_MESSAGE_CHANNEL_PREFIX,
-      `${AGENT_MESSAGE_CHANNEL_PREFIX.slice(0, -1)}/`,
-      cap
-    )
-    .toArray().length;
+  const start = AGENT_MESSAGE_CHANNEL_PREFIX;
+  const end = `${AGENT_MESSAGE_CHANNEL_PREFIX.slice(0, -1)}/`;
+  const rows = agentMessage
+    ? sql.exec(
+        `SELECT id FROM project_event_channels
+         WHERE project_id = ? AND name >= ? AND name < ? LIMIT ?`,
+        projectId,
+        start,
+        end,
+        cap
+      )
+    : sql.exec(
+        `SELECT id FROM project_event_channels
+         WHERE project_id = ? AND NOT (name >= ? AND name < ?) LIMIT ?`,
+        projectId,
+        start,
+        end,
+        cap
+      );
+  return rows.toArray().length;
 }
 
 /** Must execute in one storage transaction, including canonical strict fanout. */

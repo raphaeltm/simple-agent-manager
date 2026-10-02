@@ -4,7 +4,7 @@
  * (SELF.fetch); assertions read the real ProjectData SQLite and D1 state.
  */
 import { DEFAULT_PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION } from '@simple-agent-manager/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   type ChannelReceipt,
@@ -59,10 +59,23 @@ describe('agent message channels: recipient lifecycle', () => {
     expect(wakes[0]!.content).toContain(receipt.eventId);
   });
 
-  it('refuses a recipient whose chat is no longer active, and commits nothing', async () => {
+  it('refuses a recipient whose chat is no longer active, logs it, and commits nothing', async () => {
     const f = await twoAgentProject();
     await setChatStatus(f, f.b.sessionId, 'stopped');
+    const warn = vi.spyOn(console, 'warn');
     const reply = await withAgentMessageChannels(() => send(f.a, f.b, 'too late'));
+    const refusals = warn.mock.calls
+      .map(([line]) => (typeof line === 'string' && line.startsWith('{') ? JSON.parse(line) : null))
+      .filter((entry) => entry?.event === 'mcp.agent_message_channels.refused');
+    warn.mockRestore();
+    expect(refusals).toEqual([
+      expect.objectContaining({
+        outcome: 'recipient_unavailable',
+        projectId: f.projectId,
+        senderTaskId: f.a.taskId,
+        recipientTaskId: f.b.taskId,
+      }),
+    ]);
     expect(reply.error?.message).toBe(
       'Recipient cannot be notified: its chat is no longer active for its task'
     );
