@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   GROUPED_PAGE_SIZES_SQL,
-  type GroupedFtsWallRecoveryInput,
+  type GroupedFtsWallRecoveryRequest,
   runGroupedFtsWallRecovery,
 } from '../../src/durable-objects/project-data/grouped-fts-wall-recovery';
 import { materializeSession } from '../../src/durable-objects/project-data/materialization';
@@ -23,70 +23,82 @@ import * as projectDataService from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 
+type Stub = DurableObjectStub<ProjectDataTestDouble>;
+
 const testEnv = env as unknown as WorkerEnv;
 const OWNER = 'wall-recovery-owner';
 const INSTALLATION = 'wall-recovery-installation';
 const DAY_MS = 24 * 60 * 60 * 1000;
+const STORAGE_FULL = 'Exceeded the maximum database size.';
 
-function getStub(projectId: string): DurableObjectStub<ProjectDataTestDouble> {
-  return env.PROJECT_DATA.get(
-    env.PROJECT_DATA.idFromName(projectId)
-  ) as DurableObjectStub<ProjectDataTestDouble>;
-}
+const GENEROUS = {
+  maxRows: 10_000,
+  maxBytes: 64 * 1024 * 1024,
+  maxSessions: 50,
+  skipSessionIds: [] as string[],
+};
 
-async function seedProjectGraph(projectId: string): Promise<void> {
+/** A seeded project whose ProjectData object knows its projectId. */
+async function createProject(label: string): Promise<{ projectId: string; stub: Stub }> {
+  const projectId = `wall-recovery-${label}-${crypto.randomUUID()}`;
   await seedUser(OWNER);
   await seedInstallation(INSTALLATION, OWNER);
   await seedProject(projectId, OWNER, INSTALLATION, { name: `Wall recovery ${projectId}` });
-}
-
-function uniqueToken(label: string): string {
-  return `${label}${crypto.randomUUID().replace(/-/g, '')}`;
+  const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(projectId)) as Stub;
+  await stub.ensureProjectId(projectId);
+  return { projectId, stub };
 }
 
 type SeedSession = {
-  topic: string;
-  token: string;
+  label: string;
   /** Assistant/user turns; each assistant message becomes its own grouped row. */
   turns: number;
   /** 'stop' is terminal; 'sleep' materializes the index but stays non-terminal. */
-  end: 'stop' | 'sleep' | 'none';
-  ageDays: number;
+  end?: 'stop' | 'sleep';
+  ageDays?: number;
 };
+
+type SeededSession = { sessionId: string; token: string; before: SessionSnapshot };
 
 /**
  * Builds sessions through the real persistence + stop path so grouped rows and
  * FTS entries are produced by production materialization, not hand-inserted.
+ * Each session carries a unique search token and is snapshotted after seeding.
  */
-async function seedSessions(
-  stub: DurableObjectStub<ProjectDataTestDouble>,
-  sessions: SeedSession[]
-): Promise<string[]> {
-  return runInDurableObject(stub, async (instance, state) => {
-    const ids: string[] = [];
+async function seedSessions(stub: Stub, sessions: SeedSession[]): Promise<SeededSession[]> {
+  const seeded = await runInDurableObject(stub, async (instance, state) => {
+    const out: Array<{ sessionId: string; token: string }> = [];
     for (const spec of sessions) {
-      const sessionId = await instance.createSession(null, spec.topic);
+      const token = `${spec.label}${crypto.randomUUID().replace(/-/g, '')}`;
+      const sessionId = await instance.createSession(null, spec.label);
       for (let i = 0; i < spec.turns; i++) {
-        await instance.persistMessage(sessionId, 'user', `question ${i} ${spec.token}`, null, null);
+        await instance.persistMessage(sessionId, 'user', `question ${i} ${token}`, null, null);
         await instance.persistMessage(
           sessionId,
           'assistant',
-          `answer ${i} mentions ${spec.token} ${'x'.repeat(200)}`,
+          `answer ${i} mentions ${token} ${'x'.repeat(200)}`,
           null,
           null
         );
       }
-      if (spec.end === 'stop') await instance.stopSession(sessionId);
-      if (spec.end === 'sleep') await instance.sleepSession(sessionId);
+      if ((spec.end ?? 'stop') === 'stop') await instance.stopSession(sessionId);
+      else await instance.sleepSession(sessionId);
       state.storage.sql.exec(
         'UPDATE chat_sessions SET updated_at = ? WHERE id = ?',
-        Date.now() - spec.ageDays * DAY_MS,
+        Date.now() - (spec.ageDays ?? 30) * DAY_MS,
         sessionId
       );
-      ids.push(sessionId);
+      out.push({ sessionId, token });
     }
-    return ids;
+    return out;
   });
+  return Promise.all(seeded.map(async (s) => ({ ...s, before: await snapshotSession(stub, s) })));
+}
+
+/** One stopped, 30-day-old session. */
+async function seedOldSession(stub: Stub, label: string, turns = 3): Promise<SeededSession> {
+  const [session] = await seedSessions(stub, [{ label, turns }]);
+  return session!;
 }
 
 type SessionSnapshot = {
@@ -98,9 +110,8 @@ type SessionSnapshot = {
 };
 
 async function snapshotSession(
-  stub: DurableObjectStub<ProjectDataTestDouble>,
-  sessionId: string,
-  token: string
+  stub: Stub,
+  { sessionId, token }: { sessionId: string; token: string }
 ): Promise<SessionSnapshot> {
   return runInDurableObject(stub, async (_instance, state) => {
     const sql = state.storage.sql;
@@ -139,7 +150,7 @@ async function snapshotSession(
  * compares the index against the content table; without it, a stale entry for a
  * deleted row or a 'delete' issued with the wrong content both pass.
  */
-async function assertFtsIntegrity(stub: DurableObjectStub<ProjectDataTestDouble>): Promise<void> {
+async function assertFtsIntegrity(stub: Stub): Promise<void> {
   await runInDurableObject(stub, async (_instance, state) => {
     state.storage.sql.exec(
       `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rank) VALUES('integrity-check', 1)`
@@ -147,52 +158,52 @@ async function assertFtsIntegrity(stub: DurableObjectStub<ProjectDataTestDouble>
   });
 }
 
-const GENEROUS = {
-  maxRows: 10_000,
-  maxBytes: 64 * 1024 * 1024,
-  maxSessions: 50,
-  skipSessionIds: [] as string[],
-};
+async function searchFinds(stub: Stub, { sessionId, token }: SeededSession): Promise<boolean> {
+  const found = await runInDurableObject(stub, async (instance) =>
+    instance.searchMessages(token, null, null, 5)
+  );
+  return found.some((r: { sessionId: string }) => r.sessionId === sessionId);
+}
 
-const STORAGE_FULL = 'Exceeded the maximum database size.';
+/** The production path: service wrapper → DO RPC → module, with generous budgets. */
+function recover(projectId: string, overrides: Partial<GroupedFtsWallRecoveryRequest> = {}) {
+  return projectDataService.runProjectDataGroupedFtsWallRecovery(testEnv, projectId, {
+    reason: 'test',
+    dryRun: false,
+    ...GENEROUS,
+    ...overrides,
+  });
+}
 
 /**
- * Runs the module with `sql.exec` failing FTS `'delete'` commands per attempt
- * (1-based, counted per attempt to delete the page's first FTS entry). Each listed
- * attempt fails with the given message; Cloudflare's own storage-full text by default.
+ * Runs the module with `sql.exec` throwing on FTS `'delete'` commands chosen by
+ * `failure(attempt, deleteIndex)`: `attempt` counts attempts to delete a page's FTS
+ * entries (1-based), `deleteIndex` counts deletes within that attempt (1-based).
+ * Returning a message throws `new Error(message)`.
  */
-async function runWithStorageFullOnFts(
-  stub: DurableObjectStub<ProjectDataTestDouble>,
+async function recoverWithFtsFailures(
+  stub: Stub,
   projectId: string,
-  failOnFtsAttempts: Array<number | { attempt: number; message: string }>
+  failure: (attempt: number, deleteIndex: number) => string | undefined
 ) {
-  const failures = new Map(
-    failOnFtsAttempts.map((f) =>
-      typeof f === 'number' ? [f, STORAGE_FULL] : [f.attempt, f.message]
-    )
-  );
   return runInDurableObject(stub, async (_instance, state) => {
-    const real = state.storage.sql;
     let attempt = 0;
-    let failingMessage: string | undefined;
-    let sawFirstFtsDelete = false;
-    const failing = new Proxy(real, {
+    let deleteIndex = 0;
+    const failing = new Proxy(state.storage.sql, {
       get(target, prop) {
         if (prop === 'exec') {
           return (query: string, ...bindings: unknown[]) => {
             if (query.includes(`VALUES('delete'`)) {
-              if (!sawFirstFtsDelete) {
-                sawFirstFtsDelete = true;
-                attempt++;
-                failingMessage = failures.get(attempt);
-              }
-              if (failingMessage) throw new Error(failingMessage);
+              if (deleteIndex === 0) attempt++;
+              const message = failure(attempt, ++deleteIndex);
+              if (message) throw new Error(message);
             } else {
-              sawFirstFtsDelete = false;
+              deleteIndex = 0;
             }
             return target.exec(query, ...bindings);
           };
         }
+        // Native getters (`databaseSize`) need the real object as `this`.
         const value = Reflect.get(target, prop, target);
         return typeof value === 'function' ? value.bind(target) : value;
       },
@@ -201,7 +212,7 @@ async function runWithStorageFullOnFts(
       failing,
       projectId,
       {
-        reason: 'test: at-cap fallback',
+        reason: 'test: injected FTS failure',
         dryRun: false,
         ...GENEROUS,
         transactionRows: 500,
@@ -213,136 +224,94 @@ async function runWithStorageFullOnFts(
   });
 }
 
+/** Storage-full on each FTS attempt listed, as Cloudflare reports it at the cap. */
+function storageFullOn(...attempts: number[]) {
+  return (attempt: number) => (attempts.includes(attempt) ? STORAGE_FULL : undefined);
+}
+
 describe('ProjectData grouped FTS wall recovery', () => {
   it('prunes old terminal sessions largest-first, leaves message text and other sessions intact', async () => {
-    const projectId = `wall-recovery-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectId);
-    const stub = getStub(projectId);
-    await stub.ensureProjectId(projectId);
-
-    const tokens = {
-      large: uniqueToken('largeold'),
-      small: uniqueToken('smallold'),
-      active: uniqueToken('sleepingold'),
-      recent: uniqueToken('recentstop'),
-    };
-    const [large, small, active, recent] = await seedSessions(stub, [
-      { topic: 'large old', token: tokens.large, turns: 6, end: 'stop', ageDays: 30 },
-      { topic: 'small old', token: tokens.small, turns: 2, end: 'stop', ageDays: 30 },
-      { topic: 'sleeping old', token: tokens.active, turns: 2, end: 'sleep', ageDays: 30 },
-      { topic: 'recent stop', token: tokens.recent, turns: 2, end: 'stop', ageDays: 1 },
+    const { projectId, stub } = await createProject('order');
+    const [large, small, sleeping, recent] = await seedSessions(stub, [
+      { label: 'largeold', turns: 6 },
+      { label: 'smallold', turns: 2 },
+      { label: 'sleepingold', turns: 2, end: 'sleep' },
+      { label: 'recentstop', turns: 2, ageDays: 1 },
     ]);
-    const before = {
-      large: await snapshotSession(stub, large!, tokens.large),
-      small: await snapshotSession(stub, small!, tokens.small),
-      active: await snapshotSession(stub, active!, tokens.active),
-      recent: await snapshotSession(stub, recent!, tokens.recent),
-    };
-    expect(before.large.groupedRows).toBeGreaterThan(0);
-    expect(before.large.ftsMatches).toBeGreaterThan(0);
-    expect(before.small.groupedRows).toBeGreaterThan(0);
-    expect(before.recent.groupedRows).toBeGreaterThan(0);
+    expect(large!.before.groupedRows).toBeGreaterThan(0);
+    expect(large!.before.ftsMatches).toBeGreaterThan(0);
+    expect(small!.before.groupedRows).toBeGreaterThan(0);
+    expect(recent!.before.groupedRows).toBeGreaterThan(0);
     // The non-terminal control must hold an index, or it cannot test the status guard.
-    expect(before.active.groupedRows).toBeGreaterThan(0);
+    expect(sleeping!.before.groupedRows).toBeGreaterThan(0);
 
     // maxSessions = 1: ranking decides which old session goes first.
-    const first = await projectDataService.runProjectDataGroupedFtsWallRecovery(
-      testEnv,
-      projectId,
-      { reason: 'test: largest first', dryRun: false, ...GENEROUS, maxSessions: 1 }
-    );
+    const first = await recover(projectId, { maxSessions: 1 });
     expect(first.stopReason).toBe('session_budget');
-    expect(first.sessions.map((s) => s.sessionId)).toEqual([large]);
+    expect(first.sessions.map((s) => s.sessionId)).toEqual([large!.sessionId]);
     expect(first.sessions[0]?.drained).toBe(true);
-    expect(first.groupedRowsDeleted).toBe(before.large.groupedRows);
+    expect(first.groupedRowsDeleted).toBe(large!.before.groupedRows);
     expect(first.afterBytes).toBeLessThanOrEqual(first.beforeBytes);
 
-    const second = await projectDataService.runProjectDataGroupedFtsWallRecovery(
-      testEnv,
-      projectId,
-      { reason: 'test: drain the rest', dryRun: false, ...GENEROUS }
-    );
+    const second = await recover(projectId);
     expect(second.stopReason).toBe('candidates_exhausted');
-    expect(second.sessions.map((s) => s.sessionId)).toEqual([small]);
+    expect(second.sessions.map((s) => s.sessionId)).toEqual([small!.sessionId]);
 
-    const after = {
-      large: await snapshotSession(stub, large!, tokens.large),
-      small: await snapshotSession(stub, small!, tokens.small),
-      active: await snapshotSession(stub, active!, tokens.active),
-      recent: await snapshotSession(stub, recent!, tokens.recent),
-    };
-    for (const pruned of [after.large, after.small]) {
-      expect(pruned.groupedRows).toBe(0);
-      expect(pruned.ftsMatches).toBe(0);
-      expect(pruned.searchIndexState).toBe('grouped_fts_pruned');
-      expect(pruned.materializedAt).toBeNull();
+    for (const session of [large!, small!]) {
+      const after = await snapshotSession(stub, session);
+      expect(after.groupedRows).toBe(0);
+      expect(after.ftsMatches).toBe(0);
+      expect(after.searchIndexState).toBe('grouped_fts_pruned');
+      expect(after.materializedAt).toBeNull();
+      // Message text is byte-identical.
+      expect(after.messageDigest).toBe(session.before.messageDigest);
     }
-    // Message text is byte-identical everywhere.
-    expect(after.large.messageDigest).toBe(before.large.messageDigest);
-    expect(after.small.messageDigest).toBe(before.small.messageDigest);
     // Sleeping (not terminal), and too recent: untouched controls.
-    expect(after.active).toEqual(before.active);
-    expect(after.recent).toEqual(before.recent);
+    for (const control of [sleeping!, recent!]) {
+      expect(await snapshotSession(stub, control)).toEqual(control.before);
+    }
 
     await assertFtsIntegrity(stub);
 
     // Search still finds the pruned session through the raw-message fallback.
-    const found = await runInDurableObject(stub, async (instance) =>
-      instance.searchMessages(tokens.large, null, null, 5)
-    );
-    expect(found.some((r: { sessionId: string }) => r.sessionId === large)).toBe(true);
+    expect(await searchFinds(stub, large!)).toBe(true);
 
     // Materialization must not re-index a pruned session...
     await runInDurableObject(stub, async (_instance, state) => {
-      materializeSession(state.storage.sql, large!);
+      materializeSession(state.storage.sql, large!.sessionId);
     });
-    expect((await snapshotSession(stub, large!, tokens.large)).groupedRows).toBe(0);
+    expect((await snapshotSession(stub, large!)).groupedRows).toBe(0);
     // ...and the pruned state is what stops it: the same session without it re-indexes.
     await runInDurableObject(stub, async (_instance, state) => {
       state.storage.sql.exec(
         'UPDATE chat_sessions SET search_index_state = NULL WHERE id = ?',
-        large!
+        large!.sessionId
       );
-      materializeSession(state.storage.sql, large!);
+      materializeSession(state.storage.sql, large!.sessionId);
     });
-    expect((await snapshotSession(stub, large!, tokens.large)).groupedRows).toBeGreaterThan(0);
+    expect((await snapshotSession(stub, large!)).groupedRows).toBeGreaterThan(0);
   });
 
   it('dry run reports the prunable stock and writes nothing', async () => {
-    const projectId = `wall-recovery-dry-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectId);
-    const stub = getStub(projectId);
-    await stub.ensureProjectId(projectId);
-    const token = uniqueToken('dryrun');
-    const [sessionId] = await seedSessions(stub, [
-      { topic: 'dry', token, turns: 3, end: 'stop', ageDays: 30 },
-    ]);
-    const before = await snapshotSession(stub, sessionId!, token);
+    const { projectId, stub } = await createProject('dry');
+    const session = await seedOldSession(stub, 'dryrun');
 
-    const result = await projectDataService.runProjectDataGroupedFtsWallRecovery(
-      testEnv,
-      projectId,
-      { reason: 'test: dry run', dryRun: true, ...GENEROUS }
-    );
+    const result = await recover(projectId, { dryRun: true });
 
     expect(result.dryRun).toBe(true);
     expect(result.transactions).toBe(0);
     expect(result.ftsEntriesDeleted).toBe(0);
-    expect(result.groupedRowsDeleted).toBe(before.groupedRows);
+    expect(result.groupedRowsDeleted).toBe(session.before.groupedRows);
     expect(result.contentBytes).toBeGreaterThan(0);
     expect(result.afterBytes).toBe(result.beforeBytes);
-    expect(await snapshotSession(stub, sessionId!, token)).toEqual(before);
+    expect(await snapshotSession(stub, session)).toEqual(session.before);
   });
 
   it('excludes a session with an archive source intent', async () => {
-    const projectId = `wall-recovery-intent-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectId);
-    const stub = getStub(projectId);
-    await stub.ensureProjectId(projectId);
-    const tokens = { fenced: uniqueToken('fenced'), free: uniqueToken('free') };
+    const { projectId, stub } = await createProject('intent');
     const [fenced, free] = await seedSessions(stub, [
-      { topic: 'fenced', token: tokens.fenced, turns: 2, end: 'stop', ageDays: 30 },
-      { topic: 'free', token: tokens.free, turns: 2, end: 'stop', ageDays: 30 },
+      { label: 'fenced', turns: 2 },
+      { label: 'free', turns: 2 },
     ]);
     await runInDurableObject(stub, async (_instance, state) => {
       state.storage.sql.exec(
@@ -351,260 +320,151 @@ describe('ProjectData grouped FTS wall recovery', () => {
            target_generation, source_intent_token, state, terminal_version_sha256,
            message_count, prepared_at, created_at, updated_at
          ) VALUES (?, ?, 'mig-1', ?, 'target', 1, 'token', 'copying', 'sha', 0, 1, 1, 1)`,
-        fenced!,
+        fenced!.sessionId,
         projectId,
         projectId
       );
     });
-    const fencedBefore = await snapshotSession(stub, fenced!, tokens.fenced);
 
-    const result = await projectDataService.runProjectDataGroupedFtsWallRecovery(
-      testEnv,
-      projectId,
-      { reason: 'test: intent fence', dryRun: false, ...GENEROUS }
-    );
+    const result = await recover(projectId);
 
-    expect(result.sessions.map((s) => s.sessionId)).toEqual([free]);
-    expect(await snapshotSession(stub, fenced!, tokens.fenced)).toEqual(fencedBefore);
-    expect((await snapshotSession(stub, free!, tokens.free)).groupedRows).toBe(0);
+    expect(result.sessions.map((s) => s.sessionId)).toEqual([free!.sessionId]);
+    expect(await snapshotSession(stub, fenced!)).toEqual(fenced!.before);
+    expect((await snapshotSession(stub, free!)).groupedRows).toBe(0);
   });
 
   it('resumes a partially pruned session across calls under a row budget', async () => {
-    const projectId = `wall-recovery-resume-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectId);
-    const stub = getStub(projectId);
-    await stub.ensureProjectId(projectId);
-    const token = uniqueToken('resume');
-    const [sessionId] = await seedSessions(stub, [
-      { topic: 'resume', token, turns: 5, end: 'stop', ageDays: 30 },
-    ]);
-    const before = await snapshotSession(stub, sessionId!, token);
-    expect(before.groupedRows).toBeGreaterThan(2);
+    const { projectId, stub } = await createProject('resume');
+    const session = await seedOldSession(stub, 'resume', 5);
+    expect(session.before.groupedRows).toBeGreaterThan(2);
 
-    const partial = await projectDataService.runProjectDataGroupedFtsWallRecovery(
-      testEnv,
-      projectId,
-      { reason: 'test: partial', dryRun: false, ...GENEROUS, maxRows: 2 }
-    );
+    const partial = await recover(projectId, { maxRows: 2 });
     expect(partial.stopReason).toBe('row_budget');
     expect(partial.groupedRowsDeleted).toBe(2);
     expect(partial.sessions[0]?.drained).toBe(false);
-    const mid = await snapshotSession(stub, sessionId!, token);
-    expect(mid.groupedRows).toBe(before.groupedRows - 2);
+    const mid = await snapshotSession(stub, session);
+    expect(mid.groupedRows).toBe(session.before.groupedRows - 2);
     // Marked pruned from the first page, so search never trusts a half-deleted index.
     expect(mid.searchIndexState).toBe('grouped_fts_pruned');
     await assertFtsIntegrity(stub);
 
-    const rest = await projectDataService.runProjectDataGroupedFtsWallRecovery(testEnv, projectId, {
-      reason: 'test: rest',
-      dryRun: false,
-      ...GENEROUS,
-    });
+    const rest = await recover(projectId);
     expect(rest.sessions[0]?.drained).toBe(true);
-    expect((await snapshotSession(stub, sessionId!, token)).groupedRows).toBe(0);
+    expect((await snapshotSession(stub, session)).groupedRows).toBe(0);
     await assertFtsIntegrity(stub);
   });
 
   it('stops on the byte budget without deleting a row that does not fit', async () => {
-    const projectId = `wall-recovery-bytes-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectId);
-    const stub = getStub(projectId);
-    await stub.ensureProjectId(projectId);
-    const token = uniqueToken('bytes');
-    const [sessionId] = await seedSessions(stub, [
-      { topic: 'bytes', token, turns: 2, end: 'stop', ageDays: 30 },
-    ]);
-    const before = await snapshotSession(stub, sessionId!, token);
+    const { projectId, stub } = await createProject('bytes');
+    const session = await seedOldSession(stub, 'bytes', 2);
 
-    const result = await projectDataService.runProjectDataGroupedFtsWallRecovery(
-      testEnv,
-      projectId,
-      { reason: 'test: byte budget', dryRun: false, ...GENEROUS, maxBytes: 1 }
-    );
+    const result = await recover(projectId, { maxBytes: 1 });
 
     expect(result.stopReason).toBe('byte_budget');
     expect(result.groupedRowsDeleted).toBe(0);
-    expect(await snapshotSession(stub, sessionId!, token)).toEqual(before);
+    expect(await snapshotSession(stub, session)).toEqual(session.before);
   });
 
   it('touches only the addressed project', async () => {
-    const projectA = `wall-recovery-a-${crypto.randomUUID()}`;
-    const projectB = `wall-recovery-b-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectA);
-    await seedProjectGraph(projectB);
-    const stubA = getStub(projectA);
-    const stubB = getStub(projectB);
-    await stubA.ensureProjectId(projectA);
-    await stubB.ensureProjectId(projectB);
-    const tokenA = uniqueToken('tenanta');
-    const tokenB = uniqueToken('tenantb');
-    const [sessionA] = await seedSessions(stubA, [
-      { topic: 'a', token: tokenA, turns: 2, end: 'stop', ageDays: 30 },
-    ]);
-    const [sessionB] = await seedSessions(stubB, [
-      { topic: 'b', token: tokenB, turns: 2, end: 'stop', ageDays: 30 },
-    ]);
-    const beforeB = await snapshotSession(stubB, sessionB!, tokenB);
+    const a = await createProject('tenant-a');
+    const b = await createProject('tenant-b');
+    const sessionA = await seedOldSession(a.stub, 'tenanta', 2);
+    const sessionB = await seedOldSession(b.stub, 'tenantb', 2);
 
-    await projectDataService.runProjectDataGroupedFtsWallRecovery(testEnv, projectA, {
-      reason: 'test: tenant scope',
-      dryRun: false,
-      ...GENEROUS,
-    });
+    await recover(a.projectId);
 
-    expect((await snapshotSession(stubA, sessionA!, tokenA)).groupedRows).toBe(0);
-    expect(await snapshotSession(stubB, sessionB!, tokenB)).toEqual(beforeB);
+    expect((await snapshotSession(a.stub, sessionA)).groupedRows).toBe(0);
+    expect(await snapshotSession(b.stub, sessionB)).toEqual(sessionB.before);
   });
 
   it('rolls back the whole page when the FTS delete fails mid-transaction', async () => {
-    const projectId = `wall-recovery-rollback-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectId);
-    const stub = getStub(projectId);
-    await stub.ensureProjectId(projectId);
-    const token = uniqueToken('rollback');
-    const [sessionId] = await seedSessions(stub, [
-      { topic: 'rollback', token, turns: 3, end: 'stop', ageDays: 30 },
-    ]);
-    const before = await snapshotSession(stub, sessionId!, token);
+    const { projectId, stub } = await createProject('rollback');
+    const session = await seedOldSession(stub, 'rollback');
 
-    const result = await runInDurableObject(stub, async (_instance, state) => {
-      const real = state.storage.sql;
-      let ftsDeletes = 0;
-      // Fail the second FTS delete: the grouped DELETE and the first FTS delete have
-      // already run inside the transaction, so only a real rollback restores them.
-      const failing = new Proxy(real, {
-        get(target, prop) {
-          if (prop === 'exec') {
-            return (query: string, ...bindings: unknown[]) => {
-              if (query.includes(`VALUES('delete'`) && ++ftsDeletes === 2) {
-                throw new Error('injected FTS failure');
-              }
-              return target.exec(query, ...bindings);
-            };
-          }
-          // Native getters (`databaseSize`) need the real object as `this`.
-          const value = Reflect.get(target, prop, target);
-          return typeof value === 'function' ? value.bind(target) : value;
-        },
-      });
-      const input: GroupedFtsWallRecoveryInput = {
-        reason: 'test: rollback',
-        dryRun: false,
-        ...GENEROUS,
-        transactionRows: 500,
-        transactionBytes: 8 * 1024 * 1024,
-      };
-      return runGroupedFtsWallRecovery(
-        failing,
-        projectId,
-        input,
-        resolveStorageSafetyConfig(testEnv),
-        {
-          transactionSync: (callback) => state.storage.transactionSync(callback),
-        }
-      );
-    });
+    // Fail the second FTS delete of the atomic attempt: the grouped DELETE and the
+    // first FTS delete have already run inside the transaction, so only a real
+    // rollback restores them.
+    const result = await recoverWithFtsFailures(stub, projectId, (attempt, deleteIndex) =>
+      attempt === 1 && deleteIndex === 2 ? 'injected FTS failure' : undefined
+    );
 
     expect(result.stopReason).toBe('transaction_failed');
     expect(result.error).toContain('injected FTS failure');
-    expect(result.failedSessionId).toBe(sessionId);
+    expect(result.failedSessionId).toBe(session.sessionId);
     expect(result.transactions).toBe(0);
     expect(result.groupedRowsDeleted).toBe(0);
-    expect(await snapshotSession(stub, sessionId!, token)).toEqual(before);
+    expect(await snapshotSession(stub, session)).toEqual(session.before);
     await assertFtsIntegrity(stub);
   });
 
   it('at the cap, retries a storage-full page as delete-then-FTS and keeps the index exact', async () => {
-    const projectId = `wall-recovery-fallback-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectId);
-    const stub = getStub(projectId);
-    await stub.ensureProjectId(projectId);
-    const token = uniqueToken('fallback');
-    const [sessionId] = await seedSessions(stub, [
-      { topic: 'fallback', token, turns: 3, end: 'stop', ageDays: 30 },
-    ]);
-    const before = await snapshotSession(stub, sessionId!, token);
+    const { projectId, stub } = await createProject('fallback');
+    const session = await seedOldSession(stub, 'fallback');
 
     // Only the atomic attempt fails; the separate FTS transaction fits.
-    const result = await runWithStorageFullOnFts(stub, projectId, [1]);
+    const result = await recoverWithFtsFailures(stub, projectId, storageFullOn(1));
 
     expect(result.error).toBeNull();
     expect(result.ftsStaleRows).toBe(0);
-    expect(result.ftsEntriesDeleted).toBe(before.groupedRows);
-    const after = await snapshotSession(stub, sessionId!, token);
+    expect(result.ftsEntriesDeleted).toBe(session.before.groupedRows);
+    const after = await snapshotSession(stub, session);
     expect(after.groupedRows).toBe(0);
     expect(after.ftsMatches).toBe(0);
     expect(after.searchIndexState).toBe('grouped_fts_pruned');
-    expect(after.messageDigest).toBe(before.messageDigest);
+    expect(after.messageDigest).toBe(session.before.messageDigest);
     await assertFtsIntegrity(stub);
   });
 
   it('at the cap, frees the rows and reports stale FTS entries when the markers never fit', async () => {
-    const projectId = `wall-recovery-stale-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectId);
-    const stub = getStub(projectId);
-    await stub.ensureProjectId(projectId);
-    const token = uniqueToken('stale');
-    const [sessionId] = await seedSessions(stub, [
-      { topic: 'stale', token, turns: 3, end: 'stop', ageDays: 30 },
-    ]);
-    const before = await snapshotSession(stub, sessionId!, token);
+    const { projectId, stub } = await createProject('stale');
+    const session = await seedOldSession(stub, 'stale');
 
-    const result = await runWithStorageFullOnFts(stub, projectId, [1, 2]);
+    const result = await recoverWithFtsFailures(stub, projectId, storageFullOn(1, 2));
 
     expect(result.error).toBeNull();
     expect(result.stopReason).toBe('candidates_exhausted');
-    expect(result.ftsStaleRows).toBe(before.groupedRows);
+    expect(result.ftsStaleRows).toBe(session.before.groupedRows);
     expect(result.ftsEntriesDeleted).toBe(0);
     expect(result.afterBytes).toBeLessThanOrEqual(result.beforeBytes);
-    const after = await snapshotSession(stub, sessionId!, token);
+    const after = await snapshotSession(stub, session);
     expect(after.groupedRows).toBe(0);
     expect(after.searchIndexState).toBe('grouped_fts_pruned');
-    expect(after.messageDigest).toBe(before.messageDigest);
+    expect(after.messageDigest).toBe(session.before.messageDigest);
     // The stale postings are still in the index...
     expect(after.ftsMatches).toBeGreaterThan(0);
     // ...but search drops them and still finds the session through raw messages.
-    const found = await runInDurableObject(stub, async (instance) =>
-      instance.searchMessages(token, null, null, 5)
-    );
-    expect(found.some((r: { sessionId: string }) => r.sessionId === sessionId)).toBe(true);
+    expect(await searchFinds(stub, session)).toBe(true);
   });
 
   it('at the cap, stops with the error when the FTS step fails for another reason', async () => {
-    const projectId = `wall-recovery-fts-error-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectId);
-    const stub = getStub(projectId);
-    await stub.ensureProjectId(projectId);
-    const tokens = { first: uniqueToken('ftserrfirst'), second: uniqueToken('ftserrsecond') };
+    const { projectId, stub } = await createProject('fts-error');
     const [first, second] = await seedSessions(stub, [
-      { topic: 'first', token: tokens.first, turns: 3, end: 'stop', ageDays: 30 },
-      { topic: 'second', token: tokens.second, turns: 2, end: 'stop', ageDays: 30 },
+      { label: 'ftserrfirst', turns: 3 },
+      { label: 'ftserrsecond', turns: 2 },
     ]);
-    const before = await snapshotSession(stub, first!, tokens.first);
-    const secondBefore = await snapshotSession(stub, second!, tokens.second);
 
     // Storage-full on the atomic attempt, then an unrelated failure in the FTS step.
-    const result = await runWithStorageFullOnFts(stub, projectId, [
-      1,
-      { attempt: 2, message: 'SQLITE_CORRUPT: database disk image is malformed' },
-    ]);
+    const result = await recoverWithFtsFailures(stub, projectId, (attempt) =>
+      attempt === 1
+        ? STORAGE_FULL
+        : attempt === 2
+          ? 'SQLITE_CORRUPT: database disk image is malformed'
+          : undefined
+    );
 
     expect(result.stopReason).toBe('transaction_failed');
     expect(result.error).toContain('SQLITE_CORRUPT');
-    expect(result.failedSessionId).toBe(first);
+    expect(result.failedSessionId).toBe(first!.sessionId);
     // The rows were already deleted by the fallback's first step, so they are counted.
-    expect(result.groupedRowsDeleted).toBe(before.groupedRows);
-    expect(result.ftsStaleRows).toBe(before.groupedRows);
-    expect((await snapshotSession(stub, first!, tokens.first)).groupedRows).toBe(0);
+    expect(result.groupedRowsDeleted).toBe(first!.before.groupedRows);
+    expect(result.ftsStaleRows).toBe(first!.before.groupedRows);
+    expect((await snapshotSession(stub, first!)).groupedRows).toBe(0);
     // The call stopped: the next session was not touched.
-    expect(await snapshotSession(stub, second!, tokens.second)).toEqual(secondBefore);
+    expect(await snapshotSession(stub, second!)).toEqual(second!.before);
   });
 
   it('pages grouped rows by index walk, without sorting the rest of the session', async () => {
-    const projectId = `wall-recovery-plan-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectId);
-    const stub = getStub(projectId);
-    await stub.ensureProjectId(projectId);
+    const { stub } = await createProject('plan');
     const plan = await runInDurableObject(stub, async (_instance, state) =>
       state.storage.sql
         .exec(`EXPLAIN QUERY PLAN ${GROUPED_PAGE_SIZES_SQL}`, 'session', 0, 0, 10)
@@ -617,47 +477,26 @@ describe('ProjectData grouped FTS wall recovery', () => {
   });
 
   it('leaves sessions in skipSessionIds untouched and prunes the rest', async () => {
-    const projectId = `wall-recovery-skip-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectId);
-    const stub = getStub(projectId);
-    await stub.ensureProjectId(projectId);
-    const tokens = { skipped: uniqueToken('skipped'), pruned: uniqueToken('pruned') };
+    const { projectId, stub } = await createProject('skip');
     const [skipped, pruned] = await seedSessions(stub, [
-      { topic: 'skipped', token: tokens.skipped, turns: 3, end: 'stop', ageDays: 30 },
-      { topic: 'pruned', token: tokens.pruned, turns: 2, end: 'stop', ageDays: 30 },
+      { label: 'skipped', turns: 3 },
+      { label: 'pruned', turns: 2 },
     ]);
-    const skippedBefore = await snapshotSession(stub, skipped!, tokens.skipped);
 
-    const result = await projectDataService.runProjectDataGroupedFtsWallRecovery(
-      testEnv,
-      projectId,
-      { reason: 'test: skip', dryRun: false, ...GENEROUS, skipSessionIds: [skipped!] }
-    );
+    const result = await recover(projectId, { skipSessionIds: [skipped!.sessionId] });
 
-    expect(result.sessions.map((s) => s.sessionId)).toEqual([pruned]);
-    expect(await snapshotSession(stub, skipped!, tokens.skipped)).toEqual(skippedBefore);
-    expect((await snapshotSession(stub, pruned!, tokens.pruned)).groupedRows).toBe(0);
+    expect(result.sessions.map((s) => s.sessionId)).toEqual([pruned!.sessionId]);
+    expect(await snapshotSession(stub, skipped!)).toEqual(skipped!.before);
+    expect((await snapshotSession(stub, pruned!)).groupedRows).toBe(0);
   });
 
   it('rejects malformed budgets at the RPC boundary before touching data', async () => {
-    const projectId = `wall-recovery-invalid-${crypto.randomUUID()}`;
-    await seedProjectGraph(projectId);
-    const stub = getStub(projectId);
-    await stub.ensureProjectId(projectId);
-    const token = uniqueToken('invalid');
-    const [sessionId] = await seedSessions(stub, [
-      { topic: 'invalid', token, turns: 2, end: 'stop', ageDays: 30 },
-    ]);
-    const before = await snapshotSession(stub, sessionId!, token);
+    const { projectId, stub } = await createProject('invalid');
+    const session = await seedOldSession(stub, 'invalid', 2);
 
-    await expect(
-      projectDataService.runProjectDataGroupedFtsWallRecovery(testEnv, projectId, {
-        reason: 'test: invalid',
-        dryRun: false,
-        ...GENEROUS,
-        maxRows: Number.NaN,
-      })
-    ).rejects.toThrow(/maxRows must be a positive integer/);
-    expect(await snapshotSession(stub, sessionId!, token)).toEqual(before);
+    await expect(recover(projectId, { maxRows: Number.NaN })).rejects.toThrow(
+      /maxRows must be a positive integer/
+    );
+    expect(await snapshotSession(stub, session)).toEqual(session.before);
   });
 });
