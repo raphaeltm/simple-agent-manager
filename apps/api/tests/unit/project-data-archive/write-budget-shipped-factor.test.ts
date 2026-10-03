@@ -14,10 +14,11 @@
  * nothing. Confirmed forward: at 12:15Z only 19,984 units remained, and the 13:00Z tick was
  * refused.
  *
- * On 2026-09-27 the cadence briefly claimed every 20 minutes (72 ticks/day) and the allowance was
- * tripled with it. The 2026-10-03 billing firebreak restored the cadence to hourly while leaving
- * the allowance in place, so cadence binds again. `shippedSweepTicksPerDay` reads the shipped
- * interval, so raising the cadence without the allowance still turns that case red.
+ * Since 2026-09-27 the cadence claims every 20 minutes (72 ticks/day) and the allowance was
+ * tripled with it. One migration per tick is the drain's real ceiling, so the allowance must pay
+ * for a current-size migration on every tick or the faster cadence buys nothing once the window
+ * runs out. `shippedSweepTicksPerDay` reads the shipped interval, so raising the cadence without
+ * the allowance turns that case red.
  *
  * These cases read the value this repository actually ships rather than a number retyped into
  * the test, because a test that pins a hand-copied constant stays green when someone edits
@@ -129,9 +130,8 @@ describe('shipped archive write-estimate factor', () => {
 
     // A tick archives one session (the wall-time gate is only checked between candidates), so
     // ticks/day is the drain's ceiling and an allowance below it silently caps the cadence.
-    // Proven discriminating on 2026-09-27: with the accelerated 18-minute interval, the previous
-    // 800000 allowance admitted 37 against 72 claimed ticks and this went red. At the restored
-    // hourly cadence, the raised allowance is intentionally above the cadence ceiling.
+    // Proven discriminating on 2026-09-27: the previous 800000 allowance admits 37 against the
+    // 72 ticks an 18-minute interval claims, and this goes red.
     expect(admitted).toBeGreaterThanOrEqual(shippedSweepTicksPerDay());
   });
 

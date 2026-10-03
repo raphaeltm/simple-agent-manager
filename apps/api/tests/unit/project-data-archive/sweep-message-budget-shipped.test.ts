@@ -25,8 +25,7 @@
  * Environment overrides (`.claude/rules/70`): of the vars these cases read,
  * `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` IS pinned as a `production` GitHub Environment
  * variable, so an edit to `wrangler.toml` alone would NOT ship; the two are changed in lockstep
- * (2400000 since 2026-09-27; left in place by the 2026-10-03 hourly-cadence firebreak).
- * `_SWEEP_MESSAGE_BUDGET`,
+ * (2400000 since 2026-09-27, when the cadence was tripled). `_SWEEP_MESSAGE_BUDGET`,
  * `_WRITE_ESTIMATE_FACTOR`, `_SWEEP_UNIT_OVERHEAD_PERCENT` and `_GLOBAL_SWEEP_INTERVAL_MS` are
  * absent from both the `production` and `staging` Environments, so for those the checked-in
  * value is the deployed value.
@@ -196,11 +195,13 @@ describe('shipped archive sweep message budget', () => {
     expect(shippedPerDay).toBeGreaterThan(previousPerDay);
 
     // The honest cost of that gain, asserted rather than left in a comment: the binding
-    // At the restored hourly cadence, the raised allowance is no longer the binding constraint:
-    // the cadence is the firebreak. Bigger candidates are still the better buy per write, because
-    // the fixed per-session charge amortises over more messages.
+    // constraint MOVES. At the previous ceiling the cadence bound throughput and the
+    // allowance was never exhausted; at the shipped ceiling the allowance runs out first, so
+    // later ticks report `window_exhausted` — normal backpressure, not an alert
+    // (`.claude/rules/72`). Bigger candidates are still the better buy per write, because the
+    // fixed per-session charge amortises over more messages.
     expect(previousSessions).toBeGreaterThan(ticksPerDay);
-    expect(shippedSessions).toBeGreaterThan(ticksPerDay);
+    expect(shippedSessions).toBeLessThan(ticksPerDay);
     // Loose lower bound: enough affordable sessions that a single bad candidate consuming
     // three attempts cannot spend the whole day's allowance.
     expect(shippedSessions).toBeGreaterThanOrEqual(12);
