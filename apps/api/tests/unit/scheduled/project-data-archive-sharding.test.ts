@@ -17,7 +17,11 @@ import {
   runProjectDataArchiveSharding,
   runScopedProjectDataArchiveCanary,
 } from '../../../src/scheduled/project-data-archive-sharding';
-import { ProjectDataStorageFullError } from '../../../src/services/project-data-storage-errors';
+import { archiveShardProjectDataOwner } from '../../../src/services/project-data-archive-routing';
+import {
+  PROJECT_DATA_STORAGE_FULL,
+  ProjectDataStorageFullError,
+} from '../../../src/services/project-data-storage-errors';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const NOW = Date.now() + 60_000;
@@ -3516,6 +3520,10 @@ describe('archive-sharding breaker opens only for systemic poisoning', () => {
     for (const error of [
       new Error('Exceeded the maximum database size.'),
       new ProjectDataStorageFullError(PROJECT_ID, 'archive_source_prepare'),
+      // The same refusal after an RPC boundary: the code survives, the subclass does not.
+      Object.assign(new Error('ProjectData refused the archive write'), {
+        error: PROJECT_DATA_STORAGE_FULL,
+      }),
     ]) {
       const sqlite = new Database(':memory:');
       try {
@@ -3555,7 +3563,9 @@ describe('archive-sharding breaker opens only for systemic poisoning', () => {
       });
       const ageFailure = () =>
         sqlite
-          .prepare('UPDATE project_data_archive_migrations SET updated_at = ? WHERE migration_id = ?')
+          .prepare(
+            'UPDATE project_data_archive_migrations SET updated_at = ? WHERE migration_id = ?'
+          )
           .run(NOW - 2 * HOUR, migrationId);
       // Three capacity failures in a row: each claim spends an attempt, each failure refunds it.
       for (let tick = 0; tick < 3; tick++) {
@@ -3710,6 +3720,444 @@ describe('archive-sharding breaker opens only for systemic poisoning', () => {
         reason: 'poison_threshold:1/1:attempts_exhausted:Error',
       });
       expect(await selectableSessions(sqlite)).toEqual([]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('leaves a reclaimed failure untouched when a sibling opened the breaker earlier in the tick', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedExhaustedFailure(sqlite, 'session-a');
+      seedExhaustedFailure(sqlite, 'session-b');
+      // Reclaimed rows were claimed before, so unlike a fresh candidate they carry a lease epoch.
+      sqlite.prepare('UPDATE project_data_archive_migrations SET lease_epoch = 1').run();
+
+      const stats = await failingSweep(sqlite, new Error('shard export failed'), {
+        PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '2',
+      });
+
+      expect(stats).toMatchObject({ poisoned: 1 });
+      expect(breaker(sqlite)).toMatchObject({ state: 'open' });
+      const sessions = ['session-a', 'session-b'];
+      const refusedSession = sessions.find(
+        (sessionId) => journal(sqlite, `migration-${sessionId}`).state !== 'poisoned'
+      );
+      expect(refusedSession).toBeDefined();
+      // The refused claim spent nothing, and the unwind for never-claimed candidates did not
+      // delete the journal or hand the session back to root: it stays fenced by its own row.
+      expect(journal(sqlite, `migration-${refusedSession}`)).toMatchObject({
+        state: 'failed',
+        attempt_count: 2,
+      });
+      expect(readLocationRow(sqlite, refusedSession)).toMatchObject({
+        location_state: 'migrating',
+      });
+      expect(
+        sqlite
+          .prepare('SELECT migration_id FROM project_data_session_locations WHERE session_id = ?')
+          .get(refusedSession)
+      ).toEqual({ migration_id: `migration-${refusedSession}` });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('heals an unfrozen poison on replay without re-opening a breaker an operator closed', async () => {
+    async function replayAfter(closedAt: number | null) {
+      const sqlite = new Database(':memory:');
+      try {
+        createCoordinatorTables(sqlite);
+        seedPoisonHistory(sqlite, {
+          migrationId: 'old-a',
+          sessionId: 'session-a',
+          poisonedAt: NOW - 2 * HOUR,
+        });
+        seedPoisonHistory(sqlite, {
+          migrationId: 'old-b',
+          sessionId: 'session-b',
+          poisonedAt: NOW - 2 * HOUR,
+        });
+        // A third poison whose quarantine never landed: poisoned, but its location still fenced
+        // `migrating` (what an interrupted, unbatched poison used to leave behind).
+        const migrationId = seedMigration(sqlite, 'poisoned', {
+          migrationId: 'migration-replayed',
+          sessionId: 'session-c',
+          updatedAt: NOW - 2 * HOUR,
+        });
+        sqlite
+          .prepare(
+            'UPDATE project_data_archive_migrations SET poisoned_at = ? WHERE migration_id = ?'
+          )
+          .run(NOW - 2 * HOUR, migrationId);
+        if (closedAt !== null) {
+          sqlite
+            .prepare(
+              `INSERT INTO project_data_archive_circuit_breakers (project_id, state, reason, opened_at, updated_at)
+               VALUES (?, 'closed', 'Closed from admin UI', NULL, ?)`
+            )
+            .run(PROJECT_ID, closedAt);
+        }
+
+        const poisoned = await poisonProjectDataArchiveMigration(makeEnv(sqlite), {
+          migrationId,
+          projectId: PROJECT_ID,
+          reason: 'attempts_exhausted:Error',
+          now: NOW,
+        });
+
+        return {
+          poisoned,
+          location: readLocationRow(sqlite, 'session-c')?.location_state,
+          breaker: breaker(sqlite)?.state,
+        };
+      } finally {
+        sqlite.close();
+      }
+    }
+
+    // Closed after the three poisons: the replay freezes the session and nothing else.
+    expect(await replayAfter(NOW - HOUR)).toEqual({
+      poisoned: false,
+      location: 'frozen',
+      breaker: 'closed',
+    });
+    // Control: never closed, three distinct poisons in the window is the open condition.
+    expect(await replayAfter(null)).toEqual({
+      poisoned: false,
+      location: 'frozen',
+      breaker: 'open',
+    });
+  });
+
+  it('keeps an operator close that lands after the tick read its clock', async () => {
+    async function poisonAround(input: { closedAt: number; laterPoisons: number[] }) {
+      const sqlite = new Database(':memory:');
+      try {
+        createCoordinatorTables(sqlite);
+        // Two sessions poisoned before the close; the third is poisoned by a tick whose clock
+        // (NOW) was read before the operator's close at `closedAt`.
+        for (const sessionId of ['session-a', 'session-b']) {
+          seedPoisonHistory(sqlite, {
+            migrationId: `old-${sessionId}`,
+            sessionId,
+            poisonedAt: NOW - HOUR,
+          });
+        }
+        input.laterPoisons.forEach((poisonedAt, index) =>
+          seedPoisonHistory(sqlite, {
+            migrationId: `later-${index}`,
+            sessionId: `session-later-${index}`,
+            poisonedAt,
+          })
+        );
+        sqlite
+          .prepare(
+            `INSERT INTO project_data_archive_circuit_breakers (project_id, state, reason, opened_at, updated_at)
+             VALUES (?, 'closed', 'Closed from admin UI', NULL, ?)`
+          )
+          .run(PROJECT_ID, input.closedAt);
+        const migrationId = seedMigration(sqlite, 'failed', {
+          migrationId: 'migration-session-c',
+          sessionId: 'session-c',
+          attemptCount: 3,
+        });
+
+        await poisonProjectDataArchiveMigration(makeEnv(sqlite), {
+          migrationId,
+          projectId: PROJECT_ID,
+          reason: 'attempts_exhausted:Error',
+          now: NOW,
+        });
+        return breaker(sqlite);
+      } finally {
+        sqlite.close();
+      }
+    }
+
+    // The close survives: none of the three poisons happened after it.
+    expect(await poisonAround({ closedAt: NOW + 60_000, laterPoisons: [] })).toMatchObject({
+      state: 'closed',
+      updated_at: NOW + 60_000,
+    });
+    // Control: three distinct sessions poisoned after the close is a new systemic signal, and
+    // opening on it does not move the row's clock behind the close.
+    expect(
+      await poisonAround({
+        closedAt: NOW + 60_000,
+        laterPoisons: [NOW + 120_000, NOW + 180_000, NOW + 240_000],
+      })
+    ).toMatchObject({ state: 'open', updated_at: NOW + 60_000 });
+  });
+
+  it('never freezes the location of a migration it did not poison', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      // Published between the failure read and the poison: the location flip is still pending.
+      const migrationId = seedMigration(sqlite, 'published', {
+        migrationId: 'migration-published',
+        sessionId: 'session-published',
+      });
+
+      const poisoned = await poisonProjectDataArchiveMigration(
+        makeEnv(sqlite, { PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD: '1' }),
+        { migrationId, projectId: PROJECT_ID, reason: 'attempts_exhausted:Error', now: NOW }
+      );
+
+      expect(poisoned).toBe(false);
+      expect(journal(sqlite, migrationId)).toMatchObject({ state: 'published', poisoned_at: null });
+      expect(readLocationRow(sqlite, 'session-published')).toMatchObject({
+        location_state: 'migrating',
+      });
+      expect(breaker(sqlite)).toBeUndefined();
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe('archive-sharding capacity backpressure keys on the full object', () => {
+  const HOUR = 60 * 60 * 1000;
+  const FULL_PROJECT = 'project-full';
+  const STORAGE_FULL = 'Exceeded the maximum database size.';
+  const ENABLED = {
+    PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+    PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+  };
+
+  /** A root object at the per-object cap: every archive call fails the way Cloudflare's does. */
+  function createFullSource() {
+    const full = vi.fn(async () => {
+      throw new Error(STORAGE_FULL);
+    });
+    return {
+      ensureProjectId: full,
+      archiveSourceInspectIntent: full,
+      archiveSourcePrepareIntent: full,
+    };
+  }
+
+  /** A fenced journal that already failed against a full object, past the retry delay. */
+  function seedCapacityFailure(
+    sqlite: Database.Database,
+    input: {
+      projectId?: string;
+      sessionId: string;
+      updatedAt: number;
+      errorCode?: 'storage_full' | 'storage_full_target';
+      targetOwnerName?: string;
+    }
+  ): string {
+    const migrationId = seedMigration(sqlite, 'failed', {
+      migrationId: `migration-${input.sessionId}`,
+      projectId: input.projectId ?? PROJECT_ID,
+      sessionId: input.sessionId,
+      leaseExpiresAt: null,
+      attemptCount: 1,
+      updatedAt: input.updatedAt,
+    });
+    sqlite
+      .prepare(
+        `UPDATE project_data_archive_migrations
+         SET error_code = ?, lease_epoch = 1, target_owner_name = COALESCE(?, target_owner_name)
+         WHERE migration_id = ?`
+      )
+      .run(input.errorCode ?? 'storage_full', input.targetOwnerName ?? null, migrationId);
+    return migrationId;
+  }
+
+  function journalRow(sqlite: Database.Database, migrationId: string) {
+    return sqlite
+      .prepare(
+        `SELECT state, error_code, attempt_count, updated_at
+         FROM project_data_archive_migrations WHERE migration_id = ?`
+      )
+      .get(migrationId) as Record<string, unknown>;
+  }
+
+  async function sweep(sqlite: Database.Database, stubs: (id: string) => unknown, overrides = {}) {
+    const stats = await runProjectDataArchiveSharding(
+      makeEnv(sqlite, {
+        ...ENABLED,
+        PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+        PROJECT_DATA: { idFromName: (name: string) => name, get: stubs } as never,
+        ...overrides,
+      }),
+      new Date(NOW)
+    );
+    sqlite
+      .prepare(`UPDATE project_data_archive_global_sweep_cadence SET next_eligible_at = 0`)
+      .run();
+    return stats;
+  }
+
+  /** What the scoped canary would select for a project right now (dry run, no writes). */
+  async function selectable(sqlite: Database.Database, projectId: string): Promise<string[]> {
+    const result = await runScopedProjectDataArchiveCanary(
+      makeEnv(sqlite, {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+        PROJECT_DATA: createProjectDataNamespace({}),
+      }),
+      { projectId, dryRun: true, limit: 5, nowDate: new Date(NOW) }
+    );
+    return result.selected.map((item) => item.sessionId);
+  }
+
+  it('keeps one full root from taking the sweep from healthy work elsewhere', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      const failures = [3, 2.5, 2].map((age, index) =>
+        seedCapacityFailure(sqlite, {
+          projectId: FULL_PROJECT,
+          sessionId: `session-full-${index}`,
+          updatedAt: NOW - age * HOUR,
+        })
+      );
+      // The full project also has the largest eligible session, so it is offered first.
+      seedSessionSummary(sqlite, {
+        projectId: FULL_PROJECT,
+        sessionId: 'session-full-fresh',
+        messageCount: 900,
+      });
+      seedSessionSummary(sqlite, { sessionId: SESSION_ID, messageCount: 10 });
+      const fullSource = createFullSource();
+      const healthySource = createFakeSource();
+
+      await sweep(
+        sqlite,
+        (id) =>
+          id === FULL_PROJECT
+            ? fullSource
+            : id === SOURCE_OWNER
+              ? healthySource
+              : createFakeTarget(),
+        { PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '3' }
+      );
+
+      // One probe against the full root (the oldest), refunded; the other two wait their turn.
+      expect(failures.map((id) => journalRow(sqlite, id).updated_at === NOW)).toEqual([
+        true,
+        false,
+        false,
+      ]);
+      expect(journalRow(sqlite, failures[0]!)).toMatchObject({
+        state: 'failed',
+        error_code: 'storage_full',
+        attempt_count: 1,
+      });
+      // Nothing new is fenced into the full object (the same reader does see its probe's fence)...
+      expect(readLocationRow(sqlite, 'session-full-0', FULL_PROJECT)).toMatchObject({
+        location_state: 'migrating',
+      });
+      expect(readLocationRow(sqlite, 'session-full-fresh', FULL_PROJECT)).toBeUndefined();
+      // ...and the healthy project's session archives in the same tick.
+      expect(readLocationRow(sqlite, SESSION_ID)).toMatchObject({
+        location_state: 'archive_shard',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('resumes admission and normal retries as soon as a probe gets past the full write', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      const older = seedCapacityFailure(sqlite, {
+        sessionId: SESSION_ID,
+        updatedAt: NOW - 3 * HOUR,
+      });
+      seedCapacityFailure(sqlite, { sessionId: 'session-newer', updatedAt: NOW - 2 * HOUR });
+      seedSessionSummary(sqlite, { sessionId: 'session-fresh', messageCount: 50 });
+
+      // While the root is refusing: one probe, and no admission.
+      expect(await selectable(sqlite, PROJECT_ID)).toEqual([SESSION_ID]);
+
+      // The root has room again: the probe archives...
+      const source = createFakeSource();
+      await sweep(sqlite, (id) => (id === SOURCE_OWNER ? source : createFakeTarget()), {
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
+      });
+      expect(journalRow(sqlite, older)).toMatchObject({ state: 'published' });
+
+      // ...which lifts both bounds at once: the other failure retries and admission resumes.
+      expect(await selectable(sqlite, PROJECT_ID)).toEqual(['session-newer', 'session-fresh']);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('pauses only the full target shard, not the rest of the project', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      const shardEnv = { PROJECT_DATA_ARCHIVE_SHARD_COUNT: '2' };
+      const targetOf = (sessionId: string) =>
+        archiveShardProjectDataOwner(makeEnv(sqlite, shardEnv), PROJECT_ID, sessionId, 1).ownerName;
+      // Two eligible sessions that land on different shards (the hash is deterministic).
+      const names = Array.from({ length: 20 }, (_, index) => `session-shard-${index}`);
+      const onFullShard = names[0]!;
+      const fullShard = targetOf(onFullShard);
+      const onOtherShard = names.find((name) => targetOf(name) !== fullShard)!;
+      seedSessionSummary(sqlite, { sessionId: onFullShard, messageCount: 900 });
+      seedSessionSummary(sqlite, { sessionId: onOtherShard, messageCount: 10 });
+      // A recent failure against that shard, still inside its retry delay.
+      seedCapacityFailure(sqlite, {
+        sessionId: 'session-stuck',
+        updatedAt: NOW - 60_000,
+        errorCode: 'storage_full_target',
+        targetOwnerName: fullShard,
+      });
+      const source = createFakeSource();
+
+      await sweep(sqlite, (id) => (id === SOURCE_OWNER ? source : createFakeTarget()), {
+        ...shardEnv,
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '2',
+      });
+
+      expect(readLocationRow(sqlite, onFullShard)).toBeUndefined();
+      expect(readLocationRow(sqlite, onOtherShard)).toMatchObject({
+        location_state: 'archive_shard',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('records a full target shard against the shard, not the root', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: SESSION_ID, messageCount: 10 });
+      const source = createFakeSource();
+      const fullTarget = createFakeTarget();
+      fullTarget.archiveTargetPrepare.mockRejectedValue(new Error(STORAGE_FULL));
+
+      const stats = await sweep(sqlite, (id) => (id === SOURCE_OWNER ? source : fullTarget));
+
+      expect(stats).toMatchObject({ failed: 1, poisoned: 0 });
+      const row = sqlite
+        .prepare(
+          `SELECT state, error_code, attempt_count, target_owner_name
+           FROM project_data_archive_migrations WHERE session_id = ?`
+        )
+        .get(SESSION_ID);
+      // The claim's attempt is refunded, and the session stays fenced for the retry.
+      expect(row).toMatchObject({
+        state: 'failed',
+        error_code: 'storage_full_target',
+        attempt_count: 0,
+        target_owner_name: archiveShardProjectDataOwner(makeEnv(sqlite), PROJECT_ID, SESSION_ID, 1)
+          .ownerName,
+      });
+      // The root still accepts writes, so the rest of the project keeps being offered.
+      seedSessionSummary(sqlite, { sessionId: 'session-next', messageCount: 5 });
+      expect(await selectable(sqlite, PROJECT_ID)).toContain('session-next');
     } finally {
       sqlite.close();
     }

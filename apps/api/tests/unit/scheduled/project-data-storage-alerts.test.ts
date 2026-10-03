@@ -17,7 +17,45 @@ const HOUR = 60 * 60 * 1000;
 const GB = 1e9;
 const CAP = DEFAULT_PROJECT_DATA_STORAGE_HARD_CAP_BYTES;
 
-function setup(overrides: Partial<Record<keyof Env, string>> = {}) {
+/**
+ * KV with Cloudflare's expiry semantics on the test clock: `put` honours `expirationTtl`, `get`
+ * hides expired keys, and `list` pages by prefix and, like KV before it purges, may still return
+ * an expired key with its `expiration`.
+ */
+function createKv(clock: { now: number }, pageSize = 1000) {
+  const entries = new Map<string, { value: string; expiration?: number }>();
+  const isLive = (entry: { expiration?: number }) =>
+    entry.expiration === undefined || entry.expiration * 1000 > clock.now;
+  return {
+    entries,
+    get: vi.fn(async (key: string) => {
+      const entry = entries.get(key);
+      return entry && isLive(entry) ? entry.value : null;
+    }),
+    put: vi.fn(async (key: string, value: string, options?: { expirationTtl?: number }) => {
+      entries.set(key, {
+        value,
+        expiration: options?.expirationTtl
+          ? Math.floor(clock.now / 1000) + options.expirationTtl
+          : undefined,
+      });
+    }),
+    list: vi.fn(async ({ prefix = '', cursor }: { prefix?: string; cursor?: string } = {}) => {
+      const names = [...entries.keys()].filter((name) => name.startsWith(prefix)).sort();
+      const start = cursor ? Number(cursor) : 0;
+      const complete = start + pageSize >= names.length;
+      return {
+        keys: names
+          .slice(start, start + pageSize)
+          .map((name) => ({ name, expiration: entries.get(name)!.expiration })),
+        list_complete: complete,
+        ...(complete ? {} : { cursor: String(start + pageSize) }),
+      };
+    }),
+  };
+}
+
+function setup(overrides: Partial<Record<keyof Env, string>> = {}, kvPageSize = 1000) {
   const sqlite = new Database(':memory:');
   createSchemaTables(sqlite, [
     schema.users,
@@ -25,25 +63,26 @@ function setup(overrides: Partial<Record<keyof Env, string>> = {}) {
     schema.projectDataArchiveCircuitBreakers,
     schema.projectDataStorageTelemetry,
   ]);
-  const kv = new Map<string, string>();
+  const clock = { now: NOW };
+  const kv = createKv(clock, kvPageSize);
   const env = {
     DATABASE: createSqliteD1(sqlite),
-    KV: {
-      get: vi.fn(async (key: string) => kv.get(key) ?? null),
-      put: vi.fn(async (key: string, value: string) => {
-        kv.set(key, value);
-      }),
-    },
+    KV: kv,
     NOTIFICATION: {},
     ...overrides,
   } as unknown as Env;
+  /** One cron tick at `at`, with KV on the same clock. */
+  const tick = (at: number) => {
+    clock.now = at;
+    return runProjectDataStorageAlerts(env, at);
+  };
   // Real superadmins, plus a normal user and the system trial sentinel that must never be paged.
   const user = sqlite.prepare('INSERT INTO users (id, role, status) VALUES (?, ?, ?)');
   user.run('admin-1', 'superadmin', 'active');
   user.run('admin-2', 'superadmin', 'active');
   user.run('user-1', 'user', 'active');
   user.run('system_anonymous_trials', 'superadmin', 'system');
-  return { sqlite, env, kv };
+  return { sqlite, env, kv, tick };
 }
 
 function seedProject(sqlite: Database.Database, id: string, name: string): void {
@@ -117,11 +156,11 @@ describe('ProjectData storage superadmin alerts', () => {
   });
 
   it('pages every real superadmin once per window while a project breaker is open', async () => {
-    const { sqlite, env } = setup();
+    const { sqlite, tick } = setup();
     seedProject(sqlite, 'project-sam', 'SAM');
     seedBreaker(sqlite, 'project-sam', 'open', NOW - 5 * 24 * HOUR);
 
-    const first = await runProjectDataStorageAlerts(env, NOW);
+    const first = await tick(NOW);
 
     expect(first).toMatchObject({ alerts: 1, notificationsSent: 2, throttled: 0 });
     expect(sent().map((entry) => entry.userId)).toEqual(['admin-1', 'admin-2']);
@@ -135,20 +174,20 @@ describe('ProjectData storage superadmin alerts', () => {
     expect(sent()[0]!.notification.body).toContain(new Date(NOW - 5 * 24 * HOUR).toISOString());
 
     // The next tick inside the window is throttled for both recipients.
-    const second = await runProjectDataStorageAlerts(env, NOW + 5 * 60 * 1000);
-    expect(second).toMatchObject({ alerts: 1, notificationsSent: 0, throttled: 2 });
+    const second = await tick(NOW + 5 * 60 * 1000);
+    expect(second).toMatchObject({ alerts: 0, notificationsSent: 0, throttled: 2 });
     expect(sendNotificationMock).toHaveBeenCalledTimes(2);
   });
 
   it('stays quiet for closed breakers and small projects, while still paging the open one', async () => {
-    const { sqlite, env } = setup();
+    const { sqlite, tick } = setup();
     seedProject(sqlite, 'project-calm', 'Calm');
     seedBreaker(sqlite, 'project-calm', 'closed', NOW - HOUR);
     seedTelemetry(sqlite, 'project-calm', 4 * GB, NOW - 10 * 60 * 1000);
     seedProject(sqlite, 'project-stuck', 'Stuck');
     seedBreaker(sqlite, 'project-stuck', 'open', NOW - HOUR);
 
-    await runProjectDataStorageAlerts(env, NOW);
+    await tick(NOW);
 
     expect(new Set(sent().map((entry) => entry.notification.metadata.projectId))).toEqual(
       new Set(['project-stuck'])
@@ -156,31 +195,34 @@ describe('ProjectData storage superadmin alerts', () => {
   });
 
   it('escalates a frozen breaker, as a new episode, once its project nears the hard cap', async () => {
-    const { sqlite, env } = setup();
+    const { sqlite, tick } = setup();
     seedProject(sqlite, 'project-held', 'Held');
     seedBreaker(sqlite, 'project-held', 'frozen', NOW - 2 * HOUR, 'operator hold');
     seedTelemetry(sqlite, 'project-held', 9 * GB, NOW - 10 * 60 * 1000);
 
-    await runProjectDataStorageAlerts(env, NOW);
+    await tick(NOW);
     expect(sent().map((entry) => entry.notification.urgency)).toEqual(['medium', 'medium']);
 
     seedTelemetry(sqlite, 'project-held', Math.ceil(CAP * 0.97), NOW);
     sendNotificationMock.mockClear();
-    await runProjectDataStorageAlerts(env, NOW + 5 * 60 * 1000);
+    await tick(NOW + 5 * 60 * 1000);
 
-    const kinds = sent().map((entry) => [entry.notification.metadata.alertKind, entry.notification.urgency]);
+    const kinds = sent().map((entry) => [
+      entry.notification.metadata.alertKind,
+      entry.notification.urgency,
+    ]);
     expect(kinds).toContainEqual(['breaker_frozen', 'high']);
     expect(kinds).toContainEqual(['near_wall', 'high']);
   });
 
   it('reports a near-cap project and says so when its telemetry is stale', async () => {
-    const { sqlite, env } = setup();
+    const { sqlite, tick } = setup();
     seedProject(sqlite, 'project-fresh', 'Fresh');
     seedTelemetry(sqlite, 'project-fresh', Math.ceil(CAP * 0.96), NOW - 10 * 60 * 1000);
     seedProject(sqlite, 'project-silent', 'Silent');
     seedTelemetry(sqlite, 'project-silent', Math.ceil(CAP * 0.98), NOW - 5 * HOUR);
 
-    await runProjectDataStorageAlerts(env, NOW);
+    await tick(NOW);
 
     const byProject = new Map(
       sent().map((entry) => [entry.notification.metadata.projectId, entry.notification])
@@ -190,7 +232,9 @@ describe('ProjectData storage superadmin alerts', () => {
       title: 'Fresh storage is near the 10 GiB hard cap',
       metadata: { alertKind: 'near_wall', stale: false },
     });
+    // Stale is not calmer: the object may be closer to the cap than its last measurement.
     expect(byProject.get('project-silent')).toMatchObject({
+      urgency: 'high',
       title: 'Silent storage is near the 10 GiB hard cap (telemetry stale)',
       metadata: { alertKind: 'near_wall_stale', stale: true },
     });
@@ -199,11 +243,11 @@ describe('ProjectData storage superadmin alerts', () => {
 
   it('names the configured hard cap rather than a fixed size', async () => {
     const twoGib = 2 * 1024 * 1024 * 1024;
-    const { sqlite, env } = setup({ PROJECT_DATA_STORAGE_HARD_CAP_BYTES: String(twoGib) });
+    const { sqlite, tick } = setup({ PROJECT_DATA_STORAGE_HARD_CAP_BYTES: String(twoGib) });
     seedProject(sqlite, 'project-small-cap', 'Small cap');
     seedTelemetry(sqlite, 'project-small-cap', Math.ceil(twoGib * 0.97), NOW);
 
-    await runProjectDataStorageAlerts(env, NOW);
+    await tick(NOW);
 
     expect(sent()[0]!.notification).toMatchObject({
       title: 'Small cap storage is near the 2 GiB hard cap',
@@ -212,11 +256,11 @@ describe('ProjectData storage superadmin alerts', () => {
   });
 
   it('pages when automatic cleanup cannot reach its target, even below the wall', async () => {
-    const { sqlite, env } = setup();
+    const { sqlite, tick } = setup();
     seedProject(sqlite, 'project-cleanup', 'Cleanup');
     seedTelemetry(sqlite, 'project-cleanup', 5 * GB, NOW - 10 * 60 * 1000, 'target_unreachable');
 
-    await runProjectDataStorageAlerts(env, NOW);
+    await tick(NOW);
 
     expect(sent()[0]!.notification).toMatchObject({
       urgency: 'medium',
@@ -225,7 +269,7 @@ describe('ProjectData storage superadmin alerts', () => {
   });
 
   it('retries a failed delivery on the next tick instead of suppressing it', async () => {
-    const { sqlite, env } = setup();
+    const { sqlite, tick } = setup();
     seedProject(sqlite, 'project-sam', 'SAM');
     seedBreaker(sqlite, 'project-sam', 'open', NOW - HOUR);
     sendNotificationMock.mockImplementation(async (_env: Env, userId: string) => {
@@ -235,41 +279,71 @@ describe('ProjectData storage superadmin alerts', () => {
       return { id: 'notification' };
     });
 
-    const first = await runProjectDataStorageAlerts(env, NOW);
+    const first = await tick(NOW);
     expect(first).toMatchObject({ notificationsSent: 1, deliveryFailures: 1 });
 
-    const second = await runProjectDataStorageAlerts(env, NOW + 5 * 60 * 1000);
+    const second = await tick(NOW + 5 * 60 * 1000);
     expect(second).toMatchObject({ notificationsSent: 1, throttled: 1, deliveryFailures: 0 });
     expect(sent().map((entry) => entry.userId)).toEqual(['admin-1', 'admin-2', 'admin-1']);
   });
 
-  it('fails closed for a recipient whose throttle cannot be read', async () => {
-    const { sqlite, env } = setup();
+  it('sends nothing when the throttle stamps cannot all be read', async () => {
+    // A failed list, and a list still incomplete after the page budget, both fail closed.
+    for (const scenario of ['list_failed', 'list_truncated'] as const) {
+      sendNotificationMock.mockClear();
+      const { sqlite, kv, tick } =
+        scenario === 'list_failed'
+          ? setup()
+          : setup({ PROJECT_DATA_STORAGE_ALERT_THROTTLE_LIST_MAX_PAGES: '2' }, 1);
+      seedProject(sqlite, 'project-sam', 'SAM');
+      seedBreaker(sqlite, 'project-sam', 'open', NOW - HOUR);
+      if (scenario === 'list_failed') {
+        kv.list.mockRejectedValue(new Error('KV unavailable'));
+      } else {
+        // Three live stamps from other alerts, one per page: two pages cannot see them all.
+        for (const key of ['a', 'b', 'c']) {
+          await kv.put(`project-data-storage-alert:breaker_open:${key}:1:admin-1`, 'x', {
+            expirationTtl: 3600,
+          });
+        }
+      }
+
+      const stats = await tick(NOW);
+
+      expect(stats).toMatchObject({ candidates: 1, alerts: 0, deliveryFailures: 1 });
+      expect(sendNotificationMock).not.toHaveBeenCalled();
+    }
+    // Control: the same truncated store with enough pages sends.
+    sendNotificationMock.mockClear();
+    const { sqlite, kv, tick } = setup(
+      { PROJECT_DATA_STORAGE_ALERT_THROTTLE_LIST_MAX_PAGES: '4' },
+      1
+    );
     seedProject(sqlite, 'project-sam', 'SAM');
     seedBreaker(sqlite, 'project-sam', 'open', NOW - HOUR);
-    vi.mocked(env.KV.get).mockRejectedValue(new Error('KV unavailable'));
-
-    const stats = await runProjectDataStorageAlerts(env, NOW);
-
-    expect(stats).toMatchObject({ alerts: 1, notificationsSent: 0, deliveryFailures: 2 });
-    expect(sendNotificationMock).not.toHaveBeenCalled();
+    for (const key of ['a', 'b', 'c']) {
+      await kv.put(`project-data-storage-alert:breaker_open:${key}:1:admin-1`, 'x', {
+        expirationTtl: 3600,
+      });
+    }
+    expect(await tick(NOW)).toMatchObject({ alerts: 1, notificationsSent: 2 });
   });
 
   it('alerts again when a breaker re-opens inside the window', async () => {
-    const { sqlite, env } = setup();
+    const { sqlite, tick } = setup();
     seedProject(sqlite, 'project-sam', 'SAM');
     seedBreaker(sqlite, 'project-sam', 'open', NOW - HOUR);
-    await runProjectDataStorageAlerts(env, NOW);
+    await tick(NOW);
     expect(sendNotificationMock).toHaveBeenCalledTimes(2);
 
     // Closed by an operator, then opened again by a new systemic failure.
     seedBreaker(sqlite, 'project-sam', 'open', NOW + 10 * 60 * 1000);
-    await runProjectDataStorageAlerts(env, NOW + 15 * 60 * 1000);
+    await tick(NOW + 15 * 60 * 1000);
     expect(sendNotificationMock).toHaveBeenCalledTimes(4);
   });
 
-  it('ranks open breakers ahead of older frozen ones before applying the per-tick cap', async () => {
-    const { sqlite, env } = setup({ PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK: '1' });
+  it('ranks open breakers ahead of older frozen ones before the scan limit', async () => {
+    const { sqlite, tick } = setup({ PROJECT_DATA_STORAGE_ALERT_SCAN_LIMIT: '1' });
     seedProject(sqlite, 'project-held-a', 'Held A');
     seedBreaker(sqlite, 'project-held-a', 'frozen', NOW - 3 * HOUR, 'operator hold');
     seedProject(sqlite, 'project-held-b', 'Held B');
@@ -277,17 +351,17 @@ describe('ProjectData storage superadmin alerts', () => {
     seedProject(sqlite, 'project-stuck', 'Stuck');
     seedBreaker(sqlite, 'project-stuck', 'open', NOW - HOUR);
 
-    const stats = await runProjectDataStorageAlerts(env, NOW);
+    const stats = await tick(NOW);
 
-    // The cap drops two conditions and says so; the one it keeps is the stopped drain.
-    expect(stats).toMatchObject({ candidates: 2, alerts: 1 });
+    // The scan reads one row and says it saw only part of the set; that row is the stopped drain.
+    expect(stats).toMatchObject({ candidates: 1, alerts: 1, scanTruncated: true });
     expect(new Set(sent().map((entry) => entry.notification.metadata.projectId))).toEqual(
       new Set(['project-stuck'])
     );
   });
 
   it('sends an escalated freeze ahead of a routine one when the cap bites', async () => {
-    const { sqlite, env } = setup({ PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK: '2' });
+    const { sqlite, tick } = setup({ PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK: '2' });
     seedProject(sqlite, 'project-routine', 'Routine');
     seedBreaker(sqlite, 'project-routine', 'frozen', NOW - 3 * HOUR, 'operator hold');
     seedTelemetry(sqlite, 'project-routine', 4 * GB, NOW);
@@ -295,7 +369,7 @@ describe('ProjectData storage superadmin alerts', () => {
     seedBreaker(sqlite, 'project-urgent', 'frozen', NOW - 2 * HOUR, 'operator hold');
     seedTelemetry(sqlite, 'project-urgent', Math.ceil(CAP * 0.97), NOW);
 
-    await runProjectDataStorageAlerts(env, NOW);
+    await tick(NOW);
 
     const kinds = new Set(
       sent().map(
@@ -306,5 +380,129 @@ describe('ProjectData storage superadmin alerts', () => {
     expect(kinds).toEqual(
       new Set(['project-urgent:near_wall:high', 'project-urgent:breaker_frozen:high'])
     );
+  });
+
+  it('keeps the largest objects when the telemetry query hits the scan limit', async () => {
+    const { sqlite, tick } = setup({ PROJECT_DATA_STORAGE_ALERT_SCAN_LIMIT: '2' });
+    // Inserted smallest first, so an unordered LIMIT would keep the wrong rows. The cleanup
+    // condition shares the query and its limit, and is the mildest of all.
+    seedProject(sqlite, 'project-cleanup', 'Cleanup');
+    seedTelemetry(sqlite, 'project-cleanup', 5 * GB, NOW, 'target_unreachable');
+    for (const percent of [95, 96, 97, 98, 99]) {
+      seedProject(sqlite, `project-${percent}`, `At ${percent}`);
+      seedTelemetry(sqlite, `project-${percent}`, Math.ceil((CAP * percent) / 100), NOW);
+    }
+
+    const stats = await tick(NOW);
+
+    // Three rows fetched (limit + 1) discloses that more conditions exist than were read.
+    expect(stats).toMatchObject({ candidates: 2, alerts: 2, scanTruncated: true });
+    expect(new Set(sent().map((entry) => entry.notification.metadata.projectId))).toEqual(
+      new Set(['project-99', 'project-98'])
+    );
+  });
+
+  it('treats exactly the wall ratio as near the wall', async () => {
+    const { sqlite, tick } = setup();
+    const wallBytes = Math.floor(CAP * 0.95);
+    seedProject(sqlite, 'project-at-wall', 'At wall');
+    seedTelemetry(sqlite, 'project-at-wall', wallBytes, NOW);
+    seedProject(sqlite, 'project-below-wall', 'Below wall');
+    seedTelemetry(sqlite, 'project-below-wall', wallBytes - 1, NOW);
+
+    await tick(NOW);
+
+    expect(new Set(sent().map((entry) => entry.notification.metadata.projectId))).toEqual(
+      new Set(['project-at-wall'])
+    );
+  });
+
+  it('never lets throttled conditions starve the ones ranked after them', async () => {
+    const { sqlite, tick } = setup({ PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK: '1' });
+    seedProject(sqlite, 'project-a', 'A');
+    seedBreaker(sqlite, 'project-a', 'open', NOW - 2 * HOUR);
+    seedProject(sqlite, 'project-b', 'B');
+    seedBreaker(sqlite, 'project-b', 'open', NOW - HOUR);
+    const FIVE_MINUTES = 5 * 60 * 1000;
+    const projectsSentAt = async (at: number) => {
+      sendNotificationMock.mockClear();
+      const stats = await tick(at);
+      return {
+        stats,
+        projects: [...new Set(sent().map((e) => e.notification.metadata.projectId))],
+      };
+    };
+    // B's first delivery to admin-2 fails, so B must come back for admin-2 alone.
+    sendNotificationMock.mockImplementation(async (_env: Env, userId: string, notification) => {
+      if (
+        userId === 'admin-2' &&
+        (notification as SentNotification).metadata.projectId === 'project-b'
+      ) {
+        sendNotificationMock.mockImplementation(async () => ({ id: 'notification' }));
+        throw new Error('NotificationService unavailable');
+      }
+      return { id: 'notification' };
+    });
+
+    // Tick 1: the budget of one goes to the older breaker; B is due but deferred.
+    let result = await projectsSentAt(NOW);
+    expect(result.projects).toEqual(['project-a']);
+    expect(result.stats).toMatchObject({ alerts: 1, deferred: 1 });
+    // Tick 2: A is throttled and costs no slot, so B is sent (admin-2's copy fails).
+    result = await projectsSentAt(NOW + FIVE_MINUTES);
+    expect(result.projects).toEqual(['project-b']);
+    expect(result.stats).toMatchObject({
+      alerts: 1,
+      deferred: 0,
+      throttled: 2,
+      deliveryFailures: 1,
+    });
+    // Tick 3: only admin-2's failed copy of B is still due.
+    result = await projectsSentAt(NOW + 2 * FIVE_MINUTES);
+    expect(sent().map((entry) => entry.userId)).toEqual(['admin-2']);
+    expect(result.projects).toEqual(['project-b']);
+    // Tick 4: both conditions are throttled for everyone; nothing is sent, nothing deferred.
+    result = await projectsSentAt(NOW + 3 * FIVE_MINUTES);
+    expect(result.stats).toMatchObject({ alerts: 0, deferred: 0, throttled: 4 });
+    // After the window both are due again, and the order repeats: every condition comes round.
+    result = await projectsSentAt(NOW + 7 * HOUR);
+    expect(result.projects).toEqual(['project-a']);
+    result = await projectsSentAt(NOW + 7 * HOUR + FIVE_MINUTES);
+    expect(result.projects).toEqual(['project-b']);
+  });
+
+  it('ranks a freeze whose own project is near the wall ahead of older routine freezes', async () => {
+    const { sqlite, tick } = setup({
+      PROJECT_DATA_STORAGE_ALERT_SCAN_LIMIT: '2',
+      PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK: '1',
+    });
+    for (const [index, age] of [5, 4, 3].entries()) {
+      seedProject(sqlite, `project-routine-${index}`, `Routine ${index}`);
+      seedBreaker(sqlite, `project-routine-${index}`, 'frozen', NOW - age * HOUR, 'operator hold');
+      seedTelemetry(sqlite, `project-routine-${index}`, 4 * GB, NOW);
+    }
+    seedProject(sqlite, 'project-urgent', 'Urgent');
+    seedBreaker(sqlite, 'project-urgent', 'frozen', NOW - HOUR, 'operator hold');
+    seedTelemetry(sqlite, 'project-urgent', Math.ceil(CAP * 0.97), NOW);
+    const alertsAt = async (at: number) => {
+      sendNotificationMock.mockClear();
+      await tick(at);
+      return [
+        ...new Set(
+          sent().map(
+            (e) =>
+              `${e.notification.metadata.projectId}:${e.notification.metadata.alertKind}:${e.notification.urgency}`
+          )
+        ),
+      ];
+    };
+
+    // The newest freeze is the only near-wall one, yet it is read ahead of three older ones,
+    // and its near-wall condition taking this tick's slot does not keep the escalation out.
+    expect(await alertsAt(NOW)).toEqual(['project-urgent:near_wall:high']);
+    expect(await alertsAt(NOW + 5 * 60 * 1000)).toEqual(['project-urgent:breaker_frozen:high']);
+    expect(await alertsAt(NOW + 10 * 60 * 1000)).toEqual([
+      'project-routine-0:breaker_frozen:medium',
+    ]);
   });
 });

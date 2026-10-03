@@ -172,8 +172,9 @@ The chain that led there:
     same test (rule 62)
   - a second breaker opening after a close re-alerts
   - a failing superadmin lookup or notification is isolated
-- Rule 47 I/O budget: the step costs 2 D1 reads + 1 superadmin read + per-alert KV get/put + per-user
-  notification. That is well under 30 per tick at the current scale (1 breaker, 1 near-cap project).
+- Rule 47 I/O budget (worst case, after round 3): 3 D1 reads + 1 KV list page (up to
+  `throttleListMaxPages`) + per delivered alert and superadmin one Notification DO RPC and one KV
+  put: `3 + pages + maxAlertsPerTick x superadmins x 2` = 20 with one page and two superadmins.
 
 ### Item 3c: measurement survives a full object
 
@@ -336,12 +337,15 @@ Verdicts: 3a, 3b, 3c and 5 CHANGES REQUESTED; 4 APPROVE.
   - open breaker: high
   - frozen breaker: medium, escalating to high when that project is near the wall
   - telemetry at or above the wall ratio: high
-  - stale telemetry for a high-usage project: medium
+  - stale telemetry for a high-usage project: high (decided in review: a stale reading near the
+    wall may already be closer to the cap, so it is not calmer than a fresh one)
   - cleanup `target_unreachable` / remediation failure: medium
 - [ ] The dedup identity is the alert kind + project + episode (breaker `opened_at`, severity tier).
 - [ ] Delivery safety:
   - claim the KV throttle only after a durable notification was created
-  - fix `sendNotificationOnce` so a failed create cannot leave a dedup claim that suppresses retries
+  - ~~fix `sendNotificationOnce`~~ superseded: its one caller moved to stamp-after-delivery
+    (`superadmin-ops-alerts.ts`), and `sendNotificationOnce` plus its DO claim were removed as dead
+    code (migration 003 kept, append-only)
 - [ ] AC5 now reads "one cron tick after the qualifying telemetry is persisted".
 - [ ] Tests:
   - the real scheduled entrypoint with failing sibling steps
@@ -377,3 +381,35 @@ Verdicts: 3a, 3b, 3c and 5 CHANGES REQUESTED; 4 APPROVE.
 - [ ] Fix the below-ratio path so it shares the archive exclusion and atomic pages.
 - [ ] Real-workerd tests with high-entropy content.
 - [ ] An end-to-end prune → archive → search test.
+
+### Round 3 (task 01M40Y4P0543BJQGKXH6X4MXQ1, 13:20Z): executed 3a/3b/3c at 44736e51f
+
+Verdicts: 3a, 3b, 3c CHANGES REQUESTED (3 HIGH, 2 MEDIUM). All five are fixed on the branch:
+
+- [x] HIGH 1 (3a): a stale poison decision could undo an operator close. The poison, the location
+      freeze, the window count and the breaker upsert are now ONE D1 batch, the count reads the
+      close time inside it, and the upsert never moves `updated_at` backwards. Tests: replay after
+      a close does not reopen (control: never closed opens); a close landing after the tick's clock
+      survives (control: three post-close poisons open, clock not moved back).
+- [x] HIGH 2 (3b): capped alerts starved later projects. The per-tick budget is now spent only on
+      due alerts: one `KV.list` snapshot of live stamps skips throttled conditions at no slot cost;
+      a failed or incomplete snapshot sends nothing. Scan window `PROJECT_DATA_STORAGE_ALERT_SCAN_LIMIT`
+      (50, max 500) with disclosure. Test: cap 1, two breakers, delivery failure, throttle expiry —
+      every condition comes round.
+- [x] HIGH 3 (3a): capacity failures could monopolize admission. Found worse while fixing: admission
+      kept fencing (unreadable) sessions into a full root. New `project-data-archive-capacity-policy.ts`:
+      failures are recorded against the refusing object (`storage_full` root, `storage_full_target`
+      shard, from the journal state); while a scope has a capacity failure no later attempt got past,
+      admission fences nothing into it and reclaim retries only its oldest failure (one probe); a
+      probe that gets past the write lifts both. Tests: full root vs healthy project (one probe, no
+      new fence, healthy session archives same tick); recovery lifts both bounds; full shard pauses
+      only that shard; target failure classified as `storage_full_target`.
+- [x] MEDIUM 4 (3c): an expired or partial local stamp bypassed the D1 fallback. D1 now decides
+      whenever the local tuple does not suppress. Workers test with an expired and a partial tuple.
+- [x] MEDIUM 5 (3b): frozen-breaker escalation is ranked in SQL from the breaker's own telemetry,
+      before the LIMIT, with a unique tie-breaker. Test: an urgent freeze behind three older routine
+      ones; its near-wall alert taking one tick's slot does not keep the escalation out.
+- Every new guard was mutation-checked (deleted once, intended test red, restored). One absence
+  assertion was found vacuous by this (it read the wrong project) and was fixed with a liveness
+  pair.
+

@@ -2184,6 +2184,57 @@ describe('ProjectData storage telemetry when the object is full', () => {
     );
   });
 
+  it('lets the D1 stamp decide when a full object is left with a stale or partial local stamp', async () => {
+    const projectId = `storage-full-stale-stamp-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await stub.createSession(null, 'Stale stamp at the cap');
+    const limitBytes = await configuredLimitForRatio(stub, 0.97);
+    const intervalMs = 6 * 60 * 60 * 1000;
+    // Written while the object still had room; it can no longer advance once the object is full.
+    const setLocalStamp = (at: number, status: string) =>
+      runInDurableObject(stub, async (_instance, state) => {
+        for (const [key, value] of [
+          ['storageSafetyLastAlertAt', String(at)],
+          ['storageSafetyLastAlertStatus', status],
+          ['storageSafetyLastAlertReason', 'threshold_exceeded'],
+        ]) {
+          state.storage.sql.exec(
+            'INSERT INTO do_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+            key,
+            value
+          );
+        }
+      });
+
+    await withProjectDataStorageEnv(
+      {
+        ...DISABLED_CLEANUPS,
+        PROJECT_DATA_STORAGE_LIMIT_BYTES: limitBytes,
+        PROJECT_DATA_STORAGE_ALERT_INTERVAL_MS: String(intervalMs),
+      },
+      async () => {
+        await setLocalStamp(Date.now() - intervalMs - 60_000, 'degraded');
+
+        // The expired local stamp does not suppress, so the first full alarm alerts once...
+        await alarmWithLocalMetaFull(stub, projectId);
+        expect(await usageAlerts(projectId)).toHaveLength(1);
+        // ...and the next one, still reading the same expired local stamp, defers to D1.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await alarmWithLocalMetaFull(stub, projectId);
+        expect(await usageAlerts(projectId)).toHaveLength(1);
+
+        // A partly written tuple (fresh time, status from an older episode) defers to D1 too.
+        await setLocalStamp(Date.now(), 'warning');
+        await alarmWithLocalMetaFull(stub, projectId);
+        expect(await usageAlerts(projectId)).toHaveLength(1);
+        // Liveness: the alarms kept measuring throughout.
+        expect((await readTelemetry(projectId))?.status).toBe('degraded');
+      }
+    );
+  });
+
   it('never lets an older measurement overwrite newer telemetry', async () => {
     const projectId = `storage-stale-write-${crypto.randomUUID()}`;
     await seedProjectGraph(projectId);

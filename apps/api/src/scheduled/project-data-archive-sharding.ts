@@ -77,6 +77,12 @@ import {
 } from './project-data-archive-breaker-policy';
 
 export { poisonProjectDataArchiveMigration } from './project-data-archive-breaker-policy';
+import {
+  archiveCapacityErrorCode,
+  ONE_CAPACITY_PROBE_PER_SCOPE_SQL,
+  projectRootAcceptingArchiveWritesSql,
+  TARGET_SHARD_ACCEPTING_ARCHIVE_WRITES_SQL,
+} from './project-data-archive-capacity-policy';
 
 const log = createModuleLogger('scheduled.project_data_archive_sharding');
 const PROJECT_DATA_ARCHIVE_DEFAULT_POISON_AFTER_ATTEMPTS = 3;
@@ -1211,6 +1217,7 @@ async function selectReclaimableMigrations(
        AND (m.lease_expires_at IS NULL OR m.lease_expires_at <= ?)
        AND COALESCE(breaker.state, 'closed') = 'closed'
        ${FAILED_RETRY_DELAY_SQL}
+       ${ONE_CAPACITY_PROBE_PER_SCOPE_SQL}
      ORDER BY m.updated_at ASC, m.migration_id ASC
      LIMIT ?`
   )
@@ -1230,6 +1237,8 @@ async function selectScopedReclaimableMigrations(
   const sessionPredicate = scope.sessionId ? 'AND m.session_id = ?' : '';
   // An operator who names the session is asking for it now; the delay only paces the sweep.
   const retryDelayPredicate = scope.sessionId ? '' : FAILED_RETRY_DELAY_SQL;
+  // Likewise the one-probe bound paces the sweep against a full object, not a named retry.
+  const capacityProbePredicate = scope.sessionId ? '' : ONE_CAPACITY_PROBE_PER_SCOPE_SQL;
   const rows = await env.DATABASE.prepare(
     `SELECT m.migration_id, m.project_id, m.session_id, m.storage_format, m.state, m.source_owner_name,
             m.target_owner_name, m.target_generation, m.source_intent_token,
@@ -1244,6 +1253,7 @@ async function selectScopedReclaimableMigrations(
        AND (m.lease_expires_at IS NULL OR m.lease_expires_at <= ?)
        AND COALESCE(breaker.state, 'closed') = 'closed'
        ${retryDelayPredicate}
+       ${capacityProbePredicate}
      ORDER BY m.updated_at ASC, m.migration_id ASC
      LIMIT ?`
   )
@@ -1379,6 +1389,7 @@ async function selectCandidates(
        AND ss.ended_at <= ?
        AND (loc.session_id IS NULL OR loc.location_state = 'root')
        AND COALESCE(breaker.state, 'closed') = 'closed'
+       AND ${projectRootAcceptingArchiveWritesSql('ss.project_id')}
        AND NOT EXISTS (
          SELECT 1
          FROM session_snapshots snap
@@ -1434,6 +1445,7 @@ async function selectScopedCandidates(
        AND ss.ended_at <= ?
        AND (loc.session_id IS NULL OR loc.location_state = 'root')
        AND COALESCE(breaker.state, 'closed') = 'closed'
+       AND ${projectRootAcceptingArchiveWritesSql('ss.project_id')}
        AND NOT EXISTS (
          SELECT 1
          FROM session_snapshots snap
@@ -1476,6 +1488,9 @@ async function createCandidateJournal(
   const targetGeneration = generationRow?.generation ?? 1;
   const target = archiveShardProjectDataOwner(env, projectId, sessionId, targetGeneration);
   const migrationId = crypto.randomUUID();
+  // Never fence a session into an object that is refusing archive writes: it could only fail
+  // there and stay unreadable (project-data-archive-capacity-policy.ts).
+  const capacityAdmissionBinds = [projectId, projectId, target.ownerName];
   await env.DATABASE.batch([
     env.DATABASE.prepare(
       `INSERT INTO project_data_archive_migrations (
@@ -1489,7 +1504,9 @@ async function createCandidateJournal(
          FROM project_data_session_locations
          WHERE project_id = ? AND session_id = ? AND location_state != 'root'
        )
-         AND ${PROJECT_ARCHIVE_BREAKER_CLOSED_SQL}`
+         AND ${PROJECT_ARCHIVE_BREAKER_CLOSED_SQL}
+         AND ${projectRootAcceptingArchiveWritesSql('?')}
+         AND ${TARGET_SHARD_ACCEPTING_ARCHIVE_WRITES_SQL}`
     ).bind(
       migrationId,
       projectId,
@@ -1505,7 +1522,8 @@ async function createCandidateJournal(
         : LEGACY_ARCHIVE_FORMAT,
       projectId,
       sessionId,
-      projectId
+      projectId,
+      ...capacityAdmissionBinds
     ),
     env.DATABASE.prepare(
       `INSERT INTO project_data_session_locations (
@@ -1519,6 +1537,8 @@ async function createCandidateJournal(
          WHERE project_id = ? AND session_id = ? AND location_state != 'root'
        )
          AND ${PROJECT_ARCHIVE_BREAKER_CLOSED_SQL}
+         AND ${projectRootAcceptingArchiveWritesSql('?')}
+         AND ${TARGET_SHARD_ACCEPTING_ARCHIVE_WRITES_SQL}
        ON CONFLICT(project_id, session_id) DO UPDATE SET
          location_state = CASE
            WHEN project_data_session_locations.location_state = 'root' THEN 'migrating'
@@ -1564,7 +1584,8 @@ async function createCandidateJournal(
       now,
       projectId,
       sessionId,
-      projectId
+      projectId,
+      ...capacityAdmissionBinds
     ),
   ]);
   return readMigration(env, migrationId);
@@ -3232,6 +3253,8 @@ async function markFailed(
       migrationId: current.migration_id,
       projectId: current.project_id,
       sessionId: current.session_id,
+      errorCode: archiveCapacityErrorCode(current.state),
+      targetOwnerName: current.target_owner_name,
       attemptCount: current.attempt_count,
       poisonAfterAttempts: config.poisonAfterAttempts,
       action: 'kept_failed_and_refunded_attempt',
@@ -3252,7 +3275,7 @@ async function markFailed(
        ${leaseGuard}`
   )
     .bind(
-      storageFull ? 'storage_full' : errorCode(error),
+      storageFull ? archiveCapacityErrorCode(current.state) : errorCode(error),
       errorMessage(error),
       storageFull ? 1 : 0,
       now,

@@ -321,14 +321,13 @@ function formatGrowthForecast(telemetry: ProjectDataStorageTelemetry): string {
   return `${growth}, ${telemetry.estimatedDaysToLimit.toFixed(1)} days to limit`;
 }
 
-async function readD1AlertStamp(
-  env: Env,
-  projectId: string
-): Promise<{
+interface AlertStamp {
   lastAlertAt: number | null;
   lastAlertStatus: string | null;
   lastAlertReason: string | null;
-} | null> {
+}
+
+async function readD1AlertStamp(env: Env, projectId: string): Promise<AlertStamp | null> {
   const row = await env.DATABASE.prepare(
     `SELECT last_alert_at, last_alert_status, last_alert_reason
      FROM project_data_storage_telemetry
@@ -360,27 +359,22 @@ export async function maybePersistProjectDataStorageAlert(
   if (!isThresholdAlert && !isCleanupTargetUnreachable) return;
 
   const now = Date.now();
-  const localAlertAt = readMetaNumber(sql, META_LAST_ALERT_AT);
-  // The local stamp is best-effort (it cannot be written at the 10 GiB cap), so fall back to the
-  // copy every alert also writes to D1; otherwise a full object would re-alert on every measure.
-  const remote = localAlertAt === null ? await readD1AlertStamp(env, telemetry.projectId) : null;
-  const lastAlertAt = localAlertAt ?? remote?.lastAlertAt ?? null;
-  const lastAlertStatus =
-    localAlertAt !== null
-      ? readMeta(sql, META_LAST_ALERT_STATUS)
-      : (remote?.lastAlertStatus ?? null);
-  const lastAlertReason =
-    localAlertAt !== null
-      ? readMeta(sql, META_LAST_ALERT_REASON)
-      : (remote?.lastAlertReason ?? null);
-  if (
-    lastAlertAt !== null &&
-    now - lastAlertAt < config.alertIntervalMs &&
-    lastAlertStatus === telemetry.status &&
-    lastAlertReason === reason
-  ) {
-    return;
-  }
+  const suppresses = (stamp: AlertStamp | null): boolean =>
+    stamp !== null &&
+    stamp.lastAlertAt !== null &&
+    now - stamp.lastAlertAt < config.alertIntervalMs &&
+    stamp.lastAlertStatus === telemetry.status &&
+    stamp.lastAlertReason === reason;
+  const local: AlertStamp = {
+    lastAlertAt: readMetaNumber(sql, META_LAST_ALERT_AT),
+    lastAlertStatus: readMeta(sql, META_LAST_ALERT_STATUS),
+    lastAlertReason: readMeta(sql, META_LAST_ALERT_REASON),
+  };
+  if (suppresses(local)) return;
+  // The local stamp is best-effort: at the 10 GiB cap it can be missing, stuck at an expired
+  // value, or partly written. Every alert also stamps D1 in one upsert, so D1 decides before
+  // this object alerts again; otherwise a full object would re-alert on every measurement.
+  if (suppresses(await readD1AlertStamp(env, telemetry.projectId))) return;
 
   const growthText = formatGrowthForecast(telemetry);
   const message = isCleanupTargetUnreachable

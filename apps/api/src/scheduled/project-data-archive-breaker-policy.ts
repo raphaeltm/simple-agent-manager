@@ -39,7 +39,8 @@ function boundedInt(raw: string | undefined, fallback: number, min: number, max:
 export function resolveBreakerPoisonPolicy(
   env: Pick<
     Env,
-    'PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD' | 'PROJECT_DATA_ARCHIVE_BREAKER_POISON_WINDOW_MS'
+    | 'PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD'
+    | 'PROJECT_DATA_ARCHIVE_BREAKER_POISON_WINDOW_MS'
   >
 ): BreakerPoisonPolicy {
   return {
@@ -90,6 +91,13 @@ export const PROJECT_ARCHIVE_BREAKER_CLOSED_SQL = `COALESCE(
  * `breakerPoisonThreshold` distinct sessions of the project were poisoned inside
  * `breakerPoisonWindowMs` and since the breaker was last closed. Poison time is the stable
  * `poisoned_at` event, so a poison that was later abandoned still counts inside the window.
+ *
+ * The poison, the quarantine and the breaker decision are one D1 batch (one transaction), so
+ * an interrupted call cannot leave a session poisoned but unfrozen, or quarantined while the
+ * decision to open the breaker is lost. Every write is guarded by the state it depends on, so
+ * a replay is harmless: the freeze applies only to a still-migrating location of a poisoned
+ * migration, and the breaker counts only poisons since the last close, which is what keeps a
+ * replayed failure from re-opening a breaker an operator has since closed.
  */
 export async function poisonProjectDataArchiveMigration(
   env: Env,
@@ -104,89 +112,115 @@ export async function poisonProjectDataArchiveMigration(
 ): Promise<boolean> {
   const now = input.now ?? Date.now();
   const policy = input.breakerPolicy ?? resolveBreakerPoisonPolicy(env);
-  const result = await env.DATABASE.prepare(
-    `UPDATE project_data_archive_migrations
-     SET state = 'poisoned',
-         error_code = ?,
-         error_message = ?,
-         lease_owner = NULL,
-         lease_expires_at = NULL,
-         poisoned_at = COALESCE(poisoned_at, ?),
-         updated_at = ?
-     WHERE migration_id = ?
-       AND project_id = ?
-       AND state NOT IN ('source_deleted', 'published', 'poisoned')`
-  )
-    .bind(input.reason, input.message ?? input.reason, now, now, input.migrationId, input.projectId)
-    .run();
-  // A zero-row poison (already poisoned, or terminal) must neither freeze a location nor
-  // re-evaluate the breaker: it was counted when it was poisoned, and a replayed failure must
-  // not re-open a breaker an operator has since closed.
-  if ((result.meta.changes ?? 0) === 0) return false;
-
-  await env.DATABASE.prepare(
-    `UPDATE project_data_session_locations
-     SET location_state = 'frozen',
-         updated_at = ?
-     WHERE migration_id = ?
-       AND project_id = ?
-       AND location_state = 'migrating'`
-  )
-    .bind(now, input.migrationId, input.projectId)
-    .run();
-
-  const breaker = await env.DATABASE.prepare(
-    `SELECT state, updated_at FROM project_data_archive_circuit_breakers WHERE project_id = ?`
-  )
-    .bind(input.projectId)
-    .first<{ state: string; updated_at: number }>();
-  const lastClosedAt = breaker?.state === 'closed' ? breaker.updated_at : 0;
-  const windowStart = Math.max(now - policy.breakerPoisonWindowMs, lastClosedAt);
-  const poisoned = await env.DATABASE.prepare(
-    `SELECT COUNT(DISTINCT session_id) AS sessions
+  const windowFloor = now - policy.breakerPoisonWindowMs;
+  // Binds: project id, window floor, project id.
+  const poisonedSessionsSql = `SELECT COUNT(DISTINCT session_id) AS sessions
      FROM project_data_archive_migrations
      WHERE project_id = ?
        AND poisoned_at IS NOT NULL
-       AND poisoned_at >= ?`
-  )
-    .bind(input.projectId, windowStart)
-    .first<{ sessions: number }>();
-  const poisonedSessions = poisoned?.sessions ?? 0;
-  const opensBreaker = poisonedSessions >= policy.breakerPoisonThreshold;
-  log.warn('project_data_archive_migration_poisoned', {
-    migrationId: input.migrationId,
-    projectId: input.projectId,
-    reason: input.reason,
-    poisonedSessions,
-    breakerPoisonThreshold: policy.breakerPoisonThreshold,
-    breakerPoisonWindowMs: policy.breakerPoisonWindowMs,
-    previousBreakerState: breaker?.state ?? 'none',
-    action: opensBreaker ? 'quarantined_session_and_opened_breaker' : 'quarantined_session',
-  });
-  if (!opensBreaker) return true;
-
-  const breakerReason = `poison_threshold:${poisonedSessions}/${policy.breakerPoisonThreshold}:${input.reason}`;
-  await env.DATABASE.prepare(
-    `INSERT INTO project_data_archive_circuit_breakers (project_id, state, reason, opened_at, updated_at)
-     VALUES (?, 'open', ?, ?, ?)
-     ON CONFLICT(project_id) DO UPDATE SET
-       state = 'open',
-       reason = excluded.reason,
-       opened_at = COALESCE(project_data_archive_circuit_breakers.opened_at, excluded.opened_at),
-       updated_at = excluded.updated_at
-     WHERE project_data_archive_circuit_breakers.state != 'frozen'`
-  )
-    .bind(input.projectId, breakerReason, now, now)
-    .run();
-  if (breaker?.state !== 'open' && breaker?.state !== 'frozen') {
+       AND poisoned_at >= MAX(?, COALESCE(
+         (SELECT updated_at FROM project_data_archive_circuit_breakers
+          WHERE project_id = ? AND state = 'closed'),
+         0
+       ))`;
+  const db = env.DATABASE;
+  const [previous, poisonResult, freezeResult, counted, breakerResult] = await db.batch([
+    db
+      .prepare(`SELECT state FROM project_data_archive_circuit_breakers WHERE project_id = ?`)
+      .bind(input.projectId),
+    db
+      .prepare(
+        `UPDATE project_data_archive_migrations
+         SET state = 'poisoned',
+             error_code = ?,
+             error_message = ?,
+             lease_owner = NULL,
+             lease_expires_at = NULL,
+             poisoned_at = COALESCE(poisoned_at, ?),
+             updated_at = ?
+         WHERE migration_id = ?
+           AND project_id = ?
+           AND state NOT IN ('source_deleted', 'published', 'poisoned')`
+      )
+      .bind(
+        input.reason,
+        input.message ?? input.reason,
+        now,
+        now,
+        input.migrationId,
+        input.projectId
+      ),
+    db
+      .prepare(
+        `UPDATE project_data_session_locations
+         SET location_state = 'frozen',
+             updated_at = ?
+         WHERE migration_id = ?
+           AND project_id = ?
+           AND location_state = 'migrating'
+           AND EXISTS (
+             SELECT 1 FROM project_data_archive_migrations
+             WHERE migration_id = ? AND project_id = ? AND state = 'poisoned'
+           )`
+      )
+      .bind(now, input.migrationId, input.projectId, input.migrationId, input.projectId),
+    db.prepare(poisonedSessionsSql).bind(input.projectId, windowFloor, input.projectId),
+    db
+      .prepare(
+        `INSERT INTO project_data_archive_circuit_breakers (project_id, state, reason, opened_at, updated_at)
+         SELECT ?, 'open', 'poison_threshold:' || recent.sessions || ?, ?, ?
+         FROM (${poisonedSessionsSql}) AS recent
+         WHERE recent.sessions >= ?
+         ON CONFLICT(project_id) DO UPDATE SET
+           state = 'open',
+           reason = excluded.reason,
+           opened_at = COALESCE(project_data_archive_circuit_breakers.opened_at, excluded.opened_at),
+           -- A tick's clock can trail an operator's close; never move the row backwards.
+           updated_at = MAX(project_data_archive_circuit_breakers.updated_at, excluded.updated_at)
+         WHERE project_data_archive_circuit_breakers.state != 'frozen'`
+      )
+      .bind(
+        input.projectId,
+        // Built here: SQLite can render a bound number as REAL ("3.0") when concatenated.
+        `/${policy.breakerPoisonThreshold}:${input.reason}`,
+        now,
+        now,
+        input.projectId,
+        windowFloor,
+        input.projectId,
+        policy.breakerPoisonThreshold
+      ),
+  ]);
+  const previousState = (previous?.results?.[0] as { state?: string } | undefined)?.state ?? 'none';
+  const poisoned = (poisonResult?.meta.changes ?? 0) > 0;
+  const locationFrozen = (freezeResult?.meta.changes ?? 0) > 0;
+  // An upsert blocked by its WHERE (an operator-frozen breaker) reports zero changes.
+  const breakerOpened = (breakerResult?.meta.changes ?? 0) > 0 && previousState !== 'open';
+  const poisonedSessions =
+    (counted?.results?.[0] as { sessions?: number } | undefined)?.sessions ?? 0;
+  if (poisoned || locationFrozen) {
+    log.warn('project_data_archive_migration_poisoned', {
+      migrationId: input.migrationId,
+      projectId: input.projectId,
+      reason: input.reason,
+      replay: !poisoned,
+      locationFrozen,
+      poisonedSessions,
+      breakerPoisonThreshold: policy.breakerPoisonThreshold,
+      breakerPoisonWindowMs: policy.breakerPoisonWindowMs,
+      previousBreakerState: previousState,
+      action: breakerOpened ? 'quarantined_session_and_opened_breaker' : 'quarantined_session',
+    });
+  }
+  if (breakerOpened) {
     log.error('project_data_archive_breaker_opened', {
       projectId: input.projectId,
       migrationId: input.migrationId,
-      previousState: breaker?.state ?? 'none',
-      reason: breakerReason,
+      previousState,
+      reason: `poison_threshold:${poisonedSessions}/${policy.breakerPoisonThreshold}:${input.reason}`,
       poisonedSessions,
       breakerPoisonThreshold: policy.breakerPoisonThreshold,
     });
   }
-  return true;
+  return poisoned;
 }

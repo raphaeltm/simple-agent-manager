@@ -76,6 +76,9 @@ export const NOTIFICATION_MIGRATIONS: NotificationMigration[] = [
     },
   },
   {
+    // Unused since 2026-10-03: operator alerts stamp a KV throttle only after the notification
+    // is created (scheduled/superadmin-ops-alerts.ts), so a failed create can no longer leave a
+    // claim that suppresses the alert. Kept because applied DO migrations are append-only.
     name: '003-notification-dedup-claims',
     run: (sql) => {
       sql.exec(`

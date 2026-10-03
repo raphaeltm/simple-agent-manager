@@ -7,14 +7,14 @@ SAM combines an in-app notification center with optional Web Push delivery for a
 
 ## Notification Types
 
-| Type              | Urgency | When It Fires                                                            |
-| ----------------- | ------- | ------------------------------------------------------------------------ |
-| **task_complete** | Medium  | A task finishes executing successfully (includes PR URL or branch name)  |
-| **needs_input**   | High    | An agent calls `request_human_input` because it needs your decision      |
-| **error**         | High    | Execution fails with an error                                            |
-| **progress**      | Low     | An agent reports incremental progress via `update_task_status`           |
-| **session_ended** | Medium  | A conversation-mode session turn completes                               |
-| **pr_created**    | Medium  | An agent creates a pull request                                          |
+| Type              | Urgency | When It Fires                                                                                                                 |
+| ----------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **task_complete** | Medium  | A task finishes executing successfully (includes PR URL or branch name)                                                       |
+| **needs_input**   | High    | An agent calls `request_human_input` because it needs your decision                                                           |
+| **error**         | High    | Execution fails with an error                                                                                                 |
+| **progress**      | Low     | An agent reports incremental progress via `update_task_status`                                                                |
+| **session_ended** | Medium  | A conversation-mode session turn completes                                                                                    |
+| **pr_created**    | Medium  | An agent creates a pull request                                                                                               |
 | **cron_failure**  | High    | A five-minute operational recovery sweep fails, or ProjectData storage needs an operator (active superadmins only; see below) |
 
 ## Delivery Channels
@@ -111,6 +111,12 @@ once per `PROJECT_DATA_STORAGE_ALERT_NOTIFICATION_THROTTLE_MS` (6 hours) while t
 condition lasts. An alert can only be as fresh as the telemetry the object last
 exported; it says when that was, and says "telemetry stale" when nothing newer
 than `PROJECT_DATA_STORAGE_ALERT_STALE_AFTER_MS` (3 hours) has arrived.
+
+Each tick delivers at most `PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK` (4)
+alerts, most severe first, and only alerts that are due count toward that limit:
+a condition already sent within its window is skipped without using a slot, so
+every ongoing condition is delivered in turn. If the tick cannot read the
+throttle markers, it sends nothing rather than risk repeating every alert.
 
 ### Retention
 
