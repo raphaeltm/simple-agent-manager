@@ -755,6 +755,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_EXAMPLES_MAX?: string;
   PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_REASON_MAX_LENGTH?: string;
   PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS?: string;
+  PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD?: string; // Distinct sessions poisoned within the window before a project's archive breaker opens (default: 3; 1 = open on any poison)
+  PROJECT_DATA_ARCHIVE_BREAKER_POISON_WINDOW_MS?: string; // Window for counting distinct poisoned sessions; poisons before the last breaker close never count (default: 86400000)
   PROJECT_DATA_ARCHIVE_R2_PREFIX?: string;
   PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS?: string;
   PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY?: string;

@@ -17,6 +17,7 @@ import {
   runProjectDataArchiveSharding,
   runScopedProjectDataArchiveCanary,
 } from '../../../src/scheduled/project-data-archive-sharding';
+import { ProjectDataStorageFullError } from '../../../src/services/project-data-storage-errors';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const NOW = Date.now() + 60_000;
@@ -3286,6 +3287,276 @@ describe('archive-sharding frozen-intent inspection skips self-healing pre-copy 
       // No DO fan-out was spent on the refused row.
       expect(source.archiveSourceInspectIntent).toHaveBeenCalledTimes(1);
       expect(target.archiveTargetInspectSession).toHaveBeenCalledTimes(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe('archive-sharding breaker opens only for systemic poisoning', () => {
+  const HOUR = 60 * 60 * 1000;
+
+  /** A failed journal one attempt short of the poison limit, past the retry delay. */
+  function seedExhaustedFailure(sqlite: Database.Database, sessionId: string): string {
+    seedSessionSummary(sqlite, { sessionId, messageCount: 500 });
+    return seedMigration(sqlite, 'failed', {
+      migrationId: `migration-${sessionId}`,
+      sessionId,
+      leaseExpiresAt: null,
+      attemptCount: 2,
+      updatedAt: NOW - 2 * HOUR,
+    });
+  }
+
+  /** A historical poisoned journal with no live location row (an earlier generation). */
+  function seedPoisonHistory(
+    sqlite: Database.Database,
+    input: { migrationId: string; sessionId: string; poisonedAt: number }
+  ): void {
+    sqlite
+      .prepare(
+        `INSERT INTO project_data_archive_migrations
+           (migration_id, project_id, session_id, state, source_owner_name, target_owner_name,
+            target_generation, lease_epoch, attempt_count, error_code, poisoned_at,
+            created_at, updated_at)
+         VALUES (?, ?, ?, 'poisoned', ?, ?, 1, 0, 3, 'attempts_exhausted:Error', ?, 1000, ?)`
+      )
+      .run(
+        input.migrationId,
+        PROJECT_ID,
+        input.sessionId,
+        PROJECT_ID,
+        TARGET_OWNER,
+        input.poisonedAt,
+        input.poisonedAt
+      );
+  }
+
+  function breaker(sqlite: Database.Database) {
+    return sqlite
+      .prepare(
+        'SELECT state, reason, updated_at FROM project_data_archive_circuit_breakers WHERE project_id = ?'
+      )
+      .get(PROJECT_ID) as { state: string; reason: string; updated_at: number } | undefined;
+  }
+
+  function journal(sqlite: Database.Database, migrationId: string) {
+    return sqlite
+      .prepare(
+        `SELECT state, error_code, attempt_count, poisoned_at
+         FROM project_data_archive_migrations WHERE migration_id = ?`
+      )
+      .get(migrationId) as Record<string, unknown>;
+  }
+
+  /** One real sweep tick whose source object fails every call with `error`. */
+  async function failingSweep(
+    sqlite: Database.Database,
+    error: Error,
+    overrides: Partial<Env> = {}
+  ) {
+    const source = createFakeSource();
+    source.ensureProjectId.mockRejectedValue(error);
+    const stats = await runProjectDataArchiveSharding(
+      makeEnv(sqlite, {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+        PROJECT_DATA: createProjectDataNamespace({
+          [SOURCE_OWNER]: source,
+          [TARGET_OWNER]: createFakeTarget(),
+        }),
+        ...overrides,
+      }),
+      new Date(NOW)
+    );
+    sqlite
+      .prepare(`UPDATE project_data_archive_global_sweep_cadence SET next_eligible_at = 0`)
+      .run();
+    return stats;
+  }
+
+  /** What the real candidate selector would offer this project next (dry run, no writes). */
+  async function selectableSessions(sqlite: Database.Database): Promise<string[]> {
+    const result = await runScopedProjectDataArchiveCanary(
+      makeEnv(sqlite, {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+        PROJECT_DATA: createProjectDataNamespace({}),
+      }),
+      { projectId: PROJECT_ID, dryRun: true, limit: 5, nowDate: new Date(NOW) }
+    );
+    return result.selected.map((item) => item.sessionId);
+  }
+
+  it('quarantines one poisoned session without stopping the rest of the project', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      const poisoned = seedExhaustedFailure(sqlite, 'session-bad');
+      seedSessionSummary(sqlite, { sessionId: 'session-next', messageCount: 400 });
+
+      const stats = await failingSweep(sqlite, new Error('shard export failed'), {
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
+      });
+
+      expect(stats).toMatchObject({ poisoned: 1 });
+      expect(journal(sqlite, poisoned)).toMatchObject({
+        state: 'poisoned',
+        error_code: 'attempts_exhausted:Error',
+      });
+      expect(readLocationRow(sqlite, 'session-bad')).toMatchObject({ location_state: 'frozen' });
+      // The project breaker stays closed, so the real selector still offers the next session:
+      // with a breaker that opened on this one poison, this list was empty for five days.
+      expect(breaker(sqlite)).toBeUndefined();
+      expect(await selectableSessions(sqlite)).toEqual(['session-next']);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('opens the breaker at the default threshold of three distinct poisoned sessions', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedExhaustedFailure(sqlite, 'session-a');
+      seedExhaustedFailure(sqlite, 'session-b');
+      seedSessionSummary(sqlite, { sessionId: 'session-healthy', messageCount: 300 });
+
+      // Two distinct poisons: below the default threshold, the drain keeps going.
+      await failingSweep(sqlite, new Error('shard export failed'), {
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '2',
+      });
+      expect(journal(sqlite, 'migration-session-a')).toMatchObject({ state: 'poisoned' });
+      expect(journal(sqlite, 'migration-session-b')).toMatchObject({ state: 'poisoned' });
+      expect(breaker(sqlite)).toBeUndefined();
+      expect(await selectableSessions(sqlite)).toEqual(['session-healthy']);
+
+      // A third distinct session poisoned inside the window is the systemic signal.
+      seedExhaustedFailure(sqlite, 'session-c');
+      await failingSweep(sqlite, new Error('shard export failed'), {
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
+      });
+      expect(journal(sqlite, 'migration-session-c')).toMatchObject({ state: 'poisoned' });
+      expect(breaker(sqlite)).toMatchObject({
+        state: 'open',
+        reason: 'poison_threshold:3/3:attempts_exhausted:Error',
+      });
+      expect(await selectableSessions(sqlite)).toEqual([]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('counts only poisons inside the window and after the last breaker close', async () => {
+    const env = { PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD: '2' };
+    async function poisonAfter(
+      history: { poisonedAt: number }[],
+      closedAt: number | null
+    ): Promise<string | undefined> {
+      const sqlite = new Database(':memory:');
+      try {
+        createCoordinatorTables(sqlite);
+        history.forEach((entry, index) =>
+          seedPoisonHistory(sqlite, {
+            migrationId: `old-${index}`,
+            sessionId: `session-old-${index}`,
+            poisonedAt: entry.poisonedAt,
+          })
+        );
+        if (closedAt !== null) {
+          sqlite
+            .prepare(
+              `INSERT INTO project_data_archive_circuit_breakers (project_id, state, reason, opened_at, updated_at)
+               VALUES (?, 'closed', 'Closed from admin UI', NULL, ?)`
+            )
+            .run(PROJECT_ID, closedAt);
+        }
+        seedExhaustedFailure(sqlite, 'session-bad');
+        await failingSweep(sqlite, new Error('shard export failed'), env);
+        expect(journal(sqlite, 'migration-session-bad')).toMatchObject({ state: 'poisoned' });
+        return breaker(sqlite)?.state;
+      } finally {
+        sqlite.close();
+      }
+    }
+
+    // Control: a poison 2 h ago is inside the 24 h window, so this poison makes two.
+    expect(await poisonAfter([{ poisonedAt: NOW - 2 * HOUR }], null)).toBe('open');
+    // Outside the window: it does not count.
+    expect(await poisonAfter([{ poisonedAt: NOW - 25 * HOUR }], null)).toBeUndefined();
+    // Inside the window, but an operator closed the breaker after it: it does not count.
+    expect(await poisonAfter([{ poisonedAt: NOW - 2 * HOUR }], NOW - HOUR)).toBe('closed');
+  });
+
+  it('counts a session poisoned twice as one distinct session', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      // An earlier generation of the same session was poisoned (then abandoned to root).
+      seedPoisonHistory(sqlite, {
+        migrationId: 'old-generation',
+        sessionId: 'session-bad',
+        poisonedAt: NOW - HOUR,
+      });
+      seedExhaustedFailure(sqlite, 'session-bad');
+
+      await failingSweep(sqlite, new Error('shard export failed'), {
+        PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD: '2',
+      });
+
+      expect(journal(sqlite, 'migration-session-bad')).toMatchObject({ state: 'poisoned' });
+      expect(breaker(sqlite)).toBeUndefined();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('never poisons on a full Durable Object, so the drain keeps retrying', async () => {
+    for (const error of [
+      new Error('Exceeded the maximum database size.'),
+      new ProjectDataStorageFullError(PROJECT_ID, 'archive_source_prepare'),
+    ]) {
+      const sqlite = new Database(':memory:');
+      try {
+        createCoordinatorTables(sqlite);
+        const migrationId = seedExhaustedFailure(sqlite, 'session-wall');
+
+        const stats = await failingSweep(sqlite, error, {
+          PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD: '1',
+        });
+
+        expect(stats).toMatchObject({ poisoned: 0, failed: 1 });
+        expect(journal(sqlite, migrationId)).toMatchObject({
+          state: 'failed',
+          error_code: 'storage_full',
+          attempt_count: 3,
+          poisoned_at: null,
+        });
+        expect(breaker(sqlite)).toBeUndefined();
+      } finally {
+        sqlite.close();
+      }
+    }
+  });
+
+  it('opens on the first poison when the threshold is configured to 1', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedExhaustedFailure(sqlite, 'session-bad');
+      seedSessionSummary(sqlite, { sessionId: 'session-next', messageCount: 400 });
+
+      await failingSweep(sqlite, new Error('shard export failed'), {
+        PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
+      });
+
+      expect(breaker(sqlite)).toMatchObject({
+        state: 'open',
+        reason: 'poison_threshold:1/1:attempts_exhausted:Error',
+      });
+      expect(await selectableSessions(sqlite)).toEqual([]);
     } finally {
       sqlite.close();
     }

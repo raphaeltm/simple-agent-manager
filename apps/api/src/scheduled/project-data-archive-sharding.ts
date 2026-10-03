@@ -60,7 +60,9 @@ import {
   releaseUnusedArchiveReservation,
   reserveArchiveWrites,
 } from '../project-data-archive/write-budget';
+import { isDurableObjectStorageFullError } from '../services/durable-object-retry';
 import { getProjectDataArchiveRolloutWarningConfig } from '../services/project-data-archive-rollout-controls';
+import { PROJECT_DATA_STORAGE_FULL } from '../services/project-data-storage-errors';
 import {
   archiveShardProjectDataOwner,
   assertArchiveJournalTransition,
@@ -72,6 +74,16 @@ import {
 const log = createModuleLogger('scheduled.project_data_archive_sharding');
 const PROJECT_DATA_ARCHIVE_DEFAULT_POISON_AFTER_ATTEMPTS = 3;
 const PROJECT_DATA_ARCHIVE_MAX_POISON_AFTER_ATTEMPTS = 100;
+/**
+ * Distinct sessions that must be poisoned inside the window before the PROJECT breaker opens.
+ * A single poisoned session is already quarantined on its own (its location is frozen), so the
+ * breaker exists only for systemic failure; one bad session must not stop the project's drain.
+ */
+const PROJECT_DATA_ARCHIVE_DEFAULT_BREAKER_POISON_THRESHOLD = 3;
+const PROJECT_DATA_ARCHIVE_MAX_BREAKER_POISON_THRESHOLD = 100;
+const PROJECT_DATA_ARCHIVE_DEFAULT_BREAKER_POISON_WINDOW_MS = 24 * 60 * 60 * 1000;
+const PROJECT_DATA_ARCHIVE_MIN_BREAKER_POISON_WINDOW_MS = 60 * 1000;
+const PROJECT_DATA_ARCHIVE_MAX_BREAKER_POISON_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_SESSIONS = 5;
 const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_WALL_TIME_MS = 15_000;
 const PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_LIMIT = 5;
@@ -177,6 +189,9 @@ type ArchiveCoordinatorConfig = {
   leaseMs: number;
   wallTimeMs: number;
   poisonAfterAttempts: number;
+  /** See `PROJECT_DATA_ARCHIVE_DEFAULT_BREAKER_POISON_THRESHOLD`. */
+  breakerPoisonThreshold: number;
+  breakerPoisonWindowMs: number;
   r2Prefix: string;
   r2TimeoutMs: number;
 };
@@ -469,6 +484,49 @@ function envInt(value: string | undefined, fallback: number, min: number, max: n
   return fallback;
 }
 
+type BreakerPoisonPolicy = Pick<
+  ArchiveCoordinatorConfig,
+  'breakerPoisonThreshold' | 'breakerPoisonWindowMs'
+>;
+
+function resolveBreakerPoisonPolicy(
+  env: Pick<
+    Env,
+    'PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD' | 'PROJECT_DATA_ARCHIVE_BREAKER_POISON_WINDOW_MS'
+  >
+): BreakerPoisonPolicy {
+  return {
+    breakerPoisonThreshold: envInt(
+      env.PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD,
+      PROJECT_DATA_ARCHIVE_DEFAULT_BREAKER_POISON_THRESHOLD,
+      1,
+      PROJECT_DATA_ARCHIVE_MAX_BREAKER_POISON_THRESHOLD
+    ),
+    breakerPoisonWindowMs: envInt(
+      env.PROJECT_DATA_ARCHIVE_BREAKER_POISON_WINDOW_MS,
+      PROJECT_DATA_ARCHIVE_DEFAULT_BREAKER_POISON_WINDOW_MS,
+      PROJECT_DATA_ARCHIVE_MIN_BREAKER_POISON_WINDOW_MS,
+      PROJECT_DATA_ARCHIVE_MAX_BREAKER_POISON_WINDOW_MS
+    ),
+  };
+}
+
+/**
+ * A full Durable Object is an environmental condition, not a property of the session being
+ * archived: at the 10 GiB cap every journal write fails, for every candidate. Counting those
+ * failures toward poisoning would let the full object poison the drain that is the only thing
+ * able to empty it (it did, 2026-09-03 09:51Z), so they never poison (`.claude/rules/74`).
+ * The DO surfaces the condition as its message; the API wrapper as `PROJECT_DATA_STORAGE_FULL`.
+ */
+function isArchiveStorageFullFailure(error: unknown): boolean {
+  if (isDurableObjectStorageFullError(error)) return true;
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === 'ProjectDataStorageFullError' ||
+    (error as { error?: unknown }).error === PROJECT_DATA_STORAGE_FULL
+  );
+}
+
 /**
  * The per-candidate `message_count` ceiling a selector may offer.
  *
@@ -609,6 +667,7 @@ function resolveConfig(env: Env): ArchiveCoordinatorConfig {
       1,
       PROJECT_DATA_ARCHIVE_MAX_POISON_AFTER_ATTEMPTS
     ),
+    ...resolveBreakerPoisonPolicy(env),
     r2TimeoutMs: compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS),
     r2Prefix: env.PROJECT_DATA_ARCHIVE_R2_PREFIX || PROJECT_DATA_ARCHIVE_DEFAULT_R2_PREFIX,
   };
@@ -3141,15 +3200,27 @@ async function markFailed(
     });
     return 'unchanged';
   }
+  const storageFull = isArchiveStorageFullFailure(error);
   if (current.attempt_count >= config.poisonAfterAttempts) {
-    await poisonProjectDataArchiveMigration(env, {
+    if (!storageFull) {
+      await poisonProjectDataArchiveMigration(env, {
+        migrationId: current.migration_id,
+        projectId: current.project_id,
+        reason: `attempts_exhausted:${errorCode(error)}`,
+        message: errorMessage(error),
+        now,
+        breakerPolicy: config,
+      });
+      return 'poisoned';
+    }
+    log.warn('project_data_archive_storage_full_not_poisoned', {
       migrationId: current.migration_id,
       projectId: current.project_id,
-      reason: `attempts_exhausted:${errorCode(error)}`,
-      message: errorMessage(error),
-      now,
+      sessionId: current.session_id,
+      attemptCount: current.attempt_count,
+      poisonAfterAttempts: config.poisonAfterAttempts,
+      action: 'kept_failed_for_retry',
     });
-    return 'poisoned';
   }
   const leaseGuard = lease ? 'AND lease_owner = ? AND lease_epoch = ?' : '';
   const result = await env.DATABASE.prepare(
@@ -3165,7 +3236,7 @@ async function markFailed(
        ${leaseGuard}`
   )
     .bind(
-      errorCode(error),
+      storageFull ? 'storage_full' : errorCode(error),
       errorMessage(error),
       now,
       current.migration_id,
@@ -3223,6 +3294,14 @@ export async function freezeProjectDataArchiveMigration(
   return changed;
 }
 
+/**
+ * Poison one migration and quarantine its session (location `frozen`, excluded from candidate
+ * selection and reclaim). The PROJECT breaker opens only when `breakerPoisonThreshold` distinct
+ * sessions of the project have been poisoned inside `breakerPoisonWindowMs` and since the
+ * breaker was last closed: one poisoned session is already quarantined, so a breaker that
+ * opened on it stopped only the project's OTHER sessions (2026-09-27: five days, then the 10 GiB
+ * wall). Several distinct poisons are the systemic signal the breaker exists for.
+ */
 export async function poisonProjectDataArchiveMigration(
   env: Env,
   input: {
@@ -3231,9 +3310,11 @@ export async function poisonProjectDataArchiveMigration(
     reason: string;
     message?: string;
     now?: number;
+    breakerPolicy?: BreakerPoisonPolicy;
   }
 ): Promise<boolean> {
   const now = input.now ?? Date.now();
+  const policy = input.breakerPolicy ?? resolveBreakerPoisonPolicy(env);
   const result = await env.DATABASE.prepare(
     `UPDATE project_data_archive_migrations
      SET state = 'poisoned',
@@ -3250,26 +3331,72 @@ export async function poisonProjectDataArchiveMigration(
     .bind(input.reason, input.message ?? input.reason, now, now, input.migrationId, input.projectId)
     .run();
   const changed = (result.meta.changes ?? 0) > 0;
-  await env.DATABASE.batch([
-    env.DATABASE.prepare(
-      `UPDATE project_data_session_locations
-       SET location_state = 'frozen',
-           updated_at = ?
-       WHERE migration_id = ?
-         AND project_id = ?
-         AND location_state = 'migrating'`
-    ).bind(now, input.migrationId, input.projectId),
-    env.DATABASE.prepare(
-      `INSERT INTO project_data_archive_circuit_breakers (project_id, state, reason, opened_at, updated_at)
-       VALUES (?, 'open', ?, ?, ?)
-       ON CONFLICT(project_id) DO UPDATE SET
-         state = 'open',
-         reason = excluded.reason,
-         opened_at = COALESCE(project_data_archive_circuit_breakers.opened_at, excluded.opened_at),
-         updated_at = excluded.updated_at`
-    ).bind(input.projectId, input.reason, now, now),
-  ]);
-  return changed;
+  await env.DATABASE.prepare(
+    `UPDATE project_data_session_locations
+     SET location_state = 'frozen',
+         updated_at = ?
+     WHERE migration_id = ?
+       AND project_id = ?
+       AND location_state = 'migrating'`
+  )
+    .bind(now, input.migrationId, input.projectId)
+    .run();
+  // An already-poisoned (or terminal) row was counted when it was poisoned; re-evaluating the
+  // breaker for it would let a replayed failure re-open a breaker an operator has closed.
+  if (!changed) return false;
+
+  const breaker = await env.DATABASE.prepare(
+    `SELECT state, updated_at FROM project_data_archive_circuit_breakers WHERE project_id = ?`
+  )
+    .bind(input.projectId)
+    .first<{ state: string; updated_at: number }>();
+  const lastClosedAt = breaker?.state === 'closed' ? breaker.updated_at : 0;
+  const windowStart = Math.max(now - policy.breakerPoisonWindowMs, lastClosedAt);
+  const poisoned = await env.DATABASE.prepare(
+    `SELECT COUNT(DISTINCT session_id) AS sessions
+     FROM project_data_archive_migrations
+     WHERE project_id = ?
+       AND poisoned_at IS NOT NULL
+       AND poisoned_at >= ?`
+  )
+    .bind(input.projectId, windowStart)
+    .first<{ sessions: number }>();
+  const poisonedSessions = poisoned?.sessions ?? 0;
+  const opensBreaker = poisonedSessions >= policy.breakerPoisonThreshold;
+  log.warn('project_data_archive_migration_poisoned', {
+    migrationId: input.migrationId,
+    projectId: input.projectId,
+    reason: input.reason,
+    poisonedSessions,
+    breakerPoisonThreshold: policy.breakerPoisonThreshold,
+    breakerPoisonWindowMs: policy.breakerPoisonWindowMs,
+    action: opensBreaker ? 'quarantined_session_and_opened_breaker' : 'quarantined_session',
+  });
+  if (!opensBreaker) return true;
+
+  const breakerReason = `poison_threshold:${poisonedSessions}/${policy.breakerPoisonThreshold}:${input.reason}`;
+  await env.DATABASE.prepare(
+    `INSERT INTO project_data_archive_circuit_breakers (project_id, state, reason, opened_at, updated_at)
+     VALUES (?, 'open', ?, ?, ?)
+     ON CONFLICT(project_id) DO UPDATE SET
+       state = 'open',
+       reason = excluded.reason,
+       opened_at = COALESCE(project_data_archive_circuit_breakers.opened_at, excluded.opened_at),
+       updated_at = excluded.updated_at`
+  )
+    .bind(input.projectId, breakerReason, now, now)
+    .run();
+  if (breaker?.state !== 'open') {
+    log.error('project_data_archive_breaker_opened', {
+      projectId: input.projectId,
+      migrationId: input.migrationId,
+      previousState: breaker?.state ?? 'none',
+      reason: breakerReason,
+      poisonedSessions,
+      breakerPoisonThreshold: policy.breakerPoisonThreshold,
+    });
+  }
+  return true;
 }
 
 export async function inspectFrozenProjectDataArchiveIntents(
