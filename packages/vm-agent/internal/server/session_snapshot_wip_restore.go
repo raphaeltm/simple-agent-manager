@@ -49,6 +49,9 @@ func (s *Server) downloadAndRestoreWIPWithGitState(ctx context.Context, download
 	if len(bundleRefs) == 0 {
 		return fmt.Errorf("snapshot bundle has no restorable ref")
 	}
+	if err := ensureSnapshotBundlePrerequisites(ctx, standaloneSnapshotGit(workDir), tmpPath, gitState); err != nil {
+		return err
+	}
 	worktreeRef, worktreeCommit := snapshotBundleRef(bundleRefs, "/worktree")
 	indexRef, indexCommit := snapshotBundleRef(bundleRefs, "/index")
 	if worktreeRef != "" && indexRef != "" {

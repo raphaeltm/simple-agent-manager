@@ -201,7 +201,7 @@ func buildContainerSnapshotArchiveList(inventory []byte, logicalName string, ent
 		if rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, "../") {
 			return nil, skipped, selectedBytes, fmt.Errorf("invalid container HOME entry path")
 		}
-		if shouldExcludeSnapshotRootPath(logicalName, rel) {
+		if shouldSkipSnapshotCapturePath(logicalName, rel) {
 			continue
 		}
 		entries = append(entries, containerSnapshotArchiveEntry{kind: kind, size: size, rel: rel})
@@ -275,7 +275,8 @@ func containerSnapshotInventoryArgs(root, logicalName string) []string {
 		prefixes = snapshotRootExcludePrefixes[logicalName]
 		files = snapshotRootExcludeFiles[logicalName]
 	}
-	for index, rel := range append(append([]string{}, prefixes...), mapKeys(files)...) {
+	prefixes = append(append([]string{}, prefixes...), snapshotCaptureExcludePrefixes(logicalName)...)
+	for index, rel := range append(prefixes, mapKeys(files)...) {
 		if index > 0 {
 			args = append(args, "-o")
 		}

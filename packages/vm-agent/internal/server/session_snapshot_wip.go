@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -107,7 +107,8 @@ func createWIPBundleWithGitState(ctx context.Context, workDir string, entryThres
 		_, _ = runStandaloneGitCommand(context.Background(), workDir, nil, "update-ref", "-d", worktreeRef)
 		_, _ = runStandaloneGitCommand(context.Background(), workDir, nil, "update-ref", "-d", indexRef)
 	}()
-	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "bundle", "create", bundlePath, worktreeRef, indexRef); err != nil {
+	bundleArgs := append([]string{"bundle", "create", bundlePath, worktreeRef, indexRef}, snapshotWIPBundleBasis(ctx, standaloneSnapshotGit(workDir))...)
+	if _, err := runStandaloneGitCommand(ctx, workDir, nil, bundleArgs...); err != nil {
 		_ = os.Remove(bundlePath)
 		return base, "", skipped, fmt.Errorf("create git bundle: %w", err)
 	}
@@ -192,41 +193,16 @@ func writeFilteredIndexTree(ctx context.Context, workDir string, threshold int64
 // (git cat-file -s) rather than the worktree, so it catches staged content even
 // when the worktree copy is absent or a different size.
 func skipOversizedStagedIndexEntries(ctx context.Context, workDir string, threshold int64, excludedPaths []string) []snapshotSkippedEntry {
-	excluded := snapshotPathSet(excludedPaths)
 	out, err := runStandaloneGitCommand(ctx, workDir, nil, "ls-files", "-s", "-z")
 	if err != nil || out == "" {
 		return nil
 	}
-	var skipped []snapshotSkippedEntry
-	// `git ls-files -s -z` records are NUL-separated; each is
-	// "<mode> <object> <stage>\t<path>". CombinedOutput's TrimSpace leaves NUL
-	// bytes intact (NUL is not unicode whitespace), so the record structure is
-	// preserved.
-	for _, record := range strings.Split(out, "\x00") {
-		if record == "" {
-			continue
-		}
-		meta, path, found := strings.Cut(record, "\t")
-		if !found || path == "" {
-			continue
-		}
-		path = filepath.ToSlash(filepath.Clean(path))
-		if excluded[path] {
-			continue
-		}
-		fields := strings.Fields(meta)
-		if len(fields) < 2 {
-			continue
-		}
-		sizeOut, sizeErr := runStandaloneGitCommand(ctx, workDir, nil, "cat-file", "-s", fields[1])
-		if sizeErr != nil {
-			continue
-		}
-		size, convErr := strconv.ParseInt(strings.TrimSpace(sizeOut), 10, 64)
-		if convErr != nil || size <= threshold {
-			continue
-		}
-		skipped = append(skipped, snapshotSkippedEntry{Path: path, Reason: "staged entry exceeds size threshold", SizeBytes: size})
+	// CombinedOutput's TrimSpace leaves the NUL record separators intact.
+	entries := parseSnapshotIndexEntries(out, snapshotPathSet(excludedPaths))
+	skipped, err := oversizedSnapshotIndexEntries(ctx, standaloneSnapshotGitWithInput(workDir), entries, threshold, "staged entry exceeds size threshold")
+	if err != nil {
+		slog.Warn("Snapshot staged-entry size check failed; capturing the index unfiltered", "workDir", workDir, "error", err)
+		return nil
 	}
 	return skipped
 }

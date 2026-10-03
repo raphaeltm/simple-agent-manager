@@ -98,7 +98,7 @@ func createSessionStateTarWithContext(
 			if relErr != nil {
 				return relErr
 			}
-			if shouldExcludeSnapshotRootPath(root.logicalName, rel) {
+			if shouldSkipSnapshotCapturePath(root.logicalName, rel) {
 				if d.IsDir() {
 					return filepath.SkipDir
 				}
@@ -274,18 +274,44 @@ func shouldExcludeSnapshotRootPath(logicalName, rel string) bool {
 	if logicalName == "" {
 		return shouldExcludeHomePath(clean)
 	}
-	for _, prefix := range snapshotRootExcludePrefixes[logicalName] {
+	return snapshotPathHasPrefix(clean, snapshotRootExcludePrefixes[logicalName]) || snapshotRootExcludeFiles[logicalName][clean]
+}
+
+// shouldSkipSnapshotCapturePath reports whether a new snapshot leaves rel out:
+// every restore-time exclusion plus the capture-only regenerable caches.
+func shouldSkipSnapshotCapturePath(logicalName, rel string) bool {
+	return shouldExcludeSnapshotRootPath(logicalName, rel) ||
+		snapshotPathHasPrefix(filepath.ToSlash(filepath.Clean(rel)), snapshotCaptureExcludePrefixes(logicalName))
+}
+
+// snapshotCaptureExcludePrefixes returns the capture-only exclusions for HOME
+// (logicalName "") or for an external harness root.
+func snapshotCaptureExcludePrefixes(logicalName string) []string {
+	if logicalName == "" {
+		return homeCaptureExcludePrefixes
+	}
+	return snapshotRootCaptureExcludePrefixes[logicalName]
+}
+
+func snapshotPathHasPrefix(clean string, prefixes []string) bool {
+	for _, prefix := range prefixes {
 		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
 			return true
 		}
 	}
-	return snapshotRootExcludeFiles[logicalName][clean]
+	return false
 }
 
 var snapshotRootExcludePrefixes = map[string][]string{
 	snapshotRootCodex:    {"tmp"},
 	snapshotRootClaude:   {"debug"},
 	snapshotRootOpenCode: {"cache"},
+}
+
+// snapshotRootCaptureExcludePrefixes is the capture-only counterpart of
+// snapshotRootExcludePrefixes. See homeCaptureExcludePrefixes.
+var snapshotRootCaptureExcludePrefixes = map[string][]string{
+	snapshotRootCodex: {"cache"},
 }
 
 var snapshotRootExcludeFiles = map[string]map[string]bool{
@@ -325,6 +351,23 @@ var homeExcludePrefixes = []string{
 	snapshotExternalRootsPrefix,
 }
 
+// homeCaptureExcludePrefixes are regenerable HOME subtrees that a new snapshot
+// skips but restore still accepts:
+//   - Codex's downloaded remote plugin catalog and tools cache (.codex/cache)
+//   - globally installed npm packages, including the agent CLIs reinstalled at
+//     session start (.npm-global)
+//   - uv tool and Python installs (.local/share/uv)
+//
+// They count against the snapshot budget for nothing. Their symlinks also used
+// to mark otherwise complete snapshots "entries-skipped", which keeps a session
+// awake now that sleep requires a complete snapshot.
+//
+// They are deliberately NOT in homeExcludePrefixes. Restore rejects an archive
+// that contains an excluded path (validateSnapshotHomeTar and the standalone
+// extractor), and snapshots captured before these prefixes were skipped
+// legitimately contain them and must still wake.
+var homeCaptureExcludePrefixes = []string{".codex/cache", ".npm-global", ".local/share/uv"}
+
 // homeExcludeFiles are exact HOME-relative files excluded from the tar. Their
 // parent directories (.claude, .codex) ALSO hold harness transcript/session
 // state that LoadSession-resume depends on, so only the credential file itself
@@ -343,15 +386,7 @@ var homeExcludeFiles = map[string]bool{
 
 func shouldExcludeHomePath(rel string) bool {
 	clean := filepath.ToSlash(rel)
-	if homeExcludeFiles[clean] {
-		return true
-	}
-	for _, prefix := range homeExcludePrefixes {
-		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
-			return true
-		}
-	}
-	return false
+	return homeExcludeFiles[clean] || snapshotPathHasPrefix(clean, homeExcludePrefixes)
 }
 
 func rejectSymlinkPath(root, target string) error {

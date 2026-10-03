@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -30,63 +30,54 @@ func (s *Server) containerGitOperationInProgress(ctx context.Context, target *co
 }
 
 func (s *Server) skipOversizedContainerUntracked(ctx context.Context, target *containerSnapshotTarget, syntheticIndex string, threshold int64, excludedPaths []string) []snapshotSkippedEntry {
-	excluded := snapshotPathSet(excludedPaths)
 	output, err := s.runSnapshotWorkspaceCommand(ctx, target, nil, "git", "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil || len(output) == 0 {
 		return nil
 	}
-	var skipped []snapshotSkippedEntry
+	excluded := snapshotPathSet(excludedPaths)
+	untracked := make(map[string]bool)
 	for _, raw := range bytes.Split(output, []byte{0}) {
-		if len(raw) == 0 {
-			continue
+		if path := filepath.ToSlash(filepath.Clean(string(raw))); len(raw) > 0 && !excluded[path] {
+			untracked[path] = true
 		}
-		path := filepath.ToSlash(filepath.Clean(string(raw)))
-		if excluded[path] {
-			continue
+	}
+	if len(untracked) == 0 {
+		return nil
+	}
+	// `git add -A` already hashed the untracked files into the synthetic index,
+	// so their sizes come from one batched lookup instead of a `stat` per file.
+	syntheticEnv := []string{"GIT_INDEX_FILE=" + syntheticIndex}
+	staged, err := s.runSnapshotWorkspaceCommand(ctx, target, syntheticEnv, "git", "ls-files", "-s", "-z")
+	if err != nil {
+		return nil
+	}
+	var entries []snapshotIndexEntry
+	for _, entry := range parseSnapshotIndexEntries(string(staged), nil) {
+		if untracked[entry.path] {
+			entries = append(entries, entry)
 		}
-		statOutput, statErr := s.runSnapshotWorkspaceCommand(ctx, target, nil, "stat", "-c", "%s", "--", path)
-		if statErr != nil {
-			continue
-		}
-		size, parseErr := strconv.ParseInt(strings.TrimSpace(string(statOutput)), 10, 64)
-		if parseErr != nil || size <= threshold {
-			continue
-		}
-		skipped = append(skipped, snapshotSkippedEntry{Path: path, Reason: "entry exceeds size threshold", SizeBytes: size})
-		_, _ = s.containerGit(ctx, target, []string{"GIT_INDEX_FILE=" + syntheticIndex}, "reset", "--", path)
+	}
+	skipped, err := oversizedSnapshotIndexEntries(ctx, s.containerSnapshotGitWithInput(target), entries, threshold, "entry exceeds size threshold")
+	if err != nil {
+		slog.Warn("Container snapshot untracked-entry size check failed; capturing untracked files unfiltered", "workspace", target.workDir, "error", err)
+		return nil
+	}
+	for _, entry := range skipped {
+		_, _ = s.containerGit(ctx, target, syntheticEnv, "reset", "--", entry.Path)
 	}
 	return skipped
 }
 
 func (s *Server) oversizedContainerIndexEntries(ctx context.Context, target *containerSnapshotTarget, threshold int64, excludedPaths []string) []snapshotSkippedEntry {
-	excluded := snapshotPathSet(excludedPaths)
 	output, err := s.runSnapshotWorkspaceCommand(ctx, target, nil, "git", "ls-files", "-s", "-z")
 	if err != nil || len(output) == 0 {
 		return nil
 	}
-	var skipped []snapshotSkippedEntry
-	for _, raw := range bytes.Split(output, []byte{0}) {
-		if len(raw) == 0 {
-			continue
-		}
-		meta, path, found := strings.Cut(string(raw), "\t")
-		fields := strings.Fields(meta)
-		if !found || path == "" || len(fields) < 2 {
-			continue
-		}
-		path = filepath.ToSlash(filepath.Clean(path))
-		if excluded[path] {
-			continue
-		}
-		sizeOutput, sizeErr := s.containerGit(ctx, target, nil, "cat-file", "-s", fields[1])
-		if sizeErr != nil {
-			continue
-		}
-		size, parseErr := strconv.ParseInt(sizeOutput, 10, 64)
-		if parseErr != nil || size <= threshold {
-			continue
-		}
-		skipped = append(skipped, snapshotSkippedEntry{Path: path, Reason: "staged entry exceeds size threshold", SizeBytes: size})
+	entries := parseSnapshotIndexEntries(string(output), snapshotPathSet(excludedPaths))
+	skipped, err := oversizedSnapshotIndexEntries(ctx, s.containerSnapshotGitWithInput(target), entries, threshold, "staged entry exceeds size threshold")
+	if err != nil {
+		slog.Warn("Container snapshot staged-entry size check failed; capturing the index unfiltered", "workspace", target.workDir, "error", err)
+		return nil
 	}
 	return skipped
 }
@@ -221,7 +212,8 @@ func (s *Server) createContainerWIPBundleWithGitState(ctx context.Context, targe
 		return base, "", skipped, fmt.Errorf("create container index snapshot ref: %w", err)
 	}
 	defer func() { _, _ = s.containerGit(context.Background(), target, nil, "update-ref", "-d", indexRef) }()
-	if _, err := s.containerGit(ctx, target, nil, "bundle", "create", containerBundle, worktreeRef, indexRef); err != nil {
+	bundleArgs := append([]string{"bundle", "create", containerBundle, worktreeRef, indexRef}, snapshotWIPBundleBasis(ctx, gitCommand)...)
+	if _, err := s.containerGit(ctx, target, nil, bundleArgs...); err != nil {
 		return base, "", skipped, fmt.Errorf("create container git bundle: %w", err)
 	}
 	if reportProgress != nil {
@@ -271,14 +263,17 @@ func (s *Server) downloadAndRestoreContainerWIPWithGitState(ctx context.Context,
 	if err := s.writeHostSnapshotArtifactToContainer(ctx, target, hostPath, containerPath); err != nil {
 		return err
 	}
+	gitCommand := func(ctx context.Context, env []string, args ...string) (string, error) {
+		return s.containerGit(ctx, target, env, args...)
+	}
+	if err := ensureSnapshotBundlePrerequisites(ctx, gitCommand, hostPath, gitState); err != nil {
+		return err
+	}
 	worktreeRef, worktreeCommit := snapshotBundleRef(refs, "/worktree")
 	indexRef, indexCommit := snapshotBundleRef(refs, "/index")
 	if worktreeRef != "" && indexRef != "" {
 		if output, err := s.containerGit(ctx, target, nil, "fetch", containerPath, worktreeRef, indexRef); err != nil {
 			return fmt.Errorf("fetch container snapshot bundle: %w: %s", err, output)
-		}
-		gitCommand := func(ctx context.Context, env []string, args ...string) (string, error) {
-			return s.containerGit(ctx, target, env, args...)
 		}
 		if err := restoreSnapshotGitState(ctx, gitCommand, gitState); err != nil {
 			return err
@@ -303,9 +298,6 @@ func (s *Server) downloadAndRestoreContainerWIPWithGitState(ctx context.Context,
 	}
 	if output, err := s.containerGit(ctx, target, nil, "fetch", containerPath, legacyRef); err != nil {
 		return fmt.Errorf("fetch legacy container snapshot bundle: %w: %s", err, output)
-	}
-	gitCommand := func(ctx context.Context, env []string, args ...string) (string, error) {
-		return s.containerGit(ctx, target, env, args...)
 	}
 	if err := restoreSnapshotGitState(ctx, gitCommand, gitState); err != nil {
 		return err

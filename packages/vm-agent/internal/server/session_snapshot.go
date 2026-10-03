@@ -28,6 +28,7 @@ type snapshotPrepareResponse struct {
 		TotalBudgetBytes      int64 `json:"totalBudgetBytes"`
 		EntryThresholdBytes   int64 `json:"entryThresholdBytes"`
 		TransferIdleTimeoutMs int64 `json:"transferIdleTimeoutMs"`
+		JSONBodyMaxBytes      int64 `json:"jsonBodyMaxBytes"`
 	} `json:"config"`
 	Upload struct {
 		Home string `json:"home"`
@@ -275,6 +276,7 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, input *sessionSna
 	if len(manifest.Skipped) > 0 && manifest.Status == "available" {
 		manifest.Status = "degraded"
 	}
+	manifest.Skipped = boundSnapshotSkippedEntries(manifest.Skipped, snapshotSkippedEntriesBudget(prepare))
 	err = s.completeSnapshot(ctx, runtime.ID, sessionID, chatSessionID, runtimeName, prepare.Generation, callbackToken, manifest)
 	if err != nil {
 		return nil, &sessionSnapshotCaptureError{generation: prepare.Generation, err: err}
