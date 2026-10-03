@@ -31,9 +31,9 @@ export interface BreakerPoisonPolicy {
   breakerPoisonWindowMs: number;
 }
 
+/** Clamps a configured value into `[min, max]`; an unset or unparseable value is the default. */
 function boundedInt(raw: string | undefined, fallback: number, min: number, max: number): number {
-  const parsed = parsePositiveInt(raw, fallback);
-  return parsed < min ? fallback : Math.min(parsed, max);
+  return Math.max(min, Math.min(parsePositiveInt(raw, fallback), max));
 }
 
 export function resolveBreakerPoisonPolicy(
