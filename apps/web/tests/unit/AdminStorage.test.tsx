@@ -553,6 +553,29 @@ describe('AdminStorage — space recovery', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('Recovery finished');
   });
 
+  it('sends a small byte default exactly and shows it as more than 0 MiB', async () => {
+    mocks.fetchAdminProjectDataWallRecoveryConfig.mockResolvedValue({
+      ceilings: { maxRows: 5_000, maxBytes: 8 * 1024, maxSessions: 5 },
+      defaults: { maxRows: 500, maxBytes: 4 * 1024, maxSessions: 1 },
+    });
+    mocks.runAdminProjectDataWallRecovery.mockResolvedValue(result());
+    const dialog = await openDialog();
+
+    // 4 KiB is 0.0039 MiB: at two decimals it read as 0 and the form refused its own default.
+    expect(field(dialog, 'Size (MiB)').value).toBe('0.003');
+    expect(dialog).toHaveTextContent('Max 0.007');
+    fireEvent.change(field(dialog, 'Reason'), { target: { value: 'small budget' } });
+    expect(previewButton(dialog)).toBeEnabled();
+
+    fireEvent.click(previewButton(dialog));
+    await waitFor(() =>
+      expect(mocks.runAdminProjectDataWallRecovery).toHaveBeenCalledWith(
+        'project-sam',
+        expect.objectContaining({ maxBytes: 4 * 1024 })
+      )
+    );
+  });
+
   it('checks every budget against the API ceilings, including sizes under 1 MiB', async () => {
     mocks.fetchAdminProjectDataWallRecoveryConfig.mockResolvedValue({
       ceilings: { maxRows: 5_000, maxBytes: MIB / 2, maxSessions: 5 },

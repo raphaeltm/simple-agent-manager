@@ -41,9 +41,18 @@ const BUDGET_FIELDS: Array<{ field: BudgetField; label: string; unit: 'count' | 
   { field: 'maxBytes', label: 'Size (MiB)', unit: 'mib' },
 ];
 
-/** MiB with at most two decimals, rounded down so a prefilled value never exceeds its bound. */
+/**
+ * MiB rounded down, so a shown value never exceeds its bound: two decimals, or as many more
+ * (up to six) as it takes to keep a small non-zero size from showing as 0.
+ */
 function toMib(bytes: number): string {
-  return String(Math.floor((bytes / MIB) * 100) / 100);
+  const mib = bytes / MIB;
+  let shown = 0;
+  for (let decimals = 2; decimals <= 6 && shown === 0; decimals++) {
+    const scale = 10 ** decimals;
+    shown = Math.floor(mib * scale) / scale;
+  }
+  return String(shown);
 }
 
 /** GiB-scale sizes to the MiB, so a few freed MiB still show in the before/after pair. */
@@ -181,15 +190,17 @@ export function WallRecoveryDialog({
 
   const config = configQuery.data;
   const parsed = config
-    ? BUDGET_FIELDS.map(({ field }) => ({
-        field,
-        result: parseBudget(
+    ? BUDGET_FIELDS.map(({ field }) => {
+        const typed = inputs[field];
+        return {
           field,
-          inputs[field] ??
-            (field === 'maxBytes' ? toMib(config.defaults[field]) : String(config.defaults[field])),
-          config.ceilings[field]
-        ),
-      }))
+          // Untouched, a field sends the API's own default exactly: its MiB display is rounded.
+          result:
+            typed === null
+              ? { value: config.defaults[field] }
+              : parseBudget(field, typed, config.ceilings[field]),
+        };
+      })
     : [];
   const budgets = parsed.every((entry) => 'value' in entry.result)
     ? (Object.fromEntries(
