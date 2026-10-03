@@ -625,6 +625,12 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_STORAGE_LIMIT_BYTES?: string;
   PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS?: string;
   PROJECT_DATA_STORAGE_ALERT_INTERVAL_MS?: string;
+  PROJECT_DATA_STORAGE_HARD_CAP_BYTES?: string; // Cloudflare's per-object SQLite cap used by superadmin storage alerts (default: 10737418240)
+  PROJECT_DATA_STORAGE_WALL_ALERT_RATIO?: string; // Share of the hard cap at which superadmins are paged (default: 0.95)
+  PROJECT_DATA_STORAGE_ALERT_NOTIFICATION_THROTTLE_MS?: string; // Repeat window per alert episode and superadmin (default: 21600000)
+  PROJECT_DATA_STORAGE_ALERT_STALE_AFTER_MS?: string; // Age after which near-cap telemetry is reported as stale (default: 10800000)
+  PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK?: string; // Most severe alerts sent per cron tick (default: 5)
+  PROJECT_DATA_STORAGE_ALERT_KV_PREFIX?: string; // KV prefix for storage alert throttles (default: project-data-storage-alert)
   PROJECT_DATA_STORAGE_NOTICE_RATIO?: string;
   PROJECT_DATA_STORAGE_WARNING_RATIO?: string;
   PROJECT_DATA_STORAGE_CRITICAL_RATIO?: string;

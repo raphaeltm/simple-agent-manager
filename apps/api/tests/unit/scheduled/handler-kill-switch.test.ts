@@ -88,14 +88,17 @@ describe('scheduled operational sweep kill switch', () => {
     );
     // Archive sharding copies whole sessions between ProjectData objects when its cadence is
     // due; it runs after every lifecycle sweep (session_sleep, trial_expire) so that copy budget
-    // cannot push them back (`.claude/rules/47`). Only the relief preflight runs later.
+    // cannot push them back (`.claude/rules/47`). Only the storage alerts step and the relief
+    // preflight run later: the alerts step is D1-only and bounded, and it must follow the drain
+    // so a breaker the drain just opened pages superadmins on the same tick.
     expect(sweepNames.indexOf('session_sleep')).toBeLessThan(
       sweepNames.indexOf('project_data_archive_sharding')
     );
     expect(sweepNames.indexOf('trial_expire')).toBeLessThan(
       sweepNames.indexOf('project_data_archive_sharding')
     );
-    expect(sweepNames.indexOf('project_data_archive_sharding')).toBe(sweepNames.length - 2);
+    expect(sweepNames.indexOf('project_data_archive_sharding')).toBe(sweepNames.length - 3);
+    expect(sweepNames.indexOf('project_data_storage_alerts')).toBe(sweepNames.length - 2);
     // The relief preflight runs LAST. Its run budget is operator-tuned into the minutes
     // while an emergency plan converges, so anywhere earlier it would push every later
     // lifecycle sweep — session_sleep above all — back by that budget on every tick

@@ -27,6 +27,7 @@ import {
   scheduleHourlyPlatformMaintenance,
 } from './platform-feedback-hourly';
 import { runProjectDataArchiveSharding } from './project-data-archive-sharding';
+import { runProjectDataStorageAlerts } from './project-data-storage-alerts';
 import { runProjectDataStorageReliefPreflight } from './project-data-storage-relief-preflight';
 import { runProviderOrphanReconciliation } from './provider-orphan-reconciliation';
 import { runSessionSleepSweep } from './session-sleep';
@@ -203,6 +204,11 @@ export async function scheduled(
   const projectDataArchiveSharding = await sweeps.isolate('project_data_archive_sharding', () =>
     runProjectDataArchiveSharding(env)
   );
+  // Right after the drain so a breaker it just opened pages superadmins on this tick. D1-only
+  // (a full ProjectData object cannot be asked anything), bounded per tick.
+  const projectDataStorageAlerts = await sweeps.isolate('project_data_storage_alerts', () =>
+    runProjectDataStorageAlerts(env)
+  );
 
   // Runs LAST on purpose. The relief preflight is read-only, but it is the only
   // sweep whose run budget is operator-tuned into the minutes
@@ -347,6 +353,10 @@ export async function scheduled(
     projectDataStorageReliefPreflightSessionCount: projectDataStorageReliefPreflight?.sessionCount,
     projectDataStorageReliefPreflightSessionManifestSha256:
       projectDataStorageReliefPreflight?.sessionManifestSha256,
+    projectDataStorageAlertCandidates: projectDataStorageAlerts?.candidates,
+    projectDataStorageAlertsSent: projectDataStorageAlerts?.notificationsSent,
+    projectDataStorageAlertsThrottled: projectDataStorageAlerts?.throttled,
+    projectDataStorageAlertDeliveryFailures: projectDataStorageAlerts?.deliveryFailures,
     projectDataArchiveShardingEnabled: projectDataArchiveSharding?.enabled,
     projectDataArchiveShardingSkipped: projectDataArchiveSharding?.skipped,
     projectDataArchiveShardingSkipReason: projectDataArchiveSharding?.skipReason,

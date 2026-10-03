@@ -15,7 +15,7 @@ SAM combines an in-app notification center with optional Web Push delivery for a
 | **progress**      | Low     | An agent reports incremental progress via `update_task_status`           |
 | **session_ended** | Medium  | A conversation-mode session turn completes                               |
 | **pr_created**    | Medium  | An agent creates a pull request                                          |
-| **cron_failure**  | High    | A five-minute operational recovery sweep fails (active superadmins only) |
+| **cron_failure**  | High    | A five-minute operational recovery sweep fails, or ProjectData storage needs an operator (active superadmins only; see below) |
 
 ## Delivery Channels
 
@@ -90,14 +90,27 @@ SAM automatically deduplicates notifications:
 
 - `task_complete` notifications are deduplicated within a 60-second window (configurable via `NOTIFICATION_DEDUP_WINDOW_MS`)
 - Progress notifications are batched per task per 5-minute window
-- `cron_failure` notifications are throttled per sweep name. KV provides the
-  expiring coarse marker, and an atomic per-user Notification Durable Object
-  claim guarantees that overlapping cron invocations do not send duplicates.
+- `cron_failure` notifications are throttled per alert and per recipient. A
+  recipient's expiring KV marker is written only after their notification was
+  created, so a failed delivery is retried on the next five-minute tick instead
+  of being suppressed for the whole window. Overlapping ticks can occasionally
+  send a duplicate.
 
 Operational sweep failures are sent only to active superadmin accounts. System
 and anonymous-trial sentinel users are excluded. The notification links to the
 admin log viewer for investigation and respects the recipient's in-app
 `cron_failure` preference.
+
+ProjectData storage alerts use the same type and recipients and link to
+**Admin → Storage**. They fire while a project's archive circuit breaker is open
+(high urgency) or frozen (medium, or high once that project is near the cap),
+when a project's last exported storage measurement reaches
+`PROJECT_DATA_STORAGE_WALL_ALERT_RATIO` (95%) of Cloudflare's 10 GiB per-object
+cap, and when automatic cleanup cannot reach its target. Each repeats at most
+once per `PROJECT_DATA_STORAGE_ALERT_NOTIFICATION_THROTTLE_MS` (6 hours) while the
+condition lasts. An alert can only be as fresh as the telemetry the object last
+exported; it says when that was, and says "telemetry stale" when nothing newer
+than `PROJECT_DATA_STORAGE_ALERT_STALE_AFTER_MS` (3 hours) has arrived.
 
 ### Retention
 

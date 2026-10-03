@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { sendNotificationOnceMock } = vi.hoisted(() => ({
-  sendNotificationOnceMock: vi.fn(),
+const { sendNotificationMock } = vi.hoisted(() => ({
+  sendNotificationMock: vi.fn(),
 }));
 vi.mock('../../../src/services/notification', () => ({
-  sendNotificationOnce: sendNotificationOnceMock,
+  sendNotification: sendNotificationMock,
 }));
 
 import type { Env } from '../../../src/env';
@@ -25,17 +25,17 @@ function makeEnv() {
     NOTIFICATION: {},
     TRIAL_ANONYMOUS_USER_ID: 'system-sentinel',
   } as unknown as Env;
-  return { env, bind, prepare };
+  return { env, bind, prepare, values };
 }
 
 describe('failed sweep notifications', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    sendNotificationOnceMock.mockResolvedValue(true);
+    sendNotificationMock.mockResolvedValue({ id: 'notification' });
   });
 
   it('notifies real superadmins once per sweep name per throttle window', async () => {
-    const { env, bind, prepare } = makeEnv();
+    const { env, bind, prepare, values } = makeEnv();
 
     expect(await notifyFailedSweeps(env, ['node_cleanup'])).toEqual({
       notifiedSweeps: 1,
@@ -45,15 +45,16 @@ describe('failed sweep notifications', () => {
       notifiedSweeps: 0,
       notificationsSent: 0,
     });
-    expect(sendNotificationOnceMock).toHaveBeenCalledTimes(2);
-    expect(sendNotificationOnceMock).toHaveBeenCalledWith(
+    expect(sendNotificationMock).toHaveBeenCalledTimes(2);
+    expect(sendNotificationMock).toHaveBeenCalledWith(
       env,
       'admin-1',
-      'cron-failure-notification:node_cleanup',
-      expect.any(Number),
-      expect.objectContaining({ actionUrl: '/admin/logs', type: 'cron_failure' }),
-      expect.any(Number)
+      expect.objectContaining({ actionUrl: '/admin/logs', type: 'cron_failure' })
     );
+    expect([...values.keys()]).toEqual([
+      'cron-failure-notification:node_cleanup:admin-1',
+      'cron-failure-notification:node_cleanup:admin-2',
+    ]);
     expect(bind).toHaveBeenCalledWith('system-sentinel');
     expect(prepare.mock.calls[0]![0]).toContain("status != 'system'");
   });
@@ -61,23 +62,35 @@ describe('failed sweep notifications', () => {
   it('throttles each sweep independently', async () => {
     const { env } = makeEnv();
     await notifyFailedSweeps(env, ['node_cleanup', 'stuck_tasks']);
-    expect(sendNotificationOnceMock).toHaveBeenCalledTimes(4);
+    expect(sendNotificationMock).toHaveBeenCalledTimes(4);
   });
 
   it('does not send when the throttle KV cannot enforce the spam bound', async () => {
     const { env } = makeEnv();
     vi.mocked(env.KV.get).mockRejectedValue(new Error('KV unavailable'));
     await notifyFailedSweeps(env, ['node_cleanup']);
-    expect(sendNotificationOnceMock).not.toHaveBeenCalled();
+    expect(sendNotificationMock).not.toHaveBeenCalled();
   });
 
-  it('counts only per-user Durable Object dedup claims that succeed', async () => {
+  it('retries a recipient whose delivery failed instead of suppressing it for the window', async () => {
     const { env } = makeEnv();
-    sendNotificationOnceMock.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    sendNotificationMock
+      .mockResolvedValueOnce({ id: 'notification' })
+      .mockRejectedValueOnce(new Error('NotificationService unavailable'));
 
     expect(await notifyFailedSweeps(env, ['node_cleanup'])).toEqual({
       notifiedSweeps: 1,
       notificationsSent: 1,
     });
+    // admin-1 is throttled, admin-2 has no stamp because nothing was created for them.
+    expect(await notifyFailedSweeps(env, ['node_cleanup'])).toEqual({
+      notifiedSweeps: 1,
+      notificationsSent: 1,
+    });
+    expect(sendNotificationMock.mock.calls.map((call) => call[1])).toEqual([
+      'admin-1',
+      'admin-2',
+      'admin-2',
+    ]);
   });
 });
