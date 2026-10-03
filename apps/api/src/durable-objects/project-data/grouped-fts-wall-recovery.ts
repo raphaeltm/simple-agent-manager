@@ -162,11 +162,14 @@ export function resolveGroupedFtsWallRecoveryConfig(env: Env): GroupedFtsWallRec
   };
 }
 
-type Candidate = { sessionId: string; messageCount: number };
+export type GroupedFtsCandidate = { sessionId: string; messageCount: number };
 /** Position after the last row read: `(created_at, rowid)`, the index's own order. */
-type PageCursor = { createdAt: number; rowid: number };
+export type GroupedPageCursor = { createdAt: number; rowid: number };
 
-const PAGE_START: PageCursor = { createdAt: Number.MIN_SAFE_INTEGER, rowid: 0 };
+export const GROUPED_PAGE_START: GroupedPageCursor = {
+  createdAt: Number.MIN_SAFE_INTEGER,
+  rowid: 0,
+};
 
 /**
  * Exported so a test can pin its plan against the real engine: an index walk in
@@ -179,7 +182,16 @@ export const GROUPED_PAGE_SIZES_SQL = `SELECT rowid, created_at, length(CAST(con
   ORDER BY created_at ASC, rowid ASC
   LIMIT ?`;
 
-function readCandidates(sql: SqlStorage, cutoff: number, limit: number): Candidate[] {
+/**
+ * Terminal sessions older than `cutoff` that still have grouped rows and are not mid-archive
+ * (no source intent, no target copy), largest first. Shared with the storage alarm
+ * (`grouped-fts-cleanup.ts`), so neither path can prune a session an archive is copying.
+ */
+export function readGroupedFtsCandidates(
+  sql: SqlStorage,
+  cutoff: number,
+  limit: number
+): GroupedFtsCandidate[] {
   const rows = sql
     .exec(
       `SELECT s.id, s.message_count
@@ -201,7 +213,7 @@ function readCandidates(sql: SqlStorage, cutoff: number, limit: number): Candida
       limit
     )
     .raw();
-  const candidates: Candidate[] = [];
+  const candidates: GroupedFtsCandidate[] = [];
   for (const row of rows) {
     const sessionId = row[0];
     const messageCount = Number(row[1]);
@@ -221,10 +233,10 @@ function readCandidates(sql: SqlStorage, cutoff: number, limit: number): Candida
  * size, every remaining row of the session on every page. Sizes are read without
  * the content so a page's memory is decided before any content is loaded.
  */
-function readPage(
+export function readGroupedPage(
   sql: SqlStorage,
   sessionId: string,
-  cursor: PageCursor,
+  cursor: GroupedPageCursor,
   rowLimit: number,
   byteLimit: number,
   callBytesLeft: number
@@ -262,7 +274,11 @@ function readPage(
   return page;
 }
 
-function hasGroupedRowsAfter(sql: SqlStorage, sessionId: string, cursor: PageCursor): boolean {
+export function hasGroupedRowsAfter(
+  sql: SqlStorage,
+  sessionId: string,
+  cursor: GroupedPageCursor
+): boolean {
   return (
     sql
       .exec(
@@ -387,7 +403,7 @@ function drainSession(
   session: GroupedFtsWallRecoverySessionResult
 ): GroupedFtsWallRecoveryStopReason | null {
   const { sql, input } = run;
-  let cursor = PAGE_START;
+  let cursor = GROUPED_PAGE_START;
   for (;;) {
     const rowsLeft = input.maxRows - totals.groupedRowsDeleted;
     if (rowsLeft <= 0) {
@@ -395,7 +411,7 @@ function drainSession(
       return 'row_budget';
     }
     const bytesLeft = input.maxBytes - totals.contentBytes;
-    const page = readPage(
+    const page = readGroupedPage(
       sql,
       session.sessionId,
       cursor,
@@ -436,9 +452,11 @@ export function runGroupedFtsWallRecovery(
   // statement at 100 bound parameters (rule 69). One extra row tells a session
   // budget stop apart from running out of candidates.
   const skip = new Set(input.skipSessionIds);
-  const candidates = readCandidates(sql, cutoff, input.maxSessions + skip.size + 1).filter(
-    (candidate) => !skip.has(candidate.sessionId)
-  );
+  const candidates = readGroupedFtsCandidates(
+    sql,
+    cutoff,
+    input.maxSessions + skip.size + 1
+  ).filter((candidate) => !skip.has(candidate.sessionId));
 
   const run: RunContext = { sql, projectId, input, now, transactionSync: deps.transactionSync };
   const totals: RunTotals = {

@@ -1158,7 +1158,7 @@ describe('ProjectData storage safety firebreak', () => {
     expect(resumeResult?.terminationReason).toMatch(/target_reached|candidates_exhausted/);
   });
 
-  it('skips a byte-oversized grouped FTS session and continues past it', async () => {
+  it('leaves a session no run could afford for later and cleans past it', async () => {
     const projectId = `storage-grouped-fts-byte-skip-${crypto.randomUUID()}`;
     await seedProjectGraph(projectId);
     const stub = getStub(projectId);
@@ -1216,7 +1216,8 @@ describe('ProjectData storage safety firebreak', () => {
       });
     });
 
-    expect(result?.terminationReason).toBe('oversized_skip');
+    // The 256 KiB row exceeds the whole 128 KiB run budget: excluded for a while, not a stall.
+    expect(result?.sessionsExcluded).toBe(1);
     expect(result?.groupedRowsDeleted).toBeGreaterThan(0);
 
     const remaining = await runInDurableObject(stub, async (_instance, state) => {

@@ -1,8 +1,41 @@
-import { createModuleLogger, serializeError } from '../../lib/logger';
+/**
+ * The storage alarm's grouped/FTS cleanup: frees ProjectData storage by pruning the search
+ * index (grouped rows and their FTS entries) of old, ended sessions. Message text is never
+ * touched; pruned sessions fall back to raw-message search.
+ *
+ * It shares the operator wall recovery's engine (`grouped-fts-wall-recovery.ts`): the largest
+ * eligible sessions first, never a session an archive is copying (source intent or target
+ * copy), paged through big sessions so none is too large to clean. Each page is one
+ * transaction (rows, session mark, FTS deletes) that is rolled back whole if it fails, hits the
+ * storage cap, or leaves the database larger than it found it (`prunePageAtomically`). Unlike
+ * the wall recovery it never falls back to leaving stale FTS entries.
+ *
+ * Near the per-object cap (`groupedFtsCleanupWallUnsafeRatio`) it used to stop with
+ * `wall_unsafe`, because an FTS5 delete writes a segment about as large as the postings it
+ * cancels. With `PROJECT_DATA_GROUPED_FTS_CLEANUP_NEAR_WALL_ENABLED` it keeps running there:
+ * the growth check makes each page provably non-growing, and a page the cap refuses changes
+ * nothing. A session whose page fails or grows is left alone for a while so it cannot stall
+ * every run on the same place.
+ */
+import { createModuleLogger } from '../../lib/logger';
 import {
-  SEARCH_INDEX_STATE_COMPLETE,
-  SEARCH_INDEX_STATE_PRUNED,
-} from './materialization';
+  clearGroupedFtsCleanupRun,
+  excludeGroupedFtsCleanupSessions,
+  readGroupedFtsCleanupExclusions,
+  readGroupedFtsCleanupInProgressSessionId,
+  readGroupedFtsCleanupRecheckAt,
+  resolveGroupedFtsCleanupModeConfig,
+  writeGroupedFtsCleanupRun,
+} from './grouped-fts-cleanup-state';
+import {
+  GROUPED_PAGE_START,
+  type GroupedPageCursor,
+  hasGroupedRowsAfter,
+  readGroupedFtsCandidates,
+  readGroupedPage,
+  resolveGroupedFtsWallRecoveryConfig,
+} from './grouped-fts-wall-recovery';
+import { prunePageAtomically } from './grouped-fts-wall-recovery-prune';
 import type { ProjectDataStorageStatus, StorageSafetyConfig } from './storage-safety';
 import {
   META_LAST_MEASURED_AT,
@@ -15,9 +48,6 @@ import type { Env } from './types';
 
 const log = createModuleLogger('project_data.grouped_fts_cleanup');
 
-const META_GROUPED_FTS_CLEANUP_CURSOR_SESSION_ID = 'storageSafetyGroupedFtsCleanupCursorSessionId';
-const META_GROUPED_FTS_CLEANUP_RECHECK_AT = 'storageSafetyGroupedFtsCleanupRecheckAt';
-const META_GROUPED_FTS_CLEANUP_DISABLED_REASON = 'storageSafetyGroupedFtsCleanupDisabledReason';
 const META_LAST_ERROR = 'storageSafetyLastError';
 const OVERLOAD_ERROR_PATTERN =
   /reset|overload|queued for too long|storage operation exceeded timeout/i;
@@ -30,8 +60,10 @@ export type ProjectDataCleanupTerminationReason =
   | 'byte_budget'
   | 'row_budget'
   | 'wall_time'
+  /** Tool-payload cleanup only; the grouped/FTS cleanup pages through any session. */
   | 'oversized_skip'
   | 'wall_unsafe'
+  | 'storage_full'
   | 'circuit_breaker'
   | 'weak_reclaim'
   | 'error';
@@ -51,65 +83,29 @@ export type ProjectDataGroupedFtsCleanupResult = {
   ftsRowsDeleted: number;
   originalContentBytes: number;
   terminationReason: ProjectDataCleanupTerminationReason;
+  /** True when this run started at or above the wall-unsafe ratio (near-wall mode). */
+  nearWall: boolean;
+  /** Pages rolled back because they would have grown the database. */
+  pagesRolledBackForGrowth: number;
+  /** Sessions this run left alone for the exclusion window. */
+  sessionsExcluded: number;
   searchSemantics: 'full_fts' | 'partial_raw_like_fallback';
   cursor: { sessionId: string } | null;
   recheckAt: number | null;
   circuitBreaker: string | null;
 };
 
-type SessionCandidate = {
-  sessionId: string;
-  groupedRows: number;
-  contentBytes: number;
-};
-
 type CleanupOptions = {
   allowStart?: boolean;
   now?: number;
   nowMs?: () => number;
+  /** Required for atomic pages; without it nothing is pruned near the cap. */
+  transactionSync?: <T>(callback: () => T) => T;
   classifyStatus: (databaseSizeBytes: number) => ProjectDataStorageStatus;
 };
 
 export function readProjectDataGroupedFtsCleanupRecheckAt(sql: SqlStorage): number | null {
-  return readStorageSafetyMetaNumber(sql, META_GROUPED_FTS_CLEANUP_RECHECK_AT);
-}
-
-function clearGroupedFtsCleanupState(sql: SqlStorage): void {
-  sql.exec(
-    `DELETE FROM do_meta
-     WHERE key IN (?, ?, ?)`,
-    META_GROUPED_FTS_CLEANUP_CURSOR_SESSION_ID,
-    META_GROUPED_FTS_CLEANUP_RECHECK_AT,
-    META_GROUPED_FTS_CLEANUP_DISABLED_REASON
-  );
-}
-
-function writeGroupedFtsCleanupState(
-  sql: SqlStorage,
-  sessionId: string | null,
-  recheckAt: number | null,
-  disabledReason: string | null = null
-): void {
-  sql.exec(
-    `DELETE FROM do_meta
-     WHERE key IN (?, ?, ?)`,
-    META_GROUPED_FTS_CLEANUP_CURSOR_SESSION_ID,
-    META_GROUPED_FTS_CLEANUP_RECHECK_AT,
-    META_GROUPED_FTS_CLEANUP_DISABLED_REASON
-  );
-  if (sessionId) {
-    writeStorageSafetyMeta(sql, META_GROUPED_FTS_CLEANUP_CURSOR_SESSION_ID, sessionId);
-  }
-  if (recheckAt !== null) {
-    writeStorageSafetyMeta(sql, META_GROUPED_FTS_CLEANUP_RECHECK_AT, String(recheckAt));
-  }
-  if (disabledReason) {
-    writeStorageSafetyMeta(
-      sql,
-      META_GROUPED_FTS_CLEANUP_DISABLED_REASON,
-      truncateStorageSafetyMetaValue(disabledReason, 500)
-    );
-  }
+  return readGroupedFtsCleanupRecheckAt(sql);
 }
 
 function emptyResult(input: {
@@ -117,6 +113,7 @@ function emptyResult(input: {
   beforeBytes: number;
   config: StorageSafetyConfig;
   terminationReason: ProjectDataCleanupTerminationReason;
+  nearWall?: boolean;
   circuitBreaker?: string | null;
 }): ProjectDataGroupedFtsCleanupResult {
   return {
@@ -134,128 +131,14 @@ function emptyResult(input: {
     ftsRowsDeleted: 0,
     originalContentBytes: 0,
     terminationReason: input.terminationReason,
+    nearWall: input.nearWall ?? false,
+    pagesRolledBackForGrowth: 0,
+    sessionsExcluded: 0,
     searchSemantics: 'full_fts',
     cursor: null,
     recheckAt: null,
     circuitBreaker: input.circuitBreaker ?? null,
   };
-}
-
-function readCandidates(
-  sql: SqlStorage,
-  config: StorageSafetyConfig,
-  cursorSessionId: string | null,
-  now: number
-): SessionCandidate[] {
-  const cutoff = now - config.groupedFtsCleanupMinSessionAgeMs;
-  const rows = sql
-    .exec(
-      `SELECT
-         s.id,
-         COUNT(g.id) AS grouped_rows,
-         COALESCE(SUM(length(CAST(g.content AS BLOB))), 0) AS content_bytes
-       FROM chat_sessions s
-       JOIN chat_messages_grouped g ON g.session_id = s.id
-       WHERE s.status IN ('stopped', 'failed')
-         AND s.updated_at <= ?
-         AND s.materialized_at IS NOT NULL
-         AND COALESCE(s.search_index_state, ?) != ?
-         AND (? IS NULL OR s.id > ?)
-       GROUP BY s.id
-       ORDER BY s.id ASC
-       LIMIT ?`,
-      cutoff,
-      SEARCH_INDEX_STATE_COMPLETE,
-      SEARCH_INDEX_STATE_PRUNED,
-      cursorSessionId,
-      cursorSessionId ?? '',
-      config.groupedFtsCleanupBatchSessions + 1
-    )
-    .raw();
-
-  const candidates: SessionCandidate[] = [];
-  for (const row of rows) {
-    const sessionId = row[0];
-    const groupedRows = Number(row[1]);
-    const contentBytes = Number(row[2]);
-    if (
-      typeof sessionId === 'string' &&
-      Number.isSafeInteger(groupedRows) &&
-      groupedRows > 0 &&
-      Number.isFinite(contentBytes)
-    ) {
-      candidates.push({ sessionId, groupedRows, contentBytes });
-    }
-  }
-  return candidates;
-}
-
-function deleteGroupedFtsForSession(
-  sql: SqlStorage,
-  sessionId: string,
-  now: number
-): {
-  groupedRowsDeleted: number;
-  ftsRowsDeleted: number;
-  contentBytes: number;
-} {
-  const rows = sql
-    .exec(
-      `SELECT rowid, content, length(CAST(content AS BLOB)) AS content_bytes
-       FROM chat_messages_grouped
-       WHERE session_id = ?
-       ORDER BY created_at ASC, id ASC`,
-      sessionId
-    )
-    .raw();
-
-  let groupedRowsDeleted = 0;
-  let ftsRowsDeleted = 0;
-  let contentBytes = 0;
-  for (const row of rows) {
-    const rowid = Number(row[0]);
-    const content = row[1];
-    const rowBytes = Number(row[2]);
-    if (!Number.isSafeInteger(rowid) || typeof content !== 'string') continue;
-    if (Number.isFinite(rowBytes)) contentBytes += rowBytes;
-    try {
-      sql.exec(
-        `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
-         VALUES('delete', ?, ?)`,
-        rowid,
-        content
-      );
-      ftsRowsDeleted++;
-    } catch (error) {
-      log.warn('fts_delete_marker_failed', { sessionId, rowid, ...serializeError(error) });
-    }
-    sql.exec('DELETE FROM chat_messages_grouped WHERE rowid = ?', rowid);
-    groupedRowsDeleted++;
-  }
-
-  // The watermark must die with the rows it described (rule 44: every writer that
-  // invalidates a column has to clear it). `resolveWatermark()` prefers the
-  // watermark over `materialized_at`, so a leftover value would claim the deleted
-  // head rows are still indexed: only the tail would ever be re-grouped, and
-  // `searchMessagesLike` would skip the head's raw rows as already covered. Today
-  // the `grouped_fts_pruned` refusal is what prevents that, and this clearing is
-  // what makes the refusal a second line of defence rather than the only one.
-  sql.exec(
-    `UPDATE chat_sessions
-     SET materialized_at = NULL,
-         materialized_through_created_at = NULL,
-         materialized_through_sequence = NULL,
-         search_index_state = ?,
-         search_index_updated_at = ?,
-         search_index_degradation_reason = ?
-     WHERE id = ?`,
-    SEARCH_INDEX_STATE_PRUNED,
-    now,
-    'Grouped/FTS derived rows were pruned for storage relief; search uses raw-message LIKE fallback for this terminal session.',
-    sessionId
-  );
-
-  return { groupedRowsDeleted, ftsRowsDeleted, contentBytes };
 }
 
 function hasRecentOverloadSignal(
@@ -274,9 +157,116 @@ function hasRecentOverloadSignal(
   return null;
 }
 
+function recordLastError(sql: SqlStorage, message: string): void {
+  try {
+    writeStorageSafetyMeta(sql, META_LAST_ERROR, truncateStorageSafetyMetaValue(message, 500));
+  } catch {
+    // Best-effort near the cap; the result and the log still carry it.
+  }
+}
+
+/** Running totals for one alarm run. */
+interface RunTotals {
+  rowsExamined: number;
+  sessionsExamined: number;
+  sessionsCleaned: number;
+  groupedRowsDeleted: number;
+  contentBytes: number;
+  pagesRolledBackForGrowth: number;
+  excluded: string[];
+  lastSessionId: string | null;
+  failureMessage: string | null;
+}
+
+type SessionStop =
+  'drained' | 'row_budget' | 'byte_budget' | 'wall_time' | 'storage_full' | 'excluded';
+
+/** True when the session's next grouped row alone is larger than a whole run's byte budget. */
+function nextRowExceedsRunBudget(
+  sql: SqlStorage,
+  sessionId: string,
+  cursor: GroupedPageCursor,
+  runBudgetBytes: number
+): boolean {
+  const [next] = readGroupedPage(
+    sql,
+    sessionId,
+    cursor,
+    1,
+    Number.MAX_SAFE_INTEGER,
+    Number.MAX_SAFE_INTEGER
+  );
+  return next !== undefined && next.bytes > runBudgetBytes;
+}
+
+/** Prunes one session page by page until it is drained, a budget runs out, or a page stops it. */
+function cleanSession(
+  sql: SqlStorage,
+  sessionId: string,
+  config: StorageSafetyConfig,
+  pageLimits: { rows: number; bytes: number },
+  transactionSync: <T>(callback: () => T) => T,
+  now: number,
+  deadline: () => boolean,
+  totals: RunTotals
+): SessionStop {
+  let cursor: GroupedPageCursor = GROUPED_PAGE_START;
+  let cleanedAny = false;
+  for (;;) {
+    const rowsLeft = config.groupedFtsCleanupBatchRows - totals.groupedRowsDeleted;
+    const bytesLeft = config.groupedFtsCleanupBatchBytes - totals.contentBytes;
+    if (rowsLeft <= 0) return 'row_budget';
+    if (bytesLeft <= 0) return 'byte_budget';
+    if (deadline()) return 'wall_time';
+    const page = readGroupedPage(
+      sql,
+      sessionId,
+      cursor,
+      Math.min(pageLimits.rows, rowsLeft),
+      Math.min(pageLimits.bytes, bytesLeft),
+      bytesLeft
+    );
+    if (page.length === 0) {
+      if (!hasGroupedRowsAfter(sql, sessionId, cursor)) return 'drained';
+      // A row no run could ever afford would otherwise stop every run on this session.
+      if (nextRowExceedsRunBudget(sql, sessionId, cursor, config.groupedFtsCleanupBatchBytes)) {
+        totals.excluded.push(sessionId);
+        return 'excluded';
+      }
+      return 'byte_budget';
+    }
+    totals.rowsExamined += page.length;
+    const outcome = prunePageAtomically(sql, sessionId, page, now, transactionSync);
+    if (outcome.kind === 'storage_full') {
+      totals.failureMessage = `grouped FTS cleanup page refused at the storage cap: session=${sessionId}`;
+      return 'storage_full';
+    }
+    if (outcome.kind === 'grew' || outcome.kind === 'failed') {
+      if (outcome.kind === 'grew') totals.pagesRolledBackForGrowth++;
+      totals.excluded.push(sessionId);
+      totals.failureMessage =
+        outcome.kind === 'grew'
+          ? `grouped FTS cleanup page would grow the database by ${outcome.growthBytes} bytes: session=${sessionId}`
+          : `grouped FTS cleanup page failed: session=${sessionId}: ${
+              outcome.error instanceof Error ? outcome.error.message : String(outcome.error)
+            }`;
+      return 'excluded';
+    }
+    if (!cleanedAny) {
+      cleanedAny = true;
+      totals.sessionsCleaned++;
+    }
+    totals.groupedRowsDeleted += page.length;
+    totals.contentBytes += page.reduce((sum, row) => sum + row.bytes, 0);
+    totals.lastSessionId = sessionId;
+    const last = page[page.length - 1];
+    if (last) cursor = { createdAt: last.createdAt, rowid: last.rowid };
+  }
+}
+
 export async function runProjectDataGroupedFtsCleanup(
   sql: SqlStorage,
-  _env: Env,
+  env: Env,
   projectId: string | null,
   config: StorageSafetyConfig,
   options: CleanupOptions
@@ -288,141 +278,138 @@ export async function runProjectDataGroupedFtsCleanup(
   const triggerBytes = Math.floor(config.limitBytes * config.groupedFtsCleanupTriggerRatio);
   const targetBytes = Math.floor(config.limitBytes * config.groupedFtsCleanupTargetRatio);
   const unsafeBytes = Math.floor(config.limitBytes * config.groupedFtsCleanupWallUnsafeRatio);
-  const pendingRecheckAt = readProjectDataGroupedFtsCleanupRecheckAt(sql);
-  const cursorSessionId = readStorageSafetyMeta(sql, META_GROUPED_FTS_CLEANUP_CURSOR_SESSION_ID);
+  const mode = resolveGroupedFtsCleanupModeConfig(env);
+  const nearWall = beforeBytes >= unsafeBytes;
 
   if (!config.groupedFtsCleanupEnabled) {
-    clearGroupedFtsCleanupState(sql);
+    clearGroupedFtsCleanupRun(sql);
     return emptyResult({ projectId, beforeBytes, config, terminationReason: 'disabled' });
   }
-  if (beforeBytes >= unsafeBytes) {
-    clearGroupedFtsCleanupState(sql);
-    return emptyResult({ projectId, beforeBytes, config, terminationReason: 'wall_unsafe' });
+  if (nearWall && (!mode.nearWallEnabled || !options.transactionSync)) {
+    clearGroupedFtsCleanupRun(sql);
+    return emptyResult({
+      projectId,
+      beforeBytes,
+      config,
+      terminationReason: 'wall_unsafe',
+      nearWall,
+    });
   }
   if (beforeBytes <= targetBytes) {
-    clearGroupedFtsCleanupState(sql);
+    clearGroupedFtsCleanupRun(sql);
     return emptyResult({ projectId, beforeBytes, config, terminationReason: 'target_reached' });
   }
+  const pendingRecheckAt = readGroupedFtsCleanupRecheckAt(sql);
   if (pendingRecheckAt !== null && pendingRecheckAt > now) return null;
-  if (!cursorSessionId && beforeBytes < triggerBytes && !options.allowStart) return null;
+  const inProgress = readGroupedFtsCleanupInProgressSessionId(sql) !== null;
+  if (!inProgress && beforeBytes < triggerBytes && !options.allowStart) return null;
 
   const overloadSignal = hasRecentOverloadSignal(sql, now, config);
   if (overloadSignal) {
-    const reason = `recent overload/reset signal: ${overloadSignal}`;
-    writeGroupedFtsCleanupState(
-      sql,
-      cursorSessionId,
-      now + config.groupedFtsCleanupRecheckMs,
-      reason
-    );
+    writeGroupedFtsCleanupRun(sql, {
+      lastSessionId: readGroupedFtsCleanupInProgressSessionId(sql),
+      recheckAt: now + config.groupedFtsCleanupRecheckMs,
+      pausedReason: `recent overload/reset signal: ${overloadSignal}`,
+    });
     return emptyResult({
       projectId,
       beforeBytes,
       config,
       terminationReason: 'circuit_breaker',
+      nearWall,
       circuitBreaker: 'recent_overload_or_reset',
     });
   }
 
+  // Below the wall-unsafe ratio the DO still passes a real transaction; a caller that does not
+  // gets per-statement writes, as the cleanup always did there.
+  const transactionSync = options.transactionSync ?? (<T>(callback: () => T): T => callback());
   const deadlineMs = now + config.groupedFtsCleanupWallTimeMs;
   const nowMs = options.nowMs ?? Date.now;
-  const candidates = readCandidates(sql, config, cursorSessionId, now);
+  const deadline = () => nowMs() >= deadlineMs;
+  const exclusions = readGroupedFtsCleanupExclusions(sql, now);
+  const cutoff = now - config.groupedFtsCleanupMinSessionAgeMs;
+  const candidates = readGroupedFtsCandidates(
+    sql,
+    cutoff,
+    config.groupedFtsCleanupBatchSessions + exclusions.size + 1
+  ).filter((candidate) => !exclusions.has(candidate.sessionId));
   if (candidates.length === 0) {
-    clearGroupedFtsCleanupState(sql);
+    clearGroupedFtsCleanupRun(sql);
     return emptyResult({
       projectId,
       beforeBytes,
       config,
       terminationReason: 'candidates_exhausted',
+      nearWall,
     });
   }
 
-  let rowsExamined = 0;
-  let sessionsExamined = 0;
-  let sessionsCleaned = 0;
-  let groupedRowsDeleted = 0;
-  let ftsRowsDeleted = 0;
-  let originalContentBytes = 0;
+  const transaction = resolveGroupedFtsWallRecoveryConfig(env);
+  const pageLimits = { rows: transaction.transactionRows, bytes: transaction.transactionBytes };
+  const totals: RunTotals = {
+    rowsExamined: 0,
+    sessionsExamined: 0,
+    sessionsCleaned: 0,
+    groupedRowsDeleted: 0,
+    contentBytes: 0,
+    pagesRolledBackForGrowth: 0,
+    excluded: [],
+    lastSessionId: null,
+    failureMessage: null,
+  };
   let terminationReason: ProjectDataCleanupTerminationReason = 'candidates_exhausted';
-  let lastProcessedSessionId: string | null = cursorSessionId;
-  let shouldContinue = false;
-
-  for (const candidate of candidates) {
-    if (sessionsExamined >= config.groupedFtsCleanupBatchSessions) {
-      terminationReason = 'row_budget';
-      shouldContinue = true;
-      break;
-    }
-    if (sessionsExamined > 0 && nowMs() >= deadlineMs) {
-      terminationReason = 'wall_time';
-      shouldContinue = true;
-      break;
-    }
-    sessionsExamined++;
-    rowsExamined += candidate.groupedRows;
-
-    if (candidate.groupedRows > config.groupedFtsCleanupBatchRows) {
-      terminationReason = 'oversized_skip';
-      lastProcessedSessionId = candidate.sessionId;
-      shouldContinue = true;
-      continue;
-    }
-    if (groupedRowsDeleted + candidate.groupedRows > config.groupedFtsCleanupBatchRows) {
-      terminationReason = 'row_budget';
-      shouldContinue = true;
-      break;
-    }
-    if (originalContentBytes + candidate.contentBytes > config.groupedFtsCleanupBatchBytes) {
-      if (candidate.contentBytes > config.groupedFtsCleanupBatchBytes) {
-        terminationReason = 'oversized_skip';
-        lastProcessedSessionId = candidate.sessionId;
-        shouldContinue = true;
-        continue;
-      }
-      terminationReason = 'byte_budget';
-      shouldContinue = true;
-      break;
-    }
-
-    const deleted = deleteGroupedFtsForSession(sql, candidate.sessionId, now);
-    groupedRowsDeleted += deleted.groupedRowsDeleted;
-    ftsRowsDeleted += deleted.ftsRowsDeleted;
-    originalContentBytes += deleted.contentBytes;
-    sessionsCleaned++;
-    lastProcessedSessionId = candidate.sessionId;
-
-    if (nowMs() >= deadlineMs) {
-      terminationReason = 'wall_time';
-      shouldContinue = true;
-      break;
-    }
+  let shouldContinue = candidates.length > config.groupedFtsCleanupBatchSessions;
+  for (const candidate of candidates.slice(0, config.groupedFtsCleanupBatchSessions)) {
+    totals.sessionsExamined++;
+    const stop = cleanSession(
+      sql,
+      candidate.sessionId,
+      config,
+      pageLimits,
+      transactionSync,
+      now,
+      deadline,
+      totals
+    );
+    if (stop === 'drained' || stop === 'excluded') continue;
+    terminationReason = stop;
+    shouldContinue = true;
+    break;
+  }
+  if (shouldContinue && terminationReason === 'candidates_exhausted') {
+    terminationReason = 'row_budget';
   }
 
-  if (candidates.length > config.groupedFtsCleanupBatchSessions) {
+  if (totals.excluded.length > 0) {
+    excludeGroupedFtsCleanupSessions(
+      sql,
+      exclusions,
+      totals.excluded,
+      now + mode.exclusionMs,
+      mode.maxExclusions
+    );
     shouldContinue = true;
-    if (terminationReason === 'candidates_exhausted') terminationReason = 'row_budget';
   }
 
   const afterBytes = sql.databaseSize;
   const reclaimedBytes = Math.max(beforeBytes - afterBytes, 0);
-  if (groupedRowsDeleted > 0 && reclaimedBytes < config.groupedFtsCleanupWeakReclaimBytes) {
+  if (
+    totals.groupedRowsDeleted > 0 &&
+    reclaimedBytes < config.groupedFtsCleanupWeakReclaimBytes &&
+    terminationReason !== 'storage_full'
+  ) {
     terminationReason = 'weak_reclaim';
     shouldContinue = false;
-    writeStorageSafetyMeta(
-      sql,
-      META_LAST_ERROR,
-      truncateStorageSafetyMetaValue(
-        `grouped FTS cleanup weak reclaim: rows=${groupedRowsDeleted}, reclaimedBytes=${reclaimedBytes}`,
-        500
-      )
-    );
+    totals.failureMessage = `grouped FTS cleanup weak reclaim: rows=${totals.groupedRowsDeleted}, reclaimedBytes=${reclaimedBytes}`;
   }
+  if (totals.failureMessage) recordLastError(sql, totals.failureMessage);
 
   const recheckAt = shouldContinue ? now + config.groupedFtsCleanupRecheckMs : null;
-  if (shouldContinue) {
-    writeGroupedFtsCleanupState(sql, lastProcessedSessionId, recheckAt);
+  if (recheckAt !== null) {
+    writeGroupedFtsCleanupRun(sql, { lastSessionId: totals.lastSessionId, recheckAt });
   } else {
-    clearGroupedFtsCleanupState(sql);
+    clearGroupedFtsCleanupRun(sql);
   }
 
   const result: ProjectDataGroupedFtsCleanupResult = {
@@ -433,20 +420,24 @@ export async function runProjectDataGroupedFtsCleanup(
     limitBytes: config.limitBytes,
     triggerBytes,
     targetBytes,
-    rowsExamined,
-    sessionsExamined,
-    sessionsCleaned,
-    groupedRowsDeleted,
-    ftsRowsDeleted,
-    originalContentBytes,
+    rowsExamined: totals.rowsExamined,
+    sessionsExamined: totals.sessionsExamined,
+    sessionsCleaned: totals.sessionsCleaned,
+    groupedRowsDeleted: totals.groupedRowsDeleted,
+    // A page's FTS deletes commit with its rows or not at all.
+    ftsRowsDeleted: totals.groupedRowsDeleted,
+    originalContentBytes: totals.contentBytes,
     terminationReason,
-    searchSemantics: groupedRowsDeleted > 0 ? 'partial_raw_like_fallback' : 'full_fts',
-    cursor: shouldContinue && lastProcessedSessionId ? { sessionId: lastProcessedSessionId } : null,
+    nearWall,
+    pagesRolledBackForGrowth: totals.pagesRolledBackForGrowth,
+    sessionsExcluded: totals.excluded.length,
+    searchSemantics: totals.groupedRowsDeleted > 0 ? 'partial_raw_like_fallback' : 'full_fts',
+    cursor: recheckAt !== null && totals.lastSessionId ? { sessionId: totals.lastSessionId } : null,
     recheckAt,
     circuitBreaker: null,
   };
 
-  if (groupedRowsDeleted > 0 || terminationReason !== 'candidates_exhausted') {
+  if (totals.groupedRowsDeleted > 0 || terminationReason !== 'candidates_exhausted') {
     log.warn('completed', result);
   }
   return result;

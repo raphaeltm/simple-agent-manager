@@ -2335,6 +2335,7 @@ export class ProjectData extends DurableObject<Env> {
       config,
       {
         allowStart: true,
+        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
         classifyStatus: (databaseSizeBytes) =>
           storageSafety.classifyStorageUsage(databaseSizeBytes, config),
       }

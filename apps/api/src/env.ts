@@ -699,6 +699,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_NEAR_WALL_ENABLED?: string; // Keep the alarm cleanup running above the wall-unsafe ratio with atomic, non-growing pages (default: false)
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_EXCLUSION_MS?: string; // How long the alarm cleanup leaves a session alone after its page failed or would grow the database (default: 86400000)
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_MAX_EXCLUSIONS?: string; // Excluded sessions remembered at once (default: 50)
   PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS?: string;
   PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES?: string;
   PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS?: string;

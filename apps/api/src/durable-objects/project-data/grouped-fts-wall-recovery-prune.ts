@@ -1,6 +1,8 @@
 /**
- * How `grouped-fts-wall-recovery.ts` prunes one page of a session's grouped rows,
- * including the storage-full fallback described in that module's comment.
+ * How one page of a session's grouped rows is pruned: by the operator wall recovery
+ * (`grouped-fts-wall-recovery.ts`, `prunePage`, with the storage-full fallback described in
+ * that module's comment) and by the storage alarm (`grouped-fts-cleanup.ts`,
+ * `prunePageAtomically`, which never leaves a stale index entry).
  */
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { isDurableObjectStorageFullError } from '../../services/durable-object-retry';
@@ -10,6 +12,8 @@ const log = createModuleLogger('project_data.grouped_fts_wall_recovery');
 
 const PRUNED_REASON =
   'Grouped/FTS derived rows were pruned by operator wall recovery; search uses raw-message LIKE fallback for this terminal session.';
+export const ALARM_PRUNED_REASON =
+  'Grouped/FTS derived rows were pruned for storage relief; search uses raw-message LIKE fallback for this terminal session.';
 
 export type PageRow = { rowid: number; createdAt: number; bytes: number };
 type ContentRow = { rowid: number; content: string };
@@ -38,7 +42,8 @@ function deleteGroupedRowsAndMarkSession(
   sql: SqlStorage,
   sessionId: string,
   page: PageRow[],
-  now: number
+  now: number,
+  reason: string = PRUNED_REASON
 ): void {
   for (const { rowid } of page) {
     sql.exec(
@@ -60,7 +65,7 @@ function deleteGroupedRowsAndMarkSession(
      WHERE id = ?`,
     SEARCH_INDEX_STATE_PRUNED,
     now,
-    PRUNED_REASON,
+    reason,
     sessionId
   );
 }
@@ -136,5 +141,62 @@ export function prunePage(
       ...serializeError(error),
     });
     return { kind: 'fts_stale' };
+  }
+}
+
+/** Thrown inside the page transaction to roll back a page that left the database larger. */
+class PageGrewError extends Error {
+  constructor(readonly growthBytes: number) {
+    super(`grouped page grew the database by ${growthBytes} bytes`);
+    this.name = 'PageGrewError';
+  }
+}
+
+/**
+ * - `pruned`: the rows, the session mark and the FTS entries committed together.
+ * - `grew`: rolled back, because the page left the database larger than it found it (an FTS5
+ *   delete writes a segment about as large as the postings it cancels, which unique-token
+ *   content can make larger than the rows it frees). Nothing changed.
+ * - `storage_full`: rolled back at the per-object cap. Nothing changed.
+ * - `failed`: rolled back for any other reason. Nothing changed.
+ */
+export type AtomicPagePruneOutcome =
+  | { kind: 'pruned' }
+  | { kind: 'grew'; growthBytes: number }
+  | { kind: 'storage_full'; error: unknown }
+  | { kind: 'failed'; error: unknown };
+
+/**
+ * The storage alarm's page: one transaction or nothing. Unlike `prunePage` it has no two-step
+ * fallback, so it can never leave a stale FTS entry, and it rolls back a page whose own writes
+ * grew the database: inside `transactionSync`, `databaseSize` already counts the uncommitted
+ * pages, and a rollback restores it (verified in workerd).
+ */
+export function prunePageAtomically(
+  sql: SqlStorage,
+  sessionId: string,
+  page: PageRow[],
+  now: number,
+  transactionSync: <T>(callback: () => T) => T
+): AtomicPagePruneOutcome {
+  let rows: ContentRow[];
+  try {
+    rows = readPageContent(sql, sessionId, page);
+  } catch (error) {
+    return { kind: 'failed', error };
+  }
+  const beforeBytes = sql.databaseSize;
+  try {
+    transactionSync(() => {
+      deleteGroupedRowsAndMarkSession(sql, sessionId, page, now, ALARM_PRUNED_REASON);
+      deleteFtsEntries(sql, rows);
+      const afterBytes = sql.databaseSize;
+      if (afterBytes > beforeBytes) throw new PageGrewError(afterBytes - beforeBytes);
+    });
+    return { kind: 'pruned' };
+  } catch (error) {
+    if (error instanceof PageGrewError) return { kind: 'grew', growthBytes: error.growthBytes };
+    if (isDurableObjectStorageFullError(error)) return { kind: 'storage_full', error };
+    return { kind: 'failed', error };
   }
 }
