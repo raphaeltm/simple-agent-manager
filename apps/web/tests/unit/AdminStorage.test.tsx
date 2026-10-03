@@ -499,7 +499,7 @@ describe('AdminStorage — space recovery', () => {
   const previewButton = (dialog: HTMLElement) =>
     within(dialog).getByRole('button', { name: /preview/i });
   const recoverButton = (dialog: HTMLElement) =>
-    within(dialog).getByRole('button', { name: /recover space/i });
+    within(dialog).getByRole('button', { name: /^recover$/i });
 
   it('previews, then recovers, with the budgets the API serves', async () => {
     mocks.runAdminProjectDataWallRecovery.mockResolvedValueOnce(result()).mockResolvedValueOnce(
@@ -545,7 +545,7 @@ describe('AdminStorage — space recovery', () => {
       )
     );
     expect(await within(dialog).findByText('Recovery finished')).toBeInTheDocument();
-    expect(dialog).toHaveTextContent('freed 6.0 MiB');
+    expect(dialog).toHaveTextContent('Freed 6.0 MiB');
     // A real run refreshes the page's storage data without closing the result.
     await waitFor(() =>
       expect(mocks.fetchAdminProjectDataStorageTelemetry).toHaveBeenCalledTimes(2)
@@ -610,6 +610,7 @@ describe('AdminStorage — space recovery', () => {
 
     fireEvent.click(recoverButton(dialog));
     expect(await within(dialog).findByText(/A page failed/)).toBeInTheDocument();
+    expect(dialog).toHaveTextContent('Recovery stopped by a failure');
     // Pages before the failure were applied and are shown, and nothing retried on its own.
     expect(dialog).toHaveTextContent('120 rows');
     expect(mocks.runAdminProjectDataWallRecovery).toHaveBeenCalledTimes(1);

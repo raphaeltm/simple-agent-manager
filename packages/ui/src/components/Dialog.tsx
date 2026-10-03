@@ -19,6 +19,12 @@ interface DialogProps {
    * When provided, the header stays fixed while children scroll independently.
    */
   stickyHeader?: ReactNode;
+  /**
+   * Optional footer pinned below the scrollable body, for actions that must stay reachable
+   * however long the body grows (on a phone the body scrolls first). Buttons that submit a form
+   * in the body need its `form` attribute, since the footer sits outside that form.
+   */
+  stickyFooter?: ReactNode;
 }
 
 const maxWidthClasses: Record<NonNullable<DialogProps['maxWidth']>, string> = {
@@ -33,6 +39,7 @@ export function Dialog({
   children,
   maxWidth = 'md',
   stickyHeader,
+  stickyFooter,
   'aria-label': ariaLabel,
   'aria-labelledby': ariaLabelledby,
   'aria-describedby': ariaDescribedby,
@@ -79,6 +86,11 @@ export function Dialog({
         <div className="overflow-y-auto p-6 flex-1">
           {children}
         </div>
+        {stickyFooter && (
+          <div className="flex-shrink-0 border-t border-border-default px-6 py-4">
+            {stickyFooter}
+          </div>
+        )}
       </div>
     </div>,
     document.body,

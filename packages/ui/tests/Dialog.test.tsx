@@ -280,6 +280,20 @@ describe('Dialog', () => {
     expect(scrollArea).not.toBeNull();
   });
 
+  it('pins a sticky footer outside the scrollable body', () => {
+    render(
+      <Dialog isOpen={true} onClose={vi.fn()} stickyFooter={<button type="button">Act</button>}>
+        <p>Long body</p>
+      </Dialog>,
+    );
+    const dialog = screen.getByRole('dialog');
+    const scrollArea = dialog.querySelector('.overflow-y-auto')!;
+    const action = screen.getByRole('button', { name: 'Act' });
+    expect(scrollArea).toHaveTextContent('Long body');
+    expect(scrollArea.contains(action)).toBe(false);
+    expect(action.closest('.flex-shrink-0')?.parentElement).toBe(scrollArea.parentElement);
+  });
+
   it('cleans up body overflow style on unmount', () => {
     const { unmount } = render(
       <Dialog isOpen={true} onClose={vi.fn()}>

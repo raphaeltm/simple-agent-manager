@@ -384,7 +384,10 @@ test.describe('AdminStorage', () => {
   test('abandon dialog shows migration details and is usable on mobile', async ({ page }) => {
     await setupMocks(page, {});
     await openStoragePage(page);
-    await page.getByTestId('migration-67927ce6').getByRole('button', { name: /abandon/i }).click();
+    await page
+      .getByTestId('migration-67927ce6')
+      .getByRole('button', { name: /abandon/i })
+      .click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('heading', { name: 'Abandon migration' })).toBeVisible();
@@ -465,5 +468,206 @@ test.describe('AdminStorage', () => {
     ]);
     await screenshot(page, 'admin-storage-after-abandon');
     await assertNoOverflow(page);
+  });
+});
+
+test.describe('AdminStorage — Recover space', () => {
+  const MIB = 1024 * 1024;
+  const SAM_ID = '01KHRJGANBBWGDY1NZ0KVF0D4J';
+  const CONFIG = {
+    ceilings: { maxRows: 5_000, maxBytes: 32 * MIB, maxSessions: 5 },
+    defaults: { maxRows: 500, maxBytes: 4 * MIB, maxSessions: 1 },
+  };
+  const BASE_RESULT = {
+    projectId: SAM_ID,
+    reason: 'At the wall',
+    beforeBytes: 10_737_418_240,
+    afterBytes: 10_737_418_240,
+    databaseSizeDeltaBytes: 0,
+    candidateSessions: 1,
+    sessionsTouched: 1,
+    sessionsDrained: 0,
+    groupedRowsDeleted: 500,
+    ftsEntriesDeleted: 0,
+    ftsStaleRows: 0,
+    contentBytes: 3 * MIB,
+    transactions: 0,
+    stopReason: 'row_budget',
+    error: null,
+    failedSessionId: null,
+    sessions: [],
+  };
+  const RESULTS = [
+    { ...BASE_RESULT, dryRun: true },
+    {
+      ...BASE_RESULT,
+      dryRun: false,
+      stopReason: 'transaction_failed',
+      error:
+        'Exceeded the maximum database size. (page of 250 grouped rows for session 4b2f9c1e-7d3a-4e8b-9f61-2c5d7a8e0b13 rolled back)',
+      failedSessionId: '4b2f9c1e-7d3a-4e8b-9f61-2c5d7a8e0b13',
+      groupedRowsDeleted: 250,
+      databaseSizeDeltaBytes: 2 * MIB,
+      afterBytes: 10_737_418_240 - 2 * MIB,
+      transactions: 1,
+    },
+    {
+      ...BASE_RESULT,
+      dryRun: false,
+      afterBytes: 10_737_418_240 - 6 * MIB,
+      databaseSizeDeltaBytes: 6 * MIB,
+      ftsEntriesDeleted: 460,
+      ftsStaleRows: 40,
+      transactions: 2,
+      stopReason: 'candidates_exhausted',
+    },
+  ];
+
+  async function setupRecoveryMocks(page: Page, postBodies: unknown[]) {
+    await dismissOnboardingWizard(page);
+    await setupAuditRoutes(page, (path, respond) => {
+      if (path === '/api/auth/get-session') return respond(200, ADMIN_USER);
+      if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
+      if (path === '/api/trial-status') return respond(200, { isTrial: false });
+      if (path === '/api/projects') return respond(200, { projects: [], total: 0 });
+      if (path === '/api/notifications/unread-count') return respond(200, { count: 0 });
+      if (path === '/api/notifications') {
+        return respond(200, { notifications: [], unreadCount: 0, nextCursor: null });
+      }
+      if (path.startsWith('/api/credentials')) return respond(200, []);
+      if (path === '/api/github/installations') return respond(200, []);
+      if (path === '/api/workspaces') return respond(200, []);
+      if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
+      if (path === '/api/admin/project-data/storage/archive-sharding/problem-migrations') {
+        return respond(200, PROBLEM_MIGRATIONS);
+      }
+      if (path === '/api/admin/project-data/storage/archive-sharding/circuit-breakers') {
+        return respond(200, BREAKERS);
+      }
+      if (path === '/api/admin/project-data/storage') return respond(200, TELEMETRY);
+      if (path === '/api/admin/project-data/storage/grouped-fts-wall-recovery/config') {
+        return respond(200, CONFIG);
+      }
+      return undefined;
+    });
+    await page.route(
+      `**/api/admin/project-data/storage/${SAM_ID}/grouped-fts-wall-recovery`,
+      async (route) => {
+        postBodies.push(route.request().postDataJSON());
+        const next = RESULTS[Math.min(postBodies.length - 1, RESULTS.length - 1)];
+        await respondJson(route, 200, { result: next });
+      }
+    );
+  }
+
+  /**
+   * Blocking for the new surface: nothing inside the dialog may extend past it, and the dialog
+   * may not extend past the viewport. The page-level clipped-overflow report stays advisory, as
+   * in the rest of this file: the admin shell clips a 437px element at <=375px before any dialog
+   * opens (tasks/backlog/2026-10-03-admin-shell-clipped-overflow-mobile.md).
+   */
+  async function assertDialogContained(page: Page) {
+    const escaping = await page.getByRole('dialog').evaluate((dialog) => {
+      const bounds = dialog.getBoundingClientRect();
+      const out: string[] = [];
+      if (bounds.left < 0 || bounds.right > window.innerWidth + 1) {
+        out.push(`dialog ${Math.round(bounds.left)}..${Math.round(bounds.right)}`);
+      }
+      for (const el of Array.from(dialog.querySelectorAll('*'))) {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0) continue;
+        if (r.left < bounds.left - 1 || r.right > bounds.right + 1) {
+          out.push(`${el.tagName} ${(el.textContent ?? '').slice(0, 40)}`);
+        }
+      }
+      return out;
+    });
+    expect(escaping).toEqual([]);
+  }
+
+  async function checkLayout(page: Page, name: string) {
+    await screenshot(page, name);
+    await assertNoOverflow(page);
+    await assertDialogContained(page);
+  }
+
+  test('preview, a failed page with skip, then a finished run', async ({ page }) => {
+    const postBodies: unknown[] = [];
+    await setupRecoveryMocks(page, postBodies);
+    await openStoragePage(page);
+
+    await page
+      .getByTestId(`telemetry-${SAM_ID}`)
+      .getByRole('button', { name: /recover space/i })
+      .click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('heading', { name: 'Recover storage space' })).toBeVisible();
+    await expect(dialog.getByLabel('Sessions')).toHaveValue('1');
+    await expect(dialog.getByLabel('Size (MiB)')).toHaveValue('4');
+    await expect(dialog.getByRole('button', { name: /preview/i })).toBeDisabled();
+    await checkLayout(page, 'admin-storage-recover-dialog');
+
+    await dialog.getByLabel('Reason').fill('At the wall');
+    await dialog.getByRole('button', { name: /preview/i }).click();
+    await expect(dialog.getByText('Preview: nothing was changed')).toBeVisible();
+    await checkLayout(page, 'admin-storage-recover-preview');
+
+    await dialog.getByRole('button', { name: /^recover$/i }).click();
+    await expect(dialog.getByText(/A page failed/)).toBeVisible();
+    await dialog.getByRole('button', { name: /skip this session next run/i }).click();
+    await expect(
+      dialog.getByText('4b2f9c1e-7d3a-4e8b-9f61-2c5d7a8e0b13', { exact: true })
+    ).toBeVisible();
+    await checkLayout(page, 'admin-storage-recover-failed-page');
+
+    await dialog.getByRole('button', { name: /^recover$/i }).click();
+    await expect(dialog.getByText('Recovery finished')).toBeVisible();
+    await expect(dialog.getByText(/40 search entries did not fit/)).toBeVisible();
+    await checkLayout(page, 'admin-storage-recover-done');
+
+    expect(postBodies).toEqual([
+      {
+        reason: 'At the wall',
+        dryRun: true,
+        maxSessions: 1,
+        maxRows: 500,
+        maxBytes: 4 * MIB,
+        skipSessionIds: [],
+      },
+      {
+        reason: 'At the wall',
+        dryRun: false,
+        maxSessions: 1,
+        maxRows: 500,
+        maxBytes: 4 * MIB,
+        skipSessionIds: [],
+      },
+      {
+        reason: 'At the wall',
+        dryRun: false,
+        maxSessions: 1,
+        maxRows: 500,
+        maxBytes: 4 * MIB,
+        skipSessionIds: ['4b2f9c1e-7d3a-4e8b-9f61-2c5d7a8e0b13'],
+      },
+    ]);
+  });
+
+  test('stays inside a 320px-wide screen with invalid budgets showing', async ({ page }) => {
+    await setupRecoveryMocks(page, []);
+    await page.setViewportSize({ width: 320, height: 640 });
+    await openStoragePage(page);
+    await page
+      .getByTestId(`telemetry-${SAM_ID}`)
+      .getByRole('button', { name: /recover space/i })
+      .click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Rows').fill('999999');
+    await expect(dialog.getByText('At most 5,000')).toBeVisible();
+    const box = await dialog.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+    await checkLayout(page, 'admin-storage-recover-320');
   });
 });

@@ -20,13 +20,17 @@ import {
 } from '../../lib/query-options';
 
 const MIB = 1024 * 1024;
+const FORM_ID = 'wall-recovery-form';
 
-const STOP_REASON_LABEL: Record<GroupedFtsWallRecoveryStopReason, string> = {
+/** The heading already says when a failed page stopped the run. */
+const STOP_REASON_LABEL: Record<
+  Exclude<GroupedFtsWallRecoveryStopReason, 'transaction_failed'>,
+  string
+> = {
   candidates_exhausted: 'No more eligible sessions',
   row_budget: 'Row limit reached',
   byte_budget: 'Size limit reached',
   session_budget: 'Session limit reached',
-  transaction_failed: 'Stopped by a failed page',
 };
 
 type BudgetField = 'maxSessions' | 'maxRows' | 'maxBytes';
@@ -41,6 +45,11 @@ const BUDGET_FIELDS: Array<{ field: BudgetField; label: string; unit: 'count' | 
 /** MiB with at most two decimals, rounded down so a prefilled value never exceeds its bound. */
 function toMib(bytes: number): string {
   return String(Math.floor((bytes / MIB) * 100) / 100);
+}
+
+/** GiB-scale sizes to the MiB, so a few freed MiB still show in the before/after pair. */
+function preciseBytes(bytes: number): string {
+  return bytes >= 1024 * MIB ? `${(bytes / (1024 * MIB)).toFixed(3)} GiB` : formatBytes(bytes);
 }
 
 function display(field: BudgetField, value: number): string {
@@ -81,9 +90,15 @@ function RecoveryResult({ result }: { result: GroupedFtsWallRecoveryResult }) {
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-semibold text-fg-primary">
-          {result.dryRun ? 'Preview: nothing was changed' : 'Recovery finished'}
+          {result.dryRun
+            ? 'Preview: nothing was changed'
+            : result.stopReason === 'transaction_failed'
+              ? 'Recovery stopped by a failure'
+              : 'Recovery finished'}
         </span>
-        <span className="text-xs text-fg-muted">{STOP_REASON_LABEL[result.stopReason]}</span>
+        {result.stopReason !== 'transaction_failed' && (
+          <span className="text-xs text-fg-muted">{STOP_REASON_LABEL[result.stopReason]}</span>
+        )}
       </div>
       <dl className="m-0 grid gap-x-4 gap-y-1 sm:grid-cols-[auto_1fr]">
         <dt className="text-fg-muted">{result.dryRun ? 'Would prune' : 'Pruned'}</dt>
@@ -96,8 +111,8 @@ function RecoveryResult({ result }: { result: GroupedFtsWallRecoveryResult }) {
           <>
             <dt className="text-fg-muted">Storage</dt>
             <dd className="m-0 break-words text-fg-primary">
-              {formatBytes(result.beforeBytes)} → {formatBytes(result.afterBytes)} (
-              {delta >= 0 ? `freed ${formatBytes(delta)}` : `grew ${formatBytes(-delta)}`})
+              {delta >= 0 ? `Freed ${formatBytes(delta)}` : `Grew ${formatBytes(-delta)}`} (
+              {preciseBytes(result.beforeBytes)} → {preciseBytes(result.afterBytes)})
             </dd>
             <dt className="text-fg-muted">Search entries</dt>
             <dd className="m-0 text-fg-primary">
@@ -210,19 +225,65 @@ export function WallRecoveryDialog({
     );
   };
 
+  const header = (
+    <div className="flex items-center justify-between gap-3 border-b border-border-default px-6 py-4">
+      <h2 id="wall-recovery-title" className="m-0 text-lg font-semibold text-fg-primary">
+        Recover storage space
+      </h2>
+      <button
+        type="button"
+        onClick={dismiss}
+        disabled={recovery.isPending}
+        aria-label="Close"
+        className="-mr-2 cursor-pointer border-none bg-transparent p-2 text-xl leading-none text-fg-muted disabled:cursor-not-allowed"
+      >
+        ×
+      </button>
+    </div>
+  );
+  // Pinned below the scrolling body: on a phone the form and its result scroll, the actions stay.
+  const footer = (
+    <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+      <Button
+        type="submit"
+        form={FORM_ID}
+        variant="secondary"
+        disabled={!canRun}
+        loading={recovery.isPending && recovery.variables?.dryRun === true}
+      >
+        <ScanSearch size={16} />
+        Preview
+      </Button>
+      <Button
+        type="button"
+        variant="danger"
+        onClick={() => run(false)}
+        disabled={!canRun}
+        loading={recovery.isPending && recovery.variables?.dryRun === false}
+      >
+        <Eraser size={16} />
+        Recover
+      </Button>
+    </div>
+  );
+
   return (
-    <Dialog isOpen={target !== null} onClose={dismiss} aria-labelledby="wall-recovery-title">
+    <Dialog
+      isOpen={target !== null}
+      onClose={dismiss}
+      aria-labelledby="wall-recovery-title"
+      stickyHeader={target ? header : undefined}
+      stickyFooter={target ? footer : undefined}
+    >
       {target && (
         <form
+          id={FORM_ID}
           className="grid min-w-0 gap-4"
           onSubmit={(event) => {
             event.preventDefault();
             run(true);
           }}
         >
-          <h2 id="wall-recovery-title" className="m-0 text-lg font-semibold text-fg-primary">
-            Recover storage space
-          </h2>
           <p className="m-0 break-words text-sm text-fg-muted">
             Removes the search index of the largest old, ended sessions in{' '}
             <span className="font-semibold text-fg-primary">
@@ -327,30 +388,6 @@ export function WallRecoveryDialog({
             </Alert>
           )}
           {result && <RecoveryResult result={result} />}
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button type="button" variant="ghost" onClick={dismiss} disabled={recovery.isPending}>
-              Close
-            </Button>
-            <Button
-              type="submit"
-              variant="secondary"
-              disabled={!canRun}
-              loading={recovery.isPending && recovery.variables?.dryRun === true}
-            >
-              <ScanSearch size={16} />
-              Preview
-            </Button>
-            <Button
-              type="button"
-              variant="danger"
-              onClick={() => run(false)}
-              disabled={!canRun}
-              loading={recovery.isPending && recovery.variables?.dryRun === false}
-            >
-              <Eraser size={16} />
-              Recover space
-            </Button>
-          </div>
         </form>
       )}
     </Dialog>
