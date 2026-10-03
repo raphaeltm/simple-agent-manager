@@ -11,6 +11,10 @@ import {
   type SessionSnapshotArtifact,
   type SessionSnapshotConfig,
 } from './session-snapshot-artifacts';
+import {
+  deleteAbandonedSessionSnapshotObjects,
+  sessionSnapshotCaptureKeys,
+} from './session-snapshot-capture-cleanup';
 import { ensureUnhealthyNodeSleepPlaceholder } from './session-snapshot-unhealthy-guard';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -46,6 +50,7 @@ export async function prepareSessionSnapshot(
       status: schema.sessionSnapshots.status,
       sleepStatus: schema.sessionSnapshots.sleepStatus,
       sleepingAt: schema.sessionSnapshots.sleepingAt,
+      captureGeneration: schema.sessionSnapshots.captureGeneration,
     })
     .from(schema.sessionSnapshots)
     .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId))
@@ -140,11 +145,44 @@ export async function prepareSessionSnapshot(
         throw new Error('Snapshot capture lost the sleep teardown race');
       }
     }
+    if (current.captureGeneration && current.captureGeneration !== generation) {
+      await deleteSupersededCapture(db, env, input.chatSessionId, current.captureGeneration);
+    }
   } else {
     await db.insert(schema.sessionSnapshots).values({ ...row, createdAt: now.toISOString() });
   }
 
   return { snapshotId, generation, expiresAt, keys, config };
+}
+
+/**
+ * The capture generation this prepare replaced can no longer complete (its
+ * /complete is rejected as not current), so its uploads are abandoned. The
+ * row's recorded keys are re-read after the replacement and always kept: they
+ * belong to the completed snapshot, including the case where the superseded
+ * capture completed between the read and the replacement.
+ */
+async function deleteSupersededCapture(
+  db: Db,
+  env: Env,
+  chatSessionId: string,
+  supersededGeneration: string
+): Promise<void> {
+  const recorded = await db
+    .select({
+      homeR2Key: schema.sessionSnapshots.homeR2Key,
+      wipR2Key: schema.sessionSnapshots.wipR2Key,
+      manifestR2Key: schema.sessionSnapshots.manifestR2Key,
+    })
+    .from(schema.sessionSnapshots)
+    .where(eq(schema.sessionSnapshots.chatSessionId, chatSessionId))
+    .get();
+  await deleteAbandonedSessionSnapshotObjects(env, {
+    chatSessionId,
+    generation: supersededGeneration,
+    keys: sessionSnapshotCaptureKeys(env, chatSessionId, supersededGeneration),
+    keep: [recorded?.homeR2Key, recorded?.wipR2Key, recorded?.manifestR2Key],
+  });
 }
 
 /**
