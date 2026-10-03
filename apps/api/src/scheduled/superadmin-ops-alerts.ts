@@ -16,7 +16,19 @@ export interface SuperadminOpsAlert {
    * deliveries keep failing cannot take a capped tick's slot every time. Unset: retry next tick.
    */
   failureBackoffMs?: number;
+  /** Clock for the failure stamp's retry time (default: now). */
+  now?: number;
   notification: CreateNotificationRequest;
+}
+
+/**
+ * A live throttle stamp: `sent` holds the recipient for the throttle window; `failed` records a
+ * failed delivery that may be retried from `retryAt`, and outlives it so a retry is never
+ * mistaken for a first delivery.
+ */
+export interface ThrottleStamp {
+  kind: 'sent' | 'failed';
+  retryAt: number | null;
 }
 
 export interface SuperadminOpsAlertResult {
@@ -52,15 +64,21 @@ export async function listLiveThrottleStamps(
   prefix: string,
   now: number,
   maxPages: number
-): Promise<Set<string> | null> {
-  const live = new Set<string>();
+): Promise<Map<string, ThrottleStamp> | null> {
+  const live = new Map<string, ThrottleStamp>();
   let cursor: string | undefined;
   try {
     for (let page = 0; page < maxPages; page++) {
-      const result = await env.KV.list({ prefix: `${prefix}:`, ...(cursor ? { cursor } : {}) });
+      const result = await env.KV.list<{ kind?: unknown; retryAt?: unknown }>({
+        prefix: `${prefix}:`,
+        ...(cursor ? { cursor } : {}),
+      });
       for (const key of result.keys) {
         // `expiration` is in seconds; a key KV has not purged yet must not count once expired.
-        if (key.expiration === undefined || key.expiration * 1_000 > now) live.add(key.name);
+        if (key.expiration !== undefined && key.expiration * 1_000 <= now) continue;
+        const failed = key.metadata?.kind === 'failed';
+        const retryAt = typeof key.metadata?.retryAt === 'number' ? key.metadata.retryAt : null;
+        live.set(key.name, { kind: failed ? 'failed' : 'sent', retryAt: failed ? retryAt : null });
       }
       if (result.list_complete) return live;
       cursor = result.cursor;
@@ -97,6 +115,7 @@ export async function deliverOpsAlert(
 ): Promise<Pick<SuperadminOpsAlertResult, 'sent' | 'failed'>> {
   const result = { sent: 0, failed: 0 };
   const expirationTtl = Math.max(60, Math.ceil(alert.throttleMs / 1_000));
+  const now = alert.now ?? Date.now();
   for (const userId of recipients) {
     try {
       await sendNotification(env, userId, alert.notification);
@@ -109,17 +128,19 @@ export async function deliverOpsAlert(
         error: error instanceof Error ? error.message : String(error),
       });
       if (alert.failureBackoffMs) {
-        await env.KV.put(`${alert.throttleKey}:${userId}`, `failed:${new Date().toISOString()}`, {
-          expirationTtl: Math.max(60, Math.ceil(alert.failureBackoffMs / 1_000)),
+        await env.KV.put(`${alert.throttleKey}:${userId}`, 'failed', {
+          expirationTtl,
+          metadata: { kind: 'failed', retryAt: now + alert.failureBackoffMs },
         }).catch(() => {
-          // Without the backoff stamp the recipient is simply retried next tick.
+          // Without the stamp the recipient is retried next tick, as a first delivery.
         });
       }
       continue;
     }
     result.sent++;
-    await env.KV.put(`${alert.throttleKey}:${userId}`, new Date().toISOString(), {
+    await env.KV.put(`${alert.throttleKey}:${userId}`, new Date(now).toISOString(), {
       expirationTtl,
+      metadata: { kind: 'sent' },
     }).catch((error) => {
       log.error('ops_alert.throttle_write_failed', {
         throttleKey: alert.throttleKey,

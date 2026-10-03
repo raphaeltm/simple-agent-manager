@@ -17,6 +17,7 @@ import {
   runProjectDataArchiveSharding,
   runScopedProjectDataArchiveCanary,
 } from '../../../src/scheduled/project-data-archive-sharding';
+import { DEFAULT_PROJECT_DATA_STORAGE_HARD_CAP_BYTES } from '../../../src/scheduled/project-data-storage-alerts';
 import { archiveShardProjectDataOwner } from '../../../src/services/project-data-archive-routing';
 import {
   PROJECT_DATA_STORAGE_FULL,
@@ -166,6 +167,10 @@ function createFakeSource(options: FakeSourceOptions = {}) {
   const prepareTokens: string[] = [];
   const source = {
     ensureProjectId: vi.fn(async () => undefined),
+    // Full by default, so a capacity hold stays until a test grants headroom.
+    archiveCapacityProbe: vi.fn(async () => ({
+      databaseSizeBytes: DEFAULT_PROJECT_DATA_STORAGE_HARD_CAP_BYTES,
+    })),
     archiveSourceInspectIntent: vi.fn(async () => {
       if (!state) return { exists: false, databaseSizeBytes: 1000 };
       return {
@@ -264,6 +269,9 @@ function createFakeTarget() {
   let state: 'prepared' | 'copying' | 'sealed' | 'rehome_exported' = 'prepared';
   const target = {
     ensureProjectId: vi.fn(async () => undefined),
+    archiveCapacityProbe: vi.fn(async () => ({
+      databaseSizeBytes: DEFAULT_PROJECT_DATA_STORAGE_HARD_CAP_BYTES,
+    })),
     archiveTargetPrepare: vi.fn(async () => ({ idempotent: state !== 'prepared', state })),
     archiveTargetCommitChunk: vi.fn(async (chunk: ProjectDataArchiveChunk) => {
       state = 'copying';
@@ -4105,7 +4113,7 @@ describe('archive-sharding capacity backpressure keys on the full object', () =>
     }
   });
 
-  it('resumes admission and normal retries once a probe completes after writing to the root', async () => {
+  it('resumes admission and normal retries once a probe finds headroom on the held root', async () => {
     const sqlite = new Database(':memory:');
     try {
       createCoordinatorTables(sqlite);
@@ -4119,15 +4127,16 @@ describe('archive-sharding capacity backpressure keys on the full object', () =>
       // While the root is refusing: one probe, and no admission.
       expect(await selectable(sqlite, PROJECT_ID)).toEqual([SESSION_ID]);
 
-      // The root has room again: the probe archives...
+      // The root has room again: the sweep's probe measures it and releases the hold first...
       const source = createFakeSource();
+      source.archiveCapacityProbe.mockResolvedValue({ databaseSizeBytes: 1_000_000 });
       await sweep(sqlite, (id) => (id === SOURCE_OWNER ? source : createFakeTarget()), {
         PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
       });
+      expect(holds(sqlite)).toEqual([]);
       expect(journalRow(sqlite, older)).toMatchObject({ state: 'published' });
 
-      // ...which clears the hold and lifts both bounds: the other failure retries, admission resumes.
-      expect(holds(sqlite)).toEqual([]);
+      // ...which lifts both bounds: the other failure retries at the normal pace, admission resumes.
       expect(await selectable(sqlite, PROJECT_ID)).toEqual(['session-newer', 'session-fresh']);
     } finally {
       sqlite.close();
@@ -4248,49 +4257,136 @@ describe('archive-sharding capacity backpressure keys on the full object', () =>
     }
   );
 
-  it('clears only the holds a completed run disproved by writing to their object', async () => {
+  it('clears a hold only when a probe of its object measures headroom', async () => {
+    async function probeOnce(
+      databaseSizeBytes: number | Error,
+      lastFailureAt = NOW - 3 * HOUR
+    ): Promise<{ holds: unknown[]; lastFailureAt: number | undefined }> {
+      const sqlite = new Database(':memory:');
+      try {
+        createCoordinatorTables(sqlite);
+        seedHold(sqlite, { role: 'root', ownerName: PROJECT_ID, lastFailureAt });
+        const source = createFakeSource();
+        if (databaseSizeBytes instanceof Error) {
+          source.archiveCapacityProbe.mockRejectedValue(databaseSizeBytes);
+        } else {
+          source.archiveCapacityProbe.mockResolvedValue({ databaseSizeBytes });
+        }
+        await sweep(sqlite, (id) => (id === SOURCE_OWNER ? source : createFakeTarget()));
+        expect(source.archiveCapacityProbe).toHaveBeenCalledTimes(1);
+        const row = sqlite
+          .prepare('SELECT last_failure_at FROM project_data_archive_capacity_holds')
+          .get() as { last_failure_at: number } | undefined;
+        return { holds: holds(sqlite), lastFailureAt: row?.last_failure_at };
+      } finally {
+        sqlite.close();
+      }
+    }
+    const CAP = DEFAULT_PROJECT_DATA_STORAGE_HARD_CAP_BYTES;
+    const HEADROOM = 64 * 1024 * 1024;
+
+    // Headroom: released.
+    expect((await probeOnce(CAP - HEADROOM)).holds).toEqual([]);
+    // Still full: kept, and refreshed so it cannot lapse while the object stays full.
+    const stillFull = await probeOnce(CAP - HEADROOM + 1);
+    expect(stillFull.holds).toEqual([{ object_kind: 'root', owner_name: PROJECT_ID }]);
+    expect(stillFull.lastFailureAt).toBeGreaterThan(NOW - 3 * HOUR);
+    // A failure recorded after the probe started survives the clear.
+    expect((await probeOnce(1_000_000, Date.now() + 10 * 60_000)).holds).toEqual([
+      { object_kind: 'root', owner_name: PROJECT_ID },
+    ]);
+    // A probe that throws changes nothing.
+    const unreachable = await probeOnce(new Error('object unreachable'));
+    expect(unreachable).toEqual({
+      holds: [{ object_kind: 'root', owner_name: PROJECT_ID }],
+      lastFailureAt: NOW - 3 * HOUR,
+    });
+  });
+
+  it('never clears a hold because a migration published, however it got there', async () => {
     const sqlite = new Database(':memory:');
     try {
       createCoordinatorTables(sqlite);
-      // Resumes past the target's seal: this run writes to the root only.
+      // A resumed journal publishes after root-only writes and a replayed (cached) target seal,
+      // while the target shard is still full.
       seedMigration(sqlite, 'target_sealed', { sourceIntentToken: 'old-token' });
-      seedHold(sqlite, { role: 'root', ownerName: PROJECT_ID, lastFailureAt: NOW - 3 * HOUR });
       seedHold(sqlite, { role: 'target', ownerName: TARGET_OWNER, lastFailureAt: NOW - 3 * HOUR });
       const source = createFakeSource({ state: 'target_sealed', token: 'old-token' });
       const target = createFakeTarget();
-      // The shard already holds the sealed copy, so its re-prepare is an idempotent no-op.
-      await target.archiveTargetSeal();
-      target.archiveTargetSeal.mockClear();
 
       await sweep(sqlite, (id) => (id === SOURCE_OWNER ? source : target));
 
       expect(journalRow(sqlite, MIGRATION_ID)).toMatchObject({ state: 'published' });
-      expect(target.archiveTargetPrepare).toHaveBeenCalled();
-      expect(target.archiveTargetCommitChunk).not.toHaveBeenCalled();
-      expect(target.archiveTargetSeal).not.toHaveBeenCalled();
+      expect(target.archiveCapacityProbe).toHaveBeenCalled();
       expect(holds(sqlite)).toEqual([{ object_kind: 'target', owner_name: TARGET_OWNER }]);
     } finally {
       sqlite.close();
     }
   });
 
-  it('keeps a hold whose failure was recorded after the completing run started', async () => {
+  it('never opens a hold from a stale failure handler whose journal update changed nothing', async () => {
     const sqlite = new Database(':memory:');
     try {
       createCoordinatorTables(sqlite);
-      seedMigration(sqlite, 'target_sealed', { sourceIntentToken: 'old-token' });
-      // A concurrent attempt hit the full root after this run began.
-      seedHold(sqlite, {
-        role: 'root',
-        ownerName: PROJECT_ID,
-        lastFailureAt: Date.now() + 10 * 60_000,
-      });
-      const source = createFakeSource({ state: 'target_sealed', token: 'old-token' });
+      seedSessionSummary(sqlite, { sessionId: SESSION_ID, messageCount: 10 });
+      const source = createFakeSource();
+      source.archiveSourcePrepareIntent.mockRejectedValue(new Error(STORAGE_FULL));
+      // A successor publishes between the failure handler's read and its batch.
+      const database = createSqliteD1(sqlite) as unknown as {
+        prepare: (sql: string) => { bind: (...params: unknown[]) => object };
+        batch: (statements: object[]) => Promise<unknown>;
+      };
+      const sqlOf = new WeakMap<object, string>();
+      const racing = {
+        ...database,
+        prepare: (sql: string) => {
+          const prepared = database.prepare(sql);
+          return {
+            ...prepared,
+            bind: (...params: unknown[]) => {
+              const bound = prepared.bind(...params);
+              sqlOf.set(bound, sql);
+              return bound;
+            },
+          };
+        },
+        batch: async (statements: object[]) => {
+          if (
+            statements.some((statement) =>
+              (sqlOf.get(statement) ?? '').includes(
+                'INSERT INTO project_data_archive_capacity_holds'
+              )
+            )
+          ) {
+            sqlite
+              .prepare(
+                `UPDATE project_data_archive_migrations SET state = 'published', lease_owner = NULL WHERE session_id = ?`
+              )
+              .run(SESSION_ID);
+          }
+          return database.batch(statements);
+        },
+      } as unknown as D1Database;
 
-      await sweep(sqlite, (id) => (id === SOURCE_OWNER ? source : createFakeTarget()));
+      await runProjectDataArchiveSharding(
+        makeEnv(sqlite, {
+          ...ENABLED,
+          DATABASE: racing,
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          PROJECT_DATA: {
+            idFromName: (name: string) => name,
+            get: (id: string) => (id === SOURCE_OWNER ? source : createFakeTarget()),
+          } as never,
+        }),
+        new Date(NOW)
+      );
 
-      expect(journalRow(sqlite, MIGRATION_ID)).toMatchObject({ state: 'published' });
-      expect(holds(sqlite)).toEqual([{ object_kind: 'root', owner_name: PROJECT_ID }]);
+      expect(
+        sqlite
+          .prepare('SELECT state FROM project_data_archive_migrations WHERE session_id = ?')
+          .get(SESSION_ID)
+      ).toEqual({ state: 'published' });
+      expect(holds(sqlite)).toEqual([]);
     } finally {
       sqlite.close();
     }

@@ -4,14 +4,23 @@ import { describe, expect, it } from 'vitest';
 import type { Env as WorkerEnv } from '../../src/env';
 import { D1_MAX_BOUND_PARAMETERS } from '../../src/lib/d1-limits';
 import { ARCHIVE_WRITE_FIXED_RESERVATION } from '../../src/project-data-archive/write-budget';
+import { archiveCapacityRole } from '../../src/scheduled/project-data-archive-capacity-policy';
 import {
   abandonProjectDataArchiveMigration,
   copyBackProjectDataArchiveMigration,
+  ownerStub,
   runProjectDataArchiveSharding,
   runScopedProjectDataArchiveCanary,
 } from '../../src/scheduled/project-data-archive-sharding';
 import * as projectDataService from '../../src/services/project-data';
-import { countTargetMessages, isolateSweepFixture,projectDataStub, readLocation,seedMessages, withArchiveEnv } from './helpers/archive-fixtures';
+import {
+  countTargetMessages,
+  isolateSweepFixture,
+  projectDataStub,
+  readLocation,
+  seedMessages,
+  withArchiveEnv,
+} from './helpers/archive-fixtures';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import {
   captureProjectDataExpectedError,
@@ -23,8 +32,6 @@ const OWNER = 'archive-bridge-owner';
 const INSTALLATION = 'archive-bridge-installation';
 const TARGET_SHA = 'b'.repeat(64);
 
-
-
 async function seedProjectGraph(projectId: string): Promise<void> {
   await seedUser(OWNER);
   await seedInstallation(INSTALLATION, OWNER);
@@ -32,8 +39,6 @@ async function seedProjectGraph(projectId: string): Promise<void> {
     name: `Archive Bridge ${projectId}`,
   });
 }
-
-
 
 function largeMessage(index: number): string {
   return `archive bridge payload ${index} ${'x'.repeat(24 * 1024)}`;
@@ -56,7 +61,6 @@ function largeMessage(index: number): string {
 const OVER_BIND_LIMIT_ROWS = D1_MAX_BOUND_PARAMETERS * 2 + 1;
 
 /** Small bodies: this fixture stresses the bind count, not the byte budget. */
-
 
 async function seedTerminalSessionWithMessages(
   projectId: string,
@@ -81,10 +85,6 @@ async function countTargetGroupedMessages(ownerName: string, sessionId: string):
     return row.count;
   });
 }
-
-
-
-
 
 async function clearArchiveCadence(): Promise<void> {
   await env.DATABASE.prepare(
@@ -324,6 +324,25 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
         expect(targetRows.chunks).toBeGreaterThan(0);
       }
     );
+  });
+
+  it('tags a real Durable Object RPC rejection with the object the call ran on', async () => {
+    const projectId = `archive-rpc-tag-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const ownerName = `${projectId}:archive:g1:s0`;
+    // A real cross-isolate rejection (malformed input), not a locally constructed error.
+    let caught: unknown;
+    try {
+      await ownerStub(testEnv, ownerName, 'target').archiveSourceInspectIntent(
+        {} as Parameters<ReturnType<typeof ownerStub>['archiveSourceInspectIntent']>[0]
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    // A `leased` journal falls back to the root; only the tag can name the target.
+    expect(archiveCapacityRole(caught, 'leased')).toBe('target');
+    expect(archiveCapacityRole(new Error('untagged'), 'leased')).toBe('root');
   });
 
   it('daily-gates repeated global scheduled archive-sharding sweeps in the Workers runtime', async () => {
@@ -780,7 +799,7 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
  * None of them tells the sweep which candidate to take. A fixture seeded only with affordable
  * candidates would have passed throughout the outage, so each one seeds a mix and asserts on
  * which session actually moved.
- */describe('archive sweep affordability ceiling and budget fall-through', () => {
+ */ describe('archive sweep affordability ceiling and budget fall-through', () => {
   /**
    * Per-session message ids. The shared `seedMessages` helper numbers its ids from zero, so
    * two sessions in the same Durable Object collide on `messageId` and the second one silently

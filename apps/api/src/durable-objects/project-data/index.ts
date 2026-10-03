@@ -894,6 +894,14 @@ export class ProjectData extends DurableObject<Env> {
     return archiveSharding.inspectArchiveSourceIntent(this.sql, input);
   }
 
+  /**
+   * Read-only size probe for archive capacity holds: whether an object the archive found full
+   * has room again is measured here, never inferred from what a migration happened to write.
+   */
+  archiveCapacityProbe(): { databaseSizeBytes: number } {
+    return { databaseSizeBytes: this.sql.databaseSize };
+  }
+
   async archiveSourceExportChunk(
     input: archiveSharding.ArchiveSourceExportChunkInput
   ): Promise<import('../../project-data-archive/contract').ProjectDataArchiveChunk> {

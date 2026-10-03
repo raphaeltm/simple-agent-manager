@@ -78,15 +78,15 @@ import {
 
 export { poisonProjectDataArchiveMigration } from './project-data-archive-breaker-policy';
 import {
-  ARCHIVE_WRITE_METHODS,
   archiveCapacityErrorCode,
   archiveCapacityRole,
   type ArchiveObjectRole,
   capacityHoldClearSql,
-  clearDisprovedCapacityHolds,
   ONE_CAPACITY_PROBE_PER_HELD_OBJECT_SQL,
+  probeCapacityHolds,
   recordCapacityHoldStatement,
   resolveCapacityHoldMaxMs,
+  resolveCapacityProbeConfig,
   tagArchiveObjectFailure,
 } from './project-data-archive-capacity-policy';
 
@@ -977,20 +977,6 @@ function scopedConfig(
   };
 }
 
-/**
- * A write call proves its object took a write unless it reports that it did nothing: a CAS that
- * returned `false`, or a replay answered `{ idempotent: true }` (the target's prepare and chunk
- * commit, and an already-deleted finalize, return that without writing).
- */
-function isWriteEvidence(result: unknown): boolean {
-  if (result === false) return false;
-  return !(
-    result !== null &&
-    typeof result === 'object' &&
-    (result as { idempotent?: unknown }).idempotent === true
-  );
-}
-
 function isThenable(value: unknown): value is PromiseLike<unknown> {
   return (
     value !== null &&
@@ -1002,14 +988,13 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
 /**
  * With a `role`, every call's failure is tagged with the object it ran on, so `markFailed` records
  * a capacity failure against the object that refused the write rather than guessing from the
- * journal state, and every successful write is noted in `writes`, the only evidence that clears
- * a capacity hold (project-data-archive-capacity-policy.ts).
+ * journal state (project-data-archive-capacity-policy.ts). Exported so a Workers test can prove
+ * the tag survives a real Durable Object RPC rejection.
  */
-function ownerStub(
+export function ownerStub(
   env: Env,
   ownerName: string,
-  role?: ArchiveObjectRole,
-  writes?: Record<ArchiveObjectRole, boolean>
+  role?: ArchiveObjectRole
 ): DurableObjectStub<ProjectData> {
   const stub = env.PROJECT_DATA.get(
     env.PROJECT_DATA.idFromName(ownerName)
@@ -1025,24 +1010,10 @@ function ownerStub(
         } catch (error) {
           throw tagArchiveObjectFailure(error, role);
         }
-        const noteWrite = (resolved: unknown) => {
-          if (writes && ARCHIVE_WRITE_METHODS[role].has(prop) && isWriteEvidence(resolved)) {
-            writes[role] = true;
-          }
-        };
-        if (!isThenable(result)) {
-          noteWrite(result);
-          return result;
-        }
-        return Promise.resolve(result).then(
-          (resolved) => {
-            noteWrite(resolved);
-            return resolved;
-          },
-          (error: unknown) => {
-            throw tagArchiveObjectFailure(error, role);
-          }
-        );
+        if (!isThenable(result)) return result;
+        return Promise.resolve(result).catch((error: unknown) => {
+          throw tagArchiveObjectFailure(error, role);
+        });
       };
     },
   });
@@ -1052,10 +1023,9 @@ async function ensureOwnerStub(
   env: Env,
   ownerName: string,
   projectId: string,
-  role?: ArchiveObjectRole,
-  writes?: Record<ArchiveObjectRole, boolean>
+  role?: ArchiveObjectRole
 ): Promise<DurableObjectStub<ProjectData>> {
-  const stub = ownerStub(env, ownerName, role, writes);
+  const stub = ownerStub(env, ownerName, role);
   await stub.ensureProjectId(projectId);
   return stub;
 }
@@ -3151,50 +3121,18 @@ async function migrateClaimedCandidate(
   rowsCopied: number;
 }> {
   let migration = claimedRow;
-  // Wall clock, not the tick's `now`: a capacity failure recorded after this instant survives
-  // the hold clear below.
-  const runStartedAt = Date.now();
-  const wrote: Record<ArchiveObjectRole, boolean> = { root: false, target: false };
   const source = await ensureOwnerStub(
     env,
     migration.source_owner_name,
     migration.project_id,
-    'root',
-    wrote
+    'root'
   );
   const target = await ensureOwnerStub(
     env,
     migration.target_owner_name,
     migration.project_id,
-    'target',
-    wrote
+    'target'
   );
-  // A completed run disproves the capacity holds on the objects it wrote to. Best-effort: a hold
-  // that stays only costs the sweep its probe pacing until the next completed run.
-  const clearDisprovedHolds = async () => {
-    try {
-      const cleared = await clearDisprovedCapacityHolds(env, {
-        rootOwnerName: claimedRow.source_owner_name,
-        targetOwnerName: claimedRow.target_owner_name,
-        wrote,
-        runStartedAt,
-      });
-      if (cleared > 0) {
-        log.info('project_data_archive_capacity_hold_cleared', {
-          migrationId: claimedRow.migration_id,
-          projectId: claimedRow.project_id,
-          wrote,
-          cleared,
-        });
-      }
-    } catch (error) {
-      log.warn('project_data_archive_capacity_hold_clear_failed', {
-        migrationId: claimedRow.migration_id,
-        projectId: claimedRow.project_id,
-        ...serializeError(error),
-      });
-    }
-  };
   let chunksCopied = 0;
   let rowsCopied = 0;
   // Wall time per phase, logged on completion so production ticks quantify what each phase
@@ -3291,7 +3229,6 @@ async function migrateClaimedCandidate(
       totalMs: Date.now() - phaseStartedAt,
       phaseDurationsMs,
     });
-    if (migration.state === 'published') await clearDisprovedHolds();
     return {
       migrated: migration.state === 'published',
       recoveredCrashGap: finalized.recoveredCrashGap,
@@ -3305,7 +3242,6 @@ async function migrateClaimedCandidate(
     return { migrated: true, recoveredCrashGap: true, chunksCopied, rowsCopied };
   }
 
-  if (migration.state === 'published') await clearDisprovedHolds();
   return {
     migrated: migration.state === 'published',
     recoveredCrashGap: false,
@@ -3421,6 +3357,8 @@ async function markFailed(
               capacityRole === 'root' ? current.source_owner_name : current.target_owner_name,
             projectId: current.project_id,
             migrationId: current.migration_id,
+            errorCode: archiveCapacityErrorCode(capacityRole),
+            journalUpdatedAt: now,
             failedAt: Date.now(),
             activeFloor: now - config.capacityHoldMaxMs,
           }),
@@ -4241,6 +4179,17 @@ export async function runProjectDataArchiveSharding(
     const crashGapRecovery = await recoverCrashGaps(env, config, now);
     stats.recoveredCrashGaps = crashGapRecovery.recovered;
     stats.failed += crashGapRecovery.failed;
+    // Before selecting work: a held object that has room again is released this tick.
+    const capacityProbe = await probeCapacityHolds(env, {
+      now,
+      holdMaxMs: config.capacityHoldMaxMs,
+      config: resolveCapacityProbeConfig(env),
+      measure: async (ownerName) =>
+        (await ownerStub(env, ownerName).archiveCapacityProbe()).databaseSizeBytes,
+    });
+    if (capacityProbe.probed > 0) {
+      log.info('project_data_archive_capacity_probe', { ...capacityProbe });
+    }
     const work = await selectMigrationWork(env, config, nowDate, now);
     // Only what the tick could actually journal. The fall-through padding exists to be
     // skipped past, so counting it would inflate the figure `budgetStallLastError` reports.

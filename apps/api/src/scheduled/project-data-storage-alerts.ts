@@ -305,11 +305,25 @@ export async function runProjectDataStorageAlerts(
     stats.deliveryFailures = alerts.length;
     return stats;
   }
+  // First deliveries before retries: a recipient whose deliveries keep failing gets only the
+  // budget the healthy deliveries leave, so it can never keep a condition from anyone else.
+  const firstDeliveries: Array<{ alert: StorageAlert; throttleKey: string; due: string[] }> = [];
+  const retries: Array<{ alert: StorageAlert; throttleKey: string; due: string[] }> = [];
   for (const alert of alerts) {
     const throttleKey = `${config.kvPrefix}:${alert.kind}:${alert.projectId}:${alert.episode}`;
-    const due = recipients.filter((userId) => !live.has(`${throttleKey}:${userId}`));
-    stats.throttled += recipients.length - due.length;
-    if (due.length === 0) continue;
+    const fresh: string[] = [];
+    const retryDue: string[] = [];
+    for (const userId of recipients) {
+      const stamp = live.get(`${throttleKey}:${userId}`);
+      if (!stamp) fresh.push(userId);
+      else if (stamp.kind === 'failed' && (stamp.retryAt ?? 0) <= now) retryDue.push(userId);
+      else stats.throttled++;
+    }
+    if (fresh.length > 0)
+      firstDeliveries.push({ alert, throttleKey, due: [...fresh, ...retryDue] });
+    else if (retryDue.length > 0) retries.push({ alert, throttleKey, due: retryDue });
+  }
+  for (const { alert, throttleKey, due } of [...firstDeliveries, ...retries]) {
     if (stats.alerts >= config.maxAlertsPerTick) {
       stats.deferred++;
       continue;
@@ -321,6 +335,7 @@ export async function runProjectDataStorageAlerts(
         throttleKey,
         throttleMs: config.throttleMs,
         failureBackoffMs: config.failureBackoffMs,
+        now,
         notification: {
           type: 'cron_failure',
           urgency: alert.urgency,

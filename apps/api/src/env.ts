@@ -766,7 +766,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS?: string;
   PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD?: string; // Distinct sessions poisoned within the window before a project's archive breaker opens (default: 3; 1 = open on any poison)
   PROJECT_DATA_ARCHIVE_BREAKER_POISON_WINDOW_MS?: string; // Window for counting distinct poisoned sessions; poisons before the last breaker close never count (default: 86400000)
-  PROJECT_DATA_ARCHIVE_CAPACITY_HOLD_MAX_MS?: string; // How long a capacity hold on a full object gates admission without a failed retry refreshing it; at least twice the failed-retry delay (default: 21600000)
+  PROJECT_DATA_ARCHIVE_CAPACITY_HOLD_MAX_MS?: string; // How long a capacity hold keeps new sessions out without a failure or a full probe refreshing it; at least twice the failed-retry delay (default: 21600000)
+  PROJECT_DATA_ARCHIVE_CAPACITY_HOLD_CLEAR_HEADROOM_BYTES?: string; // Room below the hard cap a held object must show on its probe before its capacity hold clears (default: 67108864)
+  PROJECT_DATA_ARCHIVE_CAPACITY_PROBES_PER_TICK?: string; // Capacity-held objects probed per archive sweep (default: 10)
   PROJECT_DATA_ARCHIVE_R2_PREFIX?: string;
   PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS?: string;
   PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY?: string;

@@ -23,7 +23,7 @@ const CAP = DEFAULT_PROJECT_DATA_STORAGE_HARD_CAP_BYTES;
  * an expired key with its `expiration`.
  */
 function createKv(clock: { now: number }, pageSize = 1000) {
-  const entries = new Map<string, { value: string; expiration?: number }>();
+  const entries = new Map<string, { value: string; expiration?: number; metadata?: unknown }>();
   const isLive = (entry: { expiration?: number }) =>
     entry.expiration === undefined || entry.expiration * 1000 > clock.now;
   return {
@@ -32,22 +32,31 @@ function createKv(clock: { now: number }, pageSize = 1000) {
       const entry = entries.get(key);
       return entry && isLive(entry) ? entry.value : null;
     }),
-    put: vi.fn(async (key: string, value: string, options?: { expirationTtl?: number }) => {
-      entries.set(key, {
-        value,
-        expiration: options?.expirationTtl
-          ? Math.floor(clock.now / 1000) + options.expirationTtl
-          : undefined,
-      });
-    }),
+    put: vi.fn(
+      async (
+        key: string,
+        value: string,
+        options?: { expirationTtl?: number; metadata?: unknown }
+      ) => {
+        entries.set(key, {
+          value,
+          expiration: options?.expirationTtl
+            ? Math.floor(clock.now / 1000) + options.expirationTtl
+            : undefined,
+          metadata: options?.metadata,
+        });
+      }
+    ),
     list: vi.fn(async ({ prefix = '', cursor }: { prefix?: string; cursor?: string } = {}) => {
       const names = [...entries.keys()].filter((name) => name.startsWith(prefix)).sort();
       const start = cursor ? Number(cursor) : 0;
       const complete = start + pageSize >= names.length;
       return {
-        keys: names
-          .slice(start, start + pageSize)
-          .map((name) => ({ name, expiration: entries.get(name)!.expiration })),
+        keys: names.slice(start, start + pageSize).map((name) => ({
+          name,
+          expiration: entries.get(name)!.expiration,
+          metadata: entries.get(name)!.metadata,
+        })),
         list_complete: complete,
         ...(complete ? {} : { cursor: String(start + pageSize) }),
       };
@@ -570,6 +579,38 @@ describe('ProjectData storage superadmin alerts', () => {
         .filter((entry) => entry.userId === 'admin-1')
         .map((e) => e.notification.metadata.projectId)
     ).toEqual(['project-a', 'project-b', 'project-a']);
+  });
+
+  it('keeps persistent delivery failures from starving a healthy recipient at default settings', async () => {
+    const { sqlite, tick } = setup();
+    // Thirteen persistent conditions: more than three ticks' worth of the default budget of four,
+    // so fifteen-minute retries of one recipient's failures would fill every tick on their own.
+    const projects = Array.from(
+      { length: 13 },
+      (_, index) => `project-${String(index).padStart(2, '0')}`
+    );
+    for (const [index, id] of projects.entries()) {
+      seedProject(sqlite, id, id);
+      seedBreaker(sqlite, id, 'open', NOW - (100 - index) * HOUR);
+    }
+    sendNotificationMock.mockImplementation(async (_env: Env, userId: string) => {
+      if (userId === 'admin-1') throw new Error('push endpoint gone');
+      return { id: 'notification' };
+    });
+
+    for (let minute = 0; minute <= 60; minute += 5) {
+      await tick(NOW + minute * 60 * 1000);
+    }
+
+    const healthy = new Set(
+      sent()
+        .filter((entry) => entry.userId === 'admin-2')
+        .map((entry) => entry.notification.metadata.projectId)
+    );
+    expect(healthy).toEqual(new Set(projects));
+    // The failing recipient is still retried, once per backoff for each condition.
+    const failingAttempts = sent().filter((entry) => entry.userId === 'admin-1').length;
+    expect(failingAttempts).toBeGreaterThan(projects.length);
   });
 
   it('ranks a freeze whose own project is near the wall ahead of older routine freezes', async () => {

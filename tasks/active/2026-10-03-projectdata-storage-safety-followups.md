@@ -455,3 +455,29 @@ Verdicts: 3c APPROVE; 3a and 3b CHANGES REQUESTED (4 HIGH). All fixed:
       failing, the healthy one still gets both alerts by the second tick, and the failing one is
       retried once per backoff.
 
+### Local cloudflare-specialist on a3ffb77e0 + 9de05666c (holds)
+
+PASS. MEDIUM fixed: a Workers test drives a real Durable Object RPC rejection through the
+coordinator's `ownerStub` and proves the role tag survives (red without the async tag). LOWs: the
+write-evidence ones are moot after round 5 (holds clear only by measured probes);
+`last_failure_migration_id` now follows the newest failure.
+
+### Round 5 (task 01M415DPBYKXXDWMWRCY0PM8D3, 15:25Z): fixes at 9de05666c
+
+3a/3b CHANGES REQUESTED (2 HIGH, 1 MEDIUM). All fixed:
+
+- [x] HIGH (3a): a replayed or cached target seal could still clear a hold. Holds no longer clear
+      from anything a migration wrote. Each sweep probes held objects (new read-only DO RPC
+      `archiveCapacityProbe`, one `databaseSize` read, up to
+      `PROJECT_DATA_ARCHIVE_CAPACITY_PROBES_PER_TICK`): `hardCap - headroom` (64 MiB) or less clears
+      the hold, fenced by the probe start; more refreshes it. Tests: headroom/still-full/fence/probe
+      failure, and a published resume past a cached seal leaves the target hold.
+- [x] HIGH (3b): fixed backoff let 12 failing pairs fill every tick. Failure stamps now carry KV
+      metadata (`kind: failed`, `retryAt`) and outlive the backoff; each tick delivers first
+      deliveries before retries. Test: Astra's 13 conditions at default settings, one recipient
+      always failing; the healthy one gets all 13 within the hour.
+- [x] MEDIUM (3a): the hold upsert is now `INSERT ... SELECT ... WHERE EXISTS` the journal row this
+      handler moved to `failed` with this code at this tick, in the same batch. Test: a successor
+      publishes between the handler's read and its batch; no hold appears.
+- Every new guard mutation-verified (P1-P5, F1-F2, real-RPC tag).
+
