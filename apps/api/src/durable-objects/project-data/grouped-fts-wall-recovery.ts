@@ -45,6 +45,12 @@
  * (low-entropy text) to 55-180 ms/MiB (prose and unique-token content); production
  * storage is slower still, so the 32 MiB ceiling keeps a call to a few seconds.
  */
+import type {
+  GroupedFtsWallRecoveryResult,
+  GroupedFtsWallRecoverySessionResult,
+  GroupedFtsWallRecoveryStopReason,
+} from '@simple-agent-manager/shared';
+
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { type PageRow, prunePage } from './grouped-fts-wall-recovery-prune';
 import type { StorageSafetyConfig } from './storage-safety';
@@ -95,41 +101,11 @@ export interface GroupedFtsWallRecoveryInput extends GroupedFtsWallRecoveryReque
   transactionBytes: number;
 }
 
-export type GroupedFtsWallRecoveryStopReason =
-  'candidates_exhausted' | 'row_budget' | 'byte_budget' | 'session_budget' | 'transaction_failed';
-
-export interface GroupedFtsWallRecoverySessionResult {
-  sessionId: string;
-  messageCount: number;
-  groupedRowsDeleted: number;
-  contentBytes: number;
-  /** True when every grouped row of the session is gone after this call. */
-  drained: boolean;
-}
-
-export interface GroupedFtsWallRecoveryResult {
-  projectId: string;
-  reason: string;
-  dryRun: boolean;
-  beforeBytes: number;
-  afterBytes: number;
-  /** `beforeBytes - afterBytes`; negative if the object grew while the call ran. */
-  databaseSizeDeltaBytes: number;
-  candidateSessions: number;
-  sessionsTouched: number;
-  sessionsDrained: number;
-  groupedRowsDeleted: number;
-  ftsEntriesDeleted: number;
-  /** Grouped rows deleted at the cap whose FTS entries did not fit and were left stale. */
-  ftsStaleRows: number;
-  contentBytes: number;
-  transactions: number;
-  stopReason: GroupedFtsWallRecoveryStopReason;
-  error: string | null;
-  /** The session whose page failed, to pass back in `skipSessionIds` if it keeps failing. */
-  failedSessionId: string | null;
-  sessions: GroupedFtsWallRecoverySessionResult[];
-}
+export type {
+  GroupedFtsWallRecoveryResult,
+  GroupedFtsWallRecoverySessionResult,
+  GroupedFtsWallRecoveryStopReason,
+} from '@simple-agent-manager/shared';
 
 function parsePositiveInteger(raw: string | undefined, fallback: number): number {
   if (!raw?.trim()) return fallback;

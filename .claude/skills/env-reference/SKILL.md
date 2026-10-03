@@ -304,6 +304,7 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS` — Ceiling on grouped rows one superadmin grouped/FTS wall-recovery call may prune (default: `10000`)
 - `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES` — Ceiling on grouped content bytes one grouped/FTS wall-recovery call may prune (default: `33554432`)
 - `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS` — Ceiling on terminal sessions one grouped/FTS wall-recovery call may consider, and on its `skipSessionIds` length (default: `500`)
+- `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_DEFAULT_MAX_ROWS` / `_DEFAULT_MAX_BYTES` / `_DEFAULT_MAX_SESSIONS` — Starting budgets the Admin → Storage **Recover space** form shows, each clamped to its ceiling; served by `GET /api/admin/project-data/storage/grouped-fts-wall-recovery/config` (defaults: `500`, `4194304`, `1`)
 - `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_ROWS` — Grouped rows pruned per wall-recovery transaction (default: `500`)
 - `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_BYTES` — Grouped content bytes held in memory per wall-recovery transaction (default: `8388608`)
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED` — Enables automatic deletion of old low-value terminal-session `activity_events` and terminal ACP event history when storage remains above the cleanup target (default: enabled)

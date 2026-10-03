@@ -368,3 +368,76 @@ export interface AdminProjectDataArchiveProblemMigrationsResponse {
 export interface AdminProjectDataArchiveMigrationAbandonResponse {
   result: Record<string, unknown>;
 }
+
+/** Why a grouped-FTS wall recovery call stopped. */
+export type GroupedFtsWallRecoveryStopReason =
+  | 'candidates_exhausted'
+  | 'row_budget'
+  | 'byte_budget'
+  | 'session_budget'
+  | 'transaction_failed';
+
+export interface GroupedFtsWallRecoverySessionResult {
+  sessionId: string;
+  messageCount: number;
+  groupedRowsDeleted: number;
+  contentBytes: number;
+  /** True when every grouped row of the session is gone after this call. */
+  drained: boolean;
+}
+
+/**
+ * Result of `POST /api/admin/project-data/storage/:projectId/grouped-fts-wall-recovery`.
+ * A page failure is reported here with HTTP 200 (`stopReason: 'transaction_failed'`), so
+ * earlier pages of the same call may already have committed.
+ */
+export interface GroupedFtsWallRecoveryResult {
+  projectId: string;
+  reason: string;
+  dryRun: boolean;
+  beforeBytes: number;
+  afterBytes: number;
+  /** `beforeBytes - afterBytes`; negative if the object grew while the call ran. */
+  databaseSizeDeltaBytes: number;
+  candidateSessions: number;
+  sessionsTouched: number;
+  sessionsDrained: number;
+  groupedRowsDeleted: number;
+  ftsEntriesDeleted: number;
+  /** Grouped rows deleted at the cap whose FTS entries did not fit and were left stale. */
+  ftsStaleRows: number;
+  contentBytes: number;
+  transactions: number;
+  stopReason: GroupedFtsWallRecoveryStopReason;
+  error: string | null;
+  /** The session whose page failed, to pass back in `skipSessionIds` if it keeps failing. */
+  failedSessionId: string | null;
+  sessions: GroupedFtsWallRecoverySessionResult[];
+}
+
+export interface GroupedFtsWallRecoveryRequest {
+  reason: string;
+  dryRun: boolean;
+  maxRows: number;
+  maxBytes: number;
+  maxSessions: number;
+  skipSessionIds?: string[];
+}
+
+export interface GroupedFtsWallRecoveryResponse {
+  result: GroupedFtsWallRecoveryResult;
+}
+
+export interface GroupedFtsWallRecoveryLimits {
+  maxRows: number;
+  maxBytes: number;
+  maxSessions: number;
+}
+
+/** `GET /api/admin/project-data/storage/grouped-fts-wall-recovery/config`. */
+export interface GroupedFtsWallRecoveryConfigResponse {
+  /** Hard per-call ceilings the API enforces. */
+  ceilings: GroupedFtsWallRecoveryLimits;
+  /** Cautious starting budgets for the admin form, never above the ceilings. */
+  defaults: GroupedFtsWallRecoveryLimits;
+}

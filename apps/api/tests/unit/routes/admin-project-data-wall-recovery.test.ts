@@ -119,3 +119,64 @@ describe('POST /api/admin/project-data/storage/:projectId/grouped-fts-wall-recov
     expect(await res.json()).toMatchObject({ error: 'PROJECT_DATA_STORAGE_FULL' });
   });
 });
+
+describe('GET /api/admin/project-data/storage/grouped-fts-wall-recovery/config', () => {
+  const CONFIG_PATH = '/api/admin/project-data/storage/grouped-fts-wall-recovery/config';
+
+  function get(env: Env, role = 'superadmin') {
+    return createAdminProjectDataStorageApp().request(
+      CONFIG_PATH,
+      { headers: { 'x-test-role': role } },
+      env
+    );
+  }
+
+  it('rejects non-superadmins', async () => {
+    const { env } = makeEnv();
+    expect((await get(env, 'user')).status).toBe(403);
+  });
+
+  it('returns the env ceilings and the cautious starting budgets', async () => {
+    const env = {
+      PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS: '10000',
+      PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES: String(32 * 1024 * 1024),
+      PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS: '500',
+    } as unknown as Env;
+
+    const res = await get(env);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ceilings: { maxRows: 10000, maxBytes: 32 * 1024 * 1024, maxSessions: 500 },
+      defaults: { maxRows: 500, maxBytes: 4 * 1024 * 1024, maxSessions: 1 },
+    });
+  });
+
+  it('honours configured starting budgets but never above a ceiling', async () => {
+    const { env } = makeEnv(); // ceilings: 100 rows, 1,000,000 bytes, 2 sessions
+    Object.assign(env as unknown as Record<string, string>, {
+      PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_DEFAULT_MAX_ROWS: '50',
+      PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_DEFAULT_MAX_BYTES: '9999999',
+      PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_DEFAULT_MAX_SESSIONS: '5',
+    });
+
+    const body = await (await get(env)).json();
+
+    expect(body).toEqual({
+      ceilings: { maxRows: 100, maxBytes: 1_000_000, maxSessions: 2 },
+      defaults: { maxRows: 50, maxBytes: 1_000_000, maxSessions: 2 },
+    });
+  });
+
+  it('does not shadow the per-project archive routes it shares a router with', async () => {
+    const { env } = makeEnv();
+    // A two-segment literal path must not be captured as `/:projectId/...`.
+    const res = await createAdminProjectDataStorageApp().request(
+      `/api/admin/project-data/storage/${PROJECT_ID}/grouped-fts-wall-recovery`,
+      { method: 'GET', headers: { 'x-test-role': 'superadmin' } },
+      env
+    );
+    expect(res.status).toBe(404);
+    expect((await get(env)).status).toBe(200);
+  });
+});

@@ -702,6 +702,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_ROWS?: string;
   PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_BYTES?: string;
   PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_SESSIONS?: string;
+  PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_DEFAULT_MAX_ROWS?: string; // Admin form starting row budget, clamped to the ceiling (default: 500)
+  PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_DEFAULT_MAX_BYTES?: string; // Admin form starting byte budget, clamped to the ceiling (default: 4194304)
+  PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_DEFAULT_MAX_SESSIONS?: string; // Admin form starting session budget, clamped to the ceiling (default: 1)
   PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_ROWS?: string;
   PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_TRANSACTION_BYTES?: string;
   PROJECT_DATA_ARCHIVE_SHARDING_ENABLED?: string; // Exact archive read routing switch (default: disabled)

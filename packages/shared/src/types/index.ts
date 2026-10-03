@@ -495,6 +495,13 @@ export type {
   PlatformError,
   PlatformErrorLevel,
   PlatformErrorSource,
+  GroupedFtsWallRecoveryConfigResponse,
+  GroupedFtsWallRecoveryLimits,
+  GroupedFtsWallRecoveryRequest,
+  GroupedFtsWallRecoveryResponse,
+  GroupedFtsWallRecoveryResult,
+  GroupedFtsWallRecoverySessionResult,
+  GroupedFtsWallRecoveryStopReason,
 } from './admin';
 
 // Agent Settings & Profiles
