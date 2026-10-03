@@ -39,26 +39,26 @@ Each failed capture also leaves its uploaded `wip.bundle` behind in R2.
 
 ## Implementation Checklist
 
-- [ ] VM agent: compute the WIP bundle basis from `refs/remotes/origin/HEAD` (shared helper) and pass `^<sha>` to `git bundle create` in BOTH runtimes. Fall back to a full bundle when there is no default-branch ref.
-- [ ] VM agent: before `git fetch <bundle>` in BOTH restore paths, parse the bundle's prerequisites and fetch any missing ones from `origin`. Legacy full bundles have none, so this is a no-op for them.
-- [ ] VM agent: batch the oversized-entry checks into a single `git cat-file --batch-check` per list:
-  - [ ] container staged index entries
-  - [ ] container untracked entries
-  - [ ] standalone staged index entries
-- [ ] VM agent: add `.codex/cache`, `.npm-global` and `.local/share/uv` to `homeExcludePrefixes`, and `cache` to the external Codex root exclusions.
-- [ ] VM agent: bound `manifest.skipped` against the prepare response's `config.jsonBodyMaxBytes` (fallback 256 KiB). Keep diagnostics first, then the largest entries, truncate long strings, and add a summary entry.
-- [ ] API: delete a superseded capture generation's R2 artifacts when `prepareSessionSnapshot` replaces it.
-- [ ] API: delete a failed capture generation's R2 artifacts in `recordSessionSnapshotCaptureFailure`.
-- [ ] API: delete the completing generation's uploaded-but-unrecorded artifacts in `completeSessionSnapshot`.
-- [ ] Docs: update `apps/www/src/content/docs/docs/guides/instant-sessions.md` (bundle basis, exclusions, skipped-list bound, the post-#2208 "degraded snapshots do not release compute" behavior).
-- [ ] Tests: Go real-git tests for:
-  - [ ] basis exclusion
-  - [ ] the stale-ref control
-  - [ ] prerequisite fetch on restore
-  - [ ] batched checks (bounded exec count)
-  - [ ] exclusions
-  - [ ] skipped bound
-- [ ] Tests: API tests on a real SQLite D1 for the three artifact-deletion paths, plus a control proving the completed generation's keys are kept.
+- [x] VM agent: compute the WIP bundle basis from `refs/remotes/origin/HEAD` (shared helper) and pass `^<sha>` to `git bundle create` in BOTH runtimes. Fall back to a full bundle when there is no default-branch ref. (`session_snapshot_bundle.go`, 6030caa15)
+- [x] VM agent: before `git fetch <bundle>` in BOTH restore paths, parse the bundle's prerequisites and fetch any missing ones from `origin` (refresh all origin branches once, then exact commits). Legacy full bundles have none, so this is a no-op for them.
+- [x] VM agent: batch the oversized-entry checks into a single `git cat-file --batch-check` per list (`session_snapshot_entries.go`):
+  - [x] container staged index entries
+  - [x] container untracked entries
+  - [x] standalone staged index entries
+- [x] VM agent: exclude `.codex/cache`, `.npm-global`, `.local/share/uv` and the external Codex root's `cache`. Changed during implementation: these went into the new CAPTURE-ONLY `homeCaptureExcludePrefixes`, not `homeExcludePrefixes`, because restore rejects archives that contain excluded paths and older snapshots legitimately contain these.
+- [x] VM agent: bound `manifest.skipped` against the prepare response's `config.jsonBodyMaxBytes` (fallback 256 KiB). Keep diagnostics first, then the largest entries, truncate long strings, and add a summary entry.
+- [x] API: delete a superseded capture generation's R2 artifacts when `prepareSessionSnapshot` replaces it. The row's recorded keys are re-read and kept, which covers the completed-in-between race. (94912da29)
+- [x] API: delete a failed capture generation's home/wip R2 artifacts in `recordSessionSnapshotCaptureFailure`. The manifest key is kept for a transcript-only completion.
+- [x] API: delete the completing generation's uploaded-but-unrecorded artifacts in `completeSessionSnapshot`, and an in-flight capture's uploads in `deleteSessionSnapshotState`.
+- [x] Docs: update `apps/www/src/content/docs/docs/guides/instant-sessions.md` (bundle basis, exclusions, skipped-list bound, the post-#2208 "degraded snapshots do not release compute" behavior) and add an October note to `recent-product-changes.md`. (ad9615893)
+- [x] Tests: Go real-git tests for (`session_snapshot_sleep_loop_test.go`):
+  - [x] basis exclusion
+  - [x] the stale-ref control
+  - [x] prerequisite fetch on restore
+  - [x] batched checks (bounded exec count)
+  - [x] exclusions
+  - [x] skipped bound, end-to-end through `hibernateSessionSnapshot` against a control plane that enforces the 256 KiB limit
+- [x] Tests: API tests on a real SQLite D1 for the artifact-deletion paths, plus a control proving the completed generation's keys are kept and a controlled-ordering race test (`session-snapshot-capture-cleanup.test.ts`).
 
 ## Deferred (tracked as SAM Ideas, not in this PR)
 
@@ -76,6 +76,14 @@ Each failed capture also leaves its uploaded `wip.bundle` behind in R2.
 - [ ] The completion request stays under `jsonBodyMaxBytes` even with thousands of skipped entries.
 - [ ] Superseded, failed, and unrecorded capture artifacts are deleted from R2, while the completed generation's artifacts are kept.
 - [ ] Staging: a fresh VM session on a real repository sleeps automatically with a complete snapshot, then wakes and restores its work.
+
+## Implementation Notes
+
+- Pure-move refactors first (rule 18): 6b989efd8 (Go snapshot files) and 27653910b (API prepare module).
+- Discrimination (rule 62): each fix was reverted in isolation and only its intended tests went red.
+  - Go (7 mutations): no basis; basis on all remote refs (the stale-ref test went red); no prerequisite recovery; unbounded skipped list; no capture-only exclusions; caches made restore-rejecting; per-entry lookups.
+  - API (6 mutations): every cleanup path, plus the keep set and the manifest key.
+- The task file ships with the PR because a direct push to main is blocked by repository rules (required status checks).
 
 ## References
 
