@@ -640,9 +640,13 @@ What changed since the last audit:
 Next actions, in order. These are human-gated production operations, not code:
 
 1. Decide on the #2161 rollback trigger (revert the interval to 3600000, or keep 18 minutes).
+   Status 2026-10-03: the nightly billing agent set it to 3600000 (#2216) and it was reverted to
+   1080000 the same day; the 18-minute cadence stays.
 2. Abandon or retry the failed/poisoned migrations first. Closing the breaker while `156046f1`,
    `5ed87b67` and `ff721a49` are still failed risks re-poisoning it at once.
 3. Close SAM's breaker from Admin → Storage (phone-usable, PR #2135).
+   Status 2026-10-03 (prod D1, read-only): `156046f1` and `6d6f3099` were operator-abandoned
+   2026-10-02 16:28Z and the breaker was closed 16:29Z; SAM archives resumed at 16:33Z.
 
 ## Incident — 2026-10-02: the root object hit the hard 10 GiB cap
 
