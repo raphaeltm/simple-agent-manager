@@ -34,6 +34,7 @@ export {
   adminProjectDataArchiveProblemMigrationsQueryOptions,
   adminProjectDataStorageQueryKeys,
   adminProjectDataStorageTelemetryQueryOptions,
+  adminProjectDataWallRecoveryConfigQueryOptions,
 } from './admin-project-data-storage';
 export {
   adminProjectEventInspectorQueryOptions,

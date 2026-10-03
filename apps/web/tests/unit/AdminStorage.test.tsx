@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   closeAdminProjectDataArchiveCircuitBreaker: vi.fn(),
   fetchAdminProjectDataArchiveProblemMigrations: vi.fn(),
   abandonAdminProjectDataArchiveMigration: vi.fn(),
+  fetchAdminProjectDataWallRecoveryConfig: vi.fn(),
+  runAdminProjectDataWallRecovery: vi.fn(),
 }));
 
 vi.mock('../../src/components/AuthProvider', () => ({
@@ -27,6 +29,8 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
   fetchAdminProjectDataArchiveProblemMigrations:
     mocks.fetchAdminProjectDataArchiveProblemMigrations,
   abandonAdminProjectDataArchiveMigration: mocks.abandonAdminProjectDataArchiveMigration,
+  fetchAdminProjectDataWallRecoveryConfig: mocks.fetchAdminProjectDataWallRecoveryConfig,
+  runAdminProjectDataWallRecovery: mocks.runAdminProjectDataWallRecovery,
 }));
 
 import { AdminStorage } from '../../src/pages/AdminStorage';
@@ -355,9 +359,7 @@ describe('AdminStorage — Problem Migrations', () => {
 
     renderPage();
 
-    expect(
-      await screen.findByText(/showing the first 25 problem migrations/i)
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/showing the first 25 problem migrations/i)).toBeInTheDocument();
   });
 
   it('shows an error when the problem migrations list fails to load', async () => {
@@ -431,5 +433,236 @@ describe('AdminStorage — Problem Migrations', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
+  });
+});
+
+describe('AdminStorage — space recovery', () => {
+  const MIB = 1024 * 1024;
+  const CONFIG = {
+    ceilings: { maxRows: 5_000, maxBytes: 32 * MIB, maxSessions: 5 },
+    defaults: { maxRows: 500, maxBytes: 4 * MIB, maxSessions: 1 },
+  };
+
+  function result(overrides: Record<string, unknown> = {}) {
+    return {
+      result: {
+        projectId: 'project-sam',
+        reason: 'wall',
+        dryRun: true,
+        beforeBytes: 10_737_418_240,
+        afterBytes: 10_737_418_240,
+        databaseSizeDeltaBytes: 0,
+        candidateSessions: 1,
+        sessionsTouched: 1,
+        sessionsDrained: 0,
+        groupedRowsDeleted: 500,
+        ftsEntriesDeleted: 0,
+        ftsStaleRows: 0,
+        contentBytes: 3 * MIB,
+        transactions: 0,
+        stopReason: 'row_budget',
+        error: null,
+        failedSessionId: null,
+        sessions: [],
+        ...overrides,
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.fetchAdminProjectDataArchiveCircuitBreakers.mockResolvedValue({
+      breakers: [],
+      skippedRows: 0,
+      limit: 25,
+    });
+    mocks.fetchAdminProjectDataStorageTelemetry.mockResolvedValue(DEFAULT_TELEMETRY);
+    mocks.fetchAdminProjectDataArchiveProblemMigrations.mockResolvedValue({
+      migrations: [],
+      warnings: [],
+      limit: 25,
+    });
+    mocks.fetchAdminProjectDataWallRecoveryConfig.mockResolvedValue(CONFIG);
+  });
+
+  async function openDialog() {
+    renderPage();
+    const row = await screen.findByTestId('telemetry-project-sam');
+    fireEvent.click(within(row).getByRole('button', { name: /recover space/i }));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByLabelText('Sessions');
+    return dialog;
+  }
+
+  const field = (dialog: HTMLElement, label: string) =>
+    within(dialog).getByLabelText(label) as HTMLInputElement;
+  const previewButton = (dialog: HTMLElement) =>
+    within(dialog).getByRole('button', { name: /preview/i });
+  const recoverButton = (dialog: HTMLElement) =>
+    within(dialog).getByRole('button', { name: /recover space/i });
+
+  it('previews, then recovers, with the budgets the API serves', async () => {
+    mocks.runAdminProjectDataWallRecovery.mockResolvedValueOnce(result()).mockResolvedValueOnce(
+      result({
+        dryRun: false,
+        afterBytes: 10_737_418_240 - 6 * MIB,
+        databaseSizeDeltaBytes: 6 * MIB,
+        ftsEntriesDeleted: 500,
+        transactions: 3,
+      })
+    );
+    const dialog = await openDialog();
+
+    // Prefilled from the API's defaults, not from the page.
+    expect(field(dialog, 'Sessions').value).toBe('1');
+    expect(field(dialog, 'Rows').value).toBe('500');
+    expect(field(dialog, 'Size (MiB)').value).toBe('4');
+    // A destructive emergency call states why: both actions wait for a reason.
+    expect(previewButton(dialog)).toBeDisabled();
+    expect(recoverButton(dialog)).toBeDisabled();
+    fireEvent.change(field(dialog, 'Reason'), { target: { value: '  at the wall  ' } });
+
+    fireEvent.click(previewButton(dialog));
+    await waitFor(() =>
+      expect(mocks.runAdminProjectDataWallRecovery).toHaveBeenCalledWith('project-sam', {
+        reason: 'at the wall',
+        dryRun: true,
+        maxSessions: 1,
+        maxRows: 500,
+        maxBytes: 4 * MIB,
+        skipSessionIds: [],
+      })
+    );
+    expect(await within(dialog).findByText('Preview: nothing was changed')).toBeInTheDocument();
+    expect(dialog).toHaveTextContent('Would prune');
+    expect(mocks.fetchAdminProjectDataStorageTelemetry).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(recoverButton(dialog));
+    await waitFor(() =>
+      expect(mocks.runAdminProjectDataWallRecovery).toHaveBeenLastCalledWith(
+        'project-sam',
+        expect.objectContaining({ dryRun: false })
+      )
+    );
+    expect(await within(dialog).findByText('Recovery finished')).toBeInTheDocument();
+    expect(dialog).toHaveTextContent('freed 6.0 MiB');
+    // A real run refreshes the page's storage data without closing the result.
+    await waitFor(() =>
+      expect(mocks.fetchAdminProjectDataStorageTelemetry).toHaveBeenCalledTimes(2)
+    );
+    expect(screen.getByRole('dialog')).toHaveTextContent('Recovery finished');
+  });
+
+  it('checks every budget against the API ceilings, including sizes under 1 MiB', async () => {
+    mocks.fetchAdminProjectDataWallRecoveryConfig.mockResolvedValue({
+      ceilings: { maxRows: 5_000, maxBytes: MIB / 2, maxSessions: 5 },
+      defaults: { maxRows: 500, maxBytes: MIB / 4, maxSessions: 1 },
+    });
+    mocks.runAdminProjectDataWallRecovery.mockResolvedValue(result());
+    const dialog = await openDialog();
+    fireEvent.change(field(dialog, 'Reason'), { target: { value: 'wall' } });
+
+    expect(field(dialog, 'Size (MiB)').value).toBe('0.25');
+    expect(dialog).toHaveTextContent('Max 0.5');
+
+    for (const [label, value, message] of [
+      ['Size (MiB)', '0.6', 'At most 0.5 MiB'],
+      ['Size (MiB)', '0', 'Enter a size above 0 MiB'],
+      ['Rows', '2.5', 'Enter a whole number of 1 or more'],
+      ['Rows', '6000', 'At most 5,000'],
+      ['Sessions', '0', 'Enter a whole number of 1 or more'],
+    ] as const) {
+      fireEvent.change(field(dialog, label), { target: { value } });
+      expect(dialog).toHaveTextContent(message);
+      expect(field(dialog, label)).toHaveAttribute('aria-invalid', 'true');
+      expect(previewButton(dialog)).toBeDisabled();
+      // Restore a valid value before the next case.
+      fireEvent.change(field(dialog, label), {
+        target: { value: label === 'Size (MiB)' ? '0.4' : '2' },
+      });
+      expect(previewButton(dialog)).toBeEnabled();
+    }
+
+    fireEvent.click(previewButton(dialog));
+    await waitFor(() =>
+      expect(mocks.runAdminProjectDataWallRecovery).toHaveBeenCalledWith(
+        'project-sam',
+        expect.objectContaining({ maxBytes: Math.floor(0.4 * MIB), maxRows: 2, maxSessions: 2 })
+      )
+    );
+  });
+
+  it('reports a failed page and retries only when asked, skipping that session', async () => {
+    const failed = result({
+      dryRun: false,
+      stopReason: 'transaction_failed',
+      error: 'Exceeded the maximum database size.',
+      failedSessionId: 'session-bad',
+      groupedRowsDeleted: 120,
+      databaseSizeDeltaBytes: MIB,
+    });
+    mocks.runAdminProjectDataWallRecovery
+      .mockResolvedValueOnce(failed)
+      .mockResolvedValueOnce(failed)
+      .mockResolvedValueOnce(result({ dryRun: false }));
+    const dialog = await openDialog();
+    fireEvent.change(field(dialog, 'Reason'), { target: { value: 'wall' } });
+
+    fireEvent.click(recoverButton(dialog));
+    expect(await within(dialog).findByText(/A page failed/)).toBeInTheDocument();
+    // Pages before the failure were applied and are shown, and nothing retried on its own.
+    expect(dialog).toHaveTextContent('120 rows');
+    expect(mocks.runAdminProjectDataWallRecovery).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /skip this session next run/i }));
+    expect(dialog).toHaveTextContent('Skipping 1 session(s):');
+    expect(dialog).toHaveTextContent('session-bad');
+    // Already on the list: the action is not offered twice.
+    expect(
+      within(dialog).queryByRole('button', { name: /skip this session next run/i })
+    ).toBeNull();
+
+    fireEvent.click(recoverButton(dialog));
+    await waitFor(() => expect(mocks.runAdminProjectDataWallRecovery).toHaveBeenCalledTimes(2));
+    expect(mocks.runAdminProjectDataWallRecovery).toHaveBeenLastCalledWith(
+      'project-sam',
+      expect.objectContaining({ skipSessionIds: ['session-bad'] })
+    );
+    // The same session failing again does not duplicate it on the list.
+    await within(dialog).findByText(/A page failed/);
+    expect(
+      within(dialog).queryByRole('button', { name: /skip this session next run/i })
+    ).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /clear skipped sessions/i }));
+    fireEvent.click(recoverButton(dialog));
+    await waitFor(() => expect(mocks.runAdminProjectDataWallRecovery).toHaveBeenCalledTimes(3));
+    expect(mocks.runAdminProjectDataWallRecovery).toHaveBeenLastCalledWith(
+      'project-sam',
+      expect.objectContaining({ skipSessionIds: [] })
+    );
+  });
+
+  it('keeps both actions disabled until the limits load', async () => {
+    let resolveConfig: (value: typeof CONFIG) => void = () => undefined;
+    mocks.fetchAdminProjectDataWallRecoveryConfig.mockReturnValue(
+      new Promise((resolve) => {
+        resolveConfig = resolve;
+      })
+    );
+    renderPage();
+    const row = await screen.findByTestId('telemetry-project-sam');
+    fireEvent.click(within(row).getByRole('button', { name: /recover space/i }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(field(dialog, 'Reason'), { target: { value: 'wall' } });
+
+    expect(previewButton(dialog)).toBeDisabled();
+    expect(recoverButton(dialog)).toBeDisabled();
+    expect(within(dialog).queryByLabelText('Sessions')).toBeNull();
+
+    resolveConfig(CONFIG);
+    expect(await within(dialog).findByLabelText('Sessions')).toBeInTheDocument();
+    expect(previewButton(dialog)).toBeEnabled();
+    expect(mocks.runAdminProjectDataWallRecovery).not.toHaveBeenCalled();
   });
 });

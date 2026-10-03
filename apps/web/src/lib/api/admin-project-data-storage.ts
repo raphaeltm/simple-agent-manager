@@ -4,6 +4,9 @@ import type {
   AdminProjectDataArchiveMigrationAbandonResponse,
   AdminProjectDataArchiveProblemMigrationsResponse,
   AdminProjectDataStorageTelemetryResponse,
+  GroupedFtsWallRecoveryConfigResponse,
+  GroupedFtsWallRecoveryRequest,
+  GroupedFtsWallRecoveryResponse,
 } from '@simple-agent-manager/shared';
 
 import { request } from './client';
@@ -62,6 +65,26 @@ export async function abandonAdminProjectDataArchiveMigration(
     {
       method: 'POST',
       body: JSON.stringify({ reason }),
+    }
+  );
+}
+
+export async function fetchAdminProjectDataWallRecoveryConfig(): Promise<GroupedFtsWallRecoveryConfigResponse> {
+  return request<GroupedFtsWallRecoveryConfigResponse>(
+    '/api/admin/project-data/storage/grouped-fts-wall-recovery/config'
+  );
+}
+
+/** Superadmin grouped-FTS wall recovery for one project; `dryRun` previews without changes. */
+export async function runAdminProjectDataWallRecovery(
+  projectId: string,
+  body: GroupedFtsWallRecoveryRequest
+): Promise<GroupedFtsWallRecoveryResponse> {
+  return request<GroupedFtsWallRecoveryResponse>(
+    `/api/admin/project-data/storage/${encodeURIComponent(projectId)}/grouped-fts-wall-recovery`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
     }
   );
 }

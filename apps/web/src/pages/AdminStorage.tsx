@@ -4,7 +4,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, Dialog, Input, Spinner } from '@simple-agent-manager/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ShieldCheck } from 'lucide-react';
+import { Eraser, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 
 import { formatBytes } from '../components/deployments/deployment-card-format';
@@ -17,6 +17,7 @@ import {
   adminProjectDataStorageTelemetryQueryOptions,
 } from '../lib/query-options';
 import { ProblemMigrations } from './admin-storage/ProblemMigrations';
+import { WallRecoveryDialog } from './admin-storage/WallRecovery';
 
 const DEFAULT_CLOSE_REASON = 'Closed from admin UI';
 
@@ -116,10 +117,19 @@ function BreakerCard({
   );
 }
 
-function TelemetryRow({ row }: { row: AdminProjectDataStorageTelemetryRow }) {
+function TelemetryRow({
+  row,
+  onRecover,
+}: {
+  row: AdminProjectDataStorageTelemetryRow;
+  onRecover: (row: AdminProjectDataStorageTelemetryRow) => void;
+}) {
   const statusClass = STORAGE_STATUS_CLASS[row.status] ?? 'bg-surface-secondary text-fg-muted';
   return (
-    <li className="flex flex-col gap-1 border-b border-border-default py-3 last:border-b-0">
+    <li
+      data-testid={`telemetry-${row.project_id}`}
+      className="flex flex-col gap-1 border-b border-border-default py-3 last:border-b-0"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 break-words text-sm font-semibold text-fg-primary">
           {row.project_name ?? row.project_id}
@@ -140,6 +150,16 @@ function TelemetryRow({ row }: { row: AdminProjectDataStorageTelemetryRow }) {
       {row.last_error && (
         <div className="break-words text-xs text-danger-fg">Last error: {row.last_error}</div>
       )}
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        onClick={() => onRecover(row)}
+        className="mt-1 w-full sm:w-auto sm:self-start"
+      >
+        <Eraser size={16} />
+        Recover space
+      </Button>
     </li>
   );
 }
@@ -150,6 +170,9 @@ export function AdminStorage() {
   const toast = useToast();
   const [target, setTarget] = useState<AdminProjectDataArchiveCircuitBreaker | null>(null);
   const [reason, setReason] = useState(DEFAULT_CLOSE_REASON);
+  const [recoveryTarget, setRecoveryTarget] = useState<AdminProjectDataStorageTelemetryRow | null>(
+    null
+  );
 
   const breakersQuery = useQuery({
     ...adminProjectDataArchiveBreakersQueryOptions(queryScope),
@@ -254,12 +277,18 @@ export function AdminStorage() {
           <Card>
             <ul className="m-0 list-none px-4 py-1">
               {telemetry.map((row) => (
-                <TelemetryRow key={row.project_id} row={row} />
+                <TelemetryRow key={row.project_id} row={row} onRecover={setRecoveryTarget} />
               ))}
             </ul>
           </Card>
         )}
       </section>
+
+      <WallRecoveryDialog
+        key={recoveryTarget?.project_id ?? 'closed'}
+        target={recoveryTarget}
+        onClose={() => setRecoveryTarget(null)}
+      />
 
       <Dialog
         isOpen={target !== null}

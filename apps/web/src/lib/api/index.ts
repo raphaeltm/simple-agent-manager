@@ -108,6 +108,8 @@ export {
   fetchAdminProjectDataArchiveCircuitBreakers,
   fetchAdminProjectDataArchiveProblemMigrations,
   fetchAdminProjectDataStorageTelemetry,
+  fetchAdminProjectDataWallRecoveryConfig,
+  runAdminProjectDataWallRecovery,
 } from './admin-project-data-storage';
 export {
   createAgentProfile,
