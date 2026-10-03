@@ -19,8 +19,8 @@
  *   the failed-retry delay.
  *
  * A hold is never inferred away from what a migration happened to write: replays and cached
- * results make that unreliable. Each sweep instead probes held objects (`probeCapacityHolds`):
- * one read of the object's own `databaseSize`. Headroom below the hard cap clears the hold,
+ * results make that unreliable. Each sweep instead probes held objects (`probeCapacityHolds`),
+ * least recently probed first: one read of the object's own `databaseSize`. Headroom below the hard cap clears the hold,
  * fenced so that a failure recorded after the probe started survives; no headroom refreshes it.
  * A hold that nothing refreshes still lapses after `PROJECT_DATA_ARCHIVE_CAPACITY_HOLD_MAX_MS`,
  * so a probe that keeps failing cannot strand a project. `.claude/rules/74`: the gate keys on
@@ -248,8 +248,9 @@ export interface CapacityProbeStats {
 /**
  * Measure each active hold's object and act on the measurement: headroom below the hard cap
  * clears the hold, unless a failure was recorded after the probe started; no headroom refreshes
- * it, so a full object stays held for as long as it is full. A probe that throws changes nothing
- * and is retried next sweep. Oldest refresh first, so every hold is probed in turn.
+ * it, so a full object stays held for as long as it is full. A probe that throws leaves the hold
+ * as it was. Every attempt, failed or not, moves the hold behind those probed less recently
+ * (`last_probed_at`), so objects that cannot be reached cannot keep the others from a probe.
  */
 export async function probeCapacityHolds(
   env: Env,
@@ -265,7 +266,7 @@ export async function probeCapacityHolds(
     `SELECT object_kind, owner_name, project_id
      FROM project_data_archive_capacity_holds
      WHERE last_failure_at > ?
-     ORDER BY last_failure_at ASC, object_kind ASC, owner_name ASC
+     ORDER BY COALESCE(last_probed_at, 0) ASC, last_failure_at ASC, object_kind ASC, owner_name ASC
      LIMIT ?`
   )
     .bind(input.now - input.holdMaxMs, input.config.probesPerTick)
@@ -286,6 +287,15 @@ export async function probeCapacityHolds(
         projectId: hold.project_id,
         ...serializeError(error),
       });
+      // Rotate it behind the holds not yet probed, without touching `last_failure_at`: a failed
+      // probe proves nothing about the object, so it must neither refresh nor clear the hold.
+      await env.DATABASE.prepare(
+        `UPDATE project_data_archive_capacity_holds
+         SET last_probed_at = ?
+         WHERE object_kind = ? AND owner_name = ?`
+      )
+        .bind(probeStartedAt, hold.object_kind, hold.owner_name)
+        .run();
       continue;
     }
     if (databaseSizeBytes <= ceiling) {
@@ -310,10 +320,10 @@ export async function probeCapacityHolds(
     stats.stillFull++;
     await env.DATABASE.prepare(
       `UPDATE project_data_archive_capacity_holds
-       SET last_failure_at = MAX(last_failure_at, ?)
+       SET last_failure_at = MAX(last_failure_at, ?), last_probed_at = ?
        WHERE object_kind = ? AND owner_name = ?`
     )
-      .bind(probeStartedAt, hold.object_kind, hold.owner_name)
+      .bind(probeStartedAt, probeStartedAt, hold.object_kind, hold.owner_name)
       .run();
   }
   return stats;

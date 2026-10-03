@@ -4303,6 +4303,52 @@ describe('archive-sharding capacity backpressure keys on the full object', () =>
     });
   });
 
+  it('probes every hold in turn when some held objects cannot be reached', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      // Zero-padded so the reachable object also sorts last by name.
+      const owners = Array.from(
+        { length: 11 },
+        (_, index) => `${PROJECT_ID}:archive:g1:s${String(index).padStart(2, '0')}`
+      );
+      // Equal ages: ordered by failure age alone, the same ten unreachable objects took every
+      // probe until their holds expired, and the reachable one was never measured.
+      for (const ownerName of owners) {
+        seedHold(sqlite, { role: 'target', ownerName, lastFailureAt: NOW - HOUR });
+      }
+      const probed: string[] = [];
+      const stubs = (id: string) => {
+        if (id === SOURCE_OWNER) return createFakeSource();
+        const target = createFakeTarget();
+        target.archiveCapacityProbe.mockImplementation(async () => {
+          probed.push(id);
+          if (id !== owners[10]) throw new Error('object unreachable');
+          return { databaseSizeBytes: 1_000_000 };
+        });
+        return target;
+      };
+
+      await sweep(sqlite, stubs);
+      expect(probed).toEqual(owners.slice(0, 10));
+      expect(holds(sqlite)).toHaveLength(11);
+
+      await sweep(sqlite, stubs);
+      // The next sweep measures the object nobody has probed yet, and its headroom clears it.
+      expect(probed[10]).toBe(owners[10]);
+      expect(holds(sqlite)).toEqual(
+        owners.slice(0, 10).map((owner_name) => ({ object_kind: 'target', owner_name }))
+      );
+      // A failed probe neither refreshed nor cleared the unreachable objects' holds.
+      const ages = sqlite
+        .prepare('SELECT DISTINCT last_failure_at FROM project_data_archive_capacity_holds')
+        .all();
+      expect(ages).toEqual([{ last_failure_at: NOW - HOUR }]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('never clears a hold because a migration published, however it got there', async () => {
     const sqlite = new Database(':memory:');
     try {

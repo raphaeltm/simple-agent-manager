@@ -356,7 +356,7 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_DATA_ARCHIVE_BREAKER_POISON_WINDOW_MS` — Window for counting distinct poisoned sessions; poisons from before the breaker was last closed never count (default: `86400000`, min: `60000`, max: `2592000000`)
 - `PROJECT_DATA_ARCHIVE_CAPACITY_HOLD_MAX_MS` — How long a capacity hold keeps new sessions out when neither a failure nor a still-full probe refreshes it; at least twice the failed-retry delay (default: `21600000`)
 - `PROJECT_DATA_ARCHIVE_CAPACITY_HOLD_CLEAR_HEADROOM_BYTES` — Room below the hard cap a held object's probe must measure before its hold lifts (default: `67108864`)
-- `PROJECT_DATA_ARCHIVE_CAPACITY_PROBES_PER_TICK` — Held objects the archive sweep measures per run (default: `10`)
+- `PROJECT_DATA_ARCHIVE_CAPACITY_PROBES_PER_TICK` — Held objects the archive sweep measures per run, least recently probed first (default: `10`)
 - `PROJECT_DATA_ARCHIVE_R2_PREFIX` — Private R2 prefix for terminal-session archive recovery chunks and manifests (default: `project-data/session-archives`)
 - `PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS` — Archive-owner batch size processed by one project-wide search continuation step; repeat the signed continuation until the frozen inventory is exhausted (default: `4`, max: `64`)
 - `PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY` — Maximum archive-owner Durable Object searches executed concurrently within one continuation step (default: `4`, max: `16`)

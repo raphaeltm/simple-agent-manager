@@ -3701,6 +3701,8 @@ export const projectDataArchiveCapacityHolds = sqliteTable(
     lastFailureAt: integer('last_failure_at').notNull(),
     lastFailureMigrationId: text('last_failure_migration_id'),
     failureCount: integer('failure_count').notNull().default(1),
+    /** Last probe attempt, successful or not; probes go to the least recently probed holds. */
+    lastProbedAt: integer('last_probed_at'),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.objectKind, table.ownerName] }),

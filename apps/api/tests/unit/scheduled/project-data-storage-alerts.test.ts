@@ -613,6 +613,77 @@ describe('ProjectData storage superadmin alerts', () => {
     expect(failingAttempts).toBeGreaterThan(projects.length);
   });
 
+  it('retries the longest-waiting failed delivery first, so a recipient that recovers is reached', async () => {
+    const { sqlite, tick } = setup();
+    const projects = Array.from(
+      { length: 13 },
+      (_, index) => `project-${String(index).padStart(2, '0')}`
+    );
+    for (const [index, id] of projects.entries()) {
+      seedProject(sqlite, id, id);
+      seedBreaker(sqlite, id, 'open', NOW - (100 - index) * HOUR);
+    }
+    const recovered = projects[12]!;
+    const recoversAt = NOW + 20 * 60 * 1000;
+    const delivered: Array<{ userId: string; projectId: unknown }> = [];
+    let clock = NOW;
+    sendNotificationMock.mockImplementation(
+      async (_env: Env, userId: string, notification: SentNotification) => {
+        const projectId = notification.metadata.projectId;
+        // admin-1 keeps failing for twelve conditions; for the last one it recovers at minute 20.
+        if (userId === 'admin-1' && (projectId !== recovered || clock < recoversAt)) {
+          throw new Error('push endpoint gone');
+        }
+        delivered.push({ userId, projectId });
+        return { id: 'notification' };
+      }
+    );
+
+    for (let minute = 0; minute <= 90; minute += 5) {
+      clock = NOW + minute * 60 * 1000;
+      await tick(clock);
+    }
+
+    // In severity order, the twelve permanent failures ahead of it took every retry slot.
+    expect(delivered).toContainEqual({ userId: 'admin-1', projectId: recovered });
+    expect(delivered.filter((entry) => entry.userId === 'admin-1')).toHaveLength(1);
+    // Liveness: the healthy recipient got every condition.
+    expect(
+      new Set(delivered.filter((entry) => entry.userId === 'admin-2').map((e) => e.projectId))
+    ).toEqual(new Set(projects));
+  });
+
+  it('keeps a retry slot while new conditions keep arriving', async () => {
+    const { sqlite, tick } = setup({ PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK: '2' });
+    seedProject(sqlite, 'project-old', 'project-old');
+    seedBreaker(sqlite, 'project-old', 'open', NOW - 100 * HOUR);
+    const recoversAt = NOW + 10 * 60 * 1000;
+    const delivered: Array<{ userId: string; projectId: unknown }> = [];
+    let clock = NOW;
+    sendNotificationMock.mockImplementation(
+      async (_env: Env, userId: string, notification: SentNotification) => {
+        if (userId === 'admin-1' && clock < recoversAt) throw new Error('push endpoint gone');
+        delivered.push({ userId, projectId: notification.metadata.projectId });
+        return { id: 'notification' };
+      }
+    );
+
+    for (let minute = 0; minute <= 40; minute += 5) {
+      clock = NOW + minute * 60 * 1000;
+      // Two new open breakers every tick fill the whole budget with first deliveries.
+      for (const suffix of ['a', 'b']) {
+        const id = `project-new-${minute}-${suffix}`;
+        seedProject(sqlite, id, id);
+        seedBreaker(sqlite, id, 'open', clock);
+      }
+      await tick(clock);
+    }
+
+    expect(delivered).toContainEqual({ userId: 'admin-1', projectId: 'project-old' });
+    // Liveness: new conditions were still delivered on every tick.
+    expect(delivered.filter((entry) => entry.userId === 'admin-2').length).toBeGreaterThan(8);
+  });
+
   it('ranks a freeze whose own project is near the wall ahead of older routine freezes', async () => {
     const { sqlite, tick } = setup({
       PROJECT_DATA_STORAGE_ALERT_SCAN_LIMIT: '2',

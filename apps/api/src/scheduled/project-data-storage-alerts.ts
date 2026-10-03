@@ -281,6 +281,32 @@ export async function collectProjectDataStorageAlerts(
   return { alerts, scanTruncated: scan.scanTruncated };
 }
 
+interface AlertWork {
+  alert: StorageAlert;
+  throttleKey: string;
+  due: string[];
+  /** Earliest `retryAt` among the failed recipients this attempt retries. */
+  oldestRetryAt: number;
+}
+
+/**
+ * The order this tick attempts alerts in. First deliveries lead, but while any retry is due one
+ * slot of the budget is kept for retries, so sustained new alerts cannot starve a recipient
+ * whose delivery failed. Retries go longest-waiting first: in severity order, the same few
+ * persistent failures would take every retry slot, and a condition ranked after them would
+ * never be retried at all.
+ */
+function scheduleAlertWork(
+  firstDeliveries: AlertWork[],
+  retries: AlertWork[],
+  budget: number
+): AlertWork[] {
+  const byWait = [...retries].sort((left, right) => left.oldestRetryAt - right.oldestRetryAt);
+  const retryShare = byWait.length > 0 && budget > 1 ? 1 : 0;
+  const leading = firstDeliveries.slice(0, budget - retryShare);
+  return [...leading, ...byWait, ...firstDeliveries.slice(leading.length)];
+}
+
 export async function runProjectDataStorageAlerts(
   env: Env,
   now: number = Date.now()
@@ -307,23 +333,31 @@ export async function runProjectDataStorageAlerts(
   }
   // First deliveries before retries: a recipient whose deliveries keep failing gets only the
   // budget the healthy deliveries leave, so it can never keep a condition from anyone else.
-  const firstDeliveries: Array<{ alert: StorageAlert; throttleKey: string; due: string[] }> = [];
-  const retries: Array<{ alert: StorageAlert; throttleKey: string; due: string[] }> = [];
+  const firstDeliveries: AlertWork[] = [];
+  const retries: AlertWork[] = [];
   for (const alert of alerts) {
     const throttleKey = `${config.kvPrefix}:${alert.kind}:${alert.projectId}:${alert.episode}`;
     const fresh: string[] = [];
     const retryDue: string[] = [];
+    let oldestRetryAt = Number.POSITIVE_INFINITY;
     for (const userId of recipients) {
       const stamp = live.get(`${throttleKey}:${userId}`);
       if (!stamp) fresh.push(userId);
-      else if (stamp.kind === 'failed' && (stamp.retryAt ?? 0) <= now) retryDue.push(userId);
-      else stats.throttled++;
+      else if (stamp.kind === 'failed' && (stamp.retryAt ?? 0) <= now) {
+        retryDue.push(userId);
+        oldestRetryAt = Math.min(oldestRetryAt, stamp.retryAt ?? 0);
+      } else stats.throttled++;
     }
     if (fresh.length > 0)
-      firstDeliveries.push({ alert, throttleKey, due: [...fresh, ...retryDue] });
-    else if (retryDue.length > 0) retries.push({ alert, throttleKey, due: retryDue });
+      firstDeliveries.push({ alert, throttleKey, due: [...fresh, ...retryDue], oldestRetryAt });
+    else if (retryDue.length > 0)
+      retries.push({ alert, throttleKey, due: retryDue, oldestRetryAt });
   }
-  for (const { alert, throttleKey, due } of [...firstDeliveries, ...retries]) {
+  for (const { alert, throttleKey, due } of scheduleAlertWork(
+    firstDeliveries,
+    retries,
+    config.maxAlertsPerTick
+  )) {
     if (stats.alerts >= config.maxAlertsPerTick) {
       stats.deferred++;
       continue;
