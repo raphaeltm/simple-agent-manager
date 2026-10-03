@@ -221,6 +221,8 @@ The chain that led there:
 
 ### Item 5: near-wall mode for the alarm grouped-FTS cleanup
 
+> Superseded in part by the round-2 revised plan and "As built" below (flag default off).
+
 - When `beforeBytes >= unsafeBytes`, the alarm stops returning `wall_unsafe`. Instead it runs
   #2215's engine in an alarm mode:
   - same candidate query: terminal, aged, no archive intent/target, largest first, pages through
@@ -247,9 +249,9 @@ The chain that led there:
 
 ## Acceptance criteria
 
-- [ ] AC1: production runs `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS=1080000`, verified via
+- [x] AC1: production runs `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS=1080000`, verified via
       D1 `project_data_archive_global_sweep_cadence` after deploy.
-- [ ] AC2: the billing trigger prompt has the $30 floor, the run log, spike/sustained/runaway
+- [x] AC2: the billing trigger prompt has the $30 floor, the run log, spike/sustained/runaway
       classification and the protected-mechanism rule. Astra reviewed it.
 - [ ] AC3: a single poisoned session never opens a project breaker, and its project's other sessions
       keep draining (real-selector test).
@@ -269,17 +271,20 @@ The chain that led there:
 
 - [x] Item 1 revert branch pushed (`sam/restore-archive-sweep-cadence`, f02fc721c), local
       task-completion check PASS
-- [ ] Item 1 PR, CI, merge, deploy, D1 verification
+- [x] Item 1 PR #2220 merged 13:27Z, CI + Deploy Production green, D1 cadence verified
+      (`next_eligible_at - last_started_at = 1080000` at 14:32:57Z)
 - [x] Item 2 trigger prompt applied, seed log uploaded (library fileId 01M40SXDT3X87T7SW1JQ9B5D49)
-- [ ] Astra round 1 (items 1+2) addressed
-- [ ] Astra round 2 (this plan) addressed
-- [ ] 3a breaker policy + tests
-- [ ] 3b alerts step + tests
-- [ ] 3c measurement robustness + test
-- [ ] 4 route split (pure move), GET config, shared types, web control, tests, Playwright, docs
-- [ ] 5 near-wall mode + tests + docs
-- [ ] Local specialist reviews, staging verification, Astra round 3, PRs, CodeRabbit, merges, deploy
-      monitoring
+- [x] Astra round 1 (items 1+2) addressed (prompt v2, 12:25Z)
+- [x] Astra round 2 (this plan) addressed (revised plan below; PR split B/C/D)
+- [x] 3a breaker policy + tests (PR-B; rounds 3-5 fixes)
+- [x] 3b alerts step + tests (PR-B; rounds 3-5 fixes)
+- [x] 3c measurement robustness + test (PR-B)
+- [x] 4 route split (pure move), GET config, shared types, web control, tests, Playwright, docs
+      (PR-C, branch `sam/admin-wall-recovery-control`)
+- [x] 5 near-wall mode + tests + docs (PR-D, branch `sam/projectdata-near-wall-fts-cleanup`)
+- [ ] Astra executed-work review: round 6 (PR-B) and items 4+5 (PR-C, PR-D)
+- [ ] Local specialist reviews, task-completion validators, staging verification, PRs, CodeRabbit,
+      merges, deploy monitoring, rule-70 checks for the new vars
 
 ## Notes
 
@@ -287,6 +292,32 @@ The chain that led there:
   2026-10-03). Verify the deployed values after merge anyway.
 - Open question for the review: should `frozen` breakers alert at all, given a freeze is a
   deliberate operator action?
+
+## As built (items 4 and 5)
+
+### Item 4 (PR-C)
+
+- The route split uses sibling modules instead of a directory:
+  `routes/admin/project-data-archive-routes.ts` and `routes/admin/project-data-wall-recovery-routes.ts`,
+  mounted from the unchanged `routes/admin/project-data-storage.ts` (pure-move commit first).
+- `GET .../grouped-fts-wall-recovery/config` returns the ceilings and the env-default starting
+  budgets (`PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_DEFAULT_MAX_{ROWS,BYTES,SESSIONS}`, clamped).
+- The failed-page action is "Skip this session next run". It adds the session to the skip list
+  (deduped, capped at the ceiling), and the operator retries explicitly with Preview or Recover.
+- The outcome is announced inside the dialog (`aria-live`) instead of toasts, after the ui-ux review.
+- The shared `Dialog` gains a `stickyFooter` slot, so the actions stay reachable on a phone.
+
+### Item 5 (PR-D)
+
+- The flag `PROJECT_DATA_GROUPED_FTS_CLEANUP_NEAR_WALL_ENABLED` defaults to **false** (revised plan),
+  so production keeps reporting `wall_unsafe` near the wall until it is enabled. The original plan
+  text above (default `true`, new `near_wall_storage_full` reason) is superseded: a storage-full page
+  rolls back and stops the run with `storage_full`.
+- Both paths (below the ratio and near the wall) now use the wall recovery's candidate query
+  (largest first, no archive source intent or target) and one atomic page per transaction.
+- A page that grows `databaseSize` rolls back (`PageGrewError`), and the session is excluded for
+  `PROJECT_DATA_GROUPED_FTS_CLEANUP_EXCLUSION_MS` (24 h), as are failed or oversized sessions.
+- `storage_full` and excluded sessions count as cleanup failures in cleanup health.
 
 ## Review rounds (MF'in Astra)
 
@@ -319,12 +350,12 @@ Verdicts: 3a, 3b, 3c and 5 CHANGES REQUESTED; 4 APPROVE.
 
 #### Revised plan for 3a
 
-- [ ] Move the breaker policy (poison, breaker decision, storage-full classification) out of the 4,182-line coordinator into a focused module (rule 18).
-- [ ] Never overwrite a `frozen` (operator) breaker with `open`.
-- [ ] Freeze the location only when the poison UPDATE changed a row.
-- [ ] A storage-full failure refunds its attempt, so capacity failures do not spend the poison budget. Log it for audit.
-- [ ] Once a project's breaker is not `closed`, stop admitting its new candidates in the same tick. Make `createCandidateJournal` conditional on a closed breaker so a concurrent operator freeze cannot strand a fence.
-- [ ] Tests:
+- [x] Move the breaker policy (poison, breaker decision, storage-full classification) out of the 4,182-line coordinator into a focused module (rule 18).
+- [x] Never overwrite a `frozen` (operator) breaker with `open`.
+- [x] Freeze the location only when the poison UPDATE changed a row.
+- [x] A storage-full failure refunds its attempt, so capacity failures do not spend the poison budget. Log it for audit.
+- [x] Once a project's breaker is not `closed`, stop admitting its new candidates in the same tick. Make `createCandidateJournal` conditional on a closed breaker so a concurrent operator freeze cannot strand a fence.
+- [x] Tests:
   - root-full
   - healthy work behind repeated capacity failures
   - same-tick admission stop
@@ -332,36 +363,36 @@ Verdicts: 3a, 3b, 3c and 5 CHANGES REQUESTED; 4 APPROVE.
 
 #### Revised plan for 3b
 
-- [ ] Bounded D1 queries with a configurable page size.
-- [ ] Alerts:
+- [x] Bounded D1 queries with a configurable page size.
+- [x] Alerts:
   - open breaker: high
   - frozen breaker: medium, escalating to high when that project is near the wall
   - telemetry at or above the wall ratio: high
   - stale telemetry for a high-usage project: high (decided in review: a stale reading near the
     wall may already be closer to the cap, so it is not calmer than a fresh one)
   - cleanup `target_unreachable` / remediation failure: medium
-- [ ] The dedup identity is the alert kind + project + episode (breaker `opened_at`, severity tier).
-- [ ] Delivery safety:
+- [x] The dedup identity is the alert kind + project + episode (breaker `opened_at`, severity tier).
+- [x] Delivery safety:
   - claim the KV throttle only after a durable notification was created
   - ~~fix `sendNotificationOnce`~~ superseded: its one caller moved to stamp-after-delivery
     (`superadmin-ops-alerts.ts`), and `sendNotificationOnce` plus its DO claim were removed as dead
     code (migration 003 kept, append-only)
-- [ ] AC5 now reads "one cron tick after the qualifying telemetry is persisted".
-- [ ] Tests:
+- [x] AC5 now reads "one cron tick after the qualifying telemetry is persisted".
+- [x] Tests:
   - the real scheduled entrypoint with failing sibling steps
   - more than one page of projects
   - delivery failure and recovery on the next tick
 
 #### Revised plan for 3c
 
-- [ ] Every local DO meta write in the measurement, alert, cleanup-health and catch paths is best-effort and never throws.
-- [ ] The alert throttle falls back to D1 `last_alert_at` when local meta is unavailable.
-- [ ] Keep measurement serialization.
-- [ ] Guard the telemetry upsert against stale overwrites.
+- [x] Every local DO meta write in the measurement, alert, cleanup-health and catch paths is best-effort and never throws.
+- [x] The alert throttle falls back to D1 `last_alert_at` when local meta is unavailable.
+- [x] Keep measurement serialization.
+- [x] Guard the telemetry upsert against stale overwrites.
 
 #### Item 4
 
-- [ ] As planned, plus the review's implementation checks:
+- [x] As planned, plus the review's implementation checks:
   - positive-integer byte validation
   - sub-MiB ceilings
   - Preview and Recover as distinct actions
@@ -373,14 +404,14 @@ Verdicts: 3a, 3b, 3c and 5 CHANGES REQUESTED; 4 APPROVE.
 
 #### Revised plan for 5 (PR-D, flag default off)
 
-- [ ] Isolate the earlier alarm cleanup stages and their failure handlers, and pass `transactionSync`.
-- [ ] Per-page space safety: roll back a page that grows `databaseSize`.
-- [ ] Failed-session exclusion with an expiring marker.
-- [ ] Respect the recheck/overload gates.
-- [ ] Map the new reasons into cleanup health and alerts.
-- [ ] Fix the below-ratio path so it shares the archive exclusion and atomic pages.
-- [ ] Real-workerd tests with high-entropy content.
-- [ ] An end-to-end prune → archive → search test.
+- [x] Isolate the earlier alarm cleanup stages and their failure handlers, and pass `transactionSync`.
+- [x] Per-page space safety: roll back a page that grows `databaseSize`.
+- [x] Failed-session exclusion with an expiring marker.
+- [x] Respect the recheck/overload gates.
+- [x] Map the new reasons into cleanup health and alerts.
+- [x] Fix the below-ratio path so it shares the archive exclusion and atomic pages.
+- [x] Real-workerd tests with high-entropy content.
+- [x] An end-to-end prune → archive → search test.
 
 ### Round 3 (task 01M40Y4P0543BJQGKXH6X4MXQ1, 13:20Z): executed 3a/3b/3c at 44736e51f
 
