@@ -197,6 +197,20 @@ describe('ProjectData storage superadmin alerts', () => {
     expect(byProject.get('project-silent')!.body).toContain(new Date(NOW - 5 * HOUR).toISOString());
   });
 
+  it('names the configured hard cap rather than a fixed size', async () => {
+    const twoGib = 2 * 1024 * 1024 * 1024;
+    const { sqlite, env } = setup({ PROJECT_DATA_STORAGE_HARD_CAP_BYTES: String(twoGib) });
+    seedProject(sqlite, 'project-small-cap', 'Small cap');
+    seedTelemetry(sqlite, 'project-small-cap', Math.ceil(twoGib * 0.97), NOW);
+
+    await runProjectDataStorageAlerts(env, NOW);
+
+    expect(sent()[0]!.notification).toMatchObject({
+      title: 'Small cap storage is near the 2 GiB hard cap',
+      metadata: { alertKind: 'near_wall', hardCapBytes: twoGib },
+    });
+  });
+
   it('pages when automatic cleanup cannot reach its target, even below the wall', async () => {
     const { sqlite, env } = setup();
     seedProject(sqlite, 'project-cleanup', 'Cleanup');

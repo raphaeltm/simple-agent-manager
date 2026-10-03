@@ -46,11 +46,7 @@ export interface ProjectDataStorageAlertStats {
 }
 
 type AlertKind =
-  | 'breaker_open'
-  | 'breaker_frozen'
-  | 'near_wall'
-  | 'near_wall_stale'
-  | 'cleanup_unreachable';
+  'breaker_open' | 'breaker_frozen' | 'near_wall' | 'near_wall_stale' | 'cleanup_unreachable';
 
 interface StorageAlert {
   kind: AlertKind;
@@ -116,6 +112,14 @@ function gigabytes(bytes: number): string {
   return `${(bytes / 1e9).toFixed(2)} GB`;
 }
 
+const GIB = 1024 * 1024 * 1024;
+
+/** The configured hard cap, as Cloudflare states it ("10 GiB"), never a hardcoded label. */
+function capLabel(config: ProjectDataStorageAlertConfig): string {
+  const gib = config.hardCapBytes / GIB;
+  return `${Number.isInteger(gib) ? gib : gib.toFixed(2)} GiB`;
+}
+
 function label(row: { project_id: string; project_name: string | null }): string {
   return row.project_name ? `${row.project_name} (${row.project_id})` : row.project_id;
 }
@@ -124,7 +128,11 @@ function iso(ms: number | null): string {
   return ms === null ? 'an unknown time' : new Date(ms).toISOString();
 }
 
-function breakerAlert(row: BreakerRow, nearWall: boolean): StorageAlert {
+function breakerAlert(
+  row: BreakerRow,
+  nearWall: boolean,
+  config: ProjectDataStorageAlertConfig
+): StorageAlert {
   const since = row.opened_at ?? row.updated_at;
   const reason = row.reason ?? 'no reason recorded';
   if (row.state === 'open') {
@@ -147,7 +155,7 @@ function breakerAlert(row: BreakerRow, nearWall: boolean): StorageAlert {
     urgency: nearWall ? 'high' : 'medium',
     title: `Archive drain frozen: ${row.project_name ?? row.project_id}`,
     body: `The archive circuit breaker for ${label(row)} has been frozen since ${iso(since)} (${reason}).${
-      nearWall ? ' Its storage is near the 10 GiB hard cap.' : ''
+      nearWall ? ` Its storage is near the ${capLabel(config)} hard cap.` : ''
     } Its sessions are not archived until a superadmin closes the breaker in Admin → Storage.`,
     metadata: { projectId: row.project_id, breakerState: row.state, reason, since, nearWall },
   };
@@ -166,7 +174,7 @@ function wallAlert(
     projectId: row.project_id,
     episode: stale ? 'stale' : 'current',
     urgency: 'high',
-    title: `${row.project_name ?? row.project_id} storage is near the 10 GiB hard cap${stale ? ' (telemetry stale)' : ''}`,
+    title: `${row.project_name ?? row.project_id} storage is near the ${capLabel(config)} hard cap${stale ? ' (telemetry stale)' : ''}`,
     body: stale
       ? `The last measurement exported for ${label(row)} was ${observed}, and nothing newer has arrived. Writes fail at the cap. Check Admin → Storage.`
       : `${label(row)} is at ${observed}. Writes fail at the cap. Check the archive breaker and recover space in Admin → Storage.`,
@@ -242,7 +250,9 @@ export async function collectProjectDataStorageAlerts(
     ...telemetryRows
       .filter((row) => row.database_size_bytes >= wallBytes)
       .map((row) => wallAlert(row, config, now)),
-    ...(breakers.results ?? []).map((row) => breakerAlert(row, nearWall.has(row.project_id))),
+    ...(breakers.results ?? []).map((row) =>
+      breakerAlert(row, nearWall.has(row.project_id), config)
+    ),
     ...telemetryRows
       .filter((row) => row.cleanup_health === 'target_unreachable')
       .map((row) => cleanupAlert(row)),
