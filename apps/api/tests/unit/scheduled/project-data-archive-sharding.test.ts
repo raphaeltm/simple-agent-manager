@@ -4129,6 +4129,33 @@ describe('archive-sharding capacity backpressure keys on the full object', () =>
     }
   });
 
+  it.each(['intent_prepared', 'target_prepared', 'copying'] as const)(
+    'records a full root against the root when a resumed %s journal re-prepares the source',
+    async (journalState) => {
+      const sqlite = new Database(':memory:');
+      try {
+        createCoordinatorTables(sqlite);
+        seedMigration(sqlite, journalState, { sourceIntentToken: 'old-token' });
+        // The source has the intent, but re-preparing it is a root write and the root is full.
+        const source = createFakeSource({ state: 'intent_prepared', token: 'old-token' });
+        source.archiveSourcePrepareIntent.mockRejectedValue(new Error(STORAGE_FULL));
+        const target = createFakeTarget();
+
+        await sweep(sqlite, (id) => (id === SOURCE_OWNER ? source : target));
+
+        expect(journalRow(sqlite, MIGRATION_ID)).toMatchObject({
+          state: 'failed',
+          error_code: 'storage_full',
+        });
+        // Liveness: the run reached the root re-prepare, and never wrote to the target.
+        expect(source.archiveSourcePrepareIntent).toHaveBeenCalledTimes(1);
+        expect(target.archiveTargetCommitChunk).not.toHaveBeenCalled();
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
   it('records a full target shard against the shard, not the root', async () => {
     const sqlite = new Database(':memory:');
     try {

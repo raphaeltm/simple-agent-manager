@@ -12,7 +12,7 @@
  * only be as fresh as the telemetry the object last exported.
  *
  * The per-tick budget is spent only on alerts that are due: throttled conditions are skipped
- * first (one `KV.list` of live stamps), so a persistent severe condition cannot hold a slot it
+ * first (a paged `KV.list` snapshot of live stamps), so a persistent severe condition cannot hold a slot it
  * is not using and starve the conditions ranked after it.
  */
 import type { NotificationUrgency } from '@simple-agent-manager/shared';

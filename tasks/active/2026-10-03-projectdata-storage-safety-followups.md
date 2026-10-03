@@ -413,3 +413,22 @@ Verdicts: 3a, 3b, 3c CHANGES REQUESTED (3 HIGH, 2 MEDIUM). All five are fixed on
   assertion was found vacuous by this (it read the wrong project) and was fixed with a liveness
   pair.
 
+### Local cloudflare-specialist on d4be20131 (round-3 fixes)
+
+CHANGES NEEDED (1 HIGH, 1 MEDIUM, 2 LOW). All fixed:
+
+- [x] HIGH: capacity failures were classified from the journal state, but a resumed
+      `intent_prepared`/`target_prepared`/`copying` journal re-prepares the source on the root
+      first, so a full root could be recorded as `storage_full_target` and admission would keep
+      fencing into it. `ownerStub` now tags every failed call with the object it ran on (root or
+      target) and `markFailed` reads the tag; the state is only the fallback. Test: the three
+      resumed states with a full root record `storage_full` (red when the tag is ignored or the
+      stubs carry no role).
+- [x] MEDIUM: no index for the correlated capacity checks. EXPLAIN QUERY PLAN: the existing
+      `(project_id, state, updated_at)` index already serves the hot path (failed rows only), but
+      each "recovered" check read the whole project during an incident. Added migration 0179,
+      `idx_project_data_archive_migrations_capacity (project_id, error_code, state, updated_at)`,
+      and the drizzle declaration; every capacity lookup now seeks on (project_id, error_code).
+- [x] LOW: "one `KV.list`" wording now says the snapshot is paged.
+- [x] LOW: stale `claimNotificationDeduplication` mock removed from workspace-create-metering.test.ts.
+

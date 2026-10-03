@@ -571,7 +571,7 @@ describe('fresh workspace metering through registered HTTP and real SQL', () => 
     const alerts = vi.fn(async () => ({ id: 'operator-alert' }));
     Object.assign(f.f.env, { KV: { get: async () => null, put: async () => undefined },
       NOTIFICATION: { idFromName: (id: string) => id, get: () => ({
-        claimNotificationDeduplication: async () => true, createNotification: alerts,
+        createNotification: alerts,
       }) } });
     const instance = [...f.durable.instances.values()][0]!;
     const intent = [...instance.values.values()][0] as { createdAt: number; nextAttemptAt: number | null };

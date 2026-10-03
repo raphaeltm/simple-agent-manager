@@ -23,19 +23,46 @@
 export const PROJECT_DATA_ARCHIVE_ROOT_FULL_ERROR_CODE = 'storage_full';
 export const PROJECT_DATA_ARCHIVE_TARGET_FULL_ERROR_CODE = 'storage_full_target';
 
-/** Journal states whose next write lands on the target archive shard (prepare, copy, seal). */
+/** Journal states whose next write usually lands on the target archive shard (prepare, copy, seal). */
 const TARGET_WRITE_STATES: ReadonlySet<string> = new Set([
   'intent_prepared',
   'target_prepared',
   'copying',
 ]);
 
+/** The object an archive call ran on: the project's root, or the session's target shard. */
+export type ArchiveObjectRole = 'root' | 'target';
+
+const FAILED_OBJECT = Symbol('archiveFailedObject');
+
 /**
- * Which object refused, from the last state the journal recorded before the failure. Every
- * other state's next write is on the root: the source prepare (`leased`, and the re-prepare a
- * resumed journal repeats) and the source delete at finalize (`recovery_manifest_persisted`).
+ * Record on a failed call's error which object it ran on. The coordinator's stubs do this for
+ * every call (`ownerStub` in project-data-archive-sharding.ts), and the first tag wins.
  */
-export function archiveCapacityErrorCode(journalState: string): string {
+export function tagArchiveObjectFailure(error: unknown, role: ArchiveObjectRole): unknown {
+  if (error !== null && typeof error === 'object' && !(FAILED_OBJECT in error)) {
+    try {
+      Object.defineProperty(error, FAILED_OBJECT, { value: role });
+    } catch {
+      // A frozen error keeps no tag; `archiveCapacityErrorCode` falls back to the journal state.
+    }
+  }
+  return error;
+}
+
+/**
+ * Which object refused a capacity failure: the object the failing call ran on. The journal state
+ * cannot say this on its own, because a resumed journal (`intent_prepared`, `target_prepared`,
+ * `copying`) re-prepares the source on the root before it touches the target again; it is only
+ * the fallback for an untagged error.
+ */
+export function archiveCapacityErrorCode(error: unknown, journalState: string): string {
+  const role =
+    error !== null && typeof error === 'object'
+      ? (error as { [FAILED_OBJECT]?: unknown })[FAILED_OBJECT]
+      : undefined;
+  if (role === 'root') return PROJECT_DATA_ARCHIVE_ROOT_FULL_ERROR_CODE;
+  if (role === 'target') return PROJECT_DATA_ARCHIVE_TARGET_FULL_ERROR_CODE;
   return TARGET_WRITE_STATES.has(journalState)
     ? PROJECT_DATA_ARCHIVE_TARGET_FULL_ERROR_CODE
     : PROJECT_DATA_ARCHIVE_ROOT_FULL_ERROR_CODE;

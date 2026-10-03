@@ -79,8 +79,10 @@ import {
 export { poisonProjectDataArchiveMigration } from './project-data-archive-breaker-policy';
 import {
   archiveCapacityErrorCode,
+  type ArchiveObjectRole,
   ONE_CAPACITY_PROBE_PER_SCOPE_SQL,
   projectRootAcceptingArchiveWritesSql,
+  tagArchiveObjectFailure,
   TARGET_SHARD_ACCEPTING_ARCHIVE_WRITES_SQL,
 } from './project-data-archive-capacity-policy';
 
@@ -967,13 +969,43 @@ function scopedConfig(
   };
 }
 
-function ownerStub(env: Env, ownerName: string): DurableObjectStub<ProjectData> {
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    value !== null &&
+    (typeof value === 'object' || typeof value === 'function') &&
+    typeof (value as { then?: unknown }).then === 'function'
+  );
+}
+
+/**
+ * With a `role`, every call's failure is tagged with the object it ran on, so `markFailed` records
+ * a capacity failure against the object that refused the write rather than guessing from the
+ * journal state (project-data-archive-capacity-policy.ts).
+ */
+function ownerStub(
+  env: Env,
+  ownerName: string,
+  role?: ArchiveObjectRole
+): DurableObjectStub<ProjectData> {
   const stub = env.PROJECT_DATA.get(
     env.PROJECT_DATA.idFromName(ownerName)
   ) as DurableObjectStub<ProjectData>;
   return new Proxy(stub, {
     get(target, prop, receiver) {
-      return Reflect.get(target, prop, receiver);
+      const value: unknown = Reflect.get(target, prop, receiver);
+      if (!role || typeof prop !== 'string' || typeof value !== 'function') return value;
+      return (...args: unknown[]) => {
+        let result: unknown;
+        try {
+          result = Reflect.apply(value, target, args);
+        } catch (error) {
+          throw tagArchiveObjectFailure(error, role);
+        }
+        if (!isThenable(result)) return result;
+        return Promise.resolve(result).catch((error: unknown) => {
+          throw tagArchiveObjectFailure(error, role);
+        });
+      };
     },
   });
 }
@@ -981,9 +1013,10 @@ function ownerStub(env: Env, ownerName: string): DurableObjectStub<ProjectData> 
 async function ensureOwnerStub(
   env: Env,
   ownerName: string,
-  projectId: string
+  projectId: string,
+  role?: ArchiveObjectRole
 ): Promise<DurableObjectStub<ProjectData>> {
-  const stub = ownerStub(env, ownerName);
+  const stub = ownerStub(env, ownerName, role);
   await stub.ensureProjectId(projectId);
   return stub;
 }
@@ -3069,8 +3102,18 @@ async function migrateClaimedCandidate(
   rowsCopied: number;
 }> {
   let migration = claimedRow;
-  const source = await ensureOwnerStub(env, migration.source_owner_name, migration.project_id);
-  const target = await ensureOwnerStub(env, migration.target_owner_name, migration.project_id);
+  const source = await ensureOwnerStub(
+    env,
+    migration.source_owner_name,
+    migration.project_id,
+    'root'
+  );
+  const target = await ensureOwnerStub(
+    env,
+    migration.target_owner_name,
+    migration.project_id,
+    'target'
+  );
   let chunksCopied = 0;
   let rowsCopied = 0;
   // Wall time per phase, logged on completion so production ticks quantify what each phase
@@ -3253,7 +3296,7 @@ async function markFailed(
       migrationId: current.migration_id,
       projectId: current.project_id,
       sessionId: current.session_id,
-      errorCode: archiveCapacityErrorCode(current.state),
+      errorCode: archiveCapacityErrorCode(error, current.state),
       targetOwnerName: current.target_owner_name,
       attemptCount: current.attempt_count,
       poisonAfterAttempts: config.poisonAfterAttempts,
@@ -3275,7 +3318,7 @@ async function markFailed(
        ${leaseGuard}`
   )
     .bind(
-      storageFull ? archiveCapacityErrorCode(current.state) : errorCode(error),
+      storageFull ? archiveCapacityErrorCode(error, current.state) : errorCode(error),
       errorMessage(error),
       storageFull ? 1 : 0,
       now,

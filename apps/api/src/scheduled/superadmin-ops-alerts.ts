@@ -37,7 +37,7 @@ export async function listRealSuperadmins(env: Env): Promise<string[]> {
 }
 
 /**
- * Live throttle stamps under `prefix`, read with one `KV.list` per page instead of one `get`
+ * Live throttle stamps under `prefix`, read with one `KV.list` call per 1,000-key page instead of one `get`
  * per alert and recipient, so a caller can skip throttled alerts before spending its delivery
  * budget. Returns null when the stamps cannot all be read (a failed or still-incomplete list):
  * the caller must then send nothing, so a broken KV cannot turn a cron into a flood.

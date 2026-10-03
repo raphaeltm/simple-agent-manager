@@ -3680,6 +3680,12 @@ export const projectDataArchiveMigrations = sqliteTable(
       table.sessionId,
       table.state
     ),
+    capacityIdx: index('idx_project_data_archive_migrations_capacity').on(
+      table.projectId,
+      table.errorCode,
+      table.state,
+      table.updatedAt
+    ),
   })
 );
 
