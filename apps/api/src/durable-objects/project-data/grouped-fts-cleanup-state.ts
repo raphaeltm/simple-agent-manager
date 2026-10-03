@@ -10,6 +10,7 @@
 import { isJsonRecord } from '@simple-agent-manager/shared';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
+import { parsePositiveInt } from '../../lib/route-helpers';
 import {
   readStorageSafetyMeta,
   readStorageSafetyMetaNumber,
@@ -39,22 +40,16 @@ export interface GroupedFtsCleanupModeConfig {
   maxExclusions: number;
 }
 
-function positiveInteger(raw: string | undefined, fallback: number): number {
-  if (!raw?.trim()) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 export function resolveGroupedFtsCleanupModeConfig(env: Env): GroupedFtsCleanupModeConfig {
   const flag = (env.PROJECT_DATA_GROUPED_FTS_CLEANUP_NEAR_WALL_ENABLED ?? '').trim().toLowerCase();
   return {
     nearWallEnabled:
       flag === '' ? DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_NEAR_WALL_ENABLED : flag === 'true',
-    exclusionMs: positiveInteger(
+    exclusionMs: parsePositiveInt(
       env.PROJECT_DATA_GROUPED_FTS_CLEANUP_EXCLUSION_MS,
       DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_EXCLUSION_MS
     ),
-    maxExclusions: positiveInteger(
+    maxExclusions: parsePositiveInt(
       env.PROJECT_DATA_GROUPED_FTS_CLEANUP_MAX_EXCLUSIONS,
       DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_MAX_EXCLUSIONS
     ),
