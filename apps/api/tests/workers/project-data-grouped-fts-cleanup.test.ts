@@ -35,6 +35,10 @@ type Mode = { nearWall: boolean; nearWallEnabled?: boolean };
 interface RunOptions {
   mode: Mode;
   config?: Partial<StorageSafetyConfig>;
+  /** Extra Worker vars, e.g. the exclusion settings. */
+  env?: Record<string, string>;
+  /** The run's clock (defaults to the real one). */
+  now?: number;
   /** Wraps `sql` for this run, e.g. to inject failures. */
   wrapSql?: (sql: SqlStorage, inTransaction: () => boolean) => SqlStorage;
 }
@@ -68,9 +72,11 @@ function runCleanup(stub: Stub, projectId: string, options: RunOptions) {
       PROJECT_DATA_GROUPED_FTS_CLEANUP_NEAR_WALL_ENABLED: String(
         options.mode.nearWallEnabled ?? true
       ),
+      ...options.env,
     } as unknown as WorkerEnv;
     return runProjectDataGroupedFtsCleanup(sql, runEnv, projectId, config, {
       allowStart: true,
+      ...(options.now === undefined ? {} : { now: options.now }),
       transactionSync: (callback) => {
         inTransaction = true;
         try {
@@ -183,11 +189,60 @@ describe('ProjectData grouped FTS alarm cleanup', () => {
         }),
     });
 
-    expect(result).toMatchObject({ terminationReason: 'storage_full', groupedRowsDeleted: 0 });
+    // Both sessions' pages were refused and rolled back; the run tried each once and moved on.
+    expect(result).toMatchObject({
+      terminationReason: 'storage_full',
+      groupedRowsDeleted: 0,
+      pagesRefusedAtCap: 2,
+      sessionsExcludedForFailure: 2,
+    });
     const after = await snapshotSession(stub, large);
     // Rows, index entries and the session mark are all exactly as before.
     expect(after).toEqual(large.before);
     await assertFtsIntegrity(stub);
+  });
+
+  it('moves past a session the cap refuses, even when nothing can be recorded', async () => {
+    const { projectId, stub } = await createProject('cap-refusal-next', 'grouped-cleanup');
+    const [large, small] = await seedTwoOldSessions(stub);
+    let pruning: unknown = null;
+
+    const run = () =>
+      runCleanup(stub, projectId, {
+        mode: { nearWall: true },
+        config: { groupedFtsCleanupBatchSessions: 2 },
+        wrapSql: (sql) =>
+          intercept(sql, {
+            onExec: (query, bindings) => {
+              if (query.startsWith('DELETE FROM chat_messages_grouped')) pruning = bindings[1];
+              // Only the large session's index deletes do not fit at the cap...
+              if (query.includes(`VALUES('delete'`) && pruning === large.sessionId) {
+                throw new Error(STORAGE_FULL);
+              }
+              // ...and no bookkeeping fits either: no exclusion, traversal or recheck is saved.
+              if (/^\s*(INSERT INTO|DELETE FROM) do_meta/.test(query)) {
+                throw new Error(STORAGE_FULL);
+              }
+            },
+          }),
+      });
+
+    const first = await run();
+
+    // The refused page rolled back and the run went on to the next session in the same run.
+    expect(first).toMatchObject({
+      pagesRefusedAtCap: 1,
+      sessionsExcludedForFailure: 1,
+      groupedRowsDeleted: small.before.groupedRows,
+    });
+    expect(await snapshotSession(stub, large)).toEqual(large.before);
+    expect((await snapshotSession(stub, small)).groupedRows).toBe(0);
+    await assertFtsIntegrity(stub);
+
+    // With nothing recorded, the next run tries the large session again and changes nothing.
+    const second = await run();
+    expect(second).toMatchObject({ terminationReason: 'storage_full', groupedRowsDeleted: 0 });
+    expect(await snapshotSession(stub, large)).toEqual(large.before);
   });
 
   it('rolls back a page that would grow the database and leaves that session for later', async () => {
@@ -259,9 +314,11 @@ describe('ProjectData grouped FTS alarm cleanup', () => {
     const result = await runCleanup(stub, projectId, { mode: { nearWall: true } });
 
     expect(result).not.toBeNull();
+    // Liveness: the run reached every session, so the size check below covers real pages.
+    expect(result!.sessionsExamined).toBe(3);
     expect(result!.afterBytes).toBeLessThanOrEqual(result!.beforeBytes);
-    // Either a page committed (and so did not grow) or it was rolled back; never a stale entry.
-    expect(result!.groupedRowsDeleted + result!.pagesRolledBackForGrowth).toBeGreaterThan(0);
+    // Every page either committed or rolled back whole, so the index matches its table. The
+    // growth guard's own discriminating test is the injected-growth case above.
     await assertFtsIntegrity(stub);
   });
 
@@ -288,6 +345,162 @@ describe('ProjectData grouped FTS alarm cleanup', () => {
     expect(await snapshotSession(stub, large)).toEqual(large.before);
     expect((await snapshotSession(stub, small)).groupedRows).toBe(0);
     await assertFtsIntegrity(stub);
+  });
+
+  /** Fails every page of the given sessions, as a disk I/O error would. */
+  function failingPages(sessionIds: ReadonlySet<string>) {
+    return (sql: SqlStorage) =>
+      intercept(sql, {
+        onExec: (query, bindings) => {
+          if (
+            query.startsWith('DELETE FROM chat_messages_grouped') &&
+            sessionIds.has(bindings[1] as string)
+          ) {
+            throw new Error('disk I/O error');
+          }
+        },
+      });
+  }
+
+  for (const nearWall of [false, true]) {
+    it(`reaches a healthy session behind more failing sessions than it can exclude (near the wall: ${nearWall})`, async () => {
+      const { projectId, stub } = await createProject(`saturation-${nearWall}`, 'grouped-cleanup');
+      const seeded = await seedSessions(stub, [
+        { label: 'faila', turns: 8 },
+        { label: 'failb', turns: 7 },
+        { label: 'failc', turns: 6 },
+        { label: 'healthy', turns: 2 },
+      ]);
+      const failing = seeded.slice(0, 3).map((session) => session!);
+      const healthy = seeded[3]!;
+      const start = Date.now();
+
+      // One session per run and room to remember one exclusion: the evicted failures used to
+      // come straight back, largest first, ahead of the healthy session on every run.
+      let cleanedOnRun: number | null = null;
+      for (let run = 0; run < 5 && cleanedOnRun === null; run++) {
+        await runCleanup(stub, projectId, {
+          mode: { nearWall },
+          now: start + run * 60_000,
+          env: { PROJECT_DATA_GROUPED_FTS_CLEANUP_MAX_EXCLUSIONS: '1' },
+          config: { groupedFtsCleanupBatchSessions: 1, groupedFtsCleanupRecheckMs: 1_000 },
+          wrapSql: failingPages(new Set(failing.map((session) => session.sessionId))),
+        });
+        if ((await snapshotSession(stub, healthy)).groupedRows === 0) cleanedOnRun = run;
+      }
+
+      // Each run moves past the session it finished, failed or not: the fourth reaches it.
+      expect(cleanedOnRun).toBe(3);
+      for (const session of failing) {
+        expect(await snapshotSession(stub, session)).toEqual(session.before);
+      }
+      await assertFtsIntegrity(stub);
+    });
+
+    it(`retries a failed session once its exclusion expires (near the wall: ${nearWall})`, async () => {
+      const { projectId, stub } = await createProject(`expiry-${nearWall}`, 'grouped-cleanup');
+      const [large, small] = await seedTwoOldSessions(stub);
+      const start = Date.now();
+      const run = (offsetMs: number, wrapSql?: (sql: SqlStorage) => SqlStorage) =>
+        runCleanup(stub, projectId, {
+          mode: { nearWall },
+          now: start + offsetMs,
+          env: { PROJECT_DATA_GROUPED_FTS_CLEANUP_EXCLUSION_MS: '60000' },
+          config: { groupedFtsCleanupBatchSessions: 1, groupedFtsCleanupRecheckMs: 1_000 },
+          ...(wrapSql ? { wrapSql } : {}),
+        });
+
+      const failed = await run(0, failingPages(new Set([large.sessionId])));
+      expect(failed).toMatchObject({ sessionsExcludedForFailure: 1, groupedRowsDeleted: 0 });
+
+      // Still excluded: the run cleans the other session and leaves the failed one alone.
+      await run(30_000);
+      expect(await snapshotSession(stub, large)).toEqual(large.before);
+      expect((await snapshotSession(stub, small)).groupedRows).toBe(0);
+
+      // Once the exclusion has expired, it is tried again and, healthy now, cleaned.
+      const retried = await run(120_000);
+      expect(retried?.groupedRowsDeleted).toBe(large.before.groupedRows);
+      expect((await snapshotSession(stub, large)).groupedRows).toBe(0);
+      await assertFtsIntegrity(stub);
+    });
+  }
+
+  it('wraps around to a session it passed while that session was not excluded', async () => {
+    const { projectId, stub } = await createProject('wraparound', 'grouped-cleanup');
+    const [large, small] = await seedTwoOldSessions(stub);
+    const start = Date.now();
+    const exclusionsUnwritable = (sql: SqlStorage) =>
+      intercept(sql, {
+        onExec: (query, bindings) => {
+          if (
+            query.startsWith('INSERT INTO do_meta') &&
+            bindings[0] === 'storageSafetyGroupedFtsCleanupExclusions'
+          ) {
+            throw new Error(STORAGE_FULL);
+          }
+        },
+      });
+    const run = (offsetMs: number, wrapSql?: (sql: SqlStorage) => SqlStorage) =>
+      runCleanup(stub, projectId, {
+        mode: { nearWall: false },
+        now: start + offsetMs,
+        config: { groupedFtsCleanupBatchSessions: 1, groupedFtsCleanupRecheckMs: 1_000 },
+        ...(wrapSql ? { wrapSql } : {}),
+      });
+
+    // The large session's page fails and, this once, its exclusion cannot be recorded.
+    await run(0, (sql) => failingPages(new Set([large.sessionId]))(exclusionsUnwritable(sql)));
+
+    // Past the end of the order after the small session, the run counts the large one still
+    // ahead of it instead of reporting nothing left to clean...
+    const second = await run(60_000);
+    expect((await snapshotSession(stub, small)).groupedRows).toBe(0);
+    expect(second?.terminationReason).not.toBe('candidates_exhausted');
+    expect(second?.recheckAt).not.toBeNull();
+
+    // ...and the next run comes back round to it.
+    await run(120_000);
+    expect((await snapshotSession(stub, large)).groupedRows).toBe(0);
+    await assertFtsIntegrity(stub);
+  });
+
+  it('through the real alarm, a row too large for any run is not counted as a failure', async () => {
+    const { projectId, stub } = await createProject('benign-exclusion', 'grouped-cleanup');
+    await seedTwoOldSessions(stub);
+
+    const lastError = await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO do_meta (key, value) VALUES ('storageSafetyLastError', 'previous failure')
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+      );
+      const real = state.storage.sql;
+      const alarmEnv = {
+        ...testEnv,
+        PROJECT_DATA_STORAGE_LIMIT_BYTES: String(Math.ceil(real.databaseSize / 0.93)),
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO: '0.9',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO: '0.2',
+        // Every grouped row is larger than a whole run may delete.
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES: '1',
+        PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'false',
+      } as unknown as WorkerEnv;
+      const result = await runProjectDataStorageSafetyAlarm(real, alarmEnv, projectId, {
+        transactionSync: (callback) => state.storage.transactionSync(callback),
+      });
+      // Liveness: the run did exclude the sessions it could not afford.
+      expect(result.groupedFtsCleanup).toMatchObject({
+        sessionsExcluded: 2,
+        sessionsExcludedForFailure: 0,
+      });
+      return state.storage.sql
+        .exec(`SELECT value FROM do_meta WHERE key = 'storageSafetyLastError'`)
+        .toArray()[0]?.value;
+    });
+
+    // A by-design skip is not a failure, so the stale error is cleared as on any clean tick.
+    expect(lastError).toBeUndefined();
   });
 
   it('runs the grouped cleanup through the alarm even when an earlier stage throws', async () => {
@@ -329,6 +542,101 @@ describe('ProjectData grouped FTS alarm cleanup', () => {
     expect(result.cleanup).toBeNull();
     expect(result.groupedFtsCleanup?.groupedRowsDeleted).toBeGreaterThan(0);
     expect((await snapshotSession(stub, large)).groupedRows).toBe(0);
+    // The stage that threw is reported as a failure under its own name, not mistaken for a
+    // cleanup with nothing left to clean (which would raise a "target unreachable" alert).
+    expect(result.cleanupHealth).toBe('failed');
+    const meta = await runInDurableObject(stub, async (_instance, state) =>
+      Object.fromEntries(
+        state.storage.sql
+          .exec(
+            `SELECT key, value FROM do_meta
+             WHERE key IN ('storageSafetyLastError', 'storageSafetyLastAlertReason')`
+          )
+          .toArray()
+          .map((row) => [row.key, row.value])
+      )
+    );
+    expect(meta.storageSafetyLastError).toContain(
+      'tool_payload_cleanup: tool payload stage exploded'
+    );
+    expect(meta.storageSafetyLastAlertReason).not.toBe('cleanup_target_unreachable');
+  });
+
+  /** One real storage alarm, with the object sized just above the wall-unsafe ratio. */
+  function runNearWallAlarm(
+    stub: Stub,
+    projectId: string,
+    nearWallFlag: string | undefined,
+    wrapSql?: (sql: SqlStorage) => SqlStorage
+  ) {
+    return runInDurableObject(stub, async (_instance, state) => {
+      const real = state.storage.sql;
+      const alarmEnv: Record<string, unknown> = {
+        ...testEnv,
+        PROJECT_DATA_STORAGE_LIMIT_BYTES: String(Math.ceil(real.databaseSize / 0.99)),
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'true',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO: '0.9',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO: '0.2',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO: '0.98',
+        PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS: '2',
+        PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'false',
+      };
+      // Unset, the code default decides, as it does in production until the flag is set.
+      delete alarmEnv.PROJECT_DATA_GROUPED_FTS_CLEANUP_NEAR_WALL_ENABLED;
+      if (nearWallFlag !== undefined) {
+        alarmEnv.PROJECT_DATA_GROUPED_FTS_CLEANUP_NEAR_WALL_ENABLED = nearWallFlag;
+      }
+      return runProjectDataStorageSafetyAlarm(
+        wrapSql ? wrapSql(real) : real,
+        alarmEnv as unknown as WorkerEnv,
+        projectId,
+        { transactionSync: (callback) => state.storage.transactionSync(callback) }
+      );
+    });
+  }
+
+  it('through the real alarm, stays out near the wall while near-wall mode is unset', async () => {
+    const { projectId, stub } = await createProject('alarm-flag-unset', 'grouped-cleanup');
+    const [large, small] = await seedTwoOldSessions(stub);
+
+    const result = await runNearWallAlarm(stub, projectId, undefined);
+
+    // Liveness: the grouped stage ran and saw the object near the wall.
+    expect(result.groupedFtsCleanup).toMatchObject({
+      nearWall: true,
+      terminationReason: 'wall_unsafe',
+    });
+    expect(await snapshotSession(stub, large)).toEqual(large.before);
+    expect(await snapshotSession(stub, small)).toEqual(small.before);
+  });
+
+  it('through the real alarm with near-wall mode on, rolls a failing page back whole', async () => {
+    const { projectId, stub } = await createProject('alarm-flag-on', 'grouped-cleanup');
+    const [large, small] = await seedTwoOldSessions(stub);
+    let pruning: unknown = null;
+
+    const result = await runNearWallAlarm(stub, projectId, 'true', (sql) =>
+      intercept(sql, {
+        onExec: (query, bindings) => {
+          if (query.startsWith('DELETE FROM chat_messages_grouped')) pruning = bindings[1];
+          // Fails after the large session's rows and mark were already deleted in its page.
+          if (query.includes(`VALUES('delete'`) && pruning === large.sessionId) {
+            throw new Error('disk I/O error');
+          }
+        },
+      })
+    );
+
+    expect(result.groupedFtsCleanup).toMatchObject({
+      nearWall: true,
+      sessionsExcludedForFailure: 1,
+      groupedRowsDeleted: small.before.groupedRows,
+    });
+    // Only the alarm's real transaction undoes the rows and mark deleted before the failure.
+    expect(await snapshotSession(stub, large)).toEqual(large.before);
+    expect((await snapshotSession(stub, small)).groupedRows).toBe(0);
+    await assertFtsIntegrity(stub);
   });
 
   it('archives a pruned session with a full search index on its shard', async () => {

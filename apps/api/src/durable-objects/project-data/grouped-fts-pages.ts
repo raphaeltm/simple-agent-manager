@@ -30,18 +30,25 @@ export const GROUPED_PAGE_SIZES_SQL = `SELECT rowid, created_at, length(CAST(con
  * Terminal sessions older than `cutoff` that still have grouped rows and are not mid-archive
  * (no source intent, no target copy), largest first. Shared with the storage alarm
  * (`grouped-fts-cleanup.ts`), so neither path can prune a session an archive is copying.
+ * With `after`, only sessions ranked after that position in the same order are returned.
  */
 export function readGroupedFtsCandidates(
   sql: SqlStorage,
   cutoff: number,
-  limit: number
+  limit: number,
+  after?: GroupedFtsCandidate
 ): GroupedFtsCandidate[] {
+  const afterPredicate = after
+    ? 'AND (s.message_count < ? OR (s.message_count = ? AND s.id > ?))'
+    : '';
+  const afterBindings = after ? [after.messageCount, after.messageCount, after.sessionId] : [];
   const rows = sql
     .exec(
       `SELECT s.id, s.message_count
        FROM chat_sessions s
        WHERE s.status IN ('stopped', 'failed')
          AND s.updated_at <= ?
+         ${afterPredicate}
          AND NOT EXISTS (
            SELECT 1 FROM project_data_archive_source_intents i WHERE i.session_id = s.id
          )
@@ -54,6 +61,7 @@ export function readGroupedFtsCandidates(
        ORDER BY s.message_count DESC, s.id ASC
        LIMIT ?`,
       cutoff,
+      ...afterBindings,
       limit
     )
     .raw();

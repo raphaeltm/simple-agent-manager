@@ -1,7 +1,7 @@
 /**
  * Durable state of the storage alarm's grouped/FTS cleanup (`grouped-fts-cleanup.ts`), kept in
- * `do_meta`: the run-in-progress marker, the recheck time, why it last paused, and the
- * sessions it must leave alone for a while.
+ * `do_meta`: the run-in-progress marker, the recheck time, why it last paused, where the run's
+ * traversal of the candidate order stands, and the sessions it must leave alone for a while.
  *
  * Every write here is best-effort. Near the per-object cap a `do_meta` write can fail with the
  * storage-full error, and losing a marker only costs a recheck or one retried session, while a
@@ -11,6 +11,7 @@ import { isJsonRecord } from '@simple-agent-manager/shared';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import type { GroupedFtsCandidate } from './grouped-fts-pages';
 import {
   readStorageSafetyMeta,
   readStorageSafetyMetaNumber,
@@ -26,6 +27,7 @@ export const META_GROUPED_FTS_CLEANUP_CURSOR_SESSION_ID =
 const META_GROUPED_FTS_CLEANUP_RECHECK_AT = 'storageSafetyGroupedFtsCleanupRecheckAt';
 const META_GROUPED_FTS_CLEANUP_DISABLED_REASON = 'storageSafetyGroupedFtsCleanupDisabledReason';
 const META_GROUPED_FTS_CLEANUP_EXCLUSIONS = 'storageSafetyGroupedFtsCleanupExclusions';
+const META_GROUPED_FTS_CLEANUP_TRAVERSAL = 'storageSafetyGroupedFtsCleanupTraversal';
 
 /** Off by default: near the cap the alarm reports `wall_unsafe`, as before this mode existed. */
 export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_NEAR_WALL_ENABLED = false;
@@ -72,22 +74,31 @@ export function readGroupedFtsCleanupInProgressSessionId(sql: SqlStorage): strin
   return readStorageSafetyMeta(sql, META_GROUPED_FTS_CLEANUP_CURSOR_SESSION_ID);
 }
 
-/** Ends a run: no in-progress marker, no recheck, no pause reason. Exclusions stay. */
+/** Ends a run: no in-progress marker, recheck, pause reason or traversal. Exclusions stay. */
 export function clearGroupedFtsCleanupRun(sql: SqlStorage): void {
   bestEffort('run', () =>
     sql.exec(
-      `DELETE FROM do_meta WHERE key IN (?, ?, ?)`,
+      `DELETE FROM do_meta WHERE key IN (?, ?, ?, ?)`,
       META_GROUPED_FTS_CLEANUP_CURSOR_SESSION_ID,
       META_GROUPED_FTS_CLEANUP_RECHECK_AT,
-      META_GROUPED_FTS_CLEANUP_DISABLED_REASON
+      META_GROUPED_FTS_CLEANUP_DISABLED_REASON,
+      META_GROUPED_FTS_CLEANUP_TRAVERSAL
     )
   );
 }
 
-/** Keeps a run going: it resumes at `recheckAt` even below the trigger ratio. */
+/**
+ * Keeps a run going: it resumes at `recheckAt` even below the trigger ratio, and its next pass
+ * starts after `traversal` (the last session it finished) in the candidate order.
+ */
 export function writeGroupedFtsCleanupRun(
   sql: SqlStorage,
-  input: { lastSessionId: string | null; recheckAt: number; pausedReason?: string | null }
+  input: {
+    lastSessionId: string | null;
+    recheckAt: number;
+    pausedReason?: string | null;
+    traversal?: GroupedFtsCandidate | null;
+  }
 ): void {
   clearGroupedFtsCleanupRun(sql);
   bestEffort('run', () => {
@@ -104,7 +115,33 @@ export function writeGroupedFtsCleanupRun(
         truncateStorageSafetyMetaValue(input.pausedReason, 500)
       );
     }
+    if (input.traversal) {
+      writeStorageSafetyMeta(
+        sql,
+        META_GROUPED_FTS_CLEANUP_TRAVERSAL,
+        JSON.stringify(input.traversal)
+      );
+    }
   });
+}
+
+/** The last session the current run finished with, or null to start from the largest. */
+export function readGroupedFtsCleanupTraversal(sql: SqlStorage): GroupedFtsCandidate | null {
+  const raw = readStorageSafetyMeta(sql, META_GROUPED_FTS_CLEANUP_TRAVERSAL);
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+  if (!isJsonRecord(parsed)) return null;
+  const { sessionId, messageCount } = parsed;
+  return typeof sessionId === 'string' &&
+    typeof messageCount === 'number' &&
+    Number.isSafeInteger(messageCount)
+    ? { sessionId, messageCount }
+    : null;
 }
 
 /** Session id -> time until which the alarm leaves it alone; expired entries are dropped. */

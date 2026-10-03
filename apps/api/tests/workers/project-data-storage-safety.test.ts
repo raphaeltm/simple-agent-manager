@@ -1065,6 +1065,7 @@ describe('ProjectData storage safety firebreak', () => {
         config,
         {
           allowStart: true,
+          transactionSync: (callback) => state.storage.transactionSync(callback),
         }
       );
       return { result, triggerLimit };
@@ -1152,6 +1153,7 @@ describe('ProjectData storage safety firebreak', () => {
       };
       return runProjectDataGroupedFtsCleanup(state.storage.sql, testEnv, projectId, config, {
         allowStart: true,
+        transactionSync: (callback) => state.storage.transactionSync(callback),
       });
     });
     expect(resumeResult?.groupedRowsDeleted).toBe(0);
@@ -1213,11 +1215,14 @@ describe('ProjectData storage safety firebreak', () => {
       };
       return runProjectDataGroupedFtsCleanup(state.storage.sql, testEnv, projectId, config, {
         allowStart: true,
+        transactionSync: (callback) => state.storage.transactionSync(callback),
       });
     });
 
-    // The 256 KiB row exceeds the whole 128 KiB run budget: excluded for a while, not a stall.
+    // The 256 KiB row exceeds the whole 128 KiB run budget: excluded for a while, not a stall,
+    // and not a failure either.
     expect(result?.sessionsExcluded).toBe(1);
+    expect(result?.sessionsExcludedForFailure).toBe(0);
     expect(result?.groupedRowsDeleted).toBeGreaterThan(0);
 
     const remaining = await runInDurableObject(stub, async (_instance, state) => {
@@ -1287,6 +1292,7 @@ describe('ProjectData storage safety firebreak', () => {
       };
       return runProjectDataGroupedFtsCleanup(state.storage.sql, testEnv, projectId, config, {
         allowStart: true,
+        transactionSync: (callback) => state.storage.transactionSync(callback),
         now,
       });
     });
@@ -1405,6 +1411,7 @@ describe('ProjectData storage safety firebreak', () => {
       };
       return runProjectDataGroupedFtsCleanup(state.storage.sql, testEnv, projectId, config, {
         allowStart: true,
+        transactionSync: (callback) => state.storage.transactionSync(callback),
       });
     });
 

@@ -771,7 +771,10 @@ describe('incremental materialization and storage relief', () => {
           groupedFtsCleanupMinSessionAgeMs: 7 * 24 * 60 * 60 * 1000,
           groupedFtsCleanupWeakReclaimBytes: 0,
         },
-        { allowStart: true }
+        {
+          allowStart: true,
+          transactionSync: (callback) => state.storage.transactionSync(callback),
+        }
       );
     });
     expect(cleanup?.groupedRowsDeleted).toBeGreaterThan(0);

@@ -630,7 +630,6 @@ async function buildTelemetry(
   return enrichProjectDataStorageTelemetry(sql, env, baseTelemetry, config, options);
 }
 
-
 export function shouldMeasureProjectDataStorage(
   sql: SqlStorage,
   env: Env,
@@ -694,11 +693,11 @@ export async function runProjectDataStorageSafetyAlarm(
   sql: SqlStorage,
   env: Env,
   projectId: string | null,
-  options: { transactionSync?: <T>(callback: () => T) => T } = {}
+  options: { transactionSync: <T>(callback: () => T) => T }
 ): Promise<ProjectDataStorageAlarmResult> {
   const config = resolveStorageSafetyConfig(env);
   return runProjectDataStorageSafetyAlarmCore(sql, env, projectId, config, {
-    ...(options.transactionSync ? { transactionSync: options.transactionSync } : {}),
+    transactionSync: options.transactionSync,
     shouldMeasure: shouldMeasureProjectDataStorage,
     measureAndPersist: measureAndPersistProjectDataStorage,
     classifyStatus: classifyStorageUsage,

@@ -14,28 +14,25 @@
  * `wall_unsafe`, because an FTS5 delete writes a segment about as large as the postings it
  * cancels. With `PROJECT_DATA_GROUPED_FTS_CLEANUP_NEAR_WALL_ENABLED` it keeps running there:
  * the growth check makes each page provably non-growing, and a page the cap refuses changes
- * nothing. A session whose page fails or grows is left alone for a while so it cannot stall
- * every run on the same place.
+ * nothing. A session whose page fails, grows or does not fit is left alone for a while, and the
+ * run moves on to the next session; a multi-run pass also walks the candidate order with a
+ * durable traversal that wraps around, so sessions that keep failing cannot stall every run.
+ * Every caller passes the object's real `transactionSync`: a page without one would not be atomic.
  */
 import { createModuleLogger } from '../../lib/logger';
+import { cleanSession, emptyRunTotals, selectRunCandidates } from './grouped-fts-cleanup-session';
 import {
   clearGroupedFtsCleanupRun,
   excludeGroupedFtsCleanupSessions,
   readGroupedFtsCleanupExclusions,
   readGroupedFtsCleanupInProgressSessionId,
   readGroupedFtsCleanupRecheckAt,
+  readGroupedFtsCleanupTraversal,
   resolveGroupedFtsCleanupModeConfig,
   writeGroupedFtsCleanupRun,
 } from './grouped-fts-cleanup-state';
-import {
-  GROUPED_PAGE_START,
-  type GroupedPageCursor,
-  hasGroupedRowsAfter,
-  readGroupedFtsCandidates,
-  readGroupedPage,
-} from './grouped-fts-pages';
+import type { GroupedFtsCandidate } from './grouped-fts-pages';
 import { resolveGroupedFtsWallRecoveryConfig } from './grouped-fts-wall-recovery';
-import { prunePageAtomically } from './grouped-fts-wall-recovery-prune';
 import type { ProjectDataStorageStatus, StorageSafetyConfig } from './storage-safety';
 import {
   META_LAST_MEASURED_AT,
@@ -87,8 +84,12 @@ export type ProjectDataGroupedFtsCleanupResult = {
   nearWall: boolean;
   /** Pages rolled back because they would have grown the database. */
   pagesRolledBackForGrowth: number;
-  /** Sessions this run left alone for the exclusion window. */
+  /** Pages rolled back because they did not fit at the storage cap. */
+  pagesRefusedAtCap: number;
+  /** Sessions this run left alone for the exclusion window, for any reason. */
   sessionsExcluded: number;
+  /** Of those, sessions whose page failed, grew or did not fit (not a too-large row). */
+  sessionsExcludedForFailure: number;
   searchSemantics: 'full_fts' | 'partial_raw_like_fallback';
   cursor: { sessionId: string } | null;
   recheckAt: number | null;
@@ -99,8 +100,8 @@ type CleanupOptions = {
   allowStart?: boolean;
   now?: number;
   nowMs?: () => number;
-  /** Required for atomic pages; without it nothing is pruned near the cap. */
-  transactionSync?: <T>(callback: () => T) => T;
+  /** The object's `ctx.storage.transactionSync`: each page is one transaction. */
+  transactionSync: <T>(callback: () => T) => T;
   classifyStatus: (databaseSizeBytes: number) => ProjectDataStorageStatus;
 };
 
@@ -133,7 +134,9 @@ function emptyResult(input: {
     terminationReason: input.terminationReason,
     nearWall: input.nearWall ?? false,
     pagesRolledBackForGrowth: 0,
+    pagesRefusedAtCap: 0,
     sessionsExcluded: 0,
+    sessionsExcludedForFailure: 0,
     searchSemantics: 'full_fts',
     cursor: null,
     recheckAt: null,
@@ -165,105 +168,6 @@ function recordLastError(sql: SqlStorage, message: string): void {
   }
 }
 
-/** Running totals for one alarm run. */
-interface RunTotals {
-  rowsExamined: number;
-  sessionsExamined: number;
-  sessionsCleaned: number;
-  groupedRowsDeleted: number;
-  contentBytes: number;
-  pagesRolledBackForGrowth: number;
-  excluded: string[];
-  lastSessionId: string | null;
-  failureMessage: string | null;
-}
-
-type SessionStop =
-  'drained' | 'row_budget' | 'byte_budget' | 'wall_time' | 'storage_full' | 'excluded';
-
-/** True when the session's next grouped row alone is larger than a whole run's byte budget. */
-function nextRowExceedsRunBudget(
-  sql: SqlStorage,
-  sessionId: string,
-  cursor: GroupedPageCursor,
-  runBudgetBytes: number
-): boolean {
-  const [next] = readGroupedPage(
-    sql,
-    sessionId,
-    cursor,
-    1,
-    Number.MAX_SAFE_INTEGER,
-    Number.MAX_SAFE_INTEGER
-  );
-  return next !== undefined && next.bytes > runBudgetBytes;
-}
-
-/** Prunes one session page by page until it is drained, a budget runs out, or a page stops it. */
-function cleanSession(
-  sql: SqlStorage,
-  sessionId: string,
-  config: StorageSafetyConfig,
-  pageLimits: { rows: number; bytes: number },
-  transactionSync: <T>(callback: () => T) => T,
-  now: number,
-  deadline: () => boolean,
-  totals: RunTotals
-): SessionStop {
-  let cursor: GroupedPageCursor = GROUPED_PAGE_START;
-  let cleanedAny = false;
-  for (;;) {
-    const rowsLeft = config.groupedFtsCleanupBatchRows - totals.groupedRowsDeleted;
-    const bytesLeft = config.groupedFtsCleanupBatchBytes - totals.contentBytes;
-    if (rowsLeft <= 0) return 'row_budget';
-    if (bytesLeft <= 0) return 'byte_budget';
-    if (deadline()) return 'wall_time';
-    const page = readGroupedPage(
-      sql,
-      sessionId,
-      cursor,
-      Math.min(pageLimits.rows, rowsLeft),
-      Math.min(pageLimits.bytes, bytesLeft),
-      bytesLeft
-    );
-    if (page.length === 0) {
-      if (!hasGroupedRowsAfter(sql, sessionId, cursor)) return 'drained';
-      // A row no run could ever afford would otherwise stop every run on this session.
-      if (nextRowExceedsRunBudget(sql, sessionId, cursor, config.groupedFtsCleanupBatchBytes)) {
-        totals.excluded.push(sessionId);
-        return 'excluded';
-      }
-      return 'byte_budget';
-    }
-    totals.rowsExamined += page.length;
-    const outcome = prunePageAtomically(sql, sessionId, page, now, transactionSync);
-    if (outcome.kind === 'storage_full') {
-      totals.failureMessage = `grouped FTS cleanup page refused at the storage cap: session=${sessionId}`;
-      return 'storage_full';
-    }
-    if (outcome.kind === 'grew' || outcome.kind === 'failed') {
-      if (outcome.kind === 'grew') totals.pagesRolledBackForGrowth++;
-      totals.excluded.push(sessionId);
-      totals.failureMessage =
-        outcome.kind === 'grew'
-          ? `grouped FTS cleanup page would grow the database by ${outcome.growthBytes} bytes: session=${sessionId}`
-          : `grouped FTS cleanup page failed: session=${sessionId}: ${
-              outcome.error instanceof Error ? outcome.error.message : String(outcome.error)
-            }`;
-      return 'excluded';
-    }
-    if (!cleanedAny) {
-      cleanedAny = true;
-      totals.sessionsCleaned++;
-    }
-    totals.groupedRowsDeleted += page.length;
-    totals.contentBytes += page.reduce((sum, row) => sum + row.bytes, 0);
-    totals.lastSessionId = sessionId;
-    const last = page[page.length - 1];
-    if (last) cursor = { createdAt: last.createdAt, rowid: last.rowid };
-  }
-}
-
 export async function runProjectDataGroupedFtsCleanup(
   sql: SqlStorage,
   env: Env,
@@ -285,7 +189,7 @@ export async function runProjectDataGroupedFtsCleanup(
     clearGroupedFtsCleanupRun(sql);
     return emptyResult({ projectId, beforeBytes, config, terminationReason: 'disabled' });
   }
-  if (nearWall && (!mode.nearWallEnabled || !options.transactionSync)) {
+  if (nearWall && !mode.nearWallEnabled) {
     clearGroupedFtsCleanupRun(sql);
     return emptyResult({
       projectId,
@@ -310,6 +214,7 @@ export async function runProjectDataGroupedFtsCleanup(
       lastSessionId: readGroupedFtsCleanupInProgressSessionId(sql),
       recheckAt: now + config.groupedFtsCleanupRecheckMs,
       pausedReason: `recent overload/reset signal: ${overloadSignal}`,
+      traversal: readGroupedFtsCleanupTraversal(sql),
     });
     return emptyResult({
       projectId,
@@ -321,19 +226,19 @@ export async function runProjectDataGroupedFtsCleanup(
     });
   }
 
-  // Below the wall-unsafe ratio the DO still passes a real transaction; a caller that does not
-  // gets per-statement writes, as the cleanup always did there.
-  const transactionSync = options.transactionSync ?? (<T>(callback: () => T): T => callback());
   const deadlineMs = now + config.groupedFtsCleanupWallTimeMs;
   const nowMs = options.nowMs ?? Date.now;
   const deadline = () => nowMs() >= deadlineMs;
   const exclusions = readGroupedFtsCleanupExclusions(sql, now);
+  const traversal = readGroupedFtsCleanupTraversal(sql);
   const cutoff = now - config.groupedFtsCleanupMinSessionAgeMs;
-  const candidates = readGroupedFtsCandidates(
+  const candidates = selectRunCandidates(
     sql,
     cutoff,
-    config.groupedFtsCleanupBatchSessions + exclusions.size + 1
-  ).filter((candidate) => !exclusions.has(candidate.sessionId));
+    config.groupedFtsCleanupBatchSessions,
+    exclusions,
+    traversal
+  );
   if (candidates.length === 0) {
     clearGroupedFtsCleanupRun(sql);
     return emptyResult({
@@ -347,19 +252,12 @@ export async function runProjectDataGroupedFtsCleanup(
 
   const transaction = resolveGroupedFtsWallRecoveryConfig(env);
   const pageLimits = { rows: transaction.transactionRows, bytes: transaction.transactionBytes };
-  const totals: RunTotals = {
-    rowsExamined: 0,
-    sessionsExamined: 0,
-    sessionsCleaned: 0,
-    groupedRowsDeleted: 0,
-    contentBytes: 0,
-    pagesRolledBackForGrowth: 0,
-    excluded: [],
-    lastSessionId: null,
-    failureMessage: null,
-  };
+  const totals = emptyRunTotals();
   let terminationReason: ProjectDataCleanupTerminationReason = 'candidates_exhausted';
   let shouldContinue = candidates.length > config.groupedFtsCleanupBatchSessions;
+  // The last session this pass finished (cleaned, failed or excluded); a session stopped by a
+  // budget is not finished, so the next run resumes it first.
+  let finished: GroupedFtsCandidate | null = traversal;
   for (const candidate of candidates.slice(0, config.groupedFtsCleanupBatchSessions)) {
     totals.sessionsExamined++;
     const stop = cleanSession(
@@ -367,12 +265,15 @@ export async function runProjectDataGroupedFtsCleanup(
       candidate.sessionId,
       config,
       pageLimits,
-      transactionSync,
+      options.transactionSync,
       now,
       deadline,
       totals
     );
-    if (stop === 'drained' || stop === 'excluded') continue;
+    if (stop === 'drained' || stop === 'excluded' || stop === 'failed') {
+      finished = candidate;
+      continue;
+    }
     terminationReason = stop;
     shouldContinue = true;
     break;
@@ -380,12 +281,18 @@ export async function runProjectDataGroupedFtsCleanup(
   if (shouldContinue && terminationReason === 'candidates_exhausted') {
     terminationReason = 'row_budget';
   }
+  // Every page this run tried was refused at the cap: say so rather than a budget reason.
+  if (totals.pagesRefusedAtCap > 0 && totals.groupedRowsDeleted === 0) {
+    terminationReason = 'storage_full';
+    shouldContinue = true;
+  }
 
-  if (totals.excluded.length > 0) {
+  const excluded = [...totals.excludedForBudget, ...totals.excludedForFailure];
+  if (excluded.length > 0) {
     excludeGroupedFtsCleanupSessions(
       sql,
       exclusions,
-      totals.excluded,
+      excluded,
       now + mode.exclusionMs,
       mode.maxExclusions
     );
@@ -407,7 +314,11 @@ export async function runProjectDataGroupedFtsCleanup(
 
   const recheckAt = shouldContinue ? now + config.groupedFtsCleanupRecheckMs : null;
   if (recheckAt !== null) {
-    writeGroupedFtsCleanupRun(sql, { lastSessionId: totals.lastSessionId, recheckAt });
+    writeGroupedFtsCleanupRun(sql, {
+      lastSessionId: totals.lastSessionId,
+      recheckAt,
+      traversal: finished,
+    });
   } else {
     clearGroupedFtsCleanupRun(sql);
   }
@@ -430,7 +341,9 @@ export async function runProjectDataGroupedFtsCleanup(
     terminationReason,
     nearWall,
     pagesRolledBackForGrowth: totals.pagesRolledBackForGrowth,
-    sessionsExcluded: totals.excluded.length,
+    pagesRefusedAtCap: totals.pagesRefusedAtCap,
+    sessionsExcluded: excluded.length,
+    sessionsExcludedForFailure: totals.excludedForFailure.length,
     searchSemantics: totals.groupedRowsDeleted > 0 ? 'partial_raw_like_fallback' : 'full_fts',
     cursor: recheckAt !== null && totals.lastSessionId ? { sessionId: totals.lastSessionId } : null,
     recheckAt,
