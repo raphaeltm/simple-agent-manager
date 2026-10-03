@@ -512,3 +512,62 @@ write-evidence ones are moot after round 5 (holds clear only by measured probes)
       publishes between the handler's read and its batch; no hold appears.
 - Every new guard mutation-verified (P1-P5, F1-F2, real-RPC tag).
 
+
+### Round 6 (task 01M419GRFAN2PWRB762Y2YT0YB, 16:36Z): fixes at 7022989c7
+
+3a and 3b CHANGES REQUESTED, no new HIGH. The round-5 defects are fixed; two MEDIUM scheduling
+gaps, both reproduced. (The durable message never reached this session; the findings were read
+from the review session with `search_messages`.)
+
+- [x] MEDIUM (3a): failed probes monopolized the probe budget. Probes were ordered by
+      `last_failure_at`, which a throwing probe leaves unchanged, so ten unreachable objects took
+      every slot and an eleventh hold was never measured before expiry. Fixed in efd4a1264:
+      `last_probed_at` (column added to the unreleased migration 0179) is set on every attempt;
+      probes go least recently probed first; a failed probe still neither refreshes nor clears.
+- [x] MEDIUM (3b): retry-only alerts kept severity order, so twelve persistent failures took every
+      retry slot and a thirteenth condition was never retried (through minute 355). Fixed in
+      efd4a1264: retries go oldest due `retryAt` first, and one slot per tick is kept for retries
+      while any is due, so sustained new alerts cannot starve them. Tests assert delivery to the
+      recovered recipient and a retry under two new conditions per tick; each guard was removed
+      once and exactly its test went red.
+
+### Items 4 + 5 executed-work review (task 01M419H9X7XP4NE10BC3EMJWKQ, 16:41Z)
+
+Item 4 and item 5 CHANGES REQUESTED.
+
+- [x] HIGH (5): a cap refusal could block reclaimable sessions forever: the refused session was
+      neither excluded nor passed, so every run retried it first. Now the refused session is
+      excluded as a failure and the run moves on within its session budget, also when nothing
+      can be recorded (test: refusal for the large session plus failing `do_meta` writes still
+      cleans the small one in the same run).
+- [x] HIGH (5): bounded exclusions could cycle: evicted failures came straight back, largest
+      first. A durable traversal (`storageSafetyGroupedFtsCleanupTraversal`) now advances past
+      every finished session, failed or not, and wraps around deliberately. Tests: saturation
+      (three failing sessions, room for one exclusion) and expiry, in both modes, plus a
+      wraparound test.
+- [x] MEDIUM (4): a small byte default (4 KiB) displayed as 0 MiB and the form refused it. Fixed
+      in cf8670ff7: an untouched field sends the API default exactly; sizes keep enough decimals
+      to stay above zero.
+- [x] Coverage (5): unset and enabled near-wall flags now go through the real alarm entry point
+      at the near-wall ratio, including a failing-page rollback; the default-flag and
+      transaction-forwarding mutations each turn their own test red.
+
+### Local reviews of items 4 and 5
+
+- task-completion-validator (PR-D): PASS. Its two MEDIUMs (near-wall test through the alarm;
+  atomicity by convention below the ratio) are fixed: see above and `transactionSync` below.
+- cloudflare-specialist (PR-D): CHANGES NEEDED.
+  - Its CRITICAL (growth test failing) was a false alarm: a stalled test-engineer had left a
+    mutation (`if (false && ...)`) in the worktree. Reverted; the test fails only under that
+    mutation, which shows it discriminates.
+  - [x] HIGH: a stage that threw was read as "nothing left to clean" (`target_unreachable`),
+        overwriting its own error and raising the wrong alert. Stage failures are now collected;
+        cleanup health is `failed` with the stage's message, and no unreachable alert fires.
+  - [x] HIGH: `transactionSync` was optional and below the wall-unsafe ratio fell back to
+        per-statement writes. It is now required through the alarm and the cleanup (compile time).
+  - [x] MEDIUM: a too-large-row exclusion counted as a failure. Exclusions are split
+        (`sessionsExcludedForFailure`); only failures keep the last error.
+  - [x] LOW: the high-entropy test's OR-sum assertion is replaced by an explicit liveness check;
+        the growth guard's discriminating test is the injected-growth case.
+- env-validator: plumbing for all new vars added on all three branches (14702a099, 726a0a95e,
+  84807aba1); the PR-B poison window now clamps to its minimum.
