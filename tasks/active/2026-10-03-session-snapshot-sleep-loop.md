@@ -62,6 +62,12 @@ Each failed capture also leaves its uploaded `wip.bundle` behind in R2.
 
 ## Deferred (tracked as SAM Ideas, not in this PR)
 
+SAM Ideas filed:
+- 01M40H4ZBTVC9WPNMRA5VMGPS9: R2 orphan sweep
+- 01M40H56B0T8D5P2XND6C2FQTH: wait-race attribution
+- 01M3BW047BN1SPA3YBQ68SV4T8: retry budget and product decision (appended)
+
+
 - Retry budget for repairable (degraded or in-flight) sleep captures. This is a product decision: either sleep with a visible degraded warning, or stay awake and stop retrying. It interacts with failed-task preservation release.
 - `waitForFinalSessionSnapshot` attributes a pre-acceptance capture failure to the new request. After this fix that costs one extra retry; the existing test pins the current behavior.
 - A sweep of the existing orphaned `session-snapshots/` objects in R2. This PR stops new leaks.
@@ -69,12 +75,12 @@ Each failed capture also leaves its uploaded `wip.bundle` behind in R2.
 
 ## Acceptance Criteria
 
-- [ ] A SAM-sized repository produces a WIP bundle containing only commits not on the default branch, plus the snapshot commits.
-- [ ] A basis bundle restores into a fresh clone, including when the prerequisite commit has to be fetched.
-- [ ] A commit reachable only from a stale remote-tracking ref is preserved: it is not a prerequisite, and the restore succeeds.
-- [ ] Oversized-entry checks run a constant number of commands regardless of how many files are tracked.
-- [ ] The completion request stays under `jsonBodyMaxBytes` even with thousands of skipped entries.
-- [ ] Superseded, failed, and unrecorded capture artifacts are deleted from R2, while the completed generation's artifacts are kept.
+- [x] A SAM-sized repository produces a WIP bundle containing only commits not on the default branch, plus the snapshot commits. Covered by `TestWIPBundleExcludesDefaultBranchHistory` and `TestContainerWIPBundleExcludesDefaultBranchHistoryAndRestores`. On the real repo the full-history bundle is 246.6 MiB and the basis bundle tens of KB.
+- [x] A basis bundle restores into a fresh clone, including when the prerequisite commit has to be fetched. Covered by `TestRestoreFetchesMissingBundlePrerequisite`, `TestContainerRestoreFetchesMissingBundlePrerequisite` and `TestBasisBundleRestoresIntoPartialClone`. An unfetchable prerequisite fails loudly (`TestRestoreFailsVisiblyWhenBundlePrerequisiteIsUnavailable`).
+- [x] A commit reachable only from a stale remote-tracking ref is preserved: it is not a prerequisite, and the restore succeeds (`TestWIPBundleKeepsCommitReachableOnlyFromStaleRemoteRef`).
+- [x] Oversized-entry checks run a constant number of commands regardless of how many files are tracked. Covered by `TestOversizedSnapshotIndexEntriesUsesOneBatchedLookup`, plus end-to-end tests for both runtimes.
+- [x] The completion request stays under `jsonBodyMaxBytes` even with thousands of skipped entries. Covered by the `TestHibernateSessionSnapshot*` tests, which run both standalone and container runtimes against a control plane that enforces the limit.
+- [x] Superseded, failed, and unrecorded capture artifacts are deleted from R2, while the completed generation's artifacts are kept. Covered by `session-snapshot-capture-cleanup.test.ts`, including compare-and-swap race tests.
 - [ ] Staging: a fresh VM session on a real repository sleeps automatically with a complete snapshot, then wakes and restores its work.
 
 ## Implementation Notes
@@ -84,6 +90,23 @@ Each failed capture also leaves its uploaded `wip.bundle` behind in R2.
   - Go (7 mutations): no basis; basis on all remote refs (the stale-ref test went red); no prerequisite recovery; unbounded skipped list; no capture-only exclusions; caches made restore-rejecting; per-entry lookups.
   - API (6 mutations): every cleanup path, plus the keep set and the manifest key.
 - The task file ships with the PR because a direct push to main is blocked by repository rules (required status checks).
+
+## Review Outcomes (Phase 5)
+
+- constitution-validator: PASS. Its optional cross-reference comment was added.
+- doc-sync-validator: 2 HIGH stale reference docs (`api.md`, `configuration.md`). Fixed in 5d2113ef4.
+- cloudflare-specialist: CRITICAL. A prepare race could overwrite a just-completed pending snapshot and delete its objects. Fixed with a compare-and-swap in 67b217dce.
+- security-auditor: no CRITICAL or HIGH.
+  - Fixed: the compare-and-swap; header parser tests; redacted cleanup log; `--` separators.
+- go-specialist: no CRITICAL or HIGH.
+  - Fixed: basis-unavailable warning; clone-site comments; CR trimming.
+- test-engineer: 2 HIGH test gaps (partial clone, unfetchable prerequisite) plus MEDIUMs. All added in 15de90ed2 and 67b217dce.
+- task-completion-validator: HIGH container-runtime end-to-end test and a MEDIUM standalone oversized test. Both added in 15de90ed2.
+- Accepted residual risks, recorded in the PR:
+  - (a) A new-format bundle restored by a pre-fix agent fails if the default branch advanced. In practice rule 54 version-gated placement closes this.
+  - (b) A batched size-check failure fails open for its whole category (it keeps files, and logs).
+  - (c) A timeout-degraded completion that wins the race against the real `/complete` leaves the real upload unreferenced, so it is deleted. The DB stays authoritative.
+  - (d) `/complete` returns 500 instead of 409, and manifest PUT ordering is unchanged. Both predate this PR.
 
 ## References
 
