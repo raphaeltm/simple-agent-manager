@@ -12,7 +12,6 @@ import { useState } from 'react';
 
 import { formatBytes } from '../../components/deployments/deployment-card-format';
 import { useQueryScope } from '../../hooks/useQueryScope';
-import { useToast } from '../../hooks/useToast';
 import { runAdminProjectDataWallRecovery } from '../../lib/api';
 import {
   adminProjectDataStorageQueryKeys,
@@ -86,6 +85,7 @@ function RecoveryResult({ result }: { result: GroupedFtsWallRecoveryResult }) {
   return (
     <section
       aria-label={result.dryRun ? 'Preview result' : 'Recovery result'}
+      aria-live="polite"
       className="grid min-w-0 gap-2 rounded-md border border-border-default bg-inset p-3 text-sm"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -152,7 +152,6 @@ export function WallRecoveryDialog({
 }) {
   const queryScope = useQueryScope();
   const queryClient = useQueryClient();
-  const toast = useToast();
   const [reason, setReason] = useState('');
   // null = still showing the API's default for that field.
   const [inputs, setInputs] = useState<BudgetInputs>({
@@ -169,21 +168,14 @@ export function WallRecoveryDialog({
   const recovery = useMutation({
     mutationFn: (body: GroupedFtsWallRecoveryRequest) =>
       runAdminProjectDataWallRecovery(target?.project_id ?? '', body),
+    // The outcome (result panel, or the error alert) is announced inside the dialog: while it
+    // is open, everything outside it, toasts included, is inert and hidden from assistive
+    // technology, and a toast would cover the dialog's close button on a phone.
     onSuccess: async ({ result }) => {
       if (result.dryRun) return;
-      if (result.stopReason !== 'transaction_failed') {
-        toast.success(
-          `Recovered ${formatBytes(Math.max(result.databaseSizeDeltaBytes, 0))} for ${
-            target?.project_name ?? result.projectId
-          }`
-        );
-      }
       await queryClient.invalidateQueries({
         queryKey: adminProjectDataStorageQueryKeys.all(queryScope),
       });
-    },
-    onError: (error) => {
-      toast.error(errorMessage(error, 'Space recovery failed'));
     },
   });
 
