@@ -3527,16 +3527,169 @@ describe('archive-sharding breaker opens only for systemic poisoning', () => {
         });
 
         expect(stats).toMatchObject({ poisoned: 0, failed: 1 });
+        // The claim spent attempt 3; the capacity failure refunded it.
         expect(journal(sqlite, migrationId)).toMatchObject({
           state: 'failed',
           error_code: 'storage_full',
-          attempt_count: 3,
+          attempt_count: 2,
           poisoned_at: null,
         });
         expect(breaker(sqlite)).toBeUndefined();
       } finally {
         sqlite.close();
       }
+    }
+  });
+
+  it('does not let capacity failures spend the poison budget', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-wall', messageCount: 500 });
+      const migrationId = seedMigration(sqlite, 'failed', {
+        migrationId: 'migration-session-wall',
+        sessionId: 'session-wall',
+        leaseExpiresAt: null,
+        attemptCount: 0,
+        updatedAt: NOW - 2 * HOUR,
+      });
+      const ageFailure = () =>
+        sqlite
+          .prepare('UPDATE project_data_archive_migrations SET updated_at = ? WHERE migration_id = ?')
+          .run(NOW - 2 * HOUR, migrationId);
+      // Three capacity failures in a row: each claim spends an attempt, each failure refunds it.
+      for (let tick = 0; tick < 3; tick++) {
+        await failingSweep(sqlite, new Error('Exceeded the maximum database size.'));
+        expect(journal(sqlite, migrationId)).toMatchObject({
+          state: 'failed',
+          error_code: 'storage_full',
+          attempt_count: 0,
+        });
+        ageFailure();
+      }
+      // The first ordinary failure afterwards is attempt 1, nowhere near the poison limit.
+      await failingSweep(sqlite, new Error('shard export failed'));
+      expect(journal(sqlite, migrationId)).toMatchObject({
+        state: 'failed',
+        error_code: 'Error',
+        attempt_count: 1,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps an operator-frozen breaker frozen when a poison reaches the threshold', async () => {
+    // A migration claimed before an operator froze the project can still fail afterwards.
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      const migrationId = seedMigration(sqlite, 'failed', {
+        migrationId: 'migration-in-flight',
+        sessionId: 'session-in-flight',
+        attemptCount: 3,
+      });
+      sqlite
+        .prepare(
+          `INSERT INTO project_data_archive_circuit_breakers (project_id, state, reason, opened_at, updated_at)
+           VALUES (?, 'frozen', 'operator hold', ?, ?)`
+        )
+        .run(PROJECT_ID, NOW - HOUR, NOW - HOUR);
+
+      const poisoned = await poisonProjectDataArchiveMigration(
+        makeEnv(sqlite, { PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD: '1' }),
+        { migrationId, projectId: PROJECT_ID, reason: 'attempts_exhausted:Error', now: NOW }
+      );
+
+      expect(poisoned).toBe(true);
+      expect(journal(sqlite, migrationId)).toMatchObject({ state: 'poisoned' });
+      expect(breaker(sqlite)).toMatchObject({ state: 'frozen', reason: 'operator hold' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('stops admitting a project in the same tick its breaker opens', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedExhaustedFailure(sqlite, 'session-bad');
+      seedSessionSummary(sqlite, { sessionId: 'session-next', messageCount: 400 });
+
+      await failingSweep(sqlite, new Error('shard export failed'), {
+        PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '2',
+      });
+
+      expect(breaker(sqlite)).toMatchObject({ state: 'open' });
+      // The breaker opened on the reclaimed row before the new candidate's turn, so the
+      // candidate was never journaled and never fenced: no location row was ever written.
+      expect(readLocationRow(sqlite, 'session-next')).toBeUndefined();
+      expect(
+        sqlite
+          .prepare(
+            'SELECT COUNT(*) AS count FROM project_data_archive_migrations WHERE session_id = ?'
+          )
+          .get('session-next')
+      ).toEqual({ count: 0 });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('returns a just-fenced candidate to root when an operator freeze wins the claim race', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-next', messageCount: 400 });
+      const database = createSqliteD1(sqlite);
+      // Freeze the project right after the candidate's journal batch commits, before its claim.
+      const racingDatabase = {
+        ...database,
+        prepare: database.prepare.bind(database),
+        batch: async (statements: D1PreparedStatement[]) => {
+          const results = await database.batch(statements);
+          sqlite
+            .prepare(
+              `INSERT INTO project_data_archive_circuit_breakers (project_id, state, reason, opened_at, updated_at)
+               VALUES (?, 'frozen', 'operator hold', ?, ?)
+               ON CONFLICT(project_id) DO NOTHING`
+            )
+            .run(PROJECT_ID, NOW, NOW);
+          return results;
+        },
+      } as unknown as D1Database;
+      const source = createFakeSource();
+
+      await runProjectDataArchiveSharding(
+        {
+          ...makeEnv(sqlite, {
+            PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+            PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+            PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+            PROJECT_DATA: createProjectDataNamespace({
+              [SOURCE_OWNER]: source,
+              [TARGET_OWNER]: createFakeTarget(),
+            }),
+          }),
+          DATABASE: racingDatabase,
+        } as Env,
+        new Date(NOW)
+      );
+
+      // The claim was refused, nothing reached the source object, and the fence was unwound.
+      expect(source.archiveSourcePrepareIntent).not.toHaveBeenCalled();
+      expect(breaker(sqlite)).toMatchObject({ state: 'frozen' });
+      expect(readLocationRow(sqlite, 'session-next')).toMatchObject({ location_state: 'root' });
+      expect(
+        sqlite
+          .prepare(
+            'SELECT COUNT(*) AS count FROM project_data_archive_migrations WHERE session_id = ?'
+          )
+          .get('session-next')
+      ).toEqual({ count: 0 });
+    } finally {
+      sqlite.close();
     }
   });
 

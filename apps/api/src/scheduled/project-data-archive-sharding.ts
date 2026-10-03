@@ -60,9 +60,7 @@ import {
   releaseUnusedArchiveReservation,
   reserveArchiveWrites,
 } from '../project-data-archive/write-budget';
-import { isDurableObjectStorageFullError } from '../services/durable-object-retry';
 import { getProjectDataArchiveRolloutWarningConfig } from '../services/project-data-archive-rollout-controls';
-import { PROJECT_DATA_STORAGE_FULL } from '../services/project-data-storage-errors';
 import {
   archiveShardProjectDataOwner,
   assertArchiveJournalTransition,
@@ -70,20 +68,19 @@ import {
   isProjectDataArchiveExactRoutingEnabled,
   rootProjectDataOwner,
 } from '../services/project-data-archive-routing';
+import {
+  type BreakerPoisonPolicy,
+  isArchiveStorageFullFailure,
+  poisonProjectDataArchiveMigration,
+  PROJECT_ARCHIVE_BREAKER_CLOSED_SQL,
+  resolveBreakerPoisonPolicy,
+} from './project-data-archive-breaker-policy';
+
+export { poisonProjectDataArchiveMigration } from './project-data-archive-breaker-policy';
 
 const log = createModuleLogger('scheduled.project_data_archive_sharding');
 const PROJECT_DATA_ARCHIVE_DEFAULT_POISON_AFTER_ATTEMPTS = 3;
 const PROJECT_DATA_ARCHIVE_MAX_POISON_AFTER_ATTEMPTS = 100;
-/**
- * Distinct sessions that must be poisoned inside the window before the PROJECT breaker opens.
- * A single poisoned session is already quarantined on its own (its location is frozen), so the
- * breaker exists only for systemic failure; one bad session must not stop the project's drain.
- */
-const PROJECT_DATA_ARCHIVE_DEFAULT_BREAKER_POISON_THRESHOLD = 3;
-const PROJECT_DATA_ARCHIVE_MAX_BREAKER_POISON_THRESHOLD = 100;
-const PROJECT_DATA_ARCHIVE_DEFAULT_BREAKER_POISON_WINDOW_MS = 24 * 60 * 60 * 1000;
-const PROJECT_DATA_ARCHIVE_MIN_BREAKER_POISON_WINDOW_MS = 60 * 1000;
-const PROJECT_DATA_ARCHIVE_MAX_BREAKER_POISON_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_SESSIONS = 5;
 const PROJECT_DATA_ARCHIVE_DEFAULT_MANUAL_CANARY_MAX_WALL_TIME_MS = 15_000;
 const PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_LIMIT = 5;
@@ -189,9 +186,9 @@ type ArchiveCoordinatorConfig = {
   leaseMs: number;
   wallTimeMs: number;
   poisonAfterAttempts: number;
-  /** See `PROJECT_DATA_ARCHIVE_DEFAULT_BREAKER_POISON_THRESHOLD`. */
-  breakerPoisonThreshold: number;
-  breakerPoisonWindowMs: number;
+  /** See `./project-data-archive-breaker-policy`. */
+  breakerPoisonThreshold: BreakerPoisonPolicy['breakerPoisonThreshold'];
+  breakerPoisonWindowMs: BreakerPoisonPolicy['breakerPoisonWindowMs'];
   r2Prefix: string;
   r2TimeoutMs: number;
 };
@@ -482,49 +479,6 @@ function envInt(value: string | undefined, fallback: number, min: number, max: n
   const parsed = Number.parseInt(value ?? '', 10);
   if (Number.isSafeInteger(parsed) && parsed >= min) return Math.min(parsed, max);
   return fallback;
-}
-
-type BreakerPoisonPolicy = Pick<
-  ArchiveCoordinatorConfig,
-  'breakerPoisonThreshold' | 'breakerPoisonWindowMs'
->;
-
-function resolveBreakerPoisonPolicy(
-  env: Pick<
-    Env,
-    'PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD' | 'PROJECT_DATA_ARCHIVE_BREAKER_POISON_WINDOW_MS'
-  >
-): BreakerPoisonPolicy {
-  return {
-    breakerPoisonThreshold: envInt(
-      env.PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD,
-      PROJECT_DATA_ARCHIVE_DEFAULT_BREAKER_POISON_THRESHOLD,
-      1,
-      PROJECT_DATA_ARCHIVE_MAX_BREAKER_POISON_THRESHOLD
-    ),
-    breakerPoisonWindowMs: envInt(
-      env.PROJECT_DATA_ARCHIVE_BREAKER_POISON_WINDOW_MS,
-      PROJECT_DATA_ARCHIVE_DEFAULT_BREAKER_POISON_WINDOW_MS,
-      PROJECT_DATA_ARCHIVE_MIN_BREAKER_POISON_WINDOW_MS,
-      PROJECT_DATA_ARCHIVE_MAX_BREAKER_POISON_WINDOW_MS
-    ),
-  };
-}
-
-/**
- * A full Durable Object is an environmental condition, not a property of the session being
- * archived: at the 10 GiB cap every journal write fails, for every candidate. Counting those
- * failures toward poisoning would let the full object poison the drain that is the only thing
- * able to empty it (it did, 2026-09-03 09:51Z), so they never poison (`.claude/rules/74`).
- * The DO surfaces the condition as its message; the API wrapper as `PROJECT_DATA_STORAGE_FULL`.
- */
-function isArchiveStorageFullFailure(error: unknown): boolean {
-  if (isDurableObjectStorageFullError(error)) return true;
-  if (!(error instanceof Error)) return false;
-  return (
-    error.name === 'ProjectDataStorageFullError' ||
-    (error as { error?: unknown }).error === PROJECT_DATA_STORAGE_FULL
-  );
 }
 
 /**
@@ -1534,7 +1488,8 @@ async function createCandidateJournal(
          SELECT 1
          FROM project_data_session_locations
          WHERE project_id = ? AND session_id = ? AND location_state != 'root'
-       )`
+       )
+         AND ${PROJECT_ARCHIVE_BREAKER_CLOSED_SQL}`
     ).bind(
       migrationId,
       projectId,
@@ -1549,7 +1504,8 @@ async function createCandidateJournal(
         ? COMPACT_ARCHIVE_FORMAT
         : LEGACY_ARCHIVE_FORMAT,
       projectId,
-      sessionId
+      sessionId,
+      projectId
     ),
     env.DATABASE.prepare(
       `INSERT INTO project_data_session_locations (
@@ -1562,6 +1518,7 @@ async function createCandidateJournal(
          FROM project_data_session_locations
          WHERE project_id = ? AND session_id = ? AND location_state != 'root'
        )
+         AND ${PROJECT_ARCHIVE_BREAKER_CLOSED_SQL}
        ON CONFLICT(project_id, session_id) DO UPDATE SET
          location_state = CASE
            WHEN project_data_session_locations.location_state = 'root' THEN 'migrating'
@@ -1606,7 +1563,8 @@ async function createCandidateJournal(
       PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
       now,
       projectId,
-      sessionId
+      sessionId,
+      projectId
     ),
   ]);
   return readMigration(env, migrationId);
@@ -2207,6 +2165,58 @@ function restoreSessionLocationToRootStatement(
        AND session_id = ?
        AND ${input.guardSql}`
   ).bind(input.sourceOwnerName, input.now, input.projectId, input.sessionId, ...input.guardParams);
+}
+
+/**
+ * Return a journal that was never claimed to root. A `candidate` row with `lease_epoch = 0`
+ * has no lease, no source intent and no copy, so this is a pure D1 unwind. It runs when the
+ * claim refuses a just-journaled candidate, which happens when the project's breaker stopped
+ * being `closed` between admission and claim (an operator freeze racing the sweep). Without it
+ * the session stayed fenced `migrating`, unreadable, for as long as the breaker stayed shut.
+ * Both statements are guarded on the row still being that unclaimed candidate, so a row another
+ * worker claimed in between is left alone.
+ */
+async function unwindUnclaimedCandidate(
+  env: Env,
+  migration: MigrationRow,
+  now: number
+): Promise<boolean> {
+  if (migration.state !== 'candidate') return false;
+  const [locationResult, journalResult] = await env.DATABASE.batch([
+    restoreSessionLocationToRootStatement(env, {
+      projectId: migration.project_id,
+      sessionId: migration.session_id,
+      sourceOwnerName: migration.source_owner_name,
+      now,
+      guardSql: `migration_id = ?
+         AND location_state = 'migrating'
+         AND EXISTS (
+           SELECT 1
+           FROM project_data_archive_migrations m
+           WHERE m.migration_id = ?
+             AND m.state = 'candidate'
+             AND m.lease_epoch = 0
+         )`,
+      guardParams: [migration.migration_id, migration.migration_id],
+    }),
+    env.DATABASE.prepare(
+      `DELETE FROM project_data_archive_migrations
+       WHERE migration_id = ?
+         AND state = 'candidate'
+         AND lease_epoch = 0`
+    ).bind(migration.migration_id),
+  ]);
+  const unwound = (journalResult?.meta.changes ?? 0) > 0;
+  if (unwound) {
+    log.warn('project_data_archive_unclaimed_candidate_unwound', {
+      migrationId: migration.migration_id,
+      projectId: migration.project_id,
+      sessionId: migration.session_id,
+      locationRestored: (locationResult?.meta.changes ?? 0) > 0,
+      action: 'returned_to_root',
+    });
+  }
+  return unwound;
 }
 
 /**
@@ -3213,13 +3223,18 @@ async function markFailed(
       });
       return 'poisoned';
     }
-    log.warn('project_data_archive_storage_full_not_poisoned', {
+  }
+  if (storageFull) {
+    // Capacity failures are paced by the failed-retry delay like any failure, but they refund
+    // the attempt the claim spent: otherwise the next unrelated transient error after a full
+    // spell would poison the session at once. Each one is logged as the audit record.
+    log.warn('project_data_archive_capacity_failure', {
       migrationId: current.migration_id,
       projectId: current.project_id,
       sessionId: current.session_id,
       attemptCount: current.attempt_count,
       poisonAfterAttempts: config.poisonAfterAttempts,
-      action: 'kept_failed_for_retry',
+      action: 'kept_failed_and_refunded_attempt',
     });
   }
   const leaseGuard = lease ? 'AND lease_owner = ? AND lease_epoch = ?' : '';
@@ -3228,6 +3243,7 @@ async function markFailed(
      SET state = 'failed',
          error_code = ?,
          error_message = ?,
+         attempt_count = CASE WHEN ? = 1 THEN MAX(attempt_count - 1, 0) ELSE attempt_count END,
          lease_owner = NULL,
          lease_expires_at = NULL,
          updated_at = ?
@@ -3238,6 +3254,7 @@ async function markFailed(
     .bind(
       storageFull ? 'storage_full' : errorCode(error),
       errorMessage(error),
+      storageFull ? 1 : 0,
       now,
       current.migration_id,
       ...(lease ? [lease.leaseOwner, lease.leaseEpoch] : [])
@@ -3292,111 +3309,6 @@ export async function freezeProjectDataArchiveMigration(
     ).bind(input.projectId, input.reason, now, now),
   ]);
   return changed;
-}
-
-/**
- * Poison one migration and quarantine its session (location `frozen`, excluded from candidate
- * selection and reclaim). The PROJECT breaker opens only when `breakerPoisonThreshold` distinct
- * sessions of the project have been poisoned inside `breakerPoisonWindowMs` and since the
- * breaker was last closed: one poisoned session is already quarantined, so a breaker that
- * opened on it stopped only the project's OTHER sessions (2026-09-27: five days, then the 10 GiB
- * wall). Several distinct poisons are the systemic signal the breaker exists for.
- */
-export async function poisonProjectDataArchiveMigration(
-  env: Env,
-  input: {
-    migrationId: string;
-    projectId: string;
-    reason: string;
-    message?: string;
-    now?: number;
-    breakerPolicy?: BreakerPoisonPolicy;
-  }
-): Promise<boolean> {
-  const now = input.now ?? Date.now();
-  const policy = input.breakerPolicy ?? resolveBreakerPoisonPolicy(env);
-  const result = await env.DATABASE.prepare(
-    `UPDATE project_data_archive_migrations
-     SET state = 'poisoned',
-         error_code = ?,
-         error_message = ?,
-         lease_owner = NULL,
-         lease_expires_at = NULL,
-         poisoned_at = COALESCE(poisoned_at, ?),
-         updated_at = ?
-     WHERE migration_id = ?
-       AND project_id = ?
-       AND state NOT IN ('source_deleted', 'published', 'poisoned')`
-  )
-    .bind(input.reason, input.message ?? input.reason, now, now, input.migrationId, input.projectId)
-    .run();
-  const changed = (result.meta.changes ?? 0) > 0;
-  await env.DATABASE.prepare(
-    `UPDATE project_data_session_locations
-     SET location_state = 'frozen',
-         updated_at = ?
-     WHERE migration_id = ?
-       AND project_id = ?
-       AND location_state = 'migrating'`
-  )
-    .bind(now, input.migrationId, input.projectId)
-    .run();
-  // An already-poisoned (or terminal) row was counted when it was poisoned; re-evaluating the
-  // breaker for it would let a replayed failure re-open a breaker an operator has closed.
-  if (!changed) return false;
-
-  const breaker = await env.DATABASE.prepare(
-    `SELECT state, updated_at FROM project_data_archive_circuit_breakers WHERE project_id = ?`
-  )
-    .bind(input.projectId)
-    .first<{ state: string; updated_at: number }>();
-  const lastClosedAt = breaker?.state === 'closed' ? breaker.updated_at : 0;
-  const windowStart = Math.max(now - policy.breakerPoisonWindowMs, lastClosedAt);
-  const poisoned = await env.DATABASE.prepare(
-    `SELECT COUNT(DISTINCT session_id) AS sessions
-     FROM project_data_archive_migrations
-     WHERE project_id = ?
-       AND poisoned_at IS NOT NULL
-       AND poisoned_at >= ?`
-  )
-    .bind(input.projectId, windowStart)
-    .first<{ sessions: number }>();
-  const poisonedSessions = poisoned?.sessions ?? 0;
-  const opensBreaker = poisonedSessions >= policy.breakerPoisonThreshold;
-  log.warn('project_data_archive_migration_poisoned', {
-    migrationId: input.migrationId,
-    projectId: input.projectId,
-    reason: input.reason,
-    poisonedSessions,
-    breakerPoisonThreshold: policy.breakerPoisonThreshold,
-    breakerPoisonWindowMs: policy.breakerPoisonWindowMs,
-    action: opensBreaker ? 'quarantined_session_and_opened_breaker' : 'quarantined_session',
-  });
-  if (!opensBreaker) return true;
-
-  const breakerReason = `poison_threshold:${poisonedSessions}/${policy.breakerPoisonThreshold}:${input.reason}`;
-  await env.DATABASE.prepare(
-    `INSERT INTO project_data_archive_circuit_breakers (project_id, state, reason, opened_at, updated_at)
-     VALUES (?, 'open', ?, ?, ?)
-     ON CONFLICT(project_id) DO UPDATE SET
-       state = 'open',
-       reason = excluded.reason,
-       opened_at = COALESCE(project_data_archive_circuit_breakers.opened_at, excluded.opened_at),
-       updated_at = excluded.updated_at`
-  )
-    .bind(input.projectId, breakerReason, now, now)
-    .run();
-  if (breaker?.state !== 'open') {
-    log.error('project_data_archive_breaker_opened', {
-      projectId: input.projectId,
-      migrationId: input.migrationId,
-      previousState: breaker?.state ?? 'none',
-      reason: breakerReason,
-      poisonedSessions,
-      breakerPoisonThreshold: policy.breakerPoisonThreshold,
-    });
-  }
-  return true;
 }
 
 export async function inspectFrozenProjectDataArchiveIntents(
@@ -4056,7 +3968,10 @@ async function processArchiveMigrationBatch(input: {
         migration,
         input.now
       );
-      if (result.leaseNotAcquired) await releaseUnused(writeReservation);
+      if (result.leaseNotAcquired) {
+        await releaseUnused(writeReservation);
+        await unwindUnclaimedCandidate(input.env, migration, input.now);
+      }
       if (result.migrated) input.stats.migrated++;
       if (result.refused) input.stats.refused++;
       if (result.recoveredCrashGap) input.stats.recoveredCrashGaps++;

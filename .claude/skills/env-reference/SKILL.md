@@ -342,7 +342,7 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_WALL_TIME_MS` — Maximum wall-clock budget accepted by the scoped manual archive-sharding canary endpoint (default: `15000`)
 - `PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_EXAMPLES_MAX` — Maximum malformed-row warning examples returned by archive rollout read/list endpoints (default: `5`)
 - `PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_REASON_MAX_LENGTH` — Maximum characters per malformed-row warning reason returned by archive rollout read/list endpoints (default: `300`)
-- `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS` — Failed archive-sharding attempts before the migration is poisoned and its session set aside; a storage-full failure never poisons and stays `failed` with error code `storage_full` (default: `3`)
+- `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS` — Failed archive-sharding attempts before the migration is poisoned and its session set aside; a storage-full failure never poisons, refunds its attempt and stays `failed` with error code `storage_full` (default: `3`)
 - `PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD` — Distinct sessions poisoned within the window before the project's archive circuit breaker opens; `1` opens it on any poison (default: `3`)
 - `PROJECT_DATA_ARCHIVE_BREAKER_POISON_WINDOW_MS` — Window for counting distinct poisoned sessions; poisons from before the breaker was last closed never count (default: `86400000`)
 - `PROJECT_DATA_ARCHIVE_R2_PREFIX` — Private R2 prefix for terminal-session archive recovery chunks and manifests (default: `project-data/session-archives`)
