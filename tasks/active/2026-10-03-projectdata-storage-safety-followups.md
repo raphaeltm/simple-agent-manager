@@ -286,3 +286,94 @@ The chain that led there:
   2026-10-03). Verify the deployed values after merge anyway.
 - Open question for the review: should `frozen` breakers alert at all, given a freeze is a
   deliberate operator action?
+
+## Review rounds (MF'in Astra)
+
+### Round 1 (task 01M40T4JPKMJJBS3BSBY85M1G3, 12:06Z): items 1 + 2
+
+- **Item 1: APPROVE.** The LOW wording point is fixed in PR #2220 (c37502e60).
+- **Item 2: CHANGES REQUESTED.**
+  - HIGH: the multi-day cost-tool baseline is not like-for-like (storage uses the last snapshot, and month lengths differ).
+  - MEDIUM: the $30 floor needs a defined coverage.
+  - MEDIUM: there is no unknown/incomplete outcome.
+  - MEDIUM: "consecutive runs" was used instead of consecutive UTC days.
+  - MEDIUM: the protection clause also forbade safe repairs.
+
+  All of these are addressed in prompt v2 (applied 12:25Z):
+  - baseline = median of 30 single-day projections, backfilled into the library log
+  - one line per UTC day, upserted
+  - runaway → sustained → spike → normal → unknown ordering, with a zero-baseline rule
+  - the "monitored spend" coverage is spelled out
+  - repairs that keep protection intact are allowed
+
+### Round 2 (task 01M40TMX824J0Z2RV7EXF5A4R6, 12:38Z): plan for items 3-5
+
+Verdicts: 3a, 3b, 3c and 5 CHANGES REQUESTED; 4 APPROVE.
+
+#### PR split
+
+- PR-B covers items 3a, 3b and 3c (backend safety and alerts).
+- PR-C covers item 4 (UI).
+- PR-D covers item 5. Its flag defaults to **false** until real-workerd checks pass.
+
+#### Revised plan for 3a
+
+- [ ] Move the breaker policy (poison, breaker decision, storage-full classification) out of the 4,182-line coordinator into a focused module (rule 18).
+- [ ] Never overwrite a `frozen` (operator) breaker with `open`.
+- [ ] Freeze the location only when the poison UPDATE changed a row.
+- [ ] A storage-full failure refunds its attempt, so capacity failures do not spend the poison budget. Log it for audit.
+- [ ] Once a project's breaker is not `closed`, stop admitting its new candidates in the same tick. Make `createCandidateJournal` conditional on a closed breaker so a concurrent operator freeze cannot strand a fence.
+- [ ] Tests:
+  - root-full
+  - healthy work behind repeated capacity failures
+  - same-tick admission stop
+  - operator freeze preserved
+
+#### Revised plan for 3b
+
+- [ ] Bounded D1 queries with a configurable page size.
+- [ ] Alerts:
+  - open breaker: high
+  - frozen breaker: medium, escalating to high when that project is near the wall
+  - telemetry at or above the wall ratio: high
+  - stale telemetry for a high-usage project: medium
+  - cleanup `target_unreachable` / remediation failure: medium
+- [ ] The dedup identity is the alert kind + project + episode (breaker `opened_at`, severity tier).
+- [ ] Delivery safety:
+  - claim the KV throttle only after a durable notification was created
+  - fix `sendNotificationOnce` so a failed create cannot leave a dedup claim that suppresses retries
+- [ ] AC5 now reads "one cron tick after the qualifying telemetry is persisted".
+- [ ] Tests:
+  - the real scheduled entrypoint with failing sibling steps
+  - more than one page of projects
+  - delivery failure and recovery on the next tick
+
+#### Revised plan for 3c
+
+- [ ] Every local DO meta write in the measurement, alert, cleanup-health and catch paths is best-effort and never throws.
+- [ ] The alert throttle falls back to D1 `last_alert_at` when local meta is unavailable.
+- [ ] Keep measurement serialization.
+- [ ] Guard the telemetry upsert against stale overwrites.
+
+#### Item 4
+
+- [ ] As planned, plus the review's implementation checks:
+  - positive-integer byte validation
+  - sub-MiB ceilings
+  - Preview and Recover as distinct actions
+  - partial-failure display
+  - skip-list dedupe
+  - an explicit retry
+  - disabled until the config loads
+  - 320 px layout
+
+#### Revised plan for 5 (PR-D, flag default off)
+
+- [ ] Isolate the earlier alarm cleanup stages and their failure handlers, and pass `transactionSync`.
+- [ ] Per-page space safety: roll back a page that grows `databaseSize`.
+- [ ] Failed-session exclusion with an expiring marker.
+- [ ] Respect the recheck/overload gates.
+- [ ] Map the new reasons into cleanup health and alerts.
+- [ ] Fix the below-ratio path so it shares the archive exclusion and atomic pages.
+- [ ] Real-workerd tests with high-entropy content.
+- [ ] An end-to-end prune → archive → search test.
