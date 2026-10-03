@@ -17,12 +17,12 @@ import type {
   StorageSafetyConfig,
 } from './storage-safety';
 import {
-  deleteStorageSafetyMeta as deleteMeta,
+  deleteStorageSafetyMetaBestEffort as deleteMeta,
   META_LAST_ERROR,
   META_LAST_MEASURED_AT,
   META_LAST_STATUS,
   truncateStorageSafetyMetaValue as truncate,
-  writeStorageSafetyMeta as writeMeta,
+  writeStorageSafetyMetaBestEffort as writeMeta,
 } from './storage-safety-meta';
 import {
   enrichProjectDataStorageTelemetry,

@@ -13,8 +13,11 @@ import { runProjectDataGroupedFtsCleanup } from '../../src/durable-objects/proje
 import {
   DEFAULT_PROJECT_DATA_STORAGE_LIMIT_BYTES,
   type ProjectDataStorageStatus,
+  type ProjectDataStorageTelemetry,
   resolveStorageSafetyConfig,
+  runProjectDataStorageSafetyAlarm,
 } from '../../src/durable-objects/project-data/storage-safety';
+import { upsertProjectDataStorageTelemetry } from '../../src/durable-objects/project-data/storage-telemetry';
 import type { Env as WorkerEnv } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
@@ -2095,5 +2098,128 @@ describe('ProjectData storage safety firebreak', () => {
     expect(countsAfter.acpEventCount.count).toBe(countsBefore.acpEventCount.count - 2);
     expect(countsAfter.messageCount.count).toBe(countsBefore.messageCount.count);
     expect(telemetry?.last_purge_rows).toBe(4);
+  });
+});
+
+describe('ProjectData storage telemetry when the object is full', () => {
+  /** Cloudflare's message at the per-object cap. */
+  const STORAGE_FULL = 'Exceeded the maximum database size.';
+  const DISABLED_CLEANUPS = {
+    PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED: 'false',
+    PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED: 'false',
+    PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED: 'false',
+  };
+
+  /**
+   * The storage alarm core the DO's storage-safety section runs, over this object's real
+   * workerd storage, with every `do_meta` write failing the way it does at the 10 GiB cap.
+   */
+  async function alarmWithLocalMetaFull(
+    stub: DurableObjectStub<ProjectDataTestDouble>,
+    projectId: string
+  ) {
+    return runInDurableObject(stub, async (_instance, state) => {
+      const full = new Proxy(state.storage.sql, {
+        get(target, prop) {
+          if (prop === 'exec') {
+            return (query: string, ...bindings: unknown[]) => {
+              if (/(INSERT INTO|DELETE FROM)\s+do_meta/i.test(query)) throw new Error(STORAGE_FULL);
+              return target.exec(query, ...bindings);
+            };
+          }
+          // Native getters (`databaseSize`) need the real object as `this`.
+          const value = Reflect.get(target, prop, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      return runProjectDataStorageSafetyAlarm(full, testEnv, projectId, {
+        transactionSync: (callback) => state.storage.transactionSync(callback),
+      });
+    });
+  }
+
+  async function usageAlerts(projectId: string) {
+    return (await readProjectDataStorageAlerts(projectId)).filter((row) =>
+      row.message.includes('ProjectData storage usage')
+    );
+  }
+
+  it('still exports telemetry and raises one throttled alert when no local bookkeeping fits', async () => {
+    const projectId = `storage-full-meta-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await stub.createSession(null, 'Telemetry at the cap');
+    const limitBytes = await configuredLimitForRatio(stub, 0.97);
+
+    await withProjectDataStorageEnv(
+      {
+        ...DISABLED_CLEANUPS,
+        PROJECT_DATA_STORAGE_LIMIT_BYTES: limitBytes,
+        PROJECT_DATA_STORAGE_ALERT_INTERVAL_MS: String(6 * 60 * 60 * 1000),
+      },
+      async () => {
+        await alarmWithLocalMetaFull(stub, projectId);
+
+        const first = await readTelemetry(projectId);
+        expect(first?.status).toBe('degraded');
+        expect(first?.last_alert_status).toBe('degraded');
+        expect(first?.last_alert_reason).toBe('threshold_exceeded');
+        expect(await usageAlerts(projectId)).toHaveLength(1);
+        const localStamps = await runInDurableObject(stub, async (_instance, state) =>
+          state.storage.sql
+            .exec(`SELECT key FROM do_meta WHERE key LIKE 'storageSafety%'`)
+            .toArray()
+        );
+        expect(localStamps).toEqual([]);
+
+        // With no local stamp the next alarm measures again (liveness: telemetry moves on), and
+        // the D1 copy of the alert stamp is what keeps it from alerting again inside the window.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await alarmWithLocalMetaFull(stub, projectId);
+        const second = await readTelemetry(projectId);
+        expect(second?.measured_at).toBeGreaterThan(first?.measured_at ?? Number.MAX_SAFE_INTEGER);
+        expect(await usageAlerts(projectId)).toHaveLength(1);
+      }
+    );
+  });
+
+  it('never lets an older measurement overwrite newer telemetry', async () => {
+    const projectId = `storage-stale-write-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const telemetry = (measuredAt: number, databaseSizeBytes: number): ProjectDataStorageTelemetry => ({
+      projectId,
+      measuredAt,
+      databaseSizeBytes,
+      limitBytes: DEFAULT_PROJECT_DATA_STORAGE_LIMIT_BYTES,
+      usageRatio: databaseSizeBytes / DEFAULT_PROJECT_DATA_STORAGE_LIMIT_BYTES,
+      status: 'ok',
+      growthRateBytesPerDay: null,
+      estimatedDaysToLimit: null,
+      cleanupHealth: null,
+      reclaimableBytes: null,
+      categoryBreakdown: null,
+    });
+    const noHistory = { appendHistory: false };
+
+    await upsertProjectDataStorageTelemetry(testEnv, telemetry(2_000, 5_000), {}, noHistory);
+    await upsertProjectDataStorageTelemetry(testEnv, telemetry(1_000, 9_000), {}, noHistory);
+    expect(await readTelemetry(projectId)).toMatchObject({
+      measured_at: 2_000,
+      database_size_bytes: 5_000,
+    });
+    // Control: a newer measurement, and the same snapshot re-stamped, still land.
+    await upsertProjectDataStorageTelemetry(testEnv, telemetry(3_000, 7_000), {}, noHistory);
+    await upsertProjectDataStorageTelemetry(
+      testEnv,
+      telemetry(3_000, 7_000),
+      { lastAlertAt: 3_500, lastAlertStatus: 'ok', lastAlertReason: 'threshold_exceeded' },
+      noHistory
+    );
+    expect(await readTelemetry(projectId)).toMatchObject({
+      measured_at: 3_000,
+      database_size_bytes: 7_000,
+      last_alert_at: 3_500,
+    });
   });
 });

@@ -15,7 +15,7 @@ import {
   readStorageSafetyMeta as readMeta,
   readStorageSafetyMetaNumber as readMetaNumber,
   truncateStorageSafetyMetaValue as truncate,
-  writeStorageSafetyMeta as writeMeta,
+  writeStorageSafetyMetaBestEffort as writeMeta,
 } from './storage-safety-meta';
 import type { Env } from './types';
 
@@ -28,8 +28,7 @@ export const STORAGE_ALERT_REASON_THRESHOLD = 'threshold_exceeded';
 export const STORAGE_ALERT_REASON_CLEANUP_TARGET_UNREACHABLE = 'cleanup_target_unreachable';
 
 export type ProjectDataStorageAlertReason =
-  | typeof STORAGE_ALERT_REASON_THRESHOLD
-  | typeof STORAGE_ALERT_REASON_CLEANUP_TARGET_UNREACHABLE;
+  typeof STORAGE_ALERT_REASON_THRESHOLD | typeof STORAGE_ALERT_REASON_CLEANUP_TARGET_UNREACHABLE;
 
 type ProjectDataStorageTrendSource = {
   measuredAt: number;
@@ -155,7 +154,12 @@ export async function enrichProjectDataStorageTelemetry(
     ? (telemetry.categoryBreakdown ??
       measureProjectDataStorageCategories(sql, config, telemetry.measuredAt))
     : telemetry.categoryBreakdown;
-  const source = await readGrowthTrendSource(env, telemetry.projectId, telemetry.measuredAt, config);
+  const source = await readGrowthTrendSource(
+    env,
+    telemetry.projectId,
+    telemetry.measuredAt,
+    config
+  );
   const forecast = computeGrowthForecast(telemetry, source);
 
   return {
@@ -226,7 +230,8 @@ export async function upsertProjectDataStorageTelemetry(
          WHEN ? = 1 THEN excluded.last_error
          ELSE project_data_storage_telemetry.last_error
        END,
-       updated_at = excluded.updated_at`
+       updated_at = excluded.updated_at
+     WHERE excluded.measured_at >= project_data_storage_telemetry.measured_at`
   )
     .bind(
       telemetry.projectId,
@@ -316,6 +321,33 @@ function formatGrowthForecast(telemetry: ProjectDataStorageTelemetry): string {
   return `${growth}, ${telemetry.estimatedDaysToLimit.toFixed(1)} days to limit`;
 }
 
+async function readD1AlertStamp(
+  env: Env,
+  projectId: string
+): Promise<{
+  lastAlertAt: number | null;
+  lastAlertStatus: string | null;
+  lastAlertReason: string | null;
+} | null> {
+  const row = await env.DATABASE.prepare(
+    `SELECT last_alert_at, last_alert_status, last_alert_reason
+     FROM project_data_storage_telemetry
+     WHERE project_id = ?`
+  )
+    .bind(projectId)
+    .first<{
+      last_alert_at: number | null;
+      last_alert_status: string | null;
+      last_alert_reason: string | null;
+    }>();
+  if (!row) return null;
+  return {
+    lastAlertAt: row.last_alert_at,
+    lastAlertStatus: row.last_alert_status,
+    lastAlertReason: row.last_alert_reason,
+  };
+}
+
 export async function maybePersistProjectDataStorageAlert(
   sql: SqlStorage,
   env: Env,
@@ -328,9 +360,19 @@ export async function maybePersistProjectDataStorageAlert(
   if (!isThresholdAlert && !isCleanupTargetUnreachable) return;
 
   const now = Date.now();
-  const lastAlertAt = readMetaNumber(sql, META_LAST_ALERT_AT);
-  const lastAlertStatus = readMeta(sql, META_LAST_ALERT_STATUS);
-  const lastAlertReason = readMeta(sql, META_LAST_ALERT_REASON);
+  const localAlertAt = readMetaNumber(sql, META_LAST_ALERT_AT);
+  // The local stamp is best-effort (it cannot be written at the 10 GiB cap), so fall back to the
+  // copy every alert also writes to D1; otherwise a full object would re-alert on every measure.
+  const remote = localAlertAt === null ? await readD1AlertStamp(env, telemetry.projectId) : null;
+  const lastAlertAt = localAlertAt ?? remote?.lastAlertAt ?? null;
+  const lastAlertStatus =
+    localAlertAt !== null
+      ? readMeta(sql, META_LAST_ALERT_STATUS)
+      : (remote?.lastAlertStatus ?? null);
+  const lastAlertReason =
+    localAlertAt !== null
+      ? readMeta(sql, META_LAST_ALERT_REASON)
+      : (remote?.lastAlertReason ?? null);
   if (
     lastAlertAt !== null &&
     now - lastAlertAt < config.alertIntervalMs &&

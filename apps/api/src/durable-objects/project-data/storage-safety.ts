@@ -24,7 +24,7 @@ import {
   readStorageSafetyMeta as readMeta,
   readStorageSafetyMetaNumber as readMetaNumber,
   truncateStorageSafetyMetaValue as truncate,
-  writeStorageSafetyMeta as writeMeta,
+  writeStorageSafetyMetaBestEffort as writeMetaBestEffort,
 } from './storage-safety-meta';
 import {
   enrichProjectDataStorageTelemetry,
@@ -659,8 +659,8 @@ export async function measureAndPersistProjectDataStorage(
   const telemetry = await buildTelemetry(sql, env, projectId, Date.now(), null, {
     includeCategoryBreakdown: reason !== 'alarm',
   });
-  writeMeta(sql, META_LAST_MEASURED_AT, String(telemetry.measuredAt));
-  writeMeta(sql, META_LAST_STATUS, telemetry.status);
+  writeMetaBestEffort(sql, META_LAST_MEASURED_AT, String(telemetry.measuredAt));
+  writeMetaBestEffort(sql, META_LAST_STATUS, telemetry.status);
 
   try {
     await upsertProjectDataStorageTelemetry(env, telemetry, {
@@ -669,7 +669,7 @@ export async function measureAndPersistProjectDataStorage(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    writeMeta(sql, META_LAST_ERROR, truncate(message, 500));
+    writeMetaBestEffort(sql, META_LAST_ERROR, truncate(message, 500));
     log.warn('telemetry_upsert_failed', {
       projectId,
       ...serializeError(error),
@@ -680,7 +680,7 @@ export async function measureAndPersistProjectDataStorage(
     await maybePersistProjectDataStorageAlert(sql, env, telemetry, config);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    writeMeta(sql, META_LAST_ERROR, truncate(message, 500));
+    writeMetaBestEffort(sql, META_LAST_ERROR, truncate(message, 500));
     log.warn('alert_failed', {
       projectId,
       ...serializeError(error),
