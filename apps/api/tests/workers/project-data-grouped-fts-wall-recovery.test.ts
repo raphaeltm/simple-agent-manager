@@ -11,8 +11,8 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
+import { GROUPED_PAGE_SIZES_SQL } from '../../src/durable-objects/project-data/grouped-fts-pages';
 import {
-  GROUPED_PAGE_SIZES_SQL,
   type GroupedFtsWallRecoveryRequest,
   runGroupedFtsWallRecovery,
 } from '../../src/durable-objects/project-data/grouped-fts-wall-recovery';

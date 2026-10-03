@@ -33,8 +33,8 @@ import {
   hasGroupedRowsAfter,
   readGroupedFtsCandidates,
   readGroupedPage,
-  resolveGroupedFtsWallRecoveryConfig,
-} from './grouped-fts-wall-recovery';
+} from './grouped-fts-pages';
+import { resolveGroupedFtsWallRecoveryConfig } from './grouped-fts-wall-recovery';
 import { prunePageAtomically } from './grouped-fts-wall-recovery-prune';
 import type { ProjectDataStorageStatus, StorageSafetyConfig } from './storage-safety';
 import {
