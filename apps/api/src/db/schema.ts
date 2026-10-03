@@ -3680,16 +3680,33 @@ export const projectDataArchiveMigrations = sqliteTable(
       table.sessionId,
       table.state
     ),
-    capacityIdx: index('idx_project_data_archive_migrations_capacity').on(
-      table.projectId,
-      table.errorCode,
-      table.state,
-      table.updatedAt
-    ),
   })
 );
 
 export type ProjectDataArchiveMigrationRow = typeof projectDataArchiveMigrations.$inferSelect;
+
+/**
+ * A Durable Object that refused an archive write because it is at the per-object storage cap.
+ * See src/scheduled/project-data-archive-capacity-policy.ts.
+ */
+export const projectDataArchiveCapacityHolds = sqliteTable(
+  'project_data_archive_capacity_holds',
+  {
+    objectKind: text('object_kind', { enum: ['root', 'target'] }).notNull(),
+    ownerName: text('owner_name').notNull(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    openedAt: integer('opened_at').notNull(),
+    lastFailureAt: integer('last_failure_at').notNull(),
+    lastFailureMigrationId: text('last_failure_migration_id'),
+    failureCount: integer('failure_count').notNull().default(1),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.objectKind, table.ownerName] }),
+    projectIdx: index('idx_project_data_archive_capacity_holds_project').on(table.projectId),
+  })
+);
 
 export const projectDataArchiveCopyCheckpoints = sqliteTable(
   'project_data_archive_copy_checkpoints',

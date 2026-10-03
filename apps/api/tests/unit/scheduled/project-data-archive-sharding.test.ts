@@ -83,6 +83,7 @@ function createCoordinatorTables(sqlite: Database.Database): void {
     schema.sessionSummaries,
     schema.sessionSnapshots,
     schema.projectDataArchiveCircuitBreakers,
+    schema.projectDataArchiveCapacityHolds,
     schema.projectDataArchiveGlobalSweepCadence,
     schema.projectDataArchiveMigrations,
     schema.projectDataArchiveCopyCheckpoints,
@@ -3966,7 +3967,47 @@ describe('archive-sharding capacity backpressure keys on the full object', () =>
          WHERE migration_id = ?`
       )
       .run(input.errorCode ?? 'storage_full', input.targetOwnerName ?? null, migrationId);
+    // markFailed records the failure and its object's hold in one batch, so they always coexist.
+    seedHold(sqlite, {
+      role: input.errorCode === 'storage_full_target' ? 'target' : 'root',
+      ownerName:
+        input.errorCode === 'storage_full_target'
+          ? (input.targetOwnerName ?? TARGET_OWNER)
+          : (input.projectId ?? PROJECT_ID),
+      projectId: input.projectId ?? PROJECT_ID,
+      lastFailureAt: input.updatedAt,
+    });
     return migrationId;
+  }
+
+  function seedHold(
+    sqlite: Database.Database,
+    input: { role: 'root' | 'target'; ownerName: string; projectId?: string; lastFailureAt: number }
+  ): void {
+    sqlite
+      .prepare(
+        `INSERT INTO project_data_archive_capacity_holds
+           (object_kind, owner_name, project_id, opened_at, last_failure_at, failure_count)
+         VALUES (?, ?, ?, ?, ?, 1)
+         ON CONFLICT(object_kind, owner_name) DO UPDATE SET
+           last_failure_at = MAX(last_failure_at, excluded.last_failure_at),
+           failure_count = failure_count + 1`
+      )
+      .run(
+        input.role,
+        input.ownerName,
+        input.projectId ?? PROJECT_ID,
+        input.lastFailureAt,
+        input.lastFailureAt
+      );
+  }
+
+  function holds(sqlite: Database.Database) {
+    return sqlite
+      .prepare(
+        'SELECT object_kind, owner_name FROM project_data_archive_capacity_holds ORDER BY object_kind, owner_name'
+      )
+      .all();
   }
 
   function journalRow(sqlite: Database.Database, migrationId: string) {
@@ -4064,7 +4105,7 @@ describe('archive-sharding capacity backpressure keys on the full object', () =>
     }
   });
 
-  it('resumes admission and normal retries as soon as a probe gets past the full write', async () => {
+  it('resumes admission and normal retries once a probe completes after writing to the root', async () => {
     const sqlite = new Database(':memory:');
     try {
       createCoordinatorTables(sqlite);
@@ -4085,8 +4126,187 @@ describe('archive-sharding capacity backpressure keys on the full object', () =>
       });
       expect(journalRow(sqlite, older)).toMatchObject({ state: 'published' });
 
-      // ...which lifts both bounds at once: the other failure retries and admission resumes.
+      // ...which clears the hold and lifts both bounds: the other failure retries, admission resumes.
+      expect(holds(sqlite)).toEqual([]);
       expect(await selectable(sqlite, PROJECT_ID)).toEqual(['session-newer', 'session-fresh']);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps admission held while the probe is in flight', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      const probe = seedCapacityFailure(sqlite, {
+        sessionId: SESSION_ID,
+        updatedAt: NOW - 3 * HOUR,
+      });
+      seedSessionSummary(sqlite, { sessionId: 'session-fresh', messageCount: 50 });
+      let release: () => void = () => undefined;
+      const prepareGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const source = createFakeSource();
+      source.archiveSourcePrepareIntent.mockImplementation(async () => {
+        await prepareGate;
+        throw new Error(STORAGE_FULL);
+      });
+
+      const tick = sweep(sqlite, (id) => (id === SOURCE_OWNER ? source : createFakeTarget()), {
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '2',
+      });
+      await vi.waitFor(() => expect(source.archiveSourcePrepareIntent).toHaveBeenCalled());
+      // Mid-probe the journal is claimed, not failed, yet the object is still held.
+      expect(journalRow(sqlite, probe)).toMatchObject({ state: 'leased' });
+      expect(await selectable(sqlite, PROJECT_ID)).toEqual([]);
+
+      release();
+      await tick;
+      expect(journalRow(sqlite, probe)).toMatchObject({
+        state: 'failed',
+        error_code: 'storage_full',
+      });
+      expect(holds(sqlite)).toEqual([{ object_kind: 'root', owner_name: PROJECT_ID }]);
+      expect(readLocationRow(sqlite, 'session-fresh')).toBeUndefined();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('never takes a re-aligned probe for recovery before a run completes', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      const probe = seedCapacityFailure(sqlite, {
+        sessionId: SESSION_ID,
+        updatedAt: NOW - 3 * HOUR,
+      });
+      seedSessionSummary(sqlite, { sessionId: 'session-fresh', messageCount: 50 });
+      // The source still holds an old proof that is past the failed prepare; the worker then dies
+      // during finalize, before any completion.
+      const source = createFakeSource({ state: 'recovery_manifest_persisted', token: 'old-token' });
+      source.archiveSourceFinalizeDelete.mockRejectedValue(new Error('isolate evicted'));
+
+      await sweep(sqlite, (id) => (id === SOURCE_OWNER ? source : createFakeTarget()));
+
+      expect(journalRow(sqlite, probe)).toMatchObject({ state: 'failed', error_code: 'Error' });
+      expect(holds(sqlite)).toEqual([{ object_kind: 'root', owner_name: PROJECT_ID }]);
+      // Nothing was fenced into the root during that tick, and nothing will be next.
+      expect(readLocationRow(sqlite, 'session-fresh')).toBeUndefined();
+      expect(await selectable(sqlite, PROJECT_ID)).toEqual([]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each([
+    [
+      'finalize',
+      'recovery_manifest_persisted',
+      'archiveSourceFinalizeDelete',
+      'storage_full',
+      'root',
+    ],
+    ['the source seal mark', 'copying', 'archiveSourceMarkTargetSealed', 'storage_full', 'root'],
+    ['target initialization', 'leased', 'ensureTargetProjectId', 'storage_full_target', 'target'],
+  ] as const)(
+    'records a full object at %s against the object that refused',
+    async (_step, journalState, failingCall, errorCode, role) => {
+      const sqlite = new Database(':memory:');
+      try {
+        createCoordinatorTables(sqlite);
+        seedMigration(sqlite, journalState, { sourceIntentToken: 'old-token' });
+        const source = createFakeSource({
+          state:
+            journalState === 'leased'
+              ? null
+              : journalState === 'copying'
+                ? 'intent_prepared'
+                : journalState,
+          token: 'old-token',
+        });
+        const target = createFakeTarget();
+        if (failingCall === 'ensureTargetProjectId') {
+          target.ensureProjectId.mockRejectedValue(new Error(STORAGE_FULL));
+        } else {
+          source[failingCall].mockRejectedValue(new Error(STORAGE_FULL));
+        }
+
+        await sweep(sqlite, (id) => (id === SOURCE_OWNER ? source : target));
+
+        expect(journalRow(sqlite, MIGRATION_ID)).toMatchObject({
+          state: 'failed',
+          error_code: errorCode,
+        });
+        expect(holds(sqlite)).toEqual([
+          { object_kind: role, owner_name: role === 'root' ? PROJECT_ID : TARGET_OWNER },
+        ]);
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it('clears only the holds a completed run disproved by writing to their object', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      // Resumes past the target's seal: this run writes to the root only.
+      seedMigration(sqlite, 'target_sealed', { sourceIntentToken: 'old-token' });
+      seedHold(sqlite, { role: 'root', ownerName: PROJECT_ID, lastFailureAt: NOW - 3 * HOUR });
+      seedHold(sqlite, { role: 'target', ownerName: TARGET_OWNER, lastFailureAt: NOW - 3 * HOUR });
+      const source = createFakeSource({ state: 'target_sealed', token: 'old-token' });
+      const target = createFakeTarget();
+      // The shard already holds the sealed copy, so its re-prepare is an idempotent no-op.
+      await target.archiveTargetSeal();
+      target.archiveTargetSeal.mockClear();
+
+      await sweep(sqlite, (id) => (id === SOURCE_OWNER ? source : target));
+
+      expect(journalRow(sqlite, MIGRATION_ID)).toMatchObject({ state: 'published' });
+      expect(target.archiveTargetPrepare).toHaveBeenCalled();
+      expect(target.archiveTargetCommitChunk).not.toHaveBeenCalled();
+      expect(target.archiveTargetSeal).not.toHaveBeenCalled();
+      expect(holds(sqlite)).toEqual([{ object_kind: 'target', owner_name: TARGET_OWNER }]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps a hold whose failure was recorded after the completing run started', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'target_sealed', { sourceIntentToken: 'old-token' });
+      // A concurrent attempt hit the full root after this run began.
+      seedHold(sqlite, {
+        role: 'root',
+        ownerName: PROJECT_ID,
+        lastFailureAt: Date.now() + 10 * 60_000,
+      });
+      const source = createFakeSource({ state: 'target_sealed', token: 'old-token' });
+
+      await sweep(sqlite, (id) => (id === SOURCE_OWNER ? source : createFakeTarget()));
+
+      expect(journalRow(sqlite, MIGRATION_ID)).toMatchObject({ state: 'published' });
+      expect(holds(sqlite)).toEqual([{ object_kind: 'root', owner_name: PROJECT_ID }]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('stops gating admission once no probe has refreshed a hold for its maximum age', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-fresh', messageCount: 50 });
+      seedHold(sqlite, { role: 'root', ownerName: PROJECT_ID, lastFailureAt: NOW - 5 * HOUR });
+      expect(await selectable(sqlite, PROJECT_ID)).toEqual([]);
+      sqlite
+        .prepare('UPDATE project_data_archive_capacity_holds SET last_failure_at = ?')
+        .run(NOW - 7 * HOUR);
+      expect(await selectable(sqlite, PROJECT_ID)).toEqual(['session-fresh']);
     } finally {
       sqlite.close();
     }

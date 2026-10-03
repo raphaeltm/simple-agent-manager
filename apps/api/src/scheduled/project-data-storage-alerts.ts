@@ -21,6 +21,11 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import {
+  type BreakerRow,
+  scanStorageAlertConditions,
+  type TelemetryRow,
+} from './project-data-storage-alert-scan';
+import {
   deliverOpsAlert,
   listLiveThrottleStamps,
   listRealSuperadmins,
@@ -32,12 +37,15 @@ export const DEFAULT_PROJECT_DATA_STORAGE_WALL_ALERT_RATIO = 0.95;
 export const DEFAULT_PROJECT_DATA_STORAGE_ALERT_NOTIFICATION_THROTTLE_MS = 6 * 60 * 60 * 1000;
 export const DEFAULT_PROJECT_DATA_STORAGE_ALERT_STALE_AFTER_MS = 3 * 60 * 60 * 1000;
 /**
- * Due alerts delivered per tick. Worst-case I/O per tick (rules 47/60): 3 D1 reads, one KV list
- * page per `throttleListMaxPages`, and per delivered alert and superadmin one Notification DO RPC
- * plus one KV write: `3 + pages + maxAlertsPerTick x superadmins x 2`, i.e. 20 with one page and
- * two superadmins. Throttled conditions cost no I/O beyond the list.
+ * Due alerts attempted per tick. Worst-case I/O per tick (rules 47/60): 3 D1 reads, 2 more and a
+ * KV cursor read and write only when a condition query is truncated, one KV list page per
+ * `throttleListMaxPages`, and per attempted alert and superadmin one Notification DO RPC plus one
+ * KV write: `3 + 4 + pages + maxAlertsPerTick x superadmins x 2`, i.e. 24 with one page and two
+ * superadmins. Throttled and backed-off conditions cost no I/O beyond the list.
  */
 export const DEFAULT_PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK = 4;
+/** After a failed delivery, a recipient is not retried for that alert for this long. */
+export const DEFAULT_PROJECT_DATA_STORAGE_ALERT_FAILURE_BACKOFF_MS = 15 * 60 * 1000;
 /** Rows each condition query reads per tick; more qualifying rows are disclosed, not read. */
 export const DEFAULT_PROJECT_DATA_STORAGE_ALERT_SCAN_LIMIT = 50;
 const MAX_PROJECT_DATA_STORAGE_ALERT_SCAN_LIMIT = 500;
@@ -52,6 +60,7 @@ export interface ProjectDataStorageAlertConfig {
   throttleMs: number;
   staleAfterMs: number;
   maxAlertsPerTick: number;
+  failureBackoffMs: number;
   scanLimit: number;
   throttleListMaxPages: number;
   kvPrefix: string;
@@ -60,7 +69,7 @@ export interface ProjectDataStorageAlertConfig {
 export interface ProjectDataStorageAlertStats {
   /** Conditions found this tick; a lower bound when `scanTruncated`. */
   candidates: number;
-  /** Due alerts delivered this tick (at most `maxAlertsPerTick`). */
+  /** Due alerts attempted this tick (at most `maxAlertsPerTick`); `notificationsSent` counts deliveries. */
   alerts: number;
   /** Due alerts left for a later tick by the per-tick budget. */
   deferred: number;
@@ -83,25 +92,6 @@ interface StorageAlert {
   title: string;
   body: string;
   metadata: Record<string, unknown>;
-}
-
-interface BreakerRow {
-  project_id: string;
-  project_name: string | null;
-  state: 'open' | 'frozen';
-  reason: string | null;
-  opened_at: number | null;
-  updated_at: number;
-  /** The project's own last exported size, joined so escalation ranks before the LIMIT. */
-  database_size_bytes: number | null;
-}
-
-interface TelemetryRow {
-  project_id: string;
-  project_name: string | null;
-  database_size_bytes: number;
-  measured_at: number;
-  cleanup_health: string | null;
 }
 
 function parseRatio(raw: string | undefined, fallback: number): number {
@@ -130,6 +120,10 @@ export function resolveProjectDataStorageAlertConfig(env: Env): ProjectDataStora
     maxAlertsPerTick: parsePositiveInt(
       env.PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK,
       DEFAULT_PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK
+    ),
+    failureBackoffMs: parsePositiveInt(
+      env.PROJECT_DATA_STORAGE_ALERT_FAILURE_BACKOFF_MS,
+      DEFAULT_PROJECT_DATA_STORAGE_ALERT_FAILURE_BACKOFF_MS
     ),
     scanLimit: Math.min(
       parsePositiveInt(
@@ -255,60 +249,26 @@ const KIND_RANK: Record<AlertKind, number> = {
 const URGENCY_RANK: Record<NotificationUrgency, number> = { high: 0, medium: 1, low: 2 };
 
 /**
- * Collect current alert conditions, most severe first. Each query ranks by severity before its
- * LIMIT, with a unique tie-breaker: open breakers and freezes whose own project is near the wall
- * before routine freezes, larger objects first. Each reads at most `scanLimit` rows plus one, so
- * a tick can say that it saw only part of a larger set (rule 65).
+ * Collect current alert conditions, most severe first (`project-data-storage-alert-scan.ts`
+ * decides which rows a tick reads).
  */
 export async function collectProjectDataStorageAlerts(
   env: Env,
   config: ProjectDataStorageAlertConfig,
   now: number
 ): Promise<{ alerts: StorageAlert[]; scanTruncated: boolean }> {
-  const fetchLimit = config.scanLimit + 1;
   const wallBytes = Math.floor(config.hardCapBytes * config.wallAlertRatio);
-  const [breakers, telemetry] = await Promise.all([
-    env.DATABASE.prepare(
-      `SELECT b.project_id, p.name AS project_name, b.state, b.reason, b.opened_at, b.updated_at,
-              t.database_size_bytes
-       FROM project_data_archive_circuit_breakers b
-       LEFT JOIN projects p ON p.id = b.project_id
-       LEFT JOIN project_data_storage_telemetry t ON t.project_id = b.project_id
-       WHERE b.state IN ('open', 'frozen')
-       ORDER BY CASE
-           WHEN b.state = 'open' THEN 0
-           WHEN COALESCE(t.database_size_bytes, 0) >= ? THEN 1
-           ELSE 2
-         END,
-         COALESCE(b.opened_at, b.updated_at) ASC,
-         b.project_id ASC
-       LIMIT ?`
-    )
-      .bind(wallBytes, fetchLimit)
-      .all<BreakerRow>(),
-    env.DATABASE.prepare(
-      `SELECT t.project_id, p.name AS project_name, t.database_size_bytes, t.measured_at,
-              t.cleanup_health
-       FROM project_data_storage_telemetry t
-       LEFT JOIN projects p ON p.id = t.project_id
-       WHERE t.database_size_bytes >= ? OR t.cleanup_health = 'target_unreachable'
-       ORDER BY t.database_size_bytes DESC, t.project_id ASC
-       LIMIT ?`
-    )
-      .bind(wallBytes, fetchLimit)
-      .all<TelemetryRow>(),
-  ]);
-  const breakerRows = breakers.results ?? [];
-  const telemetryRows = telemetry.results ?? [];
-  const scanTruncated =
-    breakerRows.length > config.scanLimit || telemetryRows.length > config.scanLimit;
-  const scannedTelemetry = telemetryRows.slice(0, config.scanLimit);
+  const scan = await scanStorageAlertConditions(env, {
+    scanLimit: config.scanLimit,
+    kvPrefix: config.kvPrefix,
+    wallBytes,
+  });
   const alerts: StorageAlert[] = [
-    ...breakerRows.slice(0, config.scanLimit).map((row) => breakerAlert(row, wallBytes, config)),
-    ...scannedTelemetry
+    ...scan.breakers.map((row) => breakerAlert(row, wallBytes, config)),
+    ...scan.telemetry
       .filter((row) => row.database_size_bytes >= wallBytes)
       .map((row) => wallAlert(row, config, now)),
-    ...scannedTelemetry
+    ...scan.telemetry
       .filter((row) => row.cleanup_health === 'target_unreachable')
       .map((row) => cleanupAlert(row)),
   ];
@@ -318,7 +278,7 @@ export async function collectProjectDataStorageAlerts(
       URGENCY_RANK[left.urgency] - URGENCY_RANK[right.urgency] ||
       KIND_RANK[left.kind] - KIND_RANK[right.kind]
   );
-  return { alerts, scanTruncated };
+  return { alerts, scanTruncated: scan.scanTruncated };
 }
 
 export async function runProjectDataStorageAlerts(
@@ -360,6 +320,7 @@ export async function runProjectDataStorageAlerts(
       {
         throttleKey,
         throttleMs: config.throttleMs,
+        failureBackoffMs: config.failureBackoffMs,
         notification: {
           type: 'cron_failure',
           urgency: alert.urgency,

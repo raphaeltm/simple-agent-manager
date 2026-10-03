@@ -11,6 +11,11 @@ export interface SuperadminOpsAlert {
   /** Stable identity of the alert episode; one notification per recipient per window. */
   throttleKey: string;
   throttleMs: number;
+  /**
+   * When set, a failed delivery stamps the recipient for this long, so a recipient whose
+   * deliveries keep failing cannot take a capped tick's slot every time. Unset: retry next tick.
+   */
+  failureBackoffMs?: number;
   notification: CreateNotificationRequest;
 }
 
@@ -100,9 +105,16 @@ export async function deliverOpsAlert(
       log.error('ops_alert.delivery_failed', {
         throttleKey: alert.throttleKey,
         userId,
-        action: 'retry_next_tick',
+        action: alert.failureBackoffMs ? 'retry_after_backoff' : 'retry_next_tick',
         error: error instanceof Error ? error.message : String(error),
       });
+      if (alert.failureBackoffMs) {
+        await env.KV.put(`${alert.throttleKey}:${userId}`, `failed:${new Date().toISOString()}`, {
+          expirationTtl: Math.max(60, Math.ceil(alert.failureBackoffMs / 1_000)),
+        }).catch(() => {
+          // Without the backoff stamp the recipient is simply retried next tick.
+        });
+      }
       continue;
     }
     result.sent++;

@@ -424,11 +424,34 @@ CHANGES NEEDED (1 HIGH, 1 MEDIUM, 2 LOW). All fixed:
       target) and `markFailed` reads the tag; the state is only the fallback. Test: the three
       resumed states with a full root record `storage_full` (red when the tag is ignored or the
       stubs carry no role).
-- [x] MEDIUM: no index for the correlated capacity checks. EXPLAIN QUERY PLAN: the existing
-      `(project_id, state, updated_at)` index already serves the hot path (failed rows only), but
-      each "recovered" check read the whole project during an incident. Added migration 0179,
-      `idx_project_data_archive_migrations_capacity (project_id, error_code, state, updated_at)`,
-      and the drizzle declaration; every capacity lookup now seeks on (project_id, error_code).
+- [x] MEDIUM: no index for the correlated capacity checks. Superseded by round 4: the inferred
+      "current failure" SQL is gone; capacity state now lives in its own keyed table (0179).
 - [x] LOW: "one `KV.list`" wording now says the snapshot is paged.
 - [x] LOW: stale `claimNotificationDeduplication` mock removed from workspace-create-metering.test.ts.
+
+### Round 4 (task 01M41275BKCRPP7410ZJA1HMM5, 14:33Z): fixes at d4be20131
+
+Verdicts: 3c APPROVE; 3a and 3b CHANGES REQUESTED (4 HIGH). All fixed:
+
+- [x] HIGH 1 (classification): fixed by the RPC-boundary tags (a3ffb77e0). Regression cases for
+      resumed prepare (3 states), source seal mark, finalize, and target initialization.
+- [x] HIGH 2 (false recovery): inferring recovery from journal state/`updated_at` is gone. New
+      table `project_data_archive_capacity_holds` (migration 0179, additive): `markFailed` opens or
+      refreshes the hold on the refusing object in its own batch; admission and the one-probe
+      reclaim filter read the hold; only a run that publishes clears it, and only for objects that
+      run took a real write on (`{ idempotent: true }` and `false` results are not evidence), fenced
+      by `last_failure_at < runStartedAt`; an unrefreshed hold lapses after
+      `PROJECT_DATA_ARCHIVE_CAPACITY_HOLD_MAX_MS` (6 h, at least 2x the failed-retry delay). Tests:
+      probe in flight (deferred prepare), re-aligned probe that crashes in finalize, write-scoped
+      clearing, fence, expiry. Each guard mutation-verified.
+- [x] HIGH 3 (fixed scan window): `project-data-storage-alert-scan.ts`. When a condition query is
+      truncated, a rotating keyset window (by project id, cursor in KV outside the throttle
+      namespace) reads the rest in turn next to the severity window; merged and deduped. Tests: five
+      breakers with scan limit 2 are all delivered within two ticks; a row read by both windows is
+      sent once.
+- [x] HIGH 4 (persistent delivery failure): a failed delivery stamps the recipient for
+      `PROJECT_DATA_STORAGE_ALERT_FAILURE_BACKOFF_MS` (15 min), so it no longer takes the slot every
+      tick; `alerts` counts attempts, `notificationsSent` deliveries. Test: one recipient always
+      failing, the healthy one still gets both alerts by the second tick, and the failing one is
+      retried once per backoff.
 

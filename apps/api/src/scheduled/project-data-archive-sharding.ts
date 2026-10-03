@@ -78,12 +78,16 @@ import {
 
 export { poisonProjectDataArchiveMigration } from './project-data-archive-breaker-policy';
 import {
+  ARCHIVE_WRITE_METHODS,
   archiveCapacityErrorCode,
+  archiveCapacityRole,
   type ArchiveObjectRole,
-  ONE_CAPACITY_PROBE_PER_SCOPE_SQL,
-  projectRootAcceptingArchiveWritesSql,
+  capacityHoldClearSql,
+  clearDisprovedCapacityHolds,
+  ONE_CAPACITY_PROBE_PER_HELD_OBJECT_SQL,
+  recordCapacityHoldStatement,
+  resolveCapacityHoldMaxMs,
   tagArchiveObjectFailure,
-  TARGET_SHARD_ACCEPTING_ARCHIVE_WRITES_SQL,
 } from './project-data-archive-capacity-policy';
 
 const log = createModuleLogger('scheduled.project_data_archive_sharding');
@@ -189,6 +193,8 @@ type ArchiveCoordinatorConfig = {
    * session-scoped canaries bypass it.
    */
   failedRetryDelayMs: number;
+  /** How long a capacity hold gates admission without a probe refreshing it. */
+  capacityHoldMaxMs: number;
   chunkRows: number;
   chunkBytes: number;
   leaseMs: number;
@@ -522,6 +528,12 @@ function resolveSweepAffordability(
 }
 
 function resolveConfig(env: Env): ArchiveCoordinatorConfig {
+  const failedRetryDelayMs = envInt(
+    env.PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS,
+    PROJECT_DATA_ARCHIVE_DEFAULT_FAILED_RETRY_DELAY_MS,
+    0,
+    7 * 24 * 60 * 60 * 1000
+  );
   const sweepMessageBudget = envInt(
     env.PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET,
     PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET,
@@ -593,12 +605,8 @@ function resolveConfig(env: Env): ArchiveCoordinatorConfig {
       PROJECT_DATA_ARCHIVE_MIN_PRECOPY_REFUSAL_RETRY_MS,
       365 * 24 * 60 * 60 * 1000
     ),
-    failedRetryDelayMs: envInt(
-      env.PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS,
-      PROJECT_DATA_ARCHIVE_DEFAULT_FAILED_RETRY_DELAY_MS,
-      0,
-      7 * 24 * 60 * 60 * 1000
-    ),
+    failedRetryDelayMs,
+    capacityHoldMaxMs: resolveCapacityHoldMaxMs(env, failedRetryDelayMs),
     chunkRows: envInt(
       env.PROJECT_DATA_ARCHIVE_CHUNK_ROWS,
       PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS,
@@ -969,6 +977,20 @@ function scopedConfig(
   };
 }
 
+/**
+ * A write call proves its object took a write unless it reports that it did nothing: a CAS that
+ * returned `false`, or a replay answered `{ idempotent: true }` (the target's prepare and chunk
+ * commit, and an already-deleted finalize, return that without writing).
+ */
+function isWriteEvidence(result: unknown): boolean {
+  if (result === false) return false;
+  return !(
+    result !== null &&
+    typeof result === 'object' &&
+    (result as { idempotent?: unknown }).idempotent === true
+  );
+}
+
 function isThenable(value: unknown): value is PromiseLike<unknown> {
   return (
     value !== null &&
@@ -980,12 +1002,14 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
 /**
  * With a `role`, every call's failure is tagged with the object it ran on, so `markFailed` records
  * a capacity failure against the object that refused the write rather than guessing from the
- * journal state (project-data-archive-capacity-policy.ts).
+ * journal state, and every successful write is noted in `writes`, the only evidence that clears
+ * a capacity hold (project-data-archive-capacity-policy.ts).
  */
 function ownerStub(
   env: Env,
   ownerName: string,
-  role?: ArchiveObjectRole
+  role?: ArchiveObjectRole,
+  writes?: Record<ArchiveObjectRole, boolean>
 ): DurableObjectStub<ProjectData> {
   const stub = env.PROJECT_DATA.get(
     env.PROJECT_DATA.idFromName(ownerName)
@@ -1001,10 +1025,24 @@ function ownerStub(
         } catch (error) {
           throw tagArchiveObjectFailure(error, role);
         }
-        if (!isThenable(result)) return result;
-        return Promise.resolve(result).catch((error: unknown) => {
-          throw tagArchiveObjectFailure(error, role);
-        });
+        const noteWrite = (resolved: unknown) => {
+          if (writes && ARCHIVE_WRITE_METHODS[role].has(prop) && isWriteEvidence(resolved)) {
+            writes[role] = true;
+          }
+        };
+        if (!isThenable(result)) {
+          noteWrite(result);
+          return result;
+        }
+        return Promise.resolve(result).then(
+          (resolved) => {
+            noteWrite(resolved);
+            return resolved;
+          },
+          (error: unknown) => {
+            throw tagArchiveObjectFailure(error, role);
+          }
+        );
       };
     },
   });
@@ -1014,9 +1052,10 @@ async function ensureOwnerStub(
   env: Env,
   ownerName: string,
   projectId: string,
-  role?: ArchiveObjectRole
+  role?: ArchiveObjectRole,
+  writes?: Record<ArchiveObjectRole, boolean>
 ): Promise<DurableObjectStub<ProjectData>> {
-  const stub = ownerStub(env, ownerName, role);
+  const stub = ownerStub(env, ownerName, role, writes);
   await stub.ensureProjectId(projectId);
   return stub;
 }
@@ -1250,11 +1289,17 @@ async function selectReclaimableMigrations(
        AND (m.lease_expires_at IS NULL OR m.lease_expires_at <= ?)
        AND COALESCE(breaker.state, 'closed') = 'closed'
        ${FAILED_RETRY_DELAY_SQL}
-       ${ONE_CAPACITY_PROBE_PER_SCOPE_SQL}
+       ${ONE_CAPACITY_PROBE_PER_HELD_OBJECT_SQL}
      ORDER BY m.updated_at ASC, m.migration_id ASC
      LIMIT ?`
   )
-    .bind(...ACTIVE_RECLAIMABLE_STATES, now, now - config.failedRetryDelayMs, limit)
+    .bind(
+      ...ACTIVE_RECLAIMABLE_STATES,
+      now,
+      now - config.failedRetryDelayMs,
+      now - config.capacityHoldMaxMs,
+      limit
+    )
     .all<MigrationRow>();
   return rows.results ?? [];
 }
@@ -1271,7 +1316,7 @@ async function selectScopedReclaimableMigrations(
   // An operator who names the session is asking for it now; the delay only paces the sweep.
   const retryDelayPredicate = scope.sessionId ? '' : FAILED_RETRY_DELAY_SQL;
   // Likewise the one-probe bound paces the sweep against a full object, not a named retry.
-  const capacityProbePredicate = scope.sessionId ? '' : ONE_CAPACITY_PROBE_PER_SCOPE_SQL;
+  const capacityProbePredicate = scope.sessionId ? '' : ONE_CAPACITY_PROBE_PER_HELD_OBJECT_SQL;
   const rows = await env.DATABASE.prepare(
     `SELECT m.migration_id, m.project_id, m.session_id, m.storage_format, m.state, m.source_owner_name,
             m.target_owner_name, m.target_generation, m.source_intent_token,
@@ -1295,7 +1340,7 @@ async function selectScopedReclaimableMigrations(
       ...(scope.sessionId ? [scope.sessionId] : []),
       ...ACTIVE_RECLAIMABLE_STATES,
       now,
-      ...(scope.sessionId ? [] : [now - config.failedRetryDelayMs]),
+      ...(scope.sessionId ? [] : [now - config.failedRetryDelayMs, now - config.capacityHoldMaxMs]),
       limit
     )
     .all<MigrationRow>();
@@ -1422,7 +1467,7 @@ async function selectCandidates(
        AND ss.ended_at <= ?
        AND (loc.session_id IS NULL OR loc.location_state = 'root')
        AND COALESCE(breaker.state, 'closed') = 'closed'
-       AND ${projectRootAcceptingArchiveWritesSql('ss.project_id')}
+       AND ${capacityHoldClearSql('root', 'ss.project_id')}
        AND NOT EXISTS (
          SELECT 1
          FROM session_snapshots snap
@@ -1437,6 +1482,7 @@ async function selectCandidates(
     .bind(
       ...(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? [config.sweepMessageCeiling] : []),
       cutoff,
+      now.getTime() - config.capacityHoldMaxMs,
       nowIso,
       ...precopyRefusalExclusionBinds(config, now),
       Math.min(limit, config.sweepProjects * config.sweepSessions) + config.sweepFallthroughDepth
@@ -1478,7 +1524,7 @@ async function selectScopedCandidates(
        AND ss.ended_at <= ?
        AND (loc.session_id IS NULL OR loc.location_state = 'root')
        AND COALESCE(breaker.state, 'closed') = 'closed'
-       AND ${projectRootAcceptingArchiveWritesSql('ss.project_id')}
+       AND ${capacityHoldClearSql('root', 'ss.project_id')}
        AND NOT EXISTS (
          SELECT 1
          FROM session_snapshots snap
@@ -1495,6 +1541,7 @@ async function selectScopedCandidates(
       ...(scope.sessionId ? [scope.sessionId] : []),
       ...(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? [messageCeiling] : []),
       cutoff,
+      now.getTime() - config.capacityHoldMaxMs,
       nowIso,
       ...(scope.sessionId ? [] : precopyRefusalExclusionBinds(config, now)),
       limit
@@ -1505,6 +1552,7 @@ async function selectScopedCandidates(
 
 async function createCandidateJournal(
   env: Env,
+  config: ArchiveCoordinatorConfig,
   candidate: CandidateRow,
   now: number
 ): Promise<MigrationRow | null> {
@@ -1523,7 +1571,8 @@ async function createCandidateJournal(
   const migrationId = crypto.randomUUID();
   // Never fence a session into an object that is refusing archive writes: it could only fail
   // there and stay unreadable (project-data-archive-capacity-policy.ts).
-  const capacityAdmissionBinds = [projectId, projectId, target.ownerName];
+  const holdFloor = now - config.capacityHoldMaxMs;
+  const capacityAdmissionBinds = [projectId, holdFloor, target.ownerName, holdFloor];
   await env.DATABASE.batch([
     env.DATABASE.prepare(
       `INSERT INTO project_data_archive_migrations (
@@ -1538,8 +1587,8 @@ async function createCandidateJournal(
          WHERE project_id = ? AND session_id = ? AND location_state != 'root'
        )
          AND ${PROJECT_ARCHIVE_BREAKER_CLOSED_SQL}
-         AND ${projectRootAcceptingArchiveWritesSql('?')}
-         AND ${TARGET_SHARD_ACCEPTING_ARCHIVE_WRITES_SQL}`
+         AND ${capacityHoldClearSql('root', '?')}
+         AND ${capacityHoldClearSql('target', '?')}`
     ).bind(
       migrationId,
       projectId,
@@ -1570,8 +1619,8 @@ async function createCandidateJournal(
          WHERE project_id = ? AND session_id = ? AND location_state != 'root'
        )
          AND ${PROJECT_ARCHIVE_BREAKER_CLOSED_SQL}
-         AND ${projectRootAcceptingArchiveWritesSql('?')}
-         AND ${TARGET_SHARD_ACCEPTING_ARCHIVE_WRITES_SQL}
+         AND ${capacityHoldClearSql('root', '?')}
+         AND ${capacityHoldClearSql('target', '?')}
        ON CONFLICT(project_id, session_id) DO UPDATE SET
          location_state = CASE
            WHEN project_data_session_locations.location_state = 'root' THEN 'migrating'
@@ -3102,18 +3151,50 @@ async function migrateClaimedCandidate(
   rowsCopied: number;
 }> {
   let migration = claimedRow;
+  // Wall clock, not the tick's `now`: a capacity failure recorded after this instant survives
+  // the hold clear below.
+  const runStartedAt = Date.now();
+  const wrote: Record<ArchiveObjectRole, boolean> = { root: false, target: false };
   const source = await ensureOwnerStub(
     env,
     migration.source_owner_name,
     migration.project_id,
-    'root'
+    'root',
+    wrote
   );
   const target = await ensureOwnerStub(
     env,
     migration.target_owner_name,
     migration.project_id,
-    'target'
+    'target',
+    wrote
   );
+  // A completed run disproves the capacity holds on the objects it wrote to. Best-effort: a hold
+  // that stays only costs the sweep its probe pacing until the next completed run.
+  const clearDisprovedHolds = async () => {
+    try {
+      const cleared = await clearDisprovedCapacityHolds(env, {
+        rootOwnerName: claimedRow.source_owner_name,
+        targetOwnerName: claimedRow.target_owner_name,
+        wrote,
+        runStartedAt,
+      });
+      if (cleared > 0) {
+        log.info('project_data_archive_capacity_hold_cleared', {
+          migrationId: claimedRow.migration_id,
+          projectId: claimedRow.project_id,
+          wrote,
+          cleared,
+        });
+      }
+    } catch (error) {
+      log.warn('project_data_archive_capacity_hold_clear_failed', {
+        migrationId: claimedRow.migration_id,
+        projectId: claimedRow.project_id,
+        ...serializeError(error),
+      });
+    }
+  };
   let chunksCopied = 0;
   let rowsCopied = 0;
   // Wall time per phase, logged on completion so production ticks quantify what each phase
@@ -3210,6 +3291,7 @@ async function migrateClaimedCandidate(
       totalMs: Date.now() - phaseStartedAt,
       phaseDurationsMs,
     });
+    if (migration.state === 'published') await clearDisprovedHolds();
     return {
       migrated: migration.state === 'published',
       recoveredCrashGap: finalized.recoveredCrashGap,
@@ -3223,6 +3305,7 @@ async function migrateClaimedCandidate(
     return { migrated: true, recoveredCrashGap: true, chunksCopied, rowsCopied };
   }
 
+  if (migration.state === 'published') await clearDisprovedHolds();
   return {
     migrated: migration.state === 'published',
     recoveredCrashGap: false,
@@ -3288,7 +3371,8 @@ async function markFailed(
       return 'poisoned';
     }
   }
-  if (storageFull) {
+  const capacityRole = storageFull ? archiveCapacityRole(error, current.state) : null;
+  if (capacityRole) {
     // Capacity failures are paced by the failed-retry delay like any failure, but they refund
     // the attempt the claim spent: otherwise the next unrelated transient error after a full
     // spell would poison the session at once. Each one is logged as the audit record.
@@ -3296,15 +3380,15 @@ async function markFailed(
       migrationId: current.migration_id,
       projectId: current.project_id,
       sessionId: current.session_id,
-      errorCode: archiveCapacityErrorCode(error, current.state),
-      targetOwnerName: current.target_owner_name,
+      errorCode: archiveCapacityErrorCode(capacityRole),
+      heldObject: capacityRole === 'root' ? current.source_owner_name : current.target_owner_name,
       attemptCount: current.attempt_count,
       poisonAfterAttempts: config.poisonAfterAttempts,
       action: 'kept_failed_and_refunded_attempt',
     });
   }
   const leaseGuard = lease ? 'AND lease_owner = ? AND lease_epoch = ?' : '';
-  const result = await env.DATABASE.prepare(
+  const markFailedStatement = env.DATABASE.prepare(
     `UPDATE project_data_archive_migrations
      SET state = 'failed',
          error_code = ?,
@@ -3316,17 +3400,34 @@ async function markFailed(
      WHERE migration_id = ?
        AND state NOT IN ('source_deleted', 'published', 'poisoned', 'frozen')
        ${leaseGuard}`
-  )
-    .bind(
-      storageFull ? archiveCapacityErrorCode(error, current.state) : errorCode(error),
-      errorMessage(error),
-      storageFull ? 1 : 0,
-      now,
-      current.migration_id,
-      ...(lease ? [lease.leaseOwner, lease.leaseEpoch] : [])
-    )
-    .run();
-  return (result.meta.changes ?? 0) > 0 ? 'failed' : 'unchanged';
+  ).bind(
+    capacityRole ? archiveCapacityErrorCode(capacityRole) : errorCode(error),
+    errorMessage(error),
+    capacityRole ? 1 : 0,
+    now,
+    current.migration_id,
+    ...(lease ? [lease.leaseOwner, lease.leaseEpoch] : [])
+  );
+  // A capacity failure also holds its object (project-data-archive-capacity-policy.ts), in the
+  // same transaction. Its time is the wall clock, not the tick's: a run that started before this
+  // failure must not clear it.
+  const [result] = await env.DATABASE.batch([
+    markFailedStatement,
+    ...(capacityRole
+      ? [
+          recordCapacityHoldStatement(env, {
+            role: capacityRole,
+            ownerName:
+              capacityRole === 'root' ? current.source_owner_name : current.target_owner_name,
+            projectId: current.project_id,
+            migrationId: current.migration_id,
+            failedAt: Date.now(),
+            activeFloor: now - config.capacityHoldMaxMs,
+          }),
+        ]
+      : []),
+  ]);
+  return (result?.meta.changes ?? 0) > 0 ? 'failed' : 'unchanged';
 }
 
 export async function freezeProjectDataArchiveMigration(
@@ -4104,7 +4205,7 @@ async function processArchiveMigrationBatch(input: {
         ? await reserve(candidate.project_id, candidate.session_id)
         : undefined;
     if (reservation === null) continue;
-    const migration = await createCandidateJournal(input.env, candidate, input.now);
+    const migration = await createCandidateJournal(input.env, input.config, candidate, input.now);
     if (!migration) {
       await releaseUnused(reservation);
       continue;

@@ -112,11 +112,16 @@ condition lasts. An alert can only be as fresh as the telemetry the object last
 exported; it says when that was, and says "telemetry stale" when nothing newer
 than `PROJECT_DATA_STORAGE_ALERT_STALE_AFTER_MS` (3 hours) has arrived.
 
-Each tick delivers at most `PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK` (4)
+Each tick attempts at most `PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK` (4)
 alerts, most severe first, and only alerts that are due count toward that limit:
-a condition already sent within its window is skipped without using a slot, so
-every ongoing condition is delivered in turn. If the tick cannot read the
-throttle markers, it sends nothing rather than risk repeating every alert.
+a condition already sent within its window is skipped without using a slot, and
+a recipient whose delivery failed is retried after
+`PROJECT_DATA_STORAGE_ALERT_FAILURE_BACKOFF_MS` (15 minutes) rather than on every
+tick. When more conditions qualify than one scan reads
+(`PROJECT_DATA_STORAGE_ALERT_SCAN_LIMIT`, 50), the most severe are still read on
+every tick and a rotating window works through the rest, so every ongoing
+condition is delivered in turn. If the tick cannot read the throttle markers, it
+sends nothing rather than risk repeating every alert.
 
 ### Retention
 

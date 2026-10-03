@@ -629,8 +629,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_STORAGE_WALL_ALERT_RATIO?: string; // Share of the hard cap at which superadmins are paged (default: 0.95)
   PROJECT_DATA_STORAGE_ALERT_NOTIFICATION_THROTTLE_MS?: string; // Repeat window per alert episode and superadmin (default: 21600000)
   PROJECT_DATA_STORAGE_ALERT_STALE_AFTER_MS?: string; // Age after which near-cap telemetry is reported as stale (default: 10800000)
-  PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK?: string; // Most severe due alerts sent per cron tick; throttled ones use no slot (default: 4)
-  PROJECT_DATA_STORAGE_ALERT_SCAN_LIMIT?: string; // Rows each storage-alert condition query reads per tick (default: 50, max 500)
+  PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK?: string; // Most severe due alerts attempted per cron tick; throttled and backed-off ones use no slot (default: 4)
+  PROJECT_DATA_STORAGE_ALERT_FAILURE_BACKOFF_MS?: string; // How long a recipient whose delivery failed waits before that alert is retried for them (default: 900000)
+  PROJECT_DATA_STORAGE_ALERT_SCAN_LIMIT?: string; // Rows each storage-alert condition query reads per tick, plus a rotating window of as many when truncated (default: 50, max 500)
   PROJECT_DATA_STORAGE_ALERT_THROTTLE_LIST_MAX_PAGES?: string; // KV list pages read for the alert throttle snapshot before failing closed (default: 5)
   PROJECT_DATA_STORAGE_ALERT_KV_PREFIX?: string; // KV prefix for storage alert throttles (default: project-data-storage-alert)
   PROJECT_DATA_STORAGE_NOTICE_RATIO?: string;
@@ -765,6 +766,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS?: string;
   PROJECT_DATA_ARCHIVE_BREAKER_POISON_THRESHOLD?: string; // Distinct sessions poisoned within the window before a project's archive breaker opens (default: 3; 1 = open on any poison)
   PROJECT_DATA_ARCHIVE_BREAKER_POISON_WINDOW_MS?: string; // Window for counting distinct poisoned sessions; poisons before the last breaker close never count (default: 86400000)
+  PROJECT_DATA_ARCHIVE_CAPACITY_HOLD_MAX_MS?: string; // How long a capacity hold on a full object gates admission without a failed retry refreshing it; at least twice the failed-retry delay (default: 21600000)
   PROJECT_DATA_ARCHIVE_R2_PREFIX?: string;
   PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS?: string;
   PROJECT_DATA_ARCHIVE_SEARCH_CONCURRENCY?: string;

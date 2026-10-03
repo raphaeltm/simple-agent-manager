@@ -268,7 +268,7 @@ describe('ProjectData storage superadmin alerts', () => {
     });
   });
 
-  it('retries a failed delivery on the next tick instead of suppressing it', async () => {
+  it('retries a failed delivery after the backoff instead of suppressing it for the window', async () => {
     const { sqlite, tick } = setup();
     seedProject(sqlite, 'project-sam', 'SAM');
     seedBreaker(sqlite, 'project-sam', 'open', NOW - HOUR);
@@ -282,8 +282,12 @@ describe('ProjectData storage superadmin alerts', () => {
     const first = await tick(NOW);
     expect(first).toMatchObject({ notificationsSent: 1, deliveryFailures: 1 });
 
+    // Inside the 15-minute backoff the failed recipient is not retried yet...
     const second = await tick(NOW + 5 * 60 * 1000);
-    expect(second).toMatchObject({ notificationsSent: 1, throttled: 1, deliveryFailures: 0 });
+    expect(second).toMatchObject({ notificationsSent: 0, throttled: 2, deliveryFailures: 0 });
+    // ...and after it, well inside the 6-hour window, it is.
+    const third = await tick(NOW + 20 * 60 * 1000);
+    expect(third).toMatchObject({ notificationsSent: 1, throttled: 1, deliveryFailures: 0 });
     expect(sent().map((entry) => entry.userId)).toEqual(['admin-1', 'admin-2', 'admin-1']);
   });
 
@@ -353,10 +357,12 @@ describe('ProjectData storage superadmin alerts', () => {
 
     const stats = await tick(NOW);
 
-    // The scan reads one row and says it saw only part of the set; that row is the stopped drain.
-    expect(stats).toMatchObject({ candidates: 1, alerts: 1, scanTruncated: true });
+    // The severity window of one is the stopped drain, ahead of two older freezes; the rotating
+    // window adds the first project by id. The tick says it saw only part of the set.
+    expect(stats).toMatchObject({ candidates: 2, scanTruncated: true });
+    expect(sent()[0]!.notification.metadata.projectId).toBe('project-stuck');
     expect(new Set(sent().map((entry) => entry.notification.metadata.projectId))).toEqual(
-      new Set(['project-stuck'])
+      new Set(['project-stuck', 'project-held-a'])
     );
   });
 
@@ -382,23 +388,42 @@ describe('ProjectData storage superadmin alerts', () => {
     );
   });
 
-  it('keeps the largest objects when the telemetry query hits the scan limit', async () => {
+  it('reads the largest objects first and every condition within a few ticks', async () => {
     const { sqlite, tick } = setup({ PROJECT_DATA_STORAGE_ALERT_SCAN_LIMIT: '2' });
-    // Inserted smallest first, so an unordered LIMIT would keep the wrong rows. The cleanup
-    // condition shares the query and its limit, and is the mildest of all.
+    // Inserted smallest first, so an unordered LIMIT would read the wrong rows. The cleanup
+    // condition shares the query and is the mildest of all.
     seedProject(sqlite, 'project-cleanup', 'Cleanup');
     seedTelemetry(sqlite, 'project-cleanup', 5 * GB, NOW, 'target_unreachable');
     for (const percent of [95, 96, 97, 98, 99]) {
       seedProject(sqlite, `project-${percent}`, `At ${percent}`);
       seedTelemetry(sqlite, `project-${percent}`, Math.ceil((CAP * percent) / 100), NOW);
     }
+    const delivered = new Set<unknown>();
+    const runTick = async (at: number) => {
+      sendNotificationMock.mockClear();
+      const stats = await tick(at);
+      const projects = sent().map((entry) => entry.notification.metadata.projectId);
+      projects.forEach((project) => delivered.add(project));
+      return { stats, projects };
+    };
 
-    const stats = await tick(NOW);
-
-    // Three rows fetched (limit + 1) discloses that more conditions exist than were read.
-    expect(stats).toMatchObject({ candidates: 2, alerts: 2, scanTruncated: true });
-    expect(new Set(sent().map((entry) => entry.notification.metadata.projectId))).toEqual(
-      new Set(['project-99', 'project-98'])
+    const first = await runTick(NOW);
+    // The two largest are always in the window, and the tick discloses that it is truncated.
+    expect(first.stats).toMatchObject({ scanTruncated: true });
+    expect(first.projects.slice(0, 2)).toEqual(['project-99', 'project-99']);
+    expect(delivered).toContain('project-98');
+    // The rotating window walks the rest by project id until every condition was delivered.
+    await runTick(NOW + 5 * 60 * 1000);
+    await runTick(NOW + 10 * 60 * 1000);
+    expect(delivered).toEqual(
+      new Set([
+        'project-95',
+        'project-96',
+        'project-97',
+        'project-98',
+        'project-99',
+        'project-cleanup',
+      ])
     );
   });
 
@@ -457,18 +482,94 @@ describe('ProjectData storage superadmin alerts', () => {
       throttled: 2,
       deliveryFailures: 1,
     });
-    // Tick 3: only admin-2's failed copy of B is still due.
+    // Tick 3: admin-2's failed copy of B waits out its backoff; nothing else is due.
     result = await projectsSentAt(NOW + 2 * FIVE_MINUTES);
+    expect(result.stats).toMatchObject({ alerts: 0, deferred: 0, throttled: 4 });
+    // After the backoff, only admin-2's failed copy of B is due.
+    result = await projectsSentAt(NOW + 4 * FIVE_MINUTES);
     expect(sent().map((entry) => entry.userId)).toEqual(['admin-2']);
     expect(result.projects).toEqual(['project-b']);
-    // Tick 4: both conditions are throttled for everyone; nothing is sent, nothing deferred.
-    result = await projectsSentAt(NOW + 3 * FIVE_MINUTES);
-    expect(result.stats).toMatchObject({ alerts: 0, deferred: 0, throttled: 4 });
     // After the window both are due again, and the order repeats: every condition comes round.
     result = await projectsSentAt(NOW + 7 * HOUR);
     expect(result.projects).toEqual(['project-a']);
     result = await projectsSentAt(NOW + 7 * HOUR + FIVE_MINUTES);
     expect(result.projects).toEqual(['project-b']);
+  });
+
+  it('reaches conditions beyond both scan windows within a few ticks', async () => {
+    const { sqlite, tick } = setup({
+      PROJECT_DATA_STORAGE_ALERT_SCAN_LIMIT: '2',
+      PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK: '10',
+    });
+    // Severity order (oldest first) is the reverse of id order, so the two windows differ.
+    for (const [index, id] of [
+      'project-1',
+      'project-2',
+      'project-3',
+      'project-4',
+      'project-5',
+    ].entries()) {
+      seedProject(sqlite, id, id);
+      seedBreaker(sqlite, id, 'open', NOW - (index + 1) * HOUR);
+    }
+    const ticks: unknown[][] = [];
+    for (const at of [NOW, NOW + 5 * 60 * 1000, NOW + 10 * 60 * 1000]) {
+      sendNotificationMock.mockClear();
+      await tick(at);
+      ticks.push([...new Set(sent().map((entry) => entry.notification.metadata.projectId))]);
+    }
+
+    // Tick 1: the two oldest (severity) and the first two by id (rotation).
+    expect(new Set(ticks[0])).toEqual(
+      new Set(['project-5', 'project-4', 'project-1', 'project-2'])
+    );
+    // Tick 2: the rotation moves on and reaches the one no fixed window would ever read.
+    expect(ticks[1]).toEqual(['project-3']);
+    // Tick 3: everything is throttled; the rotation wrapped without re-sending anything.
+    expect(ticks[2]).toEqual([]);
+  });
+
+  it('sends a condition read by both windows once', async () => {
+    const { sqlite, tick } = setup({ PROJECT_DATA_STORAGE_ALERT_SCAN_LIMIT: '2' });
+    // Oldest first is also id order, so the severity and rotating windows read the same rows.
+    for (const [index, id] of ['project-1', 'project-2', 'project-3'].entries()) {
+      seedProject(sqlite, id, id);
+      seedBreaker(sqlite, id, 'open', NOW - (10 - index) * HOUR);
+    }
+
+    await tick(NOW);
+
+    expect(
+      sent().map((entry) => `${entry.notification.metadata.projectId}:${entry.userId}`)
+    ).toEqual(['project-1:admin-1', 'project-1:admin-2', 'project-2:admin-1', 'project-2:admin-2']);
+  });
+
+  it('keeps a recipient whose deliveries keep failing from holding back the healthy one', async () => {
+    const { sqlite, tick } = setup({ PROJECT_DATA_STORAGE_ALERT_MAX_ALERTS_PER_TICK: '1' });
+    seedProject(sqlite, 'project-a', 'A');
+    seedBreaker(sqlite, 'project-a', 'open', NOW - 2 * HOUR);
+    seedProject(sqlite, 'project-b', 'B');
+    seedBreaker(sqlite, 'project-b', 'open', NOW - HOUR);
+    sendNotificationMock.mockImplementation(async (_env: Env, userId: string) => {
+      if (userId === 'admin-1') throw new Error('push endpoint gone');
+      return { id: 'notification' };
+    });
+    const healthyGot = () =>
+      sent()
+        .filter((entry) => entry.userId === 'admin-2')
+        .map((entry) => entry.notification.metadata.projectId);
+
+    await tick(NOW);
+    await tick(NOW + 5 * 60 * 1000);
+    // A's failing copy is backed off, so B gets the slot and reaches the healthy recipient.
+    expect(healthyGot()).toEqual(['project-a', 'project-b']);
+    // The failing recipient is still retried, once per backoff, not suppressed for good.
+    await tick(NOW + 20 * 60 * 1000);
+    expect(
+      sent()
+        .filter((entry) => entry.userId === 'admin-1')
+        .map((e) => e.notification.metadata.projectId)
+    ).toEqual(['project-a', 'project-b', 'project-a']);
   });
 
   it('ranks a freeze whose own project is near the wall ahead of older routine freezes', async () => {
