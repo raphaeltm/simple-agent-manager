@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { redactSecretPatterns } from './secret-redaction';
 import {
   buildSessionSnapshotR2Key,
   sessionLifecycleError,
@@ -56,7 +57,10 @@ export async function deleteAbandonedSessionSnapshotObjects(
       chatSessionId: input.chatSessionId,
       generation: input.generation,
       keyCount: keys.length,
-      error: sessionLifecycleError(env, error),
+      error: sessionLifecycleError(
+        env,
+        redactSecretPatterns(error instanceof Error ? error.message : String(error))
+      ),
     });
   }
 }

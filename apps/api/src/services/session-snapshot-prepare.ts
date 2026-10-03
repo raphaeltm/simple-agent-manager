@@ -111,8 +111,15 @@ export async function prepareSessionSnapshot(
       isNull(schema.sessionSnapshots.sleepingAt),
       or(
         isNull(schema.sessionSnapshots.sleepStatus),
-        inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed', 'preparing'])
-      )
+        inArray(schema.sessionSnapshots.sleepStatus, CAPTURE_ALLOWED_SLEEP_STATUSES)
+      ),
+      // Compare-and-swap on the capture this prepare replaces. If a completion
+      // or another prepare moved the row since the read, overwriting it would
+      // clobber a just-completed snapshot, and the superseded-capture cleanup
+      // below would then delete that snapshot's objects.
+      current.captureGeneration === null
+        ? isNull(schema.sessionSnapshots.captureGeneration)
+        : eq(schema.sessionSnapshots.captureGeneration, current.captureGeneration)
     );
     if (current.status === 'available' || current.status === 'degraded') {
       // A checkpoint upload is not the current snapshot until completion
@@ -137,12 +144,12 @@ export async function prepareSessionSnapshot(
         })
         .where(captureAllowed);
       if ((result.meta.changes ?? 0) === 0) {
-        throw new Error('Snapshot capture lost the sleep teardown race');
+        throw new Error(await lostCaptureRaceMessage(db, snapshotId));
       }
     } else {
       const result = await db.update(schema.sessionSnapshots).set(row).where(captureAllowed);
       if ((result.meta.changes ?? 0) === 0) {
-        throw new Error('Snapshot capture lost the sleep teardown race');
+        throw new Error(await lostCaptureRaceMessage(db, snapshotId));
       }
     }
     if (current.captureGeneration && current.captureGeneration !== generation) {
@@ -153,6 +160,26 @@ export async function prepareSessionSnapshot(
   }
 
   return { snapshotId, generation, expiresAt, keys, config };
+}
+
+const CAPTURE_ALLOWED_SLEEP_STATUSES = ['scheduled', 'failed', 'preparing'];
+
+/** Names which race a prepare lost, for the capture failure it reports. */
+async function lostCaptureRaceMessage(db: Db, snapshotId: string): Promise<string> {
+  const row = await db
+    .select({
+      sleepingAt: schema.sessionSnapshots.sleepingAt,
+      sleepStatus: schema.sessionSnapshots.sleepStatus,
+    })
+    .from(schema.sessionSnapshots)
+    .where(eq(schema.sessionSnapshots.id, snapshotId))
+    .get();
+  const teardownClaimed =
+    Boolean(row?.sleepingAt) ||
+    (row?.sleepStatus != null && !CAPTURE_ALLOWED_SLEEP_STATUSES.includes(row.sleepStatus));
+  return teardownClaimed
+    ? 'Snapshot capture lost the sleep teardown race'
+    : 'Snapshot capture lost a race with a concurrent capture or completion';
 }
 
 /**
