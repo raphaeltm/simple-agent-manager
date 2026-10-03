@@ -297,10 +297,13 @@ degraded recovery rather than silently continuing on a different commit — whic
 that quietly loses work, because everything looks fine until you push.
 
 Plan for one trade-off: the repository bundle is captured first out of a shared snapshot budget
-(256 MiB by default), so a large history or a big working tree can crowd out the agent's own HOME
-state. Only commits reachable from the saved `HEAD` are bundled, so work parked on another local
-branch is not captured. If a session carries work you cannot lose, have the agent commit and push
-it.
+(256 MiB by default), so a big working tree can crowd out the agent's own HOME state. Only commits
+reachable from the saved `HEAD` are bundled, so work parked on another local branch is not
+captured. If a session carries work you cannot lose, have the agent commit and push it.
+
+Update, October 2026: the bundle no longer carries history that is already on your default branch.
+That history is fetched from origin on wake, so repository history alone no longer crowds out
+HOME.
 
 See [Instant Sessions → What gets restored](/docs/guides/instant-sessions/#what-gets-restored).
 
