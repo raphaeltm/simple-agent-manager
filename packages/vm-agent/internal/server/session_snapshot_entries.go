@@ -15,8 +15,10 @@ import (
 )
 
 // defaultSnapshotJSONBodyMaxBytes mirrors the control plane's
-// SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES default for a prepare response that does
-// not report config.jsonBodyMaxBytes.
+// SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES default
+// (DEFAULT_SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES in
+// apps/api/src/services/session-snapshot-artifacts.ts; change both together)
+// for a prepare response that does not report config.jsonBodyMaxBytes.
 const defaultSnapshotJSONBodyMaxBytes int64 = 256 * 1024
 
 // snapshotSkippedTextShare caps a single skipped entry's path or reason at this
