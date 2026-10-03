@@ -63,10 +63,10 @@ Each failed capture also leaves its uploaded `wip.bundle` behind in R2.
 ## Deferred (tracked as SAM Ideas, not in this PR)
 
 SAM Ideas filed:
+
 - 01M40H4ZBTVC9WPNMRA5VMGPS9: R2 orphan sweep
 - 01M40H56B0T8D5P2XND6C2FQTH: wait-race attribution
 - 01M3BW047BN1SPA3YBQ68SV4T8: retry budget and product decision (appended)
-
 
 - Retry budget for repairable (degraded or in-flight) sleep captures. This is a product decision: either sleep with a visible degraded warning, or stay awake and stop retrying. It interacts with failed-task preservation release.
 - `waitForFinalSessionSnapshot` attributes a pre-acceptance capture failure to the new request. After this fix that costs one extra retry; the existing test pins the current behavior.
@@ -81,14 +81,22 @@ SAM Ideas filed:
 - [x] Oversized-entry checks run a constant number of commands regardless of how many files are tracked. Covered by `TestOversizedSnapshotIndexEntriesUsesOneBatchedLookup`, plus end-to-end tests for both runtimes.
 - [x] The completion request stays under `jsonBodyMaxBytes` even with thousands of skipped entries. Covered by the `TestHibernateSessionSnapshot*` tests, which run both standalone and container runtimes against a control plane that enforces the limit.
 - [x] Superseded, failed, and unrecorded capture artifacts are deleted from R2, while the completed generation's artifacts are kept. Covered by `session-snapshot-capture-cleanup.test.ts`, including compare-and-swap race tests.
-- [ ] Staging: a fresh VM session on a real repository sleeps automatically with a complete snapshot, then wakes and restores its work.
+- [x] Staging: a fresh VM session on a real repository sleeps automatically with a complete snapshot, then wakes and restores its work. Verified on 2026-10-03, deploy run 37114279090, agent `15de90ed2`, hono fixture, chat `2dee4747`:
+  - Node provisioned and sent its first heartbeat in about 3 minutes.
+  - The agent left an unpushed 3,000-file commit, an uncommitted edit and an untracked file.
+  - The idle checkpoint completed as `available`/`none` in about 37 s. Its `wip.bundle` was 115 KB, with a single prerequisite: the default-branch tip.
+  - Automatic sleep succeeded on the first attempt (10:35:44Z).
+  - The wake, sent from the real composer, restored the snapshot (`restored`), and the agent output confirmed every piece of work.
+  - Only the final generation remained in R2.
+  - Zero "Snapshot request body is too large" errors.
+  - Cleaned up; staging is back to 0 live nodes.
 
 ## Implementation Notes
 
 - Pure-move refactors first (rule 18): 6b989efd8 (Go snapshot files) and 27653910b (API prepare module).
 - Discrimination (rule 62): each fix was reverted in isolation and only its intended tests went red.
-  - Go (7 mutations): no basis; basis on all remote refs (the stale-ref test went red); no prerequisite recovery; unbounded skipped list; no capture-only exclusions; caches made restore-rejecting; per-entry lookups.
-  - API (6 mutations): every cleanup path, plus the keep set and the manifest key.
+  - Go (9 mutations): no basis; basis on all remote refs (the stale-ref test went red); no prerequisite recovery; unbounded skipped list; no capture-only exclusions; caches made restore-rejecting; per-entry lookups; seam reverted; CR kept in header parsing.
+  - API (7 mutations): every cleanup path, the keep set, the manifest key, and the compare-and-swap.
 - The task file ships with the PR because a direct push to main is blocked by repository rules (required status checks).
 
 ## Review Outcomes (Phase 5)
