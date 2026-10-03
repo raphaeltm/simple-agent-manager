@@ -40,7 +40,7 @@ Snapshot files go into Cloudflare R2, which stores large files. A failed or repl
 
 I checked the full path with a real workspace containing a commit that added 3,000 files, an uncommitted edit, and an untracked file. The checkpoint completed in about 37 seconds, its Git bundle was 115 KB, the session slept, and waking it restored all three kinds of work.
 
-The lesson I want to keep is simple: save the parts that cannot be fetched again, keep the handoff small enough to finish, and clean up anything from a handoff that did not become the saved copy.
+Next time I build a save path, I want to ask one question first: which pieces of work can the restore side fetch again, and which pieces exist only in this session?
 
 ---
 
