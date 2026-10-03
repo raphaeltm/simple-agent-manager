@@ -170,9 +170,10 @@ PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES = "1"
 PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = "true"
 # Compact format stays off until the staged rollout and production mutation approval.
 PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
-# Tripled with the sweep cadence on 2026-09-27 (was 800000): the same ~33k estimate units per
-# tick at 3x the ticks. Real candidates reserve ~21.5k units (six production samples, 17.8k-27.1k),
-# so 72 ticks/day use ~1.55M; 800000 would have stopped the drain at ~37/day. Cost
+# Raised with the 2026-09-27 sweep acceleration (was 800000): real candidates reserve ~21.5k
+# units (six production samples, 17.8k-27.1k). The 2026-10-03 billing firebreak restored the
+# cadence to hourly while leaving this allowance in place, so the cadence is again the binding
+# throttle: 24 ticks/day use ~516k units. Cost
 # (`pnpm quality:cloudflare-cost`, rule 76): DO rows written were projected at 32.8M of the 50M/month
 # included allowance, and the extra ticks add ~0.4-0.6M billed rows/day, so the expected cost is
 # $0; spending the whole allowance at the worst measured ratio would be ~$13/month over it.
@@ -192,9 +193,9 @@ PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "2400000"
 #
 # 2 exceeds the worst observed ratio of 1.23 by ~63%. Under the 800000 allowance and hourly
 # cadence of 2026-09-14 that moved the budget's ceiling to ~47/day, so the one-candidate-per-tick
-# limit (~4,849 messages each) was the binding constraint at 24/day. Since 2026-09-27 the same factor
-# against ~10,250-unit candidates and the 2400000 allowance gives ~111/day, above the 72 ticks the
-# cadence claims, so the cadence still binds. Two caveats before trusting this number further: n
+# limit (~4,849 messages each) was the binding constraint at 24/day. With the same factor
+# against ~10,250-unit candidates and the 2400000 allowance, the budget ceiling is ~111/day, above
+# the restored hourly cadence's 24 ticks/day, so cadence binds again. Two caveats before trusting this number further: n
 # is small (2 budget samples, 4 telemetry buckets), and largest-first selection keeps pulling
 # differently-shaped candidates as the backlog drains, so the ratio can move. Re-measure before
 # changing this again — the condition it stands for is "rows this migration will actually
@@ -206,16 +207,12 @@ PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT = "100"
 PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
 # This interval IS the drain rate: a tick archives exactly one session, because
 # PROJECT_DATA_ARCHIVE_WALL_TIME_MS is checked only between candidates and a real candidate takes
-# 43-83 s. 18 min (was one hour until 2026-09-27) triples it to one claim every 20 minutes. It is
-# deliberately short of 20: the */5 cron reaches the archive step 1m15s-3m30s into each invocation,
-# and at a whole-hour interval claims kept missing their tick by seconds (37 claims averaged 62.7 min
-# apart). 18 is never due on the third five-minute tick and is due on the fourth unless the archive
-# step starts over two minutes earlier than at the previous claim (the observed spread is 2m15s),
-# which pushes that one claim to 25 minutes. Per-tick copy work
-# stays bounded by _WALL_TIME_MS, _SWEEP_SESSIONS and _SWEEP_MESSAGE_BUDGET; daily volume by
-# _DAILY_WRITE_BUDGET. Load review: tasks/archive/2026-09-27-triple-archive-drain-speed.md and the
-# archive-sharding notes in apps/www/src/content/docs/docs/reference/configuration.md.
-PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "1080000"
+# 43-83 s. The 2026-10-03 billing firebreak restores the pre-acceleration one-hour cadence,
+# reducing the ceiling from roughly 72 sessions/day back to roughly 24/day. The raised daily write
+# budget remains harmless at this cadence because the cadence, not the allowance, binds. See the
+# rollback guidance in tasks/archive/2026-09-27-triple-archive-drain-speed.md and the cost audit
+# notes in the 2026-10-03 billing-alert PR.
+PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "3600000"
 PROJECT_DATA_ARCHIVE_SHARD_COUNT = "128"
 PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS = "1"
 # Only `migrating` fences per tick; the real throughput bound is _DAILY_WRITE_BUDGET. Each
