@@ -275,7 +275,7 @@ PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS = "3"
 PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS = "604800000"
 PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS = "604800000"
 # Failed journals wait this long before a sweep retries them, so three faults poison a row over
-# hours, not three consecutive 15-minute ticks.
+# hours, not three consecutive sweep cadence ticks.
 PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS = "3600000"
 PROJECT_DATA_ARCHIVE_CHUNK_ROWS = "500"
 PROJECT_DATA_ARCHIVE_CHUNK_BYTES = "16777216"
