@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 )
@@ -33,6 +34,10 @@ func snapshotWIPBundleBasis(ctx context.Context, git snapshotGitCommand) []strin
 	commit, err := git(ctx, nil, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD^{commit}")
 	commit = strings.TrimSpace(commit)
 	if err != nil || !isSnapshotObjectID(commit) {
+		// Visible on purpose: without a basis the bundle silently grows back to
+		// the full branch history that kept idle sessions awake.
+		slog.Warn("Snapshot WIP bundle basis unavailable; bundling full branch history",
+			"ref", "refs/remotes/origin/HEAD", "resolved", commit, "error", err)
 		return nil
 	}
 	return []string{"^" + commit}
@@ -62,7 +67,7 @@ func snapshotBundlePrerequisites(path string) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("snapshot bundle header is truncated: %w", err)
 		}
-		line = strings.TrimSuffix(line, "\n")
+		line = strings.TrimRight(line, "\r\n")
 		if line == "" {
 			return prerequisites, nil
 		}

@@ -239,15 +239,16 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, input *sessionSna
 		})
 	}
 	workDir := standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
-	var snapshotTarget *containerSnapshotTarget
-	if !s.config.IsStandaloneMode() {
-		snapshotTarget = input.containerTarget
-		if snapshotTarget == nil {
-			snapshotTarget, err = s.resolveContainerSnapshotTarget(ctx, runtime)
-			if err != nil {
-				return nil, newSnapshotResolveError(prepare.Generation, err)
-			}
+	// A caller-frozen container target is authoritative: eviction pins the exact
+	// Docker identity it snapshots. Otherwise devcontainer workspaces resolve one.
+	snapshotTarget := input.containerTarget
+	if snapshotTarget == nil && !s.config.IsStandaloneMode() {
+		snapshotTarget, err = s.resolveContainerSnapshotTarget(ctx, runtime)
+		if err != nil {
+			return nil, newSnapshotResolveError(prepare.Generation, err)
 		}
+	}
+	if snapshotTarget != nil {
 		workDir = snapshotTarget.workDir
 	}
 	capture := snapshotArtifactCapture{server: s, target: snapshotTarget, workDir: workDir, token: callbackToken, prepare: prepare, threshold: entryThreshold, budget: totalBudget, idleTimeout: idleTimeout, progress: progress, manifest: &manifest}

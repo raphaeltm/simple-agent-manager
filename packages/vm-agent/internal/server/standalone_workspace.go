@@ -108,6 +108,9 @@ func (s *Server) cloneStandaloneRepository(ctx context.Context, runtime *Workspa
 	// access lazy-fetches through the persistent credential helper installed
 	// by ConfigureStandaloneGitCredentialHelper.
 	cloneFilter := s.config.StandaloneCloneFilter
+	// Never add --single-branch: a single-branch clone has no
+	// refs/remotes/origin/HEAD, which session snapshots use to leave
+	// default-branch history out of the WIP bundle (session_snapshot_bundle.go).
 	args := []string{"clone"}
 	if cloneFilter != "" {
 		args = append(args, "--filter="+cloneFilter)

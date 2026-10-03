@@ -272,7 +272,7 @@ func (s *Server) downloadAndRestoreContainerWIPWithGitState(ctx context.Context,
 	worktreeRef, worktreeCommit := snapshotBundleRef(refs, "/worktree")
 	indexRef, indexCommit := snapshotBundleRef(refs, "/index")
 	if worktreeRef != "" && indexRef != "" {
-		if output, err := s.containerGit(ctx, target, nil, "fetch", containerPath, worktreeRef, indexRef); err != nil {
+		if output, err := s.containerGit(ctx, target, nil, "fetch", "--", containerPath, worktreeRef, indexRef); err != nil {
 			return fmt.Errorf("fetch container snapshot bundle: %w: %s", err, output)
 		}
 		if err := restoreSnapshotGitState(ctx, gitCommand, gitState); err != nil {
@@ -296,7 +296,7 @@ func (s *Server) downloadAndRestoreContainerWIPWithGitState(ctx context.Context,
 		legacyRef = ref
 		break
 	}
-	if output, err := s.containerGit(ctx, target, nil, "fetch", containerPath, legacyRef); err != nil {
+	if output, err := s.containerGit(ctx, target, nil, "fetch", "--", containerPath, legacyRef); err != nil {
 		return fmt.Errorf("fetch legacy container snapshot bundle: %w: %s", err, output)
 	}
 	if err := restoreSnapshotGitState(ctx, gitCommand, gitState); err != nil {
