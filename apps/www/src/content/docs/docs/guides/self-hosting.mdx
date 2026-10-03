@@ -410,6 +410,15 @@ What to do, by what the card shows:
   width="375"
 />
 
+**Recover space**, on each row under **Storage telemetry**, frees space when a project's storage is at Cloudflare's 10 GiB per-object cap. At the cap nothing else can write to that storage, including the archive drain. It removes the search index (grouped rows and their full-text entries) of the largest old, ended sessions. Message text is never touched; those sessions fall back to a narrower plain-text search.
+
+1. Enter a reason.
+2. Keep or adjust the limits for the run: sessions, rows and size in MiB. They start at `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_DEFAULT_MAX_*` and cannot exceed the `PROJECT_DATA_GROUPED_FTS_WALL_RECOVERY_MAX_*` ceilings.
+3. Click **Preview** to see what would be pruned without changing anything.
+4. Click **Recover**. The result shows the measured change in storage size.
+
+If a page fails, pages before it may already have been applied, and nothing retries on its own. For a session that keeps failing, click **Skip this session next run**, then run again. Search entries that did not fit at the cap are reported as left stale: search ignores them, but they keep using space until the index is rebuilt. The button calls `POST /api/admin/project-data/storage/:projectId/grouped-fts-wall-recovery`.
+
 ## Teardown
 
 To remove all resources: Actions → Teardown → Run workflow → type `DELETE` to confirm.
