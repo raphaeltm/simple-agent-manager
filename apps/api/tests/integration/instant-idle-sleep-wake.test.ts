@@ -39,6 +39,7 @@ import { chatRoutes } from '../../src/routes/chat';
 import { agentSessionSuspendResumeRoutes } from '../../src/routes/workspaces/agent-session-suspend-resume';
 import { agentSessionRoutes } from '../../src/routes/workspaces/agent-sessions';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep-execution';
+import { endSessionSleepEpisodeBlocked } from '../../src/services/session-sleep-fallback';
 import {
   completeSessionSnapshot,
   prepareSessionSnapshot,
@@ -650,6 +651,69 @@ describe('Instant session wake after idle sleep', () => {
 
   // Control: only a wake from sleep is committed. A crash recovery of a session that never slept
   // leaves the session's status alone, since `wakeSession` would also revive a failed one.
+  describe('a sleep episode that ended blocked', () => {
+    // An Instant session has no transcript-and-Git fallback, so a bounded episode whose
+    // snapshots kept failing ends blocked (`session-sleep-fallback.ts`). The container's
+    // own idle timeout holds a complete checkpoint here, yet must leave the episode to the
+    // person: reopening it would start another bounded episode on every idle timeout.
+    async function endEpisodeBlocked(): Promise<void> {
+      // The sweep ends an episode against the row state it observed.
+      const observed = d1
+        .prepare(
+          `SELECT sleep_status AS sleepStatus, sleep_episode_failures AS failures
+             FROM session_snapshots WHERE chat_session_id = ?`
+        )
+        .get(CHAT_SESSION_ID) as { sleepStatus: string | null; failures: number | null };
+      await expect(
+        endSessionSleepEpisodeBlocked(env, {
+          chatSessionId: CHAT_SESSION_ID,
+          reason: 'unsupported_runtime',
+          trigger: 'attempt_budget',
+          lastError: 'Workspace snapshot completion was not durably verified',
+          expected: {
+            kind: 'observed',
+            sleepStatus: observed.sleepStatus,
+            sleepEpisodeFailures: observed.failures ?? 0,
+          },
+        })
+      ).resolves.toBe(true);
+    }
+
+    function episode() {
+      return d1
+        .prepare(
+          `SELECT sleep_status, sleeping_at IS NOT NULL AS asleep,
+                  json_extract(sleep_fallback_json, '$.outcome') AS outcome
+             FROM session_snapshots WHERE chat_session_id = ?`
+        )
+        .get(CHAT_SESSION_ID);
+    }
+
+    it('is left for the person by the container idle timeout', async () => {
+      await endEpisodeBlocked();
+      const renewActivityTimeout = vi.fn(async () => {});
+      Object.assign(container, { renewActivityTimeout });
+
+      await sleepOnContainerIdleTimeout();
+
+      // The container stayed up and re-armed its idle timer instead of sleeping.
+      expect(vmAgent.running).toBe(true);
+      expect(renewActivityTimeout).toHaveBeenCalledOnce();
+      expect(runtimeRows().workspace).toEqual({ status: 'running' });
+      expect(episode()).toEqual({ sleep_status: 'terminal_failed', asleep: 0, outcome: 'blocked' });
+    });
+
+    it('is reopened when the person asks to sleep', async () => {
+      await endEpisodeBlocked();
+
+      await sleepThroughSessionSleep();
+
+      expect(vmAgent.running).toBe(false);
+      expect(runtimeRows()).toEqual(SLEPT_ROWS);
+      expect(episode()).toEqual({ sleep_status: 'sleeping', asleep: 1, outcome: null });
+    });
+  });
+
   it('leaves a never-slept session alone when its crashed container recovers', async () => {
     sessions.failSession(projectDataSql(), CHAT_SESSION_ID);
     vmAgent.stop();

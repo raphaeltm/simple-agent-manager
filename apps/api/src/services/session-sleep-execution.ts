@@ -2,15 +2,13 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
 import * as projectDataService from './project-data';
 import {
-  classifySessionIdleness,
-  parseHarnessWorkConfig,
-  type SessionIdlenessActivityState,
-} from './session-idleness';
-import { idlenessStateChanged, sessionSleepDeferralReason } from './session-sleep-eligibility';
+  idlenessStateChanged,
+  sessionSleepDeferralReason,
+  sleepTeardownSafetyGate,
+} from './session-sleep-eligibility';
 import { persistSessionSleepFallbackNotice } from './session-sleep-fallback-notices';
 import { confirmSessionSleepFallbackStopping } from './session-sleep-recovery-point';
 import { waitForFinalSessionSnapshot } from './session-sleep-snapshot-wait';
@@ -26,7 +24,6 @@ import {
 import {
   beginSessionSnapshotStopping,
   claimSessionSnapshotSleep,
-  DEFAULT_SESSION_SLEEP_AFTER_MS,
   deferSessionSnapshotStopping,
   ensureSessionSnapshotForSleep,
   failSessionSnapshotSleepBeforeTeardown,
@@ -49,23 +46,7 @@ async function verifyAndBeginSleepTeardown(
     workspace.projectId,
     agentSession.id
   );
-  const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
-  const harnessWorkConfig = parseHarnessWorkConfig(env);
-  // Point-of-no-return gates ask the SAFETY question only. Whoever called
-  // `sleepWorkspaceSession` has already decided this session should sleep —
-  // including the user pressing Sleep on a session that just went idle — so
-  // re-imposing the unattended scheduler's idle interval here would reject
-  // an explicit request for up to SESSION_SLEEP_AFTER_MS.
-  const classifyGate = (state: SessionIdlenessActivityState | null) =>
-    classifySessionIdleness({
-      taskStatus: workspace.taskStatus,
-      taskCompletedAt: workspace.taskCompletedAt,
-      state,
-      now: new Date(),
-      idleAfterMs,
-      harnessWorkConfig,
-      policy: 'prompt-turn-ended',
-    });
+  const classifyGate = sleepTeardownSafetyGate(env, workspace);
   const idlenessBefore = classifyGate(stateBefore);
   if (!stateBefore || !idlenessBefore.idle) {
     throw new Error(sessionSleepDeferralReason(idlenessBefore, stateBefore));
@@ -172,10 +153,13 @@ export async function sleepWorkspaceSession(
   });
 
   const claimId = input.sleepClaimId ?? ulid();
+  // Only the explicit sleep route (the Sleep button) calls without a claim id.
+  const requestedByPerson = !input.sleepClaimId;
   const claim = await claimSessionSnapshotSleep(db, env, {
     chatSessionId: workspace.chatSessionId,
     claimId,
-    force: !input.sleepClaimId,
+    force: requestedByPerson,
+    reopenBlockedEpisode: requestedByPerson,
   });
   if (claim.status === 'unavailable') {
     throw new Error(`Workspace sleep claim unavailable: ${claim.reason}`);

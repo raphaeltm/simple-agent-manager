@@ -38,7 +38,18 @@ export async function claimSessionSnapshotSleep(
     chatSessionId: string;
     claimId: string;
     now?: Date;
+    /**
+     * Claim now, whatever the retry schedule says: an explicit sleep, or the Instant
+     * container's own idle sleep.
+     */
     force?: boolean;
+    /**
+     * A person asked for this sleep. Only such a claim may reopen an episode that ended
+     * blocked, and it starts a fresh one. Every automatic claim, including the Instant
+     * container's idle sleep (`VmAgentContainer.markRuntimeSleeping`), leaves a blocked
+     * episode for the person to act on (`session-sleep-episode.ts`).
+     */
+    reopenBlockedEpisode?: boolean;
   }
 ): Promise<SessionSnapshotSleepClaim> {
   const now = input.now ?? new Date();
@@ -49,14 +60,12 @@ export async function claimSessionSnapshotSleep(
     DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS
   );
   const snapshots = schema.sessionSnapshots;
-  // An explicit sleep is a human retry: it may claim an episode that ended blocked, and
-  // starts a fresh episode when it does. Automatic claims never touch a blocked episode.
   const blockedEpisode = sql`${sql.raw(blockedSleepEpisodeSql('session_snapshots'))}`;
   const dueCondition = input.force
     ? or(
         isNull(snapshots.sleepStatus),
         inArray(snapshots.sleepStatus, ['scheduled', 'failed']),
-        blockedEpisode
+        input.reopenBlockedEpisode ? blockedEpisode : undefined
       )
     : or(
         and(
