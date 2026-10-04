@@ -27,7 +27,9 @@ import { sessionRecoveryInitialPrompt } from '../../src/services/session-sleep-f
 import { findRestorableOrInFlightSleepSnapshot } from '../../src/services/session-snapshot-sleep-predicate';
 import {
   cancelScheduledSessionSleep,
+  claimSessionSnapshotRecovery,
   completeSessionSnapshot,
+  completeSessionSnapshotRecovery,
   recordSessionSnapshotProgress,
 } from '../../src/services/session-snapshots';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
@@ -219,7 +221,7 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       .run();
     sqlite
       .prepare(
-        `INSERT INTO workspaces
+        `INSERT OR IGNORE INTO workspaces
            (id, node_id, project_id, user_id, chat_session_id, status, branch, updated_at)
          VALUES (?, 'node-wake', 'project-1', 'user-1', ?, 'running', 'sam/feature', ?)`
       )
@@ -368,6 +370,8 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       schema.agentSessions,
       schema.sessionSnapshots,
       schema.computeUsage,
+      // Read by the wake claim's archive-migration fence.
+      schema.projectDataSessionLocations,
     ]);
     sqlite.exec(
       'CREATE UNIQUE INDEX idx_session_snapshots_chat_session_id ON session_snapshots(chat_session_id)'
@@ -785,6 +789,37 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       expect(restore.manifest).not.toHaveProperty('acpSessionId');
     });
 
+    it('ends with the wake, so the next restore resumes the agent session again', async () => {
+      seedSession({ id: 'a' });
+      await spendFullBudget();
+      await sweepAt(tick(3));
+      const db = drizzle(env.DATABASE, { schema });
+
+      // The wake, through the resumer's own claim, restore and commit.
+      await expect(
+        claimSessionSnapshotRecovery(db, env, {
+          chatSessionId: 'chat-a',
+          userId: 'user-1',
+          taskId: 'wake-task',
+          now: tick(4),
+        })
+      ).resolves.toMatchObject({ status: 'claimed' });
+      expect((await restoreResponse()).manifest).not.toHaveProperty('acpSessionId');
+      await expect(
+        completeSessionSnapshotRecovery(db, 'chat-a', 'wake-task', 'ws-wake-a')
+      ).resolves.toBe(true);
+      expect(row()).toMatchObject({
+        sleeping_at: null,
+        sleep_fallback_json: null,
+        sleep_episode_failures: 0,
+        sleep_episode_started_at: null,
+      });
+
+      // The next sleep's complete capture: its wake loads the agent session normally.
+      completeGeneration('chat-a', 'ws-wake-a', 'gen-after-wake', 'complete');
+      expect((await restoreResponse()).manifest).toMatchObject({ acpSessionId: 'acp-1' });
+    });
+
     it('still resumes the agent session after an ordinary sleep', async () => {
       seedSession({ id: 'a' });
       capture = 'complete';
@@ -1133,19 +1168,30 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       expect(captureCount).toBe(3);
     });
 
-    it('falls back on elapsed time exactly at the configured budget', async () => {
+    // The retry falls due on the boundary itself, and the attempt budget is out of reach,
+    // so only elapsed time decides between a second full attempt and the fallback.
+    it.each([
+      { name: 'a millisecond before the budget gives a full attempt', offsetMs: -1, captures: 2 },
+      { name: 'exactly at the budget falls back instead', offsetMs: 0, captures: 1 },
+    ])('elapsed time $name', async ({ offsetMs, captures }) => {
+      const budgetMs = 12 * 60 * 1000;
       seedSession({ id: 'a' });
       capture = 'unreachable';
-      env.SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS = String(12 * 60 * 1000);
+      env.SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS = String(budgetMs);
+      env.SESSION_SLEEP_FAILURE_MAX_ATTEMPTS = '10';
+      env.SESSION_SLEEP_RETRY_DELAY_MS = String(budgetMs + offsetMs);
       await sweepAt(tick(0));
-      // One failure, 12 minutes minus a millisecond: still a full attempt.
-      await sweepAt(new Date(tick(0).getTime() + 12 * 60 * 1000 - 1));
-      expect(captureCount).toBe(2);
-      // Exactly 12 minutes after the episode began: the fallback, not a third capture.
-      capture = 'home-skipped';
-      await sweepAt(new Date(tick(0).getTime() + 2 * 12 * 60 * 1000));
-      expect(captureCount).toBe(2);
-      expect(fallbackRecord()).toMatchObject({ outcome: 'blocked', trigger: 'elapsed_budget' });
+      expect(captureCount).toBe(1);
+
+      await sweepAt(new Date(tick(0).getTime() + budgetMs + offsetMs));
+
+      expect(captureCount).toBe(captures);
+      if (captures === 1) {
+        // No commit was ever captured, so the fallback ends the episode blocked.
+        expect(fallbackRecord()).toMatchObject({ outcome: 'blocked', trigger: 'elapsed_budget' });
+      } else {
+        expect(row()).toMatchObject({ sleep_status: 'failed', sleep_episode_failures: 2 });
+      }
     });
 
     it('gives a full attempt below the attempt budget and the fallback at it', async () => {

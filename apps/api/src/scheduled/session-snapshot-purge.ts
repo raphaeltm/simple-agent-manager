@@ -53,7 +53,7 @@ function emptySessionSnapshotPurgeStats(
  * sleep fallback slept with (`sleep_fallback_json`, `session-sleep-episode.ts`), so a
  * fallback sleep keeps the same wake window and is cleaned up — R2 bundle included —
  * exactly like any other sleep. Other degraded sleeps predate the fallback and are left
- * as they were (tracked separately) rather than terminalized in bulk by this change.
+ * as they were (idea 01M05HTJHCWXCG5YZJ6TB3Y2AG) rather than terminalized in bulk here.
  */
 const PURGEABLE_SLEEPING_SNAPSHOT_SQL = `(status = 'available'
          OR (status = 'degraded' AND sleep_fallback_json IS NOT NULL))`;
