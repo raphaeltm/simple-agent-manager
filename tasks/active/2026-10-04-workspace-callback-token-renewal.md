@@ -103,9 +103,39 @@ gets `401 Invalid or expired callback token` on every workspace-scoped callback.
 5. **ACP SessionHost:** read the callback token through a lock-free accessor that renewal updates
    (rule 46: nothing reachable from the ACP notification goroutine may take `mu`).
 
+Changes from local review (security, Go, Cloudflare, test, task-completion, docs, env):
+
+6. **VM-only renewal.** The route refuses Instant (cf-container) workspaces, like delivery. A
+   container generation is replaced under the same nodeId and the route cannot tell a superseded
+   generation from the current one, so renewing would let a surviving old generation extend its
+   workspace authority. Instant containers get a fresh token per cold wake, as before. Follow-up:
+   `tasks/backlog/2026-10-04-instant-generation-aware-callback-token-renewal.md`.
+7. **Rate limit (rule 28 §4).** Authenticated renewal attempts count against
+   `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL` (default 12 per `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL_WINDOW_SECONDS`
+   = 3600) per workspace, in one guarded D1 upsert (migration 0179, cascade-deleted with the
+   workspace). A slot is spent only after both proofs, the node binding and the active check, so a
+   caller without the credentials cannot use up the legitimate agent's quota. 429 + `Retry-After`;
+   the agent backs off.
+8. **Every consumer reads the current token.** A new concurrency test found that
+   `callbackTokenForWorkspace`/`workspaceCallbackToken` read `runtime.CallbackToken` through a shared
+   pointer outside `workspaceMu` while renewal writes it under the lock (a real data race). All
+   readers now take the lock (SessionHost creation, git credential auth, publish, provisioning,
+   standalone clone). Publish jobs (up to `DeployBuildPublishTimeout`) read the current token per
+   request instead of the one captured at start.
+9. **Identity check on install.** The agent never installs a renewed or delivered token whose claims
+   name another workspace or a node (claims read unverified; the control plane verifies). A renewal
+   response like that is retried after backoff, not latched.
+10. **One delivered token per hibernate wait.** The sleep wait loop repeats the hibernate request
+    every poll until the agent accepts it, and the agent installs a delivered token whether or not
+    it accepts. One token minted for the first poll now serves every poll (binding checked at that
+    mint, before the first delivery), instead of up to ~300 signs and 600 D1 reads.
+11. The agent's ratio clamp matches the control plane: non-finite means the default, finite values
+    clamp to 0.1-0.9.
+
 ## Implementation checklist
 
 ### API
+
 - [x] `jwt.ts`: renewal signing preserves generation (`gen_iat`); claim readers live in
       `callback-token-claims.ts` (tests partially mock `jwt.ts`); stale guard reads `gen_iat` first
 - [x] New service `workspace-callback-token-renewal.ts`: dual-proof verification, D1 binding checks
@@ -119,8 +149,14 @@ gets `401 Invalid or expired callback token` on every workspace-scoped callback.
 - [x] `node-agent-session-snapshots.ts`: include fresh token on hibernate when bound + active (VM only)
 - [x] Env vars documented: env-reference skill (API `CALLBACK_TOKEN_*`, agent `WORKSPACE_CALLBACK_TOKEN_*`,
       `MSG_AUTH_RENEWAL_WAIT`), public VM agent reference
+- [x] Review: atomic per-workspace renewal limit (migration 0179, `workspace-callback-token-renewal-rate-limit.ts`,
+      `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL[_WINDOW_SECONDS]`, 429 + Retry-After)
+- [x] Review: renewal refuses Instant runtimes (`isInstantRuntimeBinding`, shared with delivery)
+- [x] Review: one delivered token per hibernate wait (`HibernateCallbackTokenDelivery`, a plain memo object
+      so the partial `node-agent` mocks in the sleep suites keep working)
 
 ### VM agent
+
 - [x] Config: renewal ratio (clamped), retry initial/max, request timeout
 - [x] `workspace_callback_token_renewal.go`: due selection with injected clock, request with both
       tokens, response classification, bounded backoff, rejection latch keyed on the token, CAS apply
@@ -129,8 +165,14 @@ gets `401 Invalid or expired callback token` on every workspace-scoped callback.
 - [x] `acp.SessionHost`: lock-free current-token accessor + `SetCallbackToken`; replace reads
 - [x] `messagereport`: stale-token retry, park-on-401 without deleting rows, resume on new token,
       pause beyond `MSG_AUTH_RENEWAL_WAIT` reported once (slog.Error + node errorreport)
+- [x] Review: all `runtime.CallbackToken` reads under `workspaceMu` (data race found by the new
+      host-creation test)
+- [x] Review: publish job reporter and publish control plane read the current token per request
+- [x] Review: refuse renewed/delivered tokens naming another workspace or a node
+- [x] Review: ratio clamp aligned with the API; `mcp_build.go` split (move-only) under rule 18
 
 ### Tests
+
 - [x] Workers test through the real route (29): renew success (gen preserved, scope, new exp),
       expired denied, node-as-workspace and workspace-as-node proofs denied, foreign/moved node,
       owner mismatch, deleted/stopped/terminal node 410, missing row 410, claim/path mismatch, not-due,
@@ -143,8 +185,17 @@ gets `401 Invalid or expired callback token` on every workspace-scoped callback.
       propagation to reporter + every host of the workspace only; restart hydration; reporter
       park/resume/stale-401/no-duplicate/budget/bounded; hibernate handler uses delivered token
 - [x] `go test -race` for server, messagereport, acp, config
+- [x] Review additions. API: rate limit at-limit/rollover/per-workspace/concurrent/missing-workspace
+      on real SQLite; route-level 429 with Retry-After, where failed-auth attempts do not spend quota;
+      cascade delete in Miniflare D1; Instant refusal (unit + route); move race during renewal; quota
+      race; one delivery per hibernate wait (unit), delivery memoization and supplied token (workers).
+      Agent: 429 backs off; foreign/node token never installed (renewal + delivery); reporter →
+      node error reporter wiring through `getOrCreateReporter`; no token in logs across every outcome;
+      SessionHost created during a token change ends with the new token (200 rounds, -race); publish
+      job events and publish control plane use a token renewed mid-job
 
 ### Docs / rollout
+
 - [x] Public docs: security architecture (callback token scopes, lifetime, renewal), VM agent env
 - [x] Rollout note (PR body): API push heals old agents for snapshot calls only (proven against pinned
       7a9782c90 source); other consumers need new nodes; no hot replacement; AI proxy env token
@@ -152,14 +203,22 @@ gets `401 Invalid or expired callback token` on every workspace-scoped callback.
 
 ## Acceptance criteria
 
-- [ ] A VM workspace awake past 24h keeps working: snapshot prepare/progress/complete, git-token,
-      runtime assets, messages, ACP activity/usage/interactions (new agent)
-- [ ] Old agents: hibernate/snapshot callbacks succeed after 24h via the API push alone
-- [ ] Renewal never mints for: expired tokens, node-only callers, foreign nodes, moved/deleted/
-      stopped workspaces, terminal nodes, superseded Instant generations
-- [ ] No message loss or duplication across a token rotation; 401 handling is bounded
-- [ ] No tokens in logs; responses carrying tokens are `no-store`
-- [ ] Independent security review passes; parent informed of the design
+- [x] A VM workspace awake past 24h keeps working: snapshot prepare/progress/complete, git-token,
+      runtime assets, messages, ACP activity/usage/interactions, publish jobs (new agent).
+      Evidence: `TestWorkspaceTokenRenewal_RenewsAtTheRefreshPointAndKeepsAWorkspaceAlivePast24h`,
+      `..._ReachesParkedReporterAndEverySessionHostOfTheWorkspace`, `TestPublishJob_CallbacksUseATokenRenewedWhileTheJobRuns`,
+      workers "lets a workspace callback that failed after 24h succeed with the renewed token"
+- [x] Old agents: hibernate/snapshot callbacks succeed after 24h via the API push alone.
+      Evidence: `workspace_callback_token_hibernate_test.go` passes unchanged on pinned 7a9782c90
+      (re-verified independently by the test review); workers hibernate-body tests
+- [x] Renewal never mints for: expired tokens, node-only callers, foreign nodes, moved/deleted/
+      stopped workspaces, terminal nodes, any Instant generation (Instant renewal refused entirely),
+      or past the per-workspace rate limit. Evidence: workers suite (34) + unit suite (17)
+- [x] No message loss or duplication across a token rotation; 401 handling is bounded.
+      Evidence: `credential_test.go` (7), server dedupe by messageId, outbox cap
+- [x] No tokens in logs; responses carrying tokens are `no-store`.
+      Evidence: `TestWorkspaceTokenRenewal_NeverLogsATokenValue`, error report body check, route test
+- [ ] Independent security review passes; parent informed of the design (delta re-review pending)
 
 ## Staging
 
@@ -177,6 +236,48 @@ M6 claim/path, M7 delivery status, M8 post-sign re-read, M9 Instant exclusion, M
 Agent A1 expiry ordering, A2 CAS, A3 refusal latch, A4/A5 propagation, A6 persistence, A7 node
 credential retry; reporter R1/R2/R4/R5/R6; SessionHost S1; upsert publish U1. R3 (resume bookkeeping)
 is not a guard: parking is keyed on the rejected token, so a new token resumes by construction.
+
+Review additions, each reverted once with the named test going red:
+
+- M11 Instant refusal removed → unit "refuses an Instant (cf-container) workspace, while the VM
+  control renews" and workers "refuses an Instant (cf-container) workspace..."
+- M12 limit not enforced → workers "limits renewal attempts per workspace, counting only
+  authenticated ones"
+- M13 quota consumed before authentication → same workers test (failed-auth attempts used up the
+  quota and the first valid renewal got 429)
+- M14 delivery not memoized (`??=` → `=`) → workers "mints once for every repeat of a request
+  that shares a delivery" and "delivers the token already minted for an earlier poll"
+- W1 a new delivery object per poll → unit "gives every poll of one hibernate request the same
+  workspace token delivery"
+- G1 adopt identity check removed → `TestWorkspaceTokenDelivery_IgnoresTokensThatAreNotThisWorkspaces`
+- G2 renewal identity check removed → `TestWorkspaceTokenRenewal_IgnoresARenewedTokenForAnotherWorkspace`
+- G3 publish reporter uses captured token → `TestPublishJob_CallbacksUseATokenRenewedWhileTheJobRuns`
+- G4 publish control plane ignores the token source → `TestHTTPControlPlaneUsesTheCurrentTokenForEachRequest`
+- G5 token read outside `workspaceMu` → `TestWorkspaceTokenRenewal_HostCreatedDuringATokenChangeGetsTheNewToken`
+  (race detector)
+- The quota's `workspace_missing` branch is covered at the limiter level only: at the service level
+  the post-sign identity re-read also returns 410, so the branch saves a signature rather than
+  changing the outcome.
+
+## Review results
+
+| Reviewer                     | Outcome                                                                                                                                                                                                                                               |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| security-auditor (full diff) | PASS-WITH-FINDINGS, no new trust boundary. HIGH rate limit fixed; MEDIUM Instant renewal fixed (VM-only); LOW move-race test added; LOW relay header filed as backlog; LOW cf-container token co-location tracked by Idea 01M432G3276YZWCP3HEJ5B25J5  |
+| go-specialist                | No CRITICAL/HIGH. MEDIUM identity check added; MEDIUM host-creation race test added (it found the token-read data race, fixed); MEDIUM O(N) host scan per token change left as a residual (one pass per renewal, ~12h apart); LOW test clock hardened |
+| cloudflare-specialist        | Approve. MEDIUM per-poll re-mint fixed; LOW doc pointer fixed; LOW rate limit fixed                                                                                                                                                                   |
+| test-engineer                | MEDIUM Instant route test (now a refusal test); MEDIUM reporter wiring test added; LOW `UpdateAfterBootstrap` filed as backlog                                                                                                                        |
+| task-completion-validator    | HIGH publish-job custody fixed (live token source); LOW no-token-in-logs test added; ACs checked                                                                                                                                                      |
+| doc-sync-validator           | Rule 54 updated; `security.md` and api-reference wording fixed; AC3 conflict resolved by VM-only renewal                                                                                                                                              |
+| env-validator                | MEDIUM clamp aligned; LOW `.env.example` entries added                                                                                                                                                                                                |
+| constitution-validator       | PASS                                                                                                                                                                                                                                                  |
+
+## Follow-ups
+
+- `tasks/backlog/2026-10-04-snapshot-relay-node-proof-in-body.md`
+- `tasks/backlog/2026-10-04-update-after-bootstrap-workspace-token-writer.md`
+- `tasks/backlog/2026-10-04-instant-generation-aware-callback-token-renewal.md`
+- SAM Idea 01M432G3276YZWCP3HEJ5B25J5 (credentials baked into a running agent process)
 
 ## References
 
