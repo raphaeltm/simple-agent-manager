@@ -209,3 +209,12 @@ explicit sleep after a blocked episode, workspaces already gone, seven-day reten
 
 - Task file committed on the feature branch (recent repo practice lands task files through
   PRs) rather than directly on `main`.
+- Review (2026-10-04): 8 local reviewers. Fixed during review:
+  - **Cloudflare + architecture, high:** the Instant container's automatic `force: true` claim reopened blocked episodes. Fixed with `reopenBlockedEpisode`, set only by the explicit Sleep route (e79503d40).
+  - **Architecture, high:** the teardown safety gate was duplicated; now one `sleepTeardownSafetyGate` (47cfaca19).
+  - **Security, medium:** the fallback notice's quoted error was not redacted; now `sanitizeSessionLifecycleMessage` (a30ad49bd).
+  - **Tests:** the elapsed boundary is pinned at its exact instant, and the fallback wake round trip is covered (59f65bda1).
+- Found after the first cut, before review:
+  - A wake that loads the saved agent session never sends the wake prompt. The restore response now withholds `acpSessionId` after a fallback sleep.
+  - Archive is not offered for awake sessions. The blocked notice now points to the Workspaces page.
+- Staging skipped by explicit user permission for this wave. Evidence is in the PR: vertical-slice tests through `runSessionSleepSweep` and `VmAgentContainer.onActivityExpired`, plus full API unit (11,234) and Workers (1,288) suites.
