@@ -189,6 +189,14 @@ function promptTurnEnded(startedAt: number, endedAt: number): void {
   upsertActivityState(doSql, ACP_ID, { activity: 'idle', observedAt: endedAt, now: endedAt });
 }
 
+/** Delay before a failed sleep is retried (`DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS`). */
+const SLEEP_RETRY_DELAY = 5 * MINUTE;
+
+/**
+ * A `session_snapshots` row. A failed sleep keeps a due `sleep_after` and a small
+ * attempt count, so the row is in flight under both the current predicate and the
+ * bounded-episode predicate the sleep-budget task is introducing.
+ */
 function seedSleepRecord(o: {
   sleepStatus: string;
   sleepingAt?: number | null;
@@ -203,7 +211,7 @@ function seedSleepRecord(o: {
                                     sleep_claimed_at, sleep_attempts, recovery_attempts,
                                     created_at, updated_at)
      VALUES ('snapshot-1', ?, ?, ?, 'user-1', ?, 'vm', ?, ?, 'manifest-key', 'home-key', ?, ?, ?,
-             NULL, ?, 94, 0, ?, ?)`
+             ?, ?, 2, 0, ?, ?)`
   ).run(
     PROJECT_ID,
     WORKSPACE_ID,
@@ -214,17 +222,25 @@ function seedSleepRecord(o: {
     iso(T0 + 7 * 24 * HOUR),
     o.sleepingAt == null ? null : iso(o.sleepingAt),
     o.sleepStatus,
+    o.sleepClaimedAt == null || o.sleepStatus === 'sleeping'
+      ? null
+      : iso(o.sleepClaimedAt + SLEEP_RETRY_DELAY),
     o.sleepClaimedAt == null ? null : iso(o.sleepClaimedAt),
     iso(T0 - 30 * HOUR),
     iso(T0 - 30 * HOUR)
   );
 }
 
-/** A retry claim re-stamps the in-flight anchor, exactly as the sleep sweep does. */
+/**
+ * One more failed attempt: the claim stamps `sleep_claimed_at` and the failure
+ * reschedules `sleep_after`, the timestamps the in-flight predicate ages from. The
+ * status stays `failed`, as every 5-minute sample of the incident showed.
+ */
 function retryClaim(at: number): void {
   d1.prepare(
-    `UPDATE session_snapshots SET sleep_claimed_at = ?, updated_at = ? WHERE id = 'snapshot-1'`
-  ).run(iso(at), iso(at));
+    `UPDATE session_snapshots SET sleep_claimed_at = ?, sleep_after = ?, updated_at = ?
+      WHERE id = 'snapshot-1'`
+  ).run(iso(at), iso(at + SLEEP_RETRY_DELAY), iso(at));
 }
 
 function env(overrides: Partial<Record<string, unknown>> = {}): Env {
@@ -410,6 +426,42 @@ describe('live-runtime record: what kept the task, and why', () => {
     ]);
   });
 
+  it('records an active prompt turn with its basis and ages', async () => {
+    seedTask({ startedAt: T0 - 9 * HOUR });
+    seedLiveRuntime({ generationStartedAt: T0 - 9 * HOUR, nodeHeartbeatAt: T0 - 30_000 });
+    seedAcpSession({ heartbeatAt: T0 - 20_000 });
+    upsertActivityState(doSql, ACP_ID, {
+      activity: 'prompting',
+      observedAt: T0 - 90 * MINUTE,
+      now: T0 - 90 * MINUTE,
+    });
+    // A persisted message refreshes the turn's activity clock while it works.
+    upsertActivityState(doSql, ACP_ID, {
+      activity: 'prompting',
+      observedAt: T0 - 2 * MINUTE,
+      now: T0 - 2 * MINUTE,
+    });
+
+    await recoverStuckTasks(env());
+
+    const [row] = liveRuntimeRows();
+    expect(row.level).toBe('info');
+    expect(row.context).toMatchObject({
+      preservationKey: 'task_prompt_turn_active:prompt_turn_active',
+      livenessReason: 'task_prompt_turn_active',
+      workState: 'prompt_turn_active',
+      activity: 'prompting',
+      lastActivityAgeMs: 2 * MINUTE,
+      promptStartedAgeMs: 90 * MINUTE,
+      runtimeGenerationMs: 9 * HOUR,
+      sleepOutcome: null,
+    });
+    expect(row.message).toContain(
+      'a prompt turn is in progress (last activity 2m ago; turn started 1h 30m ago).'
+    );
+    expect(row.message).toContain('(now 540 min)');
+  });
+
   it('names the failing sleep that is not releasing an idle runtime', async () => {
     seedIdleConversation();
     seedSleepRecord({ sleepStatus: 'failed', sleepClaimedAt: T0 - 2 * MINUTE });
@@ -494,7 +546,12 @@ describe('live-runtime record: what kept the task, and why', () => {
     await recoverStuckTasks(env());
 
     const persisted = JSON.stringify(liveRuntimeRows());
-    const logged = JSON.stringify([...logSpy.info.mock.calls, ...logSpy.warn.mock.calls]);
+    const logged = JSON.stringify([
+      ...logSpy.info.mock.calls,
+      ...logSpy.warn.mock.calls,
+      ...logSpy.error.mock.calls,
+      ...logSpy.debug.mock.calls,
+    ]);
     for (const canary of ['CANARY-PROMPT-8f2c', 'CANARY-ERROR-91ab', 'sk-live-secret']) {
       expect(persisted).not.toContain(canary);
       expect(logged).not.toContain(canary);
@@ -579,6 +636,8 @@ describe('live-runtime record: what kept the task, and why', () => {
     expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
     expect(result.heartbeatSkipped).toBe(0);
     expect(liveRuntimeRows()).toHaveLength(0);
+    // Liveness: the sweep did select and evaluate the task (`.claude/rules/62`).
+    expect(result.candidatesScanned).toBe(1);
   });
 
   /**
