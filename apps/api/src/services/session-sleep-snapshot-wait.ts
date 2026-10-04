@@ -4,7 +4,7 @@ import type * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { hibernateAgentSessionOnNode, hibernateCallbackTokenDelivery } from './node-agent';
+import { hibernateAgentSessionOnNode,type HibernateCallbackTokenDelivery } from './node-agent';
 import {
   completeActiveSessionSnapshotAsDegraded,
   getSessionSnapshotCaptureState,
@@ -68,10 +68,7 @@ export async function waitForFinalSessionSnapshot(
   let lastProgressAt = Date.now();
   let lastProgressToken = '';
   // One delivered workspace token for every poll of this request, not one per poll.
-  const deliverWorkspaceCallbackToken = hibernateCallbackTokenDelivery(env, {
-    workspaceId: input.workspaceId,
-    nodeId: input.nodeId,
-  });
+  const tokenDelivery: HibernateCallbackTokenDelivery = {};
 
   while (Date.now() < requestDeadline) {
     const current = await getSessionSnapshotCaptureState(db, input.chatSessionId);
@@ -96,7 +93,7 @@ export async function waitForFinalSessionSnapshot(
         agentType: input.agentType,
         background: true,
       },
-      deliverWorkspaceCallbackToken
+      tokenDelivery
     )) as SnapshotResult & { accepted?: unknown };
     if (result.status !== 'pending') {
       throw new Error(`Workspace snapshot request was not accepted (${String(result.status)})`);

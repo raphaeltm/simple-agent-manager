@@ -57,21 +57,14 @@ function requestSessionSnapshot(
   );
 }
 
-/** Supplies the workspace token one hibernate request delivers; null delivers none. */
-export type HibernateCallbackTokenDelivery = () => Promise<string | null>;
-
 /**
- * Mint at most one delivered workspace token for repeats of the same hibernate request.
- * The agent installs a delivered token as soon as it reads the request, accepted or not,
- * so a caller that repeats the request until the agent accepts it resends the token it
- * minted first instead of signing a new one on every poll.
+ * Lets repeats of one hibernate request, for one workspace and node, share the workspace
+ * token minted for the first. The agent installs a delivered token as soon as it reads the
+ * request, accepted or not, so a caller that repeats the request until the agent accepts
+ * it passes the same object every time instead of signing a new token on every poll.
  */
-export function hibernateCallbackTokenDelivery(
-  env: Env,
-  target: { workspaceId: string; nodeId: string }
-): HibernateCallbackTokenDelivery {
-  let minted: Promise<string | null> | undefined;
-  return () => (minted ??= mintWorkspaceCallbackTokenForNodeDelivery(env, target));
+export interface HibernateCallbackTokenDelivery {
+  minted?: Promise<string | null>;
 }
 
 export async function hibernateAgentSessionOnNode(
@@ -81,15 +74,13 @@ export async function hibernateAgentSessionOnNode(
   env: Env,
   userId: string,
   input: SessionSnapshotRequest,
-  deliverWorkspaceCallbackToken: HibernateCallbackTokenDelivery = hibernateCallbackTokenDelivery(
-    env,
-    { workspaceId, nodeId }
-  )
+  delivery: HibernateCallbackTokenDelivery = {}
 ): Promise<unknown> {
   // The capture's prepare/progress/complete/failure callbacks authenticate with the
   // workspace token the agent holds. Deliver a fresh one over this node-management
   // request, exactly as create/restore do, so a long-awake workspace can still sleep.
-  const workspaceCallbackToken = await deliverWorkspaceCallbackToken();
+  delivery.minted ??= mintWorkspaceCallbackTokenForNodeDelivery(env, { workspaceId, nodeId });
+  const workspaceCallbackToken = await delivery.minted;
   return requestSessionSnapshot('hibernate', nodeId, workspaceId, sessionId, env, userId, {
     ...input,
     ...(workspaceCallbackToken ? { workspaceCallbackToken } : {}),

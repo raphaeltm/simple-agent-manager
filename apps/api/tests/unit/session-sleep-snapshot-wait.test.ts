@@ -9,12 +9,10 @@ import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
   hibernateAgentSessionOnNode: vi.fn(),
-  hibernateCallbackTokenDelivery: vi.fn(),
 }));
 
 vi.mock('../../src/services/node-agent', () => ({
   hibernateAgentSessionOnNode: mocks.hibernateAgentSessionOnNode,
-  hibernateCallbackTokenDelivery: mocks.hibernateCallbackTokenDelivery,
 }));
 
 describe('waitForFinalSessionSnapshot', () => {
@@ -109,9 +107,6 @@ describe('waitForFinalSessionSnapshot', () => {
         SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS: '1000',
         SESSION_SNAPSHOT_POLL_INTERVAL_MS: '1',
       } as unknown as Env;
-      const delivery = vi.fn(async () => 'delivered-token');
-      mocks.hibernateCallbackTokenDelivery.mockReset();
-      mocks.hibernateCallbackTokenDelivery.mockReturnValueOnce(delivery);
       mocks.hibernateAgentSessionOnNode.mockReset();
       mocks.hibernateAgentSessionOnNode
         .mockResolvedValueOnce({ status: 'pending', accepted: false })
@@ -127,15 +122,11 @@ describe('waitForFinalSessionSnapshot', () => {
         userId: 'user-1',
       });
 
-      expect(mocks.hibernateCallbackTokenDelivery).toHaveBeenCalledTimes(1);
-      expect(mocks.hibernateCallbackTokenDelivery).toHaveBeenCalledWith(testEnv, {
-        workspaceId: 'workspace-1',
-        nodeId: 'node-1',
-      });
       const calls = mocks.hibernateAgentSessionOnNode.mock.calls;
       expect(calls).toHaveLength(3);
+      expect(calls[0][6]).toEqual(expect.any(Object));
       for (const call of calls) {
-        expect(call[6]).toBe(delivery);
+        expect(call[6]).toBe(calls[0][6]);
       }
     } finally {
       sqlite.close();

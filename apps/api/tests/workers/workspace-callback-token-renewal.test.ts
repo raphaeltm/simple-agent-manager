@@ -24,7 +24,7 @@ import {
 } from '../../src/services/jwt';
 import {
   hibernateAgentSessionOnNode,
-  hibernateCallbackTokenDelivery,
+  type HibernateCallbackTokenDelivery,
 } from '../../src/services/node-agent-session-snapshots';
 import { mintWorkspaceCallbackTokenForNodeDelivery } from '../../src/services/workspace-callback-token-binding';
 import {
@@ -519,24 +519,44 @@ describe('hibernateAgentSessionOnNode workspace token delivery', () => {
   });
 
   it('mints once for every repeat of a request that shares a delivery', async () => {
-    const deliver = hibernateCallbackTokenDelivery(testEnv, {
-      workspaceId: WS_ACTIVE,
-      nodeId: NODE_ID,
-    });
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ status: 'pending', accepted: false }), { status: 202 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const delivery: HibernateCallbackTokenDelivery = {};
+    const poll = () =>
+      hibernateAgentSessionOnNode(
+        NODE_ID,
+        WS_ACTIVE,
+        'agent-session-1',
+        testEnv,
+        USER_ID,
+        { chatSessionId: 'chat-1', runtime: 'vm', background: true },
+        delivery
+      );
 
-    const first = deliver();
-    expect(deliver()).toBe(first);
+    await poll();
+    const minted = delivery.minted;
+    expect(minted).toBeInstanceOf(Promise);
+    await poll();
+
+    expect(delivery.minted).toBe(minted);
+    const tokens = fetchMock.mock.calls.map(
+      ([, init]) => JSON.parse(String((init as RequestInit).body)).workspaceCallbackToken
+    );
+    expect(tokens).toEqual([await minted, await minted]);
     await expect(
-      verifyCallbackToken((await first) as string, testEnv, { expectedScope: 'workspace' })
+      verifyCallbackToken(tokens[0] as string, testEnv, { expectedScope: 'workspace' })
     ).resolves.toMatchObject({ workspace: WS_ACTIVE });
   });
 
-  it('delivers the token its caller supplies', async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ status: 'pending', accepted: false }), { status: 202 })
+  it('delivers the token already minted for an earlier poll', async () => {
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ status: 'pending', accepted: false }), { status: 202 })
     );
     vi.stubGlobal('fetch', fetchMock);
-    const deliver = vi.fn(async () => 'token-minted-for-the-first-poll');
 
     await hibernateAgentSessionOnNode(
       NODE_ID,
@@ -545,10 +565,9 @@ describe('hibernateAgentSessionOnNode workspace token delivery', () => {
       testEnv,
       USER_ID,
       { chatSessionId: 'chat-1', runtime: 'vm', background: true },
-      deliver
+      { minted: Promise.resolve('token-minted-for-the-first-poll') }
     );
 
-    expect(deliver).toHaveBeenCalledTimes(1);
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(String(init.body)).workspaceCallbackToken).toBe(
       'token-minted-for-the-first-poll'
