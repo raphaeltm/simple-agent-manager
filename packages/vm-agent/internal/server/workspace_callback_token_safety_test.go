@@ -10,6 +10,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"io"
 	"log/slog"
 	"net/http"
@@ -386,5 +387,41 @@ func TestPublishJob_CallbacksUseATokenRenewedWhileTheJobRuns(t *testing.T) {
 	defer mu.Unlock()
 	if eventAuth[0] != "Bearer token-when-the-job-started" {
 		t.Fatalf("first publish callback used %q, want the token the job started with", eventAuth[0])
+	}
+}
+
+func TestDecodeCallbackTokenClaims(t *testing.T) {
+	encode := func(payload string) string {
+		return "eyJhbGciOiJIUzI1NiJ9." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".c2ln"
+	}
+	issued := time.Date(2026, 10, 4, 8, 0, 0, 0, time.UTC)
+
+	claims, ok := decodeCallbackTokenClaims(workspaceTestToken(t, renewalTestWorkspace, issued, 24*time.Hour))
+	if !ok || claims.Workspace != renewalTestWorkspace || claims.Subject != renewalTestWorkspace ||
+		claims.Scope != "workspace" || int64(claims.IssuedAt) != issued.Unix() || int64(claims.ExpiresAt) != issued.Add(24*time.Hour).Unix() {
+		t.Fatalf("decoded %+v ok=%v from a production-shaped token", claims, ok)
+	}
+	// JWT numeric dates may be fractional; padded base64 must decode too.
+	padded := "e30." + base64.URLEncoding.EncodeToString([]byte(`{"workspace":"ws-1","iat":1791108000.5,"exp":1791194400.5}`)) + ".c2ln"
+	if claims, ok := decodeCallbackTokenClaims(padded); !ok || claims.Workspace != "ws-1" || int64(claims.ExpiresAt) != 1791194400 {
+		t.Fatalf("padded/fractional token decoded as %+v ok=%v", claims, ok)
+	}
+
+	for name, token := range map[string]string{
+		"opaque string":      "not-a-jwt",
+		"two segments":       "a.b",
+		"payload not b64":    "a.!!!.c",
+		"payload not json":   encode("not json"),
+		"payload not claims": encode(`["array"]`),
+	} {
+		if _, ok := decodeCallbackTokenClaims(token); ok {
+			t.Fatalf("%s decoded", name)
+		}
+		if callbackTokenNamesOtherWorkspace(token, renewalTestWorkspace) {
+			t.Fatalf("%s was refused; an unreadable token is left for the control plane to reject", name)
+		}
+		if _, _, ok := callbackTokenLifetime(token); ok {
+			t.Fatalf("%s produced a lifetime", name)
+		}
 	}
 }

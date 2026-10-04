@@ -84,7 +84,7 @@ func TestSessionHostCallbackTokenIsRaceFreeAcrossGoroutines(t *testing.T) {
 			case <-stop:
 				return
 			default:
-				if token := host.callbackToken(); token == "" {
+				if host.callbackToken() == "" {
 					t.Error("reader observed an empty callback token")
 					return
 				}

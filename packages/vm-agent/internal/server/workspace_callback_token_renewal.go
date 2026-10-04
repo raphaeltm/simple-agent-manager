@@ -24,6 +24,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -34,8 +35,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/workspace/vm-agent/internal/messagereport"
 )
@@ -169,36 +168,56 @@ func callbackTokenRenewalDue(token string, now time.Time, ratio float64) bool {
 	return !now.Before(issuedAt.Add(time.Duration(float64(lifetime) * ratio)))
 }
 
+// callbackTokenClaims are the claims the agent reads from a workspace callback
+// token it holds or is offered.
+type callbackTokenClaims struct {
+	Workspace string  `json:"workspace"`
+	Scope     string  `json:"scope"`
+	Subject   string  `json:"sub"`
+	IssuedAt  float64 `json:"iat"`
+	ExpiresAt float64 `json:"exp"`
+}
+
+// decodeCallbackTokenClaims decodes a callback token's payload and verifies
+// nothing. Nothing in the agent authenticates anyone with these claims: they only
+// schedule renewal and stop a token the control plane minted for another
+// workspace from being installed. The control plane verifies every token it
+// receives. A token that does not decode returns ok=false.
+func decodeCallbackTokenClaims(token string) (claims callbackTokenClaims, ok bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return callbackTokenClaims{}, false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
+	if err != nil {
+		return callbackTokenClaims{}, false
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return callbackTokenClaims{}, false
+	}
+	return claims, true
+}
+
 // callbackTokenNamesOtherWorkspace reports whether a token's own claims say it is
 // not workspaceID's workspace token: node-scoped, or bound to another workspace
-// (internal/auth/jwt.go applies the same rule to tokens it verifies). Claims are
-// read WITHOUT verifying the signature; this only keeps a control-plane mistake
-// from being installed. A token whose claims cannot be read is left for the
-// control plane to reject.
+// (internal/auth/jwt.go applies the same rule to tokens it verifies). A token
+// whose claims cannot be read is left for the control plane to reject.
 func callbackTokenNamesOtherWorkspace(token, workspaceID string) bool {
-	var claims struct {
-		jwt.RegisteredClaims
-		Workspace string `json:"workspace"`
-		Scope     string `json:"scope"`
-	}
-	if _, _, err := jwt.NewParser().ParseUnverified(token, &claims); err != nil {
+	claims, ok := decodeCallbackTokenClaims(token)
+	if !ok {
 		return false
 	}
 	return claims.Scope == "node" || claims.Workspace != workspaceID ||
 		(claims.Subject != "" && claims.Subject != workspaceID)
 }
 
-// callbackTokenLifetime reads iat/exp WITHOUT verifying the signature. It only
-// schedules renewal; the control plane verifies every token it receives.
+// callbackTokenLifetime reads iat/exp to schedule renewal.
 func callbackTokenLifetime(token string) (issuedAt, expiresAt time.Time, ok bool) {
-	claims := jwt.RegisteredClaims{}
-	if _, _, err := jwt.NewParser().ParseUnverified(token, &claims); err != nil {
+	claims, ok := decodeCallbackTokenClaims(token)
+	if !ok || claims.IssuedAt <= 0 || claims.ExpiresAt <= claims.IssuedAt {
 		return time.Time{}, time.Time{}, false
 	}
-	if claims.IssuedAt == nil || claims.ExpiresAt == nil || !claims.ExpiresAt.After(claims.IssuedAt.Time) {
-		return time.Time{}, time.Time{}, false
-	}
-	return claims.IssuedAt.Time, claims.ExpiresAt.Time, true
+	return time.Unix(int64(claims.IssuedAt), 0), time.Unix(int64(claims.ExpiresAt), 0), true
 }
 
 func (s *Server) renewWorkspaceCallbackToken(candidate workspaceTokenRenewalCandidate, nodeToken string) {
@@ -239,13 +258,13 @@ func (s *Server) renewWorkspaceCallbackToken(candidate workspaceTokenRenewalCand
 	}
 }
 
-func workspaceTokenRenewalBackoff(failures int, initial, max time.Duration) time.Duration {
-	delay := initial
-	for i := 1; i < failures && delay < max; i++ {
+func workspaceTokenRenewalBackoff(failures int, initialDelay, maxDelay time.Duration) time.Duration {
+	delay := initialDelay
+	for i := 1; i < failures && delay < maxDelay; i++ {
 		delay *= 2
 	}
-	if delay > max {
-		return max
+	if delay > maxDelay {
+		return maxDelay
 	}
 	return delay
 }
