@@ -181,8 +181,10 @@ export async function endSessionSleepEpisodeBlocked(
 }
 
 /**
- * Run one fallback attempt for a session whose episode left the full phase. Never
- * throws: every outcome is recorded on the row and returned.
+ * Run one fallback attempt for a session whose episode left the full phase. Once it
+ * holds the claim it does not throw: every outcome is recorded on the row and returned.
+ * A failure before that (loading the workspace, the claim itself) has changed nothing,
+ * and the sweep logs it and retries on a later tick.
  */
 export async function runSessionSleepFallback(
   env: Env,
