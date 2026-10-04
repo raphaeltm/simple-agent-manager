@@ -34,8 +34,8 @@ The fix must preserve the user's Sol profile choice. It must not silently downgr
 - VM and Instant startup receive a JSON-safe, process-scoped `CODEX_CONFIG` containing the requested Codex model before ACP initialization.
 - The exact deployed adapter/CLI pair initializes `gpt-6.1-sol` as the current ACP session model and the existing post-handshake exact-selection check succeeds.
 - Unsupported or rejected exact selections still fail closed; SAM never silently runs a fallback model.
-- A real staging VM session and a real staging Instant session both start and complete a prompt using `gpt-6.1-sol`; temporary nodes/workspaces are removed afterward.
-- The PR remains unmerged until the ACP coordinator completes parent review.
+- Historical staging VM/Instant startup and cleanup evidence is retained. Per 2026-10-04 user waiver, successful integrated completion is verified by the user in production after shipping.
+- Ship after local review and CI under Raphaël’s explicit 2026-10-04 merge authorization.
 
 ## References
 
@@ -69,3 +69,12 @@ The fix must preserve the user's Sol profile choice. It must not silently downgr
 - Cleanup is complete: VM session stop returned 200 with `workspaceDeleted=true`; VM node and profile deletion returned 200; the final staging node inventory was empty. The Instant workspace/node/profile were also removed; its initial stop raced container deletion and returned 500, then the stop retry returned 200. No compatibility-test resources remain.
 - Read-only production credential metadata shows the Sol profile remains `gpt-6.1-sol` at medium effort and resolves through an active user-scoped OpenAI Codex `oauth-token` represented by an `auth-json` attachment. No project-scoped or platform OpenAI Codex API-key credential is configured. Production is therefore expected to reach the same ChatGPT-account rejection; API-key entitlement for this model remains unproven. No production prompt, secret retrieval, profile mutation, or credential mutation was performed.
 - Acceptance boundary: ACP startup and exact session selection are proven on VM and Instant. GPT-6.1 provider completion is not proven, so this evidence does not justify new Sol 6.1 task dispatches by itself.
+
+## 2026-10-04 shipping authorization
+
+Raphaël confirms standalone Sol 6.1 works with his account and explicitly requests finishing and shipping this integration: “Let's get #2 done and shipped. I'm okay with skipping staging so I can test here.” This supersedes the previous draft/merge hold and successful staging completion requirement. Historical staging results above remain accurate for September 30; they do not establish current account eligibility. The shared Sol profile remains unchanged. Production completion will be tested by the user after deployment.
+
+- Existing PR CI passed lint, typecheck, test, build and VM-agent test/integration/E2E.
+- Current-main merge-tree check is clean.
+- CodeRabbit was already requested and the required wait completed; rate-limited with no review. No new production code has been added in this continuation.
+- Fresh local ACP suite passed with Go 1.26.6 (29.012s). Independent continuation review passed Go correctness, task completeness under user waiver, model fail-closed behavior, constitution, and current-main compatibility.
