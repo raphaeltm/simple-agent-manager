@@ -12,14 +12,14 @@ import { signCallbackToken, verifyCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
 import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
 import {
-  signalWorkspaceDeletionUnconfirmedCallback,
-  type WorkspaceDeletionCallbackKind,
-} from '../../services/workspace-deletion-callback-signal';
-import {
   sameWorkspaceCallbackIdentity,
   WORKSPACE_CALLBACK_ACTIVE_STATUSES,
   type WorkspaceCallbackIdentitySnapshot,
 } from '../../services/workspace-callback-identity';
+import {
+  signalWorkspaceDeletionUnconfirmedCallback,
+  type WorkspaceDeletionCallbackKind,
+} from '../../services/workspace-deletion-callback-signal';
 import {
   resolveWorkspaceGitSource,
   type WorkspaceGitSourceProject,
