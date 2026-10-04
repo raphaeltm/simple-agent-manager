@@ -123,7 +123,10 @@ killed regardless of node heartbeat status".
         past it; restorable and unknown still defer; grace is configurable
   - [x] persistence dedup: two sweeps write one durable record per basis; a basis change writes a second
   - [x] logs and records contain no prompt or message content (canary test)
-- [ ] Rebase on and verify against the sibling snapshot fix if it lands first.
+- [x] Rebase on and verify against the sibling snapshot fix if it lands first. Not merged yet; verified instead by a
+      local trial merge with `origin/sam/implement-bounded-sleep-failure-yv429q` @ `a714fa741` (clean auto-merge; this
+      branch's 9 suites 349/349 and the sibling's 11 suites 297/297 pass on the merged tree). Re-check at merge time
+      if the sibling lands first.
 
 ## Implementation notes
 
@@ -142,6 +145,20 @@ killed regardless of node heartbeat status".
   and 1 insert only when the (task, basis) pair is new. Before: 1 insert every tick. With ~18 such tasks that is
   at most ~36 extra reads per tick while steady-state writes fall from ~18 to ~0; D1 row writes cost about 1000x
   row reads. No added awaits on a remote target; the ProjectData alarm path gains no I/O.
+
+## Review outcomes (Phase 5, local subagents)
+
+| Reviewer | Status | Outcome |
+| --- | --- | --- |
+| task-completion-validator | PASS | Checks A–F pass; LOW notes only (pre-existing `stuck-tasks.ts` exception not worsened, staging waiver recorded) |
+| cloudflare-specialist | ADDRESSED | MEDIUM multi-session ordering test added (`e06e82221`); LOW LIKE escaping fixed (`615594d29`); LOW evidence cap mismatch (>5 sessions) is a diagnostics-only residual |
+| security-auditor | ADDRESSED | No sensitive data in logs/records; LOW LIKE wildcard dedupe fixed with a discriminating test (`615594d29`) |
+| test-engineer | ADDRESSED | MEDIUM liveness companion and LOW-MEDIUM prompt-active record test added; nits fixed (`728ec5b10`) |
+| architecture-reviewer | PASS | No duplication; arm derivation exhaustive; ceiling grace at the right altitude |
+| constitution-validator | PASS | Grace env-configurable with `DEFAULT_*`; no hardcoded thresholds |
+| doc-sync-validator | ADDRESSED | Docs in sync; LOW follow-ups done (`615594d29`) |
+| env-validator | PASS | Env/docs consistent; no deploy plumbing needed (matches sibling vars) |
+| performance-reviewer | ADDRESSED | MEDIUM per-tick read cost documented; dedupe coupling commented |
 
 ## Acceptance criteria
 
