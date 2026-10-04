@@ -180,6 +180,23 @@ export function serializeSessionSleepFallbackRecord(record: SessionSleepFallback
   return JSON.stringify(v.parse(FallbackRecordSchema, record));
 }
 
+/**
+ * The record of a session that slept through the fallback on the generation it still
+ * holds, or null. Its agent context is older than its conversation, so a wake must start
+ * the agent fresh from the transcript. The wake prompt (`session-recovery.ts`) and the
+ * restore response (`session-snapshot-restore-response.ts`) both key on this, so the wake
+ * that is told to rebuild from the transcript is the one that does not load the old agent
+ * session.
+ */
+export function sleptFallbackRecord(snapshot: {
+  sleepFallbackJson: string | null;
+  snapshotGeneration: string | null;
+}): SessionSleepFallbackRecord | null {
+  const record = parseSessionSleepFallbackRecord(snapshot.sleepFallbackJson);
+  if (record?.outcome !== 'slept' || !record.recoveryPoint) return null;
+  return record.recoveryPoint.generation === snapshot.snapshotGeneration ? record : null;
+}
+
 /** SQL predicate: the row's sleep episode ended blocked (`sleep_status='terminal_failed'`). */
 export function blockedSleepEpisodeSql(alias: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {

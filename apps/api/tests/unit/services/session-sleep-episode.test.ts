@@ -16,6 +16,7 @@ import {
   sessionSleepEpisodePhase,
   sessionSleepEpisodeTrigger,
   type SessionSleepFallbackRecord,
+  sleptFallbackRecord,
 } from '../../../src/services/session-sleep-episode';
 import {
   SESSION_RECOVERY_INITIAL_PROMPT,
@@ -172,6 +173,26 @@ describe('the stored fallback record', () => {
       serializeSessionSleepFallbackRecord({ ...record(), outcome: 'other' } as never)
     ).toThrow();
   });
+
+  it('names a fallback sleep only on the generation it was decided for', () => {
+    const stored = serializeSessionSleepFallbackRecord(record());
+    expect(sleptFallbackRecord({ sleepFallbackJson: stored, snapshotGeneration: 'gen-3' })).toEqual(
+      record()
+    );
+    expect(sleptFallbackRecord({ sleepFallbackJson: stored, snapshotGeneration: 'gen-4' })).toBe(
+      null
+    );
+    const blocked = serializeSessionSleepFallbackRecord(
+      record({ outcome: 'blocked', blockedReason: 'no_git_baseline', recoveryPoint: null })
+    );
+    expect(sleptFallbackRecord({ sleepFallbackJson: blocked, snapshotGeneration: 'gen-3' })).toBe(
+      null
+    );
+    expect(sleptFallbackRecord({ sleepFallbackJson: '{', snapshotGeneration: 'gen-3' })).toBe(null);
+    expect(sleptFallbackRecord({ sleepFallbackJson: null, snapshotGeneration: 'gen-3' })).toBe(
+      null
+    );
+  });
 });
 
 describe('what the user and the woken agent are told', () => {
@@ -198,6 +219,7 @@ describe('what the user and the woken agent are told', () => {
     );
     expect(notice).toContain('SAM put this session to sleep using its last complete snapshot.');
     expect(notice).toContain('Not kept: any change made after that snapshot was saved.');
+    expect(notice).toContain('the agent starts a new session');
   });
 
   it('tells the user what to do when the episode ends blocked', () => {
@@ -210,7 +232,10 @@ describe('what the user and the woken agent are told', () => {
     expect(vm).toContain('SAM could not put this session to sleep.');
     expect(vm).toContain('no saved snapshot records which Git commit the workspace is on');
     expect(vm).toContain('Its workspace keeps running.');
-    expect(vm).toContain('commit and push anything you want to keep, then archive');
+    expect(vm).toContain(
+      'commit and push anything you want to keep, then stop its workspace from the Workspaces page'
+    );
+    expect(vm).not.toContain('archive');
     expect(sessionSleepBlockedNotice(blocked, 'cf-container')).toContain(
       'This Instant workspace keeps running'
     );
@@ -229,8 +254,41 @@ describe('what the user and the woken agent are told', () => {
     const prompt = sessionRecoveryInitialPrompt(record());
     expect(prompt).toContain('Use get_session_messages for this chat session');
     expect(prompt).toContain(`SAM restored commit ${'f'.repeat(40)} on branch sam/feature`);
+    expect(prompt).toContain('Files outside the repository and any changes made after');
+    expect(prompt).toContain('You are starting a new agent session');
     expect(prompt).toContain(`confirm the workspace is at commit ${'f'.repeat(12)}`);
     expect(prompt).toContain('pushes, pull requests, deployments, messages, or API calls');
     expect(prompt).toContain('Then wait for and answer the latest queued follow-up message.');
+  });
+
+  it('says only the skipped files are gone when the snapshot kept files outside the repository', () => {
+    const prompt = sessionRecoveryInitialPrompt(
+      record({
+        recoveryPoint: {
+          ...record().recoveryPoint!,
+          degradation: 'entries-skipped',
+          homeSaved: true,
+        },
+      })
+    );
+    expect(prompt).toContain('Files the snapshot skipped and any changes made after');
+    expect(prompt).not.toContain('Files outside the repository');
+    expect(prompt).toContain('You are starting a new agent session');
+  });
+
+  it('tells a wake from a complete snapshot that later changes are missing', () => {
+    const prompt = sessionRecoveryInitialPrompt(
+      record({
+        recoveryPoint: {
+          ...record().recoveryPoint!,
+          snapshotStatus: 'available',
+          degradation: 'none',
+          homeSaved: true,
+        },
+      })
+    );
+    expect(prompt).toContain('slept from its last complete snapshot');
+    expect(prompt).toContain('SAM restored that snapshot, so changes made after it are not');
+    expect(prompt).toContain('You are starting a new agent session');
   });
 });

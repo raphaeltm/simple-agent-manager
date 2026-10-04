@@ -20,10 +20,10 @@ import type * as schema from '../db/schema';
 import type { Env } from '../env';
 import { maybeJsonRecord, parseJsonRecord } from '../lib/runtime-validation';
 import {
-  parseSessionSleepFallbackRecord,
   type SessionSleepBlockedReason,
   type SessionSleepFallbackRecord,
   type SessionSleepRecoveryPoint,
+  sleptFallbackRecord,
 } from './session-sleep-episode';
 import { verifySessionSnapshotRecordedArtifacts } from './session-snapshot-artifacts';
 
@@ -122,9 +122,8 @@ export async function confirmSessionSleepFallbackStopping(
   snapshot: schema.SessionSnapshot,
   now: Date
 ): Promise<SessionSleepFallbackRecord | null> {
-  const record = parseSessionSleepFallbackRecord(snapshot.sleepFallbackJson);
-  if (record?.outcome !== 'slept' || !record.recoveryPoint) return null;
-  if (record.recoveryPoint.generation !== snapshot.snapshotGeneration) return null;
+  const record = sleptFallbackRecord(snapshot);
+  if (!record) return null;
   const assessment = await assessSessionSleepRecoveryPoint(env, snapshot, now);
   return assessment.ok ? record : null;
 }

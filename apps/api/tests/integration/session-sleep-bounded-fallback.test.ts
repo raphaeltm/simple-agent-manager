@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { sessionSnapshotRoutes } from '../../src/routes/workspaces/session-snapshots';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
 import { runSessionSnapshotPurge } from '../../src/scheduled/session-snapshot-purge';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep';
@@ -30,6 +31,7 @@ import {
   recordSessionSnapshotProgress,
 } from '../../src/services/session-snapshots';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
+import { createRouteTestApp } from '../unit/routes/route-test-app';
 
 const mocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(),
@@ -49,6 +51,12 @@ const mocks = vi.hoisted(() => ({
   stopSession: vi.fn(),
   stopWorkspaceOnNode: vi.fn(),
   transitionAcpSession: vi.fn(),
+  verifyCallbackToken: vi.fn(),
+}));
+
+vi.mock('../../src/services/jwt', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/services/jwt')>()),
+  verifyCallbackToken: (...args: unknown[]) => mocks.verifyCallbackToken(...args),
 }));
 
 vi.mock('../../src/services/node-agent', () => ({
@@ -195,6 +203,44 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
 
   function fallbackRecord(id = 'a') {
     return parseSessionSleepFallbackRecord(row(id).sleep_fallback_json);
+  }
+
+  /**
+   * The wake's restore request, as the vm-agent on the replacement workspace sends it,
+   * through the real route and the real snapshot row.
+   */
+  async function restoreResponse(id = 'a') {
+    const workspaceId = `ws-wake-${id}`;
+    sqlite
+      .prepare(
+        `INSERT OR IGNORE INTO nodes (id, user_id, status, node_role, runtime)
+         VALUES ('node-wake', 'user-1', 'running', 'workspace', 'vm')`
+      )
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO workspaces
+           (id, node_id, project_id, user_id, chat_session_id, status, branch, updated_at)
+         VALUES (?, 'node-wake', 'project-1', 'user-1', ?, 'running', 'sam/feature', ?)`
+      )
+      .run(workspaceId, `chat-${id}`, new Date().toISOString());
+    mocks.verifyCallbackToken.mockResolvedValue({
+      workspace: workspaceId,
+      type: 'callback',
+      scope: 'workspace',
+    });
+    const res = await createRouteTestApp('/api/workspaces', sessionSnapshotRoutes).request(
+      `/api/workspaces/${workspaceId}/session-snapshot/restore?chatSessionId=chat-${id}`,
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env
+    );
+    expect(res.status).toBe(200);
+    return (await res.json()) as {
+      available: boolean;
+      baseCommit: string | null;
+      manifest: Record<string, unknown> | null;
+      download: Record<string, string | null>;
+    };
   }
 
   function workspaceStatus(id = 'a') {
@@ -577,7 +623,7 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       expect(notices).toHaveLength(1);
       expect(notices[0]?.content).toContain('SAM could not put this session to sleep.');
       expect(notices[0]?.content).toContain(
-        'commit and push anything you want to keep, then archive'
+        'commit and push anything you want to keep, then stop its workspace from the Workspaces page'
       );
 
       // The exit holds: later sweeps neither select nor capture it.
@@ -647,7 +693,7 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         'SAM put this session to sleep using its last complete snapshot.'
       );
       expect(sessionRecoveryInitialPrompt(fallbackRecord())).toContain(
-        'Changes made after that snapshot are not in this workspace.'
+        'SAM restored that snapshot, so changes made after it are not in this workspace.'
       );
     });
 
@@ -663,6 +709,72 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         blockedReason: 'no_git_baseline',
       });
       expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the wake after a fallback sleep', () => {
+    // The vm-agent loads the saved agent session only when the restore manifest names
+    // it (`snapshotHarnessResumeIdentity`). Without it the restore is degraded and the
+    // agent starts fresh with the wake prompt, which is the only path that sends it.
+    it('does not resume the stale agent session of a degraded recovery point', async () => {
+      seedSession({ id: 'a' });
+      await spendFullBudget();
+      await sweepAt(tick(3));
+      expect(row()).toMatchObject({ sleep_status: 'sleeping', degradation: 'home-skipped' });
+
+      const restore = await restoreResponse();
+
+      expect(restore).toMatchObject({ available: true, baseCommit: BASE_COMMIT });
+      expect(restore.manifest).toMatchObject({
+        baseCommit: BASE_COMMIT,
+        agentType: 'claude-code',
+        git: { branch: 'sam/feature', detached: false },
+      });
+      expect(restore.manifest).not.toHaveProperty('acpSessionId');
+      expect(restore.download.wip).toContain('/session-snapshot/artifacts/wip');
+    });
+
+    it('restores the files of a complete recovery point but still starts the agent fresh', async () => {
+      seedSession({ id: 'a' });
+      capture = 'complete';
+      sqlite
+        .prepare(
+          `INSERT INTO session_snapshots
+             (id, project_id, workspace_id, node_id, user_id, chat_session_id, agent_session_id,
+              runtime, status, degradation, manifest_r2_key, expires_at, sleep_attempts,
+              sleep_episode_failures, recovery_attempts, created_at, updated_at)
+           VALUES ('snapshot-a', 'project-1', 'ws-a', 'node-1', 'user-1', 'chat-a', 'agent-a',
+                   'vm', 'pending', 'none', 'placeholder', ?, 0, 0, 0, ?, ?)`
+        )
+        .run(
+          new Date(START.getTime() + DAY_MS).toISOString(),
+          START.toISOString(),
+          START.toISOString()
+        );
+      completeGeneration('chat-a', 'ws-a', 'gen-checkpoint', 'complete');
+      capture = 'unreachable';
+      await spendFullBudget();
+      await sweepAt(tick(3));
+      expect(row()).toMatchObject({ sleep_status: 'sleeping', status: 'available' });
+
+      const restore = await restoreResponse();
+
+      expect(restore.download.home).toContain('/session-snapshot/artifacts/home');
+      expect(restore.manifest).toMatchObject({ artifacts: { home: { sizeBytes: 4 } } });
+      expect(restore.manifest).not.toHaveProperty('acpSessionId');
+    });
+
+    it('still resumes the agent session after an ordinary sleep', async () => {
+      seedSession({ id: 'a' });
+      capture = 'complete';
+
+      await sweepAt(tick(0));
+      expect(row()).toMatchObject({ sleep_status: 'sleeping', sleep_fallback_json: null });
+      expect(notices).toHaveLength(0);
+
+      const restore = await restoreResponse();
+
+      expect(restore.manifest).toMatchObject({ acpSessionId: 'acp-1', agentType: 'claude-code' });
     });
   });
 

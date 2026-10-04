@@ -25,6 +25,9 @@
  *    stopped, its deletion is scheduled through the NodeLifecycle DO, and the node
  *    turns warm only when no other workspace is active on it.
  *
+ * The wake that follows restores the files and Git state but starts a new agent session
+ * from the transcript, never the saved one (`session-snapshot-restore-response.ts`).
+ *
  * Instant (cf-container) runtimes end blocked instead: they wake in place and keep
  * their container only for a complete snapshot, so a Git-baseline wake is not
  * available to them yet.

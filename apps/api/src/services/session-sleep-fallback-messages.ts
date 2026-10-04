@@ -69,7 +69,7 @@ export function sessionSleepFallbackNotice(record: SessionSleepFallbackRecord): 
       `Kept: this conversation and the complete snapshot${capturedClause(point.capturedAt)}, including ${gitLocation(record)}.`,
       'Not kept: any change made after that snapshot was saved.',
       '',
-      'Send a message to wake it. The agent will check the transcript before continuing.',
+      'Send a message to wake it. SAM restores that snapshot, and the agent starts a new session that rebuilds its context from this conversation.',
     ].join('\n');
   }
   return [
@@ -106,7 +106,7 @@ export function sessionSleepBlockedNotice(
   const reason = record.blockedReason ?? 'retry_ceiling';
   const keepsRunning =
     runtime === 'cf-container'
-      ? 'This Instant workspace keeps running until you archive the conversation or it reaches its maximum lifetime.'
+      ? 'This Instant workspace keeps running.'
       : 'Its workspace keeps running.';
   return [
     'SAM could not put this session to sleep.',
@@ -117,7 +117,8 @@ export function sessionSleepBlockedNotice(
     '',
     'What you can do:',
     '- Keep working: send a message as usual. SAM tries sleep again the next time the session goes idle.',
-    '- Or commit and push anything you want to keep, then archive this conversation to release the workspace.',
+    // Archive is offered only once a session sleeps (`SessionFooter`), so it cannot help here.
+    '- If you are done with it: commit and push anything you want to keep, then stop its workspace from the Workspaces page. Work you did not push is lost once SAM cleans up the stopped workspace.',
   ].join('\n');
 }
 
@@ -126,7 +127,9 @@ export const SESSION_RECOVERY_INITIAL_PROMPT =
 
 /**
  * The first prompt of a wake. After a fallback sleep it tells the agent which files to
- * expect, how to check them, and not to replay effects outside the workspace.
+ * expect, how to check them, and not to replay effects outside the workspace. Such a
+ * wake always starts a new agent session (`session-snapshot-restore-response.ts`), so
+ * the agent does receive it.
  */
 export function sessionRecoveryInitialPrompt(record: SessionSleepFallbackRecord | null): string {
   const point = record?.outcome === 'slept' ? record.recoveryPoint : null;
@@ -138,8 +141,9 @@ export function sessionRecoveryInitialPrompt(record: SessionSleepFallbackRecord 
     'Resume this sleeping conversation from the persisted transcript. Use get_session_messages for this chat session before relying on memory.',
     '',
     complete
-      ? `Important: this session slept from its last complete snapshot${capturedClause(point.capturedAt)} because saving a fresh one failed. Changes made after that snapshot are not in this workspace.`
-      : `Important: this session slept through SAM's fallback, so its workspace files were not fully saved. SAM restored commit ${point.commit} ${where} with the uncommitted changes from the recovery point${capturedClause(point.capturedAt)}. Files outside the repository, your previous agent session files, and any changes made after that point are gone.`,
+      ? `Important: this session slept from its last complete snapshot${capturedClause(point.capturedAt)} because saving a fresh one failed. SAM restored that snapshot, so changes made after it are not in this workspace.`
+      : `Important: this session slept through SAM's fallback, so its workspace was not fully saved. SAM restored commit ${point.commit} ${where} with the uncommitted changes from the recovery point${capturedClause(point.capturedAt)}. ${point.homeSaved ? 'Files the snapshot skipped' : 'Files outside the repository'} and any changes made after that point are gone.`,
+    'You are starting a new agent session, so this transcript is your only record of the earlier work.',
     '',
     'Before continuing:',
     `1. Run git status and git log -1 to confirm the workspace is at commit ${short} ${where}. If it is not, tell the user what you found.`,
