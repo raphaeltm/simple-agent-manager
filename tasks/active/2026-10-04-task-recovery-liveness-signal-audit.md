@@ -86,41 +86,56 @@ killed regardless of node heartbeat status".
 
 ## Implementation checklist
 
-- [ ] Shared liveness evidence: ProjectData returns a prompt-free work-evidence snapshot (work state, activity label,
+- [x] Shared liveness evidence: ProjectData returns a prompt-free work-evidence snapshot (work state, activity label,
       timestamps) for the verdict's ACP session. The shared classifier attaches `evidence` (work state, last-activity
       age, ACP heartbeat age, runtime-work progress age) to live and ACP-level verdicts. Verdicts are unchanged.
-- [ ] Both adapters (cron sweep and ProjectData idle cleanup) carry the evidence (rule 61). The ProjectData
+- [x] Both adapters (cron sweep and ProjectData idle cleanup) carry the evidence (rule 61). The ProjectData
       `runtime_preserved` log includes it.
-- [ ] Rewrite the live-skip diagnostics in `stuck-tasks.ts`: true reason, work state, ages, and the real live-runtime
+- [x] Rewrite the live-skip diagnostics in `stuck-tasks.ts`: true reason, work state, ages, and the real live-runtime
       bound (absolute ceiling on runtime-generation age). Keep the stable identifiers `stuck_task.skipped_active_heartbeat`
       and `stuck_task_heartbeat_skip` for query continuity.
-- [ ] Persist the durable `stuck_task_heartbeat_skip` record once per task per liveness basis, not every sweep.
+- [x] Persist the durable `stuck_task_heartbeat_skip` record once per task per liveness basis, not every sweep.
       Per-sweep detail stays in Workers Logs.
-- [ ] Terminal reason uses the observed execution minutes and the liveness reason. It must keep
+- [x] Terminal reason uses the observed execution minutes and the liveness reason. It must keep
       `runtime is no longer live` for `failure-classification.ts` (Runtime lost).
-- [ ] Remove the vestigial `TASK_RUN_HARD_TIMEOUT_MS` (constant, env type, misconfiguration warning, tests, docs).
-- [ ] Ceiling visibility: when the ceiling defers to a sleep record, log the overrun, the sleep status and the arm.
-      When the overrun exceeds `SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS`, no single in-flight episode can explain it, so
-      warn and write one durable operator record.
-- [ ] Ceiling enforcement for a retry-restamped in-flight sleep: agree with sibling `01M42YPN0VJT93T8S9MMYV429Q` who
-      bounds it (expected: their episode budget bounds the shared in-flight arm). Record the agreed contract here.
-- [ ] Fix stale docs: `DEFAULT_TASK_RUN_MAX_EXECUTION_MS` doc, `.env.example`, `configuration.md` hard-timeout prose,
+- [x] Remove the vestigial `TASK_RUN_HARD_TIMEOUT_MS` (constant, env type, misconfiguration warning, tests, docs).
+- [x] Ceiling visibility: when the ceiling defers to a sleep record it logs the overrun, sleep status and arm
+      (`stuck_task.preserved_sleeping` source=ceiling); expiry logs `stuck_task.ceiling_sleep_grace_expired` (warn).
+- [x] Ceiling enforcement for a retry-restamped in-flight sleep. Contract (sibling `01M42YPN0VJT93T8S9MMYV429Q`,
+      messages `01M42ZSB1843CFGX25KDV7P36F` / `01M42ZZHW7HWK2H5G2B3CZ7QJD`): the sibling owns the root fix (episode
+      budget, exemption removal, shared in-flight arm, zombie intents); I own a defense-in-depth grace on the ceiling
+      (`TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS`, default 60 min on runtime-generation age) plus `honorInFlightSleep`
+      at the terminal gate. Restorable (incl. their fallback sleep) and unknown always defer; `terminal_failed` never
+      did. Sleep state is read only through `loadTaskSleepPreservation` (their rule-58 request).
+- [x] Fix stale docs: `DEFAULT_TASK_RUN_MAX_EXECUTION_MS` doc, `.env.example`, `configuration.md` hard-timeout prose,
       env-reference skill.
-- [ ] Tests (real SQLite D1 through `recoverStuckTasks` where the sweep is involved):
-  - [ ] healthy long prompt turn, tool/runtime work, and background finite work: preserved with the right reason
-  - [ ] handed-back idle conversation: preserved, reported idle with last-activity age
-  - [ ] stale ACP heartbeat with a healthy host: inconclusive, never terminal
-  - [ ] dead runtime (workspace missing): terminal reason states real minutes and the cause
-  - [ ] unknown or unreachable probe (DO timeout, node probe timeout): preserved
-  - [ ] identity or generation mismatch: ACP or chat id mismatch stays inconclusive
-  - [ ] durable child wait: a parent waiting on subtasks with an idle turn is not "working"
-  - [ ] new activity race: a fresh prompt during a sweep is preserved
-  - [ ] absolute ceiling: a busy live runtime past 24h is terminalized
-  - [ ] preservation behaviour: the production re-stamped in-flight loop is reported as a ceiling overrun with its
-        sleep blocker
-  - [ ] persistence dedup: two sweeps write one durable record per basis; a basis change writes a second
-  - [ ] logs and records contain no prompt or message content
+- [x] Tests (real SQLite D1 through `recoverStuckTasks` where the sweep is involved):
+  - [x] healthy long prompt turn, tool/runtime work, and background finite work: preserved with the right reason
+  - [x] handed-back idle conversation: preserved, reported idle with last-activity age
+  - [x] stale ACP heartbeat with a healthy host: inconclusive, never terminal
+  - [x] dead runtime (workspace missing): terminal reason states real minutes and the cause
+  - [x] unknown or unreachable probe (ProjectData unreachable; node probe failure/timeout covered by existing tests): preserved
+  - [x] identity or generation mismatch: an older generation's ACP session cannot prove the current runtime live
+  - [x] durable child wait: a parent waiting on subtasks with an idle turn is not "working"
+  - [x] new activity race: a prompt starting between sweeps changes the basis and writes a new record
+  - [x] absolute ceiling: a live runtime past 24h with no sleep record is terminalized
+  - [x] preservation behaviour: the production re-stamped in-flight loop defers inside the grace and terminalizes
+        past it; restorable and unknown still defer; grace is configurable
+  - [x] persistence dedup: two sweeps write one durable record per basis; a basis change writes a second
+  - [x] logs and records contain no prompt or message content (canary test)
 - [ ] Rebase on and verify against the sibling snapshot fix if it lands first.
+
+## Implementation notes
+
+- Pure moves first (rule 18): `11b4b2feb`, `e2fafba1d`, `d58e3712c`. Feature commits: `2aa89bbf2` (evidence),
+  `74e652077` (sweep records, reason, knob removal, ceiling grace), `c88973f84` (extra sweep cases), `08cd622b8` (docs).
+- Discrimination (rule 62): each fix reverted surgically, intended tests red. M1 grace disabled → the replay test;
+  M2 terminal gate re-defers → the replay test; M3 dedupe removed → the one-row-per-basis test; M4 cron adapter drops
+  evidence → 5 record tests; M5 old reason label → the dead-runtime test; M6 evidence ignores ACP id → the identity
+  test; M7 unproven not distinguished → 3 tests; I1 workspace identity dropped → the old-generation test; I2 stale
+  heartbeat accepted → the stale-ACP test; I3 unknown probe as death → the unreachable test (and others).
+- `stuck-tasks.ts` shrank (net −5 lines) despite the changes; new logic lives in `stuck-task-live-runtime.ts`.
+- `configuration.md` is not Prettier-clean at HEAD; edited by hand to avoid reflowing unrelated tables.
 
 ## Acceptance criteria
 
