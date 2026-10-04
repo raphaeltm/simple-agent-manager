@@ -188,6 +188,8 @@ beforeEach(() => {
     env,
     ctx: {
       storage: {
+        transaction: async <T>(callback: (transaction: DurableObjectTransaction) => Promise<T>) =>
+          callback(rc.ctx.storage as unknown as DurableObjectTransaction),
         get: async () => structuredClone(storedState),
         setAlarm: vi.fn(async () => undefined),
         put: async (_key: string, value: TaskRunnerState) => {

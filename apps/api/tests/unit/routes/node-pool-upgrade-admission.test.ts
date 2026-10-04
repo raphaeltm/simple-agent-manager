@@ -129,7 +129,13 @@ describe('old node-pool requests through TaskRunner admission', () => {
       .prepare('SELECT * FROM workspaces WHERE id = ?')
       .get('sleeping-workspace');
     const result = await ensureSessionRecovery(f.env, 'project-1', 'chat-1');
-    expect(result).toMatchObject({ status: 'waking' });
+    expect(result).toMatchObject({ status: 'waking', taskId: 'task-1' });
+    expect(f.reactivate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-1',
+        config: expect.objectContaining({ recoveryAttemptId: expect.any(String) }),
+      })
+    );
     expect(f.starts).toHaveLength(2);
     const wake = f.starts[1]!;
     expect(wake.config.resumeSnapshotChatSessionId).toBe('chat-1');

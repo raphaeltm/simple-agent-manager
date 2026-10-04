@@ -172,15 +172,26 @@ describe('wakeSessionForSnapshotRecovery', () => {
     expect(wakeSessionRpc).not.toHaveBeenCalled();
   });
 
-  it('does not allow stopped-session wake from a non-recovery task claim', async () => {
+  it('allows the original manually created task to wake with its owned snapshot claim', async () => {
     seedWorkspace();
     seedRecoveryTask({ triggeredBy: 'manual' });
+    sqlite.prepare('UPDATE tasks SET recovery_source_task_id = NULL WHERE id = ?').run(TASK_ID);
     seedSnapshot();
+    await expect(
+      wakeSessionForSnapshotRecovery(env, PROJECT_ID, CHAT_SESSION_ID, WORKSPACE_ID, TASK_ID)
+    ).resolves.toBe(true);
+    expect(wakeSessionRpc).toHaveBeenCalledWith(CHAT_SESSION_ID, WORKSPACE_ID, TASK_ID, {
+      allowStopped: true,
+    });
+  });
 
+  it('rejects a task that does not own the snapshot claim', async () => {
+    seedWorkspace();
+    seedRecoveryTask({ triggeredBy: 'manual' });
+    seedSnapshot({ recoveryTaskId: 'another-task' });
     await expect(
       wakeSessionForSnapshotRecovery(env, PROJECT_ID, CHAT_SESSION_ID, WORKSPACE_ID, TASK_ID)
     ).resolves.toBe(false);
-
     expect(wakeSessionRpc).not.toHaveBeenCalled();
   });
 

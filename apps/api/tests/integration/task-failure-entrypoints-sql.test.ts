@@ -51,7 +51,7 @@ describe('task failure entry points use terminal-safe SQL', () => {
 
   function taskRunnerContext(status: string) {
     sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [schema.tasks, schema.taskStatusEvents]);
+    createSchemaTables(sqlite, [schema.tasks, schema.taskStatusEvents, schema.sessionSnapshots]);
     sqlite.prepare('INSERT INTO tasks (id, status) VALUES (?, ?)').run('task-1', status);
     const storage = { put: vi.fn(async () => undefined) };
     const rc = {
@@ -77,19 +77,27 @@ describe('task failure entry points use terminal-safe SQL', () => {
   it.each(['completed', 'cancelled'])('TaskRunner does not overwrite %s', async (status) => {
     const { rc, state } = taskRunnerContext(status);
     await failTask(state, 'late runner failure', rc);
-    expect(sqlite.prepare('SELECT status FROM tasks WHERE id = ?').get('task-1')).toEqual({ status });
+    expect(sqlite.prepare('SELECT status FROM tasks WHERE id = ?').get('task-1')).toEqual({
+      status,
+    });
   });
 
   it('TaskRunner still fails an in-progress task', async () => {
     const { rc, state } = taskRunnerContext('in_progress');
     await failTask(state, 'owner failure', rc);
-    expect(sqlite.prepare('SELECT status, error_message FROM tasks WHERE id = ?').get('task-1'))
-      .toEqual({ status: 'failed', error_message: 'owner failure' });
+    expect(
+      sqlite.prepare('SELECT status, error_message FROM tasks WHERE id = ?').get('task-1')
+    ).toEqual({ status: 'failed', error_message: 'owner failure' });
   });
 
   async function runNodeProvisioningFailure(status: string): Promise<string> {
     sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [schema.tasks, schema.workspaces, schema.nodes, schema.computeUsage]);
+    createSchemaTables(sqlite, [
+      schema.tasks,
+      schema.workspaces,
+      schema.nodes,
+      schema.computeUsage,
+    ]);
     sqlite
       .prepare(
         `INSERT INTO nodes (id, user_id, status, runtime_incarnation_id)
@@ -153,8 +161,9 @@ describe('task failure entry points use terminal-safe SQL', () => {
 
     await new NodeLifecycleProvisioning(ctx, env).alarm();
     await Promise.all(pending);
-    return (sqlite.prepare('SELECT status FROM tasks WHERE id = ?').get('task-1') as { status: string })
-      .status;
+    return (
+      sqlite.prepare('SELECT status FROM tasks WHERE id = ?').get('task-1') as { status: string }
+    ).status;
   }
 
   it.each(['completed', 'cancelled'])('node provisioning does not overwrite %s', async (status) => {
