@@ -56,6 +56,8 @@ vi.mock('../../src/lib/logger', async (importOriginal) => ({
 const { projectDataRpc } = vi.hoisted(() => ({
   projectDataRpc: {
     sql: null as SqlStorage | null,
+    /** Simulates an unreachable ProjectData Durable Object. */
+    unreachable: false,
   },
 }));
 vi.mock('../../src/services/project-data', () => ({
@@ -69,6 +71,7 @@ vi.mock('../../src/services/project-data', () => ({
       _projectId: string,
       opts: Parameters<typeof readTaskAcpLivenessSignals>[2]
     ) => {
+      if (projectDataRpc.unreachable) throw new Error('ProjectData RPC failed');
       if (!projectDataRpc.sql) throw new Error('ProjectData store not seeded');
       return readTaskAcpLivenessSignals(projectDataRpc.sql, {} as ProjectDataEnv, opts);
     }
@@ -299,6 +302,7 @@ beforeEach(() => {
   doSql = createSqlStorage(projectDb);
   runMigrations(doSql);
   projectDataRpc.sql = doSql;
+  projectDataRpc.unreachable = false;
 });
 
 afterEach(() => {
@@ -473,6 +477,84 @@ describe('live-runtime record: what kept the task, and why', () => {
     }
     // Liveness: the record exists and carries the safe label.
     expect(liveRuntimeRows()[0].context).toMatchObject({ workState: 'unknown', activity: 'error' });
+  });
+
+  /**
+   * Canonical idleness (policy 0f05422d): child tasks and durable subtask waits
+   * never pin compute. A parent that ended its turn to wait for its children is
+   * idle, and nothing in the record treats the children as its work.
+   */
+  it('reports a parent waiting on subtasks as idle; its children are not its work', async () => {
+    seedIdleConversation();
+    // A child the parent dispatched two minutes ago, still being placed.
+    d1.prepare(
+      `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, status, priority,
+                          triggered_by, execution_step, task_mode, created_by, created_at,
+                          updated_at)
+       VALUES ('child-1', ?, 'user-1', ?, 'child', 'queued', 0, 'mcp', 'node_selection', 'task',
+               'user-1', ?, ?)`
+    ).run(PROJECT_ID, TASK_ID, iso(T0 - 2 * MINUTE), iso(T0 - 2 * MINUTE));
+
+    const result = await recoverStuckTasks(env());
+
+    expect(result.candidatesScanned).toBe(2);
+    expect(liveRuntimeRows()[0].context).toMatchObject({
+      workState: 'idle',
+      sleepOutcome: 'none',
+    });
+    const child = d1.prepare(`SELECT status FROM tasks WHERE id = 'child-1'`).get() as {
+      status: string;
+    };
+    expect(child.status).toBe('queued');
+  });
+
+  /**
+   * A healthy host does not make a task live: its own ACP session's heartbeat has
+   * gone stale, so the verdict is inconclusive. Kept (never failed on stale
+   * evidence), and not recorded as a live runtime either.
+   */
+  it('keeps but does not call live a task whose own ACP heartbeat is stale on a healthy host', async () => {
+    seedTask({ startedAt: T0 - 9 * HOUR });
+    seedLiveRuntime({ generationStartedAt: T0 - 9 * HOUR, nodeHeartbeatAt: T0 - 30_000 });
+    seedAcpSession({ heartbeatAt: T0 - 20 * MINUTE });
+    promptTurnEnded(T0 - 2 * HOUR, T0 - HOUR);
+
+    const result = await recoverStuckTasks(env());
+
+    expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    expect(result.heartbeatSkipped).toBe(0);
+    expect(liveRuntimeRows()).toHaveLength(0);
+    expect(result.candidatesScanned).toBe(1);
+  });
+
+  /** An unreachable ProjectData object is unknown, never death evidence. */
+  it('keeps a task when ProjectData cannot be reached', async () => {
+    seedIdleConversation();
+    projectDataRpc.unreachable = true;
+
+    const result = await recoverStuckTasks(env());
+
+    expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    expect(result.heartbeatSkipped).toBe(0);
+    expect(result.candidatesScanned).toBe(1);
+  });
+
+  /**
+   * Identity: an ACP session left over from the task's previous workspace (a
+   * prior runtime generation) still heartbeats. It must not make the CURRENT
+   * workspace live, so the verdict stays inconclusive.
+   */
+  it("does not let an older generation's ACP session prove the current runtime live", async () => {
+    seedTask({ startedAt: T0 - 9 * HOUR });
+    seedLiveRuntime({ generationStartedAt: T0 - 9 * HOUR, nodeHeartbeatAt: T0 - 30_000 });
+    seedAcpSession({ heartbeatAt: T0 - 20_000 });
+    doSql.exec(`UPDATE acp_sessions SET workspace_id = 'previous-workspace' WHERE id = ?`, ACP_ID);
+
+    const result = await recoverStuckTasks(env());
+
+    expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    expect(result.heartbeatSkipped).toBe(0);
+    expect(liveRuntimeRows()).toHaveLength(0);
   });
 
   /**
