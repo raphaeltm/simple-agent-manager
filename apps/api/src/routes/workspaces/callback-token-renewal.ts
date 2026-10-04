@@ -35,6 +35,9 @@ const RenewalRequestSchema = v.object({
 const callbackTokenRenewalRoutes = new Hono<{ Bindings: Env }>();
 
 callbackTokenRenewalRoutes.post('/:id/callback-token/renew', async (c) => {
+  // A success response carries a credential; no intermediary may store any response.
+  // Set first so error responses from the global handler carry it too.
+  c.header('Cache-Control', 'no-store');
   const workspaceId = c.req.param('id');
   const workspaceToken = extractBearerToken(c.req.header('Authorization'));
 
@@ -65,8 +68,6 @@ callbackTokenRenewalRoutes.post('/:id/callback-token/renew', async (c) => {
     }
     throw err;
   }
-  // The response can carry a credential; no intermediary may store it.
-  c.header('Cache-Control', 'no-store');
   return c.json(result);
 });
 

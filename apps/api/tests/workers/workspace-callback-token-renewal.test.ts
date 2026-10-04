@@ -229,6 +229,7 @@ describe('POST /api/workspaces/:id/callback-token/renew', () => {
     const response = await renew(WS_ACTIVE, expired, { nodeId: NODE_ID, nodeToken });
 
     expect(response.status).toBe(401);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(await errorCode(response)).toBe('UNAUTHORIZED');
   });
 
@@ -390,6 +391,7 @@ describe('POST /api/workspaces/:id/callback-token/renew', () => {
 
     const limited = await renew(WS_RATE, aged, { nodeId: NODE_ID, nodeToken });
     expect(limited.status).toBe(429);
+    expect(limited.headers.get('Cache-Control')).toBe('no-store');
     expect(await errorCode(limited)).toBe('RATE_LIMIT_EXCEEDED');
     const retryAfter = Number(limited.headers.get('Retry-After'));
     expect(retryAfter).toBeGreaterThanOrEqual(1);
