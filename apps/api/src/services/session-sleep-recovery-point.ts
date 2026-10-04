@@ -88,7 +88,8 @@ export async function assessSessionSleepRecoveryPoint(
   }
   const complete = snapshot.status === 'available' && snapshot.degradation === 'none';
   // A degraded generation is only restorable at its commit when the bundle carrying the
-  // commit objects was retained. A complete one carries them too.
+  // commit objects was retained. A complete one carries them too. Accepting a pushed
+  // commit without a bundle needs a remote check (idea 01M434S53HGTY09BS09NMWEP9E).
   if (!snapshot.wipR2Key || !snapshot.wipSha256) {
     return { ok: false, reason: 'commit_objects_unavailable' };
   }

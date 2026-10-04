@@ -30,7 +30,7 @@
  *
  * Instant (cf-container) runtimes end blocked instead: they wake in place and keep
  * their container only for a complete snapshot, so a Git-baseline wake is not
- * available to them yet.
+ * available to them yet (idea 01M434RYFTNQ0NY704JGJYHRT7).
  */
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -245,6 +245,7 @@ export async function runSessionSleepFallback(
 
   let pointOfNoReturn = false;
   try {
+    // No Git-baseline wake for Instant yet (idea 01M434RYFTNQ0NY704JGJYHRT7).
     if (workspace.nodeRuntime !== 'vm') {
       const blocked = await endSessionSleepEpisodeBlocked(env, {
         chatSessionId,

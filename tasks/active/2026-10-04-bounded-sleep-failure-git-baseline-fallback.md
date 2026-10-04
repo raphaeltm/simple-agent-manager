@@ -195,10 +195,13 @@ explicit sleep after a blocked episode, workspaces already gone, seven-day reten
 
 ## Deferrals (tracked)
 
-- cf-container fallback teardown (in-place wake from a Git baseline) → SAM idea.
+- cf-container fallback teardown (in-place wake from a Git baseline) → idea
+  `01M434RYFTNQ0NY704JGJYHRT7` (referenced at the guard in `session-sleep-fallback.ts`).
 - Remote reachability check (GitHub/GitLab API) for a `baseCommit` without a retained bundle
-  → SAM idea.
-- Purging legacy degraded sleeping rows past expiry (pre-existing leak) → SAM idea.
+  → idea `01M434S53HGTY09BS09NMWEP9E` (referenced in `session-sleep-recovery-point.ts`).
+- Purging legacy degraded sleeping rows past expiry (pre-existing leak) → existing idea
+  `01M05HTJHCWXCG5YZJ6TB3Y2AG` (updated 2026-10-04: fallback rows are purged, legacy rows
+  still excluded).
 - Staging: user permitted skipping for this wave; substitute deterministic + integration
   tests (reason recorded in PR).
 
