@@ -172,7 +172,7 @@ func (s *Server) handleMcpBuildAndPublishJobStart(w http.ResponseWriter, r *http
 	s.publishJobsMu.Unlock()
 	s.persistVMJobStart(jobID, vmJobKindPublish, prepared.WorkspaceID, vmJobStatusStarting, "starting")
 
-	controlPlaneReporter := newPublishJobReporter(s.config.ControlPlaneURL, prepared.ProjectID, jobID, prepared.Token, s.controlPlaneHTTPClient(publishTimeout), prepared.Log)
+	controlPlaneReporter := newPublishJobReporter(s.config.ControlPlaneURL, prepared.ProjectID, jobID, s.publishCallbackToken(prepared), s.controlPlaneHTTPClient(publishTimeout), prepared.Log)
 	reporter := publish.EventFunc(func(ctx context.Context, event publish.Event) {
 		s.persistPublishEvent(jobID, event)
 		controlPlaneReporter.Event(ctx, event)
@@ -236,7 +236,7 @@ func (s *Server) prepareMcpBuildAndPublish(w http.ResponseWriter, r *http.Reques
 		return nil, false
 	}
 
-	token := strings.TrimSpace(runtime.CallbackToken)
+	token := s.workspaceCallbackToken(workspaceID)
 	if token == "" {
 		writeError(w, http.StatusInternalServerError, "workspace has no callback token for publishing")
 		return nil, false
@@ -340,10 +340,11 @@ func (s *Server) runPreparedBuildAndPublish(ctx context.Context, prepared *prepa
 
 	orch := publish.New(publish.Options{
 		ControlPlane: publish.NewHTTPControlPlane(publish.HTTPControlPlaneOptions{
-			BaseURL: s.config.ControlPlaneURL,
-			Token:   prepared.Token,
-			Client:  s.controlPlaneHTTPClient(s.deployBuildPublishTimeout()),
-			Logger:  log,
+			BaseURL:     s.config.ControlPlaneURL,
+			Token:       prepared.Token,
+			TokenSource: s.publishCallbackToken(prepared),
+			Client:      s.controlPlaneHTTPClient(s.deployBuildPublishTimeout()),
+			Logger:      log,
 		}),
 		Docker: publish.NewHostDocker(),
 		Events: events,
@@ -363,16 +364,28 @@ func (s *Server) runPreparedBuildAndPublish(ctx context.Context, prepared *prepa
 	return result, nil
 }
 
+// publishCallbackToken reads the workspace token for each publish callback, so a
+// job that runs while the token is renewed uses the renewed token. The token
+// captured when the job was accepted is the fallback if the runtime is gone.
+func (s *Server) publishCallbackToken(prepared *preparedBuildPublish) func() string {
+	return func() string {
+		if token := s.workspaceCallbackToken(prepared.WorkspaceID); token != "" {
+			return token
+		}
+		return prepared.Token
+	}
+}
+
 type publishJobReporter struct {
 	baseURL   string
 	projectID string
 	jobID     string
-	token     string
+	token     func() string
 	client    *http.Client
 	log       *slog.Logger
 }
 
-func newPublishJobReporter(baseURL, projectID, jobID, token string, client *http.Client, log *slog.Logger) *publishJobReporter {
+func newPublishJobReporter(baseURL, projectID, jobID string, token func() string, client *http.Client, log *slog.Logger) *publishJobReporter {
 	return &publishJobReporter{
 		baseURL:   strings.TrimRight(baseURL, "/"),
 		projectID: projectID,
@@ -401,7 +414,7 @@ func (r *publishJobReporter) Event(ctx context.Context, event publish.Event) {
 		r.log.Warn("create publish job event request failed", "error", err)
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+r.token)
+	req.Header.Set("Authorization", "Bearer "+r.token())
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := r.client.Do(req)
 	if err != nil {

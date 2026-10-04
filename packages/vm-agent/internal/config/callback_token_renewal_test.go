@@ -45,10 +45,12 @@ func TestWorkspaceCallbackTokenRefreshRatioIsClamped(t *testing.T) {
 		{"0.7", 0.7},
 		{"0.95", MaxWorkspaceCallbackTokenRefreshRatio},
 		{"0.01", MinWorkspaceCallbackTokenRefreshRatio},
-		{"0", DefaultWorkspaceCallbackTokenRefreshRatio},
-		{"-1", DefaultWorkspaceCallbackTokenRefreshRatio},
+		// Same handling as the control plane's CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO.
+		{"0", MinWorkspaceCallbackTokenRefreshRatio},
+		{"-1", MinWorkspaceCallbackTokenRefreshRatio},
 		{"not-a-number", DefaultWorkspaceCallbackTokenRefreshRatio},
 		{"NaN", DefaultWorkspaceCallbackTokenRefreshRatio},
+		{"Inf", DefaultWorkspaceCallbackTokenRefreshRatio},
 	} {
 		t.Run(tc.value, func(t *testing.T) {
 			cfg := loadRenewalConfig(t, map[string]string{"WORKSPACE_CALLBACK_TOKEN_REFRESH_RATIO": tc.value})

@@ -169,6 +169,25 @@ func callbackTokenRenewalDue(token string, now time.Time, ratio float64) bool {
 	return !now.Before(issuedAt.Add(time.Duration(float64(lifetime) * ratio)))
 }
 
+// callbackTokenNamesOtherWorkspace reports whether a token's own claims say it is
+// not workspaceID's workspace token: node-scoped, or bound to another workspace
+// (internal/auth/jwt.go applies the same rule to tokens it verifies). Claims are
+// read WITHOUT verifying the signature; this only keeps a control-plane mistake
+// from being installed. A token whose claims cannot be read is left for the
+// control plane to reject.
+func callbackTokenNamesOtherWorkspace(token, workspaceID string) bool {
+	var claims struct {
+		jwt.RegisteredClaims
+		Workspace string `json:"workspace"`
+		Scope     string `json:"scope"`
+	}
+	if _, _, err := jwt.NewParser().ParseUnverified(token, &claims); err != nil {
+		return false
+	}
+	return claims.Scope == "node" || claims.Workspace != workspaceID ||
+		(claims.Subject != "" && claims.Subject != workspaceID)
+}
+
 // callbackTokenLifetime reads iat/exp WITHOUT verifying the signature. It only
 // schedules renewal; the control plane verifies every token it receives.
 func callbackTokenLifetime(token string) (issuedAt, expiresAt time.Time, ok bool) {
@@ -292,7 +311,12 @@ func (s *Server) requestWorkspaceCallbackTokenRenewal(
 	if parsed.Error != "" {
 		detail += " " + parsed.Error
 	}
-	return classifyWorkspaceTokenRenewal(resp.StatusCode, parsed.Renewed, parsed.Token, parsed.Error, parseErr), strings.TrimSpace(parsed.Token), detail
+	outcome = classifyWorkspaceTokenRenewal(resp.StatusCode, parsed.Renewed, parsed.Token, parsed.Error, parseErr)
+	renewed = strings.TrimSpace(parsed.Token)
+	if outcome == renewalSucceeded && callbackTokenNamesOtherWorkspace(renewed, candidate.workspaceID) {
+		return renewalTransientFailure, "", detail + " (renewed token is not this workspace's token)"
+	}
+	return outcome, renewed, detail
 }
 
 func classifyWorkspaceTokenRenewal(status int, renewed bool, token, errorCode string, parseErr error) workspaceTokenRenewalOutcome {
@@ -341,14 +365,20 @@ func (s *Server) replaceRenewedWorkspaceCallbackToken(workspaceID, renewedFrom, 
 }
 
 // adoptWorkspaceCallbackTokenLocked installs a token delivered for an existing
-// workspace (create, restore, hibernate) unless it would replace the current
-// token with one that expires earlier, so a reordered or late delivery never
-// rolls a workspace back to an older credential. Caller holds workspaceMu and
-// must persist and then propagate when it returns true.
+// workspace (create, restore, hibernate) unless its claims name another
+// workspace, or it would replace the current token with one that expires
+// earlier, so a reordered or late delivery never rolls a workspace back to an
+// older credential. Caller holds workspaceMu and must persist and then
+// propagate when it returns true.
 func adoptWorkspaceCallbackTokenLocked(runtime *WorkspaceRuntime, delivered string) bool {
 	delivered = strings.TrimSpace(delivered)
 	current := strings.TrimSpace(runtime.CallbackToken)
 	if delivered == "" || delivered == current {
+		return false
+	}
+	if callbackTokenNamesOtherWorkspace(delivered, runtime.ID) {
+		slog.Warn("Ignoring delivered callback token that is not this workspace's token",
+			"workspace", runtime.ID)
 		return false
 	}
 	if current != "" {

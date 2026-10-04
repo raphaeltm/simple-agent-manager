@@ -216,7 +216,7 @@ func (s *Server) standaloneCloneSpec(ctx context.Context, runtime *WorkspaceRunt
 	repositoryURL := gitrepo.NormalizeURL(runtime.Repository)
 	var tokenResponse *gitTokenResponse
 
-	if callbackToken := strings.TrimSpace(runtime.CallbackToken); callbackToken != "" {
+	if callbackToken := s.runtimeCallbackToken(runtime); callbackToken != "" {
 		resp, err := s.fetchGitTokenResponseForWorkspace(ctx, runtime.ID, callbackToken)
 		if err != nil {
 			slog.Warn("Standalone repository clone proceeding without git token", "workspace", runtime.ID, "error", err)

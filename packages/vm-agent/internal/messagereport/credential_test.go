@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -95,6 +96,18 @@ func (cp *tokenGatedControlPlane) persistedIDs() map[string]int {
 		out[id] = n
 	}
 	return out
+}
+
+// setTestClock installs a clock the test advances. The reporter reads now under
+// r.mu, so installing it under r.mu and advancing it atomically stays race-free
+// even if a background flush runs while the test moves the clock.
+func setTestClock(r *Reporter, start time.Time) (advance func(time.Duration)) {
+	var nanos atomic.Int64
+	nanos.Store(start.UnixNano())
+	r.mu.Lock()
+	r.now = func() time.Time { return time.Unix(0, nanos.Load()).UTC() }
+	r.mu.Unlock()
+	return func(d time.Duration) { nanos.Add(int64(d)) }
 }
 
 // newHeldTestReporter builds a reporter whose background loop never ticks during
@@ -247,19 +260,18 @@ func TestCredentialRejection_SurfacesLongPauseOnceWithoutDeleting(t *testing.T) 
 			reports = append(reports, info)
 		}
 	})
-	clock := time.Date(2026, 10, 4, 8, 0, 0, 0, time.UTC)
-	r.now = func() time.Time { return clock }
+	advance := setTestClock(r, time.Date(2026, 10, 4, 8, 0, 0, 0, time.UTC))
 
 	enqueueAssistant(t, r, "m0", "m1")
 	r.flush() // 401: pause starts
 
-	clock = clock.Add(30 * time.Minute)
+	advance(30 * time.Minute)
 	r.flush()
 	if len(reports) != 0 {
 		t.Fatalf("pause reported before the budget: %+v", reports)
 	}
 
-	clock = clock.Add(31 * time.Minute)
+	advance(31 * time.Minute)
 	r.flush()
 	r.flush()
 	if len(reports) != 1 {
@@ -284,7 +296,7 @@ func TestCredentialRejection_SurfacesLongPauseOnceWithoutDeleting(t *testing.T) 
 	r.SetToken("rejected-again")
 	enqueueAssistant(t, r, "m2")
 	r.flush()
-	clock = clock.Add(2 * time.Hour)
+	advance(2 * time.Hour)
 	r.flush()
 	if len(reports) != 2 {
 		t.Fatalf("a new pause must be reported again, got %d reports", len(reports))

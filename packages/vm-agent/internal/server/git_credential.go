@@ -359,10 +359,10 @@ func (s *Server) callbackAuthCandidates(workspaceID string) []callbackAuthCandid
 	if workspaceID == "" {
 		return candidates
 	}
-	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+	if token, ok := s.lookupWorkspaceCallbackToken(workspaceID); ok {
 		candidates = append(candidates, callbackAuthCandidate{
 			source: "workspace",
-			token:  strings.TrimSpace(runtime.CallbackToken),
+			token:  token,
 		})
 	}
 	return candidates

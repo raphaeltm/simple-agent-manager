@@ -27,10 +27,11 @@ const maxControlPlaneErrorBodyBytes = 4096
 // HTTPControlPlane talks to the SAM control plane over HTTP using the workspace
 // callback JWT. It is the production ControlPlane implementation.
 type HTTPControlPlane struct {
-	baseURL string
-	token   string
-	client  *http.Client
-	log     *slog.Logger
+	baseURL     string
+	token       string
+	tokenSource func() string
+	client      *http.Client
+	log         *slog.Logger
 }
 
 // HTTPControlPlaneOptions configures a new HTTPControlPlane. BaseURL, Token, and
@@ -38,8 +39,12 @@ type HTTPControlPlane struct {
 type HTTPControlPlaneOptions struct {
 	BaseURL string
 	Token   string
-	Client  *http.Client
-	Logger  *slog.Logger
+	// TokenSource, when set, supplies the callback JWT for each request, so a
+	// publish that outlives a workspace token renewal uses the renewed token.
+	// Token is used whenever it returns "".
+	TokenSource func() string
+	Client      *http.Client
+	Logger      *slog.Logger
 }
 
 // NewHTTPControlPlane constructs an HTTPControlPlane.
@@ -53,11 +58,21 @@ func NewHTTPControlPlane(opts HTTPControlPlaneOptions) *HTTPControlPlane {
 		client = http.DefaultClient
 	}
 	return &HTTPControlPlane{
-		baseURL: strings.TrimRight(opts.BaseURL, "/"),
-		token:   opts.Token,
-		client:  client,
-		log:     log.With("component", "publish-controlplane"),
+		baseURL:     strings.TrimRight(opts.BaseURL, "/"),
+		token:       opts.Token,
+		tokenSource: opts.TokenSource,
+		client:      client,
+		log:         log.With("component", "publish-controlplane"),
 	}
+}
+
+func (c *HTTPControlPlane) currentToken() string {
+	if c.tokenSource != nil {
+		if token := strings.TrimSpace(c.tokenSource()); token != "" {
+			return token
+		}
+	}
+	return c.token
 }
 
 func (c *HTTPControlPlane) InitArtifactUploads(ctx context.Context, projectID string, req ArtifactUploadRequest) (*ArtifactUploadInitResponse, error) {
@@ -111,7 +126,7 @@ func (c *HTTPControlPlane) do(ctx context.Context, projectID, route string, reqB
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "Bearer "+c.currentToken())
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.client.Do(req)

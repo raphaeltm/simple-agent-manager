@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // Workspace callback token renewal defaults. Workspace-scoped callback tokens are
 // minted by the control plane with a fixed lifetime (CALLBACK_TOKEN_EXPIRY_MS,
@@ -30,19 +33,15 @@ const (
 	DefaultWorkspaceCallbackTokenRenewalRetryMax = 30 * time.Minute
 )
 
-// clampWorkspaceCallbackTokenRefreshRatio keeps a configured ratio inside the
-// supported range; a non-positive or unparseable value falls back to the default.
+// clampWorkspaceCallbackTokenRefreshRatio handles a configured ratio exactly as
+// the control plane handles CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO
+// (shouldRefreshCallbackToken in apps/api/src/services/jwt.ts): a non-finite value
+// means the default, and every finite value is clamped to the supported range.
 func clampWorkspaceCallbackTokenRefreshRatio(ratio float64) float64 {
-	if ratio <= 0 || ratio != ratio { // ratio != ratio rejects NaN
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) {
 		return DefaultWorkspaceCallbackTokenRefreshRatio
 	}
-	if ratio < MinWorkspaceCallbackTokenRefreshRatio {
-		return MinWorkspaceCallbackTokenRefreshRatio
-	}
-	if ratio > MaxWorkspaceCallbackTokenRefreshRatio {
-		return MaxWorkspaceCallbackTokenRefreshRatio
-	}
-	return ratio
+	return math.Max(MinWorkspaceCallbackTokenRefreshRatio, math.Min(MaxWorkspaceCallbackTokenRefreshRatio, ratio))
 }
 
 // positiveDurationOr returns value when positive, else fallback.
