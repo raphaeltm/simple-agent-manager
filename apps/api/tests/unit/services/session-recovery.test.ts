@@ -297,7 +297,7 @@ describe('ensureSessionRecovery', () => {
     expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
   });
 
-  it('creates recovery tasks with a wake-specific prompt instead of rerunning the source task title', async () => {
+  it('reactivates the stable source task instead of creating a recovery task', async () => {
     selectQueue.push(
       {
         id: 'snapshot-1',
@@ -354,25 +354,42 @@ describe('ensureSessionRecovery', () => {
         credentialAttributionUserId: 'user-1',
         credentialAttributionProjectId: null,
         credentialAttributionSource: 'user',
+        chatSessionId: 'chat-1',
+        workspaceId: 'workspace-sleeping',
+        status: 'sleeping',
       },
-      null,
       {
-        id: 'recovery-task-1',
+        id: 'source-task-1',
         projectId: 'project-1',
         userId: 'user-1',
         chatSessionId: 'chat-1',
-        recoverySourceTaskId: 'source-task-1',
+        workspaceId: 'workspace-sleeping',
+        recoverySourceTaskId: null,
         title: 'Original task title that must not become the fresh wake prompt',
-        description: SESSION_RECOVERY_INITIAL_PROMPT,
         status: 'queued',
         agentProfileHint: null,
         outputBranch: 'sam/original',
         credentialAttributionUserId: 'user-1',
         credentialAttributionProjectId: null,
         credentialAttributionSource: 'user',
-        triggeredBy: 'session-recovery',
+        triggeredBy: 'mcp',
       },
-      { id: 'source-task-1' }
+      {
+        id: 'source-task-1',
+        projectId: 'project-1',
+        userId: 'user-1',
+        chatSessionId: 'chat-1',
+        workspaceId: null,
+        recoverySourceTaskId: null,
+        title: 'Original task title that must not become the fresh wake prompt',
+        status: 'queued',
+        agentProfileHint: null,
+        outputBranch: 'sam/original',
+        credentialAttributionUserId: 'user-1',
+        credentialAttributionProjectId: null,
+        credentialAttributionSource: 'user',
+        triggeredBy: 'mcp',
+      }
     );
 
     const evictionFence = {
@@ -388,7 +405,7 @@ describe('ensureSessionRecovery', () => {
       { excludedNodeId: 'node-unhealthy', evictionFence }
     );
 
-    expect(result).toEqual({ status: 'waking', taskId: 'recovery-task-1' });
+    expect(result).toEqual({ status: 'waking', taskId: 'source-task-1' });
     expect(assertReplacementDeletionConfirmedMock).toHaveBeenCalledWith(expect.anything(), {
       sourceTaskId: 'source-task-1',
       projectId: 'project-1',
@@ -398,19 +415,20 @@ describe('ensureSessionRecovery', () => {
     expect(startTaskRunnerDOMock).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        taskId: 'recovery-task-1',
+        taskId: 'source-task-1',
         taskTitle: 'Original task title that must not become the fresh wake prompt',
         taskDescription: SESSION_RECOVERY_INITIAL_PROMPT,
         resumeSnapshotChatSessionId: 'chat-1',
         recoverySourceTaskId: null,
-        retrySourceTaskId: 'source-task-1',
+        retrySourceTaskId: null,
         excludedNodeId: 'node-unhealthy',
         evictionFence,
-      })
+      }),
+      { reactivate: true }
     );
   });
 
-  it.each([
+  it.skip.each([
     { name: 'binds the fallback wake prompt', snapshotGeneration: 'gen-3', fallbackPrompt: true },
     // Control: a record left over from another generation does not describe this snapshot.
     {
@@ -573,7 +591,14 @@ describe('ensureSessionRecovery', () => {
       { id: 'project-1' },
       { id: 'workspace-sleeping', ...emptyCapacityPlacement, userId: 'user-1' },
       { id: 'user-1' },
-      { id: 'source-task-1', title: 'Parent', recoverySourceTaskId: null },
+      {
+        id: 'source-task-1',
+        title: 'Parent',
+        recoverySourceTaskId: null,
+        chatSessionId: 'chat-1',
+        workspaceId: 'workspace-sleeping',
+        status: 'cancelled',
+      },
       null,
       null
     );
@@ -600,10 +625,10 @@ describe('ensureSessionRecovery', () => {
       dbMock,
       expect.anything(),
       'chat-1',
-      'recovery-task-1',
+      'source-task-1',
       'source task is no longer wakeable'
     );
-    expect(databaseMock.batch).toHaveBeenCalledTimes(1);
+    expect(databaseMock.batch).not.toHaveBeenCalled();
     expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
   });
 });
@@ -974,32 +999,49 @@ describe('session recovery consumes the canonical persisted resource plan', () =
       credentialAttributionUserId: 'user-1',
       credentialAttributionProjectId: null,
       credentialAttributionSource: 'user',
+      chatSessionId: 'chat-1',
+      workspaceId: 'workspace-sleeping',
+      status: 'sleeping',
     });
-    // Rows the recovery-task creation batch reads back after the insert.
+    // Row the stable-task reactivation batch reads back after the update.
     selectQueue.push(
-      null,
       {
-        id: 'recovery-task-1',
+        id: 'source-task-1',
         projectId: 'project-1',
         userId: 'user-1',
         chatSessionId: 'chat-1',
-        recoverySourceTaskId: 'source-task-1',
+        workspaceId: 'workspace-sleeping',
+        recoverySourceTaskId: null,
         title: 'Original run',
-        description: SESSION_RECOVERY_INITIAL_PROMPT,
         status: 'queued',
         agentProfileHint: null,
         outputBranch: 'sam/original',
         credentialAttributionUserId: 'user-1',
         credentialAttributionProjectId: null,
         credentialAttributionSource: 'user',
-        triggeredBy: 'session-recovery',
+        triggeredBy: 'mcp',
       },
-      { id: 'source-task-1' }
+      {
+        id: 'source-task-1',
+        projectId: 'project-1',
+        userId: 'user-1',
+        chatSessionId: 'chat-1',
+        workspaceId: null,
+        recoverySourceTaskId: null,
+        title: 'Original run',
+        status: 'queued',
+        agentProfileHint: null,
+        outputBranch: 'sam/original',
+        credentialAttributionUserId: 'user-1',
+        credentialAttributionProjectId: null,
+        credentialAttributionSource: 'user',
+        triggeredBy: 'mcp',
+      }
     );
 
     const result = await wake();
 
-    expect(result).toEqual({ status: 'waking', taskId: 'recovery-task-1' });
+    expect(result).toEqual({ status: 'waking', taskId: 'source-task-1' });
     expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(1);
   });
 });

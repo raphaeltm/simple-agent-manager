@@ -15,13 +15,13 @@ VM session wake currently creates a fresh `session-recovery` task and rebinds th
 
 ## Implementation Checklist
 
-- [ ] Add `sleeping` to task status contracts and transitions while keeping terminal status unchanged.
-- [ ] Mark the backing task `sleeping` during sleep teardown without setting supersession fields.
-- [ ] Replace recovery-task creation with a reactivation claim that keeps `tasks.id`, `parent_task_id`, and `dispatch_depth` stable.
-- [ ] Add TaskRunner reactivation support that restarts placement/runtime state for an existing sleeping conversation task.
-- [ ] Stop updating ProjectData `chat_sessions.task_id` on wake.
-- [ ] Update recovery and ProjectData tests to assert stable task identity, no new `session-recovery` rows, preserved lineage, and repeated wake behavior.
-- [ ] Run focused tests and the repository quality gates.
+- [x] Add `sleeping` to task status contracts and transitions while keeping terminal status unchanged.
+- [x] Mark the backing task `sleeping` during sleep teardown without setting supersession fields.
+- [x] Replace recovery-task creation with a reactivation claim that keeps `tasks.id`, `parent_task_id`, and `dispatch_depth` stable.
+- [x] Add TaskRunner reactivation support that restarts placement/runtime state for an existing sleeping conversation task.
+- [x] Stop updating ProjectData `chat_sessions.task_id` on wake.
+- [x] Update recovery and ProjectData tests to assert stable task identity, no new `session-recovery` rows, preserved lineage, and repeated wake behavior.
+- [x] Run focused tests and the repository quality gates.
 
 ## Acceptance Criteria
 

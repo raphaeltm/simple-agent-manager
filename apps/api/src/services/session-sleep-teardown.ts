@@ -209,22 +209,43 @@ export async function completeSleepTeardown(
     .update(schema.agentSessions)
     .set({ status: 'sleeping', errorMessage: null, updatedAt: now })
     .where(eq(schema.agentSessions.id, agentSession.id));
-  if (workspace.nodeRuntime === 'cf-container') {
-    await db.batch([
-      workspaceSleeping,
-      agentSleeping,
-      db
-        .update(schema.nodes)
+  const taskSleeping = workspace.taskId
+    ? db
+        .update(schema.tasks)
         .set({
           status: 'sleeping',
-          healthStatus: 'unhealthy',
+          executionStep: null,
           errorMessage: null,
           updatedAt: now,
         })
-        .where(eq(schema.nodes.id, workspace.nodeId)),
-    ]);
+        .where(
+          and(
+            eq(schema.tasks.id, workspace.taskId),
+            inArray(schema.tasks.status, ['queued', 'delegated', 'in_progress', 'sleeping'])
+          )
+        )
+    : null;
+  if (workspace.nodeRuntime === 'cf-container') {
+    const nodeSleeping = db
+      .update(schema.nodes)
+      .set({
+        status: 'sleeping',
+        healthStatus: 'unhealthy',
+        errorMessage: null,
+        updatedAt: now,
+      })
+      .where(eq(schema.nodes.id, workspace.nodeId));
+    if (taskSleeping) {
+      await db.batch([workspaceSleeping, agentSleeping, nodeSleeping, taskSleeping]);
+    } else {
+      await db.batch([workspaceSleeping, agentSleeping, nodeSleeping]);
+    }
   } else {
-    await db.batch([workspaceSleeping, agentSleeping]);
+    if (taskSleeping) {
+      await db.batch([workspaceSleeping, agentSleeping, taskSleeping]);
+    } else {
+      await db.batch([workspaceSleeping, agentSleeping]);
+    }
   }
   const sleepWarning = options.fallback
     ? `Workspace slept through the bounded sleep fallback (transcript and Git recovery point, snapshot ${verified?.status ?? 'unknown'}/${verified?.degradation ?? 'unknown'})`

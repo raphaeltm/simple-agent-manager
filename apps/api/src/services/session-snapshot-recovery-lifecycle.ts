@@ -429,9 +429,7 @@ export async function hasAuthorizedRestorableSnapshotWakeClaim(
            ON recovery.id = ?
           AND recovery.project_id = snapshot.project_id
           AND recovery.user_id = snapshot.user_id
-          AND recovery.chat_session_id = snapshot.chat_session_id
           AND recovery.workspace_id = ?
-          AND recovery.triggered_by = 'session-recovery'
           AND recovery.status NOT IN ('completed', 'failed', 'cancelled')
          JOIN workspaces replacement
            ON replacement.id = ?

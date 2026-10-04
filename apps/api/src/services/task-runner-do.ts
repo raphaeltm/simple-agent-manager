@@ -208,7 +208,8 @@ export async function startTaskRunnerDO(
     projectEventWakeGuard?: ProjectEventWakeRecoveryGuard | null;
     /** Member whose continued write permission authorizes a scheduled wake. */
     recoveryRequiredProjectMemberId?: string | null;
-  }
+  },
+  options: { reactivate?: boolean } = {}
 ): Promise<void> {
   const deletionSourceTaskId = input.retrySourceTaskId ?? input.recoverySourceTaskId ?? null;
   if (deletionSourceTaskId) {
@@ -284,9 +285,13 @@ export async function startTaskRunnerDO(
     },
   };
 
-  await stub.start(startInput);
+  if (options.reactivate === true) {
+    await stub.reactivate(startInput);
+  } else {
+    await stub.start(startInput);
+  }
 
-  log.info('task_runner_do_service.started', {
+  log.info(options.reactivate === true ? 'task_runner_do_service.reactivated' : 'task_runner_do_service.started', {
     taskId: input.taskId,
     projectId: input.projectId,
   });

@@ -171,6 +171,81 @@ export class TaskRunner extends DurableObject<Env> {
   }
 
   /**
+   * Reactivate an existing conversation task after its runtime slept.
+   *
+   * Unlike start(), this is intentionally re-entrant for an existing task id:
+   * sleep keeps the task row and TaskRunner DO identity stable, while wake needs
+   * fresh runtime bindings and placement state.
+   */
+  async reactivate(input: StartTaskInput): Promise<void> {
+    await this.assertRecoveryAuthority(input);
+
+    const now = Date.now();
+    const capacityPlacementSnapshot = capacityPlacementSnapshotForTaskStart(
+      input.config.capacityPoolSelection
+    );
+    let reactivated = false;
+    let missingState = false;
+    await this.ctx.storage.transaction(async (transaction) => {
+      const existing = (await transaction.get<TaskRunnerState>('state')) ?? null;
+      if (!existing) {
+        missingState = true;
+        return;
+      }
+      const state: TaskRunnerState = {
+        ...existing,
+        projectId: input.projectId,
+        userId: input.userId,
+        currentStep: 'node_selection',
+        stepResults: {
+          nodeId: null,
+          autoProvisioned: false,
+          claimedWarmNodeId: null,
+          workspaceId: null,
+          chatSessionId: input.config.chatSessionId ?? null,
+          agentSessionId: null,
+          agentStarted: false,
+          mcpToken: null,
+          provisionedVmSize: null,
+          capacityPlacementSnapshot,
+        },
+        config: input.config,
+        retryCount: 0,
+        workspaceReadyReceived: false,
+        workspaceReadyStatus: null,
+        workspaceErrorMessage: null,
+        lastStepAt: now,
+        provisioningStartedAt: null,
+        admissionScopeKey: null,
+        admissionLeaseToken: null,
+        agentReadyStartedAt: null,
+        workspaceReadyStartedAt: null,
+        workspaceDispatchStartedAt: null,
+        workspaceDispatchAttempts: 0,
+        workspaceDispatchLastAttemptAt: null,
+        workspaceDispatchLastError: null,
+        workspaceDispatchAckedAt: null,
+        lastD1Step: null,
+        completed: false,
+      };
+      await transaction.put('state', state);
+      await transaction.setAlarm(now);
+      reactivated = true;
+    });
+
+    if (missingState) {
+      await this.start(input);
+      return;
+    }
+    if (reactivated) {
+      log.info('task_runner_do.reactivated', {
+        taskId: input.taskId,
+        projectId: input.projectId,
+      });
+    }
+  }
+
+  /**
    * Called when the workspace-ready callback arrives from the VM agent.
    * If the DO is waiting at `workspace_ready` step, this advances it immediately.
    * If the DO hasn't reached that step yet, the signal is stored for later.

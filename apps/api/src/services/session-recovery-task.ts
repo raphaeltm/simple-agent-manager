@@ -21,7 +21,7 @@ import {
 import { SourceTaskNotWakeableError } from './session-recovery-task-guard';
 import { SESSION_RECOVERY_INITIAL_PROMPT } from './session-sleep-fallback-messages';
 import type { SessionRecoverySourceTaskGuard } from './session-snapshots';
-import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
+import { startTaskRunnerDO } from './task-runner-do';
 
 export { SESSION_RECOVERY_INITIAL_PROMPT };
 
@@ -111,14 +111,6 @@ export async function startRecoveryTask(
     throw new SourceTaskNotWakeableError();
   }
   if (task.status === 'in_progress') return;
-  const alreadyStarted = await ensureTaskRunnerStarted(env, task.id);
-  if (
-    sourceTaskGuard &&
-    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
-  ) {
-    throw new SourceTaskNotWakeableError();
-  }
-  if (alreadyStarted) return;
 
   const profile = task.agentProfileHint
     ? await db
@@ -196,13 +188,9 @@ export async function startRecoveryTask(
     vmSizeSource: placementResolution.placement.vmSizeSource,
     resumeSnapshotChatSessionId: chatSessionId,
     evictionFence: options.evictionFence ?? null,
-    // Unguarded human wakes intentionally do not carry recoverySourceTaskId:
-    // that field grants the live-parent revocable-authority contract. Keep the
-    // predecessor deletion lineage separately so every TaskRunner boundary can
-    // still revalidate that the old runtime is gone before allocating a node.
-    recoverySourceTaskId: sourceTaskGuard?.taskId ?? null,
-    retrySourceTaskId: task.recoverySourceTaskId ?? null,
-    projectEventWakeGuard: sourceTaskGuard?.projectEventWake ?? null,
+    recoverySourceTaskId: null,
+    retrySourceTaskId: null,
+    projectEventWakeGuard: null,
     recoveryRequiredProjectMemberId: sourceTaskGuard?.requiredProjectMemberId ?? null,
-  });
+  }, { reactivate: true });
 }
