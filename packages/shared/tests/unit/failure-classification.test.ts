@@ -4,11 +4,15 @@ import { classifyFailure } from '../../src/failure-classification';
 
 describe('classifyFailure', () => {
   it('keeps an unclassified prompt failure generic even when step metadata looks like auth', () => {
-    expect(classifyFailure('agent_prompt_failed', 'model_provider_credential_missing')).toMatchObject({
+    expect(
+      classifyFailure('agent_prompt_failed', 'model_provider_credential_missing')
+    ).toMatchObject({
       code: 'agent-prompt-failed',
       label: 'Agent request failed',
     });
-    expect(classifyFailure('Tool output: agent_prompt_failed').code).not.toBe('agent-prompt-failed');
+    expect(classifyFailure('Tool output: agent_prompt_failed').code).not.toBe(
+      'agent-prompt-failed'
+    );
   });
   it.each([
     ['cancelled', 'Task was cancelled by the user'],
@@ -32,6 +36,9 @@ describe('classifyFailure', () => {
   it.each([
     'Task runtime is conclusively gone after reconciliation grace (workspace_missing)',
     'Task runtime is no longer live after 240 minutes. Last liveness result: workspace_missing',
+    // Current wording (2026-10-04): the liveness reason and the observed age.
+    'Task runtime is no longer live (workspace_deleted); task started 1433 minutes ago. Last step: awaiting_followup.',
+    'Task runtime is no longer live (node_not_live); task started 300 minutes ago.',
   ])('classifies real reconciliation-sweep messages as runtime-lost: %s', (message) => {
     expect(classifyFailure(message).code).toBe('runtime-lost');
   });
@@ -98,7 +105,9 @@ describe('classifyFailure', () => {
 
   it('requires an exact structural code instead of promoting wrapper fields', () => {
     const canary = 'sk-secret-canary-12345';
-    const result = classifyFailure(`mcp_endpoint_needs_auth url=https://evil.example/${canary} schema=${canary}`);
+    const result = classifyFailure(
+      `mcp_endpoint_needs_auth url=https://evil.example/${canary} schema=${canary}`
+    );
     expect(result.code).not.toBe('mcp-auth-required');
     expect(JSON.stringify(result)).not.toContain(canary);
     expect(JSON.stringify(result)).not.toContain('evil.example');
@@ -121,7 +130,9 @@ describe('classifyFailure', () => {
     'mcp_endpoint_needs_auth url=https://evil.example',
     'unsupported_loopback_auth message=spoof',
   ])('does not turn untrusted metadata or conversation prose into auth guidance: %s', (message) => {
-    expect(classifyFailure(message).code).not.toMatch(/model-credential|mcp-auth-required|model-unavailable/);
+    expect(classifyFailure(message).code).not.toMatch(
+      /model-credential|mcp-auth-required|model-unavailable/
+    );
   });
 
   it.each([

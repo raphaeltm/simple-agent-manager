@@ -146,7 +146,9 @@ killed regardless of node heartbeat status".
 - A conclusive runtime death records the observed execution minutes and the liveness reason, and still classifies as
   `runtime-lost`.
 - Durable heartbeat-skip rows drop from one per sweep to one per task per liveness basis.
-- A ceiling deferral that outlives any single in-flight sleep episode is visible at warn level with one durable record.
+- A ceiling deferral to a sleep that is only in flight ends after `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS`: the task
+  is terminalized with a warn log (`stuck_task.ceiling_sleep_grace_expired`) and the standard durable recovery record.
+  Restorable sleep records and unknown lookups still defer.
 - No preserve/terminalize decision changes except as agreed with the sibling for the ceiling bypass.
 - No prompts, message content, tokens or URLs in any new log or record.
 
