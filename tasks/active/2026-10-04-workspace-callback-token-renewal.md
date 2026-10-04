@@ -77,15 +77,18 @@ gets `401 Invalid or expired callback token` on every workspace-scoped callback.
 
 1. **API push on hibernate (heals running old agents, no binary rollout needed):**
    `hibernateAgentSessionOnNode` mints a fresh workspace token only when D1 confirms the workspace
-   is active on the target node, and sends it as `workspaceCallbackToken` over the existing
+   is active on the target VM node (never Instant; re-read after signing), and sends it as
+   `workspaceCallbackToken` over the existing
    node-management channel (same channel that delivers the token at create/restore). Agents since
    2026-07-11 already store it before capture.
 2. **Proactive dual-proof renewal (new agents):** `POST /api/workspaces/:id/callback-token/renew`
    requires the current, unexpired workspace token (`Authorization`) **and** the hosting node's
-   node token (`X-SAM-Node-ID` / `X-SAM-Node-Authorization`). It renews only if the workspace is
-   active, bound to that node, owned by the node's user, the node is non-terminal, and (Instant) the
-   token generation is not superseded. A renewed token preserves the generation issue time (`gen`
-   claim) so the stale-callback guard keeps working. Not-yet-due tokens are not re-minted.
+   node token (JSON body `{ nodeId, nodeToken }`; Workers Logs records request headers, and
+   redaction of custom headers is undocumented). It renews only if the workspace is active, bound to
+   that node, owned by the node's user, and the node is non-terminal. A renewed token preserves the
+   generation issue time (`gen_iat` claim) so the Instant stale-callback guard keeps working. No
+   superseded-generation refusal: its only signal (`agent_sessions.updated_at`) has non-recovery
+   writers and would refuse the live container. Not-yet-due tokens are not re-minted.
    - A node token alone cannot obtain a workspace token (no widened node authority).
    - A workspace token leaked from a VM devcontainer cannot renew itself (needs the node token).
    - Expired tokens are never renewed (no expiry bypass); recovery is the control-plane push.
@@ -94,9 +97,9 @@ gets `401 Invalid or expired callback token` on every workspace-scoped callback.
    definitive rejections, compare-and-swap the runtime token, persist it, and propagate every token
    change (renewal or control-plane push) to the message reporter and ACP session hosts.
 4. **Message reporter:** a 401 is no longer terminal-and-destructive. If a newer token exists, retry
-   with it; otherwise keep the outbox, send nothing, and resume when a new token arrives. Bounded by
-   the existing outbox cap and a new configurable park budget, after which the old terminal
-   behaviour applies (rule 54.13).
+   with it; otherwise keep the outbox, send nothing for that token, and resume when a new token
+   arrives. Bounded by the existing outbox cap; a pause longer than `MSG_AUTH_RENEWAL_WAIT` is
+   reported once (rule 54.13: no request loop on the rejected token, no row destruction).
 5. **ACP SessionHost:** read the callback token through a lock-free accessor that renewal updates
    (rule 46: nothing reachable from the ACP notification goroutine may take `mu`).
 
