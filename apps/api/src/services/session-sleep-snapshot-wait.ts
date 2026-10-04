@@ -4,7 +4,7 @@ import type * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { hibernateAgentSessionOnNode,type HibernateCallbackTokenDelivery } from './node-agent';
+import { hibernateAgentSessionOnNode, type HibernateCallbackTokenDelivery } from './node-agent';
 import {
   completeActiveSessionSnapshotAsDegraded,
   getSessionSnapshotCaptureState,

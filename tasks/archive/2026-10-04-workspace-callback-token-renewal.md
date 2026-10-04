@@ -112,7 +112,7 @@ Changes from local review (security, Go, Cloudflare, test, task-completion, docs
    `tasks/backlog/2026-10-04-instant-generation-aware-callback-token-renewal.md`.
 7. **Rate limit (rule 28 §4).** Authenticated renewal attempts count against
    `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL` (default 12 per `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL_WINDOW_SECONDS`
-   = 3600) per workspace, in one guarded D1 upsert (migration 0179, cascade-deleted with the
+   = 3600) per workspace, in one guarded D1 upsert (migration 0180, cascade-deleted with the
    workspace). A slot is spent only after both proofs, the node binding and the active check, so a
    caller without the credentials cannot use up the legitimate agent's quota. 429 + `Retry-After`;
    the agent backs off.
@@ -149,7 +149,7 @@ Changes from local review (security, Go, Cloudflare, test, task-completion, docs
 - [x] `node-agent-session-snapshots.ts`: include fresh token on hibernate when bound + active (VM only)
 - [x] Env vars documented: env-reference skill (API `CALLBACK_TOKEN_*`, agent `WORKSPACE_CALLBACK_TOKEN_*`,
       `MSG_AUTH_RENEWAL_WAIT`), public VM agent reference
-- [x] Review: atomic per-workspace renewal limit (migration 0179, `workspace-callback-token-renewal-rate-limit.ts`,
+- [x] Review: atomic per-workspace renewal limit (migration 0180, `workspace-callback-token-renewal-rate-limit.ts`,
       `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL[_WINDOW_SECONDS]`, 429 + Retry-After)
 - [x] Review: renewal refuses Instant runtimes (`isInstantRuntimeBinding`, shared with delivery)
 - [x] Review: one delivered token per hibernate wait (`HibernateCallbackTokenDelivery`, a plain memo object
