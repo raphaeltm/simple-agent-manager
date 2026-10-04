@@ -576,6 +576,56 @@ test.describe('Unified Agent Cards — Mobile', () => {
     expect(warningText).toContain('Warning');
   });
 
+  test('permission mode: agents with no saved mode default to Bypass Permissions', async ({
+    page,
+  }) => {
+    await setupApiMocks(page, {
+      agents: [MOCK_AGENT_CLAUDE, MOCK_AGENT_OPENCODE],
+      settingsMap: {},
+    });
+    await navigateToAgentConfig(page);
+    await page.waitForSelector('[data-testid="agent-card-claude-code"]');
+
+    for (const agentId of ['claude-code', 'opencode']) {
+      await expect(page.getByTestId(`permission-mode-${agentId}-bypassPermissions`)).toBeChecked();
+      await expect(page.getByTestId(`permission-mode-${agentId}-default`)).not.toBeChecked();
+    }
+    const claudeCard = page.getByTestId('agent-card-claude-code');
+    await expect(claudeCard.getByText('Manual', { exact: true })).toBeVisible();
+    await expect(
+      claudeCard.getByRole('alert').filter({ hasText: 'disables all safety prompts' })
+    ).toBeVisible();
+    await expect(page.getByTestId('save-settings-claude-code')).toBeDisabled();
+
+    await page.getByTestId('permission-mode-claude-code-bypassPermissions').scrollIntoViewIfNeeded();
+    await takeScreenshot(page, 'agent-settings-mobile-permission-default-bypass');
+    await assertNoOverflow(page);
+  });
+
+  test('permission mode: a saved Manual choice stays selected', async ({ page }) => {
+    await setupApiMocks(page, {
+      agents: [MOCK_AGENT_CLAUDE],
+      settingsMap: {
+        'claude-code': makeSettings({ agentType: 'claude-code', permissionMode: 'default' }),
+      },
+    });
+    await navigateToAgentConfig(page);
+    await page.waitForSelector('[data-testid="agent-card-claude-code"]');
+
+    await expect(page.getByTestId('permission-mode-claude-code-default')).toBeChecked();
+    await expect(page.getByTestId('permission-mode-claude-code-bypassPermissions')).not.toBeChecked();
+    await expect(
+      page
+        .getByTestId('agent-card-claude-code')
+        .getByRole('alert')
+        .filter({ hasText: 'disables all safety prompts' })
+    ).toHaveCount(0);
+
+    await page.getByTestId('permission-mode-claude-code-default').scrollIntoViewIfNeeded();
+    await takeScreenshot(page, 'agent-settings-mobile-permission-saved-manual');
+    await assertNoOverflow(page);
+  });
+
   test('OpenCode Go provider: uses API-backed model select with Go-only options', async ({
     page,
   }) => {
@@ -684,6 +734,28 @@ test.describe('Unified Agent Cards — Desktop', () => {
     });
     const controlId = await page.getByTestId('model-input-opencode').getAttribute('id');
     expect(labelFor).toBe(controlId);
+  });
+
+  test('permission mode: agents with no saved mode default to Bypass Permissions on desktop', async ({
+    page,
+  }) => {
+    await setupApiMocks(page, {
+      agents: [MOCK_AGENT_CLAUDE, MOCK_AGENT_CODEX, MOCK_AGENT_OPENCODE],
+      settingsMap: {
+        opencode: makeSettings({ permissionMode: 'plan' }),
+      },
+    });
+    await navigateToAgentConfig(page);
+    await page.waitForSelector('[data-testid="agent-card-claude-code"]');
+
+    await expect(page.getByTestId('permission-mode-claude-code-bypassPermissions')).toBeChecked();
+    await expect(page.getByTestId('permission-mode-openai-codex-bypassPermissions')).toBeChecked();
+    await expect(page.getByTestId('permission-mode-opencode-plan')).toBeChecked();
+    await expect(page.getByTestId('permission-mode-opencode-bypassPermissions')).not.toBeChecked();
+
+    await page.getByTestId('permission-mode-claude-code-bypassPermissions').scrollIntoViewIfNeeded();
+    await takeScreenshot(page, 'agent-settings-desktop-permission-default-bypass');
+    await assertNoOverflow(page);
   });
 
   test('error state: agents API error renders without overflow', async ({ page }) => {

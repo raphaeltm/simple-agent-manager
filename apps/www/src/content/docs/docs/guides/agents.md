@@ -135,6 +135,18 @@ has to be a model your provider accepts and your agent's version can run. The ex
 **SAM** provider mode: the platform proxy only serves models in its catalog, so there an unlisted
 ID is refused.
 
+### Permission mode
+
+Agents start in **Bypass Permissions** mode, so they edit files and run commands without stopping to
+ask. Each workspace is its own isolated VM or container. To make an agent more careful, choose another
+mode in a profile, in the project's **Agent Overrides** (project settings), or in **Settings → Agents**.
+SAM uses the first of these that sets a mode, in that order. **Manual** asks before making changes;
+**Plan Mode** plans without changing anything.
+
+Claude Code supports every mode. Even in Bypass Permissions it still asks about a few safety checks,
+and those questions appear in the chat. Codex always runs with full access. Other agents keep their
+own behavior when they don't support the chosen mode.
+
 ## Workspace Profiles
 
 When you start a chat you can also choose how much environment to bring:

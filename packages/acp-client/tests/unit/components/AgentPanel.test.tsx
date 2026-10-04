@@ -366,6 +366,34 @@ describe('AgentPanel toolbar row', () => {
     expect(cancelButton.className).toContain('text-gray-400');
   });
 
+  it('opens the settings panel on the host default permission mode', () => {
+    const session = createMockSession();
+    const messages = createMockMessages();
+
+    render(
+      <AgentPanel
+        session={session}
+        messages={messages}
+        agentSettings={{ model: null, permissionMode: null }}
+        onSaveSettings={vi.fn()}
+        permissionModes={[
+          { value: 'default', label: 'Manual' },
+          { value: 'bypassPermissions', label: 'Bypass Permissions' },
+        ]}
+        defaultPermissionMode="bypassPermissions"
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText('Agent settings'));
+
+    expect(
+      screen.getByRole('radio', { name: 'Bypass Permissions' }).getAttribute('aria-checked')
+    ).toBe('true');
+    expect(screen.getByRole('radio', { name: 'Manual' }).getAttribute('aria-checked')).toBe(
+      'false'
+    );
+  });
+
   it('settings button is not inside the form element', () => {
     const session = createMockSession();
     const messages = createMockMessages();

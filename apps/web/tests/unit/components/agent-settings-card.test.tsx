@@ -14,6 +14,16 @@ vi.mock('../../../src/lib/api/agents', () => ({
   getAgentModelCatalog: vi.fn(),
 }));
 
+function makeClaudeAgent(): AgentInfo {
+  return {
+    id: 'claude-code',
+    name: 'Claude Code',
+    description: 'Claude Code agent',
+    supportsAcp: true,
+    configured: true,
+  } as AgentInfo;
+}
+
 function makeOpenCodeAgent(): AgentInfo {
   return {
     id: 'opencode',
@@ -117,5 +127,86 @@ describe('AgentSettingsCard OpenCode model catalog', () => {
 
     expect(screen.getByTestId('model-input-opencode')).toHaveValue('custom-model');
     expect(getAgentModelCatalog).not.toHaveBeenCalled();
+  });
+});
+
+describe('AgentSettingsCard permission mode default', () => {
+  function radio(mode: string): HTMLInputElement {
+    return screen.getByTestId(`permission-mode-claude-code-${mode}`) as HTMLInputElement;
+  }
+
+  it('selects Bypass Permissions when no mode is saved, with nothing pending to save', () => {
+    render(
+      <AgentSettingsCard
+        agent={makeClaudeAgent()}
+        settings={makeOpenCodeSettings({ agentType: 'claude-code' })}
+        onSave={vi.fn()}
+        onReset={vi.fn()}
+      />
+    );
+
+    expect(radio('bypassPermissions').checked).toBe(true);
+    expect(radio('default').checked).toBe(false);
+    expect(screen.getByRole('radio', { name: 'Manual' })).toBe(radio('default'));
+    expect(screen.getByRole('alert')).toHaveTextContent('disables all safety prompts');
+    expect(screen.getByTestId('save-settings-claude-code')).toBeDisabled();
+  });
+
+  it('saves the default mode explicitly when other settings change', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AgentSettingsCard
+        agent={makeClaudeAgent()}
+        settings={makeOpenCodeSettings({ agentType: 'claude-code' })}
+        onSave={onSave}
+        onReset={vi.fn()}
+      />
+    );
+
+    await user.type(screen.getByTestId('model-input-claude-code'), 'claude-opus-5');
+    await user.click(screen.getByTestId('save-settings-claude-code'));
+
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith('claude-code', {
+        model: 'claude-opus-5',
+        permissionMode: 'bypassPermissions',
+        providerMode: null,
+      })
+    );
+  });
+
+  it('keeps a saved Manual choice selected instead of the default', () => {
+    render(
+      <AgentSettingsCard
+        agent={makeClaudeAgent()}
+        settings={makeOpenCodeSettings({ agentType: 'claude-code', permissionMode: 'default' })}
+        onSave={vi.fn()}
+        onReset={vi.fn()}
+      />
+    );
+
+    expect(radio('default').checked).toBe(true);
+    expect(radio('bypassPermissions').checked).toBe(false);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('returns the selection to Bypass Permissions on reset', async () => {
+    const user = userEvent.setup();
+    const onReset = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AgentSettingsCard
+        agent={makeClaudeAgent()}
+        settings={makeOpenCodeSettings({ agentType: 'claude-code', permissionMode: 'plan' })}
+        onSave={vi.fn()}
+        onReset={onReset}
+      />
+    );
+    expect(radio('plan').checked).toBe(true);
+
+    await user.click(screen.getByTestId('reset-settings-claude-code'));
+
+    await waitFor(() => expect(radio('bypassPermissions').checked).toBe(true));
+    expect(onReset).toHaveBeenCalledWith('claude-code');
   });
 });

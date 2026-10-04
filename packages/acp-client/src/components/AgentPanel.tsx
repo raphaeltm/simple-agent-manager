@@ -66,6 +66,8 @@ interface AgentPanelProps {
   agentSettingsLoading?: boolean;
   /** Permission mode options for the settings panel */
   permissionModes?: { value: string; label: string }[];
+  /** Mode shown in the settings panel when no permission mode is saved */
+  defaultPermissionMode?: string;
   /** Called when user saves settings from the in-chat panel */
   onSaveSettings?: (data: {
     model?: string | null;
@@ -92,6 +94,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
     agentSettings,
     agentSettingsLoading,
     permissionModes,
+    defaultPermissionMode,
     onSaveSettings,
     onError,
   },
@@ -352,6 +355,7 @@ export const AgentPanel = React.forwardRef<AgentPanelHandle, AgentPanelProps>(fu
             settings={agentSettings ?? null}
             loading={agentSettingsLoading}
             permissionModes={permissionModes}
+            defaultPermissionMode={defaultPermissionMode}
             onSave={onSaveSettings}
             onClose={() => setShowSettings(false)}
           />

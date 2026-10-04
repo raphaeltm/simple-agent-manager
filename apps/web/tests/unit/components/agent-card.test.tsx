@@ -126,7 +126,7 @@ describe('AgentCard', () => {
     renderCard(makeAgent(), null, makeSettings());
     await waitFor(() => {
       const defaultRadio = screen.getByTestId(
-        'permission-mode-claude-code-default',
+        'permission-mode-claude-code-bypassPermissions',
       ) as HTMLInputElement;
       expect(defaultRadio.checked).toBe(true);
     });

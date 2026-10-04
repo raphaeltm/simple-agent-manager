@@ -7,7 +7,11 @@ import type {
 } from '@simple-agent-manager/acp-client';
 import { AgentPanel,useAcpMessages, useAcpSession } from '@simple-agent-manager/acp-client';
 import type { AgentInfo } from '@simple-agent-manager/shared';
-import { AGENT_PERMISSION_MODE_LABELS,VALID_PERMISSION_MODES } from '@simple-agent-manager/shared';
+import {
+  AGENT_PERMISSION_MODE_LABELS,
+  DEFAULT_AGENT_PERMISSION_MODE,
+  VALID_PERMISSION_MODES,
+} from '@simple-agent-manager/shared';
 import React, {
   useCallback,
   useEffect,
@@ -349,6 +353,7 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
           agentSettings={agentSettings}
           agentSettingsLoading={agentSettingsLoading}
           permissionModes={permissionModes}
+          defaultPermissionMode={DEFAULT_AGENT_PERMISSION_MODE}
           onSaveSettings={handleSaveSettings}
           onError={handleError}
         />

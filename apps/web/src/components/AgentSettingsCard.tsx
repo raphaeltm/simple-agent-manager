@@ -14,6 +14,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import {
   AGENT_PERMISSION_MODE_LABELS,
+  DEFAULT_AGENT_PERMISSION_MODE,
   DEFAULT_OPENCODE_PROVIDER,
   DEFAULT_OPENCODE_ZEN_MODEL,
   OPENCODE_PROVIDER_OPTIONS,
@@ -55,7 +56,7 @@ export function AgentSettingsCard({
 }: AgentSettingsCardProps) {
   const [model, setModel] = useState(settings?.model ?? '');
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>(
-    settings?.permissionMode ?? 'default'
+    settings?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE
   );
   const [opencodeProvider, setOpencodeProvider] = useState<OpenCodeProvider>(
     settings?.opencodeProvider ?? DEFAULT_OPENCODE_PROVIDER
@@ -89,7 +90,7 @@ export function AgentSettingsCard({
   // Sync state when settings prop changes
   useEffect(() => {
     setModel(settings?.model ?? '');
-    setPermissionMode(settings?.permissionMode ?? 'default');
+    setPermissionMode(settings?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE);
     setOpencodeProvider(settings?.opencodeProvider ?? DEFAULT_OPENCODE_PROVIDER);
     setOpencodeBaseUrl(settings?.opencodeBaseUrl ?? '');
     setProviderMode(settings?.providerMode ?? '');
@@ -132,7 +133,7 @@ export function AgentSettingsCard({
       setResetting(true);
       await onReset(agent.id);
       setModel('');
-      setPermissionMode('default');
+      setPermissionMode(DEFAULT_AGENT_PERMISSION_MODE);
       setOpencodeProvider(DEFAULT_OPENCODE_PROVIDER);
       setOpencodeBaseUrl('');
       setProviderMode('');
@@ -165,7 +166,7 @@ export function AgentSettingsCard({
 
   const hasChanges = (() => {
     if ((model.trim() || null) !== (settings?.model ?? null)) return true;
-    if (permissionMode !== (settings?.permissionMode ?? 'default')) return true;
+    if (permissionMode !== (settings?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE)) return true;
     if (isOpenCode) {
       if (opencodeProvider !== (settings?.opencodeProvider ?? DEFAULT_OPENCODE_PROVIDER))
         return true;

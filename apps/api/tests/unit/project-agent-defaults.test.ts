@@ -10,7 +10,8 @@
  *      tests (readFileSync + toContain) prove code is present, not that it works,
  *      and broke here when prettier rewrapped the update-set line in crud.ts.
  *   4. Task submit and MCP dispatch consult project.agentDefaults
- *   5. Agent-settings callback merges project → user fallback
+ *   5. Agent-settings callback merges project → user → platform default — behavioral,
+ *      in tests/unit/routes/workspace-agent-settings-callback.test.ts
  *   6. Project Settings UI renders the new section
  */
 import { readFileSync } from 'node:fs';
@@ -409,20 +410,6 @@ describe('Project agent defaults — MCP dispatch_task resolution', () => {
 
   it('consults project.agentDefaults when profile has no model override', () => {
     expect(dispatch).toContain('resolveProjectAgentDefault(project.agentDefaults');
-  });
-});
-
-describe('Project agent defaults — agent-settings callback merges project → user', () => {
-  const runtime = apiSrc('routes/workspaces/runtime.ts');
-
-  it('fetches project.agentDefaults for the workspace project', () => {
-    expect(runtime).toContain('projects.agentDefaults');
-    expect(runtime).toContain('resolveProjectAgentDefault');
-  });
-
-  it('uses project override when present, else falls back to user settings', () => {
-    expect(runtime).toMatch(/projectDefaults\.model\s*\?\?\s*userRow\?\.model/);
-    expect(runtime).toMatch(/projectDefaults\.permissionMode\s*\?\?\s*userRow\?\.permissionMode/);
   });
 });
 
