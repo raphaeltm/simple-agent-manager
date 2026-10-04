@@ -24,8 +24,8 @@
  *  1. **The ceiling only applies while a runtime generation is actually
  *     allocated.** No workspace row, or a workspace in a terminal status, means
  *     there is no compute to bound. Those tasks are the liveness branch's
- *     business, which terminalizes a genuinely dead runtime at 4h/8h — far
- *     earlier than 24h, and with an accurate reason.
+ *     business, which terminalizes a genuinely dead runtime from the 4h recovery
+ *     check onward — far earlier than 24h, and with an accurate reason.
  *  2. **Age comes from that generation**, i.e. `workspaces.created_at`, not from
  *     a conversation row that a wake may have created weeks ago.
  *
@@ -33,6 +33,17 @@
  * task. A dead runtime with no restorable snapshot is conclusively terminalized
  * by the liveness branch; a restorable one is preserved only until its snapshot
  * TTL lapses, after which the same branch terminalizes it.
+ *
+ * The sleep gate's deferral is bounded on this module's own clock. On 2026-10-04
+ * task `01M3Z4CCZH5N22754V7CVVN9WR` reached a 35.3-hour runtime generation, 11
+ * hours past the 24-hour ceiling, because every sweep found its sleep "in
+ * flight". The sleep was failing every few minutes, and each retry claim
+ * re-stamped the timestamp the shared in-flight predicate ages from, so its
+ * 30-minute bound never lapsed (`.claude/rules/53` §5b). A sleep that is merely
+ * in flight therefore holds the ceiling off for at most
+ * `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS`, measured on runtime-generation age,
+ * which no sleep writer can touch. A restorable (asleep) record still always
+ * defers.
  *
  * Fail-closed (`.claude/rules/74` requirement 5): if the workspace read fails we
  * fall back to `tasks.started_at` and apply the ceiling, keeping today's stricter
@@ -67,20 +78,37 @@ const RELEASED_WORKSPACE_STATUSES = new Set([
   'failed',
 ]);
 
+/** A sleep that was still only in flight when the ceiling's sleep grace ran out. */
+export interface InFlightSleepGraceExpiry {
+  /** `session_snapshots.sleep_status` of the in-flight record. */
+  sleepStatus: string | null;
+  /** How far the runtime generation is past the ceiling. */
+  overrunMs: number;
+  graceMs: number;
+}
+
 export type RunawayCostCeilingVerdict =
-  /** Below the ceiling, or no allocated runtime generation to bound. */
-  | { kind: 'not_applicable'; reason: 'below_ceiling' | 'no_live_runtime_generation' }
+  /** Below the ceiling: the generation's age is reported for diagnostics. */
+  | { kind: 'not_applicable'; reason: 'below_ceiling'; runtimeGenerationMs: number }
+  /** No allocated runtime generation to bound. */
+  | { kind: 'not_applicable'; reason: 'no_live_runtime_generation' }
   /** Recoverable or superseded: withhold the verdict, leave the task untouched. */
   | {
       kind: 'preserve';
       reason:
-        | 'session_sleeping'
-        | 'session_sleep_unknown'
-        | 'superseded_live'
-        | 'supersession_unknown';
+        'session_sleeping' | 'session_sleep_unknown' | 'superseded_live' | 'supersession_unknown';
     }
-  /** Terminalize. `superseded` selects the benign lifecycle label over a failure. */
-  | { kind: 'terminalize'; superseded: boolean; runtimeGenerationMs: number };
+  /**
+   * Terminalize. `superseded` selects the benign lifecycle label over a failure.
+   * `inFlightSleepGraceExpired` is set when an in-flight sleep was outlasted, and
+   * tells the caller's terminal gate not to re-defer to that same sleep.
+   */
+  | {
+      kind: 'terminalize';
+      superseded: boolean;
+      runtimeGenerationMs: number;
+      inFlightSleepGraceExpired: InFlightSleepGraceExpiry | null;
+    };
 
 export interface RunawayCostCeilingInput {
   id: string;
@@ -164,39 +192,70 @@ async function loadCeilingWorkspace(
  * A live runtime generation past the ceiling still must not destroy a session the
  * wake path would accept — a sleep capture in flight keeps the workspace alive
  * while `session_snapshots` already owns the conversation (`.claude/rules/58`).
- * Bounded by the in-flight sleep age ceiling.
  *
- * Returns the preserve verdict, or null when sleep cannot explain the state.
+ * The record is read through the shared predicate (`loadTaskSleepPreservation`).
+ * Only its arm decides how long the ceiling defers: a restorable record, the
+ * conversation fallback and an unknown lookup always defer; an in-flight sleep
+ * defers until the generation is `sleepGraceMs` past the ceiling.
+ *
+ * Returns the preserve verdict, or null when sleep cannot explain the state, plus
+ * the grace expiry when an in-flight sleep was outlasted.
  */
 async function ceilingSleepGate(
   env: Env,
   task: RunawayCostCeilingInput,
   workspace: RuntimeWorkspaceSnapshot | null,
-  runtimeGenerationMs: number
-): Promise<RunawayCostCeilingVerdict | null> {
+  runtimeGenerationMs: number,
+  bounds: { absoluteCeilingMs: number; sleepGraceMs: number }
+): Promise<{
+  verdict: RunawayCostCeilingVerdict | null;
+  graceExpired: InFlightSleepGraceExpiry | null;
+}> {
   const preservation = await loadTaskSleepPreservation(env.DATABASE, env, {
     id: task.id,
     projectId: task.project_id,
     chatSessionId: task.chat_session_id,
   });
-  if (preservation.outcome !== 'preserve' && preservation.outcome !== 'unknown') return null;
+  if (preservation.outcome !== 'preserve' && preservation.outcome !== 'unknown') {
+    return { verdict: null, graceExpired: null };
+  }
 
-  log.info('stuck_task.preserved_sleeping', {
+  const overrunMs = runtimeGenerationMs - bounds.absoluteCeilingMs;
+  const logFields = {
     taskId: task.id,
     projectId: task.project_id,
     chatSessionId: task.chat_session_id,
     workspaceId: task.workspace_id,
     workspaceStatus: workspace?.status ?? null,
     sleepStatus: preservation.sleepStatus,
+    arm: preservation.arm,
     expiresAt: preservation.expiresAt,
     runtimeGenerationMs,
+    absoluteCeilingMs: bounds.absoluteCeilingMs,
+    overrunMs,
+    sleepGraceMs: bounds.sleepGraceMs,
     source: 'ceiling',
     outcome: preservation.outcome,
-    action: 'preserved',
-  });
+  };
+  if (preservation.arm === 'in_flight' && overrunMs > bounds.sleepGraceMs) {
+    log.warn('stuck_task.ceiling_sleep_grace_expired', { ...logFields, action: 'terminalize' });
+    return {
+      verdict: null,
+      graceExpired: {
+        sleepStatus: preservation.sleepStatus,
+        overrunMs,
+        graceMs: bounds.sleepGraceMs,
+      },
+    };
+  }
+
+  log.info('stuck_task.preserved_sleeping', { ...logFields, action: 'preserved' });
   return {
-    kind: 'preserve',
-    reason: preservation.outcome === 'preserve' ? 'session_sleeping' : 'session_sleep_unknown',
+    verdict: {
+      kind: 'preserve',
+      reason: preservation.outcome === 'preserve' ? 'session_sleeping' : 'session_sleep_unknown',
+    },
+    graceExpired: null,
   };
 }
 
@@ -255,6 +314,26 @@ async function ceilingSupersessionGate(
   return { verdict: null, superseded: supersession === 'terminal' };
 }
 
+/** The terminal reason for a ceiling verdict that is not a supersession. */
+export function runawayCostCeilingReason(
+  verdict: Extract<RunawayCostCeilingVerdict, { kind: 'terminalize' }>,
+  absoluteCeilingMs: number,
+  stepInfo: string
+): string {
+  const ceilingMinutes = Math.round(absoluteCeilingMs / 60_000);
+  const expired = verdict.inFlightSleepGraceExpired;
+  if (!expired) {
+    return `Task exceeded the absolute runaway-cost ceiling of ${ceilingMinutes} minutes; live-runtime tasks are bounded to prevent unbounded compute.${stepInfo}`;
+  }
+  return (
+    `Task exceeded the absolute runaway-cost ceiling of ${ceilingMinutes} minutes: its runtime ` +
+    `generation is ${Math.round(verdict.runtimeGenerationMs / 60_000)} minutes old, and its automatic ` +
+    `sleep was still in flight (sleep status: ${expired.sleepStatus ?? 'unknown'}) ` +
+    `${Math.round(expired.overrunMs / 60_000)} minutes past the ceiling, beyond the ` +
+    `${Math.round(expired.graceMs / 60_000)}-minute sleep grace.${stepInfo}`
+  );
+}
+
 /**
  * Decide whether the runaway-cost ceiling terminalizes this task.
  *
@@ -273,6 +352,8 @@ export async function evaluateRunawayCostCeiling(
   opts: {
     nowMs: number;
     absoluteCeilingMs: number;
+    /** `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS`, resolved by the caller. */
+    sleepGraceMs: number;
     preloadWorkspace?: (snapshot: RuntimeWorkspaceSnapshot | null, outcome: 'ok' | 'error') => void;
   }
 ): Promise<RunawayCostCeilingVerdict> {
@@ -296,14 +377,22 @@ export async function evaluateRunawayCostCeiling(
 
   const runtimeGenerationMs = opts.nowMs - generationStartMs;
   if (runtimeGenerationMs <= opts.absoluteCeilingMs) {
-    return { kind: 'not_applicable', reason: 'below_ceiling' };
+    return { kind: 'not_applicable', reason: 'below_ceiling', runtimeGenerationMs };
   }
 
-  const sleepVerdict = await ceilingSleepGate(env, task, workspace, runtimeGenerationMs);
-  if (sleepVerdict) return sleepVerdict;
+  const sleep = await ceilingSleepGate(env, task, workspace, runtimeGenerationMs, {
+    absoluteCeilingMs: opts.absoluteCeilingMs,
+    sleepGraceMs: opts.sleepGraceMs,
+  });
+  if (sleep.verdict) return sleep.verdict;
 
   const { verdict, superseded } = await ceilingSupersessionGate(env, task, runtimeGenerationMs);
   if (verdict) return verdict;
 
-  return { kind: 'terminalize', superseded, runtimeGenerationMs };
+  return {
+    kind: 'terminalize',
+    superseded,
+    runtimeGenerationMs,
+    inFlightSleepGraceExpired: sleep.graceExpired,
+  };
 }

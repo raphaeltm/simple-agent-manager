@@ -15,19 +15,22 @@ export const DEFAULT_TASK_RUN_CLEANUP_DELAY_MS = 5000;
 // Task Execution Timeout (Stuck Task Recovery)
 // =============================================================================
 
-/** Soft timeout (ms): tasks past this threshold are checked against the VM agent heartbeat.
- * If the heartbeat is recent, recovery is deferred up to the hard timeout (TASK_RUN_HARD_TIMEOUT_MS).
- * Override via TASK_RUN_MAX_EXECUTION_MS env var. */
+/** Soft timeout (ms): past this age, every stuck-task sweep checks an `in_progress` task's
+ * task-scoped runtime liveness. A conclusively dead runtime is failed; a live or inconclusive
+ * one is preserved, bounded only by TASK_RUN_ABSOLUTE_CEILING_MS. A node heartbeat alone never
+ * counts as live. Override via TASK_RUN_MAX_EXECUTION_MS env var. */
 export const DEFAULT_TASK_RUN_MAX_EXECUTION_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-/** Absolute hard timeout (ms) — tasks are killed regardless of node heartbeat status.
- * The soft timeout (TASK_RUN_MAX_EXECUTION_MS) allows heartbeat-based grace for the
- * window between soft and hard timeout. Past the hard timeout, no grace is given.
- * Override via TASK_RUN_HARD_TIMEOUT_MS env var. */
-export const DEFAULT_TASK_RUN_HARD_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours
-
-/** Absolute runaway-cost backstop (ms) that bounds even demonstrably live tasks. */
+/** Absolute runaway-cost backstop (ms) that bounds even demonstrably live tasks. Aged from the
+ * current runtime generation (`workspaces.created_at`). */
 export const DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS = 24 * 60 * 60 * 1000;
+
+/** Longest (ms) the absolute ceiling keeps deferring to a sleep that is still in flight
+ * (scheduled, capturing, stopping or retrying) after the ceiling has passed. Measured on
+ * runtime-generation age, which no sleep writer can re-stamp, so a sleep that retries forever
+ * cannot hold the ceiling off forever. Keep it above one sleep episode
+ * (SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS). Override via TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS. */
+export const DEFAULT_TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS = 60 * 60 * 1000;
 
 /** Default threshold (ms) for a task stuck in 'queued' status. Override via TASK_STUCK_QUEUED_TIMEOUT_MS env var.
  * Must be > TASK_RUNNER_AGENT_READY_TIMEOUT_MS (15 min) to avoid the stuck-task cron killing tasks

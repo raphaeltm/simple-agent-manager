@@ -68,8 +68,8 @@ const TASK_ID = '01M064TG9QK8ZQ3XW0M6P7RCTN';
 const HOUR = 60 * 60 * 1000;
 /** Past the 24h absolute runaway-cost ceiling. */
 const PAST_CEILING = -25 * HOUR;
-/** Past the 8h hard timeout but below the ceiling — the liveness branch's window. */
-const PAST_HARD_TIMEOUT = -9 * HOUR;
+/** Past the 4h recovery check but below the ceiling — the liveness branch's window. */
+const PAST_RECOVERY_CHECK = -9 * HOUR;
 
 let sqlite: Database.Database;
 
@@ -203,7 +203,6 @@ function env(overrides: Partial<Record<string, unknown>> = {}): Env {
       get: vi.fn().mockReturnValue({ getStatus: vi.fn().mockRejectedValue(new Error('no DO')) }),
     },
     TASK_RUN_MAX_EXECUTION_MS: String(4 * HOUR),
-    TASK_RUN_HARD_TIMEOUT_MS: String(8 * HOUR),
     TASK_RUN_ABSOLUTE_CEILING_MS: String(24 * HOUR),
     NODE_HEARTBEAT_STALE_SECONDS: '180',
     BASE_DOMAIN: 'example.test',
@@ -363,15 +362,18 @@ describe('runaway-cost ceiling — a sleeping conversation is not runaway comput
 
   /**
    * The ceiling's OWN sleep guard, isolated. Here the workspace is still
-   * `running`, so a runtime generation IS allocated and 25h old — the ceiling
+   * `running`, so a runtime generation IS allocated and past 24h — the ceiling
    * genuinely applies — and only the sleep lookup stops it. That is the case
    * where a sleep capture is in flight against live compute: destroying the task
-   * mid-capture would corrupt the handoff. Bounded by
-   * `SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS`.
+   * mid-capture would corrupt the handoff. Bounded per episode by
+   * `SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS`, and overall by
+   * `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS` past the ceiling (60 min by
+   * default; its retry-loop replay lives in `stuck-task-live-runtime.test.ts`), so
+   * this generation sits 30 minutes past the ceiling.
    */
-  it('preserves a 25h LIVE runtime whose sleep capture is in flight', async () => {
+  it('preserves a LIVE runtime past the ceiling whose sleep capture is in flight', async () => {
     seedTask({ executionStep: 'running' });
-    seedWorkspace({ status: 'running', createdAt: iso(PAST_CEILING) });
+    seedWorkspace({ status: 'running', createdAt: iso(-24.5 * HOUR) });
     seedNode({ heartbeatAt: iso(-30_000) });
     seedSnapshot({ sleepStatus: 'stopping', sleepingAt: null, sleepClaimedAt: iso(-60_000) });
 
@@ -558,8 +560,8 @@ describe('liveness and reconciliation branches — the same guard applies', () =
    * row was failed even with a `sleeping` snapshot (2 production rows on this
    * branch, 2 more on the reconciliation-grace branch).
    */
-  it('preserves a sleeping session past the hard timeout when the workspace row is gone', async () => {
-    seedTask({ workspaceId: null, startedAt: iso(PAST_HARD_TIMEOUT) });
+  it('preserves a sleeping session past the recovery check when the workspace row is gone', async () => {
+    seedTask({ workspaceId: null, startedAt: iso(PAST_RECOVERY_CHECK) });
     seedSnapshot({ workspaceId: null });
 
     const result = await recoverStuckTasks(env());
@@ -574,7 +576,7 @@ describe('liveness and reconciliation branches — the same guard applies', () =
    * also be satisfied by the liveness branch being broken outright.
    */
   it('still terminalizes a genuinely gone runtime with no snapshot', async () => {
-    seedTask({ workspaceId: null, startedAt: iso(PAST_HARD_TIMEOUT) });
+    seedTask({ workspaceId: null, startedAt: iso(PAST_RECOVERY_CHECK) });
 
     const result = await recoverStuckTasks(env());
 
@@ -589,7 +591,7 @@ describe('liveness and reconciliation branches — the same guard applies', () =
    * production rows had this shape and were correctly failed.
    */
   it('still terminalizes when the snapshot is terminally failed', async () => {
-    seedTask({ workspaceId: null, startedAt: iso(PAST_HARD_TIMEOUT) });
+    seedTask({ workspaceId: null, startedAt: iso(PAST_RECOVERY_CHECK) });
     seedSnapshot({ workspaceId: null, sleepStatus: 'terminal_failed' });
 
     await recoverStuckTasks(env());
@@ -637,15 +639,15 @@ describe('liveness and reconciliation branches — the same guard applies', () =
    * the 30 days to 2026-09-14.
    */
   it('preserves a sleeping session whose node is destroyed while the workspace still reads running', async () => {
-    seedTask({ executionStep: 'running', startedAt: iso(PAST_HARD_TIMEOUT) });
-    seedWorkspace({ status: 'running', createdAt: iso(PAST_HARD_TIMEOUT) });
+    seedTask({ executionStep: 'running', startedAt: iso(PAST_RECOVERY_CHECK) });
+    seedWorkspace({ status: 'running', createdAt: iso(PAST_RECOVERY_CHECK) });
     sqlite
       .prepare(
         `INSERT INTO nodes (id, user_id, name, status, health_status, last_heartbeat_at, runtime,
                           vm_size, vm_location, cloud_provider, created_at, updated_at)
        VALUES (?, 'user-1', 'node', 'destroyed', 'healthy', ?, 'vm', 'cpx21', 'nbg1', 'hetzner', ?, ?)`
       )
-      .run(NODE_ID, iso(-30_000), iso(PAST_HARD_TIMEOUT), iso(0));
+      .run(NODE_ID, iso(-30_000), iso(PAST_RECOVERY_CHECK), iso(0));
     seedSnapshot();
 
     const result = await recoverStuckTasks(env());
@@ -658,15 +660,15 @@ describe('liveness and reconciliation branches — the same guard applies', () =
 
   /** Its discriminating control: a destroyed node with no sleep record still fails. */
   it('still terminalizes a destroyed node with no sleep record', async () => {
-    seedTask({ executionStep: 'running', startedAt: iso(PAST_HARD_TIMEOUT) });
-    seedWorkspace({ status: 'running', createdAt: iso(PAST_HARD_TIMEOUT) });
+    seedTask({ executionStep: 'running', startedAt: iso(PAST_RECOVERY_CHECK) });
+    seedWorkspace({ status: 'running', createdAt: iso(PAST_RECOVERY_CHECK) });
     sqlite
       .prepare(
         `INSERT INTO nodes (id, user_id, name, status, health_status, last_heartbeat_at, runtime,
                           vm_size, vm_location, cloud_provider, created_at, updated_at)
        VALUES (?, 'user-1', 'node', 'destroyed', 'healthy', ?, 'vm', 'cpx21', 'nbg1', 'hetzner', ?, ?)`
       )
-      .run(NODE_ID, iso(-30_000), iso(PAST_HARD_TIMEOUT), iso(0));
+      .run(NODE_ID, iso(-30_000), iso(PAST_RECOVERY_CHECK), iso(0));
 
     await recoverStuckTasks(env());
 
@@ -680,8 +682,8 @@ describe('liveness and reconciliation branches — the same guard applies', () =
    * does to them. Conclusive, and unguarded before this fix.
    */
   it('preserves a sleeping session whose ACP sessions have gone terminal', async () => {
-    seedTask({ executionStep: 'running', startedAt: iso(PAST_HARD_TIMEOUT) });
-    seedWorkspace({ status: 'running', createdAt: iso(PAST_HARD_TIMEOUT) });
+    seedTask({ executionStep: 'running', startedAt: iso(PAST_RECOVERY_CHECK) });
+    seedWorkspace({ status: 'running', createdAt: iso(PAST_RECOVERY_CHECK) });
     seedNode({ heartbeatAt: iso(-30_000) });
     seedSnapshot();
     getTaskAcpLivenessSignalsMock.mockResolvedValue({
@@ -710,8 +712,8 @@ describe('liveness and reconciliation branches — the same guard applies', () =
 
   /** Its discriminating control. */
   it('still terminalizes terminal ACP sessions with no sleep record', async () => {
-    seedTask({ executionStep: 'running', startedAt: iso(PAST_HARD_TIMEOUT) });
-    seedWorkspace({ status: 'running', createdAt: iso(PAST_HARD_TIMEOUT) });
+    seedTask({ executionStep: 'running', startedAt: iso(PAST_RECOVERY_CHECK) });
+    seedWorkspace({ status: 'running', createdAt: iso(PAST_RECOVERY_CHECK) });
     seedNode({ heartbeatAt: iso(-30_000) });
     getTaskAcpLivenessSignalsMock.mockResolvedValue({
       sessions: [
@@ -741,8 +743,8 @@ describe('liveness and reconciliation branches — the same guard applies', () =
    * workspace stops its container while `workspaces.status` still reads `running`.
    */
   it('preserves a sleeping Instant session whose container has stopped', async () => {
-    seedTask({ executionStep: 'running', startedAt: iso(PAST_HARD_TIMEOUT) });
-    seedWorkspace({ status: 'running', createdAt: iso(PAST_HARD_TIMEOUT) });
+    seedTask({ executionStep: 'running', startedAt: iso(PAST_RECOVERY_CHECK) });
+    seedWorkspace({ status: 'running', createdAt: iso(PAST_RECOVERY_CHECK) });
     seedNode({ heartbeatAt: iso(-30_000), runtime: 'cf-container' });
     seedSnapshot();
     containerLifecycleMock.mockResolvedValue({ status: 'stopped', activeWorkStatus: null });
@@ -755,8 +757,8 @@ describe('liveness and reconciliation branches — the same guard applies', () =
 
   /** Its discriminating control: the same stopped container with no sleep record. */
   it('still terminalizes a stopped Instant container with no sleep record', async () => {
-    seedTask({ executionStep: 'running', startedAt: iso(PAST_HARD_TIMEOUT) });
-    seedWorkspace({ status: 'running', createdAt: iso(PAST_HARD_TIMEOUT) });
+    seedTask({ executionStep: 'running', startedAt: iso(PAST_RECOVERY_CHECK) });
+    seedWorkspace({ status: 'running', createdAt: iso(PAST_RECOVERY_CHECK) });
     seedNode({ heartbeatAt: iso(-30_000), runtime: 'cf-container' });
     containerLifecycleMock.mockResolvedValue({ status: 'stopped', activeWorkStatus: null });
 
@@ -813,8 +815,8 @@ describe('liveness and reconciliation branches — the same guard applies', () =
    * preserve paths, and it must not be failed either.
    */
   it('leaves a live runtime below the ceiling untouched', async () => {
-    seedTask({ executionStep: 'running', startedAt: iso(PAST_HARD_TIMEOUT) });
-    seedWorkspace({ status: 'running', createdAt: iso(PAST_HARD_TIMEOUT) });
+    seedTask({ executionStep: 'running', startedAt: iso(PAST_RECOVERY_CHECK) });
+    seedWorkspace({ status: 'running', createdAt: iso(PAST_RECOVERY_CHECK) });
     seedNode({ heartbeatAt: iso(-30_000) });
 
     const result = await recoverStuckTasks(env());

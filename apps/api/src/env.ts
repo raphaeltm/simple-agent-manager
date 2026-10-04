@@ -451,7 +451,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   DEFAULT_TASK_AGENT_TYPE?: string;
   // Task execution timeout (stuck task recovery)
   TASK_RUN_MAX_EXECUTION_MS?: string;
-  TASK_RUN_HARD_TIMEOUT_MS?: string;
   TASK_STUCK_QUEUED_TIMEOUT_MS?: string;
   INSTANT_START_STALE_TIMEOUT_MS?: string;
   TASK_STUCK_DELEGATED_TIMEOUT_MS?: string;

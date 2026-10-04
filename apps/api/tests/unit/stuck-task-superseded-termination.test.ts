@@ -180,7 +180,6 @@ function env(
       }),
     },
     TASK_RUN_MAX_EXECUTION_MS: '14400000', // 4h
-    TASK_RUN_HARD_TIMEOUT_MS: '28800000', // 8h
     TASK_RUN_ABSOLUTE_CEILING_MS: '86400000', // 24h
     NODE_HEARTBEAT_STALE_SECONDS: '180',
     BASE_DOMAIN: 'example.test',

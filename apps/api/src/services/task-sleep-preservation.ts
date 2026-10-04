@@ -71,6 +71,22 @@ const log = createModuleLogger('task_sleep_preservation');
 
 export type { TaskSessionSleepOutcome };
 
+/**
+ * Which part of the record preserved the session.
+ *
+ * - `restorable`: asleep with a snapshot the resumer would wake (the predicate's
+ *   `sleeping` arm). Bounded by the snapshot's own `expires_at`.
+ * - `in_flight`: a sleep the sweep is still scheduling, capturing, stopping or
+ *   retrying (every other matched row). Its 30-minute bound is measured from the
+ *   latest claim or retry stamp, so a retry loop keeps renewing it.
+ * - `conversation_fallback`: a sleeping conversation kept resumable for its human
+ *   after the snapshot TTL.
+ *
+ * Derived from the row the shared predicate returned, never from a second read,
+ * so it cannot disagree with the outcome (`.claude/rules/58`).
+ */
+export type SleepPreservationArm = 'restorable' | 'in_flight' | 'conversation_fallback';
+
 export interface TaskSleepPreservation {
   outcome: TaskSessionSleepOutcome;
   /** `session_snapshots.sleep_status` of the preserving row, for logs only. */
@@ -79,6 +95,8 @@ export interface TaskSleepPreservation {
   expiresAt: string | null;
   /** Human-resumable conversation fallback after the runtime snapshot TTL expires. */
   conversationFallback: boolean;
+  /** Set only when `outcome` is `preserve`. */
+  arm: SleepPreservationArm | null;
 }
 
 const NOT_RUN: TaskSleepPreservation = {
@@ -86,12 +104,14 @@ const NOT_RUN: TaskSleepPreservation = {
   sleepStatus: null,
   expiresAt: null,
   conversationFallback: false,
+  arm: null,
 };
 const NONE: TaskSleepPreservation = {
   outcome: 'none',
   sleepStatus: null,
   expiresAt: null,
   conversationFallback: false,
+  arm: null,
 };
 
 function preserved(row: SleepLifecyclePredicateResult): TaskSleepPreservation {
@@ -100,6 +120,8 @@ function preserved(row: SleepLifecyclePredicateResult): TaskSleepPreservation {
     sleepStatus: row.sleep_status,
     expiresAt: row.expires_at,
     conversationFallback: false,
+    // The predicate's restorable arm is the only one that admits `sleeping`.
+    arm: row.sleep_status === 'sleeping' ? 'restorable' : 'in_flight',
   };
 }
 
@@ -159,6 +181,7 @@ export async function loadTaskSleepPreservation(
         sleepStatus: null,
         expiresAt: null,
         conversationFallback: true,
+        arm: 'conversation_fallback',
       };
     }
     return NONE;
@@ -170,7 +193,13 @@ export async function loadTaskSleepPreservation(
       action: 'withheld_terminal_verdict',
       error: err instanceof Error ? err.message : String(err),
     });
-    return { outcome: 'unknown', sleepStatus: null, expiresAt: null, conversationFallback: false };
+    return {
+      outcome: 'unknown',
+      sleepStatus: null,
+      expiresAt: null,
+      conversationFallback: false,
+      arm: null,
+    };
   }
 }
 
@@ -230,10 +259,33 @@ export async function withholdTerminalVerdictForSleepingSession(
     executionStep: string | null;
     taskMode?: string | null;
   },
-  context: { source: string; withheldReason: string }
+  context: {
+    source: string;
+    withheldReason: string;
+    /**
+     * False only when the caller has already outlasted a sleep that never
+     * finished: the runaway-cost ceiling after its sleep grace. A sleeping
+     * (`restorable`) or conversation-fallback session, and an `unknown` lookup,
+     * still withhold the verdict. Absent means true.
+     */
+    honorInFlightSleep?: boolean;
+  }
 ): Promise<boolean> {
   const preservation = await loadTaskSleepPreservation(db, env, task);
   if (!withholdsTerminalVerdict(preservation)) return false;
+  if (context.honorInFlightSleep === false && preservation.arm === 'in_flight') {
+    rootLog.warn('stuck_task.in_flight_sleep_not_honored', {
+      taskId: task.id,
+      projectId: task.projectId,
+      chatSessionId: task.chatSessionId,
+      workspaceId: task.workspaceId,
+      sleepStatus: preservation.sleepStatus,
+      source: context.source,
+      reason: context.withheldReason,
+      action: 'terminalize',
+    });
+    return false;
+  }
   rootLog.info('stuck_task.preserved_sleeping', {
     taskId: task.id,
     projectId: task.projectId,
@@ -243,6 +295,7 @@ export async function withholdTerminalVerdictForSleepingSession(
     sleepStatus: preservation.sleepStatus,
     expiresAt: preservation.expiresAt,
     conversationFallback: preservation.conversationFallback,
+    arm: preservation.arm,
     outcome: preservation.outcome,
     source: context.source,
     withheldReason: context.withheldReason,
