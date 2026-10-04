@@ -141,6 +141,8 @@ export interface TaskRunConfig {
   } | null;
   /** Live source parent that revocably authorizes a snapshot-recovery TaskRunner. */
   recoverySourceTaskId?: string | null;
+  /** Unique claim identity; distinguishes wake initialization from an earlier run. */
+  recoveryAttemptId?: string | null;
   /** Failed/stopped predecessor whose workspace deletion must be confirmed before replacement. */
   retrySourceTaskId?: string | null;
   /** Optional durable lifecycle guard for reserved first-start submissions. */

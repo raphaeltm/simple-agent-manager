@@ -47,31 +47,32 @@ export {
 } from './session-recovery-refusal-report';
 export { SESSION_RECOVERY_INITIAL_PROMPT } from './session-recovery-task';
 
-// The node-pool boundary inventory (`scripts/quality/node-pool-boundary/inventory-data.ts`)
-// requires the module that holds this wake task writer to also call
-// `resolveTaskStartPlacement*` and `ensureTaskRunnerStarted`. Keep the writer beside
-// `resolveRecoveryPlacement` and `ensureSessionRecovery` when splitting this file.
 async function reactivateSleepingTask(
   database: D1Database,
   db: Db,
   context: RecoveryContext,
   chatSessionId: string,
   taskId: string,
-  placementResolution: RecoveryPlacementResolution
+  placementResolution: RecoveryPlacementResolution,
+  recoveryAttemptId: string,
+  sourceTaskGuard?: SessionRecoverySourceTaskGuard
 ): Promise<schema.Task> {
   const existing = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
   if (!existing || existing.projectId !== context.project.id) {
     throw new SourceTaskNotWakeableError();
   }
-  if (existing.chatSessionId !== chatSessionId && existing.workspaceId !== context.snapshot.workspaceId) {
+  if (
+    existing.chatSessionId !== chatSessionId &&
+    existing.workspaceId !== context.snapshot.workspaceId
+  ) {
     throw new SourceTaskNotWakeableError();
   }
 
   const now = new Date().toISOString();
   const capacityPlacementSnapshot = placementResolution.capacityPlacementSnapshot;
-  try {
+  {
     // D1 batches are transactional. The task update is the parent-state
-    // compare-and-set: if the stable task is terminal or no longer owns this
+    // compare-and-set: if an automated wake has terminalized or no longer owns this
     // conversation when the transaction begins, every later statement is a no-op.
     const results = await database.batch([
       database
@@ -79,6 +80,8 @@ async function reactivateSleepingTask(
           `UPDATE tasks
               SET status = 'queued',
                   execution_step = 'node_selection',
+                  completed_at = NULL,
+                  error_message = NULL,
                   workspace_id = NULL,
                   auto_provisioned_node_id = NULL,
                   claimed_warm_node_id = NULL,
@@ -92,7 +95,14 @@ async function reactivateSleepingTask(
                   updated_at = ?
             WHERE id = ?
               AND project_id = ?
-              AND status NOT IN ('completed', 'failed', 'cancelled')
+              AND (? = 0 OR status NOT IN ('completed', 'failed', 'cancelled'))
+              AND EXISTS (
+                SELECT 1 FROM session_snapshots snapshot
+                 WHERE snapshot.chat_session_id = ?
+                   AND snapshot.recovery_task_id = tasks.id
+                   AND snapshot.recovery_attempt_id = ?
+                   AND snapshot.recovery_status = 'waking'
+              )
               AND (
                 chat_session_id = ?
                 OR workspace_id = ?
@@ -107,6 +117,9 @@ async function reactivateSleepingTask(
           now,
           taskId,
           context.project.id,
+          sourceTaskGuard ? 1 : 0,
+          chatSessionId,
+          recoveryAttemptId,
           chatSessionId,
           context.snapshot.workspaceId
         ),
@@ -120,9 +133,19 @@ async function reactivateSleepingTask(
                 SELECT 1 FROM tasks task
                  WHERE task.id = ?
                    AND task.status = 'queued'
+                   AND EXISTS (SELECT 1 FROM session_snapshots snapshot
+                     WHERE snapshot.chat_session_id = ? AND snapshot.recovery_task_id = task.id
+                       AND snapshot.recovery_attempt_id = ? AND snapshot.recovery_status = 'waking')
               )`
         )
-        .bind(now, context.snapshot.workspaceId, chatSessionId, taskId),
+        .bind(
+          now,
+          context.snapshot.workspaceId,
+          chatSessionId,
+          taskId,
+          chatSessionId,
+          recoveryAttemptId
+        ),
       database
         .prepare(
           `INSERT INTO task_status_events
@@ -131,31 +154,18 @@ async function reactivateSleepingTask(
                   'Sleeping conversation wake claimed', ?
              FROM tasks task
             WHERE task.id = ?
-              AND task.status = 'queued'`
+              AND task.status = 'queued'
+                   AND EXISTS (SELECT 1 FROM session_snapshots snapshot
+                     WHERE snapshot.chat_session_id = ? AND snapshot.recovery_task_id = task.id
+                       AND snapshot.recovery_attempt_id = ? AND snapshot.recovery_status = 'waking')`
         )
-        .bind(ulid(), existing.status, now, taskId),
+        .bind(ulid(), existing.status, now, taskId, chatSessionId, recoveryAttemptId),
     ]);
     if ((results[0]?.meta.changes ?? 0) === 0) throw new SourceTaskNotWakeableError();
-  } catch (error) {
-    // A concurrent retry may have observed the claimed task ID and completed
-    // this exact reactivation. Re-read before treating the batch error as terminal.
-    const winner = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
-    if (
-      winner?.projectId === context.project.id &&
-      winner.chatSessionId === chatSessionId &&
-      winner.status === 'queued'
-    ) {
-      return winner;
-    }
-    throw error;
   }
 
   const created = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
-  if (
-    !created ||
-    created.chatSessionId !== chatSessionId ||
-    created.status !== 'queued'
-  ) {
+  if (!created || created.chatSessionId !== chatSessionId || created.status !== 'queued') {
     throw new Error('Sleeping task was not durably reactivated after its wake batch');
   }
   return created;
@@ -202,7 +212,7 @@ async function resolveRecoveryPlacement(
 }
 
 /**
- * Claim and (re)start the one replacement TaskRunner that wakes a sleeping VM
+ * Claim and reactivate the stable TaskRunner that wakes a sleeping VM
  * conversation. The snapshot row is the durable lock, so alarm retries and
  * concurrent user prompts converge on the same task and workspace.
  */
@@ -265,10 +275,12 @@ export async function ensureSessionRecovery(
     return refuse('session_recovery_placement_lookup_failed');
   }
 
+  const recoveryAttemptId = ulid();
   const claim = await claimSessionSnapshotRecovery(db, env, {
     chatSessionId,
     userId: context.snapshot.userId,
     taskId: recoveryTaskId,
+    recoveryAttemptId,
     sourceTaskGuard,
   });
   if (claim.status === 'unavailable') return refuse(claim.reason);
@@ -281,7 +293,8 @@ export async function ensureSessionRecovery(
       env,
       chatSessionId,
       claimedTaskId,
-      'Eviction generation changed before recovery start'
+      'Eviction generation changed before recovery start',
+      recoveryAttemptId
     );
     return { status: 'unavailable', reason: 'stale_eviction_generation' };
   }
@@ -294,7 +307,9 @@ export async function ensureSessionRecovery(
       context,
       chatSessionId,
       claimedTaskId,
-      placementResolution
+      placementResolution,
+      recoveryAttemptId,
+      sourceTaskGuard
     );
     await startRecoveryTask(
       env,
@@ -303,7 +318,8 @@ export async function ensureSessionRecovery(
       chatSessionId,
       placementResolution,
       sourceTaskGuard,
-      options
+      options,
+      recoveryAttemptId
     );
     log.info('session_recovery.waking', {
       projectId,
@@ -315,10 +331,17 @@ export async function ensureSessionRecovery(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (error instanceof SourceTaskNotWakeableError) {
-      await failSessionSnapshotRecovery(db, env, chatSessionId, claimedTaskId, message);
+      await failSessionSnapshotRecovery(
+        db,
+        env,
+        chatSessionId,
+        claimedTaskId,
+        message,
+        recoveryAttemptId
+      );
       return refuse('source_task_not_wakeable', message);
     }
-    if (await ensureTaskRunnerStarted(env, claimedTaskId).catch(() => false)) {
+    if (await ensureTaskRunnerStarted(env, claimedTaskId, recoveryAttemptId).catch(() => false)) {
       log.warn('session_recovery.start_response_ambiguous_but_durable', {
         projectId,
         chatSessionId,
@@ -328,7 +351,14 @@ export async function ensureSessionRecovery(
       return { status: 'waking', taskId: claimedTaskId };
     }
     const failure = sessionLifecycleError(env, `Session recovery failed: ${message}`);
-    await failSessionSnapshotRecovery(db, env, chatSessionId, claimedTaskId, failure);
+    await failSessionSnapshotRecovery(
+      db,
+      env,
+      chatSessionId,
+      claimedTaskId,
+      failure,
+      recoveryAttemptId
+    );
     log.error('session_recovery.start_failed', {
       projectId,
       chatSessionId,

@@ -189,6 +189,7 @@ export async function claimSessionSnapshotRecovery(
     chatSessionId: string;
     userId: string;
     taskId: string;
+    recoveryAttemptId?: string;
     now?: Date;
     sourceTaskGuard?: SessionRecoverySourceTaskGuard;
   }
@@ -221,6 +222,7 @@ export async function claimSessionSnapshotRecovery(
     .set({
       recoveryStatus: 'waking',
       recoveryTaskId: input.taskId,
+      recoveryAttemptId: input.recoveryAttemptId ?? null,
       // A claim taken under the decayed budget starts a NEW burst rather than
       // continuing the spent one, so the cap still bounds `maxAttempts` failures
       // per window. `recovery_failed_at` is cleared in the same statement: leaving
@@ -319,6 +321,7 @@ export async function claimSessionSnapshotRecovery(
         .update(schema.sessionSnapshots)
         .set({
           recoveryTaskId: input.taskId,
+          recoveryAttemptId: input.recoveryAttemptId ?? null,
           recoveryAttempts: sessionRecoveryAttemptsAfterClaim(decayCutoff),
           recoveryClaimedAt: nowIso,
           recoveryError: null,

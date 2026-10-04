@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
+import { cancelVmTaskAdmission } from '../../src/services/vm-admission-control';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const { ensureTaskRunnerStartedMock, startTaskRunnerDOMock } = vi.hoisted(() => ({
@@ -112,9 +113,7 @@ function makeSnapshotClaimable(sqlite: Database.Database, sleepingAt: string): v
         WHERE id = 'task-1'`
     )
     .run();
-  sqlite
-    .prepare(`UPDATE workspaces SET chat_session_id = 'chat-1' WHERE id = 'workspace-1'`)
-    .run();
+  sqlite.prepare(`UPDATE workspaces SET chat_session_id = 'chat-1' WHERE id = 'workspace-1'`).run();
 }
 
 function taskRow(sqlite: Database.Database, taskId = 'task-1') {
@@ -181,7 +180,7 @@ describe('session recovery stable task identity', () => {
         expect.objectContaining({
           taskId: 'task-1',
           resumeSnapshotChatSessionId: 'chat-1',
-          recoverySourceTaskId: null,
+          recoverySourceTaskId: 'task-1',
           retrySourceTaskId: null,
         }),
         { reactivate: true }
@@ -190,6 +189,106 @@ describe('session recovery stable task identity', () => {
       sqlite.close();
     }
   });
+
+  it.each(['completed', 'failed', 'cancelled'])(
+    'allows a human follow-up to a %s conversation',
+    async (status) => {
+      const sqlite = new Database(':memory:');
+      try {
+        seedStableRecoveryFixture(sqlite);
+        sqlite
+          .prepare(
+            "UPDATE tasks SET status = ?, completed_at = '2026-08-15T00:00:00.000Z', error_message = 'previous outcome' WHERE id = 'task-1'"
+          )
+          .run(status);
+        const database = createSqliteD1(sqlite);
+        await expect(
+          ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1')
+        ).resolves.toEqual({ status: 'waking', taskId: 'task-1' });
+        expect(taskRow(sqlite)).toMatchObject({ status: 'queued', parent_task_id: 'parent-1' });
+        expect(
+          sqlite.prepare("SELECT completed_at, error_message FROM tasks WHERE id = 'task-1'").get()
+        ).toEqual({ completed_at: null, error_message: null });
+        expect(recoveryTaskCount(sqlite)).toBe(0);
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it('does not revive a terminal conversation for an automated wake', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedStableRecoveryFixture(sqlite);
+      sqlite.exec("UPDATE tasks SET status = 'cancelled' WHERE id = 'task-1'");
+      await expect(wake(createSqliteD1(sqlite))).resolves.toMatchObject({ status: 'unavailable' });
+      expect(taskRow(sqlite)).toMatchObject({ status: 'cancelled' });
+      expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('requires acknowledgment of this wake attempt after an ambiguous runner response', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedStableRecoveryFixture(sqlite);
+      startTaskRunnerDOMock.mockRejectedValueOnce(new Error('RPC interrupted'));
+      ensureTaskRunnerStartedMock.mockResolvedValueOnce(false);
+      await expect(wake(createSqliteD1(sqlite))).resolves.toMatchObject({ status: 'unavailable' });
+      expect(ensureTaskRunnerStartedMock).toHaveBeenCalledWith(
+        expect.anything(),
+        'task-1',
+        expect.any(String)
+      );
+      expect(
+        sqlite
+          .prepare("SELECT recovery_status FROM session_snapshots WHERE id = 'snapshot-1'")
+          .get()
+      ).toEqual({ recovery_status: 'failed' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it.each([null, 'older-wake'])(
+    'keeps a new wake admission when cleanup arrives from %s',
+    async (oldAttempt) => {
+      const sqlite = new Database(':memory:');
+      try {
+        seedStableRecoveryFixture(sqlite);
+        sqlite.exec(`UPDATE session_snapshots SET recovery_task_id='task-1', recovery_attempt_id='new-wake';
+        UPDATE tasks SET admission_state='provisioning' WHERE id='task-1';
+        INSERT INTO vm_task_admissions (task_id,project_id,user_id,provider,credential_domain_key,provider_domain_key,scope_key,requested_vm_size,requested_vm_location,state)
+        VALUES ('task-1','project-1','user-1','hetzner','credential','provider','scope','small','nbg1','provisioning');
+        INSERT INTO vm_provisioning_leases (scope_key,owner_task_id,provider,credential_domain_key,provider_domain_key,requested_vm_size,expires_at)
+        VALUES ('scope','task-1','hetzner','credential','provider','small','2099-01-01');`);
+        const env = { DATABASE: createSqliteD1(sqlite) } as Env;
+        await cancelVmTaskAdmission(env, 'task-1', 'task_failed', oldAttempt);
+        expect(
+          sqlite.prepare("SELECT state FROM vm_task_admissions WHERE task_id='task-1'").get()
+        ).toEqual({ state: 'provisioning' });
+        expect(
+          sqlite.prepare('SELECT COUNT(*) AS count FROM vm_provisioning_leases').get()
+        ).toEqual({ count: 1 });
+        expect(sqlite.prepare("SELECT admission_state FROM tasks WHERE id='task-1'").get()).toEqual(
+          { admission_state: 'provisioning' }
+        );
+        await cancelVmTaskAdmission(env, 'task-1', 'task_failed', 'new-wake');
+        expect(
+          sqlite.prepare("SELECT state FROM vm_task_admissions WHERE task_id='task-1'").get()
+        ).toEqual({ state: 'failed' });
+        expect(
+          sqlite.prepare('SELECT COUNT(*) AS count FROM vm_provisioning_leases').get()
+        ).toEqual({ count: 0 });
+        expect(sqlite.prepare("SELECT admission_state FROM tasks WHERE id='task-1'").get()).toEqual(
+          { admission_state: 'failed' }
+        );
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
 
   it('converges repeated wake attempts on the same task id', async () => {
     const sqlite = new Database(':memory:');
@@ -202,7 +301,9 @@ describe('session recovery stable task identity', () => {
 
       expect(recoveryTaskCount(sqlite)).toBe(0);
       expect(
-        sqlite.prepare(`SELECT recovery_task_id FROM session_snapshots WHERE id = 'snapshot-1'`).get()
+        sqlite
+          .prepare(`SELECT recovery_task_id FROM session_snapshots WHERE id = 'snapshot-1'`)
+          .get()
       ).toEqual({ recovery_task_id: 'task-1' });
       expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(1);
     } finally {
@@ -227,9 +328,7 @@ describe('session recovery stable task identity', () => {
         superseded_by_task_id: null,
       });
       expect(
-        sqlite
-          .prepare(`SELECT COUNT(*) AS count FROM tasks WHERE parent_task_id = 'task-1'`)
-          .get()
+        sqlite.prepare(`SELECT COUNT(*) AS count FROM tasks WHERE parent_task_id = 'task-1'`).get()
       ).toEqual({ count: 1 });
       expect(recoveryTaskCount(sqlite)).toBe(0);
     } finally {
@@ -255,9 +354,7 @@ describe('session recovery stable task identity', () => {
       await expect(wake(database)).resolves.toEqual({ status: 'waking', taskId: 'task-1' });
 
       expect(
-        sqlite
-          .prepare(`SELECT COUNT(*) AS count FROM tasks WHERE parent_task_id = 'task-1'`)
-          .get()
+        sqlite.prepare(`SELECT COUNT(*) AS count FROM tasks WHERE parent_task_id = 'task-1'`).get()
       ).toEqual({ count: 2 });
       expect(recoveryTaskCount(sqlite)).toBe(0);
     } finally {

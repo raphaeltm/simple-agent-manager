@@ -31,3 +31,20 @@ VM session wake currently creates a fresh `session-recovery` task and rebinds th
 - Existing recovery/supersession columns remain in schema for legacy data, but new wake cycles do not append recovery chains.
 - ProjectData wake leaves `chat_sessions.task_id` unchanged.
 - Tests cover stable identity and repeated wake behavior.
+
+## Shipping review corrections
+
+- Recovery identity must include a per-wake attempt: the same task ID no longer fences old RPCs, alarms, workspace callbacks, snapshot writes, or admission cleanup. Added nullable `recovery_attempt_id` with an upgrade/fresh-install migration test and attempt-aware DO storage commits.
+- Preserve automated source/event/member authorization while allowing explicit human follow-ups to terminal conversations. Resume prompts come from the snapshot recovery contract rather than replaying the original task description.
+- Instant recovery remains unchanged; only VM teardown marks tasks sleeping. Legacy recovery rows retain their current identity on failed stable wakes.
+- Shared `StatusBadge` needs an explicit Sleeping label; otherwise the new task state renders Unknown.
+- Removed the obsolete task INSERT entry from allocation-writer inventory and updated architecture documentation.
+
+### Additional acceptance checks
+
+- [x] Human completed/failed/cancelled follow-ups reactivate in place; terminal automated wakes remain denied.
+- [x] Old wake attempts cannot acknowledge or mutate newer task/runtime state.
+- [x] Normal/fallback wake prompts retain resume warnings and avoid original-work replay.
+- [x] VM and Instant sleep lifecycle tests preserve their respective task contracts.
+- [x] Independent completion, Cloudflare/business-logic, and security review findings addressed.
+Delivery gates (final CI, staging, UI evidence, CodeRabbit wait, merge, production deployment) are tracked in PR #2230 and .do-state.md.

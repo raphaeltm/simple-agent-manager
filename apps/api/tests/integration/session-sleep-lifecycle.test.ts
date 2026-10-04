@@ -253,6 +253,35 @@ describe('terminal session sleep lifecycle integration', () => {
     vi.useRealTimers();
   });
 
+  it.each(['in_progress', 'completed', 'failed', 'cancelled'])(
+    'sleeps a VM with task status %s without rewriting terminal tasks',
+    async (status) => {
+      sqlite
+        .prepare("UPDATE tasks SET status = ?, execution_step = 'agent_ready' WHERE id = 'task-1'")
+        .run(status);
+      activity = { activity: 'idle', activityAt: START.getTime() - 60_000 };
+
+      await sleepWorkspaceSession(env, {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'explicit test sleep',
+      });
+
+      expect(
+        sqlite.prepare("SELECT status, execution_step FROM tasks WHERE id = 'task-1'").get()
+      ).toEqual({
+        status: status === 'in_progress' ? 'sleeping' : status,
+        execution_step: status === 'in_progress' ? null : 'agent_ready',
+      });
+      expect(
+        sqlite.prepare("SELECT status FROM workspaces WHERE id = 'workspace-1'").get()
+      ).toEqual({
+        status: 'sleeping',
+      });
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalled();
+    }
+  );
+
   it('protects a long prompt immediately after completion in both sweep and teardown gates', async () => {
     sqlite
       .prepare('UPDATE tasks SET completed_at = ? WHERE id = ?')

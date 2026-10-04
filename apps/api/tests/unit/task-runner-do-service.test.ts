@@ -165,7 +165,7 @@ describe('task-runner-do service', () => {
 
   it('exports ensureTaskRunnerStarted function', () => {
     expect(serviceSource).toContain('export async function ensureTaskRunnerStarted(');
-    expect(serviceSource).toContain('return stub.ensureStarted()');
+    expect(serviceSource).toContain('stub.ensureStarted(recoveryAttemptId)');
   });
 
   it('uses typed DO stub via getStub helper', () => {
@@ -187,7 +187,9 @@ describe('task-runner-do service', () => {
   });
 
   it('calls stub.advanceWorkspaceReady()', () => {
-    expect(serviceSource).toContain('await stub.advanceWorkspaceReady(status, errorMessage)');
+    expect(serviceSource).toContain(
+      'await stub.advanceWorkspaceReady(status, errorMessage, workspaceId)'
+    );
   });
 
   it('calls stub.getStatus()', () => {

@@ -571,7 +571,7 @@ lifecycleRoutes.post('/:id/ready', async (c) => {
     await assertWorkspaceCallbackIdentityCurrent(c.env, transitionedWorkspace, 'ready');
     const { advanceTaskRunnerWorkspaceReady } = await import('../../services/task-runner-do');
     const readyStatus = getTaskRunnerReadyStatus(nextStatus);
-    await advanceTaskRunnerWorkspaceReady(c.env, readyTask.id, readyStatus, null);
+    await advanceTaskRunnerWorkspaceReady(c.env, readyTask.id, readyStatus, null, workspaceId);
   }
 
   return c.json({ success: true });
@@ -641,7 +641,7 @@ lifecycleRoutes.post('/:id/provisioning-failed', async (c) => {
       WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES
     );
     const { advanceTaskRunnerWorkspaceReady } = await import('../../services/task-runner-do');
-    await advanceTaskRunnerWorkspaceReady(c.env, failedTask.id, 'error', errorMessage);
+    await advanceTaskRunnerWorkspaceReady(c.env, failedTask.id, 'error', errorMessage, workspaceId);
   }
 
   return c.json({ success: true });

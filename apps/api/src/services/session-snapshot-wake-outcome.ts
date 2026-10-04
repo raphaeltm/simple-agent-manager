@@ -22,7 +22,8 @@ export async function recordSessionSnapshotRecoveryWorkspace(
   db: Db,
   chatSessionId: string,
   taskId: string,
-  workspaceId: string
+  workspaceId: string,
+  recoveryAttemptId?: string
 ): Promise<void> {
   await db
     .update(schema.sessionSnapshots)
@@ -31,6 +32,9 @@ export async function recordSessionSnapshotRecoveryWorkspace(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
         eq(schema.sessionSnapshots.recoveryTaskId, taskId),
+        recoveryAttemptId
+          ? eq(schema.sessionSnapshots.recoveryAttemptId, recoveryAttemptId)
+          : undefined,
         inArray(schema.sessionSnapshots.recoveryStatus, ['waking', 'restored'])
       )
     );
@@ -41,7 +45,8 @@ export async function completeSessionSnapshotRecovery(
   chatSessionId: string,
   taskId: string,
   workspaceId: string,
-  recoverySourceTaskId?: string | null
+  recoverySourceTaskId?: string | null,
+  recoveryAttemptId?: string
 ): Promise<boolean> {
   const recoveryTask = alias(schema.tasks, 'snapshot_recovery_task');
   const recoverySourceTask = alias(schema.tasks, 'snapshot_recovery_source_task');
@@ -53,16 +58,22 @@ export async function completeSessionSnapshotRecovery(
           .innerJoin(
             recoverySourceTask,
             and(
-              eq(recoverySourceTask.id, recoveryTask.recoverySourceTaskId),
+              eq(recoverySourceTask.id, recoverySourceTaskId),
+              or(
+                eq(recoverySourceTask.id, recoveryTask.id),
+                eq(recoverySourceTask.id, recoveryTask.recoverySourceTaskId)
+              ),
               eq(recoverySourceTask.projectId, recoveryTask.projectId)
             )
           )
           .where(
             and(
               eq(recoveryTask.id, taskId),
-              eq(recoveryTask.recoverySourceTaskId, recoverySourceTaskId),
               eq(recoveryTask.chatSessionId, chatSessionId),
-              eq(recoveryTask.triggeredBy, 'session-recovery'),
+              or(
+                eq(recoverySourceTask.id, recoveryTask.id),
+                eq(recoveryTask.triggeredBy, 'session-recovery')
+              ),
               notInArray(recoveryTask.status, TERMINAL_TASK_STATUSES),
               or(
                 notInArray(recoverySourceTask.status, TERMINAL_TASK_STATUSES),
@@ -103,6 +114,9 @@ export async function completeSessionSnapshotRecovery(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
         eq(schema.sessionSnapshots.recoveryTaskId, taskId),
+        recoveryAttemptId
+          ? eq(schema.sessionSnapshots.recoveryAttemptId, recoveryAttemptId)
+          : undefined,
         inArray(schema.sessionSnapshots.recoveryStatus, ['waking', 'restored']),
         liveSourceCondition
       )
@@ -160,7 +174,8 @@ export async function failSessionSnapshotRecovery(
   env: Env,
   chatSessionId: string,
   taskId: string,
-  error: string
+  error: string,
+  recoveryAttemptId?: string
 ): Promise<void> {
   await db
     .update(schema.sessionSnapshots)
@@ -181,6 +196,9 @@ export async function failSessionSnapshotRecovery(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
         eq(schema.sessionSnapshots.recoveryTaskId, taskId),
+        recoveryAttemptId
+          ? eq(schema.sessionSnapshots.recoveryAttemptId, recoveryAttemptId)
+          : undefined,
         inArray(schema.sessionSnapshots.recoveryStatus, ['waking', 'restored'])
       )
     );

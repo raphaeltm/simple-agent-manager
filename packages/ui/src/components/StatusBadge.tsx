@@ -69,6 +69,11 @@ const statusConfig: Record<string, { label: string; bg: string; fg: string }> = 
     bg: 'var(--sam-status-success-bg)',
     fg: 'var(--sam-status-success-fg)',
   },
+  sleeping: {
+    label: 'Sleeping',
+    bg: 'var(--sam-status-muted-bg)',
+    fg: 'var(--sam-status-muted-fg)',
+  },
   completed: {
     label: 'Completed',
     bg: 'var(--sam-status-success-strong-bg)',

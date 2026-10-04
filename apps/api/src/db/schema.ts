@@ -1851,6 +1851,7 @@ export const sessionSnapshots = sqliteTable(
     sleepingAt: text('sleeping_at'),
     recoveryStatus: text('recovery_status'),
     recoveryTaskId: text('recovery_task_id'),
+    recoveryAttemptId: text('recovery_attempt_id'),
     recoveryWorkspaceId: text('recovery_workspace_id').references(() => workspaces.id, {
       onDelete: 'set null',
     }),

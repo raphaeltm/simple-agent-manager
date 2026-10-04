@@ -547,7 +547,9 @@ describe('handleAgentSession', () => {
       expect.anything(),
       'chat-1',
       'task-1',
-      'workspace-1'
+      'workspace-1',
+      undefined,
+      undefined
     );
     expect(state.config.resumeSnapshotChatSessionId).toBeNull();
   });
@@ -584,7 +586,9 @@ describe('handleAgentSession', () => {
       expect.anything(),
       'chat-1',
       'task-1',
-      'workspace-1'
+      'workspace-1',
+      undefined,
+      undefined
     );
     expect(state.config.resumeSnapshotChatSessionId).toBeNull();
     expect(state.currentStep).toBe('running');
@@ -630,7 +634,9 @@ describe('handleAgentSession', () => {
       expect.anything(),
       'chat-1',
       'task-1',
-      'workspace-1'
+      'workspace-1',
+      undefined,
+      undefined
     );
     expect(state.config.resumeSnapshotChatSessionId).toBeNull();
   });
@@ -700,7 +706,9 @@ describe('handleAgentSession', () => {
       expect.anything(),
       'chat-1',
       'task-1',
-      'workspace-1'
+      'workspace-1',
+      undefined,
+      undefined
     );
     expect(state.config.resumeSnapshotChatSessionId).toBeNull();
   });

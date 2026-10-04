@@ -178,6 +178,26 @@ const emptyCapacityPlacement = {
   placementExplanationJson: null,
 };
 
+function queuedSourceTask(title: string, workspaceId: string | null) {
+  return {
+    id: 'source-task-1',
+    projectId: 'project-1',
+    userId: 'user-1',
+    chatSessionId: 'chat-1',
+    workspaceId,
+    recoverySourceTaskId: null,
+    title,
+    description: 'Original task: push changes and deploy production',
+    status: 'queued',
+    agentProfileHint: null,
+    outputBranch: 'sam/original',
+    credentialAttributionUserId: 'user-1',
+    credentialAttributionProjectId: null,
+    credentialAttributionSource: 'user',
+    triggeredBy: 'mcp',
+  };
+}
+
 describe('ensureSessionRecovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -292,7 +312,7 @@ describe('ensureSessionRecovery', () => {
     expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
   });
 
-  it('reactivates the stable source task instead of creating a recovery task', async () => {
+  it.each([false, true])('reactivates without replaying work (fallback=%s)', async (fallback) => {
     selectQueue.push(
       {
         id: 'snapshot-1',
@@ -302,6 +322,31 @@ describe('ensureSessionRecovery', () => {
         runtime: 'vm',
         sleepingAt: '2026-08-15T13:11:53.580Z',
         manifestJson: JSON.stringify({ agentType: 'claude-code' }),
+        snapshotGeneration: 'generation-final',
+        sleepFallbackJson: fallback
+          ? JSON.stringify({
+              version: 1,
+              outcome: 'slept',
+              trigger: 'attempt_budget',
+              blockedReason: null,
+              decidedAt: '2026-08-15T13:11:53.580Z',
+              episodeStartedAt: null,
+              failedAttempts: 3,
+              lastError: 'snapshot upload failed',
+              recoveryPoint: {
+                generation: 'generation-final',
+                commit: 'abcdef1234567890',
+                branch: 'main',
+                detached: false,
+                upstream: null,
+                capturedAt: null,
+                snapshotStatus: 'degraded',
+                degradation: 'home-skipped',
+                workingTreeSaved: true,
+                homeSaved: false,
+              },
+            })
+          : null,
       },
       {
         id: 'project-1',
@@ -353,38 +398,11 @@ describe('ensureSessionRecovery', () => {
         workspaceId: 'workspace-sleeping',
         status: 'sleeping',
       },
-      {
-        id: 'source-task-1',
-        projectId: 'project-1',
-        userId: 'user-1',
-        chatSessionId: 'chat-1',
-        workspaceId: 'workspace-sleeping',
-        recoverySourceTaskId: null,
-        title: 'Original task title that must not become the fresh wake prompt',
-        status: 'queued',
-        agentProfileHint: null,
-        outputBranch: 'sam/original',
-        credentialAttributionUserId: 'user-1',
-        credentialAttributionProjectId: null,
-        credentialAttributionSource: 'user',
-        triggeredBy: 'mcp',
-      },
-      {
-        id: 'source-task-1',
-        projectId: 'project-1',
-        userId: 'user-1',
-        chatSessionId: 'chat-1',
-        workspaceId: null,
-        recoverySourceTaskId: null,
-        title: 'Original task title that must not become the fresh wake prompt',
-        status: 'queued',
-        agentProfileHint: null,
-        outputBranch: 'sam/original',
-        credentialAttributionUserId: 'user-1',
-        credentialAttributionProjectId: null,
-        credentialAttributionSource: 'user',
-        triggeredBy: 'mcp',
-      }
+      queuedSourceTask(
+        'Original task title that must not become the fresh wake prompt',
+        'workspace-sleeping'
+      ),
+      queuedSourceTask('Original task title that must not become the fresh wake prompt', null)
     );
 
     const evictionFence = {
@@ -401,6 +419,15 @@ describe('ensureSessionRecovery', () => {
     );
 
     expect(result).toEqual({ status: 'waking', taskId: 'source-task-1' });
+    if (fallback) {
+      expect(startTaskRunnerDOMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          taskDescription: expect.stringContaining('SAM restored commit abcdef1234567890'),
+        }),
+        { reactivate: true }
+      );
+    }
     expect(assertReplacementDeletionConfirmedMock).toHaveBeenCalledWith(expect.anything(), {
       sourceTaskId: 'source-task-1',
       projectId: 'project-1',
@@ -412,7 +439,9 @@ describe('ensureSessionRecovery', () => {
       expect.objectContaining({
         taskId: 'source-task-1',
         taskTitle: 'Original task title that must not become the fresh wake prompt',
-        taskDescription: SESSION_RECOVERY_INITIAL_PROMPT,
+        taskDescription: fallback
+          ? expect.stringContaining('Do not repeat actions with effects outside this workspace')
+          : SESSION_RECOVERY_INITIAL_PROMPT,
         resumeSnapshotChatSessionId: 'chat-1',
         recoverySourceTaskId: null,
         retrySourceTaskId: null,
@@ -473,7 +502,8 @@ describe('ensureSessionRecovery', () => {
       expect.anything(),
       'chat-1',
       'source-task-1',
-      'source task is no longer wakeable'
+      'source task is no longer wakeable',
+      expect.any(String)
     );
     expect(databaseMock.batch).not.toHaveBeenCalled();
     expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
@@ -852,38 +882,8 @@ describe('session recovery consumes the canonical persisted resource plan', () =
     });
     // Row the stable-task reactivation batch reads back after the update.
     selectQueue.push(
-      {
-        id: 'source-task-1',
-        projectId: 'project-1',
-        userId: 'user-1',
-        chatSessionId: 'chat-1',
-        workspaceId: 'workspace-sleeping',
-        recoverySourceTaskId: null,
-        title: 'Original run',
-        status: 'queued',
-        agentProfileHint: null,
-        outputBranch: 'sam/original',
-        credentialAttributionUserId: 'user-1',
-        credentialAttributionProjectId: null,
-        credentialAttributionSource: 'user',
-        triggeredBy: 'mcp',
-      },
-      {
-        id: 'source-task-1',
-        projectId: 'project-1',
-        userId: 'user-1',
-        chatSessionId: 'chat-1',
-        workspaceId: null,
-        recoverySourceTaskId: null,
-        title: 'Original run',
-        status: 'queued',
-        agentProfileHint: null,
-        outputBranch: 'sam/original',
-        credentialAttributionUserId: 'user-1',
-        credentialAttributionProjectId: null,
-        credentialAttributionSource: 'user',
-        triggeredBy: 'mcp',
-      }
+      queuedSourceTask('Original run', 'workspace-sleeping'),
+      queuedSourceTask('Original run', null)
     );
 
     const result = await wake();
