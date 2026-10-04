@@ -82,6 +82,20 @@ labelled. "Three attempts within 15 minutes" is a proposed starting point.
     (`finishSleepCleanup` / `markWorkspaceNodeWarmIfEmpty`). The fallback must reuse it.
 13. `session-snapshot-sleep-lifecycle.ts` (524 lines) and `session-sleep-execution.ts`
     (518) exceed the 500-line limit and must be split before adding to them (rule 18).
+14. A wake that restores the agent's saved session never sends the wake prompt:
+    `startSamAwareAgentSession` sends `visibleInitialPrompt` only on a fresh start, i.e.
+    when the vm-agent reports the restore `degraded`. A fallback that uses an older complete
+    snapshot (HOME and agent context present) would resume a stale agent session with no
+    guidance, behind a conversation that moved on. The vm-agent reads the resume identity
+    only from the restore response's manifest (`snapshotHarnessResumeIdentity`, Go test
+    `TestSnapshotHarnessResumeIdentity/rejects legacy snapshot without harness identity`),
+    so withholding `acpSessionId` for a fallback-slept generation forces the fresh start
+    on every deployed agent.
+15. Archive is offered only for an already sleeping session (`SessionFooter`:
+    `canArchiveSession` needs `sessionState === 'sleeping'`), so a blocked notice must not
+    tell the user to archive. Stopping the workspace from the Workspaces page works for
+    every session. `session-recovery.ts` (539 lines on `main`) also needs a split before
+    more is added to it (rule 18).
 
 ## Design
 
@@ -121,50 +135,63 @@ labelled. "Three attempts within 15 minutes" is a proposed starting point.
 
 ## Implementation checklist
 
-- [ ] Split `session-snapshot-sleep-lifecycle.ts` and `session-sleep-execution.ts` below 500
+- [x] Split `session-snapshot-sleep-lifecycle.ts` and `session-sleep-execution.ts` below 500
       lines (separate commit, no behavior change)
-- [ ] Migration `0179_session_snapshot_sleep_episode.sql` + schema columns
-- [ ] Episode config + pure phase decision (`services/session-sleep-episode.ts`) with env vars
+- [x] Migration `0179_session_snapshot_sleep_episode.sql` + schema columns
+- [x] Episode config + pure phase decision (`services/session-sleep-episode.ts`) with env vars
       `SESSION_SLEEP_FAILURE_MAX_ATTEMPTS`, `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS`
-- [ ] Claim sets episode start; stale re-claim counts a failure; remove repairable exemption
-- [ ] Failure writer counts failures, always schedules a retry (no degraded exemption)
-- [ ] Sweep: remove exemption clause; phase dispatch (full / fallback / blocked); zombie retire
-- [ ] Fallback service: minimum checks, notice, CAS, shared teardown, roll-forward
-- [ ] Blocked outcome + notice; failed-task release consistent
-- [ ] `isSessionSleepExhausted` / `exhaustedSessionSleepSql` / in-flight predicate updated
-- [ ] Finalize/wake/human-follow-up reset the episode; follow-up clears a blocked episode
-- [ ] Watchdog no longer clobbers a Git-bearing generation
-- [ ] Purge covers fallback-sleeping rows
-- [ ] Recovery prompt for fallback wakes
-- [ ] Env plumbing: `env.ts`, `.env.example`, `sync-wrangler-config.ts` optional list,
+- [x] Claim sets episode start; stale re-claim counts a failure; remove repairable exemption
+- [x] Failure writer counts failures, always schedules a retry (no degraded exemption)
+- [x] Sweep: remove exemption clause; phase dispatch (full / fallback / blocked); zombie retire
+- [x] Fallback service: minimum checks, notice, CAS, shared teardown, roll-forward
+- [x] Blocked outcome + notice; failed-task release consistent
+- [x] `isSessionSleepExhausted` / `exhaustedSessionSleepSql` / in-flight predicate updated
+- [x] Finalize/wake/human-follow-up reset the episode; follow-up clears a blocked episode
+- [x] Watchdog no longer clobbers a Git-bearing generation
+- [x] Purge covers fallback-sleeping rows
+- [x] Recovery prompt for fallback wakes
+- [x] Restore response withholds the stale agent session after a fallback sleep, keyed on
+      the same predicate as the wake prompt (`sleptFallbackRecord`) — finding 14
+- [x] Blocked notice points to an action that exists (Workspaces page stop) — finding 15
+- [x] Split `session-recovery.ts` below 500 lines (refusal reporter, separate commit)
+- [x] Env plumbing: `env.ts`, `.env.example`, `sync-wrangler-config.ts` optional list,
       `deploy-reusable.yml` `wrangler_sync_env`
-- [ ] Tests through `runSessionSleepSweep` (SQLite D1, fake clock): permanently degraded,
+- [x] Tests through `runSessionSleepSweep` (SQLite D1, fake clock): permanently degraded,
       non-degraded exhaustion, stale/late uploads, restart roll-forward, duplicate sweeps,
       new activity during teardown, human follow-up race, shared-node safety, transcript
       persistence failure, unavailable commit, good snapshot wins, exact boundaries,
       episode not reset by capture generations, zombie retire, purge at 7 days, wake prompt
-- [ ] Docs: `reference/configuration.md`, `architecture/overview.md`,
-      `guides/session-troubleshooting.md`, `guides/chat-features.md`, `concepts.mdx`
+- [x] Docs: `reference/configuration.md`, `architecture/overview.md`,
+      `guides/session-troubleshooting.md`, `guides/chat-features.md`, `concepts.mdx`,
+      `guides/instant-sessions.md`, `reference/api.md`
       (and any other statement that sleep always preserves files)
-- [ ] Steering: update policies `a3780107`, `d08d64dc` (and check `2adacc8f`) and rules that
-      say a complete snapshot is always required
+- [x] Steering rules: `apps/api/.claude/rules/47` requirement 11 + test bullet (vm-agent
+      rule 78 is incident history about capture cost and does not conflict)
+- [ ] Steering: update policies `a3780107`, `d08d64dc` (and check `2adacc8f`)
 
 ## Acceptance criteria
 
-- [ ] A session whose captures are permanently degraded sleeps via fallback after the
+- [x] A session whose captures are permanently degraded sleeps via fallback after the
       configured attempts/elapsed budget, with a visible notice, and wakes at the saved
       commit with the WIP restored and an honest agent prompt.
-- [ ] The budget survives restarts (persisted), duplicate sweeps, and is not reset by new
+- [x] The budget survives restarts (persisted), duplicate sweeps, and is not reset by new
       capture generations.
-- [ ] Without an exact restorable commit (no baseCommit, or no retained objects) the episode
+- [x] Without an exact restorable commit (no baseCommit, or no retained objects) the episode
       ends blocked: no further captures, actionable notice, runtime not torn down.
-- [ ] A follow-up or new activity before the point of no return aborts the fallback.
-- [ ] Only the session's own workspace is released; other workspaces on the node stay up and
+- [x] A follow-up or new activity before the point of no return aborts the fallback.
+- [x] Only the session's own workspace is released; other workspaces on the node stay up and
       the node is not marked warm while they run.
-- [ ] A complete snapshot that lands before the point of no return wins.
-- [ ] Fallback-sleeping rows keep the 7-day wake window and are purged after it.
-- [ ] Zombie intents for deleted workspaces stop looping.
-- [ ] Old-agent cases exit (fallback or blocked) without any agent upgrade.
+- [x] A complete snapshot that lands before the point of no return wins.
+- [x] Fallback-sleeping rows keep the 7-day wake window and are purged after it.
+- [x] Zombie intents for deleted workspaces stop looping.
+- [x] Old-agent cases exit (fallback or blocked) without any agent upgrade.
+
+Evidence: `apps/api/tests/integration/session-sleep-bounded-fallback.test.ts` covers each
+criterion through `runSessionSleepSweep` with production defaults and an injected clock
+(groups: permanently degraded captures, pre-fix agents, non-degraded exhaustion, the wake
+after a fallback sleep, preserving good artifacts, races at the point of no return, shared
+nodes, transcript and recovery-point failures, budget boundaries, Instant runtimes,
+explicit sleep after a blocked episode, workspaces already gone, seven-day retention).
 
 ## Deferrals (tracked)
 

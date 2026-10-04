@@ -17,6 +17,10 @@ your work is safe and what to do next. Everything here applies to both
   transcript is safe. → [Send a message to try again](#a-snapshot-could-not-be-fully-restored)
 - **"SAM restored this sleeping conversation from a degraded snapshot…"** (VM). The chat is back,
   but some unpushed work may not be. → [Check what's missing](#a-snapshot-could-not-be-fully-restored)
+- **"SAM put this session to sleep without saving all of its files."** (VM). Snapshots kept failing,
+  so SAM slept the chat on a Git recovery point. → [See what was kept](#sam-could-not-save-a-complete-snapshot)
+- **"SAM could not put this session to sleep."** Snapshots kept failing and there was no safe
+  recovery point, so the workspace keeps running. → [Decide what to do](#sam-could-not-save-a-complete-snapshot)
 - **A system message starting "Wake failed:"**, and **Wake failed** in the session list. SAM could
   not wake the sleeping chat. → [Read the reason, then act on it](#wake-failed)
 - **A failure card under the chat header.** The task failed; its work may have been kept.
@@ -116,6 +120,47 @@ workspace:
 
 1. Check GitHub for anything the agent already pushed, and assume other changes may be gone.
 2. Re-state what still needs doing in the same chat — the agent can read the transcript.
+
+## SAM could not save a complete snapshot
+
+Before an idle session sleeps, SAM saves a snapshot of its workspace so a wake can restore it.
+If that keeps failing (by default after three failed attempts or 15 minutes,
+`SESSION_SLEEP_FAILURE_MAX_ATTEMPTS` and `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS`), SAM stops
+retrying rather than keep a machine running indefinitely. What it does next depends on what an
+earlier snapshot already saved. It only does this to a session whose agent has finished its turn;
+a session in use is left alone.
+
+**"SAM put this session to sleep without saving all of its files."** An earlier snapshot saved the
+repository: the exact commit the workspace was on, its branch, and its uncommitted changes. SAM
+kept that and the conversation, and released the workspace. The notice lists what was kept and
+what was not. Files outside the repository that the snapshot did not save (often installed tools,
+caches, and the agent's own session files) are gone, and so is anything changed after that
+snapshot.
+
+Send a message to wake the chat. SAM starts a fresh workspace at the saved commit, and the agent
+starts a new session that rebuilds its context from the transcript. It is told to check
+`git status` first and not to repeat things the transcript shows it already did outside the
+workspace, like pushes or deployments. The chat can be woken for the usual seven days from the
+moment it slept.
+
+If the notice says SAM used **its last complete snapshot**, everything in that snapshot comes back,
+including files outside the repository, but changes made after it are missing. The agent still
+starts a new session from the transcript, because the conversation went on after that snapshot.
+
+**"SAM could not put this session to sleep."** SAM had no safe recovery point to fall back to. The
+notice gives the reason; usually no snapshot recorded the workspace's Git commit together with
+what is needed to restore it. This is typical of a workspace on an older VM agent whose snapshots
+never complete. SAM stops trying to put this session to sleep automatically, and the workspace
+keeps running. You can:
+
+- Keep working. A message works as usual, and SAM tries sleep again the next time the session
+  goes idle.
+- If you are done with it, commit and push anything you want to keep, then stop its workspace
+  from the **Workspaces** page. Work you did not push is lost once SAM cleans up the stopped
+  workspace.
+
+An Instant session always takes this path when its snapshots keep failing, because it can only
+sleep with a complete snapshot.
 
 ## Wake failed
 
