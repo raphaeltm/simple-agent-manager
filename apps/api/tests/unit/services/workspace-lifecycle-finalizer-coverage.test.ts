@@ -65,7 +65,7 @@ const SHARED_FINALIZER_ROUTE_SYMBOLS = [
 const ALLOWLIST: Record<string, string> = {
   'durable-objects/task-runner/node-provisioning-rejected-node.ts':
     'Deletes a freshly-created D1 node row only after the provider rejected its create (capacity or account quota) and only while provider_instance_id IS NULL, before any workspace or agent_session exists.',
-  'scheduled/d1-retention.ts':
+  'scheduled/session-snapshot-purge.ts':
     'Destroys expired cf-container snapshot runtime state after the ProjectData session is stopped; it does not mark workspace/node rows deleted, and the container DO routes D1 runtime termination through persistRuntimeEnded().',
   'services/deployment-provisioning.ts':
     'Abandons a fresh deployment node record after environment-link race loss before any workspace can reference the node.',
