@@ -169,7 +169,8 @@ Changes from local review (security, Go, Cloudflare, test, task-completion, docs
       host-creation test)
 - [x] Review: publish job reporter and publish control plane read the current token per request
 - [x] Review: refuse renewed/delivered tokens naming another workspace or a node
-- [x] Review: ratio clamp aligned with the API; `mcp_build.go` split (move-only) under rule 18
+- [x] Review: ratio clamp aligned with the API; `mcp_build.go` and `workspace_routing.go` split
+      (move-only, byte-identical) under rule 18
 
 ### Tests
 
@@ -218,7 +219,10 @@ Changes from local review (security, Go, Cloudflare, test, task-completion, docs
       Evidence: `credential_test.go` (7), server dedupe by messageId, outbox cap
 - [x] No tokens in logs; responses carrying tokens are `no-store`.
       Evidence: `TestWorkspaceTokenRenewal_NeverLogsATokenValue`, error report body check, route test
-- [ ] Independent security review passes; parent informed of the design (delta re-review pending)
+- [x] Independent security review passes; parent informed of the design. Evidence: full-diff
+      adversarial review (no new trust boundary; HIGH/MEDIUM fixed) and delta re-review of the fix
+      commits (PASS). The original parent 01M42WJSH7238RWH5ZH7TSSFZG was cancelled; its resumed
+      conversation (task 01M4357G5G3105A4ZEJJ1MK7SD) was informed (message 01M4369BEY4CQ8VHJC4B1A7K1F)
 
 ## Staging
 
@@ -261,16 +265,17 @@ Review additions, each reverted once with the named test going red:
 
 ## Review results
 
-| Reviewer                     | Outcome                                                                                                                                                                                                                                               |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| security-auditor (full diff) | PASS-WITH-FINDINGS, no new trust boundary. HIGH rate limit fixed; MEDIUM Instant renewal fixed (VM-only); LOW move-race test added; LOW relay header filed as backlog; LOW cf-container token co-location tracked by Idea 01M432G3276YZWCP3HEJ5B25J5  |
-| go-specialist                | No CRITICAL/HIGH. MEDIUM identity check added; MEDIUM host-creation race test added (it found the token-read data race, fixed); MEDIUM O(N) host scan per token change left as a residual (one pass per renewal, ~12h apart); LOW test clock hardened |
-| cloudflare-specialist        | Approve. MEDIUM per-poll re-mint fixed; LOW doc pointer fixed; LOW rate limit fixed                                                                                                                                                                   |
-| test-engineer                | MEDIUM Instant route test (now a refusal test); MEDIUM reporter wiring test added; LOW `UpdateAfterBootstrap` filed as backlog                                                                                                                        |
-| task-completion-validator    | HIGH publish-job custody fixed (live token source); LOW no-token-in-logs test added; ACs checked                                                                                                                                                      |
-| doc-sync-validator           | Rule 54 updated; `security.md` and api-reference wording fixed; AC3 conflict resolved by VM-only renewal                                                                                                                                              |
-| env-validator                | MEDIUM clamp aligned; LOW `.env.example` entries added                                                                                                                                                                                                |
-| constitution-validator       | PASS                                                                                                                                                                                                                                                  |
+| Reviewer                                              | Outcome                                                                                                                                                                                                                                               |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| security-auditor (full diff)                          | PASS-WITH-FINDINGS, no new trust boundary. HIGH rate limit fixed; MEDIUM Instant renewal fixed (VM-only); LOW move-race test added; LOW relay header filed as backlog; LOW cf-container token co-location tracked by Idea 01M432G3276YZWCP3HEJ5B25J5  |
+| security-auditor (delta re-review of the fix commits) | PASS. HIGH and MEDIUM verified fixed; no new trust boundary. LOW: renewal backoff ignores `Retry-After` on 429. Deferred: agent backoff (1m→30m) bounds retries, and a healthy agent never reaches the limit                                          |
+| go-specialist                                         | No CRITICAL/HIGH. MEDIUM identity check added; MEDIUM host-creation race test added (it found the token-read data race, fixed); MEDIUM O(N) host scan per token change left as a residual (one pass per renewal, ~12h apart); LOW test clock hardened |
+| cloudflare-specialist                                 | Approve. MEDIUM per-poll re-mint fixed; LOW doc pointer fixed; LOW rate limit fixed                                                                                                                                                                   |
+| test-engineer                                         | MEDIUM Instant route test (now a refusal test); MEDIUM reporter wiring test added; LOW `UpdateAfterBootstrap` filed as backlog                                                                                                                        |
+| task-completion-validator                             | First run WARN: HIGH publish-job custody, fixed with a live token source; LOW no-token-in-logs test added. Re-run after the fixes: PASS (all six checks, test counts reproduced)                                                                      |
+| doc-sync-validator                                    | Rule 54 updated; `security.md` and api-reference wording fixed; AC3 conflict resolved by VM-only renewal                                                                                                                                              |
+| env-validator                                         | MEDIUM clamp aligned; LOW `.env.example` entries added                                                                                                                                                                                                |
+| constitution-validator                                | PASS                                                                                                                                                                                                                                                  |
 
 ## Follow-ups
 
