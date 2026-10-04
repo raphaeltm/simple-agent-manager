@@ -386,6 +386,30 @@ describe('live-runtime record: what kept the task, and why', () => {
     expect(rows[1].message).toContain('a prompt turn is in progress');
   });
 
+  /** The dedupe key holds `_`, a LIKE wildcard: it must match literally. */
+  it('does not let a near-miss key suppress the record', async () => {
+    seedIdleConversation();
+    d1.prepare(
+      `INSERT INTO platform_errors (id, source, level, message, context, task_id, timestamp, created_at)
+       VALUES ('near-miss', 'api', 'info', 'older row', ?, ?, ?, ?)`
+    ).run(
+      JSON.stringify({
+        recoveryType: 'stuck_task_heartbeat_skip',
+        preservationKey: 'taskXacpXsessionXlive:idle',
+      }),
+      TASK_ID,
+      T0 - HOUR,
+      T0 - HOUR
+    );
+
+    await recoverStuckTasks(env());
+
+    expect(liveRuntimeRows().map((row) => row.context.preservationKey)).toEqual([
+      'taskXacpXsessionXlive:idle',
+      'task_acp_session_live:idle',
+    ]);
+  });
+
   it('names the failing sleep that is not releasing an idle runtime', async () => {
     seedIdleConversation();
     seedSleepRecord({ sleepStatus: 'failed', sleepClaimedAt: T0 - 2 * MINUTE });

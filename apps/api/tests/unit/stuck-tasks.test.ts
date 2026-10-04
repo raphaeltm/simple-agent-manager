@@ -672,7 +672,7 @@ describe('recoverStuckTasks', () => {
       expect(result.errors).toBe(0);
     });
 
-    it('skips in_progress tasks when node heartbeat is recent', async () => {
+    it('skips in_progress tasks whose own ACP session heartbeat is fresh', async () => {
       const now = Date.now();
       // Task started 5 hours ago (past 4h limit)
       const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();

@@ -13,6 +13,8 @@
 >   conversation tasks failed with "Task runtime is no longer live after 480 minutes … Last
 >   liveness result: workspace_deleted" after the fix deployed, from 2026-09-27 02:36Z
 >   (`01M2Y90KN3VB50A2T18AG4HV1N`) to 2026-09-30 02:36Z (`01M35Y40SZ6JNRTXGW8PP58368`).
+>   Since 2026-10-04 the same verdict reads "Task runtime is no longer live (workspace_deleted);
+>   task started N minutes ago." (`tasks/archive/2026-10-04-task-recovery-liveness-signal-audit.md`).
 > - **Remaining work:** make the day-7 conversation verdict independent of the purged snapshot
 >   row, and decide which status an idle conversation with an expired snapshot should get. Policy
 >   `a974b04f` says normal lifecycle endings must not look like failures. The regression test

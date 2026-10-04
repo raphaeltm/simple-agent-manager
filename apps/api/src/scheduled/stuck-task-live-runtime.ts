@@ -185,6 +185,8 @@ export function describeLiveRuntimePreservation(
       `Preserved in_progress task past the ${minutes(input.maxExecutionMs)}-min recovery check: ` +
       `${basis.text}${describeSleep(sleep)} Live basis: ${liveness.reason}. ${bound}`,
     fields: {
+      // Keep first and short: `hasDurableRecord` finds rows by this key in the
+      // serialized context, and an oversized context is stored only as a preview.
       preservationKey,
       taskId: input.task.id,
       projectId: input.task.project_id,
@@ -220,12 +222,17 @@ async function loadSleepSummary(
   };
 }
 
+/** Escape LIKE wildcards so the key matches literally (keys contain `_`). */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
 async function hasDurableRecord(env: Env, taskId: string, key: string): Promise<boolean> {
   try {
     const existing = await env.OBSERVABILITY_DATABASE.prepare(
-      `SELECT id FROM platform_errors WHERE task_id = ? AND context LIKE ? LIMIT 1`
+      `SELECT id FROM platform_errors WHERE task_id = ? AND context LIKE ? ESCAPE '\\' LIMIT 1`
     )
-      .bind(taskId, `%"preservationKey":"${key}"%`)
+      .bind(taskId, `%"preservationKey":"${escapeLike(key)}"%`)
       .first();
     return existing !== null;
   } catch (err) {
