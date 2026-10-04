@@ -30,12 +30,10 @@ import {
   buildRecoveryPlacementInput,
   type RecoveryPlacementResolution,
 } from './session-recovery-request';
-import {
-  abandonRecoveryHandoff,
-  SESSION_RECOVERY_INITIAL_PROMPT,
-  startRecoveryTask,
-} from './session-recovery-task';
+import { abandonRecoveryHandoff, startRecoveryTask } from './session-recovery-task';
 import { type Db, SourceTaskNotWakeableError } from './session-recovery-task-guard';
+import { parseSessionSleepFallbackRecord } from './session-sleep-episode';
+import { sessionRecoveryInitialPrompt } from './session-sleep-fallback-messages';
 import {
   claimSessionSnapshotRecovery,
   failSessionSnapshotRecovery,
@@ -201,7 +199,11 @@ async function createRecoveryTask(
         .bind(
           taskId,
           context.snapshot.userId,
-          SESSION_RECOVERY_INITIAL_PROMPT,
+          // After a bounded sleep fallback the wake prompt says which files to expect and
+          // not to replay outside effects (`session-sleep-fallback-messages.ts`).
+          sessionRecoveryInitialPrompt(
+            parseSessionSleepFallbackRecord(context.snapshot.sleepFallbackJson)
+          ),
           context.workspace.agentProfileHint,
           placementResolution.placement.vmSize,
           placementResolution.credentialAttributionUserId,

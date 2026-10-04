@@ -19,11 +19,11 @@ import {
   snapshotAgentType,
 } from './session-recovery-request';
 import { SourceTaskNotWakeableError } from './session-recovery-task-guard';
+import { SESSION_RECOVERY_INITIAL_PROMPT } from './session-sleep-fallback-messages';
 import type { SessionRecoverySourceTaskGuard } from './session-snapshots';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 
-export const SESSION_RECOVERY_INITIAL_PROMPT =
-  'Resume this sleeping conversation from the persisted transcript. Use get_session_messages for this chat session before relying on memory. Do not repeat prior work; wait for and answer the latest queued follow-up message.';
+export { SESSION_RECOVERY_INITIAL_PROMPT };
 
 export async function abandonRecoveryHandoff(
   database: D1Database,

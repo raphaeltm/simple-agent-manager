@@ -516,7 +516,7 @@ describe('session snapshot progress persistence', () => {
           agentType: 'openai-codex',
           reason: 'Workspace snapshot made no progress for 120000ms',
         })
-      ).resolves.toBe(true);
+      ).resolves.toBe('degraded');
 
       const row = sqlite
         .prepare(
@@ -546,6 +546,69 @@ describe('session snapshot progress persistence', () => {
         expect.stringContaining('Workspace snapshot made no progress'),
         expect.objectContaining({ httpMetadata: { contentType: 'application/json' } })
       );
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('abandons a stalled capture instead of replacing a generation that holds a Git commit', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      sqlite
+        .prepare(
+          `INSERT INTO session_snapshots
+             (id, workspace_id, user_id, chat_session_id, agent_session_id, runtime, status,
+              degradation, manifest_r2_key, snapshot_generation, capture_generation, base_commit,
+              wip_r2_key, wip_sha256, expires_at, updated_at)
+           VALUES ('snapshot-1', 'workspace-1', 'user-1', 'chat-1', 'agent-1', 'vm',
+              'degraded', 'home-skipped', 'snapshots/chat-1/previous/manifest.json', 'previous',
+              'capture-1', ?, 'snapshots/chat-1/previous/wip.bundle', ?,
+              '2026-08-20T00:00:00.000Z', '2026-08-15T00:00:00.000Z')`
+        )
+        .run('b'.repeat(40), 'cd'.repeat(32));
+      const r2 = { put: vi.fn(), delete: vi.fn(async () => undefined), head: vi.fn() };
+      const testEnv = env({
+        DATABASE: createSqliteD1(sqlite),
+        R2: r2 as unknown as Env['R2'],
+        SESSION_SNAPSHOT_R2_PREFIX: 'snapshots',
+      });
+      const db = drizzle(testEnv.DATABASE, { schema });
+
+      await expect(
+        completeActiveSessionSnapshotAsDegraded(db, testEnv, {
+          workspaceId: 'workspace-1',
+          chatSessionId: 'chat-1',
+          agentSessionId: 'agent-1',
+          runtime: 'vm',
+          captureGeneration: 'capture-1',
+          reason: 'Workspace snapshot made no progress for 120000ms',
+        })
+      ).resolves.toBe('abandoned');
+
+      expect(
+        sqlite
+          .prepare(
+            `SELECT status, degradation, snapshot_generation, capture_generation, base_commit, wip_r2_key
+             FROM session_snapshots WHERE id = 'snapshot-1'`
+          )
+          .get()
+      ).toEqual({
+        status: 'degraded',
+        degradation: 'home-skipped',
+        snapshot_generation: 'previous',
+        capture_generation: null,
+        base_commit: 'b'.repeat(40),
+        wip_r2_key: 'snapshots/chat-1/previous/wip.bundle',
+      });
+      // No transcript-only manifest was written over it, and only the abandoned
+      // generation's own uploads were deleted.
+      expect(r2.put).not.toHaveBeenCalled();
+      expect(r2.delete).toHaveBeenCalledWith([
+        'snapshots/chat-1/capture-1/home.tar',
+        'snapshots/chat-1/capture-1/wip.bundle',
+        'snapshots/chat-1/capture-1/manifest.json',
+      ]);
     } finally {
       sqlite.close();
     }

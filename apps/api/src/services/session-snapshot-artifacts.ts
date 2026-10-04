@@ -328,6 +328,45 @@ export async function verifyRestorableSessionSnapshotArtifacts(
 }
 
 /**
+ * Re-certify every artifact a completed generation records, whatever its status: each
+ * recorded HOME archive and WIP bundle must sit at its canonical key for that generation,
+ * with the size the manifest declares and a matching SHA-256 where R2 reports one. A
+ * restore downloads every recorded artifact and aborts on the first missing one, so a
+ * recovery point is only as good as all of them. Used by the bounded sleep fallback
+ * (`session-sleep-recovery-point.ts`), which may release compute with a degraded
+ * generation; a full sleep keeps the stricter `verifySessionSnapshotArtifactsForSleep`.
+ */
+export async function verifySessionSnapshotRecordedArtifacts(
+  env: Env,
+  snapshot: schema.SessionSnapshot
+): Promise<boolean> {
+  const generation = snapshot.snapshotGeneration;
+  if (!generation) return false;
+  const checks: Array<{ key: string; size: number; sha256: string }> = [];
+  for (const artifact of ['home', 'wip'] as const) {
+    const key = artifact === 'home' ? snapshot.homeR2Key : snapshot.wipR2Key;
+    const sha256 = artifact === 'home' ? snapshot.homeSha256 : snapshot.wipSha256;
+    if (!key && !sha256) continue;
+    if (!key || !sha256) return false;
+    if (key !== buildSessionSnapshotR2Key(env, snapshot.chatSessionId, generation, artifact)) {
+      return false;
+    }
+    const size = manifestArtifactSize(snapshot.manifestJson, artifact);
+    if (size === null) return false;
+    checks.push({ key, size, sha256 });
+  }
+  const objects = await Promise.all(checks.map((check) => env.R2.head(check.key)));
+  return checks.every((check, index) => {
+    const object = objects[index];
+    return (
+      Boolean(object) &&
+      object?.size === check.size &&
+      objectChecksumMatchesOrIsAbsent(object, check.sha256)
+    );
+  });
+}
+
+/**
  * Re-certify a snapshot generation that is safe to release compute for sleep.
  *
  * Only a complete `available/none` capture can release live compute. HOME

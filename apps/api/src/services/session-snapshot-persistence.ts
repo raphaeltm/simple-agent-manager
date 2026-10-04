@@ -4,6 +4,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { redactSecretPatterns } from './secret-redaction';
+import { abandonSessionSnapshotCapture } from './session-sleep-fallback-state';
 import {
   buildSessionSnapshotR2Key,
   type CompleteSessionSnapshotInput,
@@ -262,6 +263,15 @@ export async function recordSessionSnapshotProgress(
   return (result.meta.changes ?? 0) > 0;
 }
 
+/**
+ * End a capture generation that failed or stopped making progress. With no completed
+ * generation to fall back on, it completes as a `transcript-only` marker. A completed
+ * generation that already records a Git commit or artifacts is never replaced by that
+ * marker — replacing it would delete the only recovery point the bounded sleep fallback
+ * (`session-sleep-recovery-point.ts`) could use — so the stalled capture is abandoned
+ * instead and its late callbacks get 409. Returns which happened, or null when the
+ * generation was no longer current.
+ */
 export async function completeActiveSessionSnapshotAsDegraded(
   db: Db,
   env: Env,
@@ -275,9 +285,16 @@ export async function completeActiveSessionSnapshotAsDegraded(
     agentType?: string;
     acpSessionId?: string;
   }
-): Promise<boolean> {
+): Promise<'degraded' | 'abandoned' | null> {
   const current = await db
-    .select({ captureGeneration: schema.sessionSnapshots.captureGeneration })
+    .select({
+      captureGeneration: schema.sessionSnapshots.captureGeneration,
+      snapshotGeneration: schema.sessionSnapshots.snapshotGeneration,
+      status: schema.sessionSnapshots.status,
+      baseCommit: schema.sessionSnapshots.baseCommit,
+      homeR2Key: schema.sessionSnapshots.homeR2Key,
+      wipR2Key: schema.sessionSnapshots.wipR2Key,
+    })
     .from(schema.sessionSnapshots)
     .where(
       and(
@@ -286,7 +303,18 @@ export async function completeActiveSessionSnapshotAsDegraded(
       )
     )
     .get();
-  if (!current) return false;
+  if (!current) return null;
+  const completedGenerationHasRecoveryState =
+    Boolean(current.snapshotGeneration) &&
+    (current.status === 'available' || current.status === 'degraded') &&
+    Boolean(current.baseCommit || current.homeR2Key || current.wipR2Key);
+  if (completedGenerationHasRecoveryState) {
+    const abandoned = await abandonSessionSnapshotCapture(db, env, {
+      chatSessionId: input.chatSessionId,
+      generation: input.captureGeneration,
+    });
+    return abandoned ? 'abandoned' : null;
+  }
 
   const reason = sessionLifecycleError(env, input.reason);
   const createdAt = new Date().toISOString();
@@ -314,7 +342,7 @@ export async function completeActiveSessionSnapshotAsDegraded(
     manifest,
     artifactSizes: {},
   });
-  return true;
+  return 'degraded';
 }
 
 export async function getRestorableSessionSnapshot(

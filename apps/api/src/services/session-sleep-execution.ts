@@ -1,4 +1,3 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -12,11 +11,14 @@ import {
   type SessionIdlenessActivityState,
 } from './session-idleness';
 import { idlenessStateChanged, sessionSleepDeferralReason } from './session-sleep-eligibility';
+import { persistSessionSleepFallbackNotice } from './session-sleep-fallback-notices';
+import { confirmSessionSleepFallbackStopping } from './session-sleep-recovery-point';
 import { waitForFinalSessionSnapshot } from './session-sleep-snapshot-wait';
 import {
   completeSleepTeardown,
   finishAlreadySleeping,
   finishSleepCleanup,
+  loadResumableAgentSession,
   loadSleepWorkspace,
   type SleepWorkspace,
   type SleepWorkspaceSessionResult,
@@ -157,20 +159,7 @@ export async function sleepWorkspaceSession(
     throw new Error(`Workspace cannot sleep from status ${workspace.status}`);
   }
 
-  const [agentSession] = await db
-    .select({ id: schema.agentSessions.id, agentType: schema.agentSessions.agentType })
-    .from(schema.agentSessions)
-    .where(
-      and(
-        eq(schema.agentSessions.workspaceId, workspace.id),
-        inArray(schema.agentSessions.status, ['running', 'recovery', 'sleeping'])
-      )
-    )
-    .orderBy(desc(schema.agentSessions.createdAt))
-    .limit(1);
-  if (!agentSession) {
-    throw new Error('Workspace has no resumable agent session');
-  }
+  const agentSession = await loadResumableAgentSession(db, workspace.id);
 
   await ensureSessionSnapshotForSleep(db, env, {
     workspaceId: workspace.id,
@@ -194,6 +183,7 @@ export async function sleepWorkspaceSession(
 
   let pointOfNoReturn = claim.phase === 'stopping';
   let verified = snapshot;
+  let fallback = false;
   try {
     if (!pointOfNoReturn) {
       verified = await verifyAndBeginSleepTeardown(env, workspace, agentSession, claimId);
@@ -202,23 +192,42 @@ export async function sleepWorkspaceSession(
       // A stopping claim can survive a Worker crash or an older deployment.
       // Recheck it before retrying the runtime stop; a legacy degraded claim
       // must not become an authority to discard the still-live agent home.
+      // A bounded fallback's claim carries its own recorded recovery point,
+      // which is re-verified instead (`confirmSessionSleepFallbackStopping`).
       verified = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
-      if (
+      const identityMatches =
+        Boolean(verified) &&
+        verified?.workspaceId === workspace.id &&
+        verified.agentSessionId === agentSession.id &&
+        verified.nodeId === workspace.nodeId &&
+        verified.runtime === workspace.nodeRuntime &&
+        !verified.captureGeneration;
+      const fallbackRecord =
+        identityMatches && verified?.sleepFallbackJson
+          ? await confirmSessionSleepFallbackStopping(env, verified, new Date())
+          : null;
+      if (fallbackRecord && verified) {
+        // The notice may not have landed before the crash; the write is idempotent.
+        await persistSessionSleepFallbackNotice(env, {
+          projectId: workspace.projectId,
+          chatSessionId: workspace.chatSessionId,
+          record: fallbackRecord,
+        });
+        fallback = true;
+      } else if (
+        !identityMatches ||
         !verified ||
         verified.status !== 'available' ||
         verified.degradation !== 'none' ||
-        verified.workspaceId !== workspace.id ||
-        verified.agentSessionId !== agentSession.id ||
-        verified.nodeId !== workspace.nodeId ||
-        verified.runtime !== workspace.nodeRuntime ||
-        verified.captureGeneration ||
         !(await verifySessionSnapshotArtifactsForSleep(env, verified))
       ) {
         throw new Error('Stopping claim lacks a complete verified workspace snapshot');
       }
     }
 
-    verified = await completeSleepTeardown(env, workspace, agentSession, claimId, verified);
+    verified = await completeSleepTeardown(env, workspace, agentSession, claimId, verified, {
+      fallback,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (pointOfNoReturn) {

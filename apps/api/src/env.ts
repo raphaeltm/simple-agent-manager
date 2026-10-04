@@ -304,7 +304,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SLEEP_SWEEP_BATCH_SIZE?: string; // Max due sleeps claimed per cron sweep (default: 10)
   SESSION_SLEEP_SWEEP_WALL_BUDGET_MS?: string; // Soft D1/DO claim-loop wall budget before deferring remaining candidates (default: 20000)
   SESSION_SLEEP_RETRY_DELAY_MS?: string; // Delay after a fail-closed sleep attempt (default: 300000)
-  SESSION_SLEEP_MAX_ATTEMPTS?: string; // Max automatic sleep attempts before preserving compute (default: 9)
+  SESSION_SLEEP_MAX_ATTEMPTS?: string; // Max automatic sleep attempts before preserving compute (default: 9); also the failed-attempt ceiling at which a bounded sleep episode ends blocked
+  SESSION_SLEEP_FAILURE_MAX_ATTEMPTS?: string; // Failed full-snapshot sleep attempts per episode before the transcript-and-Git fallback (default: 3)
+  SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS?: string; // Time since a sleep episode began before the transcript-and-Git fallback (default: 900000)
   SESSION_SLEEP_CLAIM_LEASE_MS?: string; // Reclaim timeout for interrupted automatic sleep claims (default: 600000)
   SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS?: string; // Absolute ceiling for in-flight sleep destroyer deferral (default: 1800000)
   FAILED_TASK_PRESERVATION_MAX_WAIT_MS?: string; // Longest a failed task's runtime waits for its preservation sleep before release (default: 28800000)

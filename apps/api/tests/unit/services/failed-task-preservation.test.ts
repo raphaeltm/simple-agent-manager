@@ -476,8 +476,12 @@ describe('preserveFailedTaskWork', () => {
       ['a degraded capture', { status: 'degraded', degradation: 'transcript-only' }],
       ['a capture in progress', { capture_generation: 'generation-2' }],
     ] as const)(
-      'stops retrying %s once the budget is spent, unlike other sleeps',
+      'leaves %s with a scheduled retry to its bounded sleep episode',
       async (_label, repairable) => {
+        // The former special case released a repairable capture at the claim budget.
+        // The bounded episode now owns it: the sweep falls back to a transcript-and-Git
+        // sleep, which keeps more of the failed task's work than this release does, or
+        // ends the episode blocked — and only then does the release run.
         seedTask('failed');
         seedSnapshot({
           sleeping_at: null,
@@ -489,10 +493,44 @@ describe('preserveFailedTaskWork', () => {
 
         await expect(
           releaseExhaustedFailedTaskPreservation(env, { chatSessionId: 'chat-1' })
-        ).resolves.toBe(true);
-        expectReleased('snapshot_retry_exhausted');
+        ).resolves.toBe(false);
+        expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+        expect(mocks.failSession).not.toHaveBeenCalled();
       }
     );
+
+    it('releases once the bounded episode ended blocked, saying the snapshot kept failing', async () => {
+      seedTask('failed');
+      seedSnapshot({
+        sleeping_at: null,
+        sleep_status: 'terminal_failed',
+        sleep_after: null,
+        sleep_attempts: 4,
+        status: 'degraded',
+        degradation: 'transcript-only',
+      });
+      sqlite
+        .prepare(`UPDATE session_snapshots SET sleep_fallback_json = ? WHERE id = 'snapshot-1'`)
+        .run(
+          JSON.stringify({
+            version: 1,
+            outcome: 'blocked',
+            trigger: 'attempt_budget',
+            blockedReason: 'no_git_baseline',
+            decidedAt: NOW.toISOString(),
+            episodeStartedAt: NOW.toISOString(),
+            failedAttempts: 3,
+            lastError: null,
+            recoveryPoint: null,
+          })
+        );
+
+      await expect(
+        releaseExhaustedFailedTaskPreservation(env, { chatSessionId: 'chat-1' })
+      ).resolves.toBe(true);
+      // Not "no longer available": the runtime was there, its snapshots kept failing.
+      expectReleased('snapshot_retry_exhausted');
+    });
 
     it.each([
       ['a retry is still scheduled', { sleep_status: 'failed', sleep_after: NOW.toISOString() }],

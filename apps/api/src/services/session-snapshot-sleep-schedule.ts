@@ -46,6 +46,12 @@ export async function scheduleSessionSnapshotSleep(
     sleepAfterMs?: number;
     allowIncomplete?: boolean;
     resetAttempts?: boolean;
+    /**
+     * Start a new bounded sleep-failure episode (`session-sleep-episode.ts`). Only a
+     * one-off terminal event may pass this (a task failure); a completed capture
+     * generation must not, or a capture could reset the budget it is bounded by.
+     */
+    startNewEpisode?: boolean;
     runtime?: string;
     expectedWorkspaceId?: string;
     expectedNodeId?: string;
@@ -78,6 +84,9 @@ export async function scheduleSessionSnapshotSleep(
         ELSE ${requestedSleepAfter}
       END`,
       ...(resetAttempts ? { sleepAttempts: 0 } : {}),
+      ...(options.startNewEpisode
+        ? { sleepEpisodeStartedAt: null, sleepEpisodeFailures: 0, sleepFallbackJson: null }
+        : {}),
       sleepError: null,
       sleepClaimId: null,
       sleepClaimedAt: null,

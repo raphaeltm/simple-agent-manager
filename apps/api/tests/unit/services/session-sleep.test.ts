@@ -288,7 +288,7 @@ describe('sleepWorkspaceSession', () => {
             (snapshot.status === 'degraded' && snapshot.degradation !== 'none'))
         )
     );
-    mocks.completeActiveSessionSnapshotAsDegraded.mockResolvedValue(false);
+    mocks.completeActiveSessionSnapshotAsDegraded.mockResolvedValue(null);
     mocks.getSessionSnapshotCaptureState
       .mockResolvedValueOnce({
         status: 'pending',
@@ -954,7 +954,7 @@ describe('sleepWorkspaceSession', () => {
     let degradedPersisted = false;
     mocks.completeActiveSessionSnapshotAsDegraded.mockImplementation(async () => {
       degradedPersisted = true;
-      return true;
+      return 'degraded';
     });
     mocks.getRestorableSessionSnapshot
       .mockResolvedValueOnce(null)

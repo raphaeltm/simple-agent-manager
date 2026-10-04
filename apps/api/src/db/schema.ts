@@ -1864,6 +1864,16 @@ export const sessionSnapshots = sqliteTable(
     sleepClaimId: text('sleep_claim_id'),
     sleepClaimedAt: text('sleep_claimed_at'),
     sleepStoppingSince: text('sleep_stopping_since'),
+    /**
+     * Bounded sleep-failure episode (`services/session-sleep-episode.ts`): when the
+     * current sleep episode first claimed the session, and how many attempts in it
+     * failed. Neither is reset by a capture generation; only a finished sleep, a wake,
+     * or a human follow-up ends the episode (migration 0179).
+     */
+    sleepEpisodeStartedAt: text('sleep_episode_started_at'),
+    sleepEpisodeFailures: integer('sleep_episode_failures').notNull().default(0),
+    /** The bounded-failure decision record (`SessionSleepFallbackRecord`), or NULL. */
+    sleepFallbackJson: text('sleep_fallback_json'),
     snapshotGeneration: text('snapshot_generation'),
     captureGeneration: text('capture_generation'),
     captureError: text('capture_error'),

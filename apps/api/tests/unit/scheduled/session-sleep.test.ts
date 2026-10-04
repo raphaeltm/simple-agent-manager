@@ -230,17 +230,19 @@ describe('session sleep sweep', () => {
   });
 
   it.each(['degraded', 'capture'])(
-    'backs off exhausted %s repair failures so later due work gets a slot',
+    'backs off a failing %s capture so later due work gets a slot',
     async (repairKind) => {
       vi.useFakeTimers();
       const now = new Date('2026-08-12T01:00:00Z');
       vi.setSystemTime(now);
       env.SESSION_SLEEP_SWEEP_BATCH_SIZE = '1';
+      // Past the claim budget of 3: a repairable capture used to be exempt from it. It
+      // is selected now only because its failure kept a due retry, like any other.
       addDueSnapshot('repair', 3);
       sqlite
         .prepare(
           `UPDATE session_snapshots SET status = 'degraded',
-      sleep_status = 'failed', sleep_after = NULL WHERE id = 'repair'`
+      sleep_status = 'failed' WHERE id = 'repair'`
         )
         .run();
       if (repairKind === 'capture')
@@ -280,29 +282,29 @@ describe('session sleep sweep', () => {
     expect(mocks.sleepWorkspaceSession).toHaveBeenCalledTimes(1);
   });
 
-  it('retries fail-closed sleep failures and exhausts the bounded budget', async () => {
+  it('counts a fail-closed sleep failure against the bounded episode and keeps a due retry', async () => {
     addDueSnapshot('snapshot-retry', 2);
     mocks.sleepWorkspaceSession.mockRejectedValue(new Error('snapshot incomplete'));
 
     const result = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
     const row = sqlite
       .prepare(
-        `SELECT sleep_status, sleep_after, sleep_attempts, sleep_error
+        `SELECT sleep_status, sleep_after, sleep_attempts, sleep_error,
+                sleep_episode_failures, sleep_episode_started_at
          FROM session_snapshots WHERE id = 'snapshot-retry'`
       )
-      .get() as {
-      sleep_status: string;
-      sleep_after: string | null;
-      sleep_attempts: number;
-      sleep_error: string;
-    };
+      .get();
 
-    expect(result).toMatchObject({ claimed: 1, slept: 0, failed: 1, exhausted: 1 });
-    expect(row).toEqual({
+    // The claim budget (SESSION_SLEEP_MAX_ATTEMPTS=3) no longer ends the episode on its
+    // own: the episode decides, and one failure is far from its fallback budget.
+    expect(result).toMatchObject({ claimed: 1, slept: 0, failed: 1, exhausted: 0 });
+    expect(row).toMatchObject({
       sleep_status: 'failed',
-      sleep_after: null,
+      sleep_after: expect.any(String),
       sleep_attempts: 3,
       sleep_error: 'snapshot incomplete',
+      sleep_episode_failures: 1,
+      sleep_episode_started_at: '2026-08-12T01:00:00.000Z',
     });
   });
 
@@ -375,8 +377,11 @@ describe('session sleep sweep', () => {
       "status = 'available', degradation = 'none', capture_generation = 'capture-1'",
     ],
   ])(
-    'retries an exhausted failed %s row that is repairable by the sleep policy',
+    'no longer retries an exhausted legacy failed %s row past the budget',
     async (_, setClause) => {
+      // The removed "repairable capture" exemption: a legacy row that spent its budget
+      // with no retry left was re-selected forever because it was degraded or had a
+      // capture in flight. Only raising SESSION_SLEEP_MAX_ATTEMPTS re-arms it now.
       addDueSnapshot('snapshot-exhausted-repairable', 3);
       sqlite
         .prepare(
@@ -389,7 +394,8 @@ describe('session sleep sweep', () => {
 
       const result = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
 
-      expect(result).toMatchObject({ selected: 1, claimed: 1, slept: 1, exhausted: 0 });
+      expect(result).toMatchObject({ selected: 0, claimed: 0, slept: 0 });
+      expect(mocks.sleepWorkspaceSession).not.toHaveBeenCalled();
       expect(
         sqlite
           .prepare(
@@ -397,7 +403,7 @@ describe('session sleep sweep', () => {
            FROM session_snapshots WHERE id = 'snapshot-exhausted-repairable'`
           )
           .get()
-      ).toEqual({ sleep_status: 'preparing', sleep_after: null, sleep_attempts: 4 });
+      ).toEqual({ sleep_status: 'failed', sleep_after: null, sleep_attempts: 3 });
     }
   );
 

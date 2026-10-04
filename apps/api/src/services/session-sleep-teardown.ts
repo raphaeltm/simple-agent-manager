@@ -6,7 +6,7 @@
  * workspace through the same idempotent lifecycle. Split out of
  * `session-sleep-execution.ts` (`.claude/rules/18-file-size-limits.md`).
  */
-import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -90,6 +90,28 @@ export async function loadSleepWorkspace(env: Env, workspaceId: string, userId: 
 
 export type SleepWorkspace = Awaited<ReturnType<typeof loadSleepWorkspace>>;
 
+/** The workspace's latest agent session that a sleep can snapshot and stop. */
+export async function loadResumableAgentSession(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspaceId: string
+): Promise<{ id: string; agentType: string | null }> {
+  const [agentSession] = await db
+    .select({ id: schema.agentSessions.id, agentType: schema.agentSessions.agentType })
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.workspaceId, workspaceId),
+        inArray(schema.agentSessions.status, ['running', 'recovery', 'sleeping'])
+      )
+    )
+    .orderBy(desc(schema.agentSessions.createdAt))
+    .limit(1);
+  if (!agentSession) {
+    throw new Error('Workspace has no resumable agent session');
+  }
+  return agentSession;
+}
+
 export async function scheduleSleepingWorkspaceDeletion(
   env: Env,
   workspace: SleepWorkspace,
@@ -127,7 +149,10 @@ export async function finishSleepComputeCleanup(
   });
 }
 
-export async function ensureProjectDataSleeping(env: Env, workspace: SleepWorkspace): Promise<void> {
+export async function ensureProjectDataSleeping(
+  env: Env,
+  workspace: SleepWorkspace
+): Promise<void> {
   const chatSession = await projectDataService.getSession(
     env,
     workspace.projectId,
@@ -156,7 +181,8 @@ export async function completeSleepTeardown(
   workspace: SleepWorkspace,
   agentSession: { id: string },
   claimId: string,
-  verified: Awaited<ReturnType<typeof getRestorableSessionSnapshot>>
+  verified: Awaited<ReturnType<typeof getRestorableSessionSnapshot>>,
+  options: { fallback?: boolean } = {}
 ) {
   const db = drizzle(env.DATABASE, { schema });
   await ensureProjectDataSleeping(env, workspace);
@@ -200,8 +226,9 @@ export async function completeSleepTeardown(
   } else {
     await db.batch([workspaceSleeping, agentSleeping]);
   }
-  const sleepWarning =
-    verified?.status === 'degraded'
+  const sleepWarning = options.fallback
+    ? `Workspace slept through the bounded sleep fallback (transcript and Git recovery point, snapshot ${verified?.status ?? 'unknown'}/${verified?.degradation ?? 'unknown'})`
+    : verified?.status === 'degraded'
       ? `Workspace slept with degraded snapshot (${verified.degradation})`
       : null;
   const finalized = await finalizeSessionSnapshotSleeping(
@@ -210,7 +237,11 @@ export async function completeSleepTeardown(
     workspace.chatSessionId,
     claimId,
     new Date(),
-    { sleepWarning, expectedGeneration: verified?.snapshotGeneration ?? undefined }
+    {
+      sleepWarning,
+      expectedGeneration: verified?.snapshotGeneration ?? undefined,
+      fallback: options.fallback ?? false,
+    }
   );
   if (!finalized) {
     const snapshot = await getRestorableSessionSnapshot(db, workspace.chatSessionId);

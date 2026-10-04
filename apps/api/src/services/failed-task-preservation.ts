@@ -172,6 +172,7 @@ async function queueFailedTaskSleepEpisode(
       sleepAfterMs: 0,
       allowIncomplete: true,
       resetAttempts: true,
+      startNewEpisode: true,
     });
   await startEpisode();
   await queueWorkspaceSessionSleep(env, {
@@ -402,6 +403,8 @@ export interface PreservationSnapshotOwner {
   status: string;
   degradation: string;
   captureGeneration: string | null;
+  /** The bounded sleep-failure decision, when the episode ended (`session-sleep-episode.ts`). */
+  sleepFallbackJson: string | null;
   taskId: string | null;
   taskStatus: string | null;
   taskErrorMessage: string | null;
@@ -426,6 +429,7 @@ export async function loadPreservationSnapshotOwner(
       status: schema.sessionSnapshots.status,
       degradation: schema.sessionSnapshots.degradation,
       captureGeneration: schema.sessionSnapshots.captureGeneration,
+      sleepFallbackJson: schema.sessionSnapshots.sleepFallbackJson,
       taskId: schema.tasks.id,
       taskStatus: schema.tasks.status,
       taskErrorMessage: schema.tasks.errorMessage,

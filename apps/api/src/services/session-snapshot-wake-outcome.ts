@@ -88,6 +88,11 @@ export async function completeSessionSnapshotRecovery(
       sleepAttempts: 0,
       sleepError: null,
       sleepStoppingSince: null,
+      // The wake ends any sleep-failure episode and consumes the fallback record the
+      // wake prompt was built from (`session-sleep-episode.ts`).
+      sleepEpisodeStartedAt: null,
+      sleepEpisodeFailures: 0,
+      sleepFallbackJson: null,
       sleepingAt: null,
       recoveryAttempts: 0,
       recoveryFailedAt: null,
@@ -128,6 +133,9 @@ export async function markSessionSnapshotAwakeInPlace(
       sleepAttempts: 0,
       sleepError: null,
       sleepStoppingSince: null,
+      sleepEpisodeStartedAt: null,
+      sleepEpisodeFailures: 0,
+      sleepFallbackJson: null,
       recoveryAttempts: 0,
       recoveryFailedAt: null,
       // Only an asleep -> awake transition is a restore. The delivery adapter calls

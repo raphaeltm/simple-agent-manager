@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -181,7 +181,8 @@ async function markSessionSnapshotSleepingWithConfig(
   now: Date,
   claimId?: string,
   sleepWarning?: string | null,
-  expectedGeneration?: string
+  expectedGeneration?: string,
+  fallback = false
 ): Promise<boolean> {
   const ttlDays = env ? getSessionSnapshotConfig(env).ttlDays : DEFAULT_SESSION_SNAPSHOT_TTL_DAYS;
   const warning = sleepWarning && env ? sessionLifecycleError(env, sleepWarning) : null;
@@ -199,6 +200,10 @@ async function markSessionSnapshotSleepingWithConfig(
       sleepError: warning,
       sleepClaimId: null,
       sleepClaimedAt: null,
+      // The sleep happened: the failure episode is over (`session-sleep-episode.ts`).
+      // `sleep_fallback_json` stays, so the wake can tell what was not saved.
+      sleepEpisodeStartedAt: null,
+      sleepEpisodeFailures: 0,
       updatedAt: now.toISOString(),
     })
     .where(
@@ -207,8 +212,15 @@ async function markSessionSnapshotSleepingWithConfig(
         ...(expectedGeneration
           ? [
               eq(schema.sessionSnapshots.snapshotGeneration, expectedGeneration),
-              eq(schema.sessionSnapshots.status, 'available'),
-              eq(schema.sessionSnapshots.degradation, 'none'),
+              // A full sleep needs the complete generation it verified. A fallback sleep
+              // releases compute with the restorable recovery point it recorded, which may
+              // be degraded; the restorable pair below still applies to both.
+              ...(fallback
+                ? [isNotNull(schema.sessionSnapshots.sleepFallbackJson)]
+                : [
+                    eq(schema.sessionSnapshots.status, 'available'),
+                    eq(schema.sessionSnapshots.degradation, 'none'),
+                  ]),
               isNull(schema.sessionSnapshots.captureGeneration),
             ]
           : []),
@@ -239,7 +251,7 @@ export async function finalizeSessionSnapshotSleeping(
   chatSessionId: string,
   claimId: string,
   now = new Date(),
-  options: { sleepWarning?: string | null; expectedGeneration?: string } = {}
+  options: { sleepWarning?: string | null; expectedGeneration?: string; fallback?: boolean } = {}
 ): Promise<boolean> {
   const finalized = await markSessionSnapshotSleepingWithConfig(
     db,
@@ -248,7 +260,8 @@ export async function finalizeSessionSnapshotSleeping(
     now,
     claimId,
     options.sleepWarning,
-    options.expectedGeneration
+    options.expectedGeneration,
+    options.fallback ?? false
   );
   if (finalized) {
     // Every sleep finalizes here — the sleep sweep and an Instant container's own

@@ -371,6 +371,16 @@ function emptySessionSnapshotPurgeStats(
   };
 }
 
+/**
+ * Sleeping snapshots the seven-day purge retires: complete ones, and those a bounded
+ * sleep fallback slept with (`sleep_fallback_json`, `session-sleep-episode.ts`), so a
+ * fallback sleep keeps the same wake window and is cleaned up — R2 bundle included —
+ * exactly like any other sleep. Other degraded sleeps predate the fallback and are left
+ * as they were (tracked separately) rather than terminalized in bulk by this change.
+ */
+const PURGEABLE_SLEEPING_SNAPSHOT_SQL = `(status = 'available'
+         OR (status = 'degraded' AND sleep_fallback_json IS NOT NULL))`;
+
 /** Terminalize expired sessions, remove their R2 state, then purge bounded D1 metadata. */
 export async function runSessionSnapshotPurge(
   env: Env,
@@ -397,7 +407,7 @@ export async function runSessionSnapshotPurge(
      WHERE expires_at < ?
        AND sleeping_at IS NOT NULL
        AND (
-         (status = 'available' AND sleep_status = 'sleeping'
+         (${PURGEABLE_SLEEPING_SNAPSHOT_SQL} AND sleep_status = 'sleeping'
           AND (recovery_status IS NULL OR recovery_status != 'waking'))
          OR
          (status = 'expired' AND sleep_status = 'purging'
@@ -430,7 +440,7 @@ export async function runSessionSnapshotPurge(
              sleep_claimed_at = ?, updated_at = ?
          WHERE id = ? AND expires_at < ? AND sleeping_at IS NOT NULL
            AND (
-             (status = 'available' AND sleep_status = 'sleeping'
+             (${PURGEABLE_SLEEPING_SNAPSHOT_SQL} AND sleep_status = 'sleeping'
               AND (recovery_status IS NULL OR recovery_status != 'waking'))
              OR
              (status = 'expired' AND sleep_status = 'purging'
