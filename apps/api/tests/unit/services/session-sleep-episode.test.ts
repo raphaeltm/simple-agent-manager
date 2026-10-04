@@ -12,10 +12,10 @@ import {
   DEFAULT_SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS,
   parseSessionSleepFallbackRecord,
   serializeSessionSleepFallbackRecord,
-  type SessionSleepFallbackRecord,
   sessionSleepEpisodeConfig,
   sessionSleepEpisodePhase,
   sessionSleepEpisodeTrigger,
+  type SessionSleepFallbackRecord,
 } from '../../../src/services/session-sleep-episode';
 import {
   SESSION_RECOVERY_INITIAL_PROMPT,
