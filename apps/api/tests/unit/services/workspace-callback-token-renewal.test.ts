@@ -108,7 +108,11 @@ function bindingReadCount(): { count: number; mutateOn: (n: number, sql: string)
 
 beforeEach(() => {
   sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.workspaces, schema.nodes]);
+  createSchemaTables(sqlite, [
+    schema.workspaces,
+    schema.nodes,
+    schema.workspaceCallbackTokenRenewalRateLimits,
+  ]);
   seed();
   onPrepare = null;
 });
@@ -212,6 +216,48 @@ describe('renewWorkspaceCallbackToken', () => {
       renew(await agedToken(WS, 'workspace', 13 * HOUR), env, nodeToken)
     );
     expect(error.statusCode).toBe(410);
+  });
+
+  it('suppresses the renewed credential when the workspace moves to another node while minting', async () => {
+    const env = makeEnv();
+    const nodeToken = await signNodeCallbackToken(NODE, env);
+    onPrepare = (sql) => {
+      if (sql.includes('from "workspaces"') && sql.includes('left join "nodes"')) {
+        sqlite.prepare('UPDATE workspaces SET node_id = ? WHERE id = ?').run(OTHER_NODE, WS);
+      }
+    };
+
+    const error = await rejection(
+      renew(await agedToken(WS, 'workspace', 13 * HOUR), env, nodeToken)
+    );
+    expect([error.statusCode, error.error]).toEqual([410, 'GONE']);
+    expect(sqlite.prepare('SELECT node_id FROM workspaces WHERE id = ?').get(WS)).toEqual({
+      node_id: OTHER_NODE,
+    });
+  });
+
+  it('ends renewal when the workspace is deleted before its attempt is counted', async () => {
+    const env = makeEnv();
+    const nodeToken = await signNodeCallbackToken(NODE, env);
+    onPrepare = (sql) => {
+      if (sql.includes('INSERT INTO workspace_callback_token_renewal_rate_limits')) {
+        sqlite.prepare('DELETE FROM workspaces WHERE id = ?').run(WS);
+      }
+    };
+
+    const error = await rejection(
+      renew(await agedToken(WS, 'workspace', 13 * HOUR), env, nodeToken)
+    );
+    expect([error.statusCode, error.error]).toEqual([410, 'GONE']);
+  });
+
+  it('refuses an Instant (cf-container) workspace, while the VM control renews', async () => {
+    const aged = await agedToken(WS, 'workspace', 13 * HOUR);
+    expect((await renew(aged)).renewed).toBe(true);
+
+    sqlite.prepare("UPDATE nodes SET runtime = 'cf-container' WHERE id = ?").run(NODE);
+    const error = await rejection(renew(aged));
+    expect([error.statusCode, error.error]).toEqual([403, 'FORBIDDEN']);
   });
 
   it('keeps the original generation of a legacy token without gen_iat', async () => {

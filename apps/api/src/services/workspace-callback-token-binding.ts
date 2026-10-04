@@ -4,10 +4,15 @@
  * A workspace callback token may only ever reach the VM node that D1 binds the
  * workspace to. This module reads that binding and mints the fresh token the
  * control plane delivers over the node-management channel (VM hibernate requests,
- * `node-agent-session-snapshots.ts`), exactly as workspace creation does. Instant
- * (cf-container) runtimes are excluded: their container DO mints a fresh token on
- * every cold wake, and a wall-clock token pushed to a container generation would
- * defeat the Instant stale-callback guard (`routes/_stale-callback-guard.ts`).
+ * `node-agent-session-snapshots.ts`), exactly as workspace creation does.
+ *
+ * Renewal and delivery are VM-only (`isInstantRuntimeBinding`). An Instant
+ * (cf-container) runtime gets a fresh token from its container DO on every cold wake,
+ * one per container generation, and recovery replaces a generation under the same
+ * nodeId. Renewing would let a superseded generation that is still running extend its
+ * workspace authority past the lifetime of the token it was started with, and a
+ * wall-clock token pushed to a generation would defeat the Instant stale-callback
+ * guard (`routes/_stale-callback-guard.ts`).
  *
  * Kept free of route helpers so that the hibernate path stays lightweight; the
  * agent-initiated renewal route lives in `workspace-callback-token-renewal.ts`.
@@ -68,9 +73,13 @@ export function workspaceBoundToNode(
   );
 }
 
+/** Instant (cf-container) workspaces neither renew nor receive tokens (see file header). */
+export function isInstantRuntimeBinding(binding: WorkspaceCallbackTokenBinding): boolean {
+  return binding.nodeRuntime === 'cf-container';
+}
+
 /**
- * Why a binding may not receive a delivered token, or null when it may. Delivery is
- * VM-only (see the file header for why Instant runtimes are excluded).
+ * Why a binding may not receive a delivered token, or null when it may.
  */
 function deliverySkipReason(
   binding: WorkspaceCallbackTokenBinding | null,
@@ -78,7 +87,7 @@ function deliverySkipReason(
 ): string | null {
   if (!binding) return 'workspace_missing';
   if (!workspaceBoundToNode(binding, nodeId)) return 'not_bound_to_node';
-  if (binding.nodeRuntime === 'cf-container') return 'instant_runtime';
+  if (isInstantRuntimeBinding(binding)) return 'instant_runtime';
   if (!WORKSPACE_CALLBACK_ACTIVE_STATUSES.has(binding.status)) return 'workspace_inactive';
   if (!binding.nodeStatus || nodeStatusTerminatesCallbacks(binding.nodeStatus)) {
     return 'node_inactive';

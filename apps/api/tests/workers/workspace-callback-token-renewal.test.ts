@@ -22,8 +22,15 @@ import {
   signNodeCallbackToken,
   verifyCallbackToken,
 } from '../../src/services/jwt';
-import { hibernateAgentSessionOnNode } from '../../src/services/node-agent-session-snapshots';
+import {
+  hibernateAgentSessionOnNode,
+  hibernateCallbackTokenDelivery,
+} from '../../src/services/node-agent-session-snapshots';
 import { mintWorkspaceCallbackTokenForNodeDelivery } from '../../src/services/workspace-callback-token-binding';
+import {
+  DEFAULT_CALLBACK_TOKEN_RENEWAL_WINDOW_SECONDS,
+  getCallbackTokenRenewalRateLimit,
+} from '../../src/services/workspace-callback-token-renewal-rate-limit';
 import { seedNode, seedUser, seedWorkspace } from './helpers/seed-d1';
 
 const testEnv = env as unknown as Env;
@@ -49,11 +56,15 @@ const WS_ON_STOPPED_NODE = `${PREFIX}-ws-stopped-node`;
 const WS_OTHER_OWNER_NODE = `${PREFIX}-ws-other-owner-node`;
 const WS_MISSING = `${PREFIX}-ws-missing`;
 const WS_INSTANT = `${PREFIX}-ws-instant`;
+const WS_RATE = `${PREFIX}-ws-rate`;
+const WS_RATE_CONTROL = `${PREFIX}-ws-rate-control`;
+const WS_CASCADE = `${PREFIX}-ws-cascade`;
 
 let nodeToken: string;
 let otherNodeToken: string;
 let otherOwnerNodeToken: string;
 let stoppedNodeToken: string;
+let instantNodeToken: string;
 
 /**
  * Same claims as production `signCallbackToken` / `signNodeCallbackToken`, with the issue
@@ -138,12 +149,24 @@ beforeAll(async () => {
   // Corrupt binding: placement never puts a workspace on another user's node.
   await seedWorkspace(WS_OTHER_OWNER_NODE, OTHER_OWNER_NODE_ID, USER_ID, { status: 'running' });
   await seedWorkspace(WS_INSTANT, INSTANT_NODE_ID, USER_ID, { status: 'running' });
+  await seedWorkspace(WS_RATE, NODE_ID, USER_ID, { status: 'running' });
+  await seedWorkspace(WS_RATE_CONTROL, NODE_ID, USER_ID, { status: 'running' });
+  await seedWorkspace(WS_CASCADE, NODE_ID, USER_ID, { status: 'running' });
 
   nodeToken = await signNodeCallbackToken(NODE_ID, testEnv);
   otherNodeToken = await signNodeCallbackToken(OTHER_NODE_ID, testEnv);
   otherOwnerNodeToken = await signNodeCallbackToken(OTHER_OWNER_NODE_ID, testEnv);
   stoppedNodeToken = await signNodeCallbackToken(STOPPED_NODE_ID, testEnv);
+  instantNodeToken = await signNodeCallbackToken(INSTANT_NODE_ID, testEnv);
 });
+
+/** Wait out a window boundary that is about to pass, so a burst stays in one window. */
+async function startOfUncrowdedRenewalWindow(): Promise<void> {
+  const windowSeconds = getCallbackTokenRenewalRateLimit(testEnv).windowSeconds;
+  const secondsLeft = windowSeconds - (Math.floor(Date.now() / 1000) % windowSeconds);
+  if (secondsLeft < 15)
+    await new Promise((resolve) => setTimeout(resolve, (secondsLeft + 1) * 1000));
+}
 
 describe('POST /api/workspaces/:id/callback-token/renew', () => {
   it('renews an aged token for the hosting node and keeps the generation issue time', async () => {
@@ -337,6 +360,66 @@ describe('POST /api/workspaces/:id/callback-token/renew', () => {
     }
   });
 
+  it('refuses an Instant (cf-container) workspace, which gets a new token when it wakes', async () => {
+    const aged = await signAgedCallbackToken(WS_INSTANT, 'workspace', 13 * HOUR);
+
+    const response = await renew(WS_INSTANT, aged, {
+      nodeId: INSTANT_NODE_ID,
+      nodeToken: instantNodeToken,
+    });
+
+    expect(response.status).toBe(403);
+    expect(await errorCode(response)).toBe('FORBIDDEN');
+  });
+
+  it('limits renewal attempts per workspace, counting only authenticated ones', async () => {
+    await startOfUncrowdedRenewalWindow();
+    const { limit, windowSeconds } = getCallbackTokenRenewalRateLimit(testEnv);
+    expect([limit, windowSeconds]).toEqual([12, DEFAULT_CALLBACK_TOKEN_RENEWAL_WINDOW_SECONDS]);
+    const aged = await signAgedCallbackToken(WS_RATE, 'workspace', 13 * HOUR);
+
+    // A caller without the hosting node's credential cannot spend the workspace's attempts.
+    for (let attempt = 0; attempt < limit; attempt++) {
+      const rejected = await renew(WS_RATE, aged, { nodeId: NODE_ID, nodeToken: otherNodeToken });
+      expect(rejected.status).toBe(403);
+    }
+    for (let attempt = 0; attempt < limit; attempt++) {
+      const allowed = await renew(WS_RATE, aged, { nodeId: NODE_ID, nodeToken });
+      expect(allowed.status).toBe(200);
+    }
+
+    const limited = await renew(WS_RATE, aged, { nodeId: NODE_ID, nodeToken });
+    expect(limited.status).toBe(429);
+    expect(await errorCode(limited)).toBe('RATE_LIMIT_EXCEEDED');
+    const retryAfter = Number(limited.headers.get('Retry-After'));
+    expect(retryAfter).toBeGreaterThanOrEqual(1);
+    expect(retryAfter).toBeLessThanOrEqual(windowSeconds);
+
+    const otherWorkspace = await renew(
+      WS_RATE_CONTROL,
+      await signAgedCallbackToken(WS_RATE_CONTROL, 'workspace', 13 * HOUR),
+      { nodeId: NODE_ID, nodeToken }
+    );
+    expect(otherWorkspace.status).toBe(200);
+    expect(((await otherWorkspace.json()) as { renewed: boolean }).renewed).toBe(true);
+  });
+
+  it('drops the renewal counter when its workspace row is deleted', async () => {
+    const aged = await signAgedCallbackToken(WS_CASCADE, 'workspace', 13 * HOUR);
+    expect((await renew(WS_CASCADE, aged, { nodeId: NODE_ID, nodeToken })).status).toBe(200);
+    const counted = () =>
+      testEnv.DATABASE.prepare(
+        'SELECT COUNT(*) AS n FROM workspace_callback_token_renewal_rate_limits WHERE workspace_id = ?'
+      )
+        .bind(WS_CASCADE)
+        .first<{ n: number }>('n');
+    expect(await counted()).toBe(1);
+
+    await testEnv.DATABASE.prepare('DELETE FROM workspaces WHERE id = ?').bind(WS_CASCADE).run();
+
+    expect(await counted()).toBe(0);
+  });
+
   it('lets a workspace callback that failed after 24h succeed with the renewed token', async () => {
     const expired = await signAgedCallbackToken(WS_ACTIVE, 'workspace', DAY + HOUR);
     const rejected = await SELF.fetch(
@@ -433,5 +516,42 @@ describe('hibernateAgentSessionOnNode workspace token delivery', () => {
     const body = await capturedHibernateBody(WS_ON_OTHER_NODE, NODE_ID);
 
     expect(body).toEqual({ chatSessionId: 'chat-1', runtime: 'vm', background: true });
+  });
+
+  it('mints once for every repeat of a request that shares a delivery', async () => {
+    const deliver = hibernateCallbackTokenDelivery(testEnv, {
+      workspaceId: WS_ACTIVE,
+      nodeId: NODE_ID,
+    });
+
+    const first = deliver();
+    expect(deliver()).toBe(first);
+    await expect(
+      verifyCallbackToken((await first) as string, testEnv, { expectedScope: 'workspace' })
+    ).resolves.toMatchObject({ workspace: WS_ACTIVE });
+  });
+
+  it('delivers the token its caller supplies', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ status: 'pending', accepted: false }), { status: 202 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const deliver = vi.fn(async () => 'token-minted-for-the-first-poll');
+
+    await hibernateAgentSessionOnNode(
+      NODE_ID,
+      WS_ACTIVE,
+      'agent-session-1',
+      testEnv,
+      USER_ID,
+      { chatSessionId: 'chat-1', runtime: 'vm', background: true },
+      deliver
+    );
+
+    expect(deliver).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).workspaceCallbackToken).toBe(
+      'token-minted-for-the-first-poll'
+    );
   });
 });

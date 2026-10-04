@@ -757,6 +757,7 @@ export async function sendPromptToAgentOnNode(
 
 export {
   hibernateAgentSessionOnNode,
+  hibernateCallbackTokenDelivery,
   restoreAgentSessionOnNode,
 } from './node-agent-session-snapshots';
 

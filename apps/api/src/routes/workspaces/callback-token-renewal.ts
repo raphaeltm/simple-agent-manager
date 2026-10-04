@@ -6,7 +6,8 @@
  * CALLBACK_TOKEN_EXPIRY_MS keeps working. Auth is two callback JWTs, never a session cookie
  * (.claude/rules/34): the workspace's current token in `Authorization`, and the hosting
  * node's id and node token in the JSON body. See
- * `services/workspace-callback-token-renewal.ts` for the binding rules.
+ * `services/workspace-callback-token-renewal.ts` for the renewal rules and
+ * `services/workspace-callback-token-binding.ts` for the node binding they enforce.
  *
  * `workspacesRoutes` applies no session middleware, so this callback route is safe to
  * mount there next to the other workspace callbacks (`/:id/messages`, `/:id/git-token`).
@@ -17,7 +18,11 @@ import * as v from 'valibot';
 import type { Env } from '../../env';
 import { extractBearerToken } from '../../lib/auth-helpers';
 import { errors } from '../../middleware/error';
-import { renewWorkspaceCallbackToken } from '../../services/workspace-callback-token-renewal';
+import { RateLimitError } from '../../middleware/rate-limit';
+import {
+  renewWorkspaceCallbackToken,
+  type WorkspaceCallbackTokenRenewalResult,
+} from '../../services/workspace-callback-token-renewal';
 
 const MAX_NODE_ID_LENGTH = 128;
 const MAX_NODE_TOKEN_LENGTH = 16 * 1024;
@@ -46,12 +51,20 @@ callbackTokenRenewalRoutes.post('/:id/callback-token/renew', async (c) => {
     throw errors.badRequest('Invalid callback token renewal request');
   }
 
-  const result = await renewWorkspaceCallbackToken(c.env, {
-    workspaceId,
-    workspaceToken,
-    nodeId: parsed.output.nodeId,
-    nodeToken: parsed.output.nodeToken,
-  });
+  let result: WorkspaceCallbackTokenRenewalResult;
+  try {
+    result = await renewWorkspaceCallbackToken(c.env, {
+      workspaceId,
+      workspaceToken,
+      nodeId: parsed.output.nodeId,
+      nodeToken: parsed.output.nodeToken,
+    });
+  } catch (err) {
+    if (err instanceof RateLimitError) {
+      c.header('Retry-After', Math.max(1, err.retryAfter).toString());
+    }
+    throw err;
+  }
   // The response can carry a credential; no intermediary may store it.
   c.header('Cache-Control', 'no-store');
   return c.json(result);

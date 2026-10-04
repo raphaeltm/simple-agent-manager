@@ -54,6 +54,10 @@ export const DEFAULT_RATE_LIMITS = {
   // Voice transcription runs Workers AI Whisper on every request. Per MINUTE, not per hour
   // (`DEFAULT_TRANSCRIBE_WINDOW_SECONDS`): dictation is bursty, and the budget is for abuse.
   TRANSCRIBE: 30,
+  // Workspace callback-token renewal, per workspace. A healthy VM agent asks about once
+  // per half token lifetime, so this only bounds a holder of both proofs replaying them
+  // (`services/workspace-callback-token-renewal-rate-limit.ts`).
+  CALLBACK_TOKEN_RENEWAL: 12,
 } as const;
 
 /** Default time window (1 hour in seconds) */

@@ -18,11 +18,14 @@
  *    (`mintWorkspaceCallbackTokenForNodeDelivery` in `workspace-callback-token-binding.ts`).
  *
  * Both paths renew only while D1 says the workspace is active and bound to the node, so
- * deleting, stopping or reassigning a workspace still ends its callback authority.
+ * deleting, stopping or reassigning a workspace still ends its callback authority. Both
+ * are VM-only (`isInstantRuntimeBinding`), and renewal attempts are rate limited per
+ * workspace (`workspace-callback-token-renewal-rate-limit.ts`).
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { AppError, errors } from '../middleware/error';
+import { RateLimitError } from '../middleware/rate-limit';
 import {
   assertWorkspaceAcceptsCallback,
   assertWorkspaceCallbackIdentityCurrent,
@@ -33,9 +36,11 @@ import {
 } from './callback-token-claims';
 import { shouldRefreshCallbackToken, signCallbackToken, verifyCallbackToken } from './jwt';
 import {
+  isInstantRuntimeBinding,
   loadWorkspaceCallbackTokenBinding,
   workspaceBoundToNode,
 } from './workspace-callback-token-binding';
+import { consumeCallbackTokenRenewalQuota } from './workspace-callback-token-renewal-rate-limit';
 
 /**
  * Error codes for the node credential, distinct from the workspace credential's
@@ -72,11 +77,12 @@ async function verifyRenewalNodeCredential(
 }
 
 /**
- * Renew a workspace callback token for the agent on the node hosting the workspace.
+ * Renew a workspace callback token for the agent on the VM node hosting the workspace.
  *
  * Returns `{ renewed: false }` while the presented token is younger than the shared
  * CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO, so a holder cannot mint early. Throws designed
- * 401/403/410 AppErrors; never a 5xx for a rejected credential.
+ * 401/403/410 AppErrors, or a 429 RateLimitError once the workspace has used its renewal
+ * attempts for the window; never a 5xx for a rejected credential.
  */
 export async function renewWorkspaceCallbackToken(
   env: Env,
@@ -109,12 +115,37 @@ export async function renewWorkspaceCallbackToken(
     });
     throw errors.forbidden('Workspace is not hosted on this node');
   }
+  if (binding && isInstantRuntimeBinding(binding)) {
+    log.info('workspace_callback_token.renewal_rejected', {
+      workspaceId,
+      nodeId,
+      reason: 'instant_runtime',
+      action: 'rejected',
+    });
+    throw errors.forbidden('Instant workspaces get a new callback token when they wake');
+  }
   const active = await assertWorkspaceAcceptsCallback(
     env,
     binding,
     workspaceId,
     'callback_token_renewal'
   );
+
+  // Counted only after both proofs and the binding passed, so a party without the
+  // workspace's credentials cannot use up its renewal attempts.
+  const quota = await consumeCallbackTokenRenewalQuota(env, workspaceId);
+  if (quota.outcome === 'workspace_missing') {
+    throw errors.gone('Workspace is missing; callback resource is gone');
+  }
+  if (quota.outcome === 'limited') {
+    log.warn('workspace_callback_token.renewal_rate_limited', {
+      workspaceId,
+      nodeId,
+      retryAfterSeconds: quota.retryAfterSeconds,
+      action: 'rejected',
+    });
+    throw new RateLimitError(quota.retryAfterSeconds);
+  }
 
   if (!shouldRefreshCallbackToken(workspaceToken, env)) {
     return { renewed: false };

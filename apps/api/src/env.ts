@@ -334,6 +334,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   RATE_LIMIT_SESSION_SUMMARIZE_WINDOW_SECONDS?: string;
   RATE_LIMIT_IDENTITY_TOKEN?: string;
   RATE_LIMIT_IDENTITY_TOKEN_WINDOW_SECONDS?: string;
+  RATE_LIMIT_CALLBACK_TOKEN_RENEWAL?: string; // Authenticated workspace callback-token renewal attempts per workspace per window (default: 12)
+  RATE_LIMIT_CALLBACK_TOKEN_RENEWAL_WINDOW_SECONDS?: string; // Window for RATE_LIMIT_CALLBACK_TOKEN_RENEWAL (default: 3600)
   /**
    * Max Codex refresh requests per user per window. Defaults to 30. Enforced
    * atomically by CodexRefreshLock DO using ctx.storage (not KV). See

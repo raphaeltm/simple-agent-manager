@@ -538,6 +538,8 @@ by the read-only cron-liveness check.
 
 - `CALLBACK_TOKEN_EXPIRY_MS` — Lifetime of node- and workspace-scoped VM callback JWTs (default: `86400000` / 24h). Changing it does not extend tokens already issued.
 - `CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO` — Fraction of a callback token's lifetime after which it may be renewed (default: `0.5`, clamped to `0.1`–`0.9`). Gates both the node token refresh in `POST /api/nodes/:id/heartbeat` and workspace token renewal in `POST /api/workspaces/:id/callback-token/renew`; a token younger than this is not re-minted.
+- `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL` — Authenticated workspace callback-token renewal attempts allowed per workspace per window (default: `12`). Counted atomically in D1 (`workspace_callback_token_renewal_rate_limits`) only after both proofs and the node binding pass; a healthy agent asks about once per half token lifetime.
+- `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL_WINDOW_SECONDS` — Window for `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL` (default: `3600`).
 
 ### Timeouts
 

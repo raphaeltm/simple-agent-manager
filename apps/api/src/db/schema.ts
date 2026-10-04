@@ -161,6 +161,20 @@ export const aiSpendRateLimits = sqliteTable(
 );
 
 // =============================================================================
+// Workspace Callback Token Renewal Rate Limits
+// =============================================================================
+export const workspaceCallbackTokenRenewalRateLimits = sqliteTable(
+  'workspace_callback_token_renewal_rate_limits',
+  {
+    workspaceId: text('workspace_id')
+      .primaryKey()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    windowStart: integer('window_start').notNull(),
+    count: integer('count').notNull(),
+  }
+);
+
+// =============================================================================
 // Sessions (BetterAuth)
 // =============================================================================
 export const sessions = sqliteTable(
