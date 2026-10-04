@@ -16,10 +16,8 @@ import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM } from '../../../src/services/callback-token-claims';
 import { signNodeCallbackToken } from '../../../src/services/jwt';
-import {
-  mintWorkspaceCallbackTokenForNodeDelivery,
-  renewWorkspaceCallbackToken,
-} from '../../../src/services/workspace-callback-token-renewal';
+import { mintWorkspaceCallbackTokenForNodeDelivery } from '../../../src/services/workspace-callback-token-binding';
+import { renewWorkspaceCallbackToken } from '../../../src/services/workspace-callback-token-renewal';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const HOUR = 3600;

@@ -23,7 +23,7 @@ import {
   verifyCallbackToken,
 } from '../../src/services/jwt';
 import { hibernateAgentSessionOnNode } from '../../src/services/node-agent-session-snapshots';
-import { mintWorkspaceCallbackTokenForNodeDelivery } from '../../src/services/workspace-callback-token-renewal';
+import { mintWorkspaceCallbackTokenForNodeDelivery } from '../../src/services/workspace-callback-token-binding';
 import { seedNode, seedUser, seedWorkspace } from './helpers/seed-d1';
 
 const testEnv = env as unknown as Env;
