@@ -14,6 +14,7 @@ export type WorkspaceDeletionCallbackKind =
   | 'agent_settings'
   | 'boot_log'
   | 'bootstrap_token'
+  | 'callback_token_renewal'
   | 'compose_image_artifact_complete'
   | 'compose_image_artifact_init'
   | 'compose_publish_release'

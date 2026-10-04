@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import type { Env } from '../../env';
 import { agentSessionSuspendResumeRoutes } from './agent-session-suspend-resume';
 import { agentSessionRoutes } from './agent-sessions';
+import { callbackTokenRenewalRoutes } from './callback-token-renewal';
 import { crudRoutes } from './crud';
 import { lifecycleRoutes } from './lifecycle';
 import { localForwardRoutes } from './local-forward';
@@ -17,5 +18,6 @@ workspacesRoutes.route('/', agentSessionRoutes);
 workspacesRoutes.route('/', agentSessionSuspendResumeRoutes);
 workspacesRoutes.route('/', runtimeRoutes);
 workspacesRoutes.route('/', sessionSnapshotRoutes);
+workspacesRoutes.route('/', callbackTokenRenewalRoutes);
 
 export { workspacesRoutes };

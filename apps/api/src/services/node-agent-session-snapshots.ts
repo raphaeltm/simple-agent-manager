@@ -5,6 +5,7 @@ import {
   type GuardedNodeAgentMutationOptions,
   nodeAgentRequest,
 } from './node-agent';
+import { mintWorkspaceCallbackTokenForNodeDelivery } from './workspace-callback-token-renewal';
 
 export const DEFAULT_SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -13,6 +14,12 @@ interface SessionSnapshotRequest {
   runtime: string;
   agentType?: string;
   background?: boolean;
+  /**
+   * Fresh workspace-scoped callback token the agent stores before capturing (VM agents
+   * accept it on hibernate since 2026-07-11). Without it, a workspace awake longer than
+   * CALLBACK_TOKEN_EXPIRY_MS fails every snapshot callback with 401.
+   */
+  workspaceCallbackToken?: string;
 }
 
 export function getSessionSnapshotRequestTimeoutMs(env: Env): number {
@@ -50,7 +57,7 @@ function requestSessionSnapshot(
   );
 }
 
-export function hibernateAgentSessionOnNode(
+export async function hibernateAgentSessionOnNode(
   nodeId: string,
   workspaceId: string,
   sessionId: string,
@@ -58,7 +65,17 @@ export function hibernateAgentSessionOnNode(
   userId: string,
   input: SessionSnapshotRequest
 ): Promise<unknown> {
-  return requestSessionSnapshot('hibernate', nodeId, workspaceId, sessionId, env, userId, input);
+  // The capture's prepare/progress/complete/failure callbacks authenticate with the
+  // workspace token the agent holds. Deliver a fresh one over this node-management
+  // request, exactly as create/restore do, so a long-awake workspace can still sleep.
+  const workspaceCallbackToken = await mintWorkspaceCallbackTokenForNodeDelivery(env, {
+    workspaceId,
+    nodeId,
+  });
+  return requestSessionSnapshot('hibernate', nodeId, workspaceId, sessionId, env, userId, {
+    ...input,
+    ...(workspaceCallbackToken ? { workspaceCallbackToken } : {}),
+  });
 }
 
 export function restoreAgentSessionOnNode(
