@@ -36,6 +36,7 @@ const STATUS_FROM_TASK: Record<TaskStatus, IdeaStatus> = {
   queued: 'executing',
   delegated: 'executing',
   in_progress: 'executing',
+  sleeping: 'executing',
   completed: 'done',
   failed: 'parked',
   cancelled: 'parked',

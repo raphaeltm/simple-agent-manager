@@ -17,6 +17,7 @@ const TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   queued: ['delegated', 'failed', 'cancelled'],
   delegated: ['in_progress', 'failed', 'cancelled'],
   in_progress: ['completed', 'failed', 'cancelled'],
+  sleeping: ['queued', 'delegated', 'in_progress', 'cancelled'],
   completed: [],
   failed: ['ready', 'cancelled'],
   cancelled: ['ready'],

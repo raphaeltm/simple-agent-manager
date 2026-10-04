@@ -48,7 +48,7 @@ export {
 export { SESSION_RECOVERY_INITIAL_PROMPT } from './session-recovery-task';
 
 // The node-pool boundary inventory (`scripts/quality/node-pool-boundary/inventory-data.ts`)
-// requires the module that holds this tasks-INSERT writer to also call
+// requires the module that holds this wake task writer to also call
 // `resolveTaskStartPlacement*` and `ensureTaskRunnerStarted`. Keep the writer beside
 // `resolveRecoveryPlacement` and `ensureSessionRecovery` when splitting this file.
 async function reactivateSleepingTask(
