@@ -35,9 +35,9 @@ describe('callbackTokenIssuedAtMs', () => {
   });
 
   it('returns the preserved generation (gen_iat) of a renewed token, not its renewal iat', () => {
-    expect(callbackTokenIssuedAtMs(jwtWith({ iat: IAT_SECONDS + 86_400, gen_iat: IAT_SECONDS }))).toBe(
-      IAT_MS
-    );
+    expect(
+      callbackTokenIssuedAtMs(jwtWith({ iat: IAT_SECONDS + 86_400, gen_iat: IAT_SECONDS }))
+    ).toBe(IAT_MS);
   });
 
   it('falls back to iat when gen_iat is malformed', () => {
@@ -76,12 +76,16 @@ describe('callbackTokenIssuedAtMs', () => {
 
 describe('getInstantStaleCallbackMarginMs', () => {
   it('defaults when unset', () => {
-    expect(getInstantStaleCallbackMarginMs({} as Env)).toBe(DEFAULT_INSTANT_STALE_CALLBACK_MARGIN_MS);
+    expect(getInstantStaleCallbackMarginMs({} as Env)).toBe(
+      DEFAULT_INSTANT_STALE_CALLBACK_MARGIN_MS
+    );
   });
 
   it('honours a valid override', () => {
     expect(
-      getInstantStaleCallbackMarginMs({ INSTANT_STALE_CALLBACK_MARGIN_MS: '30000' } as unknown as Env)
+      getInstantStaleCallbackMarginMs({
+        INSTANT_STALE_CALLBACK_MARGIN_MS: '30000',
+      } as unknown as Env)
     ).toBe(30_000);
   });
 

@@ -38,6 +38,7 @@ const NODE_ID = `${PREFIX}-node`;
 const OTHER_NODE_ID = `${PREFIX}-node-2`;
 const OTHER_OWNER_NODE_ID = `${PREFIX}-node-other-owner`;
 const STOPPED_NODE_ID = `${PREFIX}-node-stopped`;
+const INSTANT_NODE_ID = `${PREFIX}-node-instant`;
 
 const WS_ACTIVE = `${PREFIX}-ws-active`;
 const WS_CREATING = `${PREFIX}-ws-creating`;
@@ -47,6 +48,7 @@ const WS_STOPPED = `${PREFIX}-ws-stopped`;
 const WS_ON_STOPPED_NODE = `${PREFIX}-ws-stopped-node`;
 const WS_OTHER_OWNER_NODE = `${PREFIX}-ws-other-owner-node`;
 const WS_MISSING = `${PREFIX}-ws-missing`;
+const WS_INSTANT = `${PREFIX}-ws-instant`;
 
 let nodeToken: string;
 let otherNodeToken: string;
@@ -122,6 +124,10 @@ beforeAll(async () => {
   await seedNode(OTHER_NODE_ID, USER_ID);
   await seedNode(OTHER_OWNER_NODE_ID, OTHER_USER_ID);
   await seedNode(STOPPED_NODE_ID, USER_ID, { status: 'stopped', healthStatus: 'unhealthy' });
+  await seedNode(INSTANT_NODE_ID, USER_ID);
+  await testEnv.DATABASE.prepare("UPDATE nodes SET runtime = 'cf-container' WHERE id = ?")
+    .bind(INSTANT_NODE_ID)
+    .run();
 
   await seedWorkspace(WS_ACTIVE, NODE_ID, USER_ID, { status: 'running' });
   await seedWorkspace(WS_CREATING, NODE_ID, USER_ID, { status: 'creating' });
@@ -131,6 +137,7 @@ beforeAll(async () => {
   await seedWorkspace(WS_ON_STOPPED_NODE, STOPPED_NODE_ID, USER_ID, { status: 'running' });
   // Corrupt binding: placement never puts a workspace on another user's node.
   await seedWorkspace(WS_OTHER_OWNER_NODE, OTHER_OWNER_NODE_ID, USER_ID, { status: 'running' });
+  await seedWorkspace(WS_INSTANT, INSTANT_NODE_ID, USER_ID, { status: 'running' });
 
   nodeToken = await signNodeCallbackToken(NODE_ID, testEnv);
   otherNodeToken = await signNodeCallbackToken(OTHER_NODE_ID, testEnv);
@@ -174,9 +181,7 @@ describe('POST /api/workspaces/:id/callback-token/renew', () => {
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as { token: string };
-    expect(decodeJwt(body.token)[CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM]).toBe(
-      originalIssuedAt
-    );
+    expect(decodeJwt(body.token)[CALLBACK_TOKEN_GENERATION_ISSUED_AT_CLAIM]).toBe(originalIssuedAt);
   });
 
   it('does not mint while the token is younger than the refresh threshold', async () => {
@@ -372,6 +377,11 @@ describe('mintWorkspaceCallbackTokenForNodeDelivery', () => {
     ['workspace on a stopped node', WS_ON_STOPPED_NODE, STOPPED_NODE_ID],
     ['node owned by another user', WS_OTHER_OWNER_NODE, OTHER_OWNER_NODE_ID],
     ['missing workspace', WS_MISSING, NODE_ID],
+    [
+      'Instant (cf-container) runtime, which gets a fresh token per cold wake',
+      WS_INSTANT,
+      INSTANT_NODE_ID,
+    ],
   ])('delivers nothing for a %s', async (_label, workspaceId, nodeId) => {
     await expect(
       mintWorkspaceCallbackTokenForNodeDelivery(testEnv, { workspaceId, nodeId })
@@ -401,7 +411,9 @@ describe('hibernateAgentSessionOnNode workspace token delivery', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(String(url)).toContain(`/workspaces/${workspaceId}/agent-sessions/agent-session-1/hibernate`);
+    expect(String(url)).toContain(
+      `/workspaces/${workspaceId}/agent-sessions/agent-session-1/hibernate`
+    );
     return JSON.parse(String(init.body)) as Record<string, unknown>;
   }
 

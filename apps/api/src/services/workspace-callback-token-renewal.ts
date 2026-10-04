@@ -14,8 +14,11 @@
  *    workspace token, a workspace token copied out of a devcontainer cannot renew
  *    itself, and an expired token is never renewed.
  * 2. Control-plane delivery (API -> VM agent, `mintWorkspaceCallbackTokenForNodeDelivery`):
- *    requests the control plane already sends over the node-management channel carry a
- *    freshly minted token, exactly as workspace create and cf-container restore do.
+ *    requests the control plane already sends over the node-management channel to a VM
+ *    node carry a freshly minted token, exactly as workspace create does. Instant
+ *    (cf-container) runtimes are excluded: their container DO mints a fresh token on every
+ *    cold wake, and a wall-clock token pushed to a container generation would defeat the
+ *    Instant stale-callback guard (`routes/_stale-callback-guard.ts`).
  *
  * Both paths renew only while D1 says the workspace is active and bound to the node, so
  * deleting, stopping or reassigning a workspace still ends its callback authority.
@@ -26,6 +29,7 @@ import { AppError, errors } from '../middleware/error';
 import {
   assertWorkspaceAcceptsCallback,
   assertWorkspaceCallbackIdentityCurrent,
+  sameWorkspaceCallbackIdentity,
   WORKSPACE_CALLBACK_ACTIVE_STATUSES,
   type WorkspaceCallbackIdentitySnapshot,
 } from '../routes/workspaces/_helpers';
@@ -46,11 +50,11 @@ export const NODE_CALLBACK_FORBIDDEN = 'NODE_CALLBACK_FORBIDDEN';
 
 interface WorkspaceRenewalBinding extends WorkspaceCallbackIdentitySnapshot {
   nodeUserId: string | null;
+  nodeRuntime: string | null;
 }
 
 export type WorkspaceCallbackTokenRenewalResult =
-  | { renewed: true; token: string; expiresAt: string | null }
-  | { renewed: false };
+  { renewed: true; token: string; expiresAt: string | null } | { renewed: false };
 
 async function loadWorkspaceRenewalBinding(
   env: Env,
@@ -64,7 +68,8 @@ async function loadWorkspaceRenewalBinding(
             w.status AS status,
             w.node_id AS nodeId,
             n.status AS nodeStatus,
-            n.user_id AS nodeUserId
+            n.user_id AS nodeUserId,
+            n.runtime AS nodeRuntime
        FROM workspaces w
        LEFT JOIN nodes n ON n.id = w.node_id
       WHERE w.id = ?
@@ -187,35 +192,62 @@ export async function renewWorkspaceCallbackToken(
 }
 
 /**
+ * Why a binding may not receive a delivered token, or null when it may. Delivery is
+ * VM-only (see the file header for why Instant runtimes are excluded).
+ */
+function deliverySkipReason(
+  binding: WorkspaceRenewalBinding | null,
+  nodeId: string
+): string | null {
+  if (!binding) return 'workspace_missing';
+  if (!workspaceBoundToNode(binding, nodeId)) return 'not_bound_to_node';
+  if (binding.nodeRuntime === 'cf-container') return 'instant_runtime';
+  if (!WORKSPACE_CALLBACK_ACTIVE_STATUSES.has(binding.status)) return 'workspace_inactive';
+  if (!binding.nodeStatus || nodeStatusTerminatesCallbacks(binding.nodeStatus)) {
+    return 'node_inactive';
+  }
+  return null;
+}
+
+function sameRenewalBinding(current: WorkspaceRenewalBinding, expected: WorkspaceRenewalBinding) {
+  return (
+    sameWorkspaceCallbackIdentity(current, expected) &&
+    current.nodeUserId === expected.nodeUserId &&
+    current.nodeRuntime === expected.nodeRuntime
+  );
+}
+
+/**
  * Mint a fresh workspace callback token for a control-plane request that is about to be
  * delivered to `nodeId` over the node-management channel. Returns null, and the caller
  * sends its request without a token exactly as before, unless D1 binds the workspace to
- * that node and the workspace and node are still active.
+ * that VM node and the workspace and node are still active, both before and after
+ * signing (rule 49), so a delete or move that wins the race gets no credential.
  */
 export async function mintWorkspaceCallbackTokenForNodeDelivery(
   env: Env,
   input: { workspaceId: string; nodeId: string }
 ): Promise<string | null> {
+  const skip = (reason: string) => {
+    log.info('workspace_callback_token.delivery_skipped', {
+      workspaceId: input.workspaceId,
+      nodeId: input.nodeId,
+      reason,
+    });
+    return null;
+  };
   try {
     const binding = await loadWorkspaceRenewalBinding(env, input.workspaceId);
-    const skipReason = !binding
-      ? 'workspace_missing'
-      : !workspaceBoundToNode(binding, input.nodeId)
-        ? 'not_bound_to_node'
-        : !WORKSPACE_CALLBACK_ACTIVE_STATUSES.has(binding.status)
-          ? 'workspace_inactive'
-          : !binding.nodeStatus || nodeStatusTerminatesCallbacks(binding.nodeStatus)
-            ? 'node_inactive'
-            : null;
-    if (skipReason) {
-      log.info('workspace_callback_token.delivery_skipped', {
-        workspaceId: input.workspaceId,
-        nodeId: input.nodeId,
-        reason: skipReason,
-      });
-      return null;
+    const skipReason = deliverySkipReason(binding, input.nodeId);
+    if (skipReason || !binding) return skip(skipReason ?? 'workspace_missing');
+
+    const token = await signCallbackToken(input.workspaceId, env);
+
+    const current = await loadWorkspaceRenewalBinding(env, input.workspaceId);
+    if (!current || !sameRenewalBinding(current, binding)) {
+      return skip('incarnation_changed');
     }
-    return await signCallbackToken(input.workspaceId, env);
+    return token;
   } catch (err) {
     log.warn('workspace_callback_token.delivery_mint_failed', {
       workspaceId: input.workspaceId,
