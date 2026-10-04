@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef,useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { useAudioPlayback } from '../hooks/useAudioPlayback';
 import { AudioPlayer } from './AudioPlayer';
@@ -22,6 +22,12 @@ export interface MessageActionsProps {
   /** Color variant. 'default' for light backgrounds, 'on-dark' for dark (e.g., blue) backgrounds. */
   variant?: 'default' | 'on-dark';
   /**
+   * Edge of the message the actions sit on. 'end' right-aligns the buttons and
+   * anchors the metadata popover to the right edge so it opens leftward, which
+   * keeps it on screen under a right-aligned (user) bubble.
+   */
+  align?: 'start' | 'end';
+  /**
    * Optional callback to delegate audio playback to an external player (e.g., global audio context).
    * When provided, the speaker button calls this instead of managing its own audio.
    * The inline AudioPlayer is not rendered — the external player handles UI.
@@ -41,6 +47,23 @@ function stripMarkdownForCount(md: string): string {
     .trim();
 }
 
+/** Gap between the action row and the metadata popover. */
+const POPOVER_GAP_PX = 4;
+
+/**
+ * Vertical range the popover can be seen in: the nearest ancestor that clips
+ * overflow (the chat's scroll container), narrowed to the viewport.
+ */
+function visibleBounds(el: HTMLElement): { top: number; bottom: number } {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    if (getComputedStyle(node).overflowY !== 'visible') {
+      const rect = node.getBoundingClientRect();
+      return { top: Math.max(rect.top, 0), bottom: Math.min(rect.bottom, window.innerHeight) };
+    }
+  }
+  return { top: 0, bottom: window.innerHeight };
+}
+
 function formatTimestamp(ts: number): string {
   const date = new Date(ts);
   return date.toLocaleString(undefined, {
@@ -55,7 +78,8 @@ function formatTimestamp(ts: number): string {
 
 /**
  * Action buttons displayed below messages.
- * - Info icon: shows metadata popover (timestamp, word count, char count)
+ * - Info icon: shows metadata popover (timestamp, word count, char count) below
+ *   the buttons, or above them when it would be cut off below
  * - Speaker icon: reads the message aloud via server-side TTS (preferred) or Web Speech API (fallback)
  * - Copy icon: copies message text to clipboard
  *
@@ -64,6 +88,7 @@ function formatTimestamp(ts: number): string {
  *
  * Use `hideTts` to suppress TTS (e.g., for user messages).
  * Use `variant="on-dark"` when rendered on a dark background (e.g., blue user bubbles).
+ * Use `align="end"` under a right-aligned bubble (e.g., user messages).
  */
 export const MessageActions = React.memo(function MessageActions({
   text,
@@ -72,12 +97,15 @@ export const MessageActions = React.memo(function MessageActions({
   ttsStorageId,
   hideTts,
   variant = 'default',
+  align = 'start',
   onPlayAudio,
 }: MessageActionsProps) {
   const [showMeta, setShowMeta] = useState(false);
+  const [openUpward, setOpenUpward] = useState(false);
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const metaRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const popoverId = React.useId();
 
   // When onPlayAudio is provided, we delegate audio to the global player.
@@ -90,6 +118,7 @@ export const MessageActions = React.memo(function MessageActions({
   const chars = plain.length;
 
   const isOnDark = variant === 'on-dark';
+  const isEnd = align === 'end';
   const colorMuted = isOnDark ? 'rgba(255,255,255,0.7)' : 'var(--sam-color-fg-muted)';
   const colorActive = isOnDark ? '#ffffff' : 'var(--sam-color-accent-primary)';
 
@@ -118,6 +147,24 @@ export const MessageActions = React.memo(function MessageActions({
     };
   }, [showMeta]);
 
+  // The popover opens below the buttons. Where that would cut it off (the
+  // newest message sits right above the composer), open it upward if it fits.
+  // A layout effect measures before paint, so the popover never flashes below.
+  useLayoutEffect(() => {
+    const anchor = metaRef.current;
+    const popover = popoverRef.current;
+    if (!showMeta || !anchor || !popover) {
+      setOpenUpward(false);
+      return;
+    }
+    const bounds = visibleBounds(anchor);
+    const row = anchor.getBoundingClientRect();
+    const height = popover.getBoundingClientRect().height;
+    const fitsBelow = row.bottom + POPOVER_GAP_PX + height <= bounds.bottom;
+    const fitsAbove = row.top - POPOVER_GAP_PX - height >= bounds.top;
+    setOpenUpward(!fitsBelow && fitsAbove);
+  }, [showMeta]);
+
   const toggleMeta = useCallback(() => {
     setShowMeta((v) => !v);
   }, []);
@@ -142,7 +189,7 @@ export const MessageActions = React.memo(function MessageActions({
 
   return (
     <div className="flex flex-col mt-1 relative" ref={metaRef}>
-      <div className="flex items-center gap-1">
+      <div className={`flex items-center gap-1${isEnd ? ' justify-end' : ''}`}>
         {/* Info button */}
         <button
           type="button"
@@ -329,11 +376,24 @@ export const MessageActions = React.memo(function MessageActions({
       {/* Metadata popover */}
       {showMeta && (
         <div
+          ref={popoverRef}
           id={popoverId}
           role="dialog"
           aria-label="Message metadata"
-          className={`absolute ${isOnDark ? 'right-0' : 'left-0'} top-full mt-1 z-10 rounded-md shadow-md px-3 py-2 text-xs max-w-[calc(100vw-2rem)] break-words`}
+          className={`absolute ${isEnd ? 'right-0' : 'left-0'} rounded-md shadow-md px-3 py-2 text-xs break-words`}
           style={{
+            // Inline, not Tailwind utilities: the web app does not scan this
+            // package for classes, so a utility used only here is never generated
+            // (tasks/backlog/2026-10-04-acp-client-tailwind-classes-not-generated.md).
+            ...(openUpward
+              ? { bottom: '100%', marginBottom: POPOVER_GAP_PX }
+              : { top: '100%', marginTop: POPOVER_GAP_PX }),
+            // Size to the content, not to a narrow bubble.
+            width: 'max-content',
+            maxWidth: 'calc(100vw - 2rem)',
+            // Above later messages; below the chat's z-10 chrome (floating
+            // header, scroll button) when scrolled underneath it.
+            zIndex: 5,
             backgroundColor: 'var(--sam-color-bg-surface, white)',
             borderColor: 'var(--sam-color-border-default, #e5e7eb)',
             borderWidth: '1px',

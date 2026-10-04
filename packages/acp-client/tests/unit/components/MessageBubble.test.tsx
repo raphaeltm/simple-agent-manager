@@ -373,6 +373,84 @@ describe('MessageBubble', () => {
       // Inline player must NOT appear — global player handles UI
       expect(screen.queryByRole('region', { name: 'Audio player' })).toBeNull();
     });
+
+    it('puts user actions at the trailing edge, light-on-dark on the built-in blue bubble', () => {
+      render(<MessageBubble text="Hello" role="user" timestamp={1710288000000} />);
+      const info = screen.getByLabelText('Message info');
+      expect(info.parentElement!.className).toContain('justify-end');
+      expect(info.style.color).toBe('rgba(255, 255, 255, 0.7)');
+    });
+
+    it('gives a themed user bubble the theme palette, still at the trailing edge', () => {
+      render(
+        <MessageBubble
+          text="Hello"
+          role="user"
+          timestamp={1710288000000}
+          bubbleClassName="glass-msg-user"
+        />
+      );
+      const info = screen.getByLabelText('Message info');
+      expect(info.parentElement!.className).toContain('justify-end');
+      expect(info.style.color).toBe('var(--sam-color-fg-muted)');
+
+      fireEvent.click(info);
+      expect(screen.getByRole('dialog').className).toContain('right-0');
+    });
+
+    it('keeps agent actions at the leading edge', () => {
+      render(
+        <MessageBubble
+          text="Hello"
+          role="agent"
+          timestamp={1710288000000}
+          bubbleClassName="glass-msg-assistant"
+        />
+      );
+      const info = screen.getByLabelText('Message info');
+      expect(info.parentElement!.className).not.toContain('justify-end');
+      expect(info.style.color).toBe('var(--sam-color-fg-muted)');
+    });
+
+    it('fades a just-sent user message in with info and copy already shown', () => {
+      const { container } = render(
+        <MessageBubble
+          text="Sent"
+          role="user"
+          animated
+          timestamp={1710288000000}
+          bubbleClassName="glass-msg-user"
+        />
+      );
+      expect(container.querySelectorAll('.char-fade')).toHaveLength(4);
+      expect(screen.getByLabelText('Message info')).toBeTruthy();
+      expect(screen.getByLabelText('Copy message')).toBeTruthy();
+      expect(screen.queryByLabelText('Read aloud')).toBeNull();
+    });
+
+    it('keeps the user action row (and an open popover) mounted when the fade ends', () => {
+      const props = {
+        text: 'Sent',
+        role: 'user' as const,
+        timestamp: 1710288000000,
+        bubbleClassName: 'glass-msg-user',
+      };
+      const { container, rerender } = render(<MessageBubble {...props} animated />);
+      const info = screen.getByLabelText('Message info');
+      fireEvent.click(info);
+      expect(screen.getByRole('dialog')).toBeTruthy();
+
+      rerender(<MessageBubble {...props} animated={false} />);
+      expect(container.querySelectorAll('.char-fade')).toHaveLength(0);
+      expect(screen.getByText('Sent')).toBeTruthy();
+      expect(screen.getByLabelText('Message info')).toBe(info);
+      expect(screen.getByRole('dialog')).toBeTruthy();
+    });
+
+    it('hides actions while an agent message is still animating in', () => {
+      render(<MessageBubble text="typing" role="agent" animated timestamp={1710288000000} />);
+      expect(screen.queryByLabelText('Message info')).toBeNull();
+    });
   });
 
   describe('file path link interception', () => {

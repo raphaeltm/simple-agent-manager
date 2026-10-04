@@ -649,8 +649,11 @@
     will-change: transform;
   }
 
+  /* `backwards`, not `both`: the end frame equals the row's natural state, and a
+     lingering translateY(0) would make every row a stacking context, so a
+     message's info popover would paint underneath the rows after it. */
   .sam-message-entry {
-    animation: slideUp 250ms ease-out both;
+    animation: slideUp 250ms ease-out backwards;
   }
 
   .sam-message-entry:nth-child(2n) {

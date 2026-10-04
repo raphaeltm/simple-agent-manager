@@ -7,6 +7,7 @@ import { REMARK_PLUGINS } from './markdown-config';
 import { MermaidCodeFallback, MermaidDiagram } from './MermaidDiagram';
 import { MessageActions } from './MessageActions';
 import { TypewriterText } from './TypewriterText';
+import { UserMessageFade } from './UserMessageFade';
 
 const NIGHT_OWL_CODE_BACKGROUND = '#011627';
 const NIGHT_OWL_CODE_FOREGROUND = '#d6deeb';
@@ -15,7 +16,7 @@ interface MessageBubbleProps {
   text: string;
   role: 'user' | 'agent';
   streaming?: boolean;
-  /** When true, agent text is animated with per-character fade-in via TypewriterText. */
+  /** When true, text fades in per character: agent text via TypewriterText, user text via UserMessageFade. */
   animated?: boolean;
   /** Unix-millisecond timestamp for metadata display. */
   timestamp?: number;
@@ -27,7 +28,11 @@ interface MessageBubbleProps {
   onPlayAudio?: () => void;
   /** Optional callback when a file path link is clicked. Receives path and optional line number. */
   onFileClick?: (path: string, line?: number | null) => void;
-  /** Optional CSS class for the bubble container — allows theming from the app layer. */
+  /**
+   * Optional CSS class for the bubble container — allows theming from the app layer.
+   * It replaces the built-in colors, including the solid blue user bubble, so the
+   * action buttons switch from their light-on-dark palette to the theme's colors.
+   */
   bubbleClassName?: string;
 }
 
@@ -309,7 +314,11 @@ export const MessageBubble = React.memo(function MessageBubble({
     [renderMermaid]
   );
   const components = isUser ? userComponents : agentComponents;
-  const showActions = !streaming && !animated && timestamp != null && timestamp > 0;
+  // Agent text is still arriving while streaming or animating, so its actions
+  // wait for it to settle. A user message is complete once sent (its fade-in is
+  // cosmetic), so its actions show at once and stay mounted when the fade ends.
+  const textSettled = isUser || (!streaming && !animated);
+  const showActions = textSettled && timestamp != null && timestamp > 0;
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -323,7 +332,9 @@ export const MessageBubble = React.memo(function MessageBubble({
         }`}
       >
         <div className="prose prose-sm max-w-none overflow-x-auto break-words">
-          {animated && !isUser ? (
+          {animated && isUser ? (
+            <UserMessageFade text={text} />
+          ) : animated ? (
             <TypewriterText text={text} animated={true} markdownComponents={components} />
           ) : (
             <Markdown remarkPlugins={REMARK_PLUGINS} components={components}>
@@ -341,7 +352,10 @@ export const MessageBubble = React.memo(function MessageBubble({
             ttsApiUrl={isUser ? undefined : ttsApiUrl}
             ttsStorageId={isUser ? undefined : ttsStorageId}
             hideTts={isUser}
-            variant={isUser ? 'on-dark' : 'default'}
+            // Light-on-dark icons belong to the built-in solid blue user bubble;
+            // a bubbleClassName replaces that background with themed colors.
+            variant={isUser && !bubbleClassName ? 'on-dark' : 'default'}
+            align={isUser ? 'end' : 'start'}
             onPlayAudio={isUser ? undefined : onPlayAudio}
           />
         )}
