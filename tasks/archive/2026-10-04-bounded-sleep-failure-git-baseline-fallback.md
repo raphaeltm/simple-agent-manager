@@ -167,7 +167,7 @@ labelled. "Three attempts within 15 minutes" is a proposed starting point.
       (and any other statement that sleep always preserves files)
 - [x] Steering rules: `apps/api/.claude/rules/47` requirement 11 + test bullet (vm-agent
       rule 78 is incident history about capture cost and does not conflict)
-- [ ] Steering: update policies `a3780107`, `d08d64dc` (and check `2adacc8f`)
+- [x] Steering: updated policies `a3780107`, `d08d64dc` and `2adacc8f` (2026-10-04, citing PR #2223 as pending merge)
 
 ## Acceptance criteria
 
