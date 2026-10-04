@@ -28,12 +28,3 @@ export const AGENT_PERMISSION_MODE_LABELS: Record<AgentPermissionMode, string> =
   dontAsk: "Don't Ask",
   bypassPermissions: 'Bypass Permissions',
 };
-
-/** Human-readable descriptions for permission modes */
-export const AGENT_PERMISSION_MODE_DESCRIPTIONS: Record<AgentPermissionMode, string> = {
-  default: 'Always ask before making changes',
-  acceptEdits: 'Auto-accept file edit operations',
-  plan: 'Planning mode, no actual tool execution',
-  dontAsk: "Don't prompt for permissions, deny if not pre-approved",
-  bypassPermissions: 'Bypass all permission checks',
-};

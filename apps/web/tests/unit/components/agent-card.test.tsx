@@ -125,10 +125,10 @@ describe('AgentCard', () => {
   it('saves configuration via onSaveSettings when Save Settings is clicked', async () => {
     renderCard(makeAgent(), null, makeSettings());
     await waitFor(() => {
-      const defaultRadio = screen.getByTestId(
+      const bypassRadio = screen.getByTestId(
         'permission-mode-claude-code-bypassPermissions',
       ) as HTMLInputElement;
-      expect(defaultRadio.checked).toBe(true);
+      expect(bypassRadio.checked).toBe(true);
     });
 
     fireEvent.click(screen.getByTestId('permission-mode-claude-code-acceptEdits'));
