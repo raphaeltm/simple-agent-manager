@@ -148,6 +148,18 @@ describe('mintWorkspaceCallbackTokenForNodeDelivery', () => {
     ).resolves.toBeNull();
   });
 
+  it('withholds the token when the workspace is rebound to another chat session after the first read', async () => {
+    const reads = bindingReadCount();
+    reads.mutateOn = (n) => {
+      if (n === 2) {
+        sqlite.prepare("UPDATE workspaces SET chat_session_id = 'chat-2' WHERE id = ?").run(WS);
+      }
+    };
+    await expect(
+      mintWorkspaceCallbackTokenForNodeDelivery(makeEnv(), { workspaceId: WS, nodeId: NODE })
+    ).resolves.toBeNull();
+  });
+
   it('never delivers to an Instant (cf-container) runtime', async () => {
     sqlite.prepare("UPDATE nodes SET runtime = 'cf-container' WHERE id = ?").run(NODE);
     await expect(

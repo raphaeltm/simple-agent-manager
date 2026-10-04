@@ -534,6 +534,11 @@ by the read-only cron-liveness check.
 - `MCP_INCIDENT_LIST_MAX` — Maximum result count accepted by the private `list_incident_queue` MCP tool (default: 50)
 - `HETZNER_MAX_LIST_PAGES` — Maximum pages per Hetzner list request (default: 100)
 
+### Callback Tokens
+
+- `CALLBACK_TOKEN_EXPIRY_MS` — Lifetime of node- and workspace-scoped VM callback JWTs (default: `86400000` / 24h). Changing it does not extend tokens already issued.
+- `CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO` — Fraction of a callback token's lifetime after which it may be renewed (default: `0.5`, clamped to `0.1`–`0.9`). Gates both the node token refresh in `POST /api/nodes/:id/heartbeat` and workspace token renewal in `POST /api/workspaces/:id/callback-token/renew`; a token younger than this is not re-minted.
+
 ### Timeouts
 
 - `ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS` — Maximum task-status compare-and-set attempts after a parent hard-stops a child runtime (default: 2)
@@ -726,6 +731,16 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `SESSION_SNAPSHOT_OPERATION_TIMEOUT` — Deadline for one asynchronous checkpoint operation (default: `15m`)
 - `SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL` — Minimum interval between progress callbacks while a checkpoint continues making progress (default: `15s`)
 - `SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT` — Timeout for each best-effort progress callback to the control plane (default: `5s`)
+
+### Workspace Callback Token Renewal
+
+The agent renews each workspace callback token after a successful node heartbeat once the token is past the refresh ratio (`internal/server/workspace_callback_token_renewal.go`). These use their defaults unless set in the agent service environment.
+
+- `WORKSPACE_CALLBACK_TOKEN_REFRESH_RATIO` — Fraction of a workspace token's lifetime after which the agent renews it (default: `0.5`, clamped to `0.1`–`0.9`; the control plane's `CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO` still decides)
+- `WORKSPACE_CALLBACK_TOKEN_RENEWAL_TIMEOUT` — Timeout for one renewal request (default: `15s`)
+- `WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_INITIAL` — First backoff after a transient renewal failure (default: `1m`)
+- `WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_MAX` — Backoff ceiling, also the wait after a "not yet due" answer (default: `30m`)
+- `MSG_AUTH_RENEWAL_WAIT` — How long chat-message delivery may stay paused on a rejected (401) workspace token before the pause is reported as an error (default: `15m`). Held messages are kept either way.
 
 ### File Operations
 

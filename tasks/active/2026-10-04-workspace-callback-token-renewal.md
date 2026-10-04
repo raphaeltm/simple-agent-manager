@@ -103,40 +103,49 @@ gets `401 Invalid or expired callback token` on every workspace-scoped callback.
 ## Implementation checklist
 
 ### API
-- [ ] `jwt.ts`: renewal signing preserves generation (`gen` claim); payload exposes generation;
-      stale-callback guard reads generation before `iat`
-- [ ] New service `workspace-callback-token-renewal.ts`: dual-proof verification, D1 binding checks,
-      due check, Instant superseded check, mint; hibernate-delivery mint helper (active + bound)
-- [ ] New callback route file `routes/workspaces/callback-token-renewal.ts` mounted in
-      `routes/workspaces/index.ts`; `Cache-Control: no-store`; designed 401/403/410; IDs-only logs
-- [ ] `node-agent-session-snapshots.ts`: include fresh token on hibernate when bound + active
-- [ ] Env vars: `WORKSPACE_CALLBACK_TOKEN_RENEWAL_*` documented (`env.ts`, `.env.example`, docs)
+- [x] `jwt.ts`: renewal signing preserves generation (`gen_iat`); claim readers live in
+      `callback-token-claims.ts` (tests partially mock `jwt.ts`); stale guard reads `gen_iat` first
+- [x] New service `workspace-callback-token-renewal.ts`: dual-proof verification, D1 binding checks
+      (node, owner, active, non-terminal node), due check, JIT re-check, mint; VM-only delivery mint
+      with post-sign incarnation re-read. Superseded-generation refusal dropped: `agent_sessions.updated_at`
+      has non-recovery writers (credential attribution, suspend/resume), so it would refuse the live
+      container; `gen_iat` preservation keeps the stale guard intact instead.
+- [x] New callback route file `routes/workspaces/callback-token-renewal.ts` mounted in
+      `routes/workspaces/index.ts`; node proof in the JSON body (Workers Logs records headers; custom
+      header redaction is undocumented); `Cache-Control: no-store`; designed 401/403/410; IDs-only logs
+- [x] `node-agent-session-snapshots.ts`: include fresh token on hibernate when bound + active (VM only)
+- [x] Env vars documented: env-reference skill (API `CALLBACK_TOKEN_*`, agent `WORKSPACE_CALLBACK_TOKEN_*`,
+      `MSG_AUTH_RENEWAL_WAIT`), public VM agent reference
 
 ### VM agent
-- [ ] Config: renewal ratio, retry initial/max, request timeout; heartbeat parse unaffected
-- [ ] `workspace_callback_token_renewal.go`: due selection with injected clock, request with both
-      tokens, response classification, bounded backoff, rejection latch, CAS apply
-- [ ] Hook renewal after successful heartbeat (TryLock, like ready/eviction retries)
-- [ ] `upsertWorkspaceRuntime`: persist token changes and propagate to reporter + session hosts
-- [ ] `acp.SessionHost`: lock-free current-token accessor + `SetCallbackToken`; replace reads
-- [ ] `messagereport`: stale-token retry, park-on-401, resume on new token, bounded park budget
+- [x] Config: renewal ratio (clamped), retry initial/max, request timeout
+- [x] `workspace_callback_token_renewal.go`: due selection with injected clock, request with both
+      tokens, response classification, bounded backoff, rejection latch keyed on the token, CAS apply
+- [x] Hook renewal after successful heartbeat (TryLock, like ready/eviction retries)
+- [x] `upsertWorkspaceRuntime`: never adopt an earlier-expiring token; persist then propagate
+- [x] `acp.SessionHost`: lock-free current-token accessor + `SetCallbackToken`; replace reads
+- [x] `messagereport`: stale-token retry, park-on-401 without deleting rows, resume on new token,
+      pause beyond `MSG_AUTH_RENEWAL_WAIT` reported once (slog.Error + node errorreport)
 
 ### Tests
-- [ ] Workers test through the real route: renew success (gen preserved, scope workspace, new exp),
-      expired token denied, node token as workspace proof denied, workspace token as node proof
-      denied, foreign node denied, workspace on other node (moved) denied, user mismatch denied,
-      deleted/stopped/evicted workspace 410, terminal node 410, claim/path mismatch, not-due no mint,
-      Instant superseded denied, concurrent renewals
-- [ ] Unit: hibernate push includes token only when bound + active; stale guard uses `gen`
-- [ ] Go: clock crosses threshold/24h; expired not sent; rejection latch; backoff; CAS vs concurrent
-      push; heartbeat (node) vs workspace token separation; propagation to reporter + session host;
-      persistence across restart; reporter park/resume/no-duplicate/no-loss/budget; real HTTP path
-- [ ] `go test -race` for the touched packages
+- [x] Workers test through the real route (29): renew success (gen preserved, scope, new exp),
+      expired denied, node-as-workspace and workspace-as-node proofs denied, foreign/moved node,
+      owner mismatch, deleted/stopped/terminal node 410, missing row 410, claim/path mismatch, not-due,
+      concurrent renewals, downstream route accepts the renewed token, VM-only delivery, hibernate body
+- [x] Unit (14, real SQLite): delete/move/rebind between reads, Instant excluded, D1 throw → null,
+      deletion during renewal mint → 410, legacy unscoped proofs, exp boundary, ratio clamping;
+      stale guard uses `gen_iat` with the real signer
+- [x] Go: clock crosses threshold/24h; expired offered once; latch per token; backoff; node-credential
+      retry; CAS vs concurrent delivery; earlier-expiry delivery ignored; node token untouched;
+      propagation to reporter + every host of the workspace only; restart hydration; reporter
+      park/resume/stale-401/no-duplicate/budget/bounded; hibernate handler uses delivered token
+- [x] `go test -race` for server, messagereport, acp, config
 
 ### Docs / rollout
-- [ ] Public docs: security architecture (callback token lifetime + renewal), env reference
-- [ ] Rollout note: API push heals old agents for snapshot calls only; other consumers need the new
-      agent (new nodes); no hot replacement; AI proxy env token residual risk → SAM Idea
+- [x] Public docs: security architecture (callback token scopes, lifetime, renewal), VM agent env
+- [x] Rollout note (PR body): API push heals old agents for snapshot calls only (proven against pinned
+      7a9782c90 source); other consumers need new nodes; no hot replacement; AI proxy env token
+      residual → SAM Idea 01M432G3276YZWCP3HEJ5B25J5
 
 ## Acceptance criteria
 
@@ -156,6 +165,15 @@ than 24h (or a VM with an injected clock), and the cross-boundary contract is fu
 workers tests through the real route plus Go tests against an HTTP control plane. Substitute:
 deterministic clock-injected Go tests, Miniflare workers tests through the real auth boundary,
 `-race` runs, and post-deploy production log checks.
+
+## Discrimination evidence
+
+Each guard was removed once and the intended tests went red, then restored:
+API M1 node binding, M2 owner binding, M3 node proof, M4 not-due gate, M5 gen preservation,
+M6 claim/path, M7 delivery status, M8 post-sign re-read, M9 Instant exclusion, M10 renewal JIT.
+Agent A1 expiry ordering, A2 CAS, A3 refusal latch, A4/A5 propagation, A6 persistence, A7 node
+credential retry; reporter R1/R2/R4/R5/R6; SessionHost S1; upsert publish U1. R3 (resume bookkeeping)
+is not a guard: parking is keyed on the rejected token, so a new token resumes by construction.
 
 ## References
 

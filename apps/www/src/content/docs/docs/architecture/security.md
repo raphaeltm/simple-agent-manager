@@ -91,12 +91,28 @@ SAM uses **BetterAuth** with configured OAuth login providers for user authentic
 
 ### Token Types
 
-| Token           | Lifetime  | Purpose                          | Validated By            |
-| --------------- | --------- | -------------------------------- | ----------------------- |
-| Session cookie  | Hours     | Browser authentication           | API Worker (BetterAuth) |
-| Workspace JWT   | Minutes   | Terminal WebSocket auth          | VM Agent (via JWKS)     |
-| Bootstrap token | 5 minutes | One-time VM credential injection | API Worker              |
-| Callback token  | Minutes   | VM Agent → API callbacks         | API Worker              |
+| Token           | Lifetime             | Purpose                          | Validated By            |
+| --------------- | -------------------- | -------------------------------- | ----------------------- |
+| Session cookie  | Hours                | Browser authentication           | API Worker (BetterAuth) |
+| Workspace JWT   | Minutes              | Terminal WebSocket auth          | VM Agent (via JWKS)     |
+| Bootstrap token | 5 minutes            | One-time VM credential injection | API Worker              |
+| Callback token  | 24 hours (renewable) | VM Agent → API callbacks         | API Worker              |
+
+### Callback Tokens
+
+VM agents call the API Worker with RS256 callback tokens signed by the Worker (`apps/api/src/services/jwt.ts`). There are two scopes, and neither can stand in for the other:
+
+- **Node tokens** (`scope: node`) authenticate node-level callbacks such as heartbeats and error reports. They are renewed in the heartbeat response while the node is not terminal (`apps/api/src/routes/node-lifecycle.ts`).
+- **Workspace tokens** (`scope: workspace`) authenticate everything about one workspace: chat messages, session snapshots, git credentials, runtime assets, task status and ACP activity. The Worker hands one to the node when it creates or restores the workspace.
+
+Both last `CALLBACK_TOKEN_EXPIRY_MS` (24 hours by default). A workspace token is renewed without ever leaving its workspace's scope:
+
+1. **Renewal.** After each successful heartbeat, the VM agent renews workspace tokens that are past `CALLBACK_TOKEN_REFRESH_THRESHOLD_RATIO` of their lifetime by calling `POST /api/workspaces/:id/callback-token/renew` with two proofs: the workspace's current, unexpired token and the node's own token. The Worker renews only when D1 binds the workspace to that node, the node belongs to the workspace's owner, and both are still active (`apps/api/src/services/workspace-callback-token-renewal.ts`). A node token alone cannot obtain a workspace token, a workspace token copied out of a devcontainer cannot renew itself, and an expired token is never renewed.
+2. **Delivery.** When the Worker asks a VM node to snapshot a session for sleep, the request carries a fresh workspace token over the authenticated node-management channel, the same way workspace creation does. It is minted only if the workspace is still active on that node, and never for Instant containers, which receive a fresh token on every cold wake.
+
+Deleting, stopping or moving a workspace ends renewal, so its callback authority still lapses within one token lifetime. A renewed token keeps its first issue time in a `gen_iat` claim, so the Instant stale-callback guard still recognizes a callback from a replaced container (`apps/api/src/routes/_stale-callback-guard.ts`).
+
+Credentials that an agent process received when it started, such as the SAM AI proxy key, are not rotated inside the running process; the process picks up the current token the next time it starts.
 
 Deletion-in-progress callbacks fail closed. A VM delete timeout is treated as
 uncertainty, so the workspace remains `stopping` and callback routes reject its
