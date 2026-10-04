@@ -1,18 +1,12 @@
-import {
-  ACP_SESSION_TERMINAL_STATUSES,
-  type AcpSessionStatus,
-  DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS,
-} from '@simple-agent-manager/shared';
+import { ACP_SESSION_TERMINAL_STATUSES, type AcpSessionStatus } from '@simple-agent-manager/shared';
 
-import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
-import { getNodeBackendBaseUrl } from './node-agent-readiness';
-import { isRestorableSnapshot } from './session-snapshot-artifacts';
-import { sessionRecoveryBudgetAvailable } from './session-snapshot-recovery-budget';
+import { isVmNodeHeartbeatStale, TERMINAL_NODE_STATUSES } from './task-runtime-liveness-node-probe';
+import {
+  INCONCLUSIVE_WORKSPACE_STATUSES,
+  isSessionResumable,
+} from './task-runtime-liveness-recoverability';
 import type {
   RuntimeWorkspaceSnapshot,
-  SessionResumabilitySnapshot,
-  TaskLivenessNodeHealthProbeEnv,
-  TaskLivenessNodeHealthProbeResult,
   TaskRuntimeLiveness,
   TaskRuntimeLivenessSignals,
 } from './task-runtime-liveness-types';
@@ -42,43 +36,20 @@ export type {
  */
 export const SUPERSEDED_TERMINAL_REASON_SUFFIX = '_superseded_by_completed_wake';
 
-const PROBEABLE_DELIVERY_REASONS = new Set([
-  'task_acp_session_missing',
-  'task_acp_session_stale',
-  'task_acp_session_suspect',
-]);
-
-export type TaskRuntimeDeliveryDisposition =
-  | { kind: 'deliverable'; target: { nodeId: string; userId: string } }
-  | { kind: 'terminal'; reason: string; nodeId: string | null }
-  | { kind: 'inconclusive'; reason: string };
-
-/**
- * Convert the shared task-runtime verdict into a reconciliation delivery gate.
- *
- * Task-scoped ACP absence/staleness is allowed to make one bounded delivery
- * attempt: acceptance is positive reachability evidence, while timeout/error is
- * still inconclusive. Every other uncertain verdict stays deferred. Keeping
- * this adapter beside the classifier prevents reconciliation from growing a
- * second D1-heartbeat death policy.
- */
-export function classifyTaskRuntimeDelivery(
-  liveness: TaskRuntimeLiveness
-): TaskRuntimeDeliveryDisposition {
-  if (liveness.conclusive && !liveness.live) {
-    return { kind: 'terminal', reason: liveness.reason, nodeId: liveness.nodeId };
-  }
-
-  const target = liveness.deliveryTarget;
-  if (
-    target &&
-    (liveness.live || (!liveness.conclusive && PROBEABLE_DELIVERY_REASONS.has(liveness.reason)))
-  ) {
-    return { kind: 'deliverable', target };
-  }
-
-  return { kind: 'inconclusive', reason: liveness.reason };
-}
+export {
+  classifyTaskRuntimeDelivery,
+  type TaskRuntimeDeliveryDisposition,
+} from './task-runtime-liveness-delivery';
+export {
+  getTaskLivenessNodeHealthProbeTimeoutMs,
+  needsNodeHealthProbe,
+  probeNodeHealthForTaskLiveness,
+} from './task-runtime-liveness-node-probe';
+export {
+  isSessionResumable,
+  needsSessionResumabilityProbe,
+  needsTaskSupersessionProbe,
+} from './task-runtime-liveness-recoverability';
 
 /** True when a conclusive verdict was reached because the wake moved on. */
 export function isSupersededTerminalReason(reason: string): boolean {
@@ -87,196 +58,7 @@ export function isSupersededTerminalReason(reason: string): boolean {
 
 const ACTIVE_ACP_STATUSES = new Set<AcpSessionStatus>(['assigned', 'running']);
 const TERMINAL_ACP_STATUSES = new Set<AcpSessionStatus>(ACP_SESSION_TERMINAL_STATUSES);
-const INCONCLUSIVE_WORKSPACE_STATUSES = new Set(['creating', 'sleeping', 'recovery']);
 const TERMINAL_CONTAINER_STATUSES = new Set(['stopping', 'stopped', 'expired', 'error']);
-const TERMINAL_NODE_STATUSES = new Set(['stopped', 'deleted', 'destroyed', 'destroying', 'error']);
-/** `session_snapshots.sleep_status` value meaning "asleep right now". */
-const RESUMABLE_SLEEP_STATUS = 'sleeping';
-
-export function getTaskLivenessNodeHealthProbeTimeoutMs(
-  env: Pick<TaskLivenessNodeHealthProbeEnv, 'TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS'>
-): number {
-  return getTimeoutMs(
-    env.TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS,
-    DEFAULT_TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS
-  );
-}
-
-function isVmNodeHeartbeatStale(
-  workspace: RuntimeWorkspaceSnapshot,
-  nowMs: number,
-  heartbeatStaleMs: number
-): boolean {
-  return (
-    workspace.nodeHealthStatus !== 'healthy' ||
-    workspace.nodeHeartbeatAt === null ||
-    nowMs - workspace.nodeHeartbeatAt > heartbeatStaleMs
-  );
-}
-
-/**
- * A stale D1 heartbeat/health field is a weak self-signal, not proof of VM
- * death. Both liveness adapters make the same bounded authority probe, but a
- * failed request still cannot manufacture terminal ownership evidence
- * (`.claude/rules/61`).
- */
-export function needsNodeHealthProbe(signals: TaskRuntimeLivenessSignals): boolean {
-  const workspace = signals.workspace;
-  if (signals.workspaceProbeOutcome !== 'ok') return false;
-  if (!signals.taskWorkspaceId || !workspace) return false;
-  if (workspace.status !== 'running') return false;
-  if (workspace.nodeRuntime === 'cf-container') return false;
-  if (!workspace.nodeId) return false;
-  if (workspace.nodeStatus && TERMINAL_NODE_STATUSES.has(workspace.nodeStatus)) return false;
-  if (signals.nodeHealthProbeOutcome !== 'not_run') return false;
-  return isVmNodeHeartbeatStale(workspace, signals.nowMs, signals.heartbeatStaleMs);
-}
-
-function isNodeHealthProbeTimeout(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  return err.name === 'AbortError' || err.message.startsWith('Request timed out after ');
-}
-
-export async function probeNodeHealthForTaskLiveness(
-  env: TaskLivenessNodeHealthProbeEnv,
-  nodeId: string
-): Promise<TaskLivenessNodeHealthProbeResult> {
-  const timeoutMs = getTaskLivenessNodeHealthProbeTimeoutMs(env);
-  if (!env.BASE_DOMAIN) {
-    return {
-      outcome: 'error',
-      timeoutMs,
-      url: null,
-      status: null,
-      error: 'BASE_DOMAIN is not configured',
-    };
-  }
-
-  const url = `${getNodeBackendBaseUrl(nodeId, {
-    BASE_DOMAIN: env.BASE_DOMAIN,
-    VM_AGENT_PROTOCOL: env.VM_AGENT_PROTOCOL,
-    VM_AGENT_PORT: env.VM_AGENT_PORT,
-  })}/health`;
-
-  try {
-    const response = await fetchWithTimeout(url, { method: 'GET' }, timeoutMs);
-    return {
-      outcome: response.ok ? 'ok' : 'failed',
-      timeoutMs,
-      url,
-      status: response.status,
-      error: null,
-    };
-  } catch (err) {
-    return {
-      outcome: isNodeHealthProbeTimeout(err) ? 'timeout' : 'error',
-      timeoutMs,
-      url,
-      status: null,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-/**
- * True when the session is currently asleep with a restorable, unexpired
- * snapshot. `.claude/rules/02` requires sleep to be classified inconclusive:
- * `NodeLifecycle` rewrites a slept workspace's `sleeping` status to `deleted`
- * five minutes after sleep, so workspace status alone cannot distinguish
- * "slept and restorable" from "destroyed".
- *
- * A user-initiated delete destroys the snapshot row entirely
- * (`session-snapshot-persistence.ts:deleteSessionSnapshotState`), so snapshot
- * presence — not a deletion-cause column — is the discriminator.
- *
- * Every condition below mirrors one the resumer already enforces, so this
- * predicate can never be looser than the gate that authorizes a real wake
- * (`.claude/rules/58`). Being *equal* rather than merely safe matters: a
- * snapshot the resumer would refuse must terminalize, or the task waits out the
- * full snapshot TTL for a wake that can never happen.
- */
-export function isSessionResumable(
-  snapshot: SessionResumabilitySnapshot | null,
-  projectId: string,
-  workspaceId: string,
-  budget: { maxRecoveryAttempts: number; recoveryAttemptDecayMs: number; nowMs: number }
-): boolean {
-  if (!snapshot) return false;
-  // Defence in depth: the loader is already project+workspace scoped, so these
-  // two re-checks are the in-memory half of the pair `.claude/rules/28` wants.
-  if (snapshot.projectId !== projectId) return false;
-  if (snapshot.workspaceId !== workspaceId) return false;
-  if (snapshot.sleepingAt === null) return false;
-  // A session that already woke clears both `sleeping_at` and `sleep_status`
-  // (`markSessionSnapshotAwakeInPlace`, `completeSessionSnapshotRecovery`);
-  // this is the belt-and-braces half of that pair.
-  if (snapshot.sleepStatus !== RESUMABLE_SLEEP_STATUS) return false;
-  // Mirrors `restorableSnapshotCondition()` in the claim's WHERE clause.
-  if (!isRestorableSnapshot(snapshot.status, snapshot.degradation)) return false;
-  // Mirrors the resumer's attempt budget exactly, decay included
-  // (`session-snapshot-recovery-budget.ts`). A budget that is merely spent is NOT
-  // conclusive: the resumer will release it once the last clean failure ages past
-  // the decay window, so declaring the task dead here would destroy a session the
-  // resumer can still wake (`.claude/rules/58`). Only a budget that is spent AND
-  // undecayed refuses the claim, at which point preserving the task would strand
-  // it until the snapshot TTL — the second bounded escape (`.claude/rules/47`).
-  if (
-    !sessionRecoveryBudgetAvailable({
-      recoveryAttempts: snapshot.recoveryAttempts,
-      recoveryFailedAtMs: snapshot.recoveryFailedAtMs,
-      maxAttempts: budget.maxRecoveryAttempts,
-      decayMs: budget.recoveryAttemptDecayMs,
-      nowMs: budget.nowMs,
-    })
-  ) {
-    return false;
-  }
-  // An absent or unparseable expiry is treated as NOT resumable so a snapshot
-  // can never make a task immortal (`.claude/rules/47` bounded escape path).
-  if (snapshot.expiresAtMs === null) return false;
-  return snapshot.expiresAtMs > budget.nowMs;
-}
-
-/**
- * Whether a resumability lookup can still change the verdict. Adapters use this
- * to keep the extra D1 read off the hot path: it only fires for a workspace
- * that would otherwise be declared conclusively dead
- * (`.claude/rules/47` control-loop I/O budget).
- */
-export function needsSessionResumabilityProbe(
-  workspace: RuntimeWorkspaceSnapshot | null,
-  workspaceProbeOutcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome']
-): workspace is RuntimeWorkspaceSnapshot & { chatSessionId: string } {
-  return (
-    workspaceProbeOutcome === 'ok' &&
-    workspace !== null &&
-    workspace.chatSessionId !== null &&
-    workspace.status !== 'running' &&
-    !INCONCLUSIVE_WORKSPACE_STATUSES.has(workspace.status)
-  );
-}
-
-/**
- * Whether a supersession lookup can still change the verdict. Like
- * `needsSessionResumabilityProbe` this keeps the extra D1 read off the hot path
- * by firing only for a task that would otherwise be declared conclusively dead
- * (`.claude/rules/47` control-loop I/O budget).
- *
- * Deliberately NOT gated on `workspace.chatSessionId`. A wake handoff nulls that
- * exact column (`session-recovery.ts:createRecoveryTask` stmt 3), so gating on it
- * would blind this probe to precisely the population it exists to protect — the
- * mistake that made the resumability probe unreachable for superseded tasks
- * (`.claude/rules/63`). A null workspace is probed too: the task id, not the
- * workspace, is what identifies the recovery family.
- */
-export function needsTaskSupersessionProbe(
-  workspace: RuntimeWorkspaceSnapshot | null,
-  workspaceProbeOutcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome']
-): boolean {
-  if (workspaceProbeOutcome !== 'ok') return false;
-  if (workspace === null) return true;
-  return workspace.status !== 'running' && !INCONCLUSIVE_WORKSPACE_STATUSES.has(workspace.status);
-}
 
 /**
  * A task whose conversation has been handed to a live successor is superseded,
