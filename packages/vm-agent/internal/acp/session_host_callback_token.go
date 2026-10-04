@@ -26,3 +26,10 @@ func (h *SessionHost) SetCallbackToken(token string) {
 		h.renewedCallbackToken.Store(token)
 	}
 }
+
+// UsesCallbackToken reports whether this host's control-plane calls currently
+// authenticate with token, without exposing the token itself. Used by the
+// server package to verify that renewals reach every live host.
+func (h *SessionHost) UsesCallbackToken(token string) bool {
+	return token != "" && h.callbackToken() == token
+}

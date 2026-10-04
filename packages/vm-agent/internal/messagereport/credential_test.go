@@ -315,6 +315,10 @@ func TestCredentialRejection_DuringSizeFallbackKeepsRowsAndResendsOnce(t *testin
 	if got := outbox(); got != 2 {
 		t.Fatalf("a 401 during the row-by-row fallback must keep the batch, outbox = %d", got)
 	}
+	r.flush()
+	if got := len(cp.requestTokens()); got != 3 {
+		t.Fatalf("a 401 during the fallback must pause delivery like a batch 401; requests = %d, want 3", got)
+	}
 
 	cp.setValid("renewed")
 	r.SetToken("renewed")
