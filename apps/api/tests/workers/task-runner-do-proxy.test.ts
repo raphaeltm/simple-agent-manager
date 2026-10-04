@@ -41,6 +41,14 @@ function getStub(taskId: string): DurableObjectStub<TaskRunner> {
 }
 
 /** Full realistic input for startTaskRunnerDO */
+async function bindWorkspace(taskId: string, workspaceId: string): Promise<void> {
+  await runInDurableObject(getStub(taskId), async (instance) => {
+    const state = (await instance.ctx.storage.get<TaskRunnerState>('state'))!;
+    state.stepResults.workspaceId = workspaceId;
+    await instance.ctx.storage.put('state', state);
+  });
+}
+
 function makeStartInput(taskId: string) {
   return {
     taskId,
@@ -453,8 +461,10 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady forwards running status', async () => {
     const taskId = 'task-advance-running-001';
     await startTaskRunnerDO(env, makeStartInput(taskId));
+    const workspaceId = 'workspace-advance-running';
+    await bindWorkspace(taskId, workspaceId);
 
-    await advanceTaskRunnerWorkspaceReady(env, taskId, 'running', null);
+    await advanceTaskRunnerWorkspaceReady(env, taskId, 'running', null, workspaceId);
 
     const stub = getStub(taskId);
     const status = (await stub.getStatus()) as TaskRunnerState;
@@ -466,8 +476,10 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady forwards recovery status', async () => {
     const taskId = 'task-advance-recovery-001';
     await startTaskRunnerDO(env, makeStartInput(taskId));
+    const workspaceId = 'workspace-advance-recovery';
+    await bindWorkspace(taskId, workspaceId);
 
-    await advanceTaskRunnerWorkspaceReady(env, taskId, 'recovery', null);
+    await advanceTaskRunnerWorkspaceReady(env, taskId, 'recovery', null, workspaceId);
 
     const stub = getStub(taskId);
     const status = (await stub.getStatus()) as TaskRunnerState;
@@ -478,8 +490,10 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady forwards error status with message', async () => {
     const taskId = 'task-advance-error-001';
     await startTaskRunnerDO(env, makeStartInput(taskId));
+    const workspaceId = 'workspace-advance-error';
+    await bindWorkspace(taskId, workspaceId);
 
-    await advanceTaskRunnerWorkspaceReady(env, taskId, 'error', 'Container build failed: OOM');
+    await advanceTaskRunnerWorkspaceReady(env, taskId, 'error', 'Container build failed: OOM', workspaceId);
 
     const stub = getStub(taskId);
     const status = (await stub.getStatus()) as TaskRunnerState;
@@ -491,7 +505,7 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('advanceTaskRunnerWorkspaceReady is a no-op on uninitialized DO', async () => {
     // Calling advance on a DO that was never started should not throw
     await expect(
-      advanceTaskRunnerWorkspaceReady(env, 'task-advance-noop-001', 'running', null)
+      advanceTaskRunnerWorkspaceReady(env, 'task-advance-noop-001', 'running', null, 'workspace-noop')
     ).resolves.toBeUndefined();
 
     // Verify DO remains uninitialized
