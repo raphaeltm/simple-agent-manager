@@ -163,6 +163,11 @@ import {
   SESSION_RECOVERY_INITIAL_PROMPT,
 } from '../../../src/services/session-recovery';
 import { classifySessionRecoveryRefusal } from '../../../src/services/session-recovery-refusals';
+import {
+  parseSessionSleepFallbackRecord,
+  serializeSessionSleepFallbackRecord,
+} from '../../../src/services/session-sleep-episode';
+import { sessionRecoveryInitialPrompt } from '../../../src/services/session-sleep-fallback-messages';
 
 const emptyCapacityPlacement = {
   capacityPoolId: null,
@@ -403,6 +408,137 @@ describe('ensureSessionRecovery', () => {
         evictionFence,
       })
     );
+  });
+
+  it('binds the fallback wake prompt when the conversation slept through the bounded fallback', async () => {
+    const fallback = serializeSessionSleepFallbackRecord({
+      version: 1,
+      outcome: 'slept',
+      trigger: 'attempt_budget',
+      blockedReason: null,
+      decidedAt: '2026-08-15T13:11:53.580Z',
+      episodeStartedAt: '2026-08-15T12:56:53.580Z',
+      failedAttempts: 3,
+      lastError: null,
+      recoveryPoint: {
+        generation: 'gen-3',
+        commit: 'e'.repeat(40),
+        branch: 'sam/original',
+        detached: false,
+        upstream: 'origin/sam/original',
+        capturedAt: '2026-08-15T13:05:00.000Z',
+        snapshotStatus: 'degraded',
+        degradation: 'home-skipped',
+        workingTreeSaved: true,
+        homeSaved: false,
+      },
+    });
+    selectQueue.push(
+      {
+        id: 'snapshot-1',
+        projectId: 'project-1',
+        workspaceId: 'workspace-sleeping',
+        userId: 'user-1',
+        runtime: 'vm',
+        sleepingAt: '2026-08-15T13:11:53.580Z',
+        manifestJson: JSON.stringify({ agentType: 'claude-code' }),
+        sleepFallbackJson: fallback,
+      },
+      {
+        id: 'project-1',
+        defaultLocation: 'nbg1',
+        defaultBranch: 'main',
+        repository: 'owner/repo',
+        installationId: 'install-1',
+        defaultVmSize: null,
+        defaultAgentType: null,
+        defaultProvider: null,
+        taskExecutionTimeoutMs: null,
+        nodeCpuThresholdPercent: null,
+        nodeMemoryThresholdPercent: null,
+        warmNodeTimeoutMs: null,
+      },
+      {
+        id: 'workspace-sleeping',
+        ...emptyCapacityPlacement,
+        userId: 'user-1',
+        vmSize: 'small',
+        vmLocation: 'nbg1',
+        branch: 'main',
+        workspaceProfile: 'lightweight',
+        devcontainerConfigName: null,
+        agentProfileHint: null,
+      },
+      {
+        id: 'user-1',
+        name: 'Test User',
+        email: 'test@example.com',
+        githubId: 'gh-1',
+      },
+      {
+        id: 'source-task-1',
+        title: 'Original task title that must not become the fresh wake prompt',
+        priority: 0,
+        agentProfileHint: null,
+        skillId: null,
+        skillHint: null,
+        outputBranch: 'sam/original',
+        requestedVmSizeSource: 'user',
+        resourceRequirementsJson: null,
+        resourceRequirementsSource: null,
+        resolvedReservationJson: null,
+        credentialAttributionUserId: 'user-1',
+        credentialAttributionProjectId: null,
+        credentialAttributionSource: 'user',
+      },
+      null,
+      {
+        id: 'recovery-task-1',
+        projectId: 'project-1',
+        userId: 'user-1',
+        chatSessionId: 'chat-1',
+        recoverySourceTaskId: 'source-task-1',
+        title: 'Original task title that must not become the fresh wake prompt',
+        description: SESSION_RECOVERY_INITIAL_PROMPT,
+        status: 'queued',
+        agentProfileHint: null,
+        outputBranch: 'sam/original',
+        credentialAttributionUserId: 'user-1',
+        credentialAttributionProjectId: null,
+        credentialAttributionSource: 'user',
+        triggeredBy: 'session-recovery',
+      },
+      { id: 'source-task-1' }
+    );
+
+    const evictionFence = {
+      workspaceId: 'workspace-sleeping',
+      nodeId: 'node-unhealthy',
+      generation: 'generation-1',
+    };
+    const result = await ensureSessionRecovery(
+      { DATABASE: databaseMock, BASE_DOMAIN: 'example.test' } as never,
+      'project-1',
+      'chat-1',
+      undefined,
+      { excludedNodeId: 'node-unhealthy', evictionFence }
+    );
+
+    expect(result).toEqual({ status: 'waking', taskId: 'recovery-task-1' });
+    // The INSERT ... SELECT that mints the recovery task binds its description third.
+    const insertIndex = databaseMock.prepare.mock.calls.findIndex(([query]) =>
+      String(query).includes('INSERT INTO tasks')
+    );
+    expect(insertIndex).toBeGreaterThanOrEqual(0);
+    const insert = databaseMock.prepare.mock.results[insertIndex]?.value as {
+      bind: { mock: { calls: unknown[][] } };
+    };
+    const description = insert.bind.mock.calls[0]?.[2];
+    expect(description).toBe(
+      sessionRecoveryInitialPrompt(parseSessionSleepFallbackRecord(fallback))
+    );
+    expect(description).toContain(`SAM restored commit ${'e'.repeat(40)} on branch sam/original`);
+    expect(description).not.toBe(SESSION_RECOVERY_INITIAL_PROMPT);
   });
 
   it('abandons a claimed wake when the source parent terminalizes before task creation', async () => {
