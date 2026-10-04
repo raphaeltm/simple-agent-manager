@@ -11,10 +11,12 @@ import {
   DEFAULT_DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY,
   runDeploymentReleaseRetention,
   runScheduledDeploymentReleaseRetention,
-  runScheduledSessionSnapshotPurge,
-  runSessionSnapshotPurge,
   runStaleDeploymentReleaseReconciliation,
 } from '../../../src/scheduled/d1-retention';
+import {
+  runScheduledSessionSnapshotPurge,
+  runSessionSnapshotPurge,
+} from '../../../src/scheduled/session-snapshot-purge';
 import { createMemoryKv, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 describe('D1 retention sweeps', () => {

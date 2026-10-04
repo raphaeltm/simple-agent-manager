@@ -18,8 +18,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
-import { runSessionSnapshotPurge } from '../../src/scheduled/d1-retention';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
+import { runSessionSnapshotPurge } from '../../src/scheduled/session-snapshot-purge';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep';
 import { parseSessionSleepFallbackRecord } from '../../src/services/session-sleep-episode';
 import { sessionRecoveryInitialPrompt } from '../../src/services/session-sleep-fallback-messages';
