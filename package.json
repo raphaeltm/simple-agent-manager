@@ -50,6 +50,7 @@
     "quality:specialist-review": "tsx scripts/quality/check-specialist-review-evidence.ts",
     "quality:scripts:test": "vitest run --config scripts/quality/vitest.config.ts",
     "quality:no-tracked-stale-binaries": "tsx scripts/quality/check-no-tracked-stale-binaries.ts",
+    "quality:runtime-state-files": "tsx scripts/quality/check-runtime-state-files.ts",
     "quality:do-wall-time": "tsx scripts/quality/check-do-wall-time.ts",
     "quality:cloudflare-cost": "tsx scripts/quality/check-cloudflare-cost.ts",
     "quality:observability-noise": "tsx scripts/quality/check-observability-noise.ts",
@@ -67,7 +68,7 @@
     "quality:govulncheck-diff": "tsx scripts/quality/check-go-vulnerability-diff.ts",
     "quality:gitleaks:current": "tsx scripts/quality/run-gitleaks.ts --mode=current-tree",
     "quality:gitleaks:pr": "tsx scripts/quality/run-gitleaks.ts --mode=pr-range",
-    "check:fast": "pnpm format:check && pnpm lint:oxlint && pnpm lint && pnpm quality:type-boundaries",
+    "check:fast": "pnpm format:check && pnpm lint:oxlint && pnpm lint && pnpm quality:type-boundaries && pnpm quality:runtime-state-files",
     "quality:agent-context-budget": "tsx scripts/quality/check-agent-context-budget.ts"
   },
   "dependencies": {

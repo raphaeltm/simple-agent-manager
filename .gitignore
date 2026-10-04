@@ -76,14 +76,14 @@ pnpm-debug.log*
 # SAM library downloads (download_library_file MCP tool target — canonical copies live in the platform library)
 .library/
 
-# /do workflow state (ephemeral, per-session)
-.do-state.md
+# /do workflow state is intentionally not ignored: SAM snapshots need to
+# preserve it across sleep/recovery. quality:runtime-state-files blocks commits.
 
 # Local git worktrees used by agents during branch/integration work.
 .worktrees/
 
-# /workflow orchestrator state (ephemeral, per-session)
-.workflow-state.md
+# /workflow orchestrator state is intentionally not ignored: SAM snapshots need
+# to preserve it across sleep/recovery. quality:runtime-state-files blocks commits.
 
 # Playwright run artifacts
 apps/web/test-results/
