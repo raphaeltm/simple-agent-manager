@@ -209,8 +209,10 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	}
 	s.workspaceMu.Lock()
 	var resourceHistorySnapshot *WorkspaceRuntime
+	var adoptedCallbackToken string // persisted under the lock, published after it
 	defer func() {
 		s.workspaceMu.Unlock()
+		s.propagateWorkspaceCallbackToken(workspaceID, adoptedCallbackToken)
 		if resourceHistorySnapshot != nil {
 			s.ensureResourceHistoryForRuntime(resourceHistorySnapshot)
 		}
@@ -240,8 +242,8 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		if status != "" && runtime.Status != "evicted" && !runtime.ProvisioningActive && !runtime.MetadataUnavailable {
 			runtime.Status = status
 		}
-		if callbackToken != "" {
-			runtime.CallbackToken = strings.TrimSpace(callbackToken)
+		if adoptWorkspaceCallbackTokenLocked(runtime, callbackToken) {
+			adoptedCallbackToken, metadataChanged = runtime.CallbackToken, true
 		}
 		if runtime.WorkspaceDir == "" {
 			runtime.WorkspaceDir = s.workspaceDirForRepo(workspaceID, runtime.Repository)
@@ -423,6 +425,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		PTY:                    manager,
 	}
 	s.workspaces[workspaceID] = runtime
+	adoptedCallbackToken = runtime.CallbackToken
 	runtimeCopy := *runtime
 	resourceHistorySnapshot = &runtimeCopy
 

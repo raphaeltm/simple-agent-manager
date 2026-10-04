@@ -279,6 +279,11 @@ func Load() (*Config, error) {
 		// Callback retry settings - configurable per constitution principle XI
 		WorkspaceReadyCallbackTimeout: getEnvDuration("WORKSPACE_READY_CALLBACK_TIMEOUT", DefaultWorkspaceReadyCallbackTimeout),
 
+		WorkspaceCallbackTokenRefreshRatio:        clampWorkspaceCallbackTokenRefreshRatio(getEnvFloat("WORKSPACE_CALLBACK_TOKEN_REFRESH_RATIO", DefaultWorkspaceCallbackTokenRefreshRatio)),
+		WorkspaceCallbackTokenRenewalTimeout:      positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_TIMEOUT", DefaultWorkspaceCallbackTokenRenewalTimeout), DefaultWorkspaceCallbackTokenRenewalTimeout),
+		WorkspaceCallbackTokenRenewalRetryInitial: positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_INITIAL", DefaultWorkspaceCallbackTokenRenewalRetryInitial), DefaultWorkspaceCallbackTokenRenewalRetryInitial),
+		WorkspaceCallbackTokenRenewalRetryMax:     positiveDurationOr(getEnvDuration("WORKSPACE_CALLBACK_TOKEN_RENEWAL_RETRY_MAX", DefaultWorkspaceCallbackTokenRenewalRetryMax), DefaultWorkspaceCallbackTokenRenewalRetryMax),
+
 		// Error reporting settings - configurable per constitution principle XI
 		ErrorReportFlushInterval:  getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),
 		ErrorReportMaxBatchSize:   getEnvInt("ERROR_REPORT_MAX_BATCH_SIZE", 10),

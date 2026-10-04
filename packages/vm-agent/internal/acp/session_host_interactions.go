@@ -510,7 +510,7 @@ func (h *SessionHost) requestPermission(
 	config := h.acpInteractionConfigSnapshot()
 	if !config.Enabled || config.validate() != nil || generation == "" ||
 		h.config.ProjectID == "" || h.config.WorkspaceID == "" || h.config.SessionID == "" ||
-		h.config.RuntimeIdentity == "" || h.config.CallbackToken == "" || h.config.ControlPlaneURL == "" {
+		h.config.RuntimeIdentity == "" || h.callbackToken() == "" || h.config.ControlPlaneURL == "" {
 		slog.Info("acp_interaction.permission_cancelled", "reason", "unsupported")
 		return cancelledPermissionResponse(), nil
 	}

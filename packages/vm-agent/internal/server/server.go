@@ -123,6 +123,7 @@ type Server struct {
 	bootstrapComplete      atomic.Bool
 	callbackTokenMu        sync.RWMutex
 	callbackToken          string
+	tokenRenewal           workspaceTokenRenewal // workspace callback token renewal (workspace_callback_token_renewal.go)
 	callbacksTerminal      atomic.Bool
 	httpClient             *http.Client // shared HTTP client with timeout for control-plane callbacks
 	done                   chan struct{}
@@ -1292,6 +1293,7 @@ func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID strin
 
 	// Slow path: create reporter outside the lock (disk I/O).
 	cfg := messagereport.LoadConfigFromEnv()
+	cfg.OnAuthRenewalWaitExceeded = s.reportMessagePersistencePaused
 	cfg.ProjectID = projectID
 	cfg.SessionID = chatSessionID
 	cfg.WorkspaceID = workspaceID

@@ -216,6 +216,10 @@ type SessionHost struct {
 	// credentialAttribution stores non-secret server-selected credential identity
 	// for usage callbacks. It is lock-free so SessionUpdate never waits on h.mu.
 	credentialAttribution atomic.Value
+	// renewedCallbackToken holds a workspace callback token delivered after the
+	// host was created (SetCallbackToken). Lock-free like the fields above:
+	// control-plane reporting runs on the ACP notification goroutine.
+	renewedCallbackToken atomic.Value // string
 
 	// Credential injection metadata (set during startAgent, read during stop).
 	// These track whether the agent used file-based credential injection so

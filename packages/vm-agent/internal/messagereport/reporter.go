@@ -3,6 +3,7 @@ package messagereport
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -48,6 +49,10 @@ type Reporter struct {
 	terminalPersistenceFailure bool
 	terminalPersistenceReason  string
 	terminalWakeC              chan struct{}
+	// credentialWait pauses delivery while the control plane rejects the
+	// current token (see credential.go). Guarded by mu.
+	credentialWait credentialWait
+	now            func() time.Time
 
 	// flushMu serializes flush() calls with outbox mutations in SetSessionID.
 	// Lock ordering: flushMu must always be acquired BEFORE mu when both
@@ -106,6 +111,9 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 	if cfg.ResponseMaxBytes <= 0 {
 		cfg.ResponseMaxBytes = defaults.ResponseMaxBytes
 	}
+	if cfg.AuthRenewalWait <= 0 {
+		cfg.AuthRenewalWait = defaults.AuthRenewalWait
+	}
 
 	if err := migrateOutbox(db); err != nil {
 		return nil, fmt.Errorf("messagereport: migrate outbox: %w", err)
@@ -120,6 +128,7 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 		workspaceID:   cfg.WorkspaceID,
 		sessionID:     cfg.SessionID,
 		terminalWakeC: make(chan struct{}, 1),
+		now:           time.Now,
 		stopC:         make(chan struct{}),
 		stopCtx:       stopCtx,
 		stopCancel:    stopCancel,
@@ -131,14 +140,22 @@ func New(db *sql.DB, cfg Config) (*Reporter, error) {
 }
 
 // SetToken updates the authorization token used for HTTP POSTs.
-// Call this after bootstrap when the callback JWT becomes available.
+// Call this after bootstrap when the callback JWT becomes available, and whenever
+// the workspace token is renewed or re-delivered. A token different from one the
+// control plane rejected resumes delivery of the held messages.
 func (r *Reporter) SetToken(token string) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	r.authToken = token
+	resumed := r.credentialWait.resumeWith(token)
+	wsID, sessionID := r.workspaceID, r.sessionID
 	r.mu.Unlock()
+	if resumed {
+		slog.Info("messagereport: workspace callback token replaced, resuming held messages",
+			"workspaceId", wsID, "sessionId", sessionID)
+	}
 }
 
 // SetWorkspaceID updates the workspace ID used in the batch POST URL.
@@ -328,6 +345,7 @@ func (r *Reporter) flush() {
 	r.flushMu.Lock()
 	defer r.flushMu.Unlock()
 
+	rotatedRetries := 0
 	for {
 		batch, err := r.readBatch()
 		if err != nil {
@@ -339,6 +357,15 @@ func (r *Reporter) flush() {
 		}
 
 		if err := r.sendBatch(batch); err != nil {
+			if errors.Is(err, errCredentialRotated) && rotatedRetries < maxRotatedTokenRetriesPerFlush {
+				// A renewed token replaced the one that got 401: resend now.
+				rotatedRetries++
+				continue
+			}
+			if errors.Is(err, errAwaitingCredential) {
+				// Held until a new token arrives; not a delivery attempt.
+				return
+			}
 			// sendBatch handles retry internally; if it returns an error the
 			// batch was NOT sent and remains in the outbox for the next tick.
 			slog.Warn("messagereport: send batch failed", "error", err, "count", len(batch))

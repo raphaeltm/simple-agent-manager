@@ -402,6 +402,12 @@ type Config struct {
 	// Callback retry settings - configurable per constitution principle XI
 	WorkspaceReadyCallbackTimeout time.Duration // HTTP timeout for workspace-ready retry callbacks (env: WORKSPACE_READY_CALLBACK_TIMEOUT, default: 30s)
 
+	// Workspace callback token renewal (see callback_token_renewal.go for defaults and env vars)
+	WorkspaceCallbackTokenRefreshRatio        float64
+	WorkspaceCallbackTokenRenewalTimeout      time.Duration
+	WorkspaceCallbackTokenRenewalRetryInitial time.Duration
+	WorkspaceCallbackTokenRenewalRetryMax     time.Duration
+
 	// Error reporting settings - configurable per constitution principle XI
 	ErrorReportFlushInterval  time.Duration // Background flush interval (default: 30s)
 	ErrorReportMaxBatchSize   int           // Immediate flush threshold (default: 10)

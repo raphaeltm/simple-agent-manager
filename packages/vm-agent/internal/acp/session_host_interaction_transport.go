@@ -34,7 +34,7 @@ func (h *SessionHost) createAcpInteraction(ctx context.Context, request acpInter
 	if err != nil {
 		return acpInteractionCreateRejected, fmt.Errorf("build ACP interaction create: %w", err)
 	}
-	httpRequest.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
+	httpRequest.Header.Set("Authorization", "Bearer "+h.callbackToken())
 	httpRequest.Header.Set("Content-Type", "application/json")
 	response, err := h.httpClient().Do(httpRequest)
 	if err != nil {
@@ -59,7 +59,7 @@ func (h *SessionHost) createAcpInteraction(ctx context.Context, request acpInter
 
 func (h *SessionHost) settleAcpInteraction(request acpInteractionSettleRequest, deadline time.Time) {
 	config := h.acpInteractionConfigSnapshot()
-	if !config.Enabled || h.config.CallbackToken == "" || h.config.ControlPlaneURL == "" {
+	if !config.Enabled || h.callbackToken() == "" || h.config.ControlPlaneURL == "" {
 		return
 	}
 	maxDuration := time.Duration(config.MaxDeadlineMs) * time.Millisecond
@@ -99,7 +99,7 @@ func (h *SessionHost) settleAcpInteraction(request acpInteractionSettleRequest, 
 		if buildErr != nil {
 			return
 		}
-		httpRequest.Header.Set("Authorization", "Bearer "+h.config.CallbackToken)
+		httpRequest.Header.Set("Authorization", "Bearer "+h.callbackToken())
 		httpRequest.Header.Set("Content-Type", "application/json")
 		response, sendErr := h.httpClient().Do(httpRequest)
 		if sendErr == nil {

@@ -301,7 +301,7 @@ func (h *SessionHost) injectAuthFileCredential(
 
 func (h *SessionHost) codexRefreshProxyEnv(agentType string, cred *agentCredential) (string, bool) {
 	if agentType != "openai-codex" || cred.credentialKind != "oauth-token" ||
-		h.config.ControlPlaneURL == "" || h.config.CallbackToken == "" {
+		h.config.ControlPlaneURL == "" || h.callbackToken() == "" {
 		return "", false
 	}
 	u, err := url.Parse(strings.TrimSuffix(h.config.ControlPlaneURL, "/") + "/api/auth/codex-refresh")
@@ -311,7 +311,7 @@ func (h *SessionHost) codexRefreshProxyEnv(agentType string, cred *agentCredenti
 		return "", false
 	}
 	q := url.Values{}
-	q.Set("token", h.config.CallbackToken)
+	q.Set("token", h.callbackToken())
 	u.RawQuery = q.Encode()
 	return "CODEX_REFRESH_TOKEN_URL_OVERRIDE=" + u.String(), true
 }
@@ -362,7 +362,7 @@ func (h *SessionHost) injectPlatformProxyCredential(
 	settings *agentSettingsPayload,
 	envVars []string,
 ) ([]string, *agentSettingsPayload, error) {
-	return h.injectProxyCredential(agentType, cred, settings, envVars, "platform AI proxy", h.config.CallbackToken, "callbackTokenLen")
+	return h.injectProxyCredential(agentType, cred, settings, envVars, "platform AI proxy", h.callbackToken(), "callbackTokenLen")
 }
 
 // injectProxyCredential is the shared implementation behind the passthrough and
@@ -378,7 +378,7 @@ func (h *SessionHost) injectProxyCredential(
 	credential string,
 	credLenKey string,
 ) ([]string, *agentSettingsPayload, error) {
-	if h.config.CallbackToken == "" {
+	if h.callbackToken() == "" {
 		return envVars, settings, fmt.Errorf("%s configured but CallbackToken is empty for workspace %s", label, h.config.WorkspaceID)
 	}
 
@@ -399,7 +399,7 @@ func (h *SessionHost) proxyBaseURL(cred *agentCredential) string {
 	if cred == nil || cred.inferenceConfig == nil {
 		return ""
 	}
-	return strings.ReplaceAll(cred.inferenceConfig.BaseURL, "{wstoken}", h.config.CallbackToken)
+	return strings.ReplaceAll(cred.inferenceConfig.BaseURL, "{wstoken}", h.callbackToken())
 }
 
 type proxyEnvDescriptor struct {
@@ -501,7 +501,7 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	if err != nil {
 		return fmt.Errorf("cannot start Codex: %w", err)
 	}
-	proxyConfig := codexProxyProviderConfigFromCredential(cred, h.config.CallbackToken)
+	proxyConfig := codexProxyProviderConfigFromCredential(cred, h.callbackToken())
 	effort := ""
 	if startup.settings != nil {
 		effort = startup.settings.Effort

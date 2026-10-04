@@ -109,7 +109,7 @@ func (h *SessionHost) prepareUsageReportWithAttribution(params acpsdk.SessionNot
 	projectID := h.config.ProjectID
 	nodeID := h.config.NodeID
 	controlPlaneURL := h.config.ControlPlaneURL
-	callbackToken := h.config.CallbackToken
+	callbackToken := h.callbackToken()
 	sessionID := h.config.SessionID
 	if projectID == "" || nodeID == "" || controlPlaneURL == "" || sessionID == "" || callbackToken == "" {
 		return usageReportRequest{}, false
