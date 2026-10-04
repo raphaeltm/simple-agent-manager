@@ -1,5 +1,9 @@
 import { ACP_SESSION_TERMINAL_STATUSES, type AcpSessionStatus } from '@simple-agent-manager/shared';
 
+import {
+  acpSessionHeartbeatAt,
+  describeTaskRuntimeLivenessEvidence,
+} from './task-runtime-liveness-evidence';
 import { isVmNodeHeartbeatStale, TERMINAL_NODE_STATUSES } from './task-runtime-liveness-node-probe';
 import {
   INCONCLUSIVE_WORKSPACE_STATUSES,
@@ -15,6 +19,7 @@ export {
   classifyTaskRuntimeDelivery,
   type TaskRuntimeDeliveryDisposition,
 } from './task-runtime-liveness-delivery';
+export { livenessEvidenceLogFields } from './task-runtime-liveness-evidence';
 export {
   getTaskLivenessNodeHealthProbeTimeoutMs,
   needsNodeHealthProbe,
@@ -32,13 +37,16 @@ export type {
   RuntimeAcpSessionSnapshot,
   RuntimeProbeOutcome,
   RuntimeSessionWorkSnapshot,
+  RuntimeWorkEvidenceSnapshot,
   RuntimeWorkspaceSnapshot,
+  RuntimeWorkState,
   SessionResumabilitySnapshot,
   SupersessionProbeOutcome,
   TaskAcpLivenessSignals,
   TaskLivenessNodeHealthProbeEnv,
   TaskLivenessNodeHealthProbeResult,
   TaskRuntimeLiveness,
+  TaskRuntimeLivenessEvidence,
   TaskRuntimeLivenessSignals,
   TaskSupersession,
 } from './task-runtime-liveness-types';
@@ -257,16 +265,22 @@ export function classifyTaskRuntimeLiveness(
       conclusive: true,
       reason: signals.sessionWork.reason,
       activeAcpSessionId: signals.sessionWork.activeAcpSessionId,
+      evidence: describeTaskRuntimeLivenessEvidence(
+        signals,
+        signals.sessionWork.activeAcpSessionId
+      ),
     });
   }
 
+  // Process liveness, not work: the task's own agent is alive and reporting.
+  // That proves the runtime is not dead, which is the only question asked here.
+  // Whether the agent is working or idle is in `evidence.workState`.
   const active = signals.acpSessions.find((session) => {
     if (signals.expectedAcpSessionId && session.id !== signals.expectedAcpSessionId) return false;
     if (!ACTIVE_ACP_STATUSES.has(session.status) || session.workspaceId !== workspace.id) {
       return false;
     }
-    const heartbeatAt =
-      session.lastHeartbeatAt ?? session.updatedAt ?? session.startedAt ?? session.createdAt;
+    const heartbeatAt = acpSessionHeartbeatAt(session);
     return Number.isFinite(heartbeatAt) && signals.nowMs - heartbeatAt <= signals.heartbeatStaleMs;
   });
   if (active) {
@@ -275,6 +289,7 @@ export function classifyTaskRuntimeLiveness(
       conclusive: true,
       reason: 'task_acp_session_live',
       activeAcpSessionId: active.id,
+      evidence: describeTaskRuntimeLivenessEvidence(signals, active.id),
     });
   }
 
@@ -290,7 +305,7 @@ export function classifyTaskRuntimeLiveness(
     return conclusiveDeath(signals, workspace, 'task_acp_session_terminal', terminal.id);
   }
 
-  const hasStaleActiveProjectDataSession = taskWorkspaceSessions.some((session) =>
+  const staleActiveSession = taskWorkspaceSessions.find((session) =>
     ACTIVE_ACP_STATUSES.has(session.status)
   );
   return result(workspace, {
@@ -299,10 +314,13 @@ export function classifyTaskRuntimeLiveness(
     reason:
       taskWorkspaceSessions.length === 0
         ? 'task_acp_session_missing'
-        : hasStaleActiveProjectDataSession
+        : staleActiveSession
           ? 'task_acp_session_stale'
           : 'task_acp_session_suspect',
     activeAcpSessionId: null,
+    ...(staleActiveSession
+      ? { evidence: describeTaskRuntimeLivenessEvidence(signals, staleActiveSession.id) }
+      : {}),
   });
 }
 

@@ -336,6 +336,7 @@ async function classifyLocalTaskRuntime(
       acpProbeOutcome: 'ok',
       acpSessions: probe.sessions,
       sessionWork: probe.sessionWork,
+      workEvidence: probe.workEvidence,
     });
   } catch (err) {
     log.warn('local_acp_read_failed', {

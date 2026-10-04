@@ -8,6 +8,54 @@ export interface TaskRuntimeLiveness {
   nodeId: string | null;
   activeAcpSessionId: string | null;
   deliveryTarget?: { nodeId: string; userId: string };
+  /**
+   * What a verdict that rests on the task's own ACP session actually observed.
+   * Diagnostics only: it never feeds a decision. Absent for verdicts that do not
+   * name an ACP session.
+   */
+  evidence?: TaskRuntimeLivenessEvidence;
+}
+
+/**
+ * What ProjectData reports about one ACP session's work. The first two states are
+ * exactly the ones that make `sessionWork` active, and both come from the same
+ * per-row classifier, so a description can never disagree with the verdict.
+ *
+ * - `prompt_turn_active`: a working activity (`prompting`/`recovering`) with
+ *   evidence fresher than `SESSION_ACTIVITY_STALE_THRESHOLD_MS`.
+ * - `runtime_work_active`: a fresh harness work lease (tool or background work).
+ * - `prompt_turn_unproven`: a working activity whose evidence is older than that
+ *   bound. Unproven, not false (`.claude/rules/57`): a long tool call or a
+ *   wedged prompt both look like this.
+ * - `idle`: the agent handed control back and holds no work lease.
+ * - `unknown`: no session state, or a label (`error`, `stopped`) that says
+ *   nothing about in-flight work.
+ */
+export type RuntimeWorkState =
+  'prompt_turn_active' | 'runtime_work_active' | 'prompt_turn_unproven' | 'idle' | 'unknown';
+
+/** One ACP session's work evidence, as ProjectData stores it. No prompt content. */
+export interface RuntimeWorkEvidenceSnapshot {
+  acpSessionId: string;
+  state: RuntimeWorkState;
+  /** `session_state.activity`, limited to the known labels; anything else is null. */
+  activity: string | null;
+  /** ms epoch of the last activity transition or work report. */
+  activityAt: number | null;
+  /** ms epoch the current prompt turn started; null when no turn is recorded. */
+  promptStartedAt: number | null;
+  /** ms epoch of the last harness work progress edge. */
+  runtimeWorkProgressAt: number | null;
+}
+
+/** `RuntimeWorkEvidenceSnapshot` as ages at classification time, plus the ACP heartbeat age. */
+export interface TaskRuntimeLivenessEvidence {
+  workState: RuntimeWorkState | null;
+  activity: string | null;
+  lastActivityAgeMs: number | null;
+  promptStartedAgeMs: number | null;
+  runtimeWorkProgressAgeMs: number | null;
+  acpHeartbeatAgeMs: number | null;
 }
 
 /**
@@ -76,6 +124,8 @@ export interface TaskAcpLivenessSignals {
   sessions: RuntimeAcpSessionSnapshot[];
   total: number;
   sessionWork: RuntimeSessionWorkSnapshot | null;
+  /** Work evidence per active ACP session, newest first. Diagnostics only. */
+  workEvidence?: RuntimeWorkEvidenceSnapshot[];
 }
 
 export interface ContainerLifecycleSnapshot {
@@ -160,6 +210,11 @@ export interface TaskRuntimeLivenessSignals {
    * same DO still has fresher prompt/runtime-work state.
    */
   sessionWork: RuntimeSessionWorkSnapshot | null;
+  /**
+   * ProjectData work evidence per active ACP session. Only describes a verdict
+   * (`TaskRuntimeLiveness.evidence`); absent means "not read", reported as null.
+   */
+  workEvidence?: RuntimeWorkEvidenceSnapshot[];
   containerProbeOutcome: RuntimeProbeOutcome;
   containerLifecycle: ContainerLifecycleSnapshot | null;
   /**

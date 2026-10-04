@@ -828,6 +828,7 @@ async function classifyTaskRuntime(
       acpProbeOutcome: 'ok',
       acpSessions: probe.sessions as RuntimeAcpSessionSnapshot[],
       sessionWork: probe.sessionWork,
+      workEvidence: probe.workEvidence,
     });
   } catch (err) {
     log.warn('stuck_task.liveness_probe_failed', {

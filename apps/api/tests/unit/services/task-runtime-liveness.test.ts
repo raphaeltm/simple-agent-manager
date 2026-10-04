@@ -83,6 +83,16 @@ describe('classifyTaskRuntimeLiveness', () => {
       nodeId: 'node-1',
       activeAcpSessionId: 'acp-1',
       deliveryTarget: { nodeId: 'node-1', userId: 'user-1' },
+      // No ProjectData work evidence was read, so the work state is unknown (null),
+      // never assumed idle or working.
+      evidence: {
+        workState: null,
+        activity: null,
+        lastActivityAgeMs: null,
+        promptStartedAgeMs: null,
+        runtimeWorkProgressAgeMs: null,
+        acpHeartbeatAgeMs: 0,
+      },
     });
   });
 
@@ -487,6 +497,141 @@ describe('classifyTaskRuntimeLiveness', () => {
       conclusive: true,
       reason: 'cf_container_error',
     });
+  });
+});
+
+describe('classifyTaskRuntimeLiveness — verdict evidence', () => {
+  const HOUR = 60 * 60 * 1000;
+
+  /** Two ACP sessions on the task's workspace: a fresh owner and an older sibling. */
+  function twoSessionSignals(
+    workEvidence: TaskRuntimeLivenessSignals['workEvidence']
+  ): TaskRuntimeLivenessSignals {
+    return signals({
+      acpSessions: [
+        {
+          id: 'acp-1',
+          status: 'running',
+          workspaceId: 'workspace-1',
+          lastHeartbeatAt: NOW - 20_000,
+          updatedAt: NOW - 20_000,
+          startedAt: NOW - HOUR,
+          createdAt: NOW - HOUR,
+        },
+        {
+          id: 'acp-old',
+          status: 'running',
+          workspaceId: 'workspace-1',
+          lastHeartbeatAt: NOW - 2 * HOUR,
+          updatedAt: NOW - 2 * HOUR,
+          startedAt: NOW - 3 * HOUR,
+          createdAt: NOW - 3 * HOUR,
+        },
+      ],
+      workEvidence,
+    });
+  }
+
+  it("reports the verdict's own ACP session, never a sibling's", () => {
+    const verdict = classifyTaskRuntimeLiveness(
+      twoSessionSignals([
+        {
+          acpSessionId: 'acp-old',
+          state: 'prompt_turn_active',
+          activity: 'prompting',
+          activityAt: NOW - 1_000,
+          promptStartedAt: NOW - 5_000,
+          runtimeWorkProgressAt: null,
+        },
+        {
+          acpSessionId: 'acp-1',
+          state: 'idle',
+          activity: 'idle',
+          activityAt: NOW - 2 * HOUR,
+          promptStartedAt: null,
+          runtimeWorkProgressAt: null,
+        },
+      ])
+    );
+
+    expect(verdict).toMatchObject({ live: true, reason: 'task_acp_session_live' });
+    expect(verdict.activeAcpSessionId).toBe('acp-1');
+    expect(verdict.evidence).toEqual({
+      workState: 'idle',
+      activity: 'idle',
+      lastActivityAgeMs: 2 * HOUR,
+      promptStartedAgeMs: null,
+      runtimeWorkProgressAgeMs: null,
+      acpHeartbeatAgeMs: 20_000,
+    });
+  });
+
+  /**
+   * Evidence describes a verdict and must never feed one. A work-evidence entry
+   * claiming an active prompt does not rescue a session whose heartbeat is stale
+   * and whose verdict input (`sessionWork`) says nothing is in flight.
+   */
+  it('never changes the verdict', () => {
+    const verdict = classifyTaskRuntimeLiveness(
+      signals({
+        acpSessions: [
+          {
+            id: 'acp-1',
+            status: 'running',
+            workspaceId: 'workspace-1',
+            lastHeartbeatAt: NOW - STALE_MS - 1,
+            updatedAt: NOW - STALE_MS - 1,
+            startedAt: NOW - HOUR,
+            createdAt: NOW - HOUR,
+          },
+        ],
+        sessionWork: null,
+        workEvidence: [
+          {
+            acpSessionId: 'acp-1',
+            state: 'prompt_turn_active',
+            activity: 'prompting',
+            activityAt: NOW,
+            promptStartedAt: NOW,
+            runtimeWorkProgressAt: null,
+          },
+        ],
+      })
+    );
+
+    expect(verdict).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'task_acp_session_stale',
+      evidence: { workState: 'prompt_turn_active', acpHeartbeatAgeMs: STALE_MS + 1 },
+    });
+  });
+
+  it('reports a timestamp ahead of the classifier clock as age zero', () => {
+    const verdict = classifyTaskRuntimeLiveness(
+      twoSessionSignals([
+        {
+          acpSessionId: 'acp-1',
+          state: 'idle',
+          activity: 'idle',
+          activityAt: NOW + 30_000,
+          promptStartedAt: null,
+          runtimeWorkProgressAt: null,
+        },
+      ])
+    );
+
+    expect(verdict.evidence?.lastActivityAgeMs).toBe(0);
+  });
+
+  it('omits evidence from verdicts that name no ACP session', () => {
+    const base = signals();
+    const verdict = classifyTaskRuntimeLiveness(
+      signals({ workspace: { ...workspaceFrom(base), nodeStatus: 'destroyed' } })
+    );
+
+    expect(verdict).toMatchObject({ conclusive: true, reason: 'node_not_live' });
+    expect(verdict.evidence).toBeUndefined();
   });
 });
 
