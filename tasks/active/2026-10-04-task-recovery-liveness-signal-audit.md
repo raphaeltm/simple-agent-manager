@@ -136,6 +136,12 @@ killed regardless of node heartbeat status".
   heartbeat accepted → the stale-ACP test; I3 unknown probe as death → the unreachable test (and others).
 - `stuck-tasks.ts` shrank (net −5 lines) despite the changes; new logic lives in `stuck-task-live-runtime.ts`.
 - `configuration.md` is not Prettier-clean at HEAD; edited by hand to avoid reflowing unrelated tables.
+- I/O per 5-minute sweep (performance review): candidate selection is unchanged. For each LIVE task past the 4h
+  check, the sweep now does 1 indexed `platform_errors` dedupe read (always), 1 `session_snapshots` point read
+  (idle agents only; the conversation-fallback query never runs on this path because `taskMode` is not passed),
+  and 1 insert only when the (task, basis) pair is new. Before: 1 insert every tick. With ~18 such tasks that is
+  at most ~36 extra reads per tick while steady-state writes fall from ~18 to ~0; D1 row writes cost about 1000x
+  row reads. No added awaits on a remote target; the ProjectData alarm path gains no I/O.
 
 ## Acceptance criteria
 
