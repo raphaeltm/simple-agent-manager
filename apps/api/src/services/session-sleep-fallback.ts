@@ -78,6 +78,7 @@ import {
   deferSessionSnapshotStopping,
   failSessionSnapshotSleepBeforeTeardown,
   getRestorableSessionSnapshot,
+  sanitizeSessionLifecycleMessage,
   sessionLifecycleError,
 } from './session-snapshots';
 
@@ -151,7 +152,7 @@ export async function endSessionSleepEpisodeBlocked(
     decidedAt: now.toISOString(),
     episodeStartedAt: episode.sleepEpisodeStartedAt,
     failedAttempts: episode.sleepEpisodeFailures ?? 0,
-    lastError: input.lastError ? sessionLifecycleError(env, input.lastError) : null,
+    lastError: sanitizeSessionLifecycleMessage(env, input.lastError || null),
     recoveryPoint: null,
   };
   const blocked = await blockSessionSleepEpisode(db, env, {
@@ -336,7 +337,7 @@ export async function runSessionSleepFallback(
       decidedAt: now.toISOString(),
       episodeStartedAt: episode?.sleepEpisodeStartedAt ?? null,
       failedAttempts: episode?.sleepEpisodeFailures ?? 0,
-      lastError: input.lastError ? sessionLifecycleError(env, input.lastError) : null,
+      lastError: sanitizeSessionLifecycleMessage(env, input.lastError || null),
       recoveryPoint: assessment.recoveryPoint,
     };
     const recordJson = serializeSessionSleepFallbackRecord(record);

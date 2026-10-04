@@ -375,7 +375,7 @@ export async function recordSessionSnapshotRestoreResult(
     message: string | null;
   }
 ): Promise<void> {
-  const restoreMessage = sanitizeSessionSnapshotRestoreMessage(env, input.message);
+  const restoreMessage = sanitizeSessionLifecycleMessage(env, input.message);
   await db
     .update(schema.sessionSnapshots)
     .set({
@@ -387,7 +387,13 @@ export async function recordSessionSnapshotRestoreResult(
     .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId));
 }
 
-export function sanitizeSessionSnapshotRestoreMessage(
+/**
+ * Make text from a VM agent, or from an internal failure, safe to store and to show in a
+ * chat: control characters become spaces, secret shapes are redacted, and the result is
+ * bounded like every lifecycle error. Used for restore results and for the error a sleep
+ * fallback notice quotes.
+ */
+export function sanitizeSessionLifecycleMessage(
   env: Env,
   message: string | null
 ): string | null {

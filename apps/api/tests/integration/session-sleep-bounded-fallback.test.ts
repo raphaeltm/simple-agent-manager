@@ -710,6 +710,27 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       });
       expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
     });
+
+    it('quotes the last error without secrets or control characters', async () => {
+      seedSession({ id: 'a' });
+      capture = 'unreachable';
+      const secret = 'Bearer abcdefghijklmnopqrstuvwxyz0123456789';
+      mocks.hibernateAgentSessionOnNode.mockRejectedValue(
+        new Error(`Node Agent request failed: Authorization: ${secret}\u0007 rejected`)
+      );
+
+      await spendFullBudget();
+      // Liveness: the raw error was recorded for operators, so the scenario is real.
+      expect(row().sleep_error).toContain(secret);
+      await sweepAt(tick(3));
+
+      expect(notices).toHaveLength(1);
+      const notice = notices[0]?.content ?? '';
+      expect(notice).toContain('Last error: Node Agent request failed: Authorization: [REDACTED]');
+      expect(notice).not.toContain('abcdefghijklmnopqrstuvwxyz0123456789');
+      expect(notice).not.toContain('\u0007');
+      expect(fallbackRecord()?.lastError).not.toContain('abcdefghijklmnopqrstuvwxyz0123456789');
+    });
   });
 
   describe('the wake after a fallback sleep', () => {
