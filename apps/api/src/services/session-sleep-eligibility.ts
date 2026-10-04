@@ -36,6 +36,31 @@ export function sessionSleepDeferralReason(
   }
 }
 
+/**
+ * The gate every sleep teardown asks before its point of no return: has the agent handed
+ * control back with nothing it started still in flight (`policy: 'prompt-turn-ended'`)?
+ * It asks the SAFETY question only. Whoever reached the teardown already decided the
+ * session should sleep: the sweep enforced the idle interval in its eligibility check,
+ * and a person pressing Sleep on a session that just went idle must not wait for it.
+ */
+export function sleepTeardownSafetyGate(
+  env: Env,
+  task: { taskStatus: string | null; taskCompletedAt: string | null }
+): (state: SessionIdlenessActivityState | null) => SessionIdlenessClassification {
+  const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
+  const harnessWorkConfig = parseHarnessWorkConfig(env);
+  return (state) =>
+    classifySessionIdleness({
+      taskStatus: task.taskStatus,
+      taskCompletedAt: task.taskCompletedAt,
+      state,
+      now: new Date(),
+      idleAfterMs,
+      harnessWorkConfig,
+      policy: 'prompt-turn-ended',
+    });
+}
+
 export function idlenessStateChanged(
   before: SessionIdlenessActivityState,
   after: SessionIdlenessActivityState

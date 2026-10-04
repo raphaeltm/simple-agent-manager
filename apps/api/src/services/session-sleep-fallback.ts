@@ -38,20 +38,19 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { parsePositiveInt } from '../lib/route-helpers';
 import * as projectDataService from './project-data';
 import {
-  classifySessionIdleness,
-  parseHarnessWorkConfig,
-  type SessionIdlenessActivityState,
-} from './session-idleness';
-import { idlenessStateChanged, sessionSleepDeferralReason } from './session-sleep-eligibility';
+  idlenessStateChanged,
+  sessionSleepDeferralReason,
+  sleepTeardownSafetyGate,
+} from './session-sleep-eligibility';
 import {
   serializeSessionSleepFallbackRecord,
   type SessionSleepBlockedReason,
   type SessionSleepFallbackRecord,
   type SessionSleepFallbackTrigger,
 } from './session-sleep-episode';
+import { sleepWorkspaceSession } from './session-sleep-execution';
 import {
   persistSessionSleepBlockedNotice,
   persistSessionSleepFallbackNotice,
@@ -69,11 +68,9 @@ import {
   finishSleepCleanup,
   loadResumableAgentSession,
   loadSleepWorkspace,
-  type SleepWorkspace,
 } from './session-sleep-teardown';
 import {
   claimSessionSnapshotSleep,
-  DEFAULT_SESSION_SLEEP_AFTER_MS,
   deferSessionSnapshotSleepBeforeClaim,
   deferSessionSnapshotStopping,
   failSessionSnapshotSleepBeforeTeardown,
@@ -183,24 +180,6 @@ export async function endSessionSleepEpisodeBlocked(
   return true;
 }
 
-function safetyGate(env: Env, workspace: SleepWorkspace) {
-  const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
-  const harnessWorkConfig = parseHarnessWorkConfig(env);
-  // The SAFETY question only, as at every point of no return: has the agent handed
-  // control back with nothing it started still in flight? The scheduling interval was
-  // already enforced by the sweep's eligibility check.
-  return (state: SessionIdlenessActivityState | null) =>
-    classifySessionIdleness({
-      taskStatus: workspace.taskStatus,
-      taskCompletedAt: workspace.taskCompletedAt,
-      state,
-      now: new Date(),
-      idleAfterMs,
-      harnessWorkConfig,
-      policy: 'prompt-turn-ended',
-    });
-}
-
 /**
  * Run one fallback attempt for a session whose episode left the full phase. Never
  * throws: every outcome is recorded on the row and returned.
@@ -228,8 +207,7 @@ export async function runSessionSleepFallback(
   if (claim.status !== 'claimed') return 'skipped';
   if (claim.phase === 'stopping') {
     // A teardown already crossed its point of no return: roll it forward, never
-    // re-decide it. Loaded lazily to keep the full-sleep path free of this module.
-    const { sleepWorkspaceSession } = await import('./session-sleep-execution');
+    // re-decide it.
     try {
       await sleepWorkspaceSession(env, {
         workspaceId: workspace.id,
@@ -259,7 +237,7 @@ export async function runSessionSleepFallback(
       return blocked ? 'blocked' : 'skipped';
     }
     const agentSession = await loadResumableAgentSession(db, workspace.id);
-    const classify = safetyGate(env, workspace);
+    const classify = sleepTeardownSafetyGate(env, workspace);
     const stateBefore = await projectDataService.getSessionState(
       env,
       workspace.projectId,
