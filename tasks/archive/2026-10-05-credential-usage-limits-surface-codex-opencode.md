@@ -236,7 +236,9 @@ gaps that the local suite could not see, both fixed in this branch:
   `/ws` path and was proven discriminating by reverting the broadcast.
 - **Windows were ordered alphabetically**, so OpenCode read
   `Month 2% · Rolling 0% · Week 0%`. The read model now orders each credential's
-  windows by span, shortest first, unknown spans last (`3696a6f97`).
+  windows by span, shortest first, unknown spans last (`3696a6f97`). The OpenCode Go
+  endpoint reports no window length, so fixed-meaning window types also carry a nominal
+  span used only for ordering (`credentialLimitWindowSortMinutes`, `dff92898e`).
 
 Observed provider payloads (for future reference):
 
