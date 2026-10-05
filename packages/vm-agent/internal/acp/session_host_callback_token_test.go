@@ -75,10 +75,15 @@ func TestSessionHostCallbackTokenIsRaceFreeAcrossGoroutines(t *testing.T) {
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
+	// The writer must not start until the reader is demonstrably running:
+	// under a loaded scheduler 2000 writes can finish before the goroutine
+	// is first scheduled, which turns the liveness check below into a flake.
+	ready := make(chan struct{})
 	reads := 0
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		first := true
 		for {
 			select {
 			case <-stop:
@@ -89,9 +94,14 @@ func TestSessionHostCallbackTokenIsRaceFreeAcrossGoroutines(t *testing.T) {
 					return
 				}
 				reads++
+				if first {
+					first = false
+					close(ready)
+				}
 			}
 		}
 	}()
+	<-ready
 	for i := 0; i < 2000; i++ {
 		host.SetCallbackToken("t" + strings.Repeat("x", i%7+1))
 	}
