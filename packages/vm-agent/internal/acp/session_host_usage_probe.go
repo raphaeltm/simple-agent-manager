@@ -380,6 +380,18 @@ func codexWindowPayload(windowType string, window *codexRateLimitWindow, reached
 
 // ─── OpenCode Go ─────────────────────────────────────────────────────────────
 
+// openCodeUsageClient is the host's HTTP client with redirects disabled: the
+// request carries the OpenCode API key as a bearer token, and Go's client would
+// otherwise replay it to whatever host a 3xx points at. A redirect surfaces as
+// a non-200 response and the probe reports nothing.
+func (h *SessionHost) openCodeUsageClient() *http.Client {
+	client := *h.httpClient()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &client
+}
+
 func (h *SessionHost) probeOpenCodeGoUsage(ctx context.Context, apiKey string) ([]usageLimitPayload, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.openCodeGoUsageURL(), nil)
 	if err != nil {
@@ -388,7 +400,7 @@ func (h *SessionHost) probeOpenCodeGoUsage(ctx context.Context, apiKey string) (
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Accept", "application/json")
-	resp, err := h.httpClient().Do(req)
+	resp, err := h.openCodeUsageClient().Do(req)
 	if err != nil {
 		slog.Debug("usageProbe: opencode usage request failed", "error", err)
 		return nil, false

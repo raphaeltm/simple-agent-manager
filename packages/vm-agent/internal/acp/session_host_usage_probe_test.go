@@ -569,6 +569,54 @@ func TestCompletedOpenCodeGoPromptSkipsReportOnNon200(t *testing.T) {
 	}
 }
 
+func TestCompletedOpenCodeGoPromptNeverFollowsARedirectWithTheBearerToken(t *testing.T) {
+	host, _ := newPromptRetryTestHost(t, promptRetryScript{
+		responses: []promptRetryResponse{{stopReason: "end_turn"}},
+	})
+	capture := wireUsageProbeControlPlane(t, host)
+	// An attacker-controlled (or merely misconfigured) destination: it must never
+	// see the request, let alone the Authorization header.
+	var leakedAuth atomic.Int32
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			leakedAuth.Add(1)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"usage":{"rolling":{"status":"ok","percent":1,"resetsAt":"2026-10-05T21:19:20.000Z"}}}`))
+	}))
+	t.Cleanup(elsewhere.Close)
+	var hits atomic.Int32
+	usage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.Redirect(w, r, elsewhere.URL+"/usage", http.StatusFound)
+	}))
+	t.Cleanup(usage.Close)
+	host.config.OpenCodeGoUsageURL = usage.URL
+	host.config.HTTPClient = &http.Client{Timeout: 2 * time.Second}
+	host.storeCredentialAttribution("opencode", &agentCredential{
+		credentialSource: "user", credentialReference: "cc_credentials:go-1", credentialProvider: "agent", providerMode: "direct",
+	})
+	host.storeOpencodeUsageProbeKey("opencode",
+		&agentCredential{credential: "oc-go-key", credentialKind: "api-key"},
+		&agentSettingsPayload{OpencodeProvider: "opencode-go"})
+
+	runPromptToCompletion(t, host)
+	deadline := time.Now().Add(2 * time.Second)
+	for hits.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if hits.Load() == 0 {
+		t.Fatal("usage endpoint was never called (liveness)")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if leakedAuth.Load() != 0 {
+		t.Fatalf("the bearer token was forwarded to the redirect target %d time(s)", leakedAuth.Load())
+	}
+	if capture.count() != 0 {
+		t.Fatalf("a redirected usage response must not produce a report, got %d", capture.count())
+	}
+}
+
 func TestProbeOpenCodeGoUsageHonoursTheProbeTimeout(t *testing.T) {
 	t.Parallel()
 	release := make(chan struct{})
