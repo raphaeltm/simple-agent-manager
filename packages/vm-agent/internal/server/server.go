@@ -98,6 +98,8 @@ type Server struct {
 	resourceHistoryMu      sync.Mutex
 	resourceHistories      map[string]*resourcehistory.Collector
 	resourceHistoryStarted atomic.Bool
+	resourceHistoryStops   map[string]chan struct{}
+	historyShutdown        bool
 	agentSessions          *agentsessions.Manager
 	acpConfig              acp.GatewayConfig
 	sessionHostMu          sync.Mutex

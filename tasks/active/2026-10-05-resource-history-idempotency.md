@@ -19,3 +19,12 @@ Concurrent final flushes pass the chunk read, both increment the summary, and th
 
 ## References
 .do-state.md; /do workflow; rules 13, 14, 25, 35; apps/api and packages/vm-agent AGENTS.md. User requests Sol; no GitHub issues. Keep repair approval separate from code merge.
+
+## Evidence / current state
+Controlled callback-route races failed original main with 500 for both identical/conflicting payloads; fixed tests passed. SQL fixtures now enforce immediate summary FK and R2-key uniqueness. Chunk failure rolls back summary; commit followed by response loss retains its R2 object, and retry returns idempotent. Batch errors retain uncertain attempt objects; explicit workspace/project prefix cleanup can remove these, and periodic indexed-chunk retention is unchanged.
+
+Production read-only audit at 2026-10-05T22:51Z: 45 mismatched summaries; 4,248 excess samples, 213 excess tool spans; all first/latest chunk rows retained; earliest raw expiry is still in future. 444 associated indexed chunks: 403 objects present, 41 missing (full-bucket paginated list confirmed narrower per-workspace scan). Full row snapshot and missing chunk IDs are companion JSON artifacts. No production mutations.
+
+`2026-10-05-resource-history-repair.sql` is a PROPOSAL ONLY: 45 parameter-free exact-ID updates guarded by snapshot timestamp/counts, first/latest chunk presence, exact retained chunk count and sums. No D1 chunk/R2 deletion, no fabricated raw data. Require explicit approval; take fresh backup/snapshot and rerun audit first, execute as one D1 batch, verify all 45 updates and zero eligible mismatches afterward. Zero-row updates require re-audit rather than removing guards. Counts-only repair does not repair weighted means or additive IO/gap/OOM metrics; those need separately reviewed reconstruction from chunk summary JSON before an expanded repair. Missing raw objects cannot be reconstructed from summaries alone.
+
+Review findings being addressed: join cancelled collector loop before final flush; concurrent Stop waits for completion; retain server tombstone through deletion; reject missing authoritative runtime; atomic spool publication; directory-level serialization covering publish/upload/remove/budget.
