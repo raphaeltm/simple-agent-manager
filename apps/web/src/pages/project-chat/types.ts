@@ -98,6 +98,6 @@ export function isProvisioningStatus(status: TaskStatus): boolean {
  * VITE_PROVISIONING_RESTORE_RETRIES.
  */
 const DEFAULT_PROVISIONING_RESTORE_RETRIES = 3;
-export const PROVISIONING_RESTORE_RETRIES = parseInt(
+export const PROVISIONING_RESTORE_RETRIES = Number.parseInt(
   import.meta.env.VITE_PROVISIONING_RESTORE_RETRIES || String(DEFAULT_PROVISIONING_RESTORE_RETRIES)
 );

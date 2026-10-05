@@ -16,9 +16,17 @@
  * `assertNoOverflow`, which also walks clipped overflow (rule 56).
  */
 
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+import {
+  assertNoOverflow,
+  awaitOwnTaskFetchOutcome,
+  makeIdleSessionState,
+  makeMockProject,
+  makeMockUser,
+  screenshot,
+  setupSleepingChatMocks,
+} from './audit-helpers';
 
 const MOCK_USER = makeMockUser({
   email: 'test@example.com',
@@ -28,21 +36,7 @@ const MOCK_USER = makeMockUser({
   userId: 'user-test-1',
 });
 
-const MOCK_PROJECT = {
-  id: 'proj-test-1',
-  name: 'Test Project',
-  repository: 'testuser/test-repo',
-  defaultBranch: 'main',
-  userId: 'user-test-1',
-  githubInstallationId: 'inst-1',
-  defaultVmSize: null,
-  defaultAgentType: null,
-  defaultProvider: null,
-  workspaceIdleTimeoutMs: null,
-  nodeIdleTimeoutMs: null,
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
+const MOCK_PROJECT = makeMockProject();
 
 const SESSION = {
   id: 'session-1',
@@ -104,23 +98,7 @@ const WAKING_TASK = {
   executionStep: 'node_selection',
 };
 
-const IDLE_STATE = {
-  activity: 'idle',
-  activityAt: 0,
-  statusError: null,
-  currentPlan: null,
-  planUpdatedAt: null,
-  promptStartedAt: null,
-  agentType: null,
-  lastStopReason: null,
-  runtimeWorkState: null,
-  runtimeWorkCount: null,
-  runtimeWorkSource: null,
-  runtimeWorkUpdatedAt: null,
-  runtimeWorkProgressAt: null,
-  recoveryStatus: null,
-  wakePhase: null,
-};
+const IDLE_STATE = makeIdleSessionState();
 
 interface Scenario {
   ownTask: typeof IDLE_SLEEPING_TASK;
@@ -134,54 +112,13 @@ const WAKING_SCENARIO: Scenario = {
 };
 
 async function setupApiMocks(page: Page, scenario: Scenario) {
-  await page.route('**/api/**', async (route: Route) => {
-    const path = new URL(route.request().url()).pathname;
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-
-    if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path.startsWith('/api/notifications/preferences')) return respond(200, {});
-    if (path.startsWith('/api/notifications')) {
-      return respond(200, { notifications: [], unreadCount: 0 });
-    }
-    if (path.startsWith('/api/credentials')) return respond(200, []);
-    if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
-    if (path.startsWith('/api/github/installations')) return respond(200, []);
-    if (path.startsWith('/api/report-issue/config')) return respond(200, { enabled: false });
-    if (path === '/api/trial-status') return respond(200, {});
-    if (path === '/api/agents') return respond(200, []);
-
-    const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
-    if (projectMatch) {
-      const subPath = projectMatch[2] || '';
-      // Envelope shapes matter: a bare array here crashes the app into its
-      // ErrorBoundary, where an absence-only assertion would still pass.
-      if (subPath === '/sessions') return respond(200, { sessions: [SESSION], total: 1 });
-      if (subPath === '/agent-profiles') return respond(200, { items: [] });
-      if (subPath === '/cached-commands') return respond(200, { commands: [] });
-      if (subPath === '/credential-attribution-health') return respond(200, {});
-      if (subPath.match(/^\/sessions\/[^/]+$/)) {
-        return respond(200, {
-          session: SESSION,
-          messages: MESSAGES,
-          hasMore: false,
-          state: scenario.state,
-        });
-      }
-      if (subPath.match(/\/sessions\/[^/]+\/messages/)) {
-        return respond(200, { messages: MESSAGES, hasMore: false });
-      }
-      if (subPath === '/tasks') return respond(200, []);
-      // The session's OWN task — the row `useProvisioningTracker` reads.
-      if (subPath.match(/^\/tasks\/[^/]+$/)) return respond(200, scenario.ownTask);
-      if (subPath === '/agents') return respond(200, []);
-      if (subPath === '/skills') return respond(200, []);
-      if (subPath === '') return respond(200, MOCK_PROJECT);
-      return respond(200, {});
-    }
-
-    if (path === '/api/projects') return respond(200, [MOCK_PROJECT]);
-    return respond(200, {});
+  await setupSleepingChatMocks(page, {
+    user: MOCK_USER,
+    project: MOCK_PROJECT,
+    session: SESSION,
+    messages: MESSAGES,
+    state: scenario.state,
+    ownTask: scenario.ownTask,
   });
 }
 
@@ -224,9 +161,10 @@ for (const viewport of [
       await expect(page.getByText('Only a confident')).toBeVisible();
       await expect(page.locator('body')).not.toContainText('Do you have a cloud hosting account?');
 
-      // The restore effect runs after the session list commits; give any task
-      // fetch it might issue time to land before asserting the absence.
-      await page.waitForTimeout(1500);
+      // The restore effect runs after the session list commits. If it fetched the
+      // task (the pre-fix path) the block follows that response; wait for that
+      // outcome, bounded, before asserting the absence.
+      await awaitOwnTaskFetchOutcome(page, 'task-session-1');
       await expectNoProvisioningBlock(page);
       await expect(page.getByTestId('wake-progress-banner')).toHaveCount(0);
 
@@ -245,7 +183,7 @@ for (const viewport of [
 
       // The session's own task is `queued` here, exactly the shape that used to
       // restore ProvisioningIndicator on top of this banner (rule 24).
-      await page.waitForTimeout(1500);
+      await awaitOwnTaskFetchOutcome(page, 'task-session-1');
       await expectNoProvisioningBlock(page);
       await expect(page.getByPlaceholder('Send a message to wake the agent...')).toHaveCount(0);
 

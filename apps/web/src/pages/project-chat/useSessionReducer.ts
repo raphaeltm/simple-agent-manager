@@ -75,6 +75,17 @@ export type SessionEvent =
 // Convert raw WebSocket payload to typed event
 // ---------------------------------------------------------------------------
 
+/** Only the fields present on the frame are carried, so the reducer patches nothing else. */
+function sessionUpdatedPayload(p: RawSessionEvent['payload']): SessionUpdatedPayload {
+  return {
+    sessionId: String(p.sessionId ?? ''),
+    ...(p.topic != null ? { topic: String(p.topic) } : {}),
+    ...(p.taskId != null ? { taskId: String(p.taskId) } : {}),
+    ...(p.workspaceId != null ? { workspaceId: String(p.workspaceId) } : {}),
+    ...(typeof p.status === 'string' ? { status: p.status } : {}),
+  };
+}
+
 export function rawToSessionEvent(raw: RawSessionEvent): SessionEvent | null {
   const p = raw.payload;
   switch (raw.type) {
@@ -97,16 +108,7 @@ export function rawToSessionEvent(raw: RawSessionEvent): SessionEvent | null {
     case 'session.failed':
       return { type: 'session.failed', payload: { sessionId: String(p.sessionId ?? '') } };
     case 'session.updated':
-      return {
-        type: 'session.updated',
-        payload: {
-          sessionId: String(p.sessionId ?? ''),
-          ...(p.topic != null ? { topic: String(p.topic) } : {}),
-          ...(p.taskId != null ? { taskId: String(p.taskId) } : {}),
-          ...(p.workspaceId != null ? { workspaceId: String(p.workspaceId) } : {}),
-          ...(p.status != null ? { status: String(p.status) } : {}),
-        },
-      };
+      return { type: 'session.updated', payload: sessionUpdatedPayload(p) };
     case 'session.agent_completed':
       return {
         type: 'session.agent_completed',
