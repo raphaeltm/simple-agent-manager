@@ -405,11 +405,122 @@ No merge this week touched their open scope; each was checked against this week'
 
 ## SAM memory (Part 2, done through SAM MCP, not in this diff)
 
-LEDGER_PART2
+Recorded here so the next weekly run can see what changed.
+
+- **Session review.** About 75 sessions from 2026-09-21 to 2026-10-05 were read for human
+  corrections and frustration. Every quote used for a policy was re-verified with
+  `search_messages`. Coverage gap: each project-wide message search reached only 4 of 128 archive
+  owners, so daytime 09-22 and 09-24 may be under-covered. Repeated patterns:
+  - **Short, plain answers**, asked for in six sessions.
+  - **"Did it actually ship?"**: work reported done that had not landed or did not fix the
+    symptom, in nine sessions.
+  - **Coordinators going dormant or missing their wake**, in six sessions.
+  - **Agents handing decisions back** ("needs your OK", "want me to merge?"), in eight sessions.
+  - **Direct links he can act on from his phone**, asked for in four sessions.
+- **Knowledge, 18 observations updated** to current facts:
+  - Sol 6.1 still fails inside SAM.
+  - The sleep-loop facts fixed by #2218, #2223 and #2224.
+  - #2230's stable task identity, with a pointer to the regression entry.
+  - ProjectData at 9.72 GB and falling; the R2 orphan cost after #2220.
+  - The project-tracking heuristics.
+  - Three observations that attributed the ACP delivery coordinator's relayed review messages to
+    Raphaël now say they came from the coordinator.
+  - The per-node workspace cap observation is marked superseded (Raphaël, 09-25: "I want that
+    shit out the fucking door").
+  - The Jev "do not ship a generic passthrough" recommendation is marked contested by his 09-29
+    "go broad" pushback.
+  - The dormant-coordinator and response-style observations now carry the recurrence evidence.
+- **Knowledge, 14 retired:**
+  - One spent wave authorization (the 10-04 health wave shipped as #2222, #2223 and #2224).
+  - Six PR #2210 review gates (the PR closed when #2217 shipped).
+  - Three ACP-delivery coordination notes.
+  - Five superseded PR-specific CodeRabbit waivers.
+- **Knowledge, 8 added, 6 confirmed.** Added:
+  - Ranked options in a SAM Idea for planning answers.
+  - Chat-list ordering by conversation activity (#2228).
+  - Agent-messaging provenance, with the misattribution as a live example.
+  - Direct links.
+  - Handing decisions back.
+  - The new `ShippingVerification` entity.
+  - Usage-limit wakes for coordinators.
+  - Raphaël's 10-05 stalled-tool classifier direction.
+- **Ideas:**
+  - Completed: MCP lineage checks `01M0SD6W5SR7FWFVWTK7DWV318` (#1900, #2230), Commenting MVP
+    `01M0JQB842XSJ3W172DYPB37HN`, exact Git-state restore `01M30PPM0B96G2RM1HC4Q7EHG6` (#2115).
+  - Cancelled as duplicates: `01M3WYXYPX8F8H0QN0X8MBJNXK` → `01M3WACF99XYACR3TKHC19Z6JZ`, and
+    `01KW4D1HKGCV2N8VDNB3Y7BTDX` → `01M43B7Q8HC87N3AEW187Q6BMT`. The survivors absorbed their
+    evidence.
+  - Narrowed or retitled: stable task identity follow-ups `01M43NCRFC9VF93RPM355FZAKJ`, legacy
+    recovery rows `01M3WACF99XYACR3TKHC19Z6JZ`, file commenting Phase 2
+    `01M0N1250YESBW2R497KXDZVSC`. Title-only for the two plans already full at 64 KiB: ACP
+    `01M3P2E0JJNQRXX020P65ZRKEJ` and ProjectData `01M0YZNBKSKQZ47NC0K7M8N5AX`.
+  - Status notes on 10 more ideas.
+  - Created: GPT-6.1 Sol fails inside SAM, `01M45CXE5ZG10WTT30V5HCSY9V`.
+- **Policies:**
+  - **Deactivated 7** task-scoped policies whose work verifiably shipped: `38df5a88` (#2030),
+    `805199d8` (#2059), `390ef351` (eventing, #2075), `fb2f6edf` (#1898), `1e946849` (commenting
+    MVP), `f8bed08d` (#1824), `528fc2af` (ACP delivery). The cap counts only policies that apply
+    now, and it had blocked three explicit saves this week.
+  - **Added 2**, for explicitly and repeatedly stated preferences: `be92174d` (keep chat replies
+    short and plain, one question at a time) and `d465ac2d` (give direct links for anything
+    Raphaël may act on).
+  - **Clarified 1:** `d60830e2` now says a direct change request authorizes merging once every
+    gate passes. This follows his 10-04 "Not sure I follow. Why did you not merge?" and his 10-03
+    "create a PR, get it green, get it shi[p]ped as soon as possible".
+  - Live policies: 99 before, 94 after (cap 100).
+  - Not changed: `d73204ef` (keep the Sol profile on gpt-6.1-sol) stays, because the
+    compatibility work is not finished. Policy `66060db4`, which held the ProjectData destructive
+    gates, expired on 2026-09-22 and was not renewed (nobody restated it).
+- **Not recorded, deliberately:** "Go one step deeper…" (a one-off correction that rule 39
+  covers), and "each batch can overlap by a bit" (specific to one coordinator). The
+  `.workflow-state.md` request ("Ok. Make that happen.") is draft PR #2227.
 
 ## Genuinely open for the week of 2026-10-06 (ranked)
 
-LEDGER_TOP10
+1. **#2230's `sleeping` status is missing from the "active" status sets.** It affects every VM
+   sleep since 2026-10-05 00:00Z. Slept conversations vanish from Active Tasks,
+   `list_project_agents` and the account map. Agents cannot message (`send_message_to_subtask`,
+   `send_durable_message`) or stop a slept VM agent, which breaks "sleep and be durably woken" for
+   coordinator → child messages. A slept chat likely renders as provisioning.
+   (`tasks/backlog/2026-10-05-sleeping-task-status-follow-ups.md`, SAM idea
+   `01M43NCRFC9VF93RPM355FZAKJ`)
+2. **#2222's stuck-task dedupe writes a duplicate `platform_errors` row every five minutes.** Its
+   LIKE pattern is over D1's 50-byte limit (59 rows for one task in five hours). A small fix, plus
+   the ≤ 50-byte regression guard that would have caught it.
+   (`tasks/backlog/2026-08-07-fix-stuck-task-sweep-pattern-complexity.md`)
+3. **A failed VM wake still fails the conversation.** Since #2230 it fails the conversation's own
+   task and fires the parent's task-wait hooks. (SAM idea `01M3MFDMZ5AS0BXPHZWS3CRFED`,
+   `tasks/backlog/2026-09-25-stopping-sleep-with-failed-projectdata-session.md`)
+4. **GPT-6.1 Sol is unusable inside SAM.** The pinned Codex CLI `0.156.1` rejects it for ChatGPT
+   accounts. Rebase the SAM C2 patch onto a current Codex CLI and keep its design constraints.
+   Raphaël tried it several times on 10-04. (SAM idea `01M45CXE5ZG10WTT30V5HCSY9V`)
+5. **"Expired, not failed."** 11 of the 34 tasks that failed since 2026-09-30 were lifecycle
+   outcomes: 4 expired human-input requests, 6 day-7 runtime verdicts, and 1 deleted workspace
+   while awaiting a follow-up. A `sleeping` task also has no terminal exit after the 7-day purge.
+   (`tasks/backlog/2026-09-26-trustworthy-task-status.md`, SAM idea `01KZNGJG1DCH8DBC835Y0272P4`)
+6. **ProjectData root object to ≤ 9.0 GB.** It is recovering on its own (9.72 GB, falling 250 to
+   370 MB a day). Re-measure around 10-08; land Slice C (`7868bc894`) if the drain flattens; then
+   rebuild grouped FTS. (`tasks/active/2026-09-03-projectdata-production-capacity-emergency.md`)
+7. **`update_idea` silently drops appends at 64 KiB.** The ACP and ProjectData plans are full; this
+   run had to retitle them instead of appending.
+   (`tasks/backlog/2026-09-30-update-idea-append-silently-truncated-at-cap.md`)
+8. **ACP live-proof gaps.** Forms and URL requests were proven live only with Codex, but production
+   offers them to every agent; the auth-diagnosis live matrix was never run; #2217's 11 ACP
+   Playwright tests sit in a quarantined spec. (SAM idea `01M3P2E0JJNQRXX020P65ZRKEJ`,
+   `tasks/backlog/2026-07-17-stale-playwright-audit-specs.md`)
+9. **Agent auto-commits rewrite the tracked `.codex/config.toml`.** One silently reverted
+   `model_reasoning_effort` to `"low"` on `main` (via #2217). Decide the intended value and stop
+   the vm-agent writing SAM-managed config into a tracked file.
+   (`tasks/backlog/2026-07-19-repo-history-bloat-cleanup.md`)
+10. **Five parked PRs need Raphaël's call.** #1817 close or commit (799 behind), #1788 OSV intake,
+    #2020 Sonar account actions, #2062 moon asset, #2160 Codex app-server spike.
+
+Also open, unchanged this week: prompt-cancel section B (SAM idea `01M31M9G3T4SEWT9ZW1BM4QKZ3`);
+the per-profile agent admin switch §8 (`01M388Y1Q1068DNT69KTBFXSMB`, two premises now stale after
+#2202/#2225); the staging-contention check (`01M3M0AK930MJXX12TFT9VJ3PH`); check-ins that kill
+working agents (flight-queue item 11, no recurrence in production since 09-28); the Playwright
+quarantine (99 of 120 specs); the R2 orphaned-snapshot backfill (`01M40H4ZBTVC9WPNMRA5VMGPS9`);
+and the AI-proxy token of agent processes alive past 24 h (`01M432G3276YZWCP3HEJ5B25J5`).
 
 ## Implementation checklist
 
