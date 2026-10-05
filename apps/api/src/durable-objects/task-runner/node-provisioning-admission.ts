@@ -7,6 +7,7 @@ import {
   waitForVmAdmissionCapacity,
 } from '../../services/vm-admission-control';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
+import { requestIncompatiblePoolNodeDrain } from './incompatible-node-drain';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export async function scheduleAdmissionWait(
@@ -87,6 +88,7 @@ export async function waitOrThrowForCapacityPoolNodeLimit(
   admissionIdentity: VmTaskAdmissionIdentity | null,
   poolMaxNodes: number
 ): Promise<'waiting'> {
+  await requestIncompatiblePoolNodeDrain(state, rc);
   if (admissionIdentity) {
     const waitResult = await waitForVmAdmissionCapacity(
       rc.env,

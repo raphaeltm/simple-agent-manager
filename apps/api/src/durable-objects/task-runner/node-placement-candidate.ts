@@ -9,15 +9,22 @@ import {
   type ActiveWorkspaceReservationUsage,
   evaluateWorkspaceReservationCapacity,
   parseWorkspaceAdmissionMetrics,
+  resolveTrustedWorkspaceNodeCapacity,
+  cpuBudgetMillis,
+  usableMemoryMb,
   type WorkspaceAdmissionPolicy,
 } from '../../services/workspace-resource-capacity';
-import type { DeferrableReusableNodeCandidate, ReusableNodeSelection } from './node-placement-deferral';
+import type {
+  DeferrableReusableNodeCandidate,
+  ReusableNodeSelection,
+} from './node-placement-deferral';
 import type { NodePlacementFields } from './node-selection';
 
 export type RankedReusableNode = {
   id: string;
   vmLocation: string;
-  capacityPlacementSnapshot: import('@simple-agent-manager/shared').CapacityPlacementSnapshot | null;
+  capacityPlacementSnapshot:
+    import('@simple-agent-manager/shared').CapacityPlacementSnapshot | null;
   signals: PlacementHostSignals;
 };
 
@@ -51,6 +58,22 @@ function candidateSignals(input: ReusableNodeCandidateInput): PlacementHostSigna
 
 function reusableNodeExclusion(input: ReusableNodeCandidateInput): string | null {
   if (!input.agentCompatible) return 'Host agent version is incompatible';
+  const capacity = resolveTrustedWorkspaceNodeCapacity(input.node);
+  if (
+    capacity.vcpuCount !== null &&
+    input.requestedReservation.cpuMillis > cpuBudgetMillis(capacity.vcpuCount, input.policy)
+  ) {
+    return 'Host CPU share budget cannot satisfy the requested resources';
+  }
+  if (
+    capacity.memoryMb !== null &&
+    input.requestedReservation.memoryMb > usableMemoryMb(capacity.memoryMb, input.policy)
+  ) {
+    return 'Host memory cannot satisfy the requested resources after host reserve';
+  }
+  if (capacity.diskGb !== null && input.requestedReservation.diskMb > capacity.diskGb * 1024) {
+    return 'Host disk cannot satisfy the requested resources';
+  }
   if (!input.satisfiesTaskResources) {
     return 'Trusted host hardware does not satisfy the requested resources';
   }
@@ -109,7 +132,8 @@ function capacityCandidateEvaluation(
     location: input.node.vmLocation,
     providerInstanceType: input.node.providerInstanceType,
   };
-  if (capacity.admitted) return { diagnosticHost, candidate: rankedNode(input, signals, selection) };
+  if (capacity.admitted)
+    return { diagnosticHost, candidate: rankedNode(input, signals, selection) };
   if (capacity.deferrable) {
     return {
       diagnosticHost,
