@@ -228,6 +228,7 @@ describe('failed-task work preservation vertical slice', () => {
       schema.nodes,
       schema.workspaces,
       schema.tasks,
+      schema.taskStatusEvents,
       schema.sessionSummaries,
       schema.agentSessions,
       schema.sessionSnapshots,

@@ -81,7 +81,7 @@ Related, tracked elsewhere:
 - Main starts at `0366b17d9`; #2230 stable identity and #2231 provisioning restore fix already shipped. Existing task used, managed branch/workspace reused.
 - Consumers audited: sleeping belongs in activity visibility and messaging/parent stop targets, and production status rendering. Dormant project task filters are excluded after browser routing audit. It stays excluded from live callers, execution admission/dispatch slots, stuck task sweeps, runtime-preservation and warm-placement predicates. Separate `AGENT_TARGET_STATUSES` avoids broadening `_helpers.ACTIVE_STATUSES` action triggers.
 - Sleep events use an insert-select of current status in the same D1 transaction before updating sleeping; already sleeping and terminal rows produce no event.
-- Shared staging coordinator: this task; capacity `01M473KXWJYT6S1JR03E8GVY2B`, telemetry `01M473KNZ9WXZ0X4G3Z743X2C1`. Pin heads together, max 1–2 VMs and immediate cleanup. No independent deployments over sibling validation.
+- Shared staging coordinator: resource-history task `01M473KNZ9WXZ0X4G3Z743X2C1` by parent assignment; this task does not deploy or provision independently; capacity `01M473KXWJYT6S1JR03E8GVY2B`, telemetry `01M473KNZ9WXZ0X4G3Z743X2C1`. Pin heads together, max 1–2 VMs and immediate cleanup. No independent deployments over sibling validation.
 - Failed-wake mismatch remains separate in SAM Idea `01M3MFDMZ5AS0BXPHZWS3CRFED`; audit added there. Stable task can fail/fire parent hooks while restoration returns chat to sleeping; finalizer can subsequently fail the preserved chat. Code evidence only; no legacy recovery migration.
 
 ## Local validation
@@ -95,3 +95,6 @@ Related, tracked elsewhere:
 
 - Completion-validator local implementation PASS. Added explicit terminal-event controls; lifecycle suite 11/11 green.
 - Existing #2231 sleeping-session Playwright audit 4/4 green on built preview; idle and waking at 375×667 and 1280×800. All screenshots visually reviewed, no overflow or duplicate provisioning block; UI rubric 4/4/4/4/5. Local servers stopped. No UI diff retained.
+
+- Full repository lint: 13/13 tasks PASS; full repository typecheck: 19/19 tasks PASS. Full test/build remains running with one worker/task.
+- The failed-task-preservation realistic fixture also declares taskStatusEvents; its 21 regression tests pass. This is test setup only, runtime candidate remains reviewed `7041c6a4d`.
