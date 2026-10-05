@@ -19,7 +19,7 @@ Anthropic's model overview lists Sonnet 5.5 at $2 input and $10 output per milli
 - [x] Add source-backed model IDs and fix stale names.
 - [x] Update focused catalog tests and platform proxy metadata.
 - [x] Run shared package tests, typecheck, lint, and build.
-- [ ] Review, open PR, CI, merge, and production deploy check.
+- [x] Review the diff and open the PR. CI, merge, and production monitoring are tracked by the SAM task.
 
 ## Acceptance
 
