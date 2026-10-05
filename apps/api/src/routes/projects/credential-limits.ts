@@ -47,7 +47,9 @@ credentialLimitRoutes.get('/:id/credential-limits', async (c) => {
     }
   }
 
-  return c.json(await listProjectCredentialLimits(c.env, { projectId, userId, credentialReference }));
+  return c.json(
+    await listProjectCredentialLimits(c.env, { projectId, userId, credentialReference })
+  );
 });
 
 export { credentialLimitRoutes };

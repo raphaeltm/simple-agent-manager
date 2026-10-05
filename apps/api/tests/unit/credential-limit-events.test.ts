@@ -951,7 +951,14 @@ describe('credential limit producer allowlists for Codex, OpenCode and per-model
             AND window_type = ?`
       )
       .get(windowType) as
-      | { provider: string; source: string; status: string; last_event_level: string; utilization_percent: number | null; window_minutes: number | null }
+      | {
+          provider: string;
+          source: string;
+          status: string;
+          last_event_level: string;
+          utilization_percent: number | null;
+          window_minutes: number | null;
+        }
       | undefined;
   }
 
@@ -1014,7 +1021,10 @@ describe('credential limit producer allowlists for Codex, OpenCode and per-model
           })
         )
       ).resolves.toEqual({ outcome: 'ignored', reason: 'ok' });
-      expect(windowRow(sqlite, windowType)).toMatchObject({ provider: 'opencode', last_event_level: 'ok' });
+      expect(windowRow(sqlite, windowType)).toMatchObject({
+        provider: 'opencode',
+        last_event_level: 'ok',
+      });
     }
   });
 
@@ -1036,19 +1046,31 @@ describe('credential limit producer allowlists for Codex, OpenCode and per-model
     await expect(
       recordCredentialLimitObservation(
         env as never,
-        baseObservation({ provider: 'openai', source: 'vm-agent.codex_rollout', windowType: 'codex.credits' })
+        baseObservation({
+          provider: 'openai',
+          source: 'vm-agent.codex_rollout',
+          windowType: 'codex.credits',
+        })
       )
     ).resolves.toEqual({ outcome: 'ignored', reason: 'unsupported' });
     await expect(
       recordCredentialLimitObservation(
         env as never,
-        baseObservation({ provider: 'opencode', source: 'vm-agent.console_scrape', windowType: 'opencode.weekly' })
+        baseObservation({
+          provider: 'opencode',
+          source: 'vm-agent.console_scrape',
+          windowType: 'opencode.weekly',
+        })
       )
     ).resolves.toEqual({ outcome: 'ignored', reason: 'unsupported' });
     await expect(
       recordCredentialLimitObservation(
         env as never,
-        baseObservation({ provider: 'mistral', source: 'vm-agent.codex_rollout', windowType: 'codex.primary' })
+        baseObservation({
+          provider: 'mistral',
+          source: 'vm-agent.codex_rollout',
+          windowType: 'codex.primary',
+        })
       )
     ).resolves.toEqual({ outcome: 'ignored', reason: 'unsupported' });
     expect(windowRow(sqlite, 'codex.credits')).toBeUndefined();

@@ -96,7 +96,7 @@ describe('credential limit read routes', () => {
     await expect(response.json()).resolves.toEqual(SAMPLE);
   });
 
-  it('narrows to the agent session\'s server-attributed credential', async () => {
+  it("narrows to the agent session's server-attributed credential", async () => {
     mocks.resolveAgentSessionCredentialReference.mockResolvedValue('cc_credentials:cred-1');
     const response = await app.request(
       '/api/projects/proj-1/credential-limits?agentSessionId=01SESSION',
@@ -142,14 +142,17 @@ describe('credential limit read routes', () => {
 
   it('propagates a membership rejection without reading windows', async () => {
     mocks.requireProjectCapability.mockRejectedValue(
-      Object.assign(new Error('Project capability is required'), { statusCode: 403, error: 'FORBIDDEN' })
+      Object.assign(new Error('Project capability is required'), {
+        statusCode: 403,
+        error: 'FORBIDDEN',
+      })
     );
     const response = await app.request('/api/projects/proj-1/credential-limits', {}, env);
     expect(response.status).toBe(403);
     expect(mocks.listProjectCredentialLimits).not.toHaveBeenCalled();
   });
 
-  it('serves the signed-in user\'s personal credentials at /api/credentials/limits', async () => {
+  it("serves the signed-in user's personal credentials at /api/credentials/limits", async () => {
     const response = await app.request('/api/credentials/limits', {}, env);
     expect(response.status).toBe(200);
     expect(mocks.requireAuthCalls).toBe(1);

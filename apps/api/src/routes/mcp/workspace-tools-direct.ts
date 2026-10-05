@@ -64,8 +64,11 @@ function summarizeCredentialLimits(response: CredentialLimitsResponse): string[]
       const family = credentialLimitFamilyLabel(window.windowType);
       const label = credentialLimitWindowLabel(window.windowType, window.windowMinutes);
       const used =
-        window.utilizationPercent === null ? 'usage unknown' : `${Math.round(window.utilizationPercent)}% used`;
-      const resets = window.resetsAt === null ? '' : `, resets ${new Date(window.resetsAt).toISOString()}`;
+        window.utilizationPercent === null
+          ? 'usage unknown'
+          : `${Math.round(window.utilizationPercent)}% used`;
+      const resets =
+        window.resetsAt === null ? '' : `, resets ${new Date(window.resetsAt).toISOString()}`;
       lines.push(
         `${family} ${label} (${credential.credentialSource} credential): ${used}, level ${window.level}${resets}`
       );
@@ -118,7 +121,7 @@ export async function handleGetCredentialLimits(
                 {
                   scope,
                   credentials: [],
-                  note: 'No usage samples have been recorded for this session\'s credential yet.',
+                  note: "No usage samples have been recorded for this session's credential yet.",
                 },
                 null,
                 2

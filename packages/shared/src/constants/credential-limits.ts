@@ -16,7 +16,11 @@ export const CREDENTIAL_LIMIT_EVENT_TYPES = {
 } as const;
 
 /** Provider identifiers accepted from credential-limit telemetry. */
-export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS = ['anthropic', 'openai', 'opencode'] as const;
+export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS = [
+  'anthropic',
+  'openai',
+  'opencode',
+] as const;
 
 /** Source identifiers accepted from credential-limit telemetry. */
 export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_SOURCES = [

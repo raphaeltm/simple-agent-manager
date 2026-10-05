@@ -214,7 +214,6 @@ export type {
   CCConfigurationListItem,
   CCCredentialListItem,
 } from './composable-credentials';
-export { getMyCredentialLimits, getProjectCredentialLimits } from './credential-limits';
 export {
   createCCAttachment,
   createCCConfiguration,
@@ -230,6 +229,7 @@ export {
   updateCCConfiguration,
   updateCCCredential,
 } from './composable-credentials';
+export { getMyCredentialLimits, getProjectCredentialLimits } from './credential-limits';
 export type {
   CredentialValidationResponse,
   GcpProject,

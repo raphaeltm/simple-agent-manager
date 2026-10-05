@@ -71,7 +71,10 @@ const SOURCES: ReadonlySet<string> = new Set<CredentialLimitCredentialSource>([
 ]);
 
 function readMaxRows(env: Env): number {
-  return parsePositiveInt(env.CREDENTIAL_LIMIT_READ_MAX_ROWS, DEFAULT_CREDENTIAL_LIMIT_READ_MAX_ROWS);
+  return parsePositiveInt(
+    env.CREDENTIAL_LIMIT_READ_MAX_ROWS,
+    DEFAULT_CREDENTIAL_LIMIT_READ_MAX_ROWS
+  );
 }
 
 function finiteOrNull(value: unknown): number | null {
@@ -100,7 +103,13 @@ function parseRow(row: WindowReadRow): ParsedRow | null {
   const credentialSource = SOURCES.has(row.credential_source)
     ? (row.credential_source as CredentialLimitCredentialSource)
     : null;
-  if (!credentialReference || !windowType || !provider || observedAt === null || !credentialSource) {
+  if (
+    !credentialReference ||
+    !windowType ||
+    !provider ||
+    observedAt === null ||
+    !credentialSource
+  ) {
     log.warn('credential_limit.read_row_skipped', {
       projectId: row.project_id,
       credentialReference: row.credential_reference,
@@ -119,7 +128,9 @@ function parseRow(row: WindowReadRow): ParsedRow | null {
       provider,
       source: nonEmptyString(row.source) ?? 'unknown',
       status: STATUSES.has(row.status) ? (row.status as CredentialLimitStatus) : 'unknown',
-      level: LEVELS.has(row.last_event_level) ? (row.last_event_level as CredentialLimitLevel) : 'ok',
+      level: LEVELS.has(row.last_event_level)
+        ? (row.last_event_level as CredentialLimitLevel)
+        : 'ok',
       utilizationPercent: finiteOrNull(row.utilization_percent),
       limitAmount: finiteOrNull(row.limit_amount),
       remainingAmount: finiteOrNull(row.remaining_amount),
@@ -136,7 +147,10 @@ function parseRow(row: WindowReadRow): ParsedRow | null {
  * newest sample per (credential, window) wins, which is what the user-level view
  * needs because the same credential has one row per project it was used in.
  */
-function summarize(rows: WindowReadRow[], collapseAcrossProjects: boolean): CredentialLimitCredentialSummary[] {
+function summarize(
+  rows: WindowReadRow[],
+  collapseAcrossProjects: boolean
+): CredentialLimitCredentialSummary[] {
   const byCredential = new Map<string, CredentialLimitCredentialSummary>();
   const seenWindows = new Set<string>();
 

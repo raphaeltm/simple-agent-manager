@@ -86,7 +86,7 @@ describe('get_credential_limits MCP tool', () => {
     mocks.resolveAgentSessionCredentialReference.mockResolvedValue('cc_credentials:cred-1');
   });
 
-  it('defaults to the calling session\'s credential and renders readable summary lines', async () => {
+  it("defaults to the calling session's credential and renders readable summary lines", async () => {
     const response = await handleGetCredentialLimits('1', {}, token(), env);
     expect(mocks.resolveAgentSessionCredentialReference).toHaveBeenCalledWith(env, {
       projectId: 'proj-1',

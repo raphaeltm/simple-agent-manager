@@ -93,7 +93,10 @@ export function CredentialLimitDetails({
                 <span className="font-medium text-fg-primary break-words">
                   {credentialLimitWindowLabel(window.windowType, window.windowMinutes)}
                 </span>
-                <span className="shrink-0 font-semibold" style={{ color: LEVEL_STYLES[window.level].color }}>
+                <span
+                  className="shrink-0 font-semibold"
+                  style={{ color: LEVEL_STYLES[window.level].color }}
+                >
                   {formatUtilizationPercent(window.utilizationPercent)} used
                 </span>
               </div>

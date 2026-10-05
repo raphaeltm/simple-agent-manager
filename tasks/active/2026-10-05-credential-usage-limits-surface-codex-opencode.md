@@ -28,6 +28,7 @@ SAM already records provider quota windows per credential (`credential_limit_win
 ## Research findings (verified 2026-10-05 against a3110a0a5 and primary sources)
 
 ### Existing pipeline (file:line)
+
 - Writer 1: VM agent `packages/vm-agent/internal/acp/session_host_usage.go:108-150` reads claude-agent-acp
   `usage_update._meta["_claude/rateLimit"]` → `POST /api/projects/:id/acp-sessions/:sid/usage`
   (`apps/api/src/routes/projects/agent-usage-callback.ts`, callback JWT, mounted before `projectsRoutes` — rule 34).
@@ -47,13 +48,14 @@ SAM already records provider quota windows per credential (`credential_limit_win
   i.e. often `'agent'`; the VM agent must therefore set `provider` explicitly on each limit payload.
 
 ### Codex capture path (chosen)
+
 - Codex CLI 0.160.0 (pinned via the sam-c2.2 archive) persists `EventMsg::TokenCount` to the session rollout
   (`codex-rs/rollout/src/policy.rs:113` at `rust-v0.160.0`). Rollout file:
   `$CODEX_HOME|~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<thread_id>[_<rollout_id>].jsonl`
   (`rollout_file_name.rs:67-70`). Line: `{"timestamp":"…","type":"event_msg","payload":{"type":"token_count","info":…,"rate_limits":{…}}}`.
 - `RateLimitSnapshot { limit_id?, limit_name?, primary?: RateLimitWindow, secondary?: RateLimitWindow, credits?,
-  plan_type?, rate_limit_reached_type?, spend_control_reached? }`, `RateLimitWindow { used_percent: f64,
-  window_minutes: i64|null, resets_at: unix seconds|null }` (`protocol/src/protocol.rs` at `rust-v0.160.0`).
+plan_type?, rate_limit_reached_type?, spend_control_reached? }`, `RateLimitWindow { used_percent: f64,
+window_minutes: i64|null, resets_at: unix seconds|null }` (`protocol/src/protocol.rs` at `rust-v0.160.0`).
 - codex-acp's ACP `sessionId` is the Codex thread id (`dist/index.js:33465 sessionId: response.thread.id`); the VM
   agent holds it lock-free in `h.loadMirroredSessionID()` (`session_host.go:767`).
 - Container file access helpers exist: `execInContainer` (`gateway.go:570`), `readOptionalFileFromContainer`
@@ -64,6 +66,7 @@ SAM already records provider quota windows per credential (`credential_limit_win
   differently (team: 5h primary + weekly secondary; prolite: weekly primary only) — getpaseo/paseo#4165, RunMaestro/Maestro#1596.
 
 ### OpenCode Go
+
 - Official `GET https://opencode.ai/zen/go/v1/usage`, `Authorization: Bearer <OPENCODE_API_KEY>` →
   `{"usage":{"rolling":{"status":"ok","percent":1,"resetsAt":"2026-09-13T10:42:47.510Z"},"weekly":{…},"monthly":{…}}}`
   (anomalyco/opencode#44189; opgginc/opencode-bar#154; slkiser/opencode-quota providers.md). Zen credit balance has no
@@ -75,6 +78,7 @@ SAM already records provider quota windows per credential (`credential_limit_win
 - Only one `GatewayConfig` constructor exists (`server.go:477`), used by both VM and cf-container runtimes (rule 61).
 
 ### Web / MCP patterns to reuse
+
 - TanStack `queryOptions` + `useQueryScope()` (`apps/web/src/lib/query-options/projects.ts`,
   `hooks/useQueryScope.ts`); barrel `lib/query-options/index.ts`; API barrel `lib/api/index.ts`.
 - Chat header chip row: `components/project-message-view/SessionHeader.tsx:236-320` (after `WorkspaceProfileBadge`);
@@ -88,6 +92,7 @@ SAM already records provider quota windows per credential (`credential_limit_win
   `apps/web/tests/unit/components/session-header.test.tsx`, `apps/web/tests/playwright/ideas-ui-audit.spec.ts`.
 
 ### Relevant rules / post-mortems
+
 - Rule 34 (callback routes outside `projectsRoutes`) — read route is browser-auth, so it goes INSIDE `projectsRoutes`.
 - Rule 28 §5 + rule 11 (project-scoped reads): scoping predicates tested against real SQLite with an attack fixture
   and an owner control.
@@ -99,6 +104,7 @@ SAM already records provider quota windows per credential (`credential_limit_win
 ## Implementation checklist
 
 ### A. Shared (`packages/shared`)
+
 - [x] A1 Extend `constants/credential-limits.ts`: providers `+opencode`; sources `+vm-agent.codex_rollout`,
       `+vm-agent.opencode_go_usage`; windows `+claude.seven_day_opus`, `+claude.seven_day_sonnet`, `+codex.primary`,
       `+codex.secondary`, `+opencode.rolling`, `+opencode.weekly`, `+opencode.monthly`.
@@ -108,12 +114,13 @@ SAM already records provider quota windows per credential (`credential_limit_win
       credential id from reference; unit tests.
 
 ### B. API (`apps/api`)
+
 - [x] B1 `services/credential-limit-events/read.ts`: `listProjectCredentialLimits(env, {projectId, userId,
-      credentialReference?})` (rows where `project_id = ?` AND (`user_id = ?` OR `credential_source IN
-      ('project','platform'))), `listUserCredentialLimits(env, {userId})` (rows `user_id = ?` AND
-      `credential_source = 'user'`, collapsed to newest per `(credential_reference, window_type)` across projects),
-      `resolveAgentSessionCredentialReference(env, {projectId, agentSessionId})` (agent_sessions ⋈ workspaces,
-      project-bound). Row-tolerant mapping (rule 50); bounded by `CREDENTIAL_LIMIT_READ_MAX_ROWS` (default 200).
+    credentialReference?})` (rows where `project_id = ?` AND (`user_id = ?` OR `credential_source IN
+    ('project','platform'))), `listUserCredentialLimits(env, {userId})`(rows`user_id = ?`AND
+   `credential_source = 'user'`, collapsed to newest per `(credential_reference, window_type)`across projects),
+   `resolveAgentSessionCredentialReference(env, {projectId, agentSessionId})`(agent_sessions ⋈ workspaces,
+    project-bound). Row-tolerant mapping (rule 50); bounded by`CREDENTIAL_LIMIT_READ_MAX_ROWS` (default 200).
 - [x] B2 Route `GET /api/projects/:id/credential-limits?agentSessionId=` in `routes/projects/credential-limits.ts`
       (`requireProjectCapability(..., 'project:read')`), mounted in `routes/projects/index.ts`. ≤ 3 round trips.
 - [x] B3 Route `GET /api/credentials/limits` (user) in `routes/credential-limits.ts`, mounted in `index.ts` before
@@ -128,6 +135,7 @@ SAM already records provider quota windows per credential (`credential_limit_win
       admitted and an unknown window is still `unsupported`.
 
 ### C. VM agent (`packages/vm-agent`)
+
 - [x] C1 Config: `ACPUsageProbeTimeout` (env `ACP_USAGE_PROBE_TIMEOUT`, default 10s) and `OpenCodeGoUsageURL`
       (env `OPENCODE_GO_USAGE_URL`, default `https://opencode.ai/zen/go/v1/usage`) in `config/config.go`,
       `config_load.go`, timeout validation list (`helpers.go`); plumbed via `server.go` into `GatewayConfig`.
@@ -157,6 +165,7 @@ SAM already records provider quota windows per credential (`credential_limit_win
       `OPENCODE_GO_USAGE_URL`).
 
 ### D. Web (`apps/web`)
+
 - [x] D1 `lib/api/credential-limits.ts` (`getProjectCredentialLimits`, `getMyCredentialLimits`) + barrel export.
 - [x] D2 `lib/query-options/credential-limits.ts` (identity-scoped keys, `staleTime` 30s, `refetchInterval` 60s,
       no background refetch) + barrel export.
@@ -174,12 +183,14 @@ SAM already records provider quota windows per credential (`credential_limit_win
       `.tmp/playwright-screenshots/`; reviewed and posted to the PR.
 
 ### E. Docs and records
+
 - [x] E1 Public docs: credential usage limits section (agent credentials guide) + `reference/api.md` entries for the two
       routes and the MCP tool.
 - [ ] E2 After merge: update idea `01M1RMTYR8FB95H3V031CRYN68` (Part 6 → shipped PR #, what remains: idle polling
       decision, Zen balance).
 
 ## Acceptance criteria
+
 1. A project member sees a usage chip in the chat header for a running Claude Max session's credential, with 5h and
    weekly utilization and reset time, and can open the details popover (unit test + staging Playwright screenshot).
 2. Settings → Credentials shows the same windows per personal credential that has observations (unit test + Playwright).
@@ -195,6 +206,7 @@ SAM already records provider quota windows per credential (`credential_limit_win
    real VM provisioned (vm-agent change ⇒ rule 22 infra gate) and cleaned up.
 
 ## Notes / dead ends
+
 - codex-acp ext methods at 2.1.1: `authentication/status`, `authentication/logout`, legacy set-model, steering, async
   task stop, goal control — nothing for rate limits.
 - Spawning a second `codex app-server` to call `account/rateLimits/read` was rejected: it would race the shared

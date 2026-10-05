@@ -103,11 +103,15 @@ function setup() {
 }
 
 describe('listProjectCredentialLimits', () => {
-  it('returns the caller\'s own rows plus shared rows, never another member\'s personal credential', async () => {
+  it("returns the caller's own rows plus shared rows, never another member's personal credential", async () => {
     const { env, seedWindow } = setup();
     // Owner-path control: the caller's personal Claude credential.
     seedWindow({ windowType: 'claude.five_hour', utilizationPercent: 72, lastEventLevel: 'ok' });
-    seedWindow({ windowType: 'claude.seven_day', utilizationPercent: 91, lastEventLevel: 'critical' });
+    seedWindow({
+      windowType: 'claude.seven_day',
+      utilizationPercent: 91,
+      lastEventLevel: 'critical',
+    });
     // Project-shared Codex credential used by another member — visible.
     seedWindow({
       credentialReference: 'cc_credentials:cred-shared',
@@ -140,8 +144,13 @@ describe('listProjectCredentialLimits', () => {
       lastEventLevel: 'critical',
     });
 
-    const response = await listProjectCredentialLimits(env, { projectId: 'project-1', userId: 'owner-1' });
-    const references = response.credentials.map((credential) => credential.credentialReference).sort();
+    const response = await listProjectCredentialLimits(env, {
+      projectId: 'project-1',
+      userId: 'owner-1',
+    });
+    const references = response.credentials
+      .map((credential) => credential.credentialReference)
+      .sort();
 
     expect(references).toEqual([
       'cc_credentials:cred-owner',
@@ -150,7 +159,9 @@ describe('listProjectCredentialLimits', () => {
     ]);
     expect(references).not.toContain('cc_credentials:cred-private-of-member-2');
 
-    const owner = response.credentials.find((c) => c.credentialReference === 'cc_credentials:cred-owner');
+    const owner = response.credentials.find(
+      (c) => c.credentialReference === 'cc_credentials:cred-owner'
+    );
     expect(owner).toMatchObject({
       credentialId: 'cred-owner',
       credentialSource: 'user',
@@ -163,14 +174,18 @@ describe('listProjectCredentialLimits', () => {
       ['claude.seven_day', 91],
     ]);
 
-    const shared = response.credentials.find((c) => c.credentialReference === 'cc_credentials:cred-shared');
+    const shared = response.credentials.find(
+      (c) => c.credentialReference === 'cc_credentials:cred-shared'
+    );
     expect(shared?.windows[0]).toMatchObject({
       windowType: 'codex.primary',
       windowMinutes: 300,
       source: 'vm-agent.codex_rollout',
       level: 'ok',
     });
-    const platform = response.credentials.find((c) => c.credentialReference === 'platform_credentials:plat-1');
+    const platform = response.credentials.find(
+      (c) => c.credentialReference === 'platform_credentials:plat-1'
+    );
     expect(platform?.credentialId).toBeNull();
     expect(typeof response.generatedAt).toBe('number');
   });
@@ -181,7 +196,10 @@ describe('listProjectCredentialLimits', () => {
     seedWindow({ projectId: 'project-1', credentialReference: 'cc_credentials:b' });
     seedWindow({ projectId: 'project-2', credentialReference: 'cc_credentials:elsewhere' });
 
-    const all = await listProjectCredentialLimits(env, { projectId: 'project-1', userId: 'owner-1' });
+    const all = await listProjectCredentialLimits(env, {
+      projectId: 'project-1',
+      userId: 'owner-1',
+    });
     expect(all.credentials.map((c) => c.credentialReference).sort()).toEqual([
       'cc_credentials:a',
       'cc_credentials:b',
@@ -202,14 +220,20 @@ describe('listProjectCredentialLimits', () => {
     // producer could never write can be seeded to prove the reader tolerates it.
     seedWindow({ credentialReference: 'cc_credentials:bad', credentialSource: 'mystery' });
 
-    const response = await listProjectCredentialLimits(env, { projectId: 'project-1', userId: 'owner-1' });
+    const response = await listProjectCredentialLimits(env, {
+      projectId: 'project-1',
+      userId: 'owner-1',
+    });
     expect(response.credentials.map((c) => c.credentialReference)).toEqual(['cc_credentials:good']);
   });
 
   it('caps the number of rows read via CREDENTIAL_LIMIT_READ_MAX_ROWS', async () => {
     const { env, seedWindow } = setup();
     for (let i = 0; i < 5; i++) {
-      seedWindow({ credentialReference: `cc_credentials:c${i}`, observedAt: 1_700_000_000_000 + i });
+      seedWindow({
+        credentialReference: `cc_credentials:c${i}`,
+        observedAt: 1_700_000_000_000 + i,
+      });
     }
     const response = await listProjectCredentialLimits(
       { ...env, CREDENTIAL_LIMIT_READ_MAX_ROWS: '2' } as Env,
@@ -226,13 +250,36 @@ describe('listProjectCredentialLimits', () => {
 describe('listUserCredentialLimits', () => {
   it('collapses one credential across projects to the newest sample per window and hides other users', async () => {
     const { env, seedWindow } = setup();
-    seedWindow({ projectId: 'project-1', windowType: 'claude.five_hour', utilizationPercent: 40, observedAt: 1_000 });
-    seedWindow({ projectId: 'project-2', windowType: 'claude.five_hour', utilizationPercent: 65, observedAt: 2_000 });
-    seedWindow({ projectId: 'project-2', windowType: 'claude.seven_day', utilizationPercent: 20, observedAt: 1_500 });
+    seedWindow({
+      projectId: 'project-1',
+      windowType: 'claude.five_hour',
+      utilizationPercent: 40,
+      observedAt: 1_000,
+    });
+    seedWindow({
+      projectId: 'project-2',
+      windowType: 'claude.five_hour',
+      utilizationPercent: 65,
+      observedAt: 2_000,
+    });
+    seedWindow({
+      projectId: 'project-2',
+      windowType: 'claude.seven_day',
+      utilizationPercent: 20,
+      observedAt: 1_500,
+    });
     // Shared credentials are not "mine" — Settings shows personal credentials only.
-    seedWindow({ credentialReference: 'cc_credentials:shared', credentialSource: 'project', observedAt: 3_000 });
+    seedWindow({
+      credentialReference: 'cc_credentials:shared',
+      credentialSource: 'project',
+      observedAt: 3_000,
+    });
     // Another user's personal credential must never appear.
-    seedWindow({ credentialReference: 'cc_credentials:theirs', userId: 'member-2', observedAt: 4_000 });
+    seedWindow({
+      credentialReference: 'cc_credentials:theirs',
+      userId: 'member-2',
+      observedAt: 4_000,
+    });
 
     const response = await listUserCredentialLimits(env, { userId: 'owner-1' });
     expect(response.credentials).toHaveLength(1);
@@ -247,7 +294,7 @@ describe('listUserCredentialLimits', () => {
 });
 
 describe('resolveAgentSessionCredentialReference', () => {
-  it('returns the reference only when the session\'s workspace belongs to the project', async () => {
+  it("returns the reference only when the session's workspace belongs to the project", async () => {
     const { env, seedSession } = setup();
     seedSession({
       sessionId: 'session-1',
@@ -255,18 +302,32 @@ describe('resolveAgentSessionCredentialReference', () => {
       projectId: 'project-1',
       credentialReference: 'cc_credentials:cred-owner',
     });
-    seedSession({ sessionId: 'session-2', workspaceId: 'ws-2', projectId: 'project-1', credentialReference: null });
+    seedSession({
+      sessionId: 'session-2',
+      workspaceId: 'ws-2',
+      projectId: 'project-1',
+      credentialReference: null,
+    });
 
     await expect(
-      resolveAgentSessionCredentialReference(env, { projectId: 'project-1', agentSessionId: 'session-1' })
+      resolveAgentSessionCredentialReference(env, {
+        projectId: 'project-1',
+        agentSessionId: 'session-1',
+      })
     ).resolves.toBe('cc_credentials:cred-owner');
     // Same session id, foreign project: not found.
     await expect(
-      resolveAgentSessionCredentialReference(env, { projectId: 'project-9', agentSessionId: 'session-1' })
+      resolveAgentSessionCredentialReference(env, {
+        projectId: 'project-9',
+        agentSessionId: 'session-1',
+      })
     ).resolves.toBeNull();
     // No attribution recorded.
     await expect(
-      resolveAgentSessionCredentialReference(env, { projectId: 'project-1', agentSessionId: 'session-2' })
+      resolveAgentSessionCredentialReference(env, {
+        projectId: 'project-1',
+        agentSessionId: 'session-2',
+      })
     ).resolves.toBeNull();
   });
 });

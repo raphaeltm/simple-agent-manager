@@ -17,12 +17,12 @@ vi.mock('../../../src/hooks/useQueryScope', () => ({
   useQueryScope: () => mocks.queryScope,
 }));
 
-import { CredentialLimitChip } from '../../../src/components/credential-limits/CredentialLimitChip';
 import {
   credentialChipText,
   formatResetCountdown,
   formatSampledAgo,
 } from '../../../src/components/credential-limits/credential-limit-format';
+import { CredentialLimitChip } from '../../../src/components/credential-limits/CredentialLimitChip';
 import { SessionCredentialLimitChip } from '../../../src/components/credential-limits/SessionCredentialLimitChip';
 
 const NOW = Date.UTC(2026, 9, 5, 12, 0, 0);
@@ -78,17 +78,29 @@ describe('credential limit formatting', () => {
     expect(credentialChipText(makeCredential())).toBe('Claude · 5h 72% · Week 31%');
     const codex = makeCredential({
       windows: [
-        { ...makeCredential().windows[0], windowType: 'codex.primary', windowMinutes: 300, utilizationPercent: 41.5 },
-        { ...makeCredential().windows[1], windowType: 'codex.secondary', windowMinutes: 10080, utilizationPercent: 12 },
+        {
+          ...makeCredential().windows[0],
+          windowType: 'codex.primary',
+          windowMinutes: 300,
+          utilizationPercent: 41.5,
+        },
+        {
+          ...makeCredential().windows[1],
+          windowType: 'codex.secondary',
+          windowMinutes: 10080,
+          utilizationPercent: 12,
+        },
       ],
     });
     expect(credentialChipText(codex)).toBe('Codex · 5h 42% · Week 12%');
     const many = makeCredential({
-      windows: ['opencode.rolling', 'opencode.weekly', 'opencode.monthly', 'opencode.extra'].map((windowType) => ({
-        ...makeCredential().windows[1],
-        windowType,
-        utilizationPercent: 5,
-      })),
+      windows: ['opencode.rolling', 'opencode.weekly', 'opencode.monthly', 'opencode.extra'].map(
+        (windowType) => ({
+          ...makeCredential().windows[1],
+          windowType,
+          utilizationPercent: 5,
+        })
+      ),
     });
     expect(credentialChipText(many)).toBe('OpenCode · Rolling 5% · Week 5% · Month 5% · +1');
   });
@@ -143,7 +155,9 @@ describe('SessionCredentialLimitChip', () => {
     });
     renderWithClient(<SessionCredentialLimitChip projectId="proj-1" agentSessionId="agent-1" />);
     await waitFor(() => expect(screen.getByTestId('credential-limit-chip')).toBeInTheDocument());
-    expect(mocks.getProjectCredentialLimits).toHaveBeenCalledWith('proj-1', { agentSessionId: 'agent-1' });
+    expect(mocks.getProjectCredentialLimits).toHaveBeenCalledWith('proj-1', {
+      agentSessionId: 'agent-1',
+    });
     expect(screen.getByTestId('credential-limit-chip')).toHaveTextContent('Claude · 5h 72%');
   });
 

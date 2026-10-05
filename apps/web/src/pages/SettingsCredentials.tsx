@@ -8,8 +8,8 @@ import { Alert, Button, Card, Input, Select, StatusBadge } from '@simple-agent-m
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { CredentialLimitChip } from '../components/credential-limits/CredentialLimitChip';
 import { formatSampledAgo } from '../components/credential-limits/credential-limit-format';
+import { CredentialLimitChip } from '../components/credential-limits/CredentialLimitChip';
 import { ConfigurationSection } from '../components/settings-credentials/ConfigurationSection';
 import { useQueryScope } from '../hooks/useQueryScope';
 import {
