@@ -1139,6 +1139,76 @@ describe('ACP usage callback credential verification', () => {
     });
   });
 
+  it('admits every window of one multi-window callback against the same credential', async () => {
+    const { sqlite, env } = createCredentialD1();
+    seedCallback();
+
+    const response = await handleAcpUsageCallback(makeContext(env), {
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      body: {
+        nodeId: 'node-1',
+        credentialReference: 'cc_credentials:cred-1',
+        credentialSource: 'user',
+        credentialGeneration: 1,
+        observedAt: 100_000,
+        source: 'vm-agent.codex_rollout',
+        rateLimits: [
+          {
+            windowType: 'codex.primary',
+            provider: 'openai',
+            source: 'vm-agent.codex_rollout',
+            status: 'allowed',
+            utilizationPercent: 41.5,
+            windowMinutes: 300,
+            resetsAt: 120_000,
+          },
+          {
+            windowType: 'codex.secondary',
+            provider: 'openai',
+            source: 'vm-agent.codex_rollout',
+            status: 'allowed',
+            utilizationPercent: 95,
+            windowMinutes: 10080,
+            resetsAt: 130_000,
+          },
+        ],
+      },
+    });
+
+    expect(response.status).toBe(204);
+    const rows = sqlite
+      .prepare(
+        `SELECT window_type, provider, utilization_percent, window_minutes, last_event_level
+           FROM credential_limit_windows
+          WHERE project_id = 'project-1' AND credential_reference = 'cc_credentials:cred-1'
+          ORDER BY window_type`
+      )
+      .all();
+    expect(rows).toEqual([
+      {
+        window_type: 'codex.primary',
+        provider: 'openai',
+        utilization_percent: 41.5,
+        window_minutes: 300,
+        last_event_level: 'ok',
+      },
+      {
+        window_type: 'codex.secondary',
+        provider: 'openai',
+        utilization_percent: 95,
+        window_minutes: 10080,
+        last_event_level: 'critical',
+      },
+    ]);
+    // Only the critical window crosses a threshold; the other admits silently.
+    expect(projectDataService.admitProjectEvent).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(projectDataService.admitProjectEvent).mock.calls[0]![2]).toMatchObject({
+      eventType: CREDENTIAL_LIMIT_EVENT_TYPES.critical,
+      subject: { type: 'credential', id: 'cc_credentials:cred-1' },
+    });
+  });
+
   it('rate limits authenticated callbacks before repeated session lookup work', async () => {
     const { env } = createCredentialD1({
       CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM: '1',

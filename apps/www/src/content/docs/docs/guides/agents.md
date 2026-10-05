@@ -111,12 +111,12 @@ Where it appears:
 
 Where the numbers come from (`apps/api/src/services/credential-limit-events/`, table `credential_limit_windows`):
 
-| Harness / mode                                | Windows                                       | Source                                                                                                                 |
-| --------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Claude Code with a Claude Pro/Max OAuth token | 5-hour, weekly, Opus weekly, Sonnet weekly    | Claude Code's own rate-limit events on the ACP stream (`session_host_usage.go`)                                        |
-| Codex with a ChatGPT plan                     | 5-hour and weekly (labelled by window length) | The pinned Codex CLI's session rollout, read by the VM agent after each completed turn (`session_host_usage_probe.go`) |
-| OpenCode with an OpenCode Go key              | rolling, weekly, monthly                      | OpenCode's official Go usage endpoint, called by the VM agent after each completed turn                                |
-| API keys routed through the SAM proxy         | request and token rate limits                 | Provider rate-limit response headers                                                                                   |
+| Harness / mode                                | Windows                                                                                                         | Source                                                                                                                 |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Claude Code with a Claude Pro/Max OAuth token | 5-hour, weekly, Opus weekly, Sonnet weekly                                                                      | Claude Code's own rate-limit events on the ACP stream (`session_host_usage.go`)                                        |
+| Codex with a ChatGPT plan                     | One or two windows depending on the plan, e.g. 5-hour and weekly (labelled by window length, never by position) | The pinned Codex CLI's session rollout, read by the VM agent after each completed turn (`session_host_usage_probe.go`) |
+| OpenCode with an OpenCode Go key              | rolling, weekly, monthly                                                                                        | OpenCode's official Go usage endpoint, called by the VM agent after each completed turn                                |
+| API keys routed through the SAM proxy         | request and token rate limits                                                                                   | Provider rate-limit response headers                                                                                   |
 
 Values are the latest samples SAM observed while an agent was running on that credential; they are not live quotes, and an idle credential keeps showing its last sample. SAM does not call undocumented provider account endpoints. OpenCode Zen bills per request from a credit balance that only the OpenCode console shows, so Zen sessions have no usage chip; agent settings link to the console instead.
 

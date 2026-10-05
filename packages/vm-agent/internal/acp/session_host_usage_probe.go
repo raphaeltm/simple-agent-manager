@@ -55,11 +55,12 @@ var codexThreadIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0
 // Codex home (CODEX_HOME when set, else ~/.codex) and prints its last bytes. The
 // thread id is passed as a positional argument, never spliced into the script.
 // `rollout-<timestamp>-<thread>[_<rollout>].jsonl` is the documented name shape.
-const codexRolloutTailScript = `d="${CODEX_HOME:-$HOME/.codex}/sessions"
+// The byte bound is codexRolloutTailBytes so the two cannot drift apart.
+var codexRolloutTailScript = fmt.Sprintf(`d="${CODEX_HOME:-$HOME/.codex}/sessions"
 [ -d "$d" ] || exit 0
 f=$(find "$d" -type f -name "rollout-*-$1*.jsonl" 2>/dev/null | sort | tail -n 1)
 [ -n "$f" ] || exit 0
-tail -c 262144 -- "$f"`
+tail -c %d -- "$f"`, codexRolloutTailBytes)
 
 // codexRolloutTailReader returns the trailing bytes of the rollout file for a
 // Codex thread. Tests inject a fake; production picks container or local mode.
@@ -79,6 +80,13 @@ type codexTokenCountPayload struct {
 type codexRateLimitSnapshot struct {
 	Primary   *codexRateLimitWindow `json:"primary"`
 	Secondary *codexRateLimitWindow `json:"secondary"`
+	// RateLimitReachedType is set by Codex when a limit is already enforced,
+	// possibly below 100% used_percent. Its value names the window ("primary",
+	// "secondary") in the pinned CLI; any other non-null value marks both.
+	RateLimitReachedType json.RawMessage `json:"rate_limit_reached_type"`
+	// SpendControlReached marks an organisation spend cap; every window is
+	// then rejected regardless of utilization.
+	SpendControlReached *bool `json:"spend_control_reached"`
 }
 
 type codexRateLimitWindow struct {
@@ -230,15 +238,33 @@ func (h *SessionHost) defaultCodexRolloutTailReader(ctx context.Context, threadI
 }
 
 // readLocalCodexRolloutTail is the standalone (cf-container) implementation:
-// the agent and the harness share one filesystem.
+// the agent and the harness share one filesystem. Like the container script it
+// matches on the file name at any depth under sessions/, so both readers keep
+// working if Codex ever changes the YYYY/MM/DD nesting.
 func readLocalCodexRolloutTail(threadID string) ([]byte, error) {
 	sessionsDir, err := resolveLocalAuthFileTargetPath(".codex/sessions")
 	if err != nil {
 		return nil, err
 	}
-	matches, err := filepath.Glob(filepath.Join(sessionsDir, "*", "*", "*", "rollout-*-"+threadID+"*.jsonl"))
-	if err != nil {
+	if _, err := os.Stat(sessionsDir); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
 		return nil, err
+	}
+	pattern := "rollout-*-" + threadID + "*.jsonl"
+	var matches []string
+	walkErr := filepath.WalkDir(sessionsDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		if ok, _ := filepath.Match(pattern, entry.Name()); ok {
+			matches = append(matches, path)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
 	}
 	if len(matches) == 0 {
 		return nil, nil
@@ -289,22 +315,46 @@ func parseCodexRolloutRateLimits(tail []byte, now int64) ([]usageLimitPayload, b
 		if parsed, err := time.Parse(time.RFC3339Nano, envelope.Timestamp); err == nil {
 			observedAt = parsed.UnixMilli()
 		}
+		primaryReached, secondaryReached := codexReachedWindows(snapshot)
 		var limits []usageLimitPayload
 		if snapshot.Primary != nil {
-			limits = append(limits, codexWindowPayload("codex.primary", snapshot.Primary, observedAt, now))
+			limits = append(limits, codexWindowPayload("codex.primary", snapshot.Primary, primaryReached, observedAt, now))
 		}
 		if snapshot.Secondary != nil {
-			limits = append(limits, codexWindowPayload("codex.secondary", snapshot.Secondary, observedAt, now))
+			limits = append(limits, codexWindowPayload("codex.secondary", snapshot.Secondary, secondaryReached, observedAt, now))
 		}
 		return limits, true
 	}
 	return nil, false
 }
 
-func codexWindowPayload(windowType string, window *codexRateLimitWindow, observedAt, now int64) usageLimitPayload {
+// codexReachedWindows reports which windows Codex itself marks as enforced.
+// rate_limit_reached_type names one window; spend_control_reached or an
+// unrecognised reached type marks both, which is the safe direction.
+func codexReachedWindows(snapshot *codexRateLimitSnapshot) (primary, secondary bool) {
+	if snapshot.SpendControlReached != nil && *snapshot.SpendControlReached {
+		return true, true
+	}
+	raw := bytes.TrimSpace(snapshot.RateLimitReachedType)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) || bytes.Equal(raw, []byte("false")) {
+		return false, false
+	}
+	var name string
+	if err := json.Unmarshal(raw, &name); err == nil {
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "primary":
+			return true, false
+		case "secondary":
+			return false, true
+		}
+	}
+	return true, true
+}
+
+func codexWindowPayload(windowType string, window *codexRateLimitWindow, reached bool, observedAt, now int64) usageLimitPayload {
 	utilization := clampPercent(window.UsedPercent)
 	status := "allowed"
-	if utilization >= 100 {
+	if reached || utilization >= 100 {
 		status = "rejected"
 	}
 	payload := usageLimitPayload{

@@ -11,13 +11,13 @@
  * Malformed rows are skipped, not fatal (`.claude/rules/50`).
  */
 import {
+  credentialIdFromReference,
   type CredentialLimitCredentialSource,
   type CredentialLimitCredentialSummary,
   type CredentialLimitLevel,
   type CredentialLimitsResponse,
   type CredentialLimitStatus,
   type CredentialLimitWindowSummary,
-  credentialIdFromReference,
   DEFAULT_CREDENTIAL_LIMIT_READ_MAX_ROWS,
   worstCredentialLimitLevel,
 } from '@simple-agent-manager/shared';
@@ -70,10 +70,16 @@ const SOURCES: ReadonlySet<string> = new Set<CredentialLimitCredentialSource>([
   'platform',
 ]);
 
+/**
+ * Hard ceiling on the configurable read cap: a misconfigured
+ * CREDENTIAL_LIMIT_READ_MAX_ROWS must not turn a UI poll into an unbounded read.
+ */
+const CREDENTIAL_LIMIT_READ_MAX_ROWS_CEILING = 2000;
+
 function readMaxRows(env: Env): number {
-  return parsePositiveInt(
-    env.CREDENTIAL_LIMIT_READ_MAX_ROWS,
-    DEFAULT_CREDENTIAL_LIMIT_READ_MAX_ROWS
+  return Math.min(
+    parsePositiveInt(env.CREDENTIAL_LIMIT_READ_MAX_ROWS, DEFAULT_CREDENTIAL_LIMIT_READ_MAX_ROWS),
+    CREDENTIAL_LIMIT_READ_MAX_ROWS_CEILING
   );
 }
 

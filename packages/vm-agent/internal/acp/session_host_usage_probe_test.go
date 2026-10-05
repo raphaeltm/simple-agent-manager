@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -430,5 +432,322 @@ func TestProbeCodexRolloutRejectsNonUUIDThreadIDs(t *testing.T) {
 	}
 	if _, ok := host.probeCodexRolloutRateLimits(context.Background(), testCodexThreadID); !ok {
 		t.Fatal("valid UUID must be read")
+	}
+}
+
+func TestParseCodexRolloutRateLimitsRejectsReachedWindowsBelowFullUtilization(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UnixMilli()
+	primaryReached := `{"timestamp":"2026-10-05T10:05:00Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"primary":{"used_percent":60.0,"window_minutes":300,"resets_at":1759662000},"secondary":{"used_percent":12.0,"window_minutes":10080,"resets_at":1760000000},"rate_limit_reached_type":"primary"}}}` + "\n"
+	limits, ok := parseCodexRolloutRateLimits([]byte(primaryReached), now)
+	if !ok || len(limits) != 2 {
+		t.Fatalf("limits = %v ok=%v", limits, ok)
+	}
+	if limits[0].Status != "rejected" || limits[1].Status != "allowed" {
+		t.Fatalf("rate_limit_reached_type=primary should reject only the primary window: %q/%q", limits[0].Status, limits[1].Status)
+	}
+
+	spendCap := `{"timestamp":"2026-10-05T10:05:00Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"primary":{"used_percent":30.0,"window_minutes":300},"secondary":{"used_percent":5.0,"window_minutes":10080},"spend_control_reached":true}}}` + "\n"
+	limits, ok = parseCodexRolloutRateLimits([]byte(spendCap), now)
+	if !ok || limits[0].Status != "rejected" || limits[1].Status != "rejected" {
+		t.Fatalf("spend_control_reached must reject every window: %+v", limits)
+	}
+
+	unknownShape := `{"timestamp":"2026-10-05T10:05:00Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"primary":{"used_percent":30.0,"window_minutes":300},"secondary":{"used_percent":5.0,"window_minutes":10080},"rate_limit_reached_type":{"kind":"credits"}}}}` + "\n"
+	limits, ok = parseCodexRolloutRateLimits([]byte(unknownShape), now)
+	if !ok || limits[0].Status != "rejected" || limits[1].Status != "rejected" {
+		t.Fatalf("an unrecognised reached type must fail closed to rejected: %+v", limits)
+	}
+
+	nullReached := `{"timestamp":"2026-10-05T10:05:00Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"primary":{"used_percent":30.0,"window_minutes":300},"secondary":null,"rate_limit_reached_type":null,"spend_control_reached":false}}}` + "\n"
+	limits, ok = parseCodexRolloutRateLimits([]byte(nullReached), now)
+	if !ok || len(limits) != 1 || limits[0].Status != "allowed" {
+		t.Fatalf("null/false reached markers must not reject: %+v", limits)
+	}
+}
+
+func writeRollout(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// The standalone reader is the real cf-container path; it must honour
+// CODEX_HOME, pick the newest rollout for the thread at any depth, and read only
+// the bounded tail of a large file.
+func TestReadLocalCodexRolloutTailPicksNewestAndBoundsTheRead(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	sessions := filepath.Join(codexHome, "sessions")
+
+	stale := `{"timestamp":"2026-10-04T09:00:00Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"primary":{"used_percent":1.0,"window_minutes":300}}}}` + "\n"
+	writeRollout(t, filepath.Join(sessions, "2026", "10", "04"), "rollout-2026-10-04T09-00-00-"+testCodexThreadID+".jsonl", stale)
+	// Another thread's rollout in the newest directory must not be picked.
+	writeRollout(t, filepath.Join(sessions, "2026", "10", "05"), "rollout-2026-10-05T11-00-00-11111111-2222-4333-8444-555555555555.jsonl", stale)
+
+	// The live rollout is larger than the tail bound; the newest snapshot sits at the end.
+	filler := strings.Repeat(`{"timestamp":"2026-10-05T10:00:00Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"`+strings.Repeat("x", 900)+`"}]}}`+"\n", 400)
+	newest := `{"timestamp":"2026-10-05T10:05:00Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"primary":{"used_percent":77.0,"window_minutes":300,"resets_at":1759662000}}}}` + "\n"
+	// A revert-style name (`_<rollout_id>` suffix) at a deeper, non-date path still matches.
+	live := writeRollout(t, filepath.Join(sessions, "2026", "10", "05", "extra"), "rollout-2026-10-05T10-00-00-"+testCodexThreadID+"_7.jsonl", filler+newest)
+	if info, err := os.Stat(live); err != nil || info.Size() <= codexRolloutTailBytes {
+		t.Fatalf("fixture must exceed the tail bound: size=%d err=%v", info.Size(), err)
+	}
+
+	tail, err := readLocalCodexRolloutTail(testCodexThreadID)
+	if err != nil {
+		t.Fatalf("readLocalCodexRolloutTail: %v", err)
+	}
+	if len(tail) != codexRolloutTailBytes {
+		t.Fatalf("tail length = %d, want exactly the bound %d", len(tail), codexRolloutTailBytes)
+	}
+	limits, ok := parseCodexRolloutRateLimits(tail, time.Now().UnixMilli())
+	if !ok || len(limits) != 1 || *limits[0].UtilizationPercent != 77 {
+		t.Fatalf("expected the newest snapshot from the live rollout, got %+v ok=%v", limits, ok)
+	}
+
+	// Through the host: with no container resolver the default reader is the local one.
+	host := newTestSessionHost(t)
+	host.config.ContainerResolver = nil
+	got, ok := host.probeCodexRolloutRateLimits(context.Background(), testCodexThreadID)
+	if !ok || len(got) != 1 || *got[0].UtilizationPercent != 77 {
+		t.Fatalf("default reader did not use the local rollout: %+v ok=%v", got, ok)
+	}
+}
+
+func TestReadLocalCodexRolloutTailWithoutRollouts(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	if tail, err := readLocalCodexRolloutTail(testCodexThreadID); err != nil || tail != nil {
+		t.Fatalf("missing sessions dir: tail=%v err=%v, want nil/nil", tail, err)
+	}
+	if err := os.MkdirAll(filepath.Join(codexHome, "sessions", "2026", "10", "05"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if tail, err := readLocalCodexRolloutTail(testCodexThreadID); err != nil || tail != nil {
+		t.Fatalf("empty sessions dir: tail=%v err=%v, want nil/nil", tail, err)
+	}
+}
+
+func TestCompletedOpenCodeGoPromptSkipsReportOnNon200(t *testing.T) {
+	host, _ := newPromptRetryTestHost(t, promptRetryScript{
+		responses: []promptRetryResponse{{stopReason: "end_turn"}},
+	})
+	capture := wireUsageProbeControlPlane(t, host)
+	var hits atomic.Int32
+	usage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(usage.Close)
+	host.config.OpenCodeGoUsageURL = usage.URL
+	host.config.HTTPClient = &http.Client{Timeout: 2 * time.Second}
+	host.storeCredentialAttribution("opencode", &agentCredential{
+		credentialSource: "user", credentialReference: "cc_credentials:go-1", credentialProvider: "agent", providerMode: "direct",
+	})
+	host.storeOpencodeUsageProbeKey("opencode",
+		&agentCredential{credential: "oc-go-key", credentialKind: "api-key"},
+		&agentSettingsPayload{OpencodeProvider: "opencode-go"})
+
+	runPromptToCompletion(t, host)
+	deadline := time.Now().Add(2 * time.Second)
+	for hits.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if hits.Load() == 0 {
+		t.Fatal("usage endpoint was never called (liveness)")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if capture.count() != 0 {
+		t.Fatalf("a non-200 usage response must not produce a report, got %d", capture.count())
+	}
+}
+
+func TestProbeOpenCodeGoUsageHonoursTheProbeTimeout(t *testing.T) {
+	t.Parallel()
+	release := make(chan struct{})
+	usage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(func() { close(release); usage.Close() })
+	host := newTestSessionHost(t)
+	host.config.OpenCodeGoUsageURL = usage.URL
+	host.config.UsageProbeTimeout = 30 * time.Millisecond
+	host.config.HTTPClient = &http.Client{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), host.usageProbeTimeout())
+	defer cancel()
+	started := time.Now()
+	limits, ok := host.probeOpenCodeGoUsage(ctx, "oc-go-key")
+	if ok || limits != nil {
+		t.Fatalf("slow endpoint must yield no observation, got %+v", limits)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("probe did not respect the timeout: took %s", elapsed)
+	}
+}
+
+func TestScheduleProviderUsageProbeIsSingleFlight(t *testing.T) {
+	host := newTestSessionHost(t)
+	host.storeCredentialAttribution("openai-codex", &agentCredential{credentialSource: "user", credentialReference: "cc_credentials:x", credentialProvider: "openai", providerMode: "direct"})
+	host.mu.Lock()
+	host.setSessionIDLocked(testCodexThreadID)
+	host.mu.Unlock()
+	host.config.UsageProbeTimeout = 5 * time.Second
+
+	release := make(chan struct{})
+	var reads atomic.Int32
+	host.codexRolloutReader = func(ctx context.Context, _ string) ([]byte, error) {
+		reads.Add(1)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil, context.Canceled
+	}
+
+	if !host.scheduleProviderUsageProbe() {
+		t.Fatal("first probe must start")
+	}
+	deadline := time.Now().Add(time.Second)
+	for reads.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if host.scheduleProviderUsageProbe() {
+		t.Fatal("second probe must be rejected while the first is in flight")
+	}
+	close(release)
+	deadline = time.Now().Add(time.Second)
+	for host.usageProbeInFlight.Load() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !host.scheduleProviderUsageProbe() {
+		t.Fatal("probe must be schedulable again once the previous one finished")
+	}
+}
+
+// Rule 71: the probe must outlive the prompt's own context. Cancelling the
+// caller's context at completion must not cancel the rollout read or the report.
+func TestProbeSurvivesCallerContextCancellation(t *testing.T) {
+	host, _ := newPromptRetryTestHost(t, promptRetryScript{
+		responses: []promptRetryResponse{{stopReason: "end_turn"}},
+	})
+	capture := wireUsageProbeControlPlane(t, host)
+	host.storeCredentialAttribution("openai-codex", &agentCredential{
+		credentialSource: "user", credentialReference: "cc_credentials:codex-1", credentialGeneration: 1, credentialProvider: "openai", providerMode: "direct",
+	})
+	host.mu.Lock()
+	host.setSessionIDLocked(testCodexThreadID)
+	host.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var readerCtxErr atomic.Value
+	host.codexRolloutReader = func(readCtx context.Context, _ string) ([]byte, error) {
+		// By now the caller's context is cancelled; the probe's must not be.
+		<-ctx.Done()
+		readerCtxErr.Store(readCtx.Err() == nil)
+		return []byte(codexRolloutFixture), nil
+	}
+
+	var completed sync.WaitGroup
+	completed.Add(1)
+	host.config.OnPromptComplete = func(string, error) {
+		defer completed.Done()
+		cancel()
+	}
+	host.HandlePrompt(ctx, json.RawMessage(`1`), promptRetryParams(), "viewer-1", false)
+	completed.Wait()
+
+	payload := capture.waitForPayload(t, 5*time.Second)
+	if alive, _ := readerCtxErr.Load().(bool); !alive {
+		t.Fatal("probe context was cancelled along with the prompt context")
+	}
+	if payload.Source != "vm-agent.codex_rollout" {
+		t.Fatalf("payload source = %q", payload.Source)
+	}
+}
+
+// Teardown control for rule 71: stopping the host cancels an in-flight probe
+// and no report is posted afterwards.
+func TestStopCancelsInFlightProbe(t *testing.T) {
+	host := newTestSessionHost(t)
+	capture := wireUsageProbeControlPlane(t, host)
+	host.storeCredentialAttribution("openai-codex", &agentCredential{credentialSource: "user", credentialReference: "cc_credentials:x", credentialProvider: "openai", providerMode: "direct"})
+	host.mu.Lock()
+	host.setSessionIDLocked(testCodexThreadID)
+	host.mu.Unlock()
+	host.config.UsageProbeTimeout = 5 * time.Second
+
+	cancelled := make(chan struct{})
+	host.codexRolloutReader = func(ctx context.Context, _ string) ([]byte, error) {
+		<-ctx.Done()
+		close(cancelled)
+		return []byte(codexRolloutFixture), nil
+	}
+	if !host.scheduleProviderUsageProbe() {
+		t.Fatal("probe must start")
+	}
+	host.Stop()
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop() did not cancel the in-flight probe")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if capture.count() != 0 {
+		t.Fatalf("no report must be posted after Stop(), got %d", capture.count())
+	}
+}
+
+// A prompt that fails after retries must not sample usage; only successful
+// completions do. Liveness: the failure itself is still reported.
+func TestErroredCodexPromptDoesNotProbe(t *testing.T) {
+	host, _ := newPromptRetryTestHost(t, promptRetryScript{
+		responses: []promptRetryResponse{
+			{errMessage: `Internal error: API Error: 529 overloaded_error`},
+			{errMessage: `Internal error: API Error: 529 overloaded_error`},
+			{errMessage: `Internal error: API Error: 529 overloaded_error`},
+		},
+	})
+	capture := wireUsageProbeControlPlane(t, host)
+	host.storeCredentialAttribution("openai-codex", &agentCredential{
+		credentialSource: "user", credentialReference: "cc_credentials:codex-1", credentialProvider: "openai", providerMode: "direct",
+	})
+	host.mu.Lock()
+	host.setSessionIDLocked(testCodexThreadID)
+	host.mu.Unlock()
+	var reads atomic.Int32
+	host.codexRolloutReader = func(context.Context, string) ([]byte, error) {
+		reads.Add(1)
+		return []byte(codexRolloutFixture), nil
+	}
+
+	var completed sync.WaitGroup
+	completed.Add(1)
+	var promptErr atomic.Value
+	host.config.OnPromptComplete = func(_ string, err error) {
+		defer completed.Done()
+		promptErr.Store(err != nil)
+	}
+	host.HandlePrompt(context.Background(), json.RawMessage(`1`), promptRetryParams(), "viewer-1", false)
+	completed.Wait()
+	time.Sleep(50 * time.Millisecond)
+
+	if failed, _ := promptErr.Load().(bool); !failed {
+		t.Fatal("liveness: the exhausted prompt must complete with an error")
+	}
+	if reads.Load() != 0 || capture.count() != 0 {
+		t.Fatalf("errored prompt probed: reads=%d posts=%d", reads.Load(), capture.count())
 	}
 }

@@ -7,6 +7,7 @@
 import { expect, type Page, test } from '@playwright/test';
 
 import {
+  assertNoClippedOverflow,
   assertNoOverflow,
   type AuditResponder,
   makeMockUser,
@@ -250,6 +251,10 @@ function chatHandler(scenario: LimitsScenario, sessionCredential: unknown) {
       return respond(200, { tasks: [], nextCursor: null });
     if (path === `/api/projects/${PROJECT_ID}`) return respond(200, MOCK_PROJECT);
     if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT], total: 1 });
+    // App-shell data the chat route loads; these must be the right container shape.
+    if (path === '/api/credentials') return respond(200, []);
+    if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
+    if (path === '/api/github/installations') return respond(200, { installations: [] });
     if (path.startsWith('/api/notifications'))
       return respond(200, { notifications: [], unreadCount: 0, nextCursor: null });
     if (path === '/api/agents') return respond(200, { agents: [] });
@@ -318,6 +323,7 @@ function surfaceTests() {
       /Claude · 5h 72% · Week 31%/
     );
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-chat-normal', { scopeToProject: true });
 
     await page.getByTestId('credential-limit-chip').click();
@@ -326,6 +332,7 @@ function surfaceTests() {
     await expect(details.getByTestId('credential-limit-window')).toHaveCount(2);
     await expect(details).toContainText('resets in 2h');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-chat-details', { scopeToProject: true });
   });
 
@@ -337,6 +344,7 @@ function surfaceTests() {
     );
     await expect(page.getByTestId('credential-limit-chip')).toHaveAccessibleName(/Limit reached/);
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-chat-critical', { scopeToProject: true });
   });
 
@@ -347,6 +355,7 @@ function surfaceTests() {
       /OpenCode · Rolling 7% · Week 39% · Month 19% · \+2/
     );
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-chat-many', { scopeToProject: true });
     await page.getByTestId('credential-limit-chip').click();
     await expect(
@@ -354,6 +363,7 @@ function surfaceTests() {
     ).toHaveCount(5);
     await expect(page.getByTestId('credential-limit-details')).toContainText('reset due');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-chat-many-details', { scopeToProject: true });
   });
 
@@ -364,12 +374,14 @@ function surfaceTests() {
     await expect(page.getByTestId('session-header')).toContainText('Active');
     await expect(page.getByTestId('credential-limit-chip')).toHaveCount(0);
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-chat-empty', { scopeToProject: true });
 
     await openChat(page, 'error', CLAUDE_CRED);
     await expect(page.getByTestId('session-header')).toContainText('Active');
     await expect(page.getByTestId('credential-limit-chip')).toHaveCount(0);
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('settings credential cards show usage rows only for credentials with samples', async ({
@@ -381,11 +393,13 @@ function surfaceTests() {
     await expect(rows.nth(0)).toContainText('Claude · 5h 72%');
     await expect(rows.nth(0)).toContainText('sampled 4m ago');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-settings-normal', { scopeToProject: true });
 
     await rows.nth(1).getByTestId('credential-limit-chip').click();
     await expect(page.getByTestId('credential-limit-details')).toContainText('Codex usage');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-settings-details', { scopeToProject: true });
   });
 
@@ -394,12 +408,14 @@ function surfaceTests() {
     await expect(page.getByText('Claude Max (personal)')).toBeVisible();
     await expect(page.getByTestId('credential-usage-row')).toHaveCount(0);
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-settings-empty', { scopeToProject: true });
 
     await openSettings(page, 'error');
     await expect(page.getByText('Claude Max (personal)')).toBeVisible();
     await expect(page.getByTestId('credential-usage-row')).toHaveCount(0);
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 }
 

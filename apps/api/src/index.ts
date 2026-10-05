@@ -85,6 +85,7 @@ import { clientErrorsRoutes } from './routes/client-errors';
 import { codexRefreshRoutes } from './routes/codex-refresh';
 import { codexRuntimeRoutes } from './routes/codex-runtime';
 import { ccRoutes } from './routes/composable-credentials';
+import { credentialLimitsRoute } from './routes/credential-limits';
 import { credentialsRoutes } from './routes/credentials';
 import { dashboardRoutes } from './routes/dashboard';
 import { deployReleaseCallbackRoute } from './routes/deploy-release-callback';
@@ -142,7 +143,6 @@ import { workspaceEvictionCallbackRoute } from './routes/projects/workspace-evic
 import { workspaceResourceHistoryCallbackRoute } from './routes/projects/workspace-resource-history-callback';
 import { providersRoutes } from './routes/providers';
 import { reportIssueRoutes } from './routes/report-issue';
-import { credentialLimitsRoute } from './routes/credential-limits';
 import { resolutionStatusRoute } from './routes/resolution-status';
 import { samRoutes } from './routes/sam';
 import { setupRoutes } from './routes/setup';

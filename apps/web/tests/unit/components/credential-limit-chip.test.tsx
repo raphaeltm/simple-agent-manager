@@ -105,10 +105,24 @@ describe('credential limit formatting', () => {
     expect(credentialChipText(many)).toBe('OpenCode · Rolling 5% · Week 5% · Month 5% · +1');
   });
 
+  it('spells out exactly three windows without a +N suffix', () => {
+    const three = makeCredential({
+      windows: ['opencode.rolling', 'opencode.weekly', 'opencode.monthly'].map((windowType) => ({
+        ...makeCredential().windows[1],
+        windowType,
+        utilizationPercent: 9,
+      })),
+    });
+    expect(credentialChipText(three)).toBe('OpenCode · Rolling 9% · Week 9% · Month 9%');
+  });
+
   it('formats reset countdowns and sample age', () => {
     expect(formatResetCountdown(NOW + 2 * 3_600_000 + 10 * 60_000, NOW)).toBe('resets in 2h 10m');
     expect(formatResetCountdown(NOW + 30 * 60_000, NOW)).toBe('resets in 30m');
     expect(formatResetCountdown(NOW + 26 * 3_600_000, NOW)).toBe('resets in 1d 2h');
+    expect(formatResetCountdown(NOW + 48 * 3_600_000, NOW)).toBe('resets in 2d');
+    expect(formatResetCountdown(NOW + 3 * 3_600_000, NOW)).toBe('resets in 3h');
+    expect(formatResetCountdown(NOW, NOW)).toBe('reset due');
     expect(formatResetCountdown(NOW - 1, NOW)).toBe('reset due');
     expect(formatResetCountdown(null, NOW)).toBeNull();
     expect(formatSampledAgo(NOW - 10_000, NOW)).toBe('sampled just now');

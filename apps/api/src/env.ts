@@ -290,7 +290,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CREDENTIAL_LIMIT_OBSERVATION_MAX_AGE_MS?: string; // Oldest accepted credential limit observation age (default: 86400000)
   CREDENTIAL_LIMIT_OBSERVATION_FUTURE_SKEW_MS?: string; // Accepted future clock skew for credential limit samples (default: 300000)
   CREDENTIAL_LIMIT_RESET_MAX_FUTURE_MS?: string; // Max future provider reset timestamp accepted (default: 691200000)
-  CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS?: string; // Comma-separated credential telemetry provider allowlist (default: anthropic,openai)
+  CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS?: string; // Comma-separated credential telemetry provider allowlist (default: anthropic,openai,opencode)
   CREDENTIAL_LIMIT_SUPPORTED_SOURCES?: string; // Comma-separated credential telemetry source allowlist
   CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES?: string; // Comma-separated credential telemetry window allowlist
   CREDENTIAL_LIMIT_ADMISSION_MAX_ACTIVE_PER_PROJECT?: string; // Max retained credential event admissions per project (default: 1000)

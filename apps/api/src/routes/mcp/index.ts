@@ -182,9 +182,9 @@ import {
   handleGetWorkspaceDiffSummary,
   handleGetWorkspaceInfo,
 } from './workspace-tools';
+import { handleGetCredentialLimits } from './workspace-tools-credential-limits';
 import {
   handleCheckDnsStatus,
-  handleGetCredentialLimits,
   handleGetPeerAgentOutput,
   handleGetTaskDependencies,
   handleListProjectAgents,

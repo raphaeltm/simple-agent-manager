@@ -109,6 +109,32 @@ describe('AgentSettingsCard OpenCode model catalog', () => {
     expect(screen.queryByText('Claude Sonnet 4.6')).not.toBeInTheDocument();
   });
 
+  it('shows the Zen balance note only for the opencode-zen provider', async () => {
+    vi.mocked(getAgentModelCatalog).mockResolvedValue(dynamicOpenCodeCatalog());
+    const { unmount } = render(
+      <AgentSettingsCard
+        agent={makeOpenCodeAgent()}
+        settings={makeOpenCodeSettings({ opencodeProvider: 'opencode-zen' })}
+        onSave={vi.fn()}
+        onReset={vi.fn()}
+      />
+    );
+    const note = screen.getByTestId('opencode-zen-balance-note');
+    expect(note).toHaveTextContent('OpenCode console');
+    expect(note.querySelector('a')).toHaveAttribute('href', 'https://opencode.ai/zen');
+    unmount();
+
+    render(
+      <AgentSettingsCard
+        agent={makeOpenCodeAgent()}
+        settings={makeOpenCodeSettings({ opencodeProvider: 'opencode-go' })}
+        onSave={vi.fn()}
+        onReset={vi.fn()}
+      />
+    );
+    expect(screen.queryByTestId('opencode-zen-balance-note')).toBeNull();
+  });
+
   it('keeps custom OpenCode providers as freeform model input', async () => {
     const user = userEvent.setup();
     const onSave = vi.fn().mockResolvedValue(undefined);

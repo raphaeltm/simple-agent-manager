@@ -293,6 +293,23 @@ describe('listUserCredentialLimits', () => {
   });
 });
 
+describe('listUserCredentialLimits cap', () => {
+  it('reads at most CREDENTIAL_LIMIT_READ_MAX_ROWS rows, newest first', async () => {
+    const { env, seedWindow } = setup();
+    for (let i = 0; i < 4; i++) {
+      seedWindow({ credentialReference: `cc_credentials:u${i}`, observedAt: 1_000 + i });
+    }
+    const response = await listUserCredentialLimits(
+      { ...env, CREDENTIAL_LIMIT_READ_MAX_ROWS: '2' } as Env,
+      { userId: 'owner-1' }
+    );
+    expect(response.credentials.map((c) => c.credentialReference)).toEqual([
+      'cc_credentials:u3',
+      'cc_credentials:u2',
+    ]);
+  });
+});
+
 describe('resolveAgentSessionCredentialReference', () => {
   it("returns the reference only when the session's workspace belongs to the project", async () => {
     const { env, seedSession } = setup();

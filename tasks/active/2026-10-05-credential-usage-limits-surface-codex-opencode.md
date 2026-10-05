@@ -177,7 +177,7 @@ window_minutes: i64|null, resets_at: unix seconds|null }` (`protocol/src/protoco
 - [x] D5 `SettingsCredentials.tsx` `CredentialCard`: usage line from `/api/credentials/limits` matched by
       `cc_credentials:<id>`; `AgentSettingsCard.tsx`: when OpenCode provider is `opencode-zen`, show the one-line note
       "Zen credit balance is only visible in the OpenCode console" with a link.
-- [ ] D6 Unit tests: format helpers; `SessionHeader` shows/hides the chip from a mocked query; Settings card shows usage.
+- [x] D6 Unit tests: format helpers; `SessionHeader` shows/hides the chip from a mocked query; Settings card shows usage.
 - [ ] D7 Playwright `tests/playwright/credential-limits-audit.spec.ts`: Settings credentials + chat header at 375×667
       and 1280×800 with normal / long names / many windows / empty / error data; overflow assertions; screenshots in
       `.tmp/playwright-screenshots/`; reviewed and posted to the PR.
@@ -204,6 +204,15 @@ window_minutes: i64|null, resets_at: unix seconds|null }` (`protocol/src/protoco
 7. No code path calls `api.anthropic.com/api/oauth/usage` or `chatgpt.com/backend-api/wham/usage` (grep in review).
 8. `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green; Go tests green; CI green; staging deploy green with a
    real VM provisioned (vm-agent change ⇒ rule 22 infra gate) and cleaned up.
+
+## Review follow-ups applied (2026-10-05, Phase 5)
+- Added migration `0183_credential_limit_windows_user_index.sql` + schema index so the per-user read is index-backed (performance + Cloudflare reviewers).
+- `CREDENTIAL_LIMIT_READ_MAX_ROWS` is clamped to a 2000-row ceiling (Cloudflare reviewer); var added to the deploy override list (env reviewer).
+- Codex `rate_limit_reached_type` / `spend_control_reached` now mark windows `rejected` below 100% (validator + test reviewer), with tests.
+- Local rollout lookup is depth-agnostic like the container script (go reviewer).
+- MCP handler moved to `routes/mcp/workspace-tools-credential-limits.ts` (file-size rule 18); shared `formatMsSpan` in `lib/time-utils.ts` replaces the duplicate span formatter (architecture reviewer).
+- Tests added: Settings usage rows, SessionHeader chip wiring spy, Zen note, MCP error path, multi-window single callback through the real handler, user cap, local rollout reader, OpenCode non-200 + timeout, rule-71 cancellation + teardown, single-flight, errored prompt; Playwright now also asserts no clipped overflow.
+- Docs: `configuration.md` gained the two VM-agent vars, the two `VITE_` vars and the corrected `anthropic,openai,opencode` default.
 
 ## Notes / dead ends
 

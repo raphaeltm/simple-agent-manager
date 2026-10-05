@@ -16,8 +16,13 @@ import {
 
 /**
  * Compact usage chip for one credential ("Claude · 5h 72% · Week 31%") that opens
- * a details dialog listing every window with its reset countdown. The dialog is
- * used instead of a hover tooltip so the details work on a phone.
+ * a details dialog listing every window with its reset countdown.
+ *
+ * A `Dialog` rather than the anchored `Popover`: the chip lives in the chat
+ * header, which sits at the top of an `overflow` scroll container, and on a
+ * 375px screen a five-window list with progress bars needs more room than an
+ * anchored panel reliably has. A modal is never clipped by the header's
+ * overflow (rule 56) and reads the same on phone and desktop.
  */
 export function CredentialLimitChip({
   credential,
@@ -47,7 +52,7 @@ export function CredentialLimitChip({
   );
 }
 
-export function CredentialLimitDetails({
+function CredentialLimitDetails({
   credential,
   now,
 }: Readonly<{ credential: CredentialLimitCredentialSummary; now?: number }>) {

@@ -1803,6 +1803,11 @@ export const credentialLimitWindows = sqliteTable(
       table.agentSessionId
     ),
     observedAtIdx: index('idx_credential_limit_windows_observed_at').on(table.observedAt),
+    userSourceObservedIdx: index('idx_credential_limit_windows_user_source_observed').on(
+      table.userId,
+      table.credentialSource,
+      table.observedAt
+    ),
     projectUpdatedIdx: index('idx_credential_limit_windows_project_updated').on(
       table.projectId,
       table.updatedAt,

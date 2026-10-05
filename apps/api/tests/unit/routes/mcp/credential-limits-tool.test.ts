@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../../src/env';
 import type { McpTokenData } from '../../../../src/routes/mcp/_helpers';
-import { handleGetCredentialLimits } from '../../../../src/routes/mcp/workspace-tools-direct';
+import { handleGetCredentialLimits } from '../../../../src/routes/mcp/workspace-tools-credential-limits';
 
 const mocks = vi.hoisted(() => ({
   listProjectCredentialLimits: vi.fn(),
@@ -131,6 +131,14 @@ describe('get_credential_limits MCP tool', () => {
     );
     expect(body.credentials).toEqual([]);
     expect(String(body.note)).toContain('scope "project"');
+  });
+
+  it('returns a JSON-RPC internal error when the read service fails', async () => {
+    mocks.listProjectCredentialLimits.mockRejectedValue(new Error('D1 unavailable'));
+    const response = await handleGetCredentialLimits('6', { scope: 'project' }, token(), env);
+    expect(response.error?.code).toBe(-32603);
+    expect(response.error?.message).toContain('Failed to read credential limits');
+    expect(response.error?.message).toContain('D1 unavailable');
   });
 
   it('rejects an unknown scope', async () => {

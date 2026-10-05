@@ -8,9 +8,9 @@ import {
   credentialLimitWindowLabel,
 } from '@simple-agent-manager/shared';
 
+import { formatMsSpan } from '../../lib/time-utils';
+
 const MINUTE_MS = 60_000;
-const HOUR_MS = 60 * MINUTE_MS;
-const DAY_MS = 24 * HOUR_MS;
 
 /** How many windows the compact chip spells out before collapsing to "+N". */
 export const CHIP_MAX_WINDOWS = 3;
@@ -46,33 +46,22 @@ export function formatUtilizationPercent(value: number | null): string {
   return `${Math.round(value)}%`;
 }
 
-function formatSpan(ms: number): string {
-  if (ms >= DAY_MS) {
-    const days = Math.floor(ms / DAY_MS);
-    const hours = Math.floor((ms % DAY_MS) / HOUR_MS);
-    return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
-  }
-  if (ms >= HOUR_MS) {
-    const hours = Math.floor(ms / HOUR_MS);
-    const minutes = Math.floor((ms % HOUR_MS) / MINUTE_MS);
-    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-  }
-  return `${Math.max(1, Math.ceil(ms / MINUTE_MS))}m`;
-}
-
 /** "resets in 2h 10m", "reset due" once the time has passed, null when unknown. */
 export function formatResetCountdown(resetsAt: number | null, now: number): string | null {
   if (resetsAt === null || !Number.isFinite(resetsAt)) return null;
   const remaining = resetsAt - now;
   if (remaining <= 0) return 'reset due';
-  return `resets in ${formatSpan(remaining)}`;
+  return `resets in ${formatMsSpan(remaining)}`;
 }
 
-/** "sampled 3m ago" — how old the newest provider sample is. */
+/**
+ * "sampled 3m ago" — how old the newest provider sample is. Ages floor to whole
+ * minutes (a sample taken 5m 01s ago reads "5m ago"), whereas countdowns round up.
+ */
 export function formatSampledAgo(observedAt: number, now: number): string {
   const age = now - observedAt;
   if (age < MINUTE_MS) return 'sampled just now';
-  return `sampled ${formatSpan(age)} ago`;
+  return `sampled ${formatMsSpan(Math.floor(age / MINUTE_MS) * MINUTE_MS)} ago`;
 }
 
 /** Family label for a credential, taken from its first window ("Claude", "Codex", …). */

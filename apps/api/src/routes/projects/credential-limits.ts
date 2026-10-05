@@ -22,7 +22,8 @@ const AGENT_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,160}$/;
  * resolved server-side from `agent_sessions` (canonical identity, never a
  * client-supplied credential reference).
  *
- * I/O budget: project membership (1) + optional session lookup (1) + windows (1).
+ * I/O budget: project membership check (2 parallel D1 reads) + optional session
+ * lookup (1) + windows (1) = 4-5 round trips (rule 60 GET budget: 8).
  */
 const credentialLimitRoutes = new Hono<{ Bindings: Env }>();
 
