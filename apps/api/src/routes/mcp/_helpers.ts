@@ -321,6 +321,10 @@ export const MCP_SERVER_VERSION = '1.0.0';
 // Task status sets
 export const ACTIVE_STATUSES = ['queued', 'in_progress', 'delegated', 'awaiting_followup'];
 
+// Sleeping agents retain their task/chat identity and can receive durable wakes
+// or parent cancellation. They cannot act as live callers or consume dispatch slots.
+export const AGENT_TARGET_STATUSES = [...ACTIVE_STATUSES, 'sleeping'];
+
 /**
  * Validate and filter a roles array against the allowlist.
  * Returns null if any role is invalid (caller should return 400).

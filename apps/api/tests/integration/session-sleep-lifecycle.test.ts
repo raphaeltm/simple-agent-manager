@@ -92,6 +92,7 @@ describe('terminal session sleep lifecycle integration', () => {
       schema.nodes,
       schema.workspaces,
       schema.tasks,
+      schema.taskStatusEvents,
       schema.sessionSummaries,
       schema.agentSessions,
       schema.sessionSnapshots,
@@ -279,6 +280,12 @@ describe('terminal session sleep lifecycle integration', () => {
         status: 'sleeping',
       });
       expect(mocks.stopWorkspaceOnNode).toHaveBeenCalled();
+      const events = sqlite
+        .prepare("SELECT from_status, to_status FROM task_status_events WHERE task_id = 'task-1'")
+        .all();
+      expect(events).toEqual(
+        status === 'in_progress' ? [{ from_status: 'in_progress', to_status: 'sleeping' }] : []
+      );
     }
   );
 
