@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Keep platform model routing metadata in one auditable registry.
 // =============================================================================
 // AI Task Title Generation
 // =============================================================================
