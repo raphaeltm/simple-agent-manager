@@ -20,7 +20,7 @@ Implement recommendations from corrected session 5cd63e28-6191-4704-b00e-3c1f05d
 - [ ] Verify exact gpt-6.1-sol startup, turn execution, permissions, forms/URL completion, cancellation and no silent fallback.
 - [x] Regression checks prevent pin drift and selecting old paired CLI.
 - [x] Independent Go/security reviews; findings addressed.
-- [ ] Completion review before archive.
+- [x] Completion review before archive; no missing implementation after profile-forwarding correction.
 - [ ] Staging validate VM + Instant upgrade paths unless explicitly waived for this upgrade.
 - [ ] CI + CodeRabbit request/wait, merge, monitor production deployment.
 - [ ] Report actual completion evidence separately from model selection and deployment.
@@ -53,3 +53,11 @@ Source session above; PR #2205; scripts/diagnostics/acp-runtime-distribution.md;
 - The original staging VM task `01M45M2ZW6HQBMS7YCESK94QM8` provisioned node `01M45M56XV9EVM63N15BXXYY1X`, received heartbeats, and completed an agent turn before sleeping. The node was already deleted when work resumed. Its patched-binary check failed; do not treat the printed marker as successful verification.
 - Diagnosed the failed check: TaskRunner forwarded the selected model but omitted the resolved profile ID when creating the agent session. Runtime-assets callbacks therefore saw a null session profile and omitted its patched-runtime selector. Forward the already-resolved profile ID to bootstrap; regression checks exercise the real runner/bootstrap/D1 boundary with two distinct profiles and no-profile control.
 - Completion review found no missing active runtime/install/download paths. The old 0.156.1 diagnostic probes are explicitly historical PR #2210 evidence. Live patched VM/Instant verification and release gates remain pending.
+
+
+### Verified candidate after profile correction
+
+- `b2b06d3c0` forwards the resolved profile ID before VM agent creation. Regression failed before the fix and passed afterward: 32 tests across TaskRunner/bootstrap persistence, runtime-assets, and skill resolution. API lint and typecheck passed.
+- Instant first attempt used **old agent `4f223d6` during Cloudflare progressive rollout**, despite successful Worker upload. It failed Sol metadata/account validation and was stopped. Container rollout `bb295b2a-3415-4a66-81b6-96950b789fe8` then completed 3/3. Broader deployment-readiness follow-up: SAM Idea `01M45YAV6N70PJQESCMM7PCBW3`.
+- Instant retry on node `01M45YB0HE740CKFA0TTJTBC0X` reported the required agent `b910a57`. Account-backed **gpt-6.1-sol** session `7c48aaec-81ee-44b1-8ecd-3b74aaaca22a` executed the verification command successfully: `codex-cli 0.160.0-sam-c2.2`, ACP `2.1.1-sam-c2.2`, all three payload checksums OK, exit 0. This is actual provider completion, separate from earlier fixture-backed exact-model tests.
+- Final API profile-fix staging deployment: https://github.com/raphaeltm/simple-agent-manager/actions/runs/37305100586 . Live patched VM verification, browser follow-up, cleanup, CodeRabbit request/wait, merge and production checks still pending at implementation archival; final results will be maintained in PR #2234.
