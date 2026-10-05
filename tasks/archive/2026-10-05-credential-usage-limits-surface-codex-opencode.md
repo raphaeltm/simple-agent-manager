@@ -249,6 +249,13 @@ gaps that the local suite could not see, both fixed in this branch:
   and `tests/unit/components/session-credential-limit-chip.test.tsx` (the latter reaches the
   chip through the real query and reproduced the exact error with the fix stashed).
 
+- **CodeRabbit (PR #2238) asked for two hardenings on the OpenCode Go probe**, both
+  applied: `OPENCODE_GO_USAGE_URL` must be https unless the host is loopback
+  (`Config.Validate`), and the probe uses a copy of the host HTTP client with
+  redirects disabled so the bearer token can never be replayed to another host.
+  The redirect test records any `Authorization` header at the redirect target and
+  fails with "the bearer token was forwarded" when the client change is reverted.
+
 Observed provider payloads (for future reference):
 
 - Codex CLI 0.160 rollout on a ChatGPT **Pro** plan reported only
