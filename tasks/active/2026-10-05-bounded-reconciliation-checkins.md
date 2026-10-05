@@ -11,12 +11,12 @@ The weekly production review chat_01M45MRD2N4KTMCCXHVB9B5AK2 produced 24 identic
 - Preserve work and model selection; no runtime teardown or model downgrade. Compatibility fix/health review execution is separate.
 
 ## Checklist
-- [ ] Durable per-session retry episode, idempotent delivered-attempt counting, explicit reset on human input or real tool progress.
-- [ ] Suppress known unsupported-model runtime errors before another check-in; bounded detection also handles legacy transcript errors.
-- [ ] One bounded Clef assessment at three unsuccessful check-ins; no fourth nudge, including unavailable/uncertain classifier; visible pause notice and attention marker.
-- [ ] Fence classifier completion against intervening human input/progress; survive restart and avoid repeated classifications/notice spam.
-- [ ] Candidate selection and alarm exclude paused episodes without blocking other sessions.
-- [ ] Regression tests through real SQLite, message persistence and reconciliation; cover duplicate callbacks, restart, errors, real progress, human reset, classifier races/outage, and saturation.
+- [x] Durable per-session retry episode, idempotent delivered-attempt counting, explicit reset on human input or real tool progress.
+- [x] Suppress known unsupported-model runtime errors before another check-in; bounded detection also handles legacy transcript errors.
+- [x] One bounded Clef assessment at three unsuccessful check-ins; no fourth nudge, including unavailable/uncertain classifier; visible pause notice and attention marker.
+- [x] Fence classifier completion against intervening human input/progress; survive restart and avoid repeated classifications/notice spam.
+- [x] Candidate selection and alarm exclude paused episodes without blocking other sessions.
+- [x] Regression tests through real SQLite, message persistence and reconciliation; cover duplicate callbacks, restart, errors, real progress, human reset, classifier races/outage, and saturation.
 - [ ] Config/env/docs synchronization and local checks.
 - [ ] Local specialist review, staging verification, PR/CI/CodeRabbit, merge and production deploy.
 
@@ -25,3 +25,8 @@ No more than three automatic nudges per no-progress episode. Permanent unsupport
 
 ## References
 `apps/api/.claude/rules/47-control-loop-io-budget.md`, `45-durable-object-concurrency-mutex.md`, `72-error-categories-must-match-the-recovery-action.md`.
+
+## Review and validation evidence
+Local Cloudflare/constitution, task-completion/test, env/docs/security reviewers passed after fixes for first-error ingress, nonconsecutive completed-tool replay, same-batch human/error ordering, and opaque auth-token redaction. Tool progress uses existing transcript insertion order as the replay ledger; the local lookup runs only after a check-in or during a pause, bounded by that session's retained transcript (no new per-tool records). The classifier reads at most the configured 200 messages / 24,000 characters and runs once with the existing 10-second timeout. Candidate volume narrows: paused sessions are excluded before D1 or remote work.
+
+Focused reconciliation tests pass; real Workers RPC/SQLite pause-and-retry test passes. Surgical bypasses prove both fourth-nudge and A/B/A replay tests discriminate. Full lint/typecheck/build passed. Initial full tests: 812 API files passed, one unrelated dynamic-import timeout in session-sleep; complete sleep file passed on rerun. Final full checks and staging/PR/deploy are still pending, tracked in .do-state.md.

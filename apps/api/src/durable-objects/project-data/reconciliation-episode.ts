@@ -186,10 +186,19 @@ export function observeReconciliationMessage(
   sql: SqlStorage,
   env: Env,
   sessionId: string,
-  message: { role: string; content: string; toolMetadata: unknown; origin?: string | null },
+  message: {
+    id: string;
+    role: string;
+    content: string;
+    toolMetadata: unknown;
+    origin?: string | null;
+  },
   broadcast: Broadcast
 ): void {
-  const episode = readReconciliationEpisode(sql, sessionId);
+  const permanent = message.role === 'assistant' && isPermanentRuntimeError(message.content);
+  const episode = permanent
+    ? ensureReconciliationEpisode(sql, sessionId)
+    : readReconciliationEpisode(sql, sessionId);
   if (!episode) return;
   let metadata: unknown = message.toolMetadata;
   if (typeof metadata === 'string') {
@@ -204,7 +213,23 @@ export function observeReconciliationMessage(
     metadata
   );
   if (message.role === 'tool' && tool.success && tool.output.toolCallId) {
-    resetReconciliationEpisode(sql, sessionId, tool.output.toolCallId);
+    if (episode.attempts === 0 && !episode.paused) return;
+    // The persisted transcript is the completion ledger: unlike remembering
+    // only the last ID, it also rejects A/B/A replays across restarts. This
+    // lookup runs only after a check-in, not on every ordinary tool update.
+    const first = sql
+      .exec(
+        `SELECT id FROM chat_messages
+      WHERE session_id = ? AND role = 'tool' AND json_valid(tool_metadata)
+        AND json_extract(tool_metadata, '$.toolCallId') = ?
+        AND json_extract(tool_metadata, '$.status') = 'completed'
+      ORDER BY rowid ASC LIMIT 1`,
+        sessionId,
+        tool.output.toolCallId
+      )
+      .toArray()[0];
+    if (first?.id === message.id)
+      resetReconciliationEpisode(sql, sessionId, tool.output.toolCallId);
   } else if (
     message.role === 'user' &&
     message.origin !== 'system' &&
@@ -212,7 +237,7 @@ export function observeReconciliationMessage(
     !message.content.startsWith('[SAM ')
   ) {
     resetReconciliationEpisode(sql, sessionId);
-  } else if (message.role === 'assistant' && isPermanentRuntimeError(message.content)) {
+  } else if (permanent) {
     pauseReconciliationEpisode(sql, env, sessionId, episode, 'unsupported_model', broadcast);
   }
 }

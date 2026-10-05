@@ -171,6 +171,7 @@ describe('bounded delivered check-in episodes', () => {
 
   it('stops a known permanent error before even the first check-in', async () => {
     await message('assistant', permanent);
+    expect(readReconciliationEpisode(sql, 'session-1')?.paused).toBe(true);
     vi.setSystemTime(Date.now() + IDLE);
     await tick();
     expect(boundary.send).not.toHaveBeenCalled();
@@ -316,6 +317,78 @@ describe('bounded delivered check-in episodes', () => {
     await tick();
     expect(boundary.send).toHaveBeenCalledTimes(1);
     expect(readReconciliationEpisode(sql, 'session-1')?.paused).toBe(false);
+  });
+
+  it('rejects nonconsecutive completed-tool replay across a restart', async () => {
+    await tick();
+    await message('tool', 'ok A', { toolCallId: 'A', status: 'completed' });
+    writeReconciliationEpisode(sql, 'session-1', {
+      ...ensureReconciliationEpisode(sql, 'session-1'),
+      attempts: 1,
+    });
+    await message('tool', 'ok B', { toolCallId: 'B', status: 'completed' });
+    const episode = ensureReconciliationEpisode(sql, 'session-1');
+    expect(episode.lastToolCallId).toBe('B');
+    writeReconciliationEpisode(sql, 'session-1', { ...episode, attempts: 3, paused: true });
+    sql = createSqlStorage(db);
+    await persistMessageBatchWithSideEffects(sql, env, hooks, 'session-1', [
+      {
+        messageId: 'replay-A',
+        role: 'tool',
+        content: 'replayed A',
+        toolMetadata: JSON.stringify({ toolCallId: 'A', status: 'completed' }),
+        timestamp: new Date().toISOString(),
+        sequence: -1,
+      },
+    ]);
+    expect(readReconciliationEpisode(sql, 'session-1')).toMatchObject({
+      attempts: 3,
+      paused: true,
+    });
+  });
+
+  it('retains the new attention marker when a human retry and permanent error arrive together', async () => {
+    await exhaust();
+    await persistMessageBatchWithSideEffects(sql, env, hooks, 'session-1', [
+      {
+        messageId: 'human-retry',
+        role: 'user',
+        content: 'retry now',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        messageId: 'runtime-error',
+        role: 'assistant',
+        content: permanent,
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+    expect(readReconciliationEpisode(sql, 'session-1')?.paused).toBe(true);
+    expect(
+      sql
+        .exec(
+          "SELECT * FROM session_attention_markers WHERE source = 'reconciliation_loop' AND resolved_at IS NULL"
+        )
+        .toArray()
+    ).toHaveLength(1);
+  });
+
+  it('redacts opaque Authorization, Basic, and standalone Bearer credentials before Clef', async () => {
+    const secrets = ['opaqueCanaryOne123', 'opaqueCanaryTwo456', 'opaqueCanaryThree789'];
+    await tick();
+    await message(
+      'assistant',
+      `Authorization: Bearer ${secrets[0]}\nAuthorization: Basic ${secrets[1]}\nBearer ${secrets[2]}`
+    );
+    const episode = ensureReconciliationEpisode(sql, 'session-1');
+    writeReconciliationEpisode(sql, 'session-1', { ...episode, attempts: 3 });
+    vi.setSystemTime(Date.now() + IDLE);
+    await tick();
+    const request = JSON.stringify(boundary.ai.mock.calls[0]);
+    for (const secret of secrets) expect(request).not.toContain(secret);
+    expect(request).toContain('[REDACTED_AUTH]');
   });
 
   it('reaches other work behind a full page of paused candidates', async () => {

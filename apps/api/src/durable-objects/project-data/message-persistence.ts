@@ -76,13 +76,17 @@ export async function runPersistedMessageSideEffects(
     toolMetadata: string | null;
   }
 ): Promise<void> {
+  const attentionResolution = resolveAttentionForRoles(sql, hooks, sessionId, [
+    { id: result.id, role },
+  ]);
   observeReconciliationMessage(
     sql,
     env,
     sessionId,
-    { role, content, toolMetadata: result.toolMetadata },
+    { id: result.id, role, content, toolMetadata: result.toolMetadata },
     hooks.broadcastEvent
   );
+  await attentionResolution;
   const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId);
   if (idleReset.cleanupAt > 0) await hooks.recalculateAlarm();
 
@@ -96,7 +100,6 @@ export async function runPersistedMessageSideEffects(
   }
 
   sessionState.refreshWorkingActivityForChatSession(sql, sessionId, result.now);
-  await resolveAttentionForRoles(sql, hooks, sessionId, [{ id: result.id, role }]);
 
   if (result.workspaceId) activity.updateMessageActivity(sql, result.workspaceId, sessionId);
   hooks.scheduleSummarySync();
@@ -138,6 +141,12 @@ export async function persistMessageBatchWithSideEffects(
     };
   }
 
+  const attentionResolution = resolveAttentionForRoles(
+    sql,
+    hooks,
+    sessionId,
+    result.persistedMessages
+  );
   for (const message of result.persistedMessages) {
     observeReconciliationMessage(sql, env, sessionId, message, hooks.broadcastEvent);
   }
@@ -162,7 +171,7 @@ export async function persistMessageBatchWithSideEffects(
     sessionState.refreshWorkingActivityForChatSession(sql, sessionId, latestMessageAt);
   }
 
-  await resolveAttentionForRoles(sql, hooks, sessionId, result.persistedMessages);
+  await attentionResolution;
 
   if (result.workspaceId) activity.updateMessageActivity(sql, result.workspaceId, sessionId);
   hooks.scheduleSummarySync();

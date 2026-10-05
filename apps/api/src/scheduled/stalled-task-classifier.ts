@@ -88,10 +88,15 @@ function numberAge(nowMs: number, value: unknown): number | null {
 function sanitizeTranscriptContent(content: unknown): string {
   if (typeof content !== 'string') return '';
   return redactCredentialTokens(
-    content.replace(
-      /(Bearer|token|secret|password|authorization|cookie)\s*[:=]\s*["']?[^"'\s]+/gi,
-      '$1=[REDACTED]'
-    ),
+    content
+      .replace(
+        /\b(?:authorization\s*[:=]\s*["']?)?(?:Bearer|Basic)\s+[^\s"',;]+/gi,
+        '[REDACTED_AUTH]'
+      )
+      .replace(
+        /(Bearer|token|secret|password|authorization|cookie)\s*[:=]\s*["']?[^"'\s]+/gi,
+        '$1=[REDACTED]'
+      ),
     '[REDACTED_KEY]'
   ).replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[REDACTED_EMAIL]');
 }
