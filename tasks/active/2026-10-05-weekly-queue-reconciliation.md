@@ -142,7 +142,7 @@ Shepherd" park comments, with no human reply. The decisions are repeated in the 
 
 | Verdict    | Files | Action                                                                 |
 | ---------- | ----: | ---------------------------------------------------------------------- |
-| UNCHANGED  |   204 | Kept; 17 of them got a dated note with a corrected fact or new finding |
+| UNCHANGED  |   204 | Kept; 19 of them got a dated note with a corrected fact or new finding |
 | PROGRESS   |     8 | Kept, with a `Reconciliation 2026-10-05` block                         |
 | SUPERSEDED |     1 | Deleted                                                                |
 | OBSOLETE   |     1 | Archived (an archived task links to it); link repointed                |
@@ -183,7 +183,7 @@ Three files that were UNSURE on 2026-09-30 are still kept (counted as UNCHANGED)
 - `2026-09-26-trustworthy-task-status`: #2230's `sleeping` status takes VM conversations out of
   the false day-7 failure; Instant tasks, pre-#2230 rows and the post-purge end state remain.
 
-### Corrected or extended, note added (17)
+### Corrected or extended, note added (19)
 
 - `2026-08-07-fix-stuck-task-sweep-pattern-complexity`: the #2222 production recurrence above.
 - `2026-07-20-instant-ping-container-died-midsession`: #2230 widened it (`sleeping` refused by MCP
@@ -208,10 +208,14 @@ Three files that were UNSURE on 2026-09-30 are still kept (counted as UNCHANGED)
 - `2026-07-16-project-data-row-fault-isolation-audit`: a second tolerant `mapRows` already exists.
 - `2026-09-23-resource-sparkline-gap-marker-has-no-colour`: now 27 files, plus two more undefined
   classes.
+- `2026-09-25-split-permanent-session-recovery-refusals`: pointers corrected; #2230 rewrote
+  `session-recovery.ts` (370 lines), so the cited `:456` no longer existed.
+- `2026-09-25-stopping-sleep-with-failed-projectdata-session`: pointers corrected after #2223 and
+  #2230 moved the code; cross-referenced to the #2230 failed-wake change.
 - `2026-07-19-instant-launch-stuck-queued-on-disconnect`: the July-tasks sub-item is closable.
 - `2026-07-25-admin-ai-proxy-orphaned-default-model`: #2199 added a second trigger.
 
-### Unchanged, no edit needed: 187
+### Unchanged, no edit needed: 185
 
 No merge this week touched their open scope; each was checked against this week's 26 merges. Three of them were UNSURE on 2026-09-30 and stay kept: `2026-02-23-suppress-background-subagents-in-acp`, `2026-07-14-stabilize-codex-crash-recovery-reporting-tests`, `2026-09-08-staging-capacity-query-and-deploy-reset-noise`.
 
@@ -387,9 +391,7 @@ No merge this week touched their open scope; each was checked against this week'
 - `2026-09-23-schedules-panel-hardcoded-poll-interval`
 - `2026-09-25-composable-capacity-source-anchor-guard`
 - `2026-09-25-reporter-session-switch-unsent-rows`
-- `2026-09-25-split-permanent-session-recovery-refusals`
 - `2026-09-25-staging-allocation-plan-no-longer-current`
-- `2026-09-25-stopping-sleep-with-failed-projectdata-session`
 - `2026-09-25-structured-log-error-text-redaction`
 - `2026-09-27-chat-switch-list-first-paint`
 - `2026-09-27-workspace-chat-view-transcript-cache`
