@@ -155,21 +155,23 @@ async function setupApiMocks(
         return respond(200, { messages: MESSAGES, hasMore: false });
       }
       if (subPath === '/tasks') return respond(200, []);
-      // The session's OWN task. Realistic state matters here: `useProjectChatState`
-      // only populates `provisioning` (and thus renders ProvisioningIndicator) for
-      // a task that is neither terminal nor in_progress. A slept session's task is
-      // in_progress, so the big provisioning block correctly stays hidden and the
-      // wake banner is the only indicator. An empty `{}` here fakes an
-      // undefined-status task and renders BOTH — a mock artifact, not real UI.
+      // The session's OWN task. Since PR #2230 a slept conversation keeps its
+      // original task row: `queued` with `node_selection` once a wake is claimed
+      // (services/session-recovery.ts), `in_progress`/`running` once restored.
+      // Realistic state matters: `useProvisioningTracker` must not restore
+      // ProvisioningIndicator for a sleeping session even though its task is
+      // `queued`, or both progress blocks render at once. An empty `{}` here
+      // fakes an undefined-status task — a mock artifact, not real UI.
       if (subPath.match(/^\/tasks\/[^/]+$/)) {
+        const restored = (options.recoveryStatus ?? 'waking') !== 'waking';
         return respond(200, {
           id: 'task-session-1',
-          status: 'in_progress',
-          executionStep: 'running',
+          status: restored ? 'in_progress' : 'queued',
+          executionStep: restored ? 'running' : 'node_selection',
           errorMessage: null,
           outputBranch: 'sam/test',
           startedAt: '2026-01-15T10:00:00Z',
-          workspaceId: 'ws-test-1',
+          workspaceId: restored ? 'ws-test-1' : null,
         });
       }
       if (subPath === '/agents') return respond(200, []);

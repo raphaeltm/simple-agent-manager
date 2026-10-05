@@ -31,13 +31,12 @@ import { type RawSessionEvent, useProjectWebSocket } from '../../hooks/useProjec
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { useTrialStatus } from '../../hooks/useTrialStatus';
-import { useDocumentVisible, useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
+import { useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import {
   closeConversationTask,
   getProjectTask,
   getTranscribeApiUrl,
-  getWorkspace,
   linkSessionIdea,
   listChatSessions,
   listProjectTasks,
@@ -73,13 +72,12 @@ import {
   CHAT_SESSION_LIST_LIMIT,
   CHAT_TASK_LIST_LIMIT,
   EXECUTE_IDEA_PROMPT_TEMPLATE,
-  isTerminal,
   SESSION_RECONCILE_INTERVAL_MS,
   SESSION_SYNC_INTERVAL_MS,
-  TASK_STATUS_POLL_MS,
 } from './types';
 import { useAttachments } from './useAttachments';
 import { useProjectSkills } from './useProjectSkills';
+import { useProvisioningTracker } from './useProvisioningTracker';
 import { useSessionReducer } from './useSessionReducer';
 import { rawToSessionEvent } from './useSessionReducer';
 import { useStableTaskInfoMap } from './useStableTaskInfoMap';
@@ -459,103 +457,16 @@ export function useProjectChatState() {
     paused: !wsConnected,
   });
 
-  // Poll task status during provisioning
-  const provisioningVisible = useDocumentVisible();
-  useEffect(() => {
-    if (!provisioning || isTerminal(provisioning.status)) return;
-    // Provisioning polls every 2s and can run for minutes — by far the hottest
-    // poll on this page. Suspend it in a hidden tab; re-running this effect on
-    // the visibility transition refreshes once immediately on return, which is
-    // what a 2s progress poll wants.
-    if (!provisioningVisible) return;
-    const poll = async () => {
-      try {
-        const task = await getProjectTask(projectId, provisioning.taskId);
-        setProvisioning((prev) => {
-          if (!prev) return null;
-          const next = {
-            ...prev,
-            status: task.status,
-            executionStep: task.executionStep ?? null,
-            errorMessage: task.errorMessage ?? null,
-            requestedVmSize: task.requestedVmSize ?? prev.requestedVmSize,
-            provisionedVmSize: task.provisionedVmSize ?? prev.provisionedVmSize,
-          };
-          if (task.workspaceId && !prev.workspaceId) next.workspaceId = task.workspaceId;
-          return next;
-        });
-        if (task.workspaceId && !provisioning.workspaceUrl) {
-          try {
-            const ws = await getWorkspace(task.workspaceId);
-            if (ws.url)
-              setProvisioning((prev) => (prev ? { ...prev, workspaceUrl: ws.url ?? null } : null));
-          } catch {
-            /* Workspace may not be ready yet */
-          }
-        }
-        if (
-          task.status === 'in_progress' &&
-          (task.workspaceId || task.executionStep === 'running')
-        ) {
-          navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
-          setProvisioning(null);
-        }
-        if (isTerminal(task.status)) {
-          navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
-          setProvisioning(null);
-          void loadSessions();
-        }
-      } catch {
-        /* Continue polling on transient errors */
-      }
-    };
-    void poll();
-    const interval = setInterval(() => void poll(), TASK_STATUS_POLL_MS);
-    return () => clearInterval(interval);
-  }, [
-    provisioning?.taskId,
-    provisioning?.status,
+  // Provisioning poll + restore (see useProvisioningTracker for the gates)
+  useProvisioningTracker({
     projectId,
+    sessionId,
+    sessions,
+    provisioning,
+    setProvisioning,
     navigate,
     loadSessions,
-    provisioning?.sessionId,
-    provisioningVisible,
-  ]);
-
-  // Restore provisioning state when navigating to a session with an active task
-  useEffect(() => {
-    if (!sessionId || provisioning) return;
-    const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession?.taskId) return;
-    const selectedTaskId = selectedSession.taskId;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const task = await getProjectTask(projectId, selectedTaskId);
-        if (cancelled) return;
-        if (!isTerminal(task.status) && task.status !== 'in_progress') {
-          setProvisioning({
-            taskId: task.id,
-            sessionId,
-            branchName: task.outputBranch ?? '',
-            status: task.status,
-            executionStep: task.executionStep ?? null,
-            errorMessage: task.errorMessage ?? null,
-            startedAt: task.startedAt ? new Date(task.startedAt).getTime() : Date.now(),
-            workspaceId: task.workspaceId ?? null,
-            workspaceUrl: null,
-            requestedVmSize: task.requestedVmSize ?? null,
-            provisionedVmSize: task.provisionedVmSize ?? null,
-          });
-        }
-      } catch {
-        /* Best-effort */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, sessions, projectId, provisioning]);
+  });
 
   // ---------------------------------------------------------------------------
   // Handlers
