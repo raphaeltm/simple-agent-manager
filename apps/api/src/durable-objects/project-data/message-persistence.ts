@@ -3,6 +3,7 @@ import * as activity from './activity';
 import * as attention from './attention';
 import * as idleCleanup from './idle-cleanup';
 import * as messages from './messages';
+import { observeReconciliationMessage } from './reconciliation-episode';
 import * as sessionState from './session-state';
 import type { SessionIdentityGuard } from './sessions';
 import type { Env } from './types';
@@ -75,6 +76,13 @@ export async function runPersistedMessageSideEffects(
     toolMetadata: string | null;
   }
 ): Promise<void> {
+  observeReconciliationMessage(
+    sql,
+    env,
+    sessionId,
+    { role, content, toolMetadata: result.toolMetadata },
+    hooks.broadcastEvent
+  );
   const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId);
   if (idleReset.cleanupAt > 0) await hooks.recalculateAlarm();
 
@@ -130,6 +138,9 @@ export async function persistMessageBatchWithSideEffects(
     };
   }
 
+  for (const message of result.persistedMessages) {
+    observeReconciliationMessage(sql, env, sessionId, message, hooks.broadcastEvent);
+  }
   const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId);
   if (idleReset.cleanupAt > 0) await hooks.recalculateAlarm();
 

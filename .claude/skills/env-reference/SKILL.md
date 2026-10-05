@@ -833,3 +833,7 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS` — Grace period passed to `docker stop --time` during eviction, in seconds (default: 10)
 - `DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS` — Durable callback backoff cap, in seconds (default: 300). Retry eligibility also respects the complete operation lease (default: 60 seconds), which can exceed the cap; delivery is heartbeat-paced
 - `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS` — Deadline for resolving a pressured Docker container to a workspace before eviction, in seconds (default: 5)
+
+### Repeated agent check-ins
+
+`TASK_RECONCILIATION_MAX_CHECKINS` (default `3`) caps automatic check-ins per durable no-progress episode. Human input or a newly completed tool call resets the budget; assistant error/text and system messages do not. A recognized unsupported-model runtime error pauses check-ins before another delivery. At the cap, SAM pauses nudges and asks Clef once using the existing `STALLED_TASK_CLASSIFIER_*` model, timeout, confidence, and transcript limits (without the long-turn age gate). Disabled/unavailable/uncertain classification never grants additional retries. The session/work remains intact; the attention notice explains how to retry.

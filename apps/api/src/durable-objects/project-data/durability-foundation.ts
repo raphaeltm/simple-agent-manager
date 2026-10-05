@@ -14,6 +14,7 @@ import * as idleCleanup from './idle-cleanup';
 import * as mailbox from './mailbox';
 import * as delivery from './prompt-delivery';
 import { runPromptDeliveryClaim } from './prompt-delivery-runner';
+import { resetReconciliationEpisode } from './reconciliation-episode';
 import * as sessionState from './session-state';
 import type { Env } from './types';
 import { raiseSessionWakeFailure } from './wake-failure';
@@ -85,6 +86,7 @@ function runAcceptedPromptDeliveryHooks(
   if (accepted.transcriptInserted) {
     idleCleanup.resetIdleCleanup(sql, env, input.targetSessionId);
     if (input.senderType === 'human') {
+      resetReconciliationEpisode(sql, input.targetSessionId);
       attention.resolveAttentionMarkers(
         sql,
         input.targetSessionId,

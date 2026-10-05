@@ -104,3 +104,6 @@ export const DEFAULT_ACP_ACTIVITY_BINDING_CACHE_TTL_MS = 30 * 1000; // 30 second
 
 /** Maximum cached ACP activity bindings per Worker isolate. */
 export const DEFAULT_ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES = 2048;
+
+/** Maximum automatic check-ins without confirmed progress before pausing. */
+export const DEFAULT_TASK_RECONCILIATION_MAX_CHECKINS = 3;
