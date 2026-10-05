@@ -397,9 +397,9 @@ function surfaceTests() {
     await assertNoClippedOverflow(page);
   });
 
-  // Settings pages run the advisory overflow check only: the settings
-  // sub-navigation strip is clipped by the page's overflow-x-hidden main at 375px
-  // today (SAM idea 01M46AJBTE8361Q9T7J11CB3YM), independent of this surface.
+  // Settings pages run the advisory overflow check only: the settings tab strip
+  // is 679px wide inside the page's overflow-x-hidden main at 375px today, with
+  // or without this change (SAM idea 01M46AJBTE8361Q9T7J11CB3YM).
   test('settings credential cards show usage rows only for credentials with samples', async ({
     page,
   }) => {

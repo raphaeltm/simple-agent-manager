@@ -6,11 +6,6 @@
  *
  * Category B tools (proxied to VM agent) remain in workspace-tools.ts.
  */
-import {
-  credentialLimitFamilyLabel,
-  type CredentialLimitsResponse,
-  credentialLimitWindowLabel,
-} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 

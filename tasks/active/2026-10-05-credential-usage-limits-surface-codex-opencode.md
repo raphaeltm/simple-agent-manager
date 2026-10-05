@@ -178,7 +178,7 @@ window_minutes: i64|null, resets_at: unix seconds|null }` (`protocol/src/protoco
       `cc_credentials:<id>`; `AgentSettingsCard.tsx`: when OpenCode provider is `opencode-zen`, show the one-line note
       "Zen credit balance is only visible in the OpenCode console" with a link.
 - [x] D6 Unit tests: format helpers; `SessionHeader` shows/hides the chip from a mocked query; Settings card shows usage.
-- [ ] D7 Playwright `tests/playwright/credential-limits-audit.spec.ts`: Settings credentials + chat header at 375×667
+- [x] D7 Playwright `tests/playwright/credential-limits-audit.spec.ts`: Settings credentials + chat header at 375×667
       and 1280×800 with normal / long names / many windows / empty / error data; overflow assertions; screenshots in
       `.tmp/playwright-screenshots/`; reviewed and posted to the PR.
 

@@ -65,7 +65,9 @@ function CredentialCard({
       }`}
     >
       <div className="flex items-start justify-between gap-2 flex-wrap">
-        <span className="text-sm font-semibold text-fg-primary break-words">{cred.name}</span>
+        <span className="min-w-0 text-sm font-semibold text-fg-primary break-words [overflow-wrap:anywhere]">
+          {cred.name}
+        </span>
         <div className="flex items-center gap-2 shrink-0">
           <span className="inline-flex items-center rounded-full border border-border-default px-2 py-0.5 text-[0.7rem] font-medium text-fg-muted whitespace-nowrap">
             {KIND_LABELS[cred.kind] ?? cred.kind}
