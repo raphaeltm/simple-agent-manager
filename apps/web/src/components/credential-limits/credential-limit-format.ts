@@ -15,23 +15,16 @@ const MINUTE_MS = 60_000;
 /** How many windows the compact chip spells out before collapsing to "+N". */
 export const CHIP_MAX_WINDOWS = 3;
 
+/**
+ * Level colours come from the shared status tokens (the same family
+ * `StatusBadge` uses), so the chip reads like every other status surface and
+ * both themes stay in sync. Four distinct tiers: green / amber / orange / red.
+ */
 export const LEVEL_STYLES: Record<CredentialLimitLevel, { background: string; color: string }> = {
-  ok: {
-    background: 'var(--sam-color-success-tint, rgba(34, 197, 94, 0.12))',
-    color: 'var(--sam-color-success, #22c55e)',
-  },
-  warning: {
-    background: 'var(--sam-color-warning-tint, rgba(245, 158, 11, 0.12))',
-    color: 'var(--sam-color-warning, #f59e0b)',
-  },
-  critical: {
-    background: 'var(--sam-color-danger-tint, rgba(239, 68, 68, 0.12))',
-    color: 'var(--sam-color-danger, #ef4444)',
-  },
-  rejected: {
-    background: 'var(--sam-color-danger-tint, rgba(239, 68, 68, 0.12))',
-    color: 'var(--sam-color-danger, #ef4444)',
-  },
+  ok: { background: 'var(--sam-status-success-bg)', color: 'var(--sam-status-success-fg)' },
+  warning: { background: 'var(--sam-status-warning-bg)', color: 'var(--sam-status-warning-fg)' },
+  critical: { background: 'var(--sam-status-critical-bg)', color: 'var(--sam-status-critical-fg)' },
+  rejected: { background: 'var(--sam-status-danger-bg)', color: 'var(--sam-status-danger-fg)' },
 };
 
 export const LEVEL_LABELS: Record<CredentialLimitLevel, string> = {
@@ -40,6 +33,19 @@ export const LEVEL_LABELS: Record<CredentialLimitLevel, string> = {
   critical: 'Critical',
   rejected: 'Limit reached',
 };
+
+/**
+ * Value label for one window. A missing sample on a window the provider has
+ * already flagged (warning/critical/rejected) must say so rather than "unknown".
+ */
+export function windowValueLabel(
+  window: Pick<CredentialLimitWindowSummary, 'utilizationPercent' | 'level'>
+): string {
+  if (window.utilizationPercent === null) {
+    return window.level === 'ok' ? 'usage unknown' : LEVEL_LABELS[window.level];
+  }
+  return `${formatUtilizationPercent(window.utilizationPercent)} used`;
+}
 
 export function formatUtilizationPercent(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return '—';

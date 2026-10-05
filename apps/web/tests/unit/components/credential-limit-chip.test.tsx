@@ -164,6 +164,21 @@ describe('CredentialLimitChip with a window lacking a sample', () => {
     expect(screen.getByTestId('credential-limit-window')).toHaveTextContent('usage unknown');
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
   });
+
+  it('names the known level when a flagged window has no sample', () => {
+    const credential = makeCredential({
+      level: 'rejected',
+      windows: [
+        { ...makeCredential().windows[1], windowType: 'opencode.weekly', utilizationPercent: null, status: 'rejected', level: 'rejected' },
+      ],
+    });
+    render(<CredentialLimitChip credential={credential} now={NOW} />);
+    fireEvent.click(screen.getByTestId('credential-limit-chip'));
+    expect(screen.getByTestId('credential-limit-window')).toHaveTextContent('Limit reached');
+    expect(screen.getByTestId('credential-limit-window')).not.toHaveTextContent('usage unknown');
+    // The dialog is labelled by its heading, not a generic string.
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('OpenCode usage');
+  });
 });
 
 describe('SessionCredentialLimitChip', () => {

@@ -210,6 +210,9 @@
   --sam-status-warning-fg: #fbbf24;
   --sam-status-danger-bg: rgba(239, 68, 68, 0.15);
   --sam-status-danger-fg: #f87171;
+  /* critical: between warning (amber) and danger (red) — a quota window that is nearly exhausted but still usable */
+  --sam-status-critical-bg: rgba(249, 115, 22, 0.15);
+  --sam-status-critical-fg: #fb923c;
   --sam-status-neutral-bg: rgba(127, 127, 127, 0.15);
   --sam-status-neutral-fg: #9ca3af;
   --sam-status-indigo-bg: rgba(99, 102, 241, 0.15);
@@ -465,6 +468,8 @@
   --sam-status-warning-fg: #b45309;
   --sam-status-danger-bg: rgba(185, 28, 28, 0.1);
   --sam-status-danger-fg: #b91c1c;
+  --sam-status-critical-bg: rgba(194, 65, 12, 0.12);
+  --sam-status-critical-fg: #c2410c;
   --sam-status-neutral-bg: rgba(74, 93, 84, 0.12);
   --sam-status-neutral-fg: #4a5d54;
   --sam-status-indigo-bg: rgba(67, 56, 202, 0.1);
