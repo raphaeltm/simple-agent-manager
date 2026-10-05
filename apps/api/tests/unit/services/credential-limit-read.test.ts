@@ -103,6 +103,33 @@ function setup() {
 }
 
 describe('listProjectCredentialLimits', () => {
+  it("orders each credential's windows shortest-span first, unknown spans last", async () => {
+    const { env, seedWindow } = setup();
+    const opencode = {
+      credentialReference: 'cc_credentials:cred-opencode',
+      provider: 'opencode',
+      agentType: 'opencode',
+      source: 'vm-agent.opencode_go_usage',
+    };
+    // Seeded in the alphabetical order the old sort produced (month, rolling, week).
+    seedWindow({ ...opencode, windowType: 'opencode.monthly', windowMinutes: null });
+    seedWindow({ ...opencode, windowType: 'opencode.rolling', windowMinutes: 300 });
+    seedWindow({ ...opencode, windowType: 'opencode.weekly', windowMinutes: 10080 });
+
+    const response = await listProjectCredentialLimits(env, {
+      projectId: 'project-1',
+      userId: 'owner-1',
+    });
+    const credential = response.credentials.find(
+      (c) => c.credentialReference === 'cc_credentials:cred-opencode'
+    );
+    expect(credential?.windows.map((window) => window.windowType)).toEqual([
+      'opencode.rolling',
+      'opencode.weekly',
+      'opencode.monthly',
+    ]);
+  });
+
   it("returns the caller's own rows plus shared rows, never another member's personal credential", async () => {
     const { env, seedWindow } = setup();
     // Owner-path control: the caller's personal Claude credential.

@@ -190,7 +190,13 @@ function summarize(
 
   const credentials = Array.from(byCredential.values());
   for (const summary of credentials) {
-    summary.windows.sort((a, b) => a.windowType.localeCompare(b.windowType));
+    // Shortest window first (5h before week before month) so chips and MCP
+    // summaries read in the order a user burns through them; unknown spans last.
+    summary.windows.sort(
+      (a, b) =>
+        (a.windowMinutes ?? Number.POSITIVE_INFINITY) -
+          (b.windowMinutes ?? Number.POSITIVE_INFINITY) || a.windowType.localeCompare(b.windowType)
+    );
     summary.level = worstCredentialLimitLevel(summary.windows.map((window) => window.level));
   }
   credentials.sort((a, b) => b.observedAt - a.observedAt);
