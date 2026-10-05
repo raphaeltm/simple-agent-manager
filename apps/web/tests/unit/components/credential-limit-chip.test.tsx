@@ -152,6 +152,20 @@ describe('CredentialLimitChip', () => {
   });
 });
 
+describe('CredentialLimitChip with a window lacking a sample', () => {
+  it('says usage unknown instead of a dash', () => {
+    const credential = makeCredential({
+      level: 'ok',
+      windows: [{ ...makeCredential().windows[1], windowType: 'claude.seven_day_opus', utilizationPercent: null, level: 'ok' }],
+    });
+    render(<CredentialLimitChip credential={credential} now={NOW} />);
+    expect(screen.getByTestId('credential-limit-chip')).toHaveTextContent('Claude · Opus week —');
+    fireEvent.click(screen.getByTestId('credential-limit-chip'));
+    expect(screen.getByTestId('credential-limit-window')).toHaveTextContent('usage unknown');
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
+  });
+});
+
 describe('SessionCredentialLimitChip', () => {
   function renderWithClient(ui: React.ReactElement) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

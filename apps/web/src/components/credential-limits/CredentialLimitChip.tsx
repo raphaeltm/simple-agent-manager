@@ -102,7 +102,9 @@ function CredentialLimitDetails({
                   className="shrink-0 font-semibold"
                   style={{ color: LEVEL_STYLES[window.level].color }}
                 >
-                  {formatUtilizationPercent(window.utilizationPercent)} used
+                  {window.utilizationPercent === null
+                    ? 'usage unknown'
+                    : `${formatUtilizationPercent(window.utilizationPercent)} used`}
                 </span>
               </div>
               <div
