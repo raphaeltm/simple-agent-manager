@@ -17,8 +17,9 @@ The weekly production review chat_01M45MRD2N4KTMCCXHVB9B5AK2 produced 24 identic
 - [x] Fence classifier completion against intervening human input/progress; survive restart and avoid repeated classifications/notice spam.
 - [x] Candidate selection and alarm exclude paused episodes without blocking other sessions.
 - [x] Regression tests through real SQLite, message persistence and reconciliation; cover duplicate callbacks, restart, errors, real progress, human reset, classifier races/outage, and saturation.
-- [ ] Config/env/docs synchronization and local checks.
-- [ ] Local specialist review, staging verification, PR/CI/CodeRabbit, merge and production deploy.
+- [x] Config/env/docs synchronization and local checks.
+- [x] Local specialist review and task-completion validation.
+- Delivery gates (staging, PR/CI/CodeRabbit, merge and production deploy) tracked in `.do-state.md` and PR evidence.
 
 ## Acceptance
 No more than three automatic nudges per no-progress episode. Permanent unsupported-model errors pause immediately. Automated messages/errors do not replenish budget. Human input or real tool progress may start a new episode. Classifier failures cannot restore retries; no destructive cleanup. One visible actionable notice. Tests prove repeated ticks do not re-arm paused candidates and other work remains reachable.
@@ -29,4 +30,7 @@ No more than three automatic nudges per no-progress episode. Permanent unsupport
 ## Review and validation evidence
 Local Cloudflare/constitution, task-completion/test, env/docs/security reviewers passed after fixes for first-error ingress, nonconsecutive completed-tool replay, same-batch human/error ordering, and opaque auth-token redaction. Tool progress uses existing transcript insertion order as the replay ledger; the local lookup runs only after a check-in or during a pause, bounded by that session's retained transcript (no new per-tool records). The classifier reads at most the configured 200 messages / 24,000 characters and runs once with the existing 10-second timeout. Candidate volume narrows: paused sessions are excluded before D1 or remote work.
 
-Focused reconciliation tests pass; real Workers RPC/SQLite pause-and-retry test passes. Surgical bypasses prove both fourth-nudge and A/B/A replay tests discriminate. Full lint/typecheck/build passed. Initial full tests: 812 API files passed, one unrelated dynamic-import timeout in session-sleep; complete sleep file passed on rerun. Final full checks and staging/PR/deploy are still pending, tracked in .do-state.md.
+Focused reconciliation tests pass; real Workers RPC/SQLite pause-and-retry test passes. Surgical bypasses prove both fourth-nudge and A/B/A replay tests discriminate. Full lint/typecheck/build passed. Initial full tests: 812 API files passed, one unrelated dynamic-import timeout in session-sleep; complete sleep file passed on rerun. Final root lint, typecheck, test (21 tasks), and build (9 tasks) all passed. Staging run 37321174383 is underway; remaining delivery gates are tracked in .do-state.md.
+
+## Post-mortem
+The check-in continuation path introduced in `f41136e3d` cleared its candidate gate after each successful delivery, while assistant error messages resolved the check-in marker. Together these treated an error response as another opportunity to retry without an episode-level ceiling. Existing tests checked one delivery and acknowledgement rather than repeated errors across multiple alarm ticks. This PR adds durable episode accounting, genuine-progress reset rules, and multi-iteration/negative tests. Existing control-loop and error-category rules already require bounded work; no additional standing instruction is needed.
