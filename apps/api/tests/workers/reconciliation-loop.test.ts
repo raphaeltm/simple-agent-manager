@@ -15,6 +15,44 @@ import { guardReconciliationLoop } from '../../src/durable-objects/project-data/
 
 /** Real DO RPC message ingress and Workers SQLite; no deployed test endpoint. */
 describe('reconciliation pause through Workers message ingress', () => {
+  it('pauses the current Codex plain-text error on the first response', async () => {
+    const stub = env.PROJECT_DATA.get(
+      env.PROJECT_DATA.newUniqueId()
+    ) as DurableObjectStub<ProjectData>;
+    const sessionId = await stub.createSession('ws-plain', 'Plain runtime error', 'task-plain');
+    await stub.persistMessageBatch(sessionId, [
+      {
+        messageId: 'plain-warning',
+        role: 'assistant',
+        content:
+          'Warning: Model metadata for `sam-loop-invalid-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.\n\n',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        messageId: 'plain-error',
+        role: 'assistant',
+        content:
+          "The 'sam-loop-invalid-model' model is not supported when using Codex with a ChatGPT account.\n\n",
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+    await runInDurableObject(stub, (_instance, state) => {
+      expect(readReconciliationEpisode(state.storage.sql, sessionId)).toMatchObject({
+        paused: true,
+        attempts: 0,
+      });
+      expect(
+        state.storage.sql
+          .exec(
+            "SELECT COUNT(*) AS n FROM session_attention_markers WHERE source = 'reconciliation_loop' AND resolved_at IS NULL"
+          )
+          .one().n
+      ).toBe(1);
+    });
+  });
+
   it('persists a pause across RPCs and allows a human retry without deleting work', async () => {
     const stub = env.PROJECT_DATA.get(
       env.PROJECT_DATA.newUniqueId()

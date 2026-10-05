@@ -98,9 +98,14 @@ export function resetReconciliationEpisode(
   );
 }
 
-/** Only recognize actual runtime error envelopes, never prose quoting an error. */
+/** Recognize exact runtime error text/envelopes, never prose quoting an error. */
 export function isPermanentRuntimeError(content: string): boolean {
   const normalized = content.trim().replace(/^Warning: Model metadata[^\n]*\n\s*/, '');
+  const unsupportedModel =
+    /^The '[^'\n]+' model is not supported when using Codex with a ChatGPT account\.$/;
+  // Current Codex emits the message directly; older versions used the JSON
+  // envelope below. Warning and error can also arrive as separate messages.
+  if (unsupportedModel.test(normalized)) return true;
   try {
     const envelope = v.safeParse(
       v.object({
@@ -110,12 +115,7 @@ export function isPermanentRuntimeError(content: string): boolean {
       }),
       JSON.parse(normalized)
     );
-    return (
-      envelope.success &&
-      /^The '[^'\n]+' model is not supported when using Codex with a ChatGPT account\.$/.test(
-        envelope.output.error.message
-      )
-    );
+    return envelope.success && unsupportedModel.test(envelope.output.error.message);
   } catch {
     return false;
   }

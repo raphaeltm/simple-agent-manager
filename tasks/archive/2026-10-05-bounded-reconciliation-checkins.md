@@ -34,3 +34,6 @@ Focused reconciliation tests pass; real Workers RPC/SQLite pause-and-retry test 
 
 ## Post-mortem
 The check-in continuation path introduced in `f41136e3d` cleared its candidate gate after each successful delivery, while assistant error messages resolved the check-in marker. Together these treated an error response as another opportunity to retry without an episode-level ceiling. Existing tests checked one delivery and acknowledgement rather than repeated errors across multiple alarm ticks. This PR adds durable episode accounting, genuine-progress reset rules, and multi-iteration/negative tests. Existing control-loop and error-category rules already require bounded work; no additional standing instruction is needed.
+
+## Staging-discovered compatibility correction
+First staging deployment37321174383 passed, including smoke tests. The deliberate invalid-model session showed that current Codex emits the exact unsupported-model message as bare text, separately from its warning, instead of the parent session JSON envelope. A new ingress regression failed before the fix; the parser now accepts that exact anchored runtime sentence as well as the legacy envelope. Added actual Workers batch-RPC coverage. All three reviewers passed the delta. A second staging deployment verifies the correction before merge.

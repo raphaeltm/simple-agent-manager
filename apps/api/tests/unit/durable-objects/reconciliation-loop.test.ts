@@ -169,6 +169,23 @@ describe('bounded delivered check-in episodes', () => {
     expect(sql.exec('SELECT status FROM chat_sessions').toArray()[0]?.status).toBe('active');
   });
 
+  it('pauses the plain-text unsupported-model error emitted by the current Codex runtime', async () => {
+    await message(
+      'assistant',
+      'Warning: Model metadata for `sam-loop-invalid-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.\n\n'
+    );
+    await message(
+      'assistant',
+      "The 'sam-loop-invalid-model' model is not supported when using Codex with a ChatGPT account.\n\n"
+    );
+    expect(readReconciliationEpisode(sql, 'session-1')).toMatchObject({
+      paused: true,
+      attempts: 0,
+    });
+    expect(await getReconciliationCandidates(sql, env)).toEqual([]);
+    expect(boundary.send).not.toHaveBeenCalled();
+  });
+
   it('stops a known permanent error before even the first check-in', async () => {
     await message('assistant', permanent);
     expect(readReconciliationEpisode(sql, 'session-1')?.paused).toBe(true);
