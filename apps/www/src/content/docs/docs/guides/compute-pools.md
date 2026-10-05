@@ -239,7 +239,8 @@ not counted and are not capped by it. A separate installation-wide ceiling (`MAX
 10 by default) applies on top, so raising the pool limit past that has no effect.
 
 After an agent update, an older machine can still count toward the limit while being unable to
-accept new work. When that blocks queued work, SAM requests sleep for its persistent sessions.
+accept new work. When that blocks queued work on a managed machine provisioned by a SAM task,
+SAM requests sleep for its persistent sessions.
 Working sessions keep running; idle sessions sleep through the normal bounded snapshot process.
 Existing sleep retries and blocked sessions keep their current state. Once the machine empties,
 normal retention and cleanup free its slot so queued work can use a current machine. SAM does
