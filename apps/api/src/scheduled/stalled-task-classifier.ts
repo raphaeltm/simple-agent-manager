@@ -175,33 +175,54 @@ export async function classifyLongRunningTaskStall(
   const activeAgeMs = longTurnAge(input.liveness);
   if (activeAgeMs === null || activeAgeMs < config.minActivityAgeMs) return null;
 
-  const { messages } = await projectDataService.getMessages(
-    env,
-    input.task.project_id,
-    input.task.chat_session_id,
-    config.messageLimit,
-    null,
-    null,
-    undefined,
-    false,
-    'desc'
-  );
-  const latestActivityAgeMs = numberAge(input.nowMs, messages[0]?.createdAt ?? messages[0]?.created_at);
-  if (latestActivityAgeMs === null || latestActivityAgeMs < config.minActivityAgeMs) return null;
-
-  const transcript = formatTranscript([...messages].reverse(), config.transcriptMaxChars);
-  const state = {
-    taskId: input.task.id,
-    workspaceId: input.task.workspace_id,
-    livenessReason: input.liveness.reason,
-    evidence: input.liveness.evidence ?? null,
-    activeAgeMs,
-    latestTranscriptActivityAgeMs: latestActivityAgeMs,
-    transcript,
-  };
-
   try {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error('stalled task classifier timed out')),
+        config.timeoutMs
+      );
+    });
+    const { messages } = await Promise.race([
+      projectDataService.getMessages(
+        env,
+        input.task.project_id,
+        input.task.chat_session_id,
+        config.messageLimit,
+        null,
+        null,
+        undefined,
+        false,
+        'desc'
+      ),
+      timeout,
+    ]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
+    const latestActivityAgeMs = numberAge(
+      input.nowMs,
+      messages[0]?.createdAt ?? messages[0]?.created_at
+    );
+    if (latestActivityAgeMs === null || latestActivityAgeMs < config.minActivityAgeMs) return null;
+
+    const transcript = formatTranscript([...messages].reverse(), config.transcriptMaxChars);
+    const state = {
+      taskId: input.task.id,
+      workspaceId: input.task.workspace_id,
+      livenessReason: input.liveness.reason,
+      evidence: input.liveness.evidence ?? null,
+      activeAgeMs,
+      latestTranscriptActivityAgeMs: latestActivityAgeMs,
+      transcript,
+    };
+
+    timer = undefined;
+    const modelTimeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error('stalled task classifier timed out')),
+        config.timeoutMs
+      );
+    });
     const payload = await Promise.race([
       env.AI.run(config.model, {
         model: config.selector,
@@ -228,14 +249,7 @@ export async function classifyLongRunningTaskStall(
           },
         },
       }),
-      new Promise<never>((_, reject) =>
-        {
-          timer = setTimeout(
-            () => reject(new Error('stalled task classifier timed out')),
-            config.timeoutMs
-          );
-        }
-      ),
+      modelTimeout,
     ]).finally(() => {
       if (timer) clearTimeout(timer);
     });

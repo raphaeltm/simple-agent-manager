@@ -1351,7 +1351,10 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
             const liveness = await probeLiveness();
             if (liveness.live || !liveness.conclusive) {
               if (liveness.live) {
-                const stall = await probeStall(liveness);
+                const stall =
+                  task.status === 'in_progress' && executionMs > maxExecutionMs
+                    ? await probeStall(liveness)
+                    : null;
                 if (stall?.decision === 'stalled') {
                   isStuck = true;
                   reason =
@@ -1417,7 +1420,11 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         const doStatus = doProbe.status;
         const liveness = task.status === 'in_progress' ? await probeLiveness() : null;
 
-        if (liveness?.live) {
+        if (
+          task.status === 'in_progress' &&
+          timeForCheck > maxExecutionMs &&
+          liveness?.live
+        ) {
           const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
           const stall = await probeStall(liveness);
           if (stall?.decision === 'stalled') {
