@@ -9,6 +9,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import { redactCredentialTokens } from '../lib/credential-token-redaction';
 import { log } from '../lib/logger';
 import * as projectDataService from '../services/project-data';
 import type { TaskRuntimeLiveness } from '../services/task-runtime-liveness';
@@ -86,10 +87,13 @@ function numberAge(nowMs: number, value: unknown): number | null {
 
 function sanitizeTranscriptContent(content: unknown): string {
   if (typeof content !== 'string') return '';
-  return content
-    .replace(/(Bearer|token|secret|password|authorization|cookie)\s*[:=]\s*["']?[^"'\s]+/gi, '$1=[REDACTED]')
-    .replace(/sk-[A-Za-z0-9_-]{16,}/g, '[REDACTED_KEY]')
-    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[REDACTED_EMAIL]');
+  return redactCredentialTokens(
+    content.replace(
+      /(Bearer|token|secret|password|authorization|cookie)\s*[:=]\s*["']?[^"'\s]+/gi,
+      '$1=[REDACTED]'
+    ),
+    '[REDACTED_KEY]'
+  ).replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[REDACTED_EMAIL]');
 }
 
 function formatTranscript(messages: Record<string, unknown>[], maxChars: number): string {
