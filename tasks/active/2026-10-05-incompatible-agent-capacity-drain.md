@@ -51,3 +51,15 @@ Pool `cap-pool-default:user:toWzGjNW3IyUkCVItRQv3qSn0wI8c22y`; original maxNodes
 Setup correction pending: lowering maxNodes1 before workspace admission completed advanced revision25->26; restoring ORIGINAL3 advanced27 and could not repair strict cached authority. First host remains healthy empty, no workspace created. Coordinator notified and asked to authorize sequential API cleanup/provider absence then ONE corrected fixture with maxNodes1 configured before submission. No further VM provisioned.
 
 Seven-day recurrence follow-up SAM Idea: `01M474AV9DBFPBKPKAZ6PZXDTV` (future observation cannot be completed in implementation run).
+
+### Corrected fixture
+Coordinator authorized sequential API cleanup with provider-absence proof, zero live usage, then one corrected fixture; revised 75–90 minute elapsed window <= EUR0.03, within prior EUR0.10 bound.
+First task cancelled; initial node deleted confirmed through API. Related error node `01M475RRZ2V88JWCMN6SFD8W9C` had no provider instance/IP and already stored termination proof; normal API deletion confirmed. No concurrent extra runtime.
+Corrected pool maxNodes1/revision28 set before submission and unchanged thereafter. Task `01M475TJHSSZNA3H07BPSKHKK6`, session `8a531f4e-9295-4879-96ec-f6be51120c4d`, node `01M475TRJKCN3PT23CCP73NXF7`, workspace `01M47651P42CPKKHEHGQ505XJE`.
+Node https://app.sammy.party/nodes/01M475TRJKCN3PT23CCP73NXF7
+Workspace https://app.sammy.party/workspaces/01M47651P42CPKKHEHGQ505XJE
+Chat https://app.sammy.party/projects/01M4757VDW3YBG091THZCKNHGV/chat/8a531f4e-9295-4879-96ec-f6be51120c4d
+Old agent c66d1dd51ef46a92b9e12c169cb3138d1d266550 heartbeat23:24:56Z/ready23:24:16Z. Read-only authority comparison matched revision/source generation/credential version/candidate. Initial CPU saturation after boot cleared; workspace creating at23:25:15Z. Running/fixture sentinel assertions pending.
+Integrated candidate repinned `2613b82d02afe0c10a229b236055adcb979085c7` (sleeping test fixture correction only).
+
+At23:26:19.819Z canonical agent idle/inactive; assistant confirmed FIXTURE READY, uncommitted `capacity-fixture.txt` exact `capacity-drain-preserve-01M4677451EBA2GZW0TENE0WEM`, git HEAD `a18ce29a47a952ecc284ccbbc89fdb2d845823bc`. Workspace running; read-only D1 confirmed exactly one live managed node, one occupied workspace, maxNodes1/revision28, heartbeat23:26:58Z c66d1dd. Coordinator sent full reviewed SHA, IDs/links/fixture assertion, hold replaced with readiness report; only coordinator deploys.
