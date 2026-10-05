@@ -286,7 +286,19 @@ function settingsHandler(scenario: LimitsScenario) {
   };
 }
 
+/**
+ * The first-run onboarding overlay covers the chat for a user with no cloud
+ * credential (the rule-62 incident). A returning user has dismissed it, which
+ * the app persists per user in localStorage; seed that state before navigation.
+ */
+async function dismissOnboarding(page: Page) {
+  await page.addInitScript((userId: string) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
+}
+
 async function openChat(page: Page, scenario: LimitsScenario, sessionCredential: unknown) {
+  await dismissOnboarding(page);
   await setupAuditRoutes(page, chatHandler(scenario, sessionCredential));
   await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
   await page.getByTestId('session-header').waitFor({ state: 'visible', timeout: 15_000 });
@@ -294,6 +306,7 @@ async function openChat(page: Page, scenario: LimitsScenario, sessionCredential:
 }
 
 async function openSettings(page: Page, scenario: LimitsScenario) {
+  await dismissOnboarding(page);
   await setupAuditRoutes(page, settingsHandler(scenario));
   await page.goto('/settings/credentials');
   await page.getByRole('heading', { name: 'Credentials' }).waitFor({ timeout: 15_000 });
