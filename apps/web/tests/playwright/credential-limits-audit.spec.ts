@@ -297,6 +297,57 @@ async function dismissOnboarding(page: Page) {
   }, MOCK_USER.user.id);
 }
 
+function agentSettingsHandler(opencodeProvider: 'opencode-zen' | 'opencode-go') {
+  return (path: string, respond: AuditResponder) => {
+    if (path.includes('/api/auth')) return respond(200, MOCK_USER);
+    if (path === '/api/agents') {
+      return respond(200, {
+        agents: [{ id: 'opencode', name: 'OpenCode', description: 'OpenCode agent with multi-provider support' }],
+      });
+    }
+    if (path === '/api/model-catalog/opencode') {
+      return respond(200, {
+        agentType: 'opencode',
+        source: 'dynamic',
+        updatedAt: '2026-06-27T00:00:00.000Z',
+        groups: [
+          { label: 'OpenCode Zen', models: [{ id: 'opencode/claude-sonnet-4-6', name: 'Claude Sonnet 4.6', group: 'OpenCode Zen' }] },
+          { label: 'OpenCode Go', models: [{ id: 'opencode-go/glm-5.2', name: 'GLM-5.2', group: 'OpenCode Go' }] },
+        ],
+      });
+    }
+    if (path === '/api/agent-settings/opencode') {
+      return respond(200, {
+        agentType: 'opencode',
+        model: null,
+        permissionMode: 'bypassPermissions',
+        allowedTools: null,
+        deniedTools: null,
+        additionalEnv: null,
+        opencodeProvider,
+        opencodeBaseUrl: null,
+        providerMode: null,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      });
+    }
+    if (path === '/api/projects') return respond(200, { projects: [] });
+    if (path === '/api/credentials') return respond(200, []);
+    if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
+    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/github')) return respond(200, []);
+    return undefined;
+  };
+}
+
+async function openAgentSettings(page: Page, opencodeProvider: 'opencode-zen' | 'opencode-go') {
+  await dismissOnboarding(page);
+  await setupAuditRoutes(page, agentSettingsHandler(opencodeProvider));
+  await page.goto('/settings/agents');
+  await page.getByTestId('agent-card-opencode').waitFor({ timeout: 15_000 });
+  await page.waitForTimeout(600);
+}
+
 async function openChat(page: Page, scenario: LimitsScenario, sessionCredential: unknown) {
   await dismissOnboarding(page);
   await setupAuditRoutes(page, chatHandler(scenario, sessionCredential));
@@ -415,6 +466,21 @@ function surfaceTests() {
     await expect(page.getByTestId('credential-limit-details')).toContainText('Codex usage');
     await assertNoOverflow(page);
     await screenshot(page, 'credential-limits-settings-details', { scopeToProject: true });
+  });
+
+  test('agent settings show the Zen console note only for the opencode-zen provider', async ({ page }) => {
+    await openAgentSettings(page, 'opencode-zen');
+    const note = page.getByTestId('opencode-zen-balance-note');
+    await note.scrollIntoViewIfNeeded();
+    await expect(note).toBeVisible();
+    await expect(note).toContainText('OpenCode console');
+    await expect(note.locator('a')).toHaveAttribute('href', 'https://opencode.ai/zen');
+    await assertNoOverflow(page);
+    await screenshot(page, 'credential-limits-agent-settings-zen-note', { scopeToProject: true });
+
+    await openAgentSettings(page, 'opencode-go');
+    await expect(page.getByTestId('agent-card-opencode')).toBeVisible();
+    await expect(page.getByTestId('opencode-zen-balance-note')).toHaveCount(0);
   });
 
   test('settings cards degrade silently when limits are empty or failing', async ({ page }) => {
