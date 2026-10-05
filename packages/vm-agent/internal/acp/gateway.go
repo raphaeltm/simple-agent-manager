@@ -28,9 +28,9 @@ const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.81.2"
 const claudeCodeMinVersion = "2.1.280"
 const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.281"
 const claudeCodeInstallCommand = "npm install -g " + claudeACPInstallPackage + " " + claudeCodeInstallPackage
-const codexACPInstallPackage = "@agentclientprotocol/codex-acp@1.13.1"
-const codexCLIInstallPackage = "@openai/codex@0.156.1"
-const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.13.1 @openai/codex@0.156.1"
+const codexACPInstallPackage = "@agentclientprotocol/codex-acp@2.1.1"
+const codexCLIInstallPackage = "@openai/codex@0.160.0"
+const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@2.1.1 @openai/codex@0.160.0"
 
 // BootLogReporter sends structured log entries to the control plane.
 // It must be non-nil and have a valid token for logging to work.
@@ -1016,7 +1016,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 	case "openai-codex":
 		// Sandbox and approval overrides are injected through CODEX_CONFIG by
-		// writeCodexStartupConfig. codex-acp (verified through 1.13.1) does not parse Codex CLI -c
+		// writeCodexStartupConfig. codex-acp (verified through 2.1.1) does not parse Codex CLI -c
 		// arguments; its supported config channel is CODEX_CONFIG JSON, which it
 		// forwards to every app-server thread (including spawned subagents).
 		if credentialKind == "oauth-token" {

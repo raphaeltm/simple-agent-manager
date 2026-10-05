@@ -7,6 +7,15 @@ import {
   codexRuntimeRoutes,
 } from '../../src/routes/codex-runtime';
 
+const releases = [
+  { name: 'current', release: CODEX_RUNTIME_RELEASE, bytes: CODEX_RUNTIME_ARCHIVE_BYTES },
+  {
+    name: 'previous (existing VM agents)',
+    release: 'e85e7bfee875bb0bc0397a546073b324258d4cba2c0e54cb3808c3596825b292',
+    bytes: 132578703,
+  },
+];
+
 const request = (query: string, get = vi.fn()) =>
   codexRuntimeRoutes.request(`/download?${query}`, {}, { R2: { get } } as unknown as Env);
 
@@ -41,34 +50,36 @@ describe('immutable Codex runtime download', () => {
       (await request(`release=${CODEX_RUNTIME_RELEASE}`, vi.fn().mockResolvedValue(null))).status
     ).toBe(404);
   });
-  it('rejects a wrong-size object and cancels its stream', async () => {
-    const cancel = vi.fn();
-    const body = new ReadableStream({ cancel });
-    expect(
-      (
-        await request(
-          `release=${CODEX_RUNTIME_RELEASE}`,
-          vi.fn().mockResolvedValue({ size: 3, body })
-        )
-      ).status
-    ).toBe(503);
-    expect(cancel).toHaveBeenCalledOnce();
-  });
-  it('streams only the exact immutable key with download headers', async () => {
-    const body = new ReadableStream({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode('test bytes'));
-        controller.close();
-      },
-    });
-    const get = vi.fn().mockResolvedValue({ size: CODEX_RUNTIME_ARCHIVE_BYTES, body });
-    const response = await request(`release=${CODEX_RUNTIME_RELEASE}`, get);
-    expect(get).toHaveBeenCalledWith(
-      `acp/codex/releases/${CODEX_RUNTIME_RELEASE}/codex-runtime-linux-amd64.tar.gz`
-    );
-    expect(response.status).toBe(200);
-    expect(response.headers.get('cache-control')).toContain('immutable');
-    expect(response.headers.get('content-length')).toBe(String(CODEX_RUNTIME_ARCHIVE_BYTES));
-    expect(await response.text()).toBe('test bytes');
-  });
+  it.each(releases)(
+    'rejects wrong-size $name objects and cancels their streams',
+    async ({ release, bytes }) => {
+      const cancel = vi.fn();
+      const body = new ReadableStream({ cancel });
+      expect(
+        (await request(`release=${release}`, vi.fn().mockResolvedValue({ size: bytes + 1, body })))
+          .status
+      ).toBe(503);
+      expect(cancel).toHaveBeenCalledOnce();
+    }
+  );
+  it.each(releases)(
+    'streams the exact $name immutable key with its own size',
+    async ({ release, bytes }) => {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('test bytes'));
+          controller.close();
+        },
+      });
+      const get = vi.fn().mockResolvedValue({ size: bytes, body });
+      const response = await request(`release=${release}`, get);
+      expect(get).toHaveBeenCalledWith(
+        `acp/codex/releases/${release}/codex-runtime-linux-amd64.tar.gz`
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toContain('immutable');
+      expect(response.headers.get('content-length')).toBe(String(bytes));
+      expect(await response.text()).toBe('test bytes');
+    }
+  );
 });

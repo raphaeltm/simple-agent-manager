@@ -9,7 +9,7 @@ usage() {
 
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd -P)
 manifest="$script_dir/pinned-codex-local.sha256"
-identity="sam-codex-acp-1.13.1-sam-c2.1+cli-0.156.1-sam-c2.1-codemode2"
+identity="sam-codex-acp-2.1.1-sam-c2.2+cli-0.160.0-sam-c2.2-codemode2"
 default_catalog="$script_dir/pinned-codex-catalog"
 
 init_catalog() {

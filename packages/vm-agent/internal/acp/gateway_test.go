@@ -392,8 +392,8 @@ func TestCodexInstalledCheckRequiresExactAdapterAndCLI(t *testing.T) {
 		return cmd.Run()
 	}
 
-	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 1.13.1")
-	writeVersionCommand("codex", "codex-cli 0.156.1")
+	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 2.1.1")
+	writeVersionCommand("codex", "codex-cli 0.160.0")
 	if err := runCheck(); err != nil {
 		t.Fatalf("current Codex adapter and CLI should pass validation: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestCodexInstalledCheckRequiresExactAdapterAndCLI(t *testing.T) {
 		t.Fatal("stale Codex adapter unexpectedly passed validation")
 	}
 
-	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 1.13.1")
+	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 2.1.1")
 	writeVersionCommand("codex", "codex-cli 0.153.2")
 	if err := runCheck(); err == nil {
 		t.Fatal("stale Codex CLI unexpectedly passed validation")

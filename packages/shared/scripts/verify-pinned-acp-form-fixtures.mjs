@@ -35,7 +35,7 @@ function methodBody(source, signature) {
 }
 
 assertPinned(claudeDir, '0.81.2');
-assertPinned(codexDir, '1.13.1');
+assertPinned(codexDir, '2.1.1');
 
 const claude = await import(pathToFileURL(join(claudeDir, 'dist/elicitation.js')).href);
 const mcp = claude.mcpElicitationToCreateRequest({
@@ -70,7 +70,9 @@ const helper = methodBody(codexSource, 'function userInputNoteFieldId(questionId
 const builder = methodBody(codexSource, '  buildUserInputRequest(params) {');
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 assert.equal(sha256(helper), '1bbe92fc16e09779f7c880d212569ae6503f47c5e99c22218e855eec0a7f48d6');
-assert.equal(sha256(builder), 'e68832666416c87c3e4944a2bbee4c68516e86e1127709ed9229861816c23cf1');
+// Version 2.1.1 adds an AIR-only rendering branch. SAM does not advertise
+// _meta.jetbrains.air, so its reviewed choice-and-note schema is unchanged.
+assert.equal(sha256(builder), '9183faada1fb67ce3d83a3cf54104d0cb3538f9a575b3a6ef66bfd266d734cdd');
 assert.match(codexSource, /var USER_INPUT_NOTE_FIELD_SUFFIX = "_note";/);
 assert.match(codexSource, /var USER_INPUT_OTHER_OPTION = "None of the above";/);
 assert.equal(
@@ -79,4 +81,4 @@ assert.equal(
   'Codex fixture must match the exact reviewed output of the pinned builder',
 );
 
-console.log('Claude 0.81.2 builder output matches fixtures; Codex 1.13.1 source and full fixture fingerprints match the reviewed snapshot.');
+console.log('Claude 0.81.2 builder output matches fixtures; Codex 2.1.1 source and full fixture fingerprints match the reviewed snapshot.');

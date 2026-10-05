@@ -20,8 +20,8 @@ import (
 //go:embed codex_runtime_installer.sh
 var codexRuntimeInstaller string
 
-const codexRuntimeArchiveSHA = "e85e7bfee875bb0bc0397a546073b324258d4cba2c0e54cb3808c3596825b292"
-const codexRuntimeArchiveBytes = 132578703
+const codexRuntimeArchiveSHA = "1fd3c07846581888284ed9c9d02bc1f51e3673610c3688d8da98db47030bfb95"
+const codexRuntimeArchiveBytes = 136245837
 
 var codexRuntimeHostPattern = regexp.MustCompile(`^[a-zA-Z0-9.-]+$`)
 

@@ -4,10 +4,14 @@ set -euo pipefail
 [[ $# -eq 2 ]] || { echo "usage: $0 <reviewed-archive.tar.gz> <install-root>" >&2; exit 2; }
 archive=$(realpath -- "$1")
 root=$2
-identity='sam-codex-acp-1.13.1-sam-c2.1+cli-0.156.1-sam-c2.1-codemode2'
-archive_hash='e85e7bfee875bb0bc0397a546073b324258d4cba2c0e54cb3808c3596825b292'
-archive_size=132578703
-catalog_hash='c984a43334aab0968f8a728e8944fd36f99a613e9402eef77243d5ca3ff56d09'
+identity='sam-codex-acp-2.1.1-sam-c2.2+cli-0.160.0-sam-c2.2-codemode2'
+prior_identity='sam-codex-acp-1.13.1-sam-c2.1+cli-0.156.1-sam-c2.1-codemode2'
+prior_catalog_hash='c984a43334aab0968f8a728e8944fd36f99a613e9402eef77243d5ca3ff56d09'
+prior_notices_hash='9f84f8c07cc6b2a3dfe7df75816e18896575e0a8f622b2cb778b826f8db4e056'
+notices_hash='1b8edf18ddd7ea418024c1feb8b48697fe4e408fba33c315ac79d2ab9ef4b7cd'
+archive_hash='1fd3c07846581888284ed9c9d02bc1f51e3673610c3688d8da98db47030bfb95'
+archive_size=136245837
+catalog_hash='02c1b8818f856effeb90a076ace5ab70a9e25b81dadcbf78be000f53113c3b1e'
 [[ $(uname -m) == x86_64 && $(node -p 'process.versions.node.split(".")[0]') -ge 22 ]] || {
   echo 'candidate requires Linux x86_64 and Node 22+' >&2; exit 1;
 }
@@ -65,25 +69,46 @@ flock -x 9
 incoming=$(mktemp -d "$root/.incoming.XXXXXX")
 tar --extract --file "$private/archive.tar" --directory "$incoming" --no-same-owner
 
+trusted_file() {
+  [[ -f "$1" && ! -L "$1" && $(stat -c %u -- "$1") == "$EUID" ]] || return 1
+  (( (8#$(stat -c %a -- "$1") & 0022) == 0 )) || return 1
+  public_path "$1" 0044
+}
+
 verify_release() {
-  local base=$1 release="$1/releases/$identity" catalog="$1/catalog/$identity.sha256"
+  local selected=${2:-$identity} expected_catalog cli_version adapter_version
+  case "$selected" in
+    "$identity") expected_catalog=$catalog_hash; cli_version='0.160.0-sam-c2.2'; adapter_version='2.1.1-sam-c2.2' ;;
+    "$prior_identity") expected_catalog=$prior_catalog_hash; cli_version='0.156.1-sam-c2.1'; adapter_version='1.13.1-sam-c2.1' ;;
+    *) return 1 ;;
+  esac
+  local release="$1/releases/$selected" catalog="$1/catalog/$selected.sha256"
   [[ -d "$release" && ! -L "$release" && -f "$catalog" && ! -L "$catalog" ]] || return 1
   # Never execute a valid-at-check-time file that another user can replace.
   [[ -z $(find "$release" \( ! -user "$EUID" -o -perm /022 \) -print -quit) ]] || return 1
-  printf '%s  %s\n' "$catalog_hash" "$catalog" | sha256sum --check --status || return 1
-  [[ -z $(find "$release" -type l -print -quit) ]] || return 1
+  trusted_file "$catalog" || return 1
+  printf '%s  %s\n' "$expected_catalog" "$catalog" | sha256sum --check --status || return 1
+  [[ -z $(find "$release" ! -type f ! -type d -print -quit) ]] || return 1
   [[ $(cd "$release" && find . -type f -printf '%P\n' | sort) == "$(printf '%s\n' bin/codex bin/codex-acp payload/SHA256SUMS payload/SOURCE-PROVENANCE payload/adapter.js payload/codex payload/codex-code-mode-host | sort)" ]] || return 1
   (cd "$release" && sha256sum --check --status "$catalog") || return 1
   [[ -x "$release/bin/codex" && -x "$release/bin/codex-acp" && -x "$release/payload/codex" && -x "$release/payload/codex-code-mode-host" ]] || return 1
-  [[ $("$release/bin/codex" --version) == 'codex-cli 0.156.1-sam-c2.1' ]] || return 1
-  [[ $("$release/bin/codex-acp" --version) == '@agentclientprotocol/codex-acp 1.13.1-sam-c2.1' ]] || return 1
+  [[ $("$release/bin/codex" --version) == "codex-cli $cli_version" ]] || return 1
+  [[ $("$release/bin/codex-acp" --version) == "@agentclientprotocol/codex-acp $adapter_version" ]] || return 1
 }
 
 verify_notices() {
-  local base=$1 notices="$1/notices/$identity" manifest="${2:-$1/catalog/$identity.notices.sha256}"
+  local selected=${3:-$identity} expected_notices
+  case "$selected" in
+    "$identity") expected_notices=$notices_hash ;;
+    "$prior_identity") expected_notices=$prior_notices_hash ;;
+    *) return 1 ;;
+  esac
+  local notices="$1/notices/$selected" manifest="${2:-$1/catalog/$selected.notices.sha256}"
   [[ -d "$notices" && ! -L "$notices" && -f "$manifest" && ! -L "$manifest" ]] || return 1
+  [[ -z $(find "$notices" ! -type f ! -type d -print -quit) ]] || return 1
   [[ -z $(find "$notices" \( -type l -o ! -user "$EUID" -o -perm /022 \) -print -quit) ]] || return 1
-  printf '%s  %s\n' '9f84f8c07cc6b2a3dfe7df75816e18896575e0a8f622b2cb778b826f8db4e056' "$manifest" | sha256sum --check --status || return 1
+  trusted_file "$manifest" || return 1
+  printf '%s  %s\n' "$expected_notices" "$manifest" | sha256sum --check --status || return 1
   [[ $(cd "$notices" && find . -type f -printf '%P\n' | sort) == "$(awk '{print $2}' "$manifest" | sort)" ]] || return 1
   [[ -z $(find "$notices" -type d ! -perm -0055 -print -quit) ]] || return 1
   [[ -z $(find "$notices" -type f ! -perm -0044 -print -quit) ]] || return 1
@@ -124,12 +149,25 @@ if [[ -e "$root/releases/$identity" ]]; then
   public_release "$root/releases/$identity" || exit 1
   verify_release "$root" || exit 1
 fi
-# This candidate has never been distributed. Replacing another active identity
-# needs its corresponding reviewed migration/rollback procedure, not a fallback.
+# Only the reviewed predecessor can migrate. Validate it before publishing any
+# new bytes, and retain both its immutable files and an explicit rollback link.
+verify_prior() {
+  verify_release "$root" "$prior_identity" &&
+    public_release "$root/releases/$prior_identity" &&
+    verify_notices "$root" "" "$prior_identity"
+}
+if [[ -e "$root/previous" || -L "$root/previous" ]]; then
+  [[ -L "$root/previous" && $(readlink -- "$root/previous") == "releases/$prior_identity" ]] || exit 1
+  verify_prior || exit 1
+fi
+migrating=false
 if [[ -e "$root/current" || -L "$root/current" ]]; then
-  [[ -L "$root/current" && $(readlink -f -- "$root/current") == "$root/releases/$identity" ]] || {
-    echo 'different active release; explicit migration required' >&2; exit 1;
-  }
+  [[ -L "$root/current" ]] || exit 1
+  case "$(readlink -- "$root/current")" in
+    "releases/$identity") ;;
+    "releases/$prior_identity") verify_prior || exit 1; migrating=true ;;
+    *) echo 'unapproved active release; explicit migration required' >&2; exit 1 ;;
+  esac
 fi
 notices="$root/notices/$identity"
 notices_manifest="$root/catalog/$identity.notices.sha256"
@@ -169,6 +207,10 @@ verify_notices "$root"
 verify_release "$root"
 # Existing installations must also be usable without the installer's UID.
 public_release "$release"
+if [[ "$migrating" == true ]]; then
+  ln -s -- "releases/$prior_identity" "$incoming/previous.next"
+  mv -Tf -- "$incoming/previous.next" "$root/previous"
+fi
 ln -s -- "releases/$identity" "$incoming/current.next"
 mv -Tf -- "$incoming/current.next" "$root/current"
 echo "$identity"

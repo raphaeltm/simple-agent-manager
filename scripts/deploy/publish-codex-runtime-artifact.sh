@@ -4,8 +4,8 @@ set -euo pipefail
 [[ $# -eq 1 ]] || { echo "usage: $0 <reviewed-runtime.tar.gz>" >&2; exit 2; }
 : "${R2_BUCKET:?R2_BUCKET is required}"
 [[ "$R2_BUCKET" =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]] || exit 1
-release='e85e7bfee875bb0bc0397a546073b324258d4cba2c0e54cb3808c3596825b292'
-size=132578703
+release='1fd3c07846581888284ed9c9d02bc1f51e3673610c3688d8da98db47030bfb95'
+size=136245837
 # Pinned Wrangler R2 REST upload transport rejects objects above 300 MiB.
 (( size <= 300 * 1024 * 1024 )) || { echo 'Artifact exceeds Wrangler upload limit' >&2; exit 1; }
 private=$(mktemp -d)

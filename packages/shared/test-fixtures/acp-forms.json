@@ -176,7 +176,7 @@
   },
   {
     "name": "codex_request_user_input_choice_and_note",
-    "source": "codex-acp@1.13.1 CodexElicitationHandler.buildUserInputRequest",
+    "source": "codex-acp@2.1.1 CodexElicitationHandler.buildUserInputRequest",
     "schema": {
       "type": "object",
       "properties": {

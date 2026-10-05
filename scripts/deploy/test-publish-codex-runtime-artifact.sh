@@ -11,7 +11,7 @@ cat > "$private/bin/pnpm" <<'MOCK'
 set -euo pipefail
 [[ "$1 $2 $3 $4 $5 $6" == '--filter @simple-agent-manager/api exec wrangler r2 object' ]]
 operation=$7
-[[ "$8" == test-bucket/acp/codex/releases/e85e7bfee875bb0bc0397a546073b324258d4cba2c0e54cb3808c3596825b292/codex-runtime-linux-amd64.tar.gz ]]
+[[ "$8" == test-bucket/acp/codex/releases/1fd3c07846581888284ed9c9d02bc1f51e3673610c3688d8da98db47030bfb95/codex-runtime-linux-amd64.tar.gz ]]
 [[ "$9" == --file && "${11}" == --remote ]]
 echo "$operation" >> "$FAKE_STATE/calls"
 if [[ "$FAKE_CASE" == unavailable ]]; then echo 'service unavailable' >&2; exit 1; fi

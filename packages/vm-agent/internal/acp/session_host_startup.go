@@ -536,7 +536,7 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	if err != nil {
 		return fmt.Errorf("cannot start Codex: write SAM MCP config.toml: %w", err)
 	}
-	// codex-acp (verified through 1.13.1) ignores Codex CLI -c arguments. CODEX_CONFIG is merged into
+	// codex-acp (verified through 2.1.1) ignores Codex CLI -c arguments. CODEX_CONFIG is merged into
 	// each app-server thread. Seed the requested model before session/new: newly
 	// released Codex models may be valid provider models before they appear in the
 	// adapter's default configOptions, while a configured current model is advertised

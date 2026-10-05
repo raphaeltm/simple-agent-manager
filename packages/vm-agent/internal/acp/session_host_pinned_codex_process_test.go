@@ -115,7 +115,14 @@ func runPinnedCodexProcessCase(t *testing.T, completionBeforeAnswer, withoutComp
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 1<<20))
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&request); err != nil || request.Model != "gpt-6.1-sol" {
+			t.Errorf("expected exact Sol 6.1 model in provider request, got %q (decode: %v)", request.Model, err)
+			http.Error(w, "wrong model", http.StatusBadRequest)
+			return
+		}
 		call := modelCalls.Add(1)
 		item := map[string]any{"type": "message", "role": "assistant", "id": fmt.Sprintf("msg-%d", call),
 			"content": []any{map[string]any{"type": "output_text", "text": "Done"}}}
@@ -142,7 +149,7 @@ func runPinnedCodexProcessCase(t *testing.T, completionBeforeAnswer, withoutComp
 	defer model.Close()
 	home := t.TempDir()
 	modelURL, _ := url.Parse(model.URL)
-	config := fmt.Sprintf("model = \"mock-model\"\napproval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\nmodel_provider = \"mock_provider\"\n[model_providers.mock_provider]\nname = \"Mock\"\nbase_url = \"%s/v1\"\nwire_api = \"responses\"\nenv_key = \"PROBE_API_KEY\"\nrequest_max_retries = 0\nstream_max_retries = 0\n", modelURL.String())
+	config := fmt.Sprintf("model = \"gpt-6.1-sol\"\napproval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\nmodel_provider = \"mock_provider\"\n[model_providers.mock_provider]\nname = \"Mock\"\nbase_url = \"%s/v1\"\nwire_api = \"responses\"\nenv_key = \"PROBE_API_KEY\"\nrequest_max_retries = 0\nstream_max_retries = 0\n", modelURL.String())
 	if useCodeMode {
 		config += "[features]\ncode_mode = true\ncode_mode_only = true\n"
 	}
@@ -190,7 +197,7 @@ func runPinnedCodexProcessCase(t *testing.T, completionBeforeAnswer, withoutComp
 	if err != nil {
 		t.Fatalf("ACP initialize: %v", err)
 	}
-	if initialized.AgentInfo == nil || initialized.AgentInfo.Version != "1.13.1-sam-c2.1" {
+	if initialized.AgentInfo == nil || initialized.AgentInfo.Version != "2.1.1-sam-c2.2" {
 		t.Fatalf("ACP agent identity does not match patched build")
 	}
 	session, err := client.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: home, McpServers: []acpsdk.McpServer{{Http: &acpsdk.McpServerHttpInline{
