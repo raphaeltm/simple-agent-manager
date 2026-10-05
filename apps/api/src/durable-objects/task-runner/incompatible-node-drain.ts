@@ -39,6 +39,7 @@ export async function requestIncompatiblePoolNodeDrain(
         AND w.status IN ('running', 'recovery')
         AND w.project_id IS NOT NULL AND w.chat_session_id IS NOT NULL
         AND s.sleep_status IS NULL AND s.sleeping_at IS NULL
+        AND (s.id IS NULL OR s.status IN ('pending', 'available', 'degraded', 'failed'))
         AND (s.id IS NULL OR (s.user_id = w.user_id
           AND s.project_id = w.project_id AND (s.workspace_id IS NULL OR s.workspace_id = w.id)))
         AND EXISTS (SELECT 1 FROM agent_sessions a WHERE a.workspace_id = w.id

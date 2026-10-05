@@ -6,8 +6,8 @@ import {
   type VmTaskAdmissionIdentity,
   waitForVmAdmissionCapacity,
 } from '../../services/vm-admission-control';
-import { persistPlacementDiagnostics } from './placement-diagnostics';
 import { requestIncompatiblePoolNodeDrain } from './incompatible-node-drain';
+import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export async function scheduleAdmissionWait(

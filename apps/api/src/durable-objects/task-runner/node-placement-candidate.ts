@@ -7,10 +7,10 @@ import {
 } from '../../services/placement-strategy';
 import {
   type ActiveWorkspaceReservationUsage,
+  cpuBudgetMillis,
   evaluateWorkspaceReservationCapacity,
   parseWorkspaceAdmissionMetrics,
   resolveTrustedWorkspaceNodeCapacity,
-  cpuBudgetMillis,
   usableMemoryMb,
   type WorkspaceAdmissionPolicy,
 } from '../../services/workspace-resource-capacity';
