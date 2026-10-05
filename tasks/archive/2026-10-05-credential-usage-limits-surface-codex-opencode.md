@@ -1,6 +1,6 @@
 # Surface credential usage limits; capture Codex and OpenCode Go live limits
 
-**Status:** backlog → active
+**Status:** archived with the PR (implementation complete; staging evidence recorded in the PR body)
 **Requested by:** Raphaël, 2026-10-05 (task 01M464DMGWETMRVFA9TW2JVE6M): "I want you to add codex and OpenCode as well as surface the existing data. Get a pr green."
 **Research record:** idea `01M1RMTYR8FB95H3V031CRYN68` Parts 1–6 (Part 6 = 2026-10-05 verification of provider endpoints).
 
