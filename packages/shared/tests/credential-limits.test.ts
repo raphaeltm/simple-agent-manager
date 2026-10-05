@@ -4,6 +4,7 @@ import {
   credentialIdFromReference,
   credentialLimitFamilyLabel,
   credentialLimitWindowLabel,
+  credentialLimitWindowSortMinutes,
   formatCredentialLimitWindowMinutes,
   worstCredentialLimitLevel,
 } from '../src/credential-limits';
@@ -56,5 +57,17 @@ describe('credential limit helpers', () => {
     expect(formatCredentialLimitWindowMinutes(10080)).toBe('Week');
     expect(formatCredentialLimitWindowMinutes(43200)).toBe('30d');
     expect(formatCredentialLimitWindowMinutes(0)).toBe('Window');
+  });
+
+  it('orders windows by reported length, then nominal span, unknown last', () => {
+    expect(credentialLimitWindowSortMinutes('opencode.rolling', null)).toBe(300);
+    expect(credentialLimitWindowSortMinutes('opencode.weekly', null)).toBe(10080);
+    expect(credentialLimitWindowSortMinutes('opencode.monthly', null)).toBe(43200);
+    expect(credentialLimitWindowSortMinutes('claude.five_hour', undefined)).toBe(300);
+    // Reported length wins over the nominal span.
+    expect(credentialLimitWindowSortMinutes('opencode.rolling', 120)).toBe(120);
+    // Positional and token-rate windows stay unknown without a reported length.
+    expect(credentialLimitWindowSortMinutes('codex.primary', null)).toBeNull();
+    expect(credentialLimitWindowSortMinutes('anthropic.tokens', null)).toBeNull();
   });
 });

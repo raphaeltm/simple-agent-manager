@@ -86,6 +86,34 @@ export function formatCredentialLimitWindowMinutes(windowMinutes: number): strin
 }
 
 /**
+ * Nominal span of fixed-meaning window types whose provider payload carries no
+ * length (OpenCode Go reports only `resetsAt`). Used ONLY to order a credential's
+ * windows shortest-first; never for labels, thresholds or gates. Positional types
+ * (`codex.primary`/`secondary`) and token-rate windows stay unknown.
+ */
+const NOMINAL_WINDOW_MINUTES: Record<string, number> = {
+  'claude.five_hour': 5 * 60,
+  'claude.seven_day': 7 * 24 * 60,
+  'claude.seven_day_opus': 7 * 24 * 60,
+  'claude.seven_day_sonnet': 7 * 24 * 60,
+  'opencode.rolling': 5 * 60,
+  'opencode.weekly': 7 * 24 * 60,
+  'opencode.monthly': 30 * 24 * 60,
+};
+
+/**
+ * Span to sort a window by: the reported length when the provider gave one,
+ * otherwise the nominal span of a fixed-meaning type, otherwise `null` (sort last).
+ */
+export function credentialLimitWindowSortMinutes(
+  windowType: string,
+  windowMinutes: number | null | undefined
+): number | null {
+  if (windowMinutes !== null && windowMinutes !== undefined) return windowMinutes;
+  return NOMINAL_WINDOW_MINUTES[windowType] ?? null;
+}
+
+/**
  * Label for one window. Fixed-meaning window types use a fixed label; positional
  * types (`codex.primary`, `codex.secondary`) are labelled by their reported length.
  */

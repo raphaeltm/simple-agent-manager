@@ -17,6 +17,7 @@ import {
   type CredentialLimitLevel,
   type CredentialLimitsResponse,
   type CredentialLimitStatus,
+  credentialLimitWindowSortMinutes,
   type CredentialLimitWindowSummary,
   DEFAULT_CREDENTIAL_LIMIT_READ_MAX_ROWS,
   worstCredentialLimitLevel,
@@ -194,8 +195,10 @@ function summarize(
     // summaries read in the order a user burns through them; unknown spans last.
     summary.windows.sort(
       (a, b) =>
-        (a.windowMinutes ?? Number.POSITIVE_INFINITY) -
-          (b.windowMinutes ?? Number.POSITIVE_INFINITY) || a.windowType.localeCompare(b.windowType)
+        (credentialLimitWindowSortMinutes(a.windowType, a.windowMinutes) ??
+          Number.POSITIVE_INFINITY) -
+          (credentialLimitWindowSortMinutes(b.windowType, b.windowMinutes) ??
+            Number.POSITIVE_INFINITY) || a.windowType.localeCompare(b.windowType)
     );
     summary.level = worstCredentialLimitLevel(summary.windows.map((window) => window.level));
   }

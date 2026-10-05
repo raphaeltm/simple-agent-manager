@@ -112,9 +112,11 @@ describe('listProjectCredentialLimits', () => {
       source: 'vm-agent.opencode_go_usage',
     };
     // Seeded in the alphabetical order the old sort produced (month, rolling, week).
+    // All WITHOUT a reported length — exactly what the OpenCode Go endpoint yields on
+    // staging — so ordering must come from the nominal span of the window type.
     seedWindow({ ...opencode, windowType: 'opencode.monthly', windowMinutes: null });
-    seedWindow({ ...opencode, windowType: 'opencode.rolling', windowMinutes: 300 });
-    seedWindow({ ...opencode, windowType: 'opencode.weekly', windowMinutes: 10080 });
+    seedWindow({ ...opencode, windowType: 'opencode.rolling', windowMinutes: null });
+    seedWindow({ ...opencode, windowType: 'opencode.weekly', windowMinutes: null });
 
     const response = await listProjectCredentialLimits(env, {
       projectId: 'project-1',
@@ -128,6 +130,25 @@ describe('listProjectCredentialLimits', () => {
       'opencode.weekly',
       'opencode.monthly',
     ]);
+
+    // A reported length wins over the nominal span, and unknown spans sort last.
+    const codex = {
+      credentialReference: 'cc_credentials:cred-codex',
+      provider: 'openai',
+      agentType: 'openai-codex',
+      source: 'vm-agent.codex_rollout',
+    };
+    seedWindow({ ...codex, windowType: 'codex.secondary', windowMinutes: 300 });
+    seedWindow({ ...codex, windowType: 'codex.primary', windowMinutes: null });
+    const again = await listProjectCredentialLimits(env, {
+      projectId: 'project-1',
+      userId: 'owner-1',
+    });
+    expect(
+      again.credentials
+        .find((c) => c.credentialReference === 'cc_credentials:cred-codex')
+        ?.windows.map((window) => window.windowType)
+    ).toEqual(['codex.secondary', 'codex.primary']);
   });
 
   it("returns the caller's own rows plus shared rows, never another member's personal credential", async () => {
