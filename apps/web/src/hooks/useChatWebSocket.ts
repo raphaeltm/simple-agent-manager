@@ -44,7 +44,9 @@ interface UseChatWebSocketOptions {
     promptStartedAt?: number | null
   ) => void;
   /** Called when the session metadata changes server-side. */
-  onSessionUpdated?: (updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId'>>) => void;
+  onSessionUpdated?: (
+    updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId' | 'agentSessionId'>>
+  ) => void;
   /**
    * Called when the replacement TaskRunner waking this sleeping session advances a
    * phase. Pushed so the wake banner updates without waiting for the fallback poll.
@@ -231,12 +233,19 @@ export function useChatWebSocket({
           } else if (data.type === 'session.updated') {
             const p = payload;
             if (p.sessionId !== sessionId) return;
-            const updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId'>> = {};
+            const updates: Partial<
+              Pick<ChatSessionResponse, 'topic' | 'workspaceId' | 'agentSessionId'>
+            > = {};
             if (typeof p.topic === 'string' || p.topic === null) {
               updates.topic = p.topic;
             }
             if (typeof p.workspaceId === 'string' || p.workspaceId === null) {
               updates.workspaceId = p.workspaceId;
+            }
+            // Pushed when the DO registers the ACP session (createAcpSession), so a
+            // page opened before the agent started still learns its session id.
+            if (typeof p.agentSessionId === 'string') {
+              updates.agentSessionId = p.agentSessionId;
             }
             if (Object.keys(updates).length > 0) {
               onSessionUpdatedRef.current?.(updates);

@@ -351,6 +351,40 @@ describe('useChatWebSocket (behavioral)', () => {
     });
   });
 
+  it('forwards agentSessionId from session.updated so a page opened before the agent started learns it', () => {
+    // The DO pushes this when it registers the ACP session (createAcpSession);
+    // the usage-limit chip and resume/recovery key on session.agentSessionId.
+    const onSessionUpdated = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onSessionUpdated }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.updated',
+        sessionId: 'sess-1',
+        agentSessionId: 'acp-123',
+      });
+    });
+
+    expect(onSessionUpdated).toHaveBeenCalledWith({ agentSessionId: 'acp-123' });
+  });
+
+  it('does not forward a non-string agentSessionId', () => {
+    const onSessionUpdated = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onSessionUpdated }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.updated',
+        sessionId: 'sess-1',
+        agentSessionId: null,
+      });
+    });
+
+    expect(onSessionUpdated).not.toHaveBeenCalled();
+  });
+
   it('ignores session.updated events for different sessions', () => {
     const onSessionUpdated = vi.fn();
     renderHook(() => useChatWebSocket({ ...defaultProps, onSessionUpdated }));
