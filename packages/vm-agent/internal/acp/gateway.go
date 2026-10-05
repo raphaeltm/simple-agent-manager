@@ -30,7 +30,7 @@ const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.281"
 const claudeCodeInstallCommand = "npm install -g " + claudeACPInstallPackage + " " + claudeCodeInstallPackage
 const codexACPInstallPackage = "@agentclientprotocol/codex-acp@2.1.1"
 const codexCLIInstallPackage = "@openai/codex@0.160.0"
-const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@2.1.1 @openai/codex@0.160.0"
+const codexACPInstallCommand = "npm install -g " + codexACPInstallPackage + " " + codexCLIInstallPackage
 
 // BootLogReporter sends structured log entries to the control plane.
 // It must be non-nil and have a valid token for logging to work.
