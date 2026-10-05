@@ -105,7 +105,7 @@ SAM shows how much of a credential's provider allowance is used, so you can see 
 
 Where it appears:
 
-- **Chat header** — a usage chip next to the workspace badge for the credential the running session uses (for example `Claude · 5h 72% · Week 31%`). Tap it for every window with its reset time.
+- **Chat header** — a usage chip next to the workspace badge for the credential the running session uses (for example `Claude · 5h 72% · Week 31%`), shortest window first. Tap it for every window with its reset time. The chip appears as soon as the agent's first turn completes; you do not need to reload.
 - **Settings → Credentials** — the same chip on each personal credential that has samples.
 - **Agents** — the MCP tool `get_credential_limits` returns the same windows, so an orchestrator can pause dispatching and schedule a wake for after the reset instead of running into the limit.
 

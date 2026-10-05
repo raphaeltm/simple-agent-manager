@@ -220,3 +220,29 @@ window_minutes: i64|null, resets_at: unix seconds|null }` (`protocol/src/protoco
   task stop, goal control — nothing for rate limits.
 - Spawning a second `codex app-server` to call `account/rateLimits/read` was rejected: it would race the shared
   `auth.json` refresh token (the exact race the Codex refresh proxy exists to prevent).
+
+## Staging findings (2026-10-05)
+
+Live verification on staging (`app.sammy.party`, Raphaël's staging account) found two
+gaps that the local suite could not see, both fixed in this branch:
+
+- **Chip never appeared on an already-open chat page.** `session.updated` broadcasts
+  only carried `topic`/`workspaceId`, so a page opened before the agent session
+  existed never learned `session.agentSessionId`; the chip (gated on it) showed only
+  after a reload. `ProjectData.createAcpSession` now broadcasts
+  `{ sessionId, agentSessionId }` to the chat session's sockets and
+  `useChatWebSocket` forwards it (`39241bd7b`). Worker test
+  `tests/workers/acp-session-created-broadcast.test.ts` subscribes through the real
+  `/ws` path and was proven discriminating by reverting the broadcast.
+- **Windows were ordered alphabetically**, so OpenCode read
+  `Month 2% · Rolling 0% · Week 0%`. The read model now orders each credential's
+  windows by span, shortest first, unknown spans last (`3696a6f97`).
+
+Observed provider payloads (for future reference):
+
+- Codex CLI 0.160 rollout on a ChatGPT **Pro** plan reported only
+  `primary: { used_percent: 65, window_minutes: 10080 }` with `secondary: null`, plus a
+  `credits: { balance }` object SAM does not surface yet (follow-up noted on the idea).
+  Labelling by `window_minutes` (not position) therefore showed "Week", as intended.
+- OpenCode Go `/zen/go/v1/usage` returned rolling/weekly/monthly with `percent` and
+  `resetsAt` (monthly without a reset time).
