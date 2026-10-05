@@ -44,4 +44,12 @@ Source session above; PR #2205; scripts/diagnostics/acp-runtime-distribution.md;
 - Lint, typecheck, build and full VM-agent Go suite passed. Monorepo tests passed20/21 tasks: API11302passed and1import timeout; focused retry43/43passed.
 - Final Go-to-ACP run passed all14 interaction scenarios plus runtime bundle verification, asserting exact gpt-6.1-sol in every provider request. This verifies transport, not real-account entitlement.
 - Current/previous/unknown download12tests, publisher6mock scenarios, stock2.1.1 form/URL verifier scripts, local source installer tamper/rollback suite, and anonymous release download checksum verification passed.
-- Security review no introduced findings; Go review stale fixture verifier pins fixed and retested. Root installer predecessor fixture corrected after existing archive symlink was accidentally duplicated; focused migration checks pending.
+- Security review no introduced findings; Go review stale fixture verifier pins fixed and retested. Root installer predecessor fixture corrected; predecessor upgrade, tamper rejection, and idempotence checks passed (persisted PR validation evidence).
+
+
+### Recovery and live verification continuation
+
+- Restored clean at `545893ece` on October 5; implementation and published C2.2 release survived. PR #2234 CI passed, and staging run 37282217598 succeeded. A later catalog deployment replaced staging; candidate restoration run 37303104641 started after checking for active deployments and compute.
+- The original staging VM task `01M45M2ZW6HQBMS7YCESK94QM8` provisioned node `01M45M56XV9EVM63N15BXXYY1X`, received heartbeats, and completed an agent turn before sleeping. The node was already deleted when work resumed. Its patched-binary check failed; do not treat the printed marker as successful verification.
+- Diagnosed the failed check: TaskRunner forwarded the selected model but omitted the resolved profile ID when creating the agent session. Runtime-assets callbacks therefore saw a null session profile and omitted its patched-runtime selector. Forward the already-resolved profile ID to bootstrap; regression checks exercise the real runner/bootstrap/D1 boundary with two distinct profiles and no-profile control.
+- Completion review found no missing active runtime/install/download paths. The old 0.156.1 diagnostic probes are explicitly historical PR #2210 evidence. Live patched VM/Instant verification and release gates remain pending.

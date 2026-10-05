@@ -80,6 +80,8 @@ export async function handleAgentSession(
       userId: state.userId,
       chatSessionId: state.stepResults.chatSessionId,
       agentSessionId: sessionId,
+      // Dispatch resolves the profile hint to its ID before persisting runner state.
+      agentProfileId: state.config.agentProfileHint,
       label: buildTaskAgentSessionLabel(state.config.taskTitle),
       agentType,
       visibleInitialPrompt: buildVisibleTaskInitialPrompt(state),

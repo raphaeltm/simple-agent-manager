@@ -321,6 +321,7 @@ describe('handleAgentSession', () => {
       status: 'running',
       label: 'Task: Fix runtime orchestration coverage with ',
       agentType: 'openai-codex',
+      agentProfileId: 'profile-1',
     });
 
     expect(createAgentSessionOnNodeMock).toHaveBeenCalledWith(
@@ -398,6 +399,31 @@ describe('handleAgentSession', () => {
     );
     expect(storageWrites.at(-1)?.completed).toBe(true);
   });
+
+  it.each(['sol-runtime-profile', 'another-project-profile', null])(
+    'persists the selected profile %s before starting the VM agent',
+    async (profileId) => {
+      const state = makeState();
+      state.config.agentProfileHint = profileId;
+      const { rc } = makeContext();
+      createAgentSessionOnNodeMock.mockImplementationOnce(async () => {
+        // Runtime-assets callbacks read the session row, not the workspace hint.
+        expect(insertedAgentSessions).toEqual([
+          expect.objectContaining({
+            id: 'agent-session-new',
+            workspaceId: 'workspace-1',
+            agentProfileId: profileId,
+          }),
+        ]);
+      });
+
+      await handleAgentSession(state, rc);
+
+      expect(createAgentSessionOnNodeMock).toHaveBeenCalledOnce();
+      expect(startAgentSessionOnNodeMock).toHaveBeenCalledOnce();
+      expect(state.currentStep).toBe('running');
+    }
+  );
 
   it('rechecks source authority at the agent boundary and never sends a stale initial prompt', async () => {
     restoreAgentSessionOnNodeMock.mockResolvedValueOnce({
