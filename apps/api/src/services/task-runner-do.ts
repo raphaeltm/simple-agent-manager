@@ -200,6 +200,7 @@ export async function startTaskRunnerDO(
     } | null;
     /** Original parent whose live status authorizes this snapshot-recovery runner. */
     recoverySourceTaskId?: string | null;
+    recoveryAttemptId?: string | null;
     /** Original attempt whose runtime deletion fences this replacement. */
     retrySourceTaskId?: string | null;
     /** Optional durable lifecycle guard for reserved first-start submissions. */
@@ -208,10 +209,11 @@ export async function startTaskRunnerDO(
     projectEventWakeGuard?: ProjectEventWakeRecoveryGuard | null;
     /** Member whose continued write permission authorizes a scheduled wake. */
     recoveryRequiredProjectMemberId?: string | null;
-  }
+  },
+  options: { reactivate?: boolean } = {}
 ): Promise<void> {
   const deletionSourceTaskId = input.retrySourceTaskId ?? input.recoverySourceTaskId ?? null;
-  if (deletionSourceTaskId) {
+  if (deletionSourceTaskId && deletionSourceTaskId !== input.taskId) {
     await assertReplacementDeletionConfirmed(env, {
       sourceTaskId: deletionSourceTaskId,
       projectId: input.projectId,
@@ -277,6 +279,7 @@ export async function startTaskRunnerDO(
       resumeSnapshotChatSessionId: input.resumeSnapshotChatSessionId ?? null,
       evictionFence: input.evictionFence ?? null,
       recoverySourceTaskId: input.recoverySourceTaskId ?? null,
+      recoveryAttemptId: input.recoveryAttemptId ?? null,
       retrySourceTaskId: input.retrySourceTaskId ?? null,
       startGuard: input.startGuard ?? null,
       projectEventWakeGuard: input.projectEventWakeGuard ?? null,
@@ -284,12 +287,21 @@ export async function startTaskRunnerDO(
     },
   };
 
-  await stub.start(startInput);
+  if (options.reactivate === true) {
+    await stub.reactivate(startInput);
+  } else {
+    await stub.start(startInput);
+  }
 
-  log.info('task_runner_do_service.started', {
-    taskId: input.taskId,
-    projectId: input.projectId,
-  });
+  log.info(
+    options.reactivate === true
+      ? 'task_runner_do_service.reactivated'
+      : 'task_runner_do_service.started',
+    {
+      taskId: input.taskId,
+      projectId: input.projectId,
+    }
+  );
 }
 
 /**
@@ -300,11 +312,12 @@ export async function advanceTaskRunnerWorkspaceReady(
   env: Env,
   taskId: string,
   status: 'running' | 'recovery' | 'error',
-  errorMessage: string | null
+  errorMessage: string | null,
+  workspaceId: string
 ): Promise<void> {
   const stub = getStub(env, taskId);
 
-  await stub.advanceWorkspaceReady(status, errorMessage);
+  await stub.advanceWorkspaceReady(status, errorMessage, workspaceId);
 
   log.info('task_runner_do_service.workspace_ready_advanced', {
     taskId,
@@ -343,9 +356,13 @@ export async function getTaskRunnerStatus(env: Env, taskId: string): Promise<unk
 /**
  * Confirm that TaskRunner initialization committed and repair a missing alarm.
  */
-export async function ensureTaskRunnerStarted(env: Env, taskId: string): Promise<boolean> {
+export async function ensureTaskRunnerStarted(
+  env: Env,
+  taskId: string,
+  recoveryAttemptId?: string
+): Promise<boolean> {
   const stub = getStub(env, taskId);
-  return stub.ensureStarted();
+  return recoveryAttemptId ? stub.ensureStarted(recoveryAttemptId) : stub.ensureStarted();
 }
 
 /**

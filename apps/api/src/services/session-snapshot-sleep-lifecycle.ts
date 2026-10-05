@@ -192,6 +192,7 @@ async function markSessionSnapshotSleepingWithConfig(
       sleepingAt: now.toISOString(),
       expiresAt: snapshotExpiry(now, ttlDays),
       recoveryStatus: null,
+      recoveryAttemptId: null,
       recoveryError: null,
       recoveryAttempts: 0,
       recoveryFailedAt: null,

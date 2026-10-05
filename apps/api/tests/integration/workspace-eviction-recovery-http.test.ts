@@ -145,13 +145,14 @@ describe('workspace eviction HTTP recovery vertical slice', () => {
     ).toMatchObject({ status: 'evicted', eviction_finalized_at: expect.any(String) });
     expect(
       sqlite
-        .prepare(`SELECT COUNT(*) AS count FROM tasks WHERE triggered_by = 'session-recovery'`)
+        .prepare(`SELECT COUNT(*) AS count FROM tasks`)
         .get()
     ).toEqual({ count: 1 });
     expect(mocks.startTaskRunnerDO).toHaveBeenCalledOnce();
     expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
       env,
       expect.objectContaining({
+        taskId: 'source-task',
         vmLocation: 'hel1',
         excludedNodeId: 'node-1',
         evictionFence: {
@@ -159,7 +160,11 @@ describe('workspace eviction HTTP recovery vertical slice', () => {
           nodeId: 'node-1',
           generation: 'generation-1',
         },
-      })
+      }),
+      { reactivate: true }
     );
+    expect(sqlite.prepare('SELECT id, status, triggered_by FROM tasks').get()).toEqual({
+      id: 'source-task', status: 'queued', triggered_by: 'mcp',
+    });
   });
 });

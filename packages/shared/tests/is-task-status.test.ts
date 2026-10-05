@@ -34,13 +34,14 @@ describe('TASK_STATUSES', () => {
       'queued',
       'delegated',
       'in_progress',
+      'sleeping',
       'completed',
       'failed',
       'cancelled',
     ]);
   });
 
-  it('has 8 statuses', () => {
-    expect(TASK_STATUSES).toHaveLength(8);
+  it('has 9 statuses', () => {
+    expect(TASK_STATUSES).toHaveLength(9);
   });
 });

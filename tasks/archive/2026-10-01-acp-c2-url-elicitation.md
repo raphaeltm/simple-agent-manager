@@ -162,3 +162,7 @@ selection and fresh-stock GPT-5.5 rollback now have distinct live evidence.
 Timeout/interruption and unsupported-model attempts remain explicitly excluded
 from successful continuation claims. No new provider login or token custody was
 added. Final rollback and release disposition remain parent-owned.
+
+---
+
+_Reconciled 2026-10-05 (weekly queue reconciliation): draft PR #2207 landed through PR #2217 (`b79136805`, merged 2026-10-03T15:59Z). Its head `bbfc13999` is reachable from main, so GitHub marks #2207 merged at the same second. First successful production deploy run 37136649002 (2026-10-03T16:23Z). The acceptance criterion "draft, dormant, unmerged, undeployed" was superseded by the parent's release. URLs were enabled in production by deploy run 37137757826 (2026-10-03T16:41Z), and the `sam-api-prod` readback on 2026-10-05 shows `ACP_INTERACTION_URLS_ENABLED=true`. The checked-in default remains `false` (`apps/api/wrangler.toml:394`). The live wrapper→Go→Worker→browser gap was closed for Codex on a VM (both completion orders) and on Instant (URL `62842f67-…`), per `scripts/diagnostics/acp-runtime-distribution.md`. Claude URL continuation was not run live. Post-timeout tool availability is open in Idea `01M414TM187NXNWF8AFNJZ6181`. No boxes left unticked._

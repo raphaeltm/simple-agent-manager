@@ -61,3 +61,7 @@ selection and fresh-stock GPT-5.5 rollback now have distinct live evidence.
 Timeout/interruption and unsupported-model attempts remain explicitly excluded
 from successful continuation claims. No new provider login or token custody was
 added. Final rollback and release disposition remain parent-owned.
+
+---
+
+_Reconciled 2026-10-05 (weekly queue reconciliation): shipped via PR #2206 (`989bf7bb6`, merged 2026-09-30T21:43Z), first successful production deploy run 36783707657 (2026-09-30T22:07Z). PR #2217 (`b79136805`) later added the schema-name field labels and the release. Production enablement came with deploy run 37137757826 (2026-10-03T16:41Z), and the `sam-api-prod` readback on 2026-10-05 shows `ACP_INTERACTION_FORMS_ENABLED=true`. Live form continuation is recorded for Codex only, on VM and Instant (`scripts/diagnostics/acp-runtime-distribution.md`). #2217 lists Claude forms as deterministic builder coverage only, yet forms are offered to any agent in conversation mode (`apps/api/src/services/acp-interaction-runtime-config.ts:15`). No boxes left unticked._

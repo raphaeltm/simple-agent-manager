@@ -61,7 +61,8 @@ export async function ensureSessionLinked(
         drizzle(rc.env.DATABASE, { schema }),
         state.config.resumeSnapshotChatSessionId,
         state.taskId,
-        workspaceId
+        workspaceId,
+        state.config.recoveryAttemptId ?? undefined
       );
     }
 

@@ -1,5 +1,11 @@
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  completeSessionSnapshotRecovery,
+  recordSessionSnapshotRecoveryWorkspace,
+} from '../../../src/services/session-snapshot-wake-outcome';
 
 vi.mock('cloudflare:workers', () => ({ DurableObject: class {} }));
 
@@ -396,5 +402,73 @@ describe('atomic warm-node claim for the current recovery generation', () => {
     expect(
       f.sqlite.prepare("SELECT claimed_warm_node_id FROM tasks WHERE id = 'T2'").get()
     ).toEqual({ claimed_warm_node_id: expected === 'claimed' ? 'warm-node' : null });
+  });
+});
+
+describe('stable-task wake authority', () => {
+  function stableFixture() {
+    const f = fixture();
+    f.sqlite.exec(`
+      UPDATE tasks SET recovery_source_task_id = NULL, triggered_by = 'mcp' WHERE id = 'T2';
+      UPDATE session_snapshots SET recovery_attempt_id = 'wake-1';
+    `);
+    const input = { ...recoveryInput, sourceTaskId: 'T2', recoveryAttemptId: 'wake-1' };
+    return { ...f, input };
+  }
+
+  it('allows the stable owner without replacement-task lineage metadata', async () => {
+    const f = stableFixture();
+    await expect(
+      isSessionRecoveryTaskAndEventAuthorized(f.database, f.input, f.validateEvent)
+    ).resolves.toBe(true);
+  });
+
+  it.each([
+    ['task cancellation', "UPDATE tasks SET status = 'cancelled' WHERE id = 'T2'"],
+    ['membership revocation', "UPDATE project_members SET status = 'suspended'"],
+    ['new wake on the same task', "UPDATE session_snapshots SET recovery_attempt_id = 'wake-2'"],
+  ])('rejects %s while the event RPC awaited', async (_label, mutation) => {
+    const f = stableFixture();
+    await expect(
+      isSessionRecoveryTaskAndEventAuthorized(f.database, f.input, async () => {
+        f.sqlite.exec(mutation);
+        return true;
+      })
+    ).resolves.toBe(false);
+  });
+
+  it('rejects a revoked event subscription for a stable owner', async () => {
+    const f = stableFixture();
+    await expect(
+      isSessionRecoveryTaskAndEventAuthorized(f.database, f.input, async () => false)
+    ).resolves.toBe(false);
+  });
+
+  it('continues to enforce scheduled-wake membership without an event subscription', async () => {
+    const f = stableFixture();
+    const input = { ...f.input, projectEventWake: null, requiredProjectMemberId: 'user' };
+    await expect(isSessionRecoveryTaskAuthorized(f.database, input)).resolves.toBe(true);
+    f.sqlite.exec("UPDATE project_members SET role = 'viewer'");
+    await expect(isSessionRecoveryTaskAuthorized(f.database, input)).resolves.toBe(false);
+  });
+
+  it('commits the stable guarded wake and fences delayed workspace/restore writes', async () => {
+    const f = stableFixture();
+    const db = drizzle(f.database, { schema });
+    await recordSessionSnapshotRecoveryWorkspace(db, 'chat', 'T2', 'workspace-new', 'wake-1');
+    f.sqlite.exec("UPDATE session_snapshots SET recovery_attempt_id = 'wake-2'");
+    await recordSessionSnapshotRecoveryWorkspace(db, 'chat', 'T2', 'workspace-stale', 'wake-1');
+    await expect(
+      completeSessionSnapshotRecovery(db, 'chat', 'T2', 'workspace-stale', 'T2', 'wake-1')
+    ).resolves.toBe(false);
+    expect(
+      f.sqlite.prepare('SELECT recovery_workspace_id, recovery_status FROM session_snapshots').get()
+    ).toEqual({ recovery_workspace_id: 'workspace-new', recovery_status: 'waking' });
+    await expect(
+      completeSessionSnapshotRecovery(db, 'chat', 'T2', 'workspace-current', 'T2', 'wake-2')
+    ).resolves.toBe(true);
+    expect(
+      f.sqlite.prepare('SELECT recovery_workspace_id, recovery_status FROM session_snapshots').get()
+    ).toEqual({ recovery_workspace_id: 'workspace-current', recovery_status: 'restored' });
   });
 });

@@ -19,9 +19,13 @@ import {
   snapshotAgentType,
 } from './session-recovery-request';
 import { SourceTaskNotWakeableError } from './session-recovery-task-guard';
-import { SESSION_RECOVERY_INITIAL_PROMPT } from './session-sleep-fallback-messages';
+import { sleptFallbackRecord } from './session-sleep-episode';
+import {
+  SESSION_RECOVERY_INITIAL_PROMPT,
+  sessionRecoveryInitialPrompt,
+} from './session-sleep-fallback-messages';
 import type { SessionRecoverySourceTaskGuard } from './session-snapshots';
-import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
+import { startTaskRunnerDO } from './task-runner-do';
 
 export { SESSION_RECOVERY_INITIAL_PROMPT };
 
@@ -98,7 +102,8 @@ export async function startRecoveryTask(
   chatSessionId: string,
   placementResolution: RecoveryPlacementResolution,
   sourceTaskGuard?: SessionRecoverySourceTaskGuard,
-  options: SessionRecoveryOptions = {}
+  options: SessionRecoveryOptions = {},
+  recoveryAttemptId: string = ulid()
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   if (['completed', 'failed', 'cancelled'].includes(task.status)) {
@@ -111,14 +116,6 @@ export async function startRecoveryTask(
     throw new SourceTaskNotWakeableError();
   }
   if (task.status === 'in_progress') return;
-  const alreadyStarted = await ensureTaskRunnerStarted(env, task.id);
-  if (
-    sourceTaskGuard &&
-    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
-  ) {
-    throw new SourceTaskNotWakeableError();
-  }
-  if (alreadyStarted) return;
 
   const profile = task.agentProfileHint
     ? await db
@@ -141,68 +138,70 @@ export async function startRecoveryTask(
     });
   }
 
-  await startTaskRunnerDO(env, {
-    taskId: task.id,
-    projectId: context.project.id,
-    userId: context.snapshot.userId,
-    vmSize: asVmSize(context.workspace.vmSize),
-    vmLocation: placementResolution.placement.vmLocation,
-    branch: context.workspace.branch || context.project.defaultBranch,
-    defaultBranch: context.project.defaultBranch,
-    preferredNodeId: null,
-    excludedNodeId: options.excludedNodeId ?? null,
-    userName: context.user.name,
-    userEmail: context.user.email,
-    githubId: context.user.githubId,
-    taskTitle: task.title,
-    taskDescription: task.description ?? SESSION_RECOVERY_INITIAL_PROMPT,
-    repository: context.project.repository,
-    installationId: context.project.installationId,
-    outputBranch: task.outputBranch,
-    projectDefaultVmSize: context.project.defaultVmSize as VMSize | null,
-    chatSessionId,
-    agentType:
-      snapshotAgentType(context.snapshot) ??
-      profile?.agentType ??
-      context.project.defaultAgentType ??
-      null,
-    workspaceProfile: asWorkspaceProfile(context.workspace.workspaceProfile),
-    devcontainerConfigName: context.workspace.devcontainerConfigName,
-    cloudProvider: placementResolution.placement.provider ?? placementResolution.effectiveProvider,
-    explicitVmLocation: placementResolution.placement.explicitVmLocation === true,
-    credentialAttributionUserId: placementResolution.credentialAttributionUserId,
-    credentialAttributionProjectId: placementResolution.credentialAttributionProjectId,
-    credentialAttributionSource: placementResolution.credentialAttributionSource,
-    taskMode: 'conversation',
-    model: profile?.model ?? null,
-    effort:
-      profile?.effort === 'low' ||
-      profile?.effort === 'medium' ||
-      profile?.effort === 'high' ||
-      profile?.effort === 'auto'
-        ? profile.effort
-        : null,
-    permissionMode: profile?.permissionMode ?? null,
-    systemPromptAppend: profile?.systemPromptAppend ?? null,
-    agentProfileHint: task.agentProfileHint,
-    projectScaling: {
-      taskExecutionTimeoutMs: context.project.taskExecutionTimeoutMs,
-      nodeCpuThresholdPercent: context.project.nodeCpuThresholdPercent,
-      nodeMemoryThresholdPercent: context.project.nodeMemoryThresholdPercent,
-      warmNodeTimeoutMs: context.project.warmNodeTimeoutMs,
+  await startTaskRunnerDO(
+    env,
+    {
+      taskId: task.id,
+      projectId: context.project.id,
+      userId: context.snapshot.userId,
+      vmSize: asVmSize(context.workspace.vmSize),
+      vmLocation: placementResolution.placement.vmLocation,
+      branch: context.workspace.branch || context.project.defaultBranch,
+      defaultBranch: context.project.defaultBranch,
+      preferredNodeId: null,
+      excludedNodeId: options.excludedNodeId ?? null,
+      userName: context.user.name,
+      userEmail: context.user.email,
+      githubId: context.user.githubId,
+      taskTitle: task.title,
+      taskDescription: sessionRecoveryInitialPrompt(sleptFallbackRecord(context.snapshot)),
+      repository: context.project.repository,
+      installationId: context.project.installationId,
+      outputBranch: task.outputBranch,
+      projectDefaultVmSize: context.project.defaultVmSize as VMSize | null,
+      chatSessionId,
+      agentType:
+        snapshotAgentType(context.snapshot) ??
+        profile?.agentType ??
+        context.project.defaultAgentType ??
+        null,
+      workspaceProfile: asWorkspaceProfile(context.workspace.workspaceProfile),
+      devcontainerConfigName: context.workspace.devcontainerConfigName,
+      cloudProvider:
+        placementResolution.placement.provider ?? placementResolution.effectiveProvider,
+      explicitVmLocation: placementResolution.placement.explicitVmLocation === true,
+      credentialAttributionUserId: placementResolution.credentialAttributionUserId,
+      credentialAttributionProjectId: placementResolution.credentialAttributionProjectId,
+      credentialAttributionSource: placementResolution.credentialAttributionSource,
+      taskMode: 'conversation',
+      model: profile?.model ?? null,
+      effort:
+        profile?.effort === 'low' ||
+        profile?.effort === 'medium' ||
+        profile?.effort === 'high' ||
+        profile?.effort === 'auto'
+          ? profile.effort
+          : null,
+      permissionMode: profile?.permissionMode ?? null,
+      systemPromptAppend: profile?.systemPromptAppend ?? null,
+      agentProfileHint: task.agentProfileHint,
+      projectScaling: {
+        taskExecutionTimeoutMs: context.project.taskExecutionTimeoutMs,
+        nodeCpuThresholdPercent: context.project.nodeCpuThresholdPercent,
+        nodeMemoryThresholdPercent: context.project.nodeMemoryThresholdPercent,
+        warmNodeTimeoutMs: context.project.warmNodeTimeoutMs,
+      },
+      resolvedReservation: placementResolution.placement.resolvedReservation,
+      capacityPoolSelection: placementResolution.capacityPoolSelection,
+      vmSizeSource: placementResolution.placement.vmSizeSource,
+      resumeSnapshotChatSessionId: chatSessionId,
+      evictionFence: options.evictionFence ?? null,
+      recoverySourceTaskId: sourceTaskGuard?.taskId ?? null,
+      recoveryAttemptId,
+      retrySourceTaskId: null,
+      projectEventWakeGuard: sourceTaskGuard?.projectEventWake ?? null,
+      recoveryRequiredProjectMemberId: sourceTaskGuard?.requiredProjectMemberId ?? null,
     },
-    resolvedReservation: placementResolution.placement.resolvedReservation,
-    capacityPoolSelection: placementResolution.capacityPoolSelection,
-    vmSizeSource: placementResolution.placement.vmSizeSource,
-    resumeSnapshotChatSessionId: chatSessionId,
-    evictionFence: options.evictionFence ?? null,
-    // Unguarded human wakes intentionally do not carry recoverySourceTaskId:
-    // that field grants the live-parent revocable-authority contract. Keep the
-    // predecessor deletion lineage separately so every TaskRunner boundary can
-    // still revalidate that the old runtime is gone before allocating a node.
-    recoverySourceTaskId: sourceTaskGuard?.taskId ?? null,
-    retrySourceTaskId: task.recoverySourceTaskId ?? null,
-    projectEventWakeGuard: sourceTaskGuard?.projectEventWake ?? null,
-    recoveryRequiredProjectMemberId: sourceTaskGuard?.requiredProjectMemberId ?? null,
-  });
+    { reactivate: true }
+  );
 }

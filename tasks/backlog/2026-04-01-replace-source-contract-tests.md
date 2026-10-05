@@ -1,5 +1,7 @@
 # Replace Source-Contract Tests with Behavioral Integration Tests
 
+> **Reconciliation 2026-10-05:** PR #2225 (9ef726c20) deleted the agent-settings-callback source-contract block from `apps/api/tests/unit/project-agent-defaults.test.ts`. That block read `routes/workspaces/runtime.ts`. It was replaced by a behavioral route test on a real SQL engine, `apps/api/tests/unit/routes/workspace-agent-settings-callback.test.ts:47-194` (`app.request`, no `readFileSync`). Still open: every item in the 2026-09-30 block. `project-agent-defaults.test.ts` still reads `routes/tasks/submit.ts` and `routes/mcp/dispatch-tool.ts` (`:391-415`), so all 28 listed files remain. The detector regex in `scripts/quality/check-source-contract-tests.ts:52-55` is still unfixed. No new route source-contract tests were added this week.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** all 9 named files in `apps/api/tests/unit/routes/` were deleted by PR #598

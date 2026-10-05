@@ -66,7 +66,14 @@ describe('TaskRunner build-started callback handling', () => {
       ctx: { storage: { put: typeof put; setAlarm: typeof setAlarm } };
       getState: () => Promise<TaskRunnerState>;
     };
-    runner.ctx = { storage: { put, setAlarm } };
+    const storage = {
+      put,
+      setAlarm,
+      get: async () => structuredClone(state),
+      transaction: async <T>(callback: (transaction: DurableObjectTransaction) => Promise<T>) =>
+        callback(storage as unknown as DurableObjectTransaction),
+    };
+    runner.ctx = { storage };
     runner.getState = vi.fn(async () => state);
 
     const before = state.workspaceReadyStartedAt;

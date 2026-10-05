@@ -1,5 +1,7 @@
 # Fix stuck-task sweep pattern complexity failures
 
+> **Reconciliation 2026-10-05: the same bug class is live in production again, from #2222.** `hasDurableRecord` (`apps/api/src/scheduled/stuck-task-live-runtime.ts:230-236`) binds `%"preservationKey":"<escaped key>"%`, which is 51 to 69 bytes for real keys, over D1's 50-byte LIKE limit. The first record is written; from the next sweep on, the dedupe read throws, is caught with only a warning (`stuck_task.live_runtime_record_lookup_failed`), and a duplicate `platform_errors` row is inserted every five minutes. Production observability D1, 2026-10-05: task `01M44DA3EDRCGNATD4R3FT0Y7A` has 59 rows with the same key (01:36Z to 06:27Z) and task `01M42YQA8QPJQBW48KTDQFAHDE` has 9. The bound statement returns `LIKE or GLOB pattern too complex` (7500) in production, while a 48-byte pattern on the same rows succeeds. The better-sqlite3 unit test cannot see D1's limit. Suggested fix: match on an exact column or `json_extract(context, '$.preservationKey') = ?` instead of LIKE. This makes the open regression guard below (bound LIKE patterns stay at or under 50 bytes) urgent.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the fix, in 8eed3b740 (PR #1765). The failing statement was the TaskRunner-mismatch

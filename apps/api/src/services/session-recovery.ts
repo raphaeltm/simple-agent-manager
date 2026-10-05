@@ -6,8 +6,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import {
-  CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
-  CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
   capacityPlacementSnapshotSqlValues,
 } from './capacity-placement-snapshot';
 import { PlacementResolutionError } from './placement-resolution-error';
@@ -19,7 +18,6 @@ import {
   assertReplacementDeletionConfirmed,
   WorkspaceDeletionUnconfirmedError,
 } from './replacement-deletion-fence';
-import { failAndRestoreSessionRecoveryHandoff } from './session-recovery-authority';
 import { loadRecoveryContext, type RecoveryContext } from './session-recovery-context';
 import {
   evictionRecoveryFenceMatches,
@@ -33,10 +31,8 @@ import {
   buildRecoveryPlacementInput,
   type RecoveryPlacementResolution,
 } from './session-recovery-request';
-import { abandonRecoveryHandoff, startRecoveryTask } from './session-recovery-task';
+import { startRecoveryTask } from './session-recovery-task';
 import { type Db, SourceTaskNotWakeableError } from './session-recovery-task-guard';
-import { sleptFallbackRecord } from './session-sleep-episode';
-import { sessionRecoveryInitialPrompt } from './session-sleep-fallback-messages';
 import {
   claimSessionSnapshotRecovery,
   failSessionSnapshotRecovery,
@@ -51,261 +47,126 @@ export {
 } from './session-recovery-refusal-report';
 export { SESSION_RECOVERY_INITIAL_PROMPT } from './session-recovery-task';
 
-// The node-pool boundary inventory (`scripts/quality/node-pool-boundary/inventory-data.ts`)
-// requires the module that holds this tasks-INSERT writer to also call
-// `resolveTaskStartPlacement*` and `ensureTaskRunnerStarted`. Keep the writer beside
-// `resolveRecoveryPlacement` and `ensureSessionRecovery` when splitting this file.
-async function createRecoveryTask(
+async function reactivateSleepingTask(
   database: D1Database,
   db: Db,
   context: RecoveryContext,
   chatSessionId: string,
   taskId: string,
   placementResolution: RecoveryPlacementResolution,
+  recoveryAttemptId: string,
   sourceTaskGuard?: SessionRecoverySourceTaskGuard
 ): Promise<schema.Task> {
-  const sourceTaskId =
-    sourceTaskGuard?.taskId ??
-    context.sourceTask?.recoverySourceTaskId ??
-    context.sourceTask?.id ??
-    null;
-  if (!sourceTaskId) throw new SourceTaskNotWakeableError();
-  const requiresLiveSource = sourceTaskGuard ? 1 : 0;
-
   const existing = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
-  if (existing) {
-    if (
-      existing.projectId === context.project.id &&
-      existing.recoverySourceTaskId === sourceTaskId &&
-      existing.chatSessionId === chatSessionId &&
-      existing.triggeredBy === 'session-recovery'
-    ) {
-      return existing;
-    }
-    throw new Error('Recovery task ID is already bound to different work');
+  if (!existing || existing.projectId !== context.project.id) {
+    throw new SourceTaskNotWakeableError();
+  }
+  if (
+    existing.chatSessionId !== chatSessionId &&
+    existing.workspaceId !== context.snapshot.workspaceId
+  ) {
+    throw new SourceTaskNotWakeableError();
   }
 
   const now = new Date().toISOString();
   const capacityPlacementSnapshot = placementResolution.capacityPlacementSnapshot;
-  try {
-    // D1 batches are transactional. The INSERT ... SELECT is the parent-state
-    // compare-and-set: if the source is terminal or no longer owns this
-    // conversation when the transaction begins, every later statement is a
-    // no-op because it is conditioned on that insert having succeeded.
+  {
+    // D1 batches are transactional. The task update is the parent-state
+    // compare-and-set: if an automated wake has terminalized or no longer owns this
+    // conversation when the transaction begins, every later statement is a no-op.
     const results = await database.batch([
       database
         .prepare(
-          `INSERT INTO tasks
-             (id, project_id, user_id, chat_session_id, recovery_source_task_id,
-              title, description, status, execution_step, priority,
-              agent_profile_hint, skill_id, skill_hint, task_mode, output_branch,
-              requested_vm_size, requested_vm_size_source,
-              resource_requirements_json, resource_requirements_source,
-              resolved_reservation_json, credential_attribution_user_id,
-              credential_attribution_project_id, credential_attribution_source,
-              ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
-              triggered_by, created_by, created_at, updated_at)
-           SELECT ?, source.project_id, ?, NULL, source.id,
-                  COALESCE(NULLIF(source.title, ''), 'Resume conversation'), ?,
-                  'queued', 'node_selection', COALESCE(source.priority, 0),
-                  COALESCE(source.agent_profile_hint, ?), source.skill_id,
-                  source.skill_hint, 'conversation', source.output_branch, ?,
-                  COALESCE(source.requested_vm_size_source, 'session-recovery'),
-                  source.resource_requirements_json, source.resource_requirements_source,
-                  source.resolved_reservation_json,
-                  ?,
-                  ?,
-                  ?,
-                  ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
-                  'session-recovery', ?, ?, ?
-             FROM tasks source
-            WHERE source.id = ?
-              AND source.project_id = ?
-              AND (
-                ? = 0
-                OR source.status NOT IN ('completed', 'failed', 'cancelled')
-                OR (
-                  source.status = 'cancelled'
-                  AND source.superseded_by_task_id IS NOT NULL
-                  AND EXISTS (
-                    SELECT 1 FROM tasks marked_successor
-                     WHERE marked_successor.id = source.superseded_by_task_id
-                       AND marked_successor.project_id = source.project_id
-                       AND marked_successor.chat_session_id = ?
-                       AND marked_successor.triggered_by = 'session-recovery'
-                       AND marked_successor.status NOT IN ('completed', 'failed', 'cancelled')
-                  )
-                )
+          `UPDATE tasks
+              SET status = 'queued',
+                  execution_step = 'node_selection',
+                  completed_at = NULL,
+                  error_message = NULL,
+                  workspace_id = NULL,
+                  auto_provisioned_node_id = NULL,
+                  claimed_warm_node_id = NULL,
+                  claimed_warm_node_at = NULL,
+                  requested_vm_size = ?,
+                  requested_vm_size_source = COALESCE(requested_vm_size_source, 'session-recovery'),
+                  credential_attribution_user_id = ?,
+                  credential_attribution_project_id = ?,
+                  credential_attribution_source = ?,
+                  ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS},
+                  updated_at = ?
+            WHERE id = ?
+              AND project_id = ?
+              AND (? = 0 OR status NOT IN ('completed', 'failed', 'cancelled'))
+              AND EXISTS (
+                SELECT 1 FROM session_snapshots snapshot
+                 WHERE snapshot.chat_session_id = ?
+                   AND snapshot.recovery_task_id = tasks.id
+                   AND snapshot.recovery_attempt_id = ?
+                   AND snapshot.recovery_status = 'waking'
               )
               AND (
-                source.chat_session_id = ?
-                OR EXISTS (
-                  SELECT 1 FROM tasks owner
-                   WHERE owner.recovery_source_task_id = source.id
-                     AND owner.project_id = source.project_id
-                     AND owner.chat_session_id = ?
-                     AND owner.triggered_by = 'session-recovery'
-                )
-              )
-              AND NOT EXISTS (SELECT 1 FROM tasks duplicate WHERE duplicate.id = ?)`
+                chat_session_id = ?
+                OR workspace_id = ?
+              )`
         )
         .bind(
-          taskId,
-          context.snapshot.userId,
-          // After a bounded sleep fallback the wake prompt says which files to expect and
-          // not to replay outside effects (`session-sleep-fallback-messages.ts`).
-          sessionRecoveryInitialPrompt(sleptFallbackRecord(context.snapshot)),
-          context.workspace.agentProfileHint,
           placementResolution.placement.vmSize,
           placementResolution.credentialAttributionUserId,
           placementResolution.credentialAttributionProjectId,
           placementResolution.credentialAttributionSource,
           ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
-          context.snapshot.userId,
-          now,
-          now,
-          sourceTaskId,
-          context.project.id,
-          requiresLiveSource,
-          chatSessionId,
-          chatSessionId,
-          chatSessionId,
-          taskId
-        ),
-      database
-        .prepare(
-          `UPDATE tasks
-              SET chat_session_id = NULL,
-                  superseded_by_task_id = ?,
-                  updated_at = ?
-            WHERE EXISTS (
-                SELECT 1 FROM tasks recovery
-                 WHERE recovery.id = ?
-                   AND recovery.recovery_source_task_id = ?
-                   AND recovery.chat_session_id IS NULL
-              )
-              AND (
-                (chat_session_id = ? AND (id = ? OR recovery_source_task_id = ?))
-                OR (
-                  id = ?
-                  AND project_id = ?
-                  AND EXISTS (
-                    SELECT 1 FROM tasks owner
-                     WHERE owner.recovery_source_task_id = tasks.id
-                       AND owner.project_id = tasks.project_id
-                       AND owner.chat_session_id = ?
-                       AND owner.triggered_by = 'session-recovery'
-                       AND owner.status NOT IN ('completed', 'failed', 'cancelled')
-                  )
-                )
-              )`
-        )
-        .bind(
-          taskId,
           now,
           taskId,
-          sourceTaskId,
-          chatSessionId,
-          sourceTaskId,
-          sourceTaskId,
-          sourceTaskId,
           context.project.id,
-          chatSessionId
+          sourceTaskGuard ? 1 : 0,
+          chatSessionId,
+          recoveryAttemptId,
+          chatSessionId,
+          context.snapshot.workspaceId
         ),
       database
         .prepare(
           `UPDATE workspaces
               SET chat_session_id = NULL, updated_at = ?
-            WHERE chat_session_id = ?
-              AND EXISTS (
-                SELECT 1 FROM tasks recovery
-                 WHERE recovery.id = ?
-                   AND recovery.recovery_source_task_id = ?
-                   AND recovery.chat_session_id IS NULL
-              )`
-        )
-        .bind(now, chatSessionId, taskId, sourceTaskId),
-      database
-        .prepare(
-          `UPDATE tasks
-              SET chat_session_id = ?, updated_at = ?
             WHERE id = ?
-              AND recovery_source_task_id = ?
-              AND chat_session_id IS NULL
+              AND chat_session_id = ?
               AND EXISTS (
-                SELECT 1 FROM tasks source
-                 WHERE source.id = ?
-                   AND source.project_id = ?
-                   AND (
-                     ? = 0
-                     OR source.status NOT IN ('completed', 'failed', 'cancelled')
-                     OR (
-                       source.status = 'cancelled'
-                       AND (
-                         source.superseded_by_task_id = ?
-                         OR (
-                           source.superseded_by_task_id IS NOT NULL
-                           AND EXISTS (
-                             SELECT 1 FROM tasks marked_successor
-                              WHERE marked_successor.id = source.superseded_by_task_id
-                                AND marked_successor.project_id = source.project_id
-                                AND marked_successor.chat_session_id = ?
-                                AND marked_successor.triggered_by = 'session-recovery'
-                                AND marked_successor.status NOT IN ('completed', 'failed', 'cancelled')
-                           )
-                         )
-                       )
-                     )
-                   )
+                SELECT 1 FROM tasks task
+                 WHERE task.id = ?
+                   AND task.status = 'queued'
+                   AND EXISTS (SELECT 1 FROM session_snapshots snapshot
+                     WHERE snapshot.chat_session_id = ? AND snapshot.recovery_task_id = task.id
+                       AND snapshot.recovery_attempt_id = ? AND snapshot.recovery_status = 'waking')
               )`
         )
         .bind(
-          chatSessionId,
           now,
+          context.snapshot.workspaceId,
+          chatSessionId,
           taskId,
-          sourceTaskId,
-          sourceTaskId,
-          context.project.id,
-          requiresLiveSource,
-          taskId,
-          chatSessionId
+          chatSessionId,
+          recoveryAttemptId
         ),
       database
         .prepare(
           `INSERT INTO task_status_events
              (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
-           SELECT ?, recovery.id, NULL, 'queued', 'system', NULL,
+           SELECT ?, task.id, ?, 'queued', 'system', NULL,
                   'Sleeping conversation wake claimed', ?
-             FROM tasks recovery
-            WHERE recovery.id = ?
-              AND recovery.recovery_source_task_id = ?
-              AND recovery.chat_session_id = ?`
+             FROM tasks task
+            WHERE task.id = ?
+              AND task.status = 'queued'
+                   AND EXISTS (SELECT 1 FROM session_snapshots snapshot
+                     WHERE snapshot.chat_session_id = ? AND snapshot.recovery_task_id = task.id
+                       AND snapshot.recovery_attempt_id = ? AND snapshot.recovery_status = 'waking')`
         )
-        .bind(ulid(), now, taskId, sourceTaskId, chatSessionId),
+        .bind(ulid(), existing.status, now, taskId, chatSessionId, recoveryAttemptId),
     ]);
     if ((results[0]?.meta.changes ?? 0) === 0) throw new SourceTaskNotWakeableError();
-  } catch (error) {
-    // A concurrent retry may have observed the claimed task ID and completed
-    // this exact insert. Re-read before treating the batch error as terminal.
-    const winner = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
-    if (
-      winner?.projectId === context.project.id &&
-      winner.recoverySourceTaskId === sourceTaskId &&
-      winner.chatSessionId === chatSessionId &&
-      winner.triggeredBy === 'session-recovery'
-    ) {
-      return winner;
-    }
-    throw error;
   }
 
   const created = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).get();
-  if (
-    !created ||
-    created.recoverySourceTaskId !== sourceTaskId ||
-    created.chatSessionId !== chatSessionId
-  ) {
-    throw new Error('Recovery task was not durably bound after its creation batch');
+  if (!created || created.chatSessionId !== chatSessionId || created.status !== 'queued') {
+    throw new Error('Sleeping task was not durably reactivated after its wake batch');
   }
   return created;
 }
@@ -351,7 +212,7 @@ async function resolveRecoveryPlacement(
 }
 
 /**
- * Claim and (re)start the one replacement TaskRunner that wakes a sleeping VM
+ * Claim and reactivate the stable TaskRunner that wakes a sleeping VM
  * conversation. The snapshot row is the durable lock, so alarm retries and
  * concurrent user prompts converge on the same task and workspace.
  */
@@ -394,7 +255,10 @@ export async function ensureSessionRecovery(
     }
   }
 
-  const recoveryTaskId = ulid();
+  const recoveryTaskId = context.sourceTask?.id ?? sourceTaskGuard?.taskId ?? null;
+  if (!recoveryTaskId) {
+    return refuse('source_task_not_wakeable');
+  }
   let placementResolution: RecoveryPlacementResolution;
   try {
     const resolved = await resolveRecoveryPlacement(db, env, context, recoveryTaskId, options);
@@ -411,35 +275,40 @@ export async function ensureSessionRecovery(
     return refuse('session_recovery_placement_lookup_failed');
   }
 
+  const recoveryAttemptId = ulid();
   const claim = await claimSessionSnapshotRecovery(db, env, {
     chatSessionId,
     userId: context.snapshot.userId,
     taskId: recoveryTaskId,
+    recoveryAttemptId,
     sourceTaskGuard,
   });
   if (claim.status === 'unavailable') return refuse(claim.reason);
   if (claim.status === 'waking') return claim;
+  const claimedTaskId = recoveryTaskId;
 
   if (options.evictionFence && !(await evictionRecoveryFenceMatches(env, options.evictionFence))) {
     await failSessionSnapshotRecovery(
       db,
       env,
       chatSessionId,
-      claim.taskId,
-      'Eviction generation changed before recovery start'
+      claimedTaskId,
+      'Eviction generation changed before recovery start',
+      recoveryAttemptId
     );
     return { status: 'unavailable', reason: 'stale_eviction_generation' };
   }
 
   let recoveryTask: schema.Task | null = null;
   try {
-    recoveryTask = await createRecoveryTask(
+    recoveryTask = await reactivateSleepingTask(
       env.DATABASE,
       db,
       context,
       chatSessionId,
-      claim.taskId,
+      claimedTaskId,
       placementResolution,
+      recoveryAttemptId,
       sourceTaskGuard
     );
     await startRecoveryTask(
@@ -449,7 +318,8 @@ export async function ensureSessionRecovery(
       chatSessionId,
       placementResolution,
       sourceTaskGuard,
-      options
+      options,
+      recoveryAttemptId
     );
     log.info('session_recovery.waking', {
       projectId,
@@ -461,32 +331,38 @@ export async function ensureSessionRecovery(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (error instanceof SourceTaskNotWakeableError) {
-      if (recoveryTask) {
-        await abandonRecoveryHandoff(env.DATABASE, context, recoveryTask, chatSessionId, message);
-      }
-      await failSessionSnapshotRecovery(db, env, chatSessionId, claim.taskId, message);
+      await failSessionSnapshotRecovery(
+        db,
+        env,
+        chatSessionId,
+        claimedTaskId,
+        message,
+        recoveryAttemptId
+      );
       return refuse('source_task_not_wakeable', message);
     }
-    if (await ensureTaskRunnerStarted(env, claim.taskId).catch(() => false)) {
+    if (await ensureTaskRunnerStarted(env, claimedTaskId, recoveryAttemptId).catch(() => false)) {
       log.warn('session_recovery.start_response_ambiguous_but_durable', {
         projectId,
         chatSessionId,
-        taskId: claim.taskId,
+        taskId: claimedTaskId,
         error: message,
       });
-      return { status: 'waking', taskId: claim.taskId };
+      return { status: 'waking', taskId: claimedTaskId };
     }
     const failure = sessionLifecycleError(env, `Session recovery failed: ${message}`);
-    await failAndRestoreSessionRecoveryHandoff(env.DATABASE, {
-      recoveryTaskId: claim.taskId,
+    await failSessionSnapshotRecovery(
+      db,
+      env,
       chatSessionId,
-      error: failure,
-      statusEventId: ulid(),
-    });
+      claimedTaskId,
+      failure,
+      recoveryAttemptId
+    );
     log.error('session_recovery.start_failed', {
       projectId,
       chatSessionId,
-      taskId: claim.taskId,
+      taskId: claimedTaskId,
       error: message,
     });
     return refuse(`recovery_start_failed:${message}`, message);

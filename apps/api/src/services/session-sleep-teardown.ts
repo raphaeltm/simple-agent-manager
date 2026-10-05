@@ -209,22 +209,42 @@ export async function completeSleepTeardown(
     .update(schema.agentSessions)
     .set({ status: 'sleeping', errorMessage: null, updatedAt: now })
     .where(eq(schema.agentSessions.id, agentSession.id));
+  // Instant wakes its existing runtime in place and keeps the task active.
+  // Only VM recovery reactivates a sleeping task through TaskRunner.
+  const taskSleeping =
+    workspace.nodeRuntime !== 'cf-container' && workspace.taskId
+      ? db
+          .update(schema.tasks)
+          .set({
+            status: 'sleeping',
+            executionStep: null,
+            errorMessage: null,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(schema.tasks.id, workspace.taskId),
+              inArray(schema.tasks.status, ['queued', 'delegated', 'in_progress', 'sleeping'])
+            )
+          )
+      : null;
   if (workspace.nodeRuntime === 'cf-container') {
-    await db.batch([
-      workspaceSleeping,
-      agentSleeping,
-      db
-        .update(schema.nodes)
-        .set({
-          status: 'sleeping',
-          healthStatus: 'unhealthy',
-          errorMessage: null,
-          updatedAt: now,
-        })
-        .where(eq(schema.nodes.id, workspace.nodeId)),
-    ]);
+    const nodeSleeping = db
+      .update(schema.nodes)
+      .set({
+        status: 'sleeping',
+        healthStatus: 'unhealthy',
+        errorMessage: null,
+        updatedAt: now,
+      })
+      .where(eq(schema.nodes.id, workspace.nodeId));
+    await db.batch([workspaceSleeping, agentSleeping, nodeSleeping]);
   } else {
-    await db.batch([workspaceSleeping, agentSleeping]);
+    if (taskSleeping) {
+      await db.batch([workspaceSleeping, agentSleeping, taskSleeping]);
+    } else {
+      await db.batch([workspaceSleeping, agentSleeping]);
+    }
   }
   const sleepWarning = options.fallback
     ? `Workspace slept through the bounded sleep fallback (transcript and Git recovery point, snapshot ${verified?.status ?? 'unknown'}/${verified?.degradation ?? 'unknown'})`

@@ -7,11 +7,11 @@
 import { log } from '../../lib/logger';
 import { persistError, redactSensitiveData } from '../../services/observability';
 import { recordTaskLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
-import { restoreSessionRecoveryHandoff } from '../../services/session-recovery-authority';
 import {
-  taskStatusIsNonTerminalSql,
-  TERMINAL_STATUS_VALUES,
-} from '../../services/task-status';
+  isSessionRecoveryAttemptCurrent,
+  restoreSessionRecoveryHandoff,
+} from '../../services/session-recovery-authority';
+import { taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from '../../services/task-status';
 import {
   createProjectEventTaskTerminalTransitionHook,
   createTaskWaitTerminalTransitionHook,
@@ -70,31 +70,40 @@ export async function transitionToInProgress(
             SELECT 1
               FROM tasks recovery
               JOIN tasks source
-                ON source.id = recovery.recovery_source_task_id
+                ON source.id = ?
+               AND (source.id = recovery.id OR source.id = recovery.recovery_source_task_id)
                AND source.project_id = recovery.project_id
               JOIN session_snapshots snapshot
                 ON snapshot.chat_session_id = recovery.chat_session_id
                AND snapshot.project_id = recovery.project_id
                AND snapshot.recovery_task_id = recovery.id
              WHERE recovery.id = ?
-               AND recovery.recovery_source_task_id = ?
                AND recovery.project_id = ?
                AND recovery.chat_session_id = ?
-               AND recovery.triggered_by = 'session-recovery'
+               AND (source.id = recovery.id OR recovery.triggered_by = 'session-recovery')
                AND source.status NOT IN ('completed', 'failed', 'cancelled')
                AND snapshot.recovery_status IN ('waking', 'restored')
           )
-        )`
+        )
+        AND (? IS NULL OR EXISTS (
+          SELECT 1 FROM session_snapshots snapshot
+           WHERE snapshot.chat_session_id = ? AND snapshot.project_id = ?
+             AND snapshot.recovery_task_id = tasks.id AND snapshot.recovery_attempt_id = ?
+        ))`
   )
     .bind(
       now,
       now,
       state.taskId,
       recoverySourceTaskId,
-      state.taskId,
       recoverySourceTaskId,
+      state.taskId,
       state.projectId,
-      recoveryChatSessionId
+      recoveryChatSessionId,
+      state.config.recoveryAttemptId ?? null,
+      recoveryChatSessionId,
+      state.projectId,
+      state.config.recoveryAttemptId ?? null
     )
     .run();
 
@@ -228,11 +237,34 @@ export async function transitionToInProgress(
 /**
  * Fail the task, clean up resources, record error, mark DO as complete.
  */
+async function ownsRecoveryAttempt(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext
+): Promise<boolean> {
+  const persisted = await rc.ctx.storage.get?.<TaskRunnerState>('state');
+  if (
+    persisted &&
+    (persisted.config.recoveryAttemptId ?? null) !== (state.config.recoveryAttemptId ?? null)
+  )
+    return false;
+  return (
+    !state.config.recoveryAttemptId ||
+    isSessionRecoveryAttemptCurrent(rc.env.DATABASE, {
+      taskId: state.taskId,
+      projectId: state.projectId,
+      chatSessionId: state.config.resumeSnapshotChatSessionId ?? state.config.chatSessionId ?? '',
+      recoveryAttemptId: state.config.recoveryAttemptId,
+    })
+  );
+}
+
 export async function failTask(
   state: TaskRunnerState,
   errorMessage: string,
   rc: TaskRunnerContext
 ): Promise<void> {
+  const ownsClaim = () => ownsRecoveryAttempt(state, rc);
+  if (!(await ownsClaim())) return;
   const now = new Date().toISOString();
 
   log.error('task_runner_do.task_failed', {
@@ -271,12 +303,28 @@ export async function failTask(
   // write — never clobber an already-terminal row (completed/failed/cancelled).
   const failureTransition = await rc.env.DATABASE.prepare(
     `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
-     WHERE id = ? AND ${taskStatusIsNonTerminalSql()}`
+     WHERE id = ? AND ${taskStatusIsNonTerminalSql()}
+       AND (? IS NULL OR EXISTS (
+         SELECT 1 FROM session_snapshots snapshot
+          WHERE snapshot.chat_session_id = ? AND snapshot.project_id = ?
+            AND snapshot.recovery_task_id = tasks.id AND snapshot.recovery_attempt_id = ?
+       ))`
   )
-    .bind(errorMessage, now, now, state.taskId, ...TERMINAL_STATUS_VALUES)
+    .bind(
+      errorMessage,
+      now,
+      now,
+      state.taskId,
+      ...TERMINAL_STATUS_VALUES,
+      state.config.recoveryAttemptId ?? null,
+      state.config.resumeSnapshotChatSessionId ?? null,
+      state.projectId,
+      state.config.recoveryAttemptId ?? null
+    )
     .run();
 
   if (!failureTransition.meta.changes) {
+    if (!(await ownsClaim())) return;
     await recoverReservedWorkspaceAllocationForCleanup(state, rc);
     if (state.config.resumeSnapshotChatSessionId) {
       await failRecoveryLifecycle(state, errorMessage, rc);
@@ -434,12 +482,14 @@ async function failRecoveryLifecycle(
   rc: TaskRunnerContext
 ): Promise<void> {
   const recoverySessionId = state.config.resumeSnapshotChatSessionId;
-  if (!recoverySessionId) return;
+  if (!recoverySessionId || !(await ownsRecoveryAttempt(state, rc))) return;
 
   // Ownership restoration is a correctness boundary, not best-effort cleanup:
   // if D1 is temporarily unavailable, let the DO alarm retry instead of
   // completing with a terminal replacement still owning the durable chat.
-  await restoreSessionRecoveryHandoff(rc.env.DATABASE, state.taskId, recoverySessionId);
+  if (!state.config.recoveryAttemptId) {
+    await restoreSessionRecoveryHandoff(rc.env.DATABASE, state.taskId, recoverySessionId);
+  }
   const { drizzle } = await import('drizzle-orm/d1');
   const schema = await import('../../db/schema');
   const { failSessionSnapshotRecovery } = await import('../../services/session-snapshots');
@@ -448,7 +498,8 @@ async function failRecoveryLifecycle(
     rc.env,
     recoverySessionId,
     state.taskId,
-    errorMessage
+    errorMessage,
+    state.config.recoveryAttemptId ?? undefined
   );
 
   // The failed task owns only the replacement runtime. Preserve the original
@@ -479,9 +530,15 @@ export async function cleanupOnFailure(
   rc: TaskRunnerContext,
   admissionCancelReason: 'task_failed' | 'cancelled' = 'task_failed'
 ): Promise<void> {
+  if (!(await ownsRecoveryAttempt(state, rc))) return;
   const now = new Date().toISOString();
 
-  await cancelVmTaskAdmission(rc.env, state.taskId, admissionCancelReason).catch((err) => {
+  await cancelVmTaskAdmission(
+    rc.env,
+    state.taskId,
+    admissionCancelReason,
+    state.config.recoveryAttemptId ?? null
+  ).catch((err) => {
     log.warn('task_runner_do.cleanup.admission_cancel_failed', {
       taskId: state.taskId,
       error: err instanceof Error ? err.message : String(err),
@@ -490,15 +547,17 @@ export async function cleanupOnFailure(
   state.admissionScopeKey = null;
   state.admissionLeaseToken = null;
 
-  const persistedWarmClaim = await rc.env.DATABASE.prepare(
-    `SELECT claimed_warm_node_id FROM tasks WHERE id = ?`
-  )
-    .bind(state.taskId)
-    .first<{ claimed_warm_node_id: string | null }>()
-    .catch(() => null);
+  if (!(await ownsRecoveryAttempt(state, rc))) return;
+  const persistedWarmClaim = state.config.recoveryAttemptId
+    ? null
+    : await rc.env.DATABASE.prepare(`SELECT claimed_warm_node_id FROM tasks WHERE id = ?`)
+        .bind(state.taskId)
+        .first<{ claimed_warm_node_id: string | null }>()
+        .catch(() => null);
   const claimedWarmNodeId =
     state.stepResults.claimedWarmNodeId ?? persistedWarmClaim?.claimed_warm_node_id ?? null;
   if (claimedWarmNodeId) {
+    if (!(await ownsRecoveryAttempt(state, rc))) return;
     await releaseClaimedWarmNode(state, rc, claimedWarmNodeId).catch((error) => {
       log.error('task_runner_do.cleanup.warm_claim_release_failed', {
         taskId: state.taskId,

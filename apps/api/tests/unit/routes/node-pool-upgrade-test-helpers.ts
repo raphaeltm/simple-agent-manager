@@ -90,6 +90,9 @@ export function fixture(scope: Scope = 'user', existingDatabase?: Database.Datab
   const start = vi.fn(async (input: StartTaskInput) => {
     starts.push(structuredClone(input));
   });
+  const reactivate = vi.fn(async (input: StartTaskInput) => {
+    starts.push(structuredClone(input));
+  });
   const projectStub = {
     ensureProjectId: vi.fn(async () => undefined),
     createSession: vi.fn(async () => 'chat-1'),
@@ -102,7 +105,7 @@ export function fixture(scope: Scope = 'user', existingDatabase?: Database.Datab
     VM_AGENT_REQUIRED_VERSION: '0123456789abcdef0123456789abcdef01234567',
     TASK_RUNNER: {
       idFromName: (id: string) => id,
-      get: () => ({ start, ensureStarted: async () => false }),
+      get: () => ({ start, reactivate, ensureStarted: async () => false }),
     },
     PROJECT_DATA: { idFromName: (id: string) => id, get: () => projectStub },
   } as unknown as Env;
@@ -130,7 +133,7 @@ export function fixture(scope: Scope = 'user', existingDatabase?: Database.Datab
     expect(starts).toHaveLength(1);
     return starts[0]!;
   }
-  return { sqlite, env, db, starts, start, run };
+  return { sqlite, env, db, starts, start, reactivate, run };
 }
 export type Fixture = ReturnType<typeof fixture>;
 

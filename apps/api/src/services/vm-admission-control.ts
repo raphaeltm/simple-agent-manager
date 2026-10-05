@@ -653,8 +653,15 @@ export async function markVmAdmissionPlaced(
 export async function cancelVmTaskAdmission(
   env: Env,
   taskId: string,
-  reason: VmAdmissionReason | string = 'cancelled'
+  reason: VmAdmissionReason | string = 'cancelled',
+  recoveryAttemptId?: string | null
 ): Promise<void> {
+  // Stable tasks reuse admission rows across wakes; old cleanup must not cancel a new claim.
+  const fence =
+    recoveryAttemptId === undefined
+      ? ''
+      : "AND COALESCE((SELECT recovery_attempt_id FROM session_snapshots WHERE recovery_task_id = ? LIMIT 1), '') = ?";
+  const fenceValues = recoveryAttemptId === undefined ? [] : [taskId, recoveryAttemptId ?? ''];
   const admission = await getAdmission(env, taskId);
   const now = new Date().toISOString();
   const terminalized = await env.DATABASE.prepare(
@@ -667,21 +674,28 @@ export async function cancelVmTaskAdmission(
         updated_at = ?
       WHERE task_id = ?
         AND state IN ('queued', 'waiting', 'provisioning_granted', 'provisioning', 'node_ready')
+        ${fence}
     `
   )
-    .bind(reason === 'task_failed' ? 'failed' : 'cancelled', reason, now, now, taskId)
-    .run();
-  await env.DATABASE.prepare(`DELETE FROM vm_provisioning_leases WHERE owner_task_id = ?`)
-    .bind(taskId)
-    .run();
-  if (changes(terminalized) > 0) {
-    await setTaskAdmissionMirror(
-      env,
-      taskId,
+    .bind(
       reason === 'task_failed' ? 'failed' : 'cancelled',
       reason,
-      null
-    );
+      now,
+      now,
+      taskId,
+      ...fenceValues
+    )
+    .run();
+  await env.DATABASE.prepare(`DELETE FROM vm_provisioning_leases WHERE owner_task_id = ? ${fence}`)
+    .bind(taskId, ...fenceValues)
+    .run();
+  if (changes(terminalized) > 0) {
+    await env.DATABASE.prepare(
+      `UPDATE tasks SET admission_state = ?, admission_reason = ?, admission_next_retry_at = NULL,
+        updated_at = ? WHERE id = ? ${fence}`
+    )
+      .bind(reason === 'task_failed' ? 'failed' : 'cancelled', reason, now, taskId, ...fenceValues)
+      .run();
   }
   if (admission?.scope_key) {
     await wakeVmAdmissionWaiters(env, {

@@ -594,6 +594,9 @@ describe('Instant session wake after idle sleep', () => {
       await sleep();
       expect(vmAgent.running).toBe(false);
       expect(runtimeRows()).toEqual(SLEPT_ROWS);
+      expect(d1.prepare('SELECT status FROM tasks WHERE id = ?').get(TASK_ID)).toEqual({
+        status: 'in_progress',
+      });
 
       const deliveryId = await sendFollowUp('Pick up where you left off.');
 
@@ -603,6 +606,9 @@ describe('Instant session wake after idle sleep', () => {
       });
       expect(vmAgent.starts).toBe(1);
       expect(vmAgent.prompts).toEqual(['Pick up where you left off.']);
+      expect(d1.prepare('SELECT status FROM tasks WHERE id = ?').get(TASK_ID)).toEqual({
+        status: 'in_progress',
+      });
       expect(runtimeRows()).toEqual(AWAKE_ROWS);
       expect(getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
         status: 'active',

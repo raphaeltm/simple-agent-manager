@@ -1,5 +1,13 @@
 # Undefined --sam-color-* tokens in apps/web (was: ResourceSparkline gap marker has no colour)
 
+> **Reconciliation 2026-10-05:** Scope grew. The three new ACP cards use the Tailwind class
+> `text-fg-secondary` (`apps/web/src/components/project-message-view/Acp{Permission,Form,Url}Card.tsx`),
+> so it is now in 27 `apps/web` files (24 in the 2026-09-30 block, plus those 3). The separate
+> `--sam-color-fg-secondary` custom property in `apps/web/src/components/debug/FailureCard.tsx`
+> moved from `:173,214` to `:188,245`. The undefined `hover:bg-bg-hover` and `text-fg-accent`
+> classes in four files (items M1/M2 of `2026-06-12-timeline-drawer-post-merge-fixes.md`) belong in
+> the same sweep.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** PR #2185 (`2075aa074`) replaced the sparkline with the uPlot timeline in
@@ -69,6 +77,6 @@ sample 28): the grey dot is present, the vertical line is not.
       `DOCS_SHOTS=1 npx playwright test docs-screenshots-sessions` and commit the
       refreshed docs image. Three places in
       `apps/www/src/content/docs/docs/guides/session-resources.md` describe the marker
-      as it renders *today* and must be updated together, or the guide half-reverts:
+      as it renders _today_ and must be updated together, or the guide half-reverts:
       the chart-legend bullet under "The detail timeline", the "Gaps and resets"
       section, and the Troubleshooting row about a long flat stretch.
