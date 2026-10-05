@@ -58,6 +58,15 @@ export function CredentialLimitChip({
   );
 }
 
+const CREDENTIAL_SOURCE_LABELS: Record<
+  CredentialLimitCredentialSummary['credentialSource'],
+  string
+> = {
+  user: 'Your credential',
+  project: 'Project credential',
+  platform: 'Platform credential',
+};
+
 function CredentialLimitDetails({
   credential,
   now,
@@ -72,11 +81,7 @@ function CredentialLimitDetails({
             {credentialFamilyLabel(credential)} usage
           </h2>
           <p className="m-0 mt-0.5 text-xs text-fg-muted break-words">
-            {credential.credentialSource === 'user'
-              ? 'Your credential'
-              : credential.credentialSource === 'project'
-                ? 'Project credential'
-                : 'Platform credential'}
+            {CREDENTIAL_SOURCE_LABELS[credential.credentialSource]}
             {credential.agentType ? ` · ${credential.agentType}` : ''} ·{' '}
             {formatSampledAgo(credential.observedAt, at)}
           </p>

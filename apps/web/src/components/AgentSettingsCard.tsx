@@ -240,7 +240,9 @@ export function AgentSettingsCard({
               >
                 Check your balance in the OpenCode console
               </a>
-              . OpenCode Go plans report rolling, weekly and monthly usage in the session header.
+              {
+                '. OpenCode Go plans report rolling, weekly and monthly usage in the session header.'
+              }
             </p>
           )}
         </div>

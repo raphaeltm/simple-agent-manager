@@ -72,7 +72,7 @@ export function credentialIdFromReference(reference: string): string | null {
 /** Human label for the window family encoded in the window type prefix. */
 export function credentialLimitFamilyLabel(windowType: string): string {
   const family = windowType.split('.')[0] ?? '';
-  return FAMILY_LABELS[family] ?? (family ? family : 'Provider');
+  return FAMILY_LABELS[family] ?? family ?? 'Provider';
 }
 
 /** Format a window length as a short label, e.g. 300 → `5h`, 10080 → `Week`. */

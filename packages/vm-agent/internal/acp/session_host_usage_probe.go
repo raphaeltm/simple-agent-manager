@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -456,7 +457,7 @@ func normalizeOpenCodeUsageStatus(value string) string {
 }
 
 func clampPercent(value float64) float64 {
-	if value < 0 || value != value { // NaN guard
+	if value < 0 || math.IsNaN(value) {
 		return 0
 	}
 	if value > 100 {
