@@ -1,5 +1,7 @@
 # cf-container wake/restore hardening follow-ups
 
+> **Reconciliation 2026-10-05:** All five open items are still open, but #2218 moved the cited code. Current locations: `skipOversizedUntracked` is at `packages/vm-agent/internal/server/session_snapshot_wip.go:128` and still uses `context.Background()` at `:150`; `absoluteControlPlaneURL` is at `session_snapshot.go:412`; the restore fetch is at `apps/api/src/durable-objects/vm-agent-container.ts:901`; the node-management TTL is at `apps/api/src/services/jwt.ts:189`; the circular import is at `apps/api/src/services/node-agent.ts:758-762`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

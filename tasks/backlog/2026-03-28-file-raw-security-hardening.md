@@ -1,5 +1,7 @@
 # File Raw Endpoint Security Hardening
 
+> **Reconciliation 2026-10-05:** Criterion 1 (the JWT in the `FileViewerPanel` `<img src>`) is also claimed by `2026-03-28-migrate-file-proxy-token-to-auth-header.md`, whose 2026-09-30 block owns it; treat that file as the owner. Nothing else changed: the raw paths are untouched and the vm-agent Content-Length check still defaults to `'0'`.
+
 **Created**: 2026-03-28
 **Source**: Security auditor review of image rendering feature PR
 

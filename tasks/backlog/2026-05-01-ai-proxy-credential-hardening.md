@@ -1,5 +1,7 @@
 # AI Proxy Credential Hardening
 
+> **Reconciliation 2026-10-05:** #2224 (`4f223d6fa`) now injects the renewed callback token (`packages/vm-agent/internal/acp/session_host_startup.go:365,402`), but it is still the full callback token: no proxy-scoped token, BaseURL origin check, or sentinel guard on credential sync. A related gap is tracked only as SAM idea `01M432G3276YZWCP3HEJ5B25J5`: an agent process that is already running keeps the token it started with as its AI-proxy key (`session_host_callback_token.go:20-23`).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** Go tests for the main proxy injection branches

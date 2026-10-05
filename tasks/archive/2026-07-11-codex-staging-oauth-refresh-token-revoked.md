@@ -1,5 +1,7 @@
 # Codex (openai-codex) unusable on staging — OAuth refresh token revoked
 
+> **Reconciliation 2026-10-05: archived as obsolete, not fixed by a dedicated change.** The symptom is gone: on 2026-10-03, fresh `openai-codex` VM and Instant turns completed on staging for the same smoke user (`provider_mode` `sam`) with no auth error, during the #2207/#2217 runtime-distribution staging runs (`scripts/diagnostics/acp-runtime-distribution.md:145-157,268-289`). Read-only staging D1 shows that user's `openai-codex` agent settings at `provider_mode='sam'` (updated 2026-10-03 15:01Z) and an active `oauth-token` credential created 2026-08-21. Moved from `tasks/backlog/` because `tasks/archive/2026-06-15-codex-acp-midprompt-disconnect.md` links to it.
+
 ## Problem
 
 On staging (`sammy.party`), an `openai-codex` agent session for the smoke user

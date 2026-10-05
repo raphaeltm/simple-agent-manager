@@ -1,5 +1,7 @@
 # Session Header Accessibility and Design Token Fixes
 
+> **Reconciliation 2026-10-05:** #2230 added a `sleeping` task status. SessionHeader's badge (`apps/web/src/components/project-message-view/SessionHeader.tsx:455-479`) gives it the same fallback style as `cancelled` (item #10), which uses an undefined token. Whoever fixes item #10 should cover `sleeping` too.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** files are under `apps/web/src/components/project-message-view/`.

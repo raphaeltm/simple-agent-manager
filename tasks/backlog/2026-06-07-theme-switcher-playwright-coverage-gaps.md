@@ -1,5 +1,7 @@
 # Theme switcher — close Playwright audit coverage gaps
 
+> **Reconciliation 2026-10-05:** Both specs this file extends are quarantined (`apps/web/tests/playwright/visual-audit-quarantine.txt:105-106`, since 2026-08-25), so new coverage there will not run in CI until `2026-07-17-stale-playwright-audit-specs.md` repairs them.
+
 **Date:** 2026-06-07
 **Origin:** Late-arriving task-completion-validator (WARN, 2 MEDIUM) on the
 merged three-way theme switcher (PR #1246, task

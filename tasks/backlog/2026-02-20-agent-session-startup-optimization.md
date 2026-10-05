@@ -1,5 +1,7 @@
 # Agent Session Startup Optimization
 
+> **Reconciliation 2026-10-05:** Scope grew this week instead of shipping. Since #2217, VM Codex sessions verify, download (about 132.6 MB) and install the pinned Codex runtime when a session starts (`packages/vm-agent/internal/acp/session_host.go:625-637` → `codex_runtime_distribution.go:56`, 5-minute default timeout in `config.go:35`). That belongs in this file's Phase 2 pre-install scope. Key and settings fetches are still sequential (`session_host_selection.go:51,229`). The references to `@zed-industries/claude-code-acp` and `session_host.go:295-330` below are stale.
+
 **Created**: 2026-02-20
 **Status**: Backlog
 **Priority**: High
