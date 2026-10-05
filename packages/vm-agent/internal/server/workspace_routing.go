@@ -237,11 +237,6 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			metadataChanged = true
 		}
 		if status != "" && runtime.Status != "evicted" && !runtime.ProvisioningActive && !runtime.MetadataUnavailable {
-			if runtime.Status == "stopped" && (status == "creating" || status == "running" || status == "recovery") {
-				s.resourceHistoryMu.Lock()
-				delete(s.resourceHistoryStops, workspaceID)
-				s.resourceHistoryMu.Unlock()
-			}
 			runtime.Status = status
 		}
 		if adoptWorkspaceCallbackTokenLocked(runtime, callbackToken) {

@@ -244,3 +244,17 @@ func (s *Server) stopAllResourceHistoryCollectors(ctx context.Context) {
 		}
 	}
 }
+
+// resetResourceHistoryAfterReprovision is called only after an explicit restart
+// has been admitted. Never clear ownership while a final flush is still running.
+func (s *Server) resetResourceHistoryAfterReprovision(workspaceID string) {
+	s.resourceHistoryMu.Lock()
+	defer s.resourceHistoryMu.Unlock()
+	if done := s.resourceHistoryStops[workspaceID]; done != nil {
+		select {
+		case <-done:
+			delete(s.resourceHistoryStops, workspaceID)
+		default:
+		}
+	}
+}

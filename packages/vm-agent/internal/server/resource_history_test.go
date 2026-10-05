@@ -57,8 +57,16 @@ func TestResourceHistoryFinalFlushCannotRestartWhileStopping(t *testing.T) {
 	}
 	// An explicit new running lifecycle can create its next collector.
 	s.resourceHistoryStarted.Store(false)
-	s.upsertWorkspaceRuntime(runtime.ID, "", "", "running", "token")
+	if _, _, _, err := s.claimWorkspaceReprovision(context.Background(), runtime.ID, workspaceReprovisionRequest{}, []string{"stopped"}); err != nil {
+		t.Fatal(err)
+	}
+	s.ensureResourceHistoryForRuntime(s.snapshotRuntimeForResourceTest(runtime))
 	if got := s.resourceHistoryCollector(runtime.ID); got == nil || got == original {
 		t.Fatal("explicit restart did not create collector")
 	}
+}
+
+func (s *Server) snapshotRuntimeForResourceTest(runtime *WorkspaceRuntime) *WorkspaceRuntime {
+	snapshot := s.snapshotWorkspaceRuntime(runtime)
+	return &snapshot
 }
