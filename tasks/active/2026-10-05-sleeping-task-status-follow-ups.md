@@ -56,22 +56,42 @@ Related, tracked elsewhere:
 
 ## Implementation checklist
 
-- [ ] List every consumer that enumerates task statuses as "active", "live" or "non-terminal"
+- [x] List every consumer that enumerates task statuses as "active", "live" or "non-terminal"
       (API, MCP, web, scheduled sweeps) and decide per consumer whether `sleeping` belongs. Prefer
       one shared constant over patching each list.
-- [ ] Dashboard Active Tasks, `list_project_agents` and the account map include slept VM
+- [x] Dashboard Active Tasks, `list_project_agents` and the account map include slept VM
       conversations, with the Sleeping indicator.
-- [ ] `send_message_to_subtask` and `send_durable_message` to a slept VM agent are accepted and
+- [x] `send_message_to_subtask` and `send_durable_message` to a slept VM agent are accepted and
       delivered through the durable wake path (or refused with an explicit, documented reason);
       `stop_subtask` cancels a slept child.
-- [ ] Opening a slept VM conversation renders the sleeping state, not provisioning, and does not
+- [x] Opening a slept VM conversation renders the sleeping state, not provisioning, and does not
       start the 2 s task poll.
-- [ ] The transition to `sleeping` writes a `task_status_events` row.
+- [x] The transition to `sleeping` writes a `task_status_events` row.
 
 ## Acceptance criteria
 
-- [ ] Each fix has a test that reaches it the way production does: put a VM task to sleep through
+- [x] Each fix has a test that reaches it the way production does: put a VM task to sleep through
       the real teardown path, then call the real route or tool (`.claude/rules/62`). Do not
       hand-write `status='sleeping'` as the only setup.
-- [ ] Each test has a control proving the same consumer still excludes terminal tasks.
-- [ ] A behavioral web test covers the chat restore effect with a `sleeping` task.
+- [x] Each test has a control proving the same consumer still excludes terminal tasks.
+- [x] A behavioral web test covers the chat restore effect with a `sleeping` task.
+
+## Reconciliation and implementation notes (2026-10-05)
+
+- Main starts at `0366b17d9`; #2230 stable identity and #2231 provisioning restore fix already shipped. Existing task used, managed branch/workspace reused.
+- Consumers audited: sleeping belongs in activity visibility and messaging/parent stop targets, and production status rendering. Dormant project task filters are excluded after browser routing audit. It stays excluded from live callers, execution admission/dispatch slots, stuck task sweeps, runtime-preservation and warm-placement predicates. Separate `AGENT_TARGET_STATUSES` avoids broadening `_helpers.ACTIVE_STATUSES` action triggers.
+- Sleep events use an insert-select of current status in the same D1 transaction before updating sleeping; already sleeping and terminal rows produce no event.
+- Shared staging coordinator: this task; capacity `01M473KXWJYT6S1JR03E8GVY2B`, telemetry `01M473KNZ9WXZ0X4G3Z743X2C1`. Pin heads together, max 1–2 VMs and immediate cleanup. No independent deployments over sibling validation.
+- Failed-wake mismatch remains separate in SAM Idea `01M3MFDMZ5AS0BXPHZWS3CRFED`; audit added there. Stable task can fail/fire parent hooks while restoration returns chat to sleeping; finalizer can subsequently fail the preserved chat. Code evidence only; no legacy recovery migration.
+
+## Local validation
+
+- New real-SQLite teardown-to-consumer suite: 16 tests pass, including terminal tasks, active missing/deleted-node controls, sleeping callers, same-project peers, cross-project targets, direct parent/current membership, disabled delivery, atomic rollback and idempotent status events.
+- Pre-fix API mutation: 8 regression failures / 6 controls passing; exact current production files restored, final suite green.
+- Six existing sleep/MCP/activity regression suites: 92 tests pass with one worker. API typecheck and targeted ESLint pass. Initial concurrent run timed out under memory pressure; fixtures now include the existing task event table.
+- Provisioning restore behavior is already shipped in #2231; existing sleeping-session-audit.spec.ts supplies behavioral coverage. No app UI edits: ProjectTasks status filters are dormant behind /tasks → /ideas redirect; actual Ideas view intentionally lists drafts and existing executing mapping includes sleeping.
+- Messaging tests validate real consumer gates and durable acceptance contract. Actual durable alarm/wake and VM final-flush require the coordinated staging run; not claimed by the boundary mocks.
+- Independent Cloudflare/security/constitution/doc review PASS; full quality and staging still pending.
+
+- Completion-validator local implementation PASS. Added explicit terminal-event controls; lifecycle suite 11/11 green.
+- Existing #2231 sleeping-session Playwright audit 4/4 green on built preview; idle and waking at 375×667 and 1280×800. All screenshots visually reviewed, no overflow or duplicate provisioning block; UI rubric 4/4/4/4/5. Local servers stopped. No UI diff retained.
