@@ -101,3 +101,7 @@ Slice B connects ACP `RequestPermission` to the shipped Cloudflare create/answer
 - Ambiguous create acknowledgement does not override an answer already consumed by the runtime; the matching receipt remains duplicate-safe.
 - Permission cancellation is owned by the exact prompt attempt. An old attempt's cancellation cannot cancel a newer attempt's permission.
 - The real `acp-go-sdk@v0.13.5` connection remains usable after prompt deadline/cancel closes the matching permission.
+
+---
+
+_Reconciled 2026-10-05 (weekly queue reconciliation): draft PR #2201 was closed unmerged (2026-09-30T16:49Z). Its head `96df904f7` shipped inside integration PR #2202 (`86e6c5b75`, merged 2026-09-30T16:16Z), which added `packages/vm-agent/internal/acp/session_host_interactions.go`. No non-test `internal/acp` Go file still selects `Options[0]`. First successful production deploy run 36744720219 (2026-09-30T16:30Z). The parent's release lifted the keep-disabled and unmerged constraints. Production activation came with deploy run 37137757826 (2026-10-03T16:41Z), and the `sam-api-prod` readback on 2026-10-05 shows `ACP_INTERACTIONS_ENABLED=true`. No boxes left unticked._

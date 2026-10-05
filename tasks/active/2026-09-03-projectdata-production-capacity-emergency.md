@@ -670,3 +670,40 @@ Relief shipped: superadmin `POST /api/admin/project-data/storage/:projectId/grou
 (branch `claude/friendly-planck-qziggg`), which prunes grouped/FTS search rows delete-first.
 Staging verification was skipped on Raphaël's explicit instruction for this emergency; the
 at-cap behaviour is proven by the first bounded production call.
+
+## Reconciliation — 2026-10-05 (weekly queue audit)
+
+**Verdict: stays active, now recovering on its own.** The headline criterion (at or below
+9,000,000,000 bytes) is still unmet, but the size is falling for the first time since the breaker
+opened on 2026-09-27, and none of the 2026-09-30 next actions is still waiting on a human.
+
+Measured 2026-10-05 (read-only production D1 `sam-prod`):
+
+- `project_data_storage_telemetry`: **9,719,410,688 bytes** at 05:15Z (usage ratio 0.9719, status
+  `degraded`). That is 90.5% of the hard 10 GiB cap.
+- Daily 16:40Z samples from `project_data_storage_telemetry_history`: 10.627 GB (10-01),
+  10.267 GB (10-02), 10.213 GB (10-03), 9.842 GB (10-04). Overnight 10-05 the hourly samples fall
+  by 12 to 15 MB an hour. At 250 to 370 MB a day, the 9.0 GB target is about two to three days out.
+- `project_data_archive_circuit_breakers`: SAM's breaker is **`closed`** ("Closed from admin UI",
+  updated 2026-10-02 16:29Z).
+- SAM archive migrations: 452 `published`, 47 `frozen`, and **0** `failed`, `poisoned` or in
+  flight. Publishes per day: 14 (10-02), 40 (10-03), 59 (10-04), 17 by 05:52Z on 10-05. The global
+  sweep (`archive_sharding_global_sweep`) last finished `succeeded`, with 0 budget stalls.
+
+What changed since 2026-09-30:
+
+- The root object hit the hard cap on 10-02 (see the incident section above). #2215 shipped the
+  superadmin grouped-FTS wall recovery and freed about 464 MB.
+- The failed and poisoned migrations were abandoned from Admin → Storage and the breaker was
+  closed (10-02 16:28Z to 16:29Z). SAM archives resumed at 16:33Z.
+- #2216 slowed the archive sweep to one hour on 10-03 02:50Z. #2220 restored the 18-minute
+  cadence the same day at 13:27Z, so the #2161 rollback question is settled: keep 18 minutes.
+
+Still open:
+
+1. The headline criterion. Re-measure around 2026-10-08. If the drain flattens before 9.0 GB, the
+   next lever is Slice C below, not another manual relief call.
+2. Slice C (bounded root history indexing) is still unmerged: commit `7868bc894` on
+   `sam/implement-reliable-projectdata-archiving-tc49jm`, now 217 commits behind `main`.
+3. Rebuild grouped FTS rows after the wall recovery:
+   `tasks/backlog/2026-10-02-rebuild-grouped-fts-after-wall-recovery.md`.

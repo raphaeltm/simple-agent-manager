@@ -73,3 +73,7 @@ selection and fresh-stock GPT-5.5 rollback now have distinct live evidence.
 Timeout/interruption and unsupported-model attempts remain explicitly excluded
 from successful continuation claims. No new provider login or token custody was
 added. Final rollback and release disposition remain parent-owned.
+
+---
+
+_Reconciled 2026-10-05 (weekly queue reconciliation): draft PRs #2209 and #2210 were closed unmerged (2026-10-03T16:00Z). #2209's head `df1ef598a` is not on main. #2210 (head `b7334b6f8`) carried #2209's reviewed changes into PR #2217, merged as `b79136805` on 2026-10-03T15:59Z. That commit added `packages/vm-agent/internal/acp/auth_failure.go`, `session_host_loopback_diagnosis.go`, and the reason codes in `packages/shared/src/failure-classification.ts:115-160`. The creator-gated banners are at `apps/web/src/components/project-message-view/SessionStatusBanners.tsx:43-60`. First successful production deploy run 37136649002 (2026-10-03T16:23Z). Limit: the "parent-owned final runtime matrix" above was not run live. #2217's Limits section says the reason-code tests "include real SDK/HTTP/Worker/UI boundaries, not an assertion that every external account failure was reproduced live." No boxes left unticked._

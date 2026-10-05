@@ -81,3 +81,7 @@ Worker, shared schema, VM, or documentation contract changes are required.
 - Draft PR and handoff only; coordinator owns integrated staging and activation.
 - No VM, Worker route, shared schema, auth/token custody, form, or URL elicitation changes.
 - Do not advertise forms or URL requests.
+
+---
+
+_Reconciled 2026-10-05 (weekly queue reconciliation): draft PR #2200 was closed unmerged (2026-09-30T22:32Z). Its reviewed head `e13a166b5` shipped inside integration PR #2202 (`86e6c5b75`, merged 2026-09-30T16:16Z). That commit added `AcpPermissionCard.tsx`, `useAcpPermissionInteractions.ts` and `apps/web/src/lib/api/acp-interactions.ts`, and deleted `packages/acp-client/src/components/PermissionDialog.tsx`. First successful production deploy run 36744720219 (2026-09-30T16:30Z). Permission creation was enabled in production by deploy run 37137757826 (2026-10-03T16:41Z, #2217 release), and the `sam-api-prod` readback on 2026-10-05 shows `ACP_INTERACTIONS_ENABLED=true`. #2200's only later commit, `fca210a90`, is test-only, and main's audit spec has the retry-control clearance assertions (`apps/web/tests/playwright/acp-permission-chat-audit.spec.ts:524-548`). No boxes left unticked._

@@ -41,7 +41,7 @@ The reviewed ACP runtime bridge in PR #2201 and project-chat permission UI in PR
 - [x] Confirm normal chat remains functional and review mobile/desktop staging screenshots.
 - [x] Delete only integration-owned staging workspaces/nodes immediately and prove zero owned VMs remain at rest.
 - [x] Create and maintain a draft integration PR with exact deployed commit, resource IDs, fixtures, requests/results, bounded observability, cleanup, integration fixes, and remaining gaps.
-- [ ] Send the final branch/head/PR/CI/staging evidence to parent task `01M3RT1PBZNM57EMC00B7ZXAEK`; do not merge or mark ready.
+- [ ] Send the final branch/head/PR/CI/staging evidence to parent task `01M3RT1PBZNM57EMC00B7ZXAEK`; do not merge or mark ready. — not ticked: superseded. No record of a message to `01M3RT1PBZNM57EMC00B7ZXAEK` was found. The coordinating parent became `01M3SG06CFJYF7F6HVJXHTFTN1`. That parent reviewed final head `aecaf205f` (#2202 comment 5914878688, 2026-09-30T15:56Z) and released #2202 under Raphaël's authorization (merged 16:16Z).
 
 ## Acceptance criteria
 
@@ -103,3 +103,7 @@ Pinned deploy run `36718788997` then failed closed before publishing at the Work
 - The two live runtimes prove successful delivery receipts; the deliberately lost/unconfirmed receipt, cancellation/deadline/Stop/process-loss, recreated-generation fencing, feature-off/version-skew, and stopped/stale-running no-wake cases remain deterministic evidence from the named suites rather than staged fault injection. This avoids mislabeling local coverage as deployed proof.
 - The preload fixture exercised the pinned Codex ACP process path under SAM `bypassPermissions`/never-full-access configuration and emitted permission requests by design; it is not evidence that actual Codex emits them. No actual Codex account permission emission or actual Claude account emission was proven, so both remain explicit rollout gaps. Claude support here is limited to the reviewed adapter implementation and deterministic SDK fixture coverage.
 - After deleting the VM and retained Instant workspace/node/profile through the public API, the authoritative D1 query returned zero nodes outside `deleted`/`failed`. All five temporary staging GitHub Environment overrides were then removed. Restoration deploy `36736535610` republishes the same exact candidate SHA with checked-in `ACP_INTERACTIONS_ENABLED=false`; production was never mutated.
+
+---
+
+_Reconciled 2026-10-05 (weekly queue reconciliation): shipped via PR #2202 (`86e6c5b75`, squash-merged 2026-09-30T16:16Z), first successful production deploy run 36744720219 (2026-09-30T16:30Z). The acceptance criterion that the PR "remains draft and unmerged" was superseded by the parent's release. Checked-in defaults remain `false`. Production permission creation was later enabled by an explicit Environment override (deploy run 37137757826, 2026-10-03T16:41Z). One box is left unticked as superseded because the parent handoff target changed (see that line)._
