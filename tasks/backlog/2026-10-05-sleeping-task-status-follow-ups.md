@@ -19,13 +19,15 @@ now fall through them. Found by the 2026-10-05 weekly queue reconciliation
    from all three. The dashboard card's "Sleeping" indicator
    (`apps/web/src/components/ActiveTaskCard.tsx:46`) can now only show for Instant rows. At
    2026-10-05 05:15Z, production D1 held 2 tasks in `sleeping`.
-2. **Parents can no longer message or stop a slept child (verified in code).** MCP
-   `resolveAgentTarget` refuses any target whose status is not in `ACTIVE_STATUSES`, which is
+2. **No agent can message a slept VM agent, and parents cannot stop a slept child (verified in
+   code).** MCP `resolveAgentTarget` refuses any target whose status is not in `ACTIVE_STATUSES`, which is
    `queued`, `in_progress`, `delegated` and `awaiting_followup`
    (`apps/api/src/routes/mcp/_helpers.ts:322`, check at
    `apps/api/src/routes/mcp/orchestration-comms.ts:146`). It is used by `send_message_to_subtask`
-   and `stop_subtask` (`orchestration-comms.ts:253,449`). `sleeping → cancelled` is an allowed
-   transition (`apps/api/src/services/task-status.ts:37`), so the stop refusal is not intended.
+   and `stop_subtask` (`orchestration-comms.ts:253,449`), and `send_durable_message` applies the
+   same check (`apps/api/src/routes/mcp/mailbox-tools.ts:378`), so no agent in the project can
+   message a slept VM agent. `sleeping → cancelled` is an allowed transition
+   (`apps/api/src/services/task-status.ts:37`), so the stop refusal is not intended.
 3. **A slept VM chat likely renders as provisioning (code reading, not reproduced).** The project
    chat restore effect calls `setProvisioning` for every non-terminal status other than
    `in_progress` (`apps/web/src/pages/project-chat/useProjectChatState.ts:536`), and `isTerminal`
@@ -43,6 +45,10 @@ now fall through them. Found by the 2026-10-05 weekly queue reconciliation
 
 Related, tracked elsewhere:
 
+- A failed VM wake now writes `failed` on the conversation's own task
+  (`apps/api/src/durable-objects/task-runner/state-machine.ts:305`) and fires the parent's
+  task-wait hooks (`:351-365`); before #2230 only a recovery row failed. From code reading. SAM
+  idea `01M3MFDMZ5AS0BXPHZWS3CRFED` and `2026-09-25-stopping-sleep-with-failed-projectdata-session.md`.
 - A `sleeping` task has no terminal exit after the 7-day snapshot purge: item (3) of
   `2026-09-26-trustworthy-task-status.md`.
 - SessionHeader gives `sleeping` the undefined fallback style of `cancelled`: item #10 of
@@ -55,8 +61,9 @@ Related, tracked elsewhere:
       one shared constant over patching each list.
 - [ ] Dashboard Active Tasks, `list_project_agents` and the account map include slept VM
       conversations, with the Sleeping indicator.
-- [ ] `send_message_to_subtask` to a slept VM child is accepted and delivered through the durable
-      wake path (or refused with an explicit, documented reason); `stop_subtask` cancels it.
+- [ ] `send_message_to_subtask` and `send_durable_message` to a slept VM agent are accepted and
+      delivered through the durable wake path (or refused with an explicit, documented reason);
+      `stop_subtask` cancels a slept child.
 - [ ] Opening a slept VM conversation renders the sleeping state, not provisioning, and does not
       start the 2 s task poll.
 - [ ] The transition to `sleeping` writes a `task_status_events` row.
