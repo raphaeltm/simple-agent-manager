@@ -15,7 +15,7 @@ because it is a denylist: every status it does not name is treated as "the
 runner is provisioning this session". The new value fell straight through, and
 every idle slept conversation rendered the first-boot banner — "Starting...
 Waiting for task runner..." — with a timer counting from the task's original
-start (task `01M45D6BEYJS57NJTXSMJ85ECG`, 2026-10-05). The same gate matched the
+start (production task `01M456RX5PSKEJNB7EAV8645TK`, reported 2026-10-05; fixed in PR #2231). The same gate matched the
 mid-wake `queued` state too, stacking the provisioning block on the wake banner.
 
 ## Class of Bug

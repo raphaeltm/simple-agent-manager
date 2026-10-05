@@ -91,3 +91,13 @@ export const PROVISIONING_TASK_STATUSES = [
 export function isProvisioningStatus(status: TaskStatus): boolean {
   return (PROVISIONING_TASK_STATUSES as readonly TaskStatus[]).includes(status);
 }
+
+/**
+ * How many times the provisioning restore retries a failed task fetch (at
+ * TASK_STATUS_POLL_MS intervals) before giving up. Override via
+ * VITE_PROVISIONING_RESTORE_RETRIES.
+ */
+const DEFAULT_PROVISIONING_RESTORE_RETRIES = 3;
+export const PROVISIONING_RESTORE_RETRIES = parseInt(
+  import.meta.env.VITE_PROVISIONING_RESTORE_RETRIES || String(DEFAULT_PROVISIONING_RESTORE_RETRIES)
+);

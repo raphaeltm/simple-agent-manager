@@ -5,6 +5,7 @@ import type { ChatSessionListItem } from '../../src/lib/api';
 import {
   applySessionEvent,
   applySessionEvents,
+  rawToSessionEvent,
   type SessionEvent,
   useSessionReducer,
 } from '../../src/pages/project-chat/useSessionReducer';
@@ -364,5 +365,51 @@ describe('useSessionReducer hook (batching)', () => {
 
     // Sessions reference unchanged
     expect(result.current.sessions).toBe(sessionsBefore);
+  });
+});
+
+describe('session.updated status (sleep/wake broadcasts)', () => {
+  // ProjectData broadcasts `{ sessionId, status: 'sleeping' }` from sleepSession()
+  // and `{ sessionId, workspaceId, taskId, status: 'active' }` from wakeSession().
+  // The reducer used to drop `status`, so a slept session stayed `active` in the
+  // sidebar until the slow reconcile, and `useProvisioningTracker`'s
+  // sleeping-session gate read a stale value.
+  it('applies a sleep broadcast to the matching session', () => {
+    const existing = [makeSession({ id: 'sess-1', status: 'active', topic: 'Keep' })];
+    const result = applySessionEvent(existing, {
+      type: 'session.updated',
+      payload: { sessionId: 'sess-1', status: 'sleeping' },
+    });
+    expect(result[0].status).toBe('sleeping');
+    expect(result[0].topic).toBe('Keep');
+  });
+
+  it('applies a wake broadcast, including the new workspace and task', () => {
+    const existing = [makeSession({ id: 'sess-1', status: 'sleeping', workspaceId: null })];
+    const result = applySessionEvent(existing, {
+      type: 'session.updated',
+      payload: { sessionId: 'sess-1', status: 'active', workspaceId: 'ws-2', taskId: 'task-1' },
+    });
+    expect(result[0]).toMatchObject({ status: 'active', workspaceId: 'ws-2', taskId: 'task-1' });
+  });
+
+  it('leaves status alone when the payload has none', () => {
+    const existing = [makeSession({ id: 'sess-1', status: 'sleeping' })];
+    const result = applySessionEvent(existing, {
+      type: 'session.updated',
+      payload: { sessionId: 'sess-1', topic: 'Renamed' },
+    });
+    expect(result[0].status).toBe('sleeping');
+  });
+
+  it('maps status through from the raw WebSocket frame', () => {
+    const event = rawToSessionEvent({
+      type: 'session.updated',
+      payload: { sessionId: 'sess-1', status: 'sleeping' },
+    } as unknown as Parameters<typeof rawToSessionEvent>[0]);
+    expect(event).toEqual({
+      type: 'session.updated',
+      payload: { sessionId: 'sess-1', status: 'sleeping' },
+    });
   });
 });

@@ -12,17 +12,26 @@
  *    re-derive it from the session's own task so a reload mid-provisioning still
  *    shows progress.
  *
- * Restore gates on `isProvisioningStatus`, an allowlist of the runner's
- * pre-agent statuses, and skips a session whose status is `sleeping`. Since
- * PR #2230 a slept VM conversation keeps its original task row, which is
- * `sleeping` with a null execution step while idle
- * (`services/session-sleep-teardown.ts`) and `queued`/`delegated` while a wake
- * is in flight (`services/session-recovery.ts`). Neither is first-boot
- * provisioning: nothing is happening in the idle case, and the wake case is
- * already rendered by `WakeProgressBanner`. The previous "not terminal and not
- * in_progress" denylist matched both and showed "Starting... Waiting for task
- * runner..." over an idle slept chat, with a timer counting from the task's
- * original start.
+ * Restore renders the banner only for a session's FIRST boot. Since PR #2230 a
+ * slept VM conversation keeps its original task row, which is `sleeping` with a
+ * null execution step while idle (`services/session-sleep-teardown.ts`) and
+ * `queued`/`delegated` while a wake is in flight
+ * (`services/session-recovery.ts`). Neither is first-boot provisioning: nothing
+ * is happening in the idle case, and the wake case is already rendered by
+ * `WakeProgressBanner`. The previous "not terminal and not in_progress"
+ * denylist matched both and showed "Starting... Waiting for task runner..."
+ * over an idle slept chat, with a timer counting from the task's original start.
+ *
+ * Three gates, each keyed on the condition rather than a proxy (rule 74):
+ *  1. the selected session's status is not `sleeping` (the server's chat
+ *     session status, kept live by the `session.updated` sleep/wake broadcasts);
+ *  2. the task status is in `PROVISIONING_TASK_STATUSES` (an allowlist, so a
+ *     future status cannot fall through);
+ *  3. the task has no `startedAt`. `started_at` is written exactly once, when
+ *     the agent first starts (`task-runner/state-machine.ts`
+ *     `transitionToInProgress`), and a wake does not reset it, so a `queued`
+ *     task that has started before is a wake — this backstops gate 1 against a
+ *     dropped WebSocket frame leaving the list entry stale.
  */
 import type { Dispatch, SetStateAction } from 'react';
 import { useEffect } from 'react';
@@ -32,7 +41,12 @@ import { useDocumentVisible } from '../../hooks/useVisibilityAwarePoll';
 import type { ChatSessionListItem } from '../../lib/api';
 import { getProjectTask, getWorkspace } from '../../lib/api';
 import type { ProvisioningState } from './types';
-import { isProvisioningStatus, isTerminal, TASK_STATUS_POLL_MS } from './types';
+import {
+  isProvisioningStatus,
+  isTerminal,
+  PROVISIONING_RESTORE_RETRIES,
+  TASK_STATUS_POLL_MS,
+} from './types';
 
 export interface UseProvisioningTrackerArgs {
   projectId: string;
@@ -92,9 +106,11 @@ export function useProvisioningTracker({
           (Boolean(task.workspaceId) || task.executionStep === 'running');
         // A conversation that slept before the agent reported in belongs to the
         // sleep/wake UI from here on; polling it would say "Starting..." forever.
-        if (agentRunning || task.status === 'sleeping') {
+        const slept = task.status === 'sleeping';
+        if (agentRunning || slept) {
           navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
           setProvisioning(null);
+          if (slept) void loadSessions();
         }
         if (isTerminal(task.status)) {
           navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
@@ -108,10 +124,15 @@ export function useProvisioningTracker({
     void poll();
     const interval = setInterval(() => void poll(), TASK_STATUS_POLL_MS);
     return () => clearInterval(interval);
+    // `workspaceUrl` is a dependency so that storing it restarts the interval
+    // once (one immediate poll) instead of leaving a closure that refetches the
+    // workspace on every tick; the other fields the poll writes are
+    // deliberately NOT dependencies, or every tick would restart the interval.
   }, [
     provisioning?.taskId,
     provisioning?.status,
     provisioning?.sessionId,
+    provisioning?.workspaceUrl,
     projectId,
     navigate,
     loadSessions,
@@ -128,15 +149,19 @@ export function useProvisioningTracker({
   const selectedSessionSleeping = selectedSession?.status === 'sleeping';
   useEffect(() => {
     if (!sessionId || provisioning || !selectedTaskId) return;
-    // A sleeping session's task is `sleeping` while idle and `queued`/`delegated`
-    // while a wake is in flight. Neither is first-boot provisioning; the
-    // sleep/wake UI owns that session until it is active again.
+    // Gate 1: a sleeping session's task is `sleeping` while idle and
+    // `queued`/`delegated` while a wake is in flight. Neither is first-boot
+    // provisioning; the sleep/wake UI owns that session until it is active again.
     if (selectedSessionSleeping) return;
     let cancelled = false;
-    void (async () => {
+    let retriesLeft = PROVISIONING_RESTORE_RETRIES;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const attempt = async () => {
       try {
         const task = await getProjectTask(projectId, selectedTaskId);
-        if (cancelled || !isProvisioningStatus(task.status)) return;
+        if (cancelled) return;
+        // Gate 2: allowlist. Gate 3: a task that has started before is a wake.
+        if (!isProvisioningStatus(task.status) || task.startedAt) return;
         setProvisioning({
           taskId: task.id,
           sessionId,
@@ -144,18 +169,24 @@ export function useProvisioningTracker({
           status: task.status,
           executionStep: task.executionStep ?? null,
           errorMessage: task.errorMessage ?? null,
-          startedAt: task.startedAt ? new Date(task.startedAt).getTime() : Date.now(),
+          startedAt: Date.now(),
           workspaceId: task.workspaceId ?? null,
           workspaceUrl: null,
           requestedVmSize: task.requestedVmSize ?? null,
           provisionedVmSize: task.provisionedVmSize ?? null,
         });
       } catch {
-        /* Best-effort */
+        // Transient failure (offline blip, 5xx). Retry a bounded number of
+        // times so a reload mid-provisioning does not lose the banner for good.
+        if (cancelled || retriesLeft <= 0) return;
+        retriesLeft -= 1;
+        retryTimer = setTimeout(() => void attempt(), TASK_STATUS_POLL_MS);
       }
-    })();
+    };
+    void attempt();
     return () => {
       cancelled = true;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
     };
   }, [
     sessionId,

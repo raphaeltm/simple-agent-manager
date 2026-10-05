@@ -23,6 +23,8 @@ export interface SessionUpdatedPayload {
   topic?: string;
   taskId?: string;
   workspaceId?: string;
+  /** Sleep (`'sleeping'`) and wake (`'active'`) broadcasts from ProjectData. */
+  status?: string;
 }
 
 export interface SessionStoppedPayload {
@@ -102,6 +104,7 @@ export function rawToSessionEvent(raw: RawSessionEvent): SessionEvent | null {
           ...(p.topic != null ? { topic: String(p.topic) } : {}),
           ...(p.taskId != null ? { taskId: String(p.taskId) } : {}),
           ...(p.workspaceId != null ? { workspaceId: String(p.workspaceId) } : {}),
+          ...(p.status != null ? { status: String(p.status) } : {}),
         },
       };
     case 'session.agent_completed':
@@ -203,6 +206,10 @@ export function applySessionEvent(
         ...(fields.topic !== undefined ? { topic: fields.topic } : {}),
         ...(fields.taskId !== undefined ? { taskId: fields.taskId } : {}),
         ...(fields.workspaceId !== undefined ? { workspaceId: fields.workspaceId } : {}),
+        // ProjectData broadcasts `status: 'sleeping'` on sleep and `'active'` on
+        // wake. Dropping it left the sidebar (and anything gating on a list
+        // item's status) up to SESSION_RECONCILE_INTERVAL_MS behind the server.
+        ...(fields.status !== undefined ? { status: fields.status } : {}),
       }));
     }
 

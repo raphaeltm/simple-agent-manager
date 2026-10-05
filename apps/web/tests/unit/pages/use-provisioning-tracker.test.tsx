@@ -14,6 +14,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatSessionListItem } from '../../../src/lib/api';
 import type { ProvisioningState } from '../../../src/pages/project-chat/types';
+import {
+  PROVISIONING_RESTORE_RETRIES,
+  TASK_STATUS_POLL_MS,
+} from '../../../src/pages/project-chat/types';
 import { useProvisioningTracker } from '../../../src/pages/project-chat/useProvisioningTracker';
 
 const mocks = vi.hoisted(() => ({
@@ -51,19 +55,30 @@ function makeTask(overrides: Record<string, unknown> = {}) {
     executionStep: 'node_provisioning',
     errorMessage: null,
     outputBranch: BRANCH,
-    startedAt: '2026-10-05T04:58:29.900Z',
+    // First boot: `started_at` is written only when the agent first starts
+    // (task-runner/state-machine.ts transitionToInProgress).
+    startedAt: null,
     workspaceId: null,
     ...overrides,
   };
 }
 
+const ORIGINAL_START = '2026-10-05T04:58:29.900Z';
+
 /** What `session-sleep-teardown.ts` leaves on a slept VM conversation's task. */
-const sleepingTask = () => makeTask({ status: 'sleeping', executionStep: null });
+const sleepingTask = () =>
+  makeTask({ status: 'sleeping', executionStep: null, startedAt: ORIGINAL_START });
 /** What `session-recovery.ts` writes to the same task once a wake is claimed. */
-const wakingTask = () => makeTask({ status: 'queued', executionStep: 'node_selection' });
+const wakingTask = () =>
+  makeTask({ status: 'queued', executionStep: 'node_selection', startedAt: ORIGINAL_START });
 /** The task once the runner has handed the session to a live agent. */
 const runningTask = () =>
-  makeTask({ status: 'in_progress', executionStep: 'running', workspaceId: 'ws-1' });
+  makeTask({
+    status: 'in_progress',
+    executionStep: 'running',
+    workspaceId: 'ws-1',
+    startedAt: ORIGINAL_START,
+  });
 
 interface HarnessProps {
   sessionId: string | undefined;
@@ -117,7 +132,6 @@ describe('useProvisioningTracker — restore on navigation', () => {
       status: 'queued',
       executionStep: 'node_provisioning',
       branchName: BRANCH,
-      startedAt: Date.parse('2026-10-05T04:58:29.900Z'),
     });
   });
 
@@ -155,6 +169,61 @@ describe('useProvisioningTracker — restore on navigation', () => {
     await waitFor(() => expect(mocks.getProjectTask).toHaveBeenCalledTimes(1));
     await settle();
     expect(result.current).toBeNull();
+  });
+
+  it('treats a waking task as not provisioning even when the session list lags', async () => {
+    // A dropped `session.updated` frame can leave the list entry `active` while
+    // the wake has already re-queued the task. The task has started before
+    // (startedAt set), so it is a wake, not a first boot.
+    mocks.getProjectTask.mockResolvedValue(wakingTask());
+    const { result } = renderTracker({ sessionId: 'session-1', sessions: [makeSession()] });
+
+    await waitFor(() => expect(mocks.getProjectTask).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(result.current).toBeNull();
+  });
+
+  it('retries a transient task fetch failure and restores once it succeeds', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mocks.getProjectTask
+        .mockRejectedValueOnce(new Error('502 Bad Gateway'))
+        .mockResolvedValue(makeTask());
+      const { result } = renderTracker({ sessionId: 'session-1', sessions: [makeSession()] });
+
+      await waitFor(() => expect(mocks.getProjectTask).toHaveBeenCalledTimes(1));
+      await settle();
+      expect(result.current).toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(TASK_STATUS_POLL_MS);
+      });
+      await waitFor(() => expect(result.current?.status).toBe('queued'));
+      // 1 failed restore + 1 successful retry + the poll's immediate first tick
+      // once provisioning is set.
+      expect(mocks.getProjectTask).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up after the bounded number of retries', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mocks.getProjectTask.mockRejectedValue(new Error('offline'));
+      const { result } = renderTracker({ sessionId: 'session-1', sessions: [makeSession()] });
+
+      await waitFor(() => expect(mocks.getProjectTask).toHaveBeenCalledTimes(1));
+      for (let i = 0; i < PROVISIONING_RESTORE_RETRIES + 2; i += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(TASK_STATUS_POLL_MS);
+        });
+      }
+      expect(mocks.getProjectTask).toHaveBeenCalledTimes(1 + PROVISIONING_RESTORE_RETRIES);
+      expect(result.current).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not restore provisioning once the agent is running', async () => {
@@ -229,7 +298,7 @@ describe('useProvisioningTracker — poll', () => {
 
   it('stops tracking and returns to the session when the conversation sleeps mid-poll', async () => {
     mocks.getProjectTask.mockResolvedValue(sleepingTask());
-    const { result, navigate } = renderTracker({
+    const { result, navigate, loadSessions } = renderTracker({
       sessionId: 'session-1',
       sessions: [],
       initial: inFlight(),
@@ -237,5 +306,8 @@ describe('useProvisioningTracker — poll', () => {
 
     await waitFor(() => expect(result.current).toBeNull());
     expect(navigate).toHaveBeenCalledWith('/projects/proj-1/chat/session-1', { replace: true });
+    // The sidebar must learn the session slept, or the restore effect would
+    // immediately refetch the task it just saw as sleeping.
+    expect(loadSessions).toHaveBeenCalledTimes(1);
   });
 });
