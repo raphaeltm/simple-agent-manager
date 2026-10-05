@@ -10,6 +10,8 @@ The static catalog serves Claude Code, OpenAI Codex, OpenCode, Mistral Vibe, and
 
 Sources checked: [Anthropic models](https://platform.claude.com/docs/en/models/overview), [OpenAI models](https://developers.openai.com/api/docs/models), [Google Gemini models](https://ai.google.dev/gemini-api/docs/models), [Mistral Vibe configuration](https://docs.mistral.ai/vibe/code/cli/configuration), [OpenCode models data](https://models.opencode.ai/api.json), [OpenCode Zen](https://opencode.ai/zen).
 
+Anthropic's model overview lists Sonnet 5.5 at $2 input and $10 output per million tokens with a 1M token context window; the platform proxy metadata uses those values.
+
 ## Checklist
 
 - [x] Inspect supported agents and catalog consumers.
