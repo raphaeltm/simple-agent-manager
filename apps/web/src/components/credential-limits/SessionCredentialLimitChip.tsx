@@ -18,7 +18,7 @@ export function SessionCredentialLimitChip({
     ...projectCredentialLimitsQueryOptions(queryScope, projectId, agentSessionId),
     enabled: Boolean(queryScope && projectId && agentSessionId),
   });
-  const credential = query.data?.credentials[0];
-  if (!credential || credential.windows.length === 0) return null;
+  const credential = query.data?.credentials?.[0];
+  if (!credential || !credential.windows?.length) return null;
   return <CredentialLimitChip credential={credential} />;
 }

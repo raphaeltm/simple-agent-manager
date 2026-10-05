@@ -240,6 +240,15 @@ gaps that the local suite could not see, both fixed in this branch:
   endpoint reports no window length, so fixed-meaning window types also carry a nominal
   span used only for ordering (`credentialLimitWindowSortMinutes`, `dff92898e`).
 
+- **An unexpected limits body crashed the chat page.** CI's session tool-rail Playwright
+  audit answers unknown API paths with `{}`; the header chip read
+  `data.credentials[0]` and threw, taking the whole message view down
+  ("Cannot read properties of undefined (reading '0')"). The web API client now
+  normalizes the body at the boundary (`normalizeCredentialLimitsResponse`, rules 50/51)
+  and the chip guards its reads. Regression tests: `tests/unit/lib/credential-limits-api.test.ts`
+  and `tests/unit/components/session-credential-limit-chip.test.tsx` (the latter reaches the
+  chip through the real query and reproduced the exact error with the fix stashed).
+
 Observed provider payloads (for future reference):
 
 - Codex CLI 0.160 rollout on a ChatGPT **Pro** plan reported only
