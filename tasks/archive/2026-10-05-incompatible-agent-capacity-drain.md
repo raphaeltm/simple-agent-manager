@@ -21,8 +21,8 @@ Six production tasks exhausted the two-hour admission deadline while an occupied
 - [x] Correct hardware/reserve rejection reasons while retaining true authority mismatch diagnostics.
 - [x] Real admission-path regression with occupied incompatible host; simulate bounded safe sleep/cleanup and verify subsequent provisioning.
 - [x] Eligible-full convergence and busy/blocked/foreign/deployment/Instant controls.
-- [ ] Prove regression fails against original code and run required quality checks.
-- [ ] Independent Cloudflare, constitution, test, documentation and completion review; resolve findings.
+- [x] Prove regression fails against original code and run required quality checks.
+- [x] Independent Cloudflare, constitution, test, documentation and completion review; resolve findings.
 - [ ] Coordinate one pinned bounded staging sweep with visibility and telemetry siblings; clean resources.
 - [ ] Archive task, draft PR, CI, CodeRabbit request/wait, merge and monitor production deploy.
 
@@ -63,3 +63,14 @@ Old agent c66d1dd51ef46a92b9e12c169cb3138d1d266550 heartbeat23:24:56Z/ready23:24
 Integrated candidate repinned `2613b82d02afe0c10a229b236055adcb979085c7` (sleeping test fixture correction only).
 
 At23:26:19.819Z canonical agent idle/inactive; assistant confirmed FIXTURE READY, uncommitted `capacity-fixture.txt` exact `capacity-drain-preserve-01M4677451EBA2GZW0TENE0WEM`, git HEAD `a18ce29a47a952ecc284ccbbc89fdb2d845823bc`. Workspace running; read-only D1 confirmed exactly one live managed node, one occupied workspace, maxNodes1/revision28, heartbeat23:26:58Z c66d1dd. Coordinator sent full reviewed SHA, IDs/links/fixture assertion, hold replaced with readiness report; only coordinator deploys.
+
+Real session-proxy file read confirmed exact sentinel content; real git/status confirmed staged[],unstaged[],untracked capacity-fixture.txt ?? before integration. This supplements assistant assertion with runtime evidence. Root web336 suites/4023tests PASS; full API ongoing.
+
+Coordinator full quality PASS (lint13/typecheck19/build9/root21/API816files11383tests/web4023/fullGo+race) and began integrated deploy2613b82d at23:36Z. Browser baseline workspace/chat hydrated, no page errors, screenshots inspected. ONE authorized read-only human followup completed at23:36:31.119Z with unchanged exact sentinel/HEAD and canonical idle/inactive. Expected normal15mineligibility23:51:31Z; no further reset. Strict baseline file/untracked assertion PASS, sentinel SHA256 db98501d4c3ed89595e9fbaeb466e0d369c70c72da4ca48d725daf9da0aa3ea3.
+
+Shared staging workflow https://github.com/raphaeltm/simple-agent-manager/actions/runs/37389450160 pinned2613b82d. Existing predeploy ProjectData alarm regression2.04x is unrelated to newfixture/TaskRunner and was recorded by coordinator in existing SAMIdea01M27M86R544BQX86VZANZGSQ2, no duplicate issue/Idea or overlapping code.
+
+## Final local quality
+`pnpm lint`13/13 PASS; `pnpm exec turbo run typecheck --concurrency=1`19/19 PASS; `pnpm exec turbo run test --concurrency=1 -- --maxWorkers=1`21/21 targets PASS (API818 files/11402 tests; web336 files/4023 tests); `pnpm exec turbo run build --concurrency=1`9/9 PASS. Focused admission/placement23/23 PASS, observed removal proofs fail and fixes restored. Node-pool boundary, source-contract1565tests and formatratchet PASS. API build's existing missing-output warning is nonfatal.
+Phase4/5 implementation validation complete; downstream shared staging, CI and merge remain explicit unfinished gates.
+At23:43:40 read-only lifecycle observation: ordinary idle already has available snapshot generation01M476T50N6DJSVWJNEN0WMC08 and scheduled unclaimed sleep_after23:51:46.511Z, zero failures/attempts. New helper must preserve that episode. Coordinator asked to explicitly authorize one bounded additional human prompt to create legitimate missing intent through normal cancel-scheduled-sleep API and exercise admission CAS; no further activity reset performed yet. This would require <=105min elapsed but <EUR0.02 actual estimate, below prior cost cap; no second concurrent VM or direct D1 writes. Existing-episode preservation plus local CAS proof is an alternative if coordinator declines.
