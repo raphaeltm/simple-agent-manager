@@ -214,6 +214,7 @@ export type {
   CCConfigurationListItem,
   CCCredentialListItem,
 } from './composable-credentials';
+export { getMyCredentialLimits, getProjectCredentialLimits } from './credential-limits';
 export {
   createCCAttachment,
   createCCConfiguration,

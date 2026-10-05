@@ -47,6 +47,9 @@ export interface AgentSettingsCardProps {
 /**
  * Per-agent settings card for model selection and permission mode.
  */
+/** OpenCode's own console, the only place Zen credit balance is visible. */
+const OPENCODE_CONSOLE_URL = 'https://opencode.ai/zen';
+
 export function AgentSettingsCard({
   agent,
   settings,
@@ -225,6 +228,21 @@ export function AgentSettingsCard({
               </option>
             ))}
           </select>
+          {opencodeProvider === 'opencode-zen' && (
+            <p className="text-xs text-fg-muted mt-2 mb-0" data-testid="opencode-zen-balance-note">
+              Zen bills per request from a credit balance that OpenCode only shows in its own
+              console, so SAM cannot display remaining Zen credit.{' '}
+              <a
+                href={OPENCODE_CONSOLE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent underline-offset-2 hover:underline"
+              >
+                Check your balance in the OpenCode console
+              </a>
+              . OpenCode Go plans report rolling, weekly and monthly usage in the session header.
+            </p>
+          )}
         </div>
       )}
 

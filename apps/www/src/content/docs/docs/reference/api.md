@@ -234,6 +234,22 @@ List all credentials for the authenticated user (tokens are not returned).
 
 Delete a stored cloud-provider credential.
 
+### `GET /api/credentials/limits`
+
+Latest provider usage windows for the authenticated user's personal credentials, across projects
+(newest sample per credential and window). Each credential carries `credentialId` (for
+`cc_credentials:<id>` references), `level` (`ok`, `warning`, `critical`, `rejected`) and its
+`windows` (`windowType`, `utilizationPercent`, `windowMinutes`, `resetsAt`, `observedAt`, `source`).
+Rows come from `credential_limit_windows`; the response is capped by `CREDENTIAL_LIMIT_READ_MAX_ROWS`.
+
+### `GET /api/projects/:id/credential-limits`
+
+Usage windows visible to the caller inside a project: the caller's own credentials plus project-
+and platform-shared ones, never another member's personal credential. Requires `project:read`.
+Optional `agentSessionId` narrows the result to the credential that agent session is attributed to,
+resolved server-side from `agent_sessions`. The MCP tool `get_credential_limits` exposes the same
+view to agents (`scope: "session" | "project"`).
+
 ### `GET /api/providers/catalog`
 
 List non-secret compute-provider catalog metadata for cloud-provider credentials the caller can use.

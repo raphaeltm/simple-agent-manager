@@ -225,6 +225,13 @@ type GatewayConfig struct {
 	TerminalActivityReportBackoff time.Duration
 	// ActivityReportTimeout bounds each activity callback request.
 	ActivityReportTimeout time.Duration
+	// UsageProbeTimeout bounds one post-turn provider usage probe (Codex rollout
+	// read or OpenCode Go usage request). Zero selects the package default.
+	UsageProbeTimeout time.Duration
+	// OpenCodeGoUsageURL is the OpenCode Go usage endpoint probed after each
+	// turn of an OpenCode session that uses the opencode-go provider. Empty
+	// selects the package default.
+	OpenCodeGoUsageURL string
 	// CredentialSyncTimeout bounds auth-file sync-back during shutdown.
 	CredentialSyncTimeout time.Duration
 

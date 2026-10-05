@@ -261,6 +261,16 @@ export type {
 } from './project';
 export { ARTIFACTS_DEFAULTS, VALID_REPO_PROVIDERS } from './project';
 
+// Credential usage limits
+export type {
+  CredentialLimitCredentialSource,
+  CredentialLimitCredentialSummary,
+  CredentialLimitLevel,
+  CredentialLimitsResponse,
+  CredentialLimitStatus,
+  CredentialLimitWindowSummary,
+} from './credential-limits';
+
 // Deployment
 export type {
   DeploymentEnvironmentConfigResponse,

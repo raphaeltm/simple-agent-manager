@@ -25,6 +25,23 @@ export const WORKSPACE_TOOLS = [
     },
   },
   {
+    name: 'get_credential_limits',
+    description:
+      'Read remaining provider usage for the credentials this project uses: Claude Pro/Max 5-hour and weekly windows, Codex (ChatGPT plan) 5-hour and weekly windows, OpenCode Go rolling/weekly/monthly windows, and API-key rate-limit headers seen through the SAM proxy. Values are the latest samples SAM observed while agents ran, not live quotes. Check this before dispatching heavy work; when a window is critical or rejected, pause new dispatches and schedule a wake for after `resetsAt` instead of running into the limit.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['session', 'project'],
+          description:
+            "'session' (default): only the credential your own agent session is attributed to. 'project': every credential visible to you in this project (your own plus project- and platform-shared ones).",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'get_network_info',
     description:
       'Get workspace network info: base domain, workspace URL, and all listening ports with their external URLs.',

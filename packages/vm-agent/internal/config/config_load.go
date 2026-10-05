@@ -173,6 +173,8 @@ func Load() (*Config, error) {
 		ACPCredentialSyncTimeout:          getEnvDuration("ACP_CREDENTIAL_SYNC_TIMEOUT", DefaultACPCredentialSyncTimeout),
 		ACPRestartAttemptTimeout:          getEnvDuration("ACP_RESTART_ATTEMPT_TIMEOUT", DefaultACPRestartAttemptTimeout),
 		ACPActivityReportTimeout:          getEnvDuration("ACP_ACTIVITY_REPORT_TIMEOUT", DefaultACPActivityReportTimeout),
+		ACPUsageProbeTimeout:              getEnvDuration("ACP_USAGE_PROBE_TIMEOUT", DefaultACPUsageProbeTimeout),
+		OpenCodeGoUsageURL:                getEnv("OPENCODE_GO_USAGE_URL", DefaultOpenCodeGoUsageURL),
 		ACPCheckpointPreemptGrace:         getEnvDuration("ACP_CHECKPOINT_PREEMPT_GRACE", DefaultACPCheckpointPreemptGrace),
 		ACPCheckpointPreemptMaxGrace:      getEnvDuration("ACP_CHECKPOINT_PREEMPT_MAX_GRACE", DefaultACPCheckpointPreemptMaxGrace),
 		ACPCheckpointRolloverTimeout:      getEnvDuration("ACP_CHECKPOINT_ROLLOVER_TIMEOUT", DefaultACPCheckpointRolloverTimeout),

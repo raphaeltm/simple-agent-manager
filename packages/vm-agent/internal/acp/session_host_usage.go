@@ -106,6 +106,24 @@ func (h *SessionHost) prepareUsageReport(params acpsdk.SessionNotification) (usa
 }
 
 func (h *SessionHost) prepareUsageReportWithAttribution(params acpsdk.SessionNotification, attr credentialAttribution, hasAttr bool) (usageReportRequest, bool) {
+	meta, ok := claudeRateLimitMeta(params)
+	if !ok {
+		return usageReportRequest{}, false
+	}
+
+	observedAt := h.now().UnixMilli()
+	limit, ok := usageLimitFromClaudeRateLimit(meta, observedAt)
+	if !ok {
+		return usageReportRequest{}, false
+	}
+	return h.buildUsageReportRequest(attr, hasAttr, "claude-acp.usage_update", observedAt, []usageLimitPayload{limit})
+}
+
+// buildUsageReportRequest assembles one usage callback for the session's
+// server-attributed credential. It is the single place every producer (Claude
+// ACP meta, Codex rollout probe, OpenCode Go probe) funnels through, so the
+// attribution and routing contract with the control plane stays identical.
+func (h *SessionHost) buildUsageReportRequest(attr credentialAttribution, hasAttr bool, source string, observedAt int64, limits []usageLimitPayload) (usageReportRequest, bool) {
 	projectID := h.config.ProjectID
 	nodeID := h.config.NodeID
 	controlPlaneURL := h.config.ControlPlaneURL
@@ -118,15 +136,7 @@ func (h *SessionHost) prepareUsageReportWithAttribution(params acpsdk.SessionNot
 	if !hasAttr || attr.CredentialReference == "" || attr.CredentialSource == "" {
 		return usageReportRequest{}, false
 	}
-
-	meta, ok := claudeRateLimitMeta(params)
-	if !ok {
-		return usageReportRequest{}, false
-	}
-
-	observedAt := h.now().UnixMilli()
-	limit, ok := usageLimitFromClaudeRateLimit(meta, observedAt)
-	if !ok {
+	if len(limits) == 0 {
 		return usageReportRequest{}, false
 	}
 
@@ -137,8 +147,8 @@ func (h *SessionHost) prepareUsageReportWithAttribution(params acpsdk.SessionNot
 		CredentialSource:     attr.CredentialSource,
 		CredentialGeneration: attr.CredentialGeneration,
 		ObservedAt:           observedAt,
-		Source:               "claude-acp.usage_update",
-		RateLimits:           []usageLimitPayload{limit},
+		Source:               source,
+		RateLimits:           limits,
 	}
 	return usageReportRequest{
 		url: strings.TrimRight(controlPlaneURL, "/") +

@@ -99,6 +99,27 @@ A few things worth knowing:
 - **User-scoped.** Guided sign-in saves the credential for your account, so it applies across your projects. To set a subscription credential for a single [shared project](/docs/guides/collaboration/), use the manual paste fallback in that project's connections.
 - **Availability.** Guided sign-in is available on the hosted platform and on self-hosted deployments running on Cloudflare Containers (SAM's default runtime). If the button isn't shown, use the manual API key or token fields in the same panel.
 
+## Usage Limits
+
+SAM shows how much of a credential's provider allowance is used, so you can see a Claude Max 5-hour window at 72% before the agent hits it.
+
+Where it appears:
+
+- **Chat header** — a usage chip next to the workspace badge for the credential the running session uses (for example `Claude · 5h 72% · Week 31%`). Tap it for every window with its reset time.
+- **Settings → Credentials** — the same chip on each personal credential that has samples.
+- **Agents** — the MCP tool `get_credential_limits` returns the same windows, so an orchestrator can pause dispatching and schedule a wake for after the reset instead of running into the limit.
+
+Where the numbers come from (`apps/api/src/services/credential-limit-events/`, table `credential_limit_windows`):
+
+| Harness / mode                              | Windows                                       | Source                                                                                                              |
+| ------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Claude Code with a Claude Pro/Max OAuth token | 5-hour, weekly, Opus weekly, Sonnet weekly  | Claude Code's own rate-limit events on the ACP stream (`session_host_usage.go`)                                     |
+| Codex with a ChatGPT plan                   | 5-hour and weekly (labelled by window length) | The pinned Codex CLI's session rollout, read by the VM agent after each completed turn (`session_host_usage_probe.go`) |
+| OpenCode with an OpenCode Go key            | rolling, weekly, monthly                      | OpenCode's official Go usage endpoint, called by the VM agent after each completed turn                              |
+| API keys routed through the SAM proxy       | request and token rate limits                 | Provider rate-limit response headers                                                                                 |
+
+Values are the latest samples SAM observed while an agent was running on that credential; they are not live quotes, and an idle credential keeps showing its last sample. SAM does not call undocumented provider account endpoints. OpenCode Zen bills per request from a credit balance that only the OpenCode console shows, so Zen sessions have no usage chip; agent settings link to the console instead.
+
 ## AI Provider Modes
 
 Each agent runs in one of three provider modes, which control where LLM traffic goes and who pays for it:

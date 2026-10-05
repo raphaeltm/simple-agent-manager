@@ -21,6 +21,11 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   updateWorkspacePortsPublic: mocks.updateWorkspacePortsPublic,
 }));
 
+// The usage chip owns a TanStack query; it has its own tests (credential-limit-chip.test.tsx).
+vi.mock('../../../src/components/credential-limits/SessionCredentialLimitChip', () => ({
+  SessionCredentialLimitChip: () => null,
+}));
+
 vi.mock('../../../src/lib/text-utils', () => ({
   stripMarkdown: (s: string) => s,
 }));

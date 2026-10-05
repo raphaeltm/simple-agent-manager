@@ -99,73 +99,73 @@ SAM already records provider quota windows per credential (`credential_limit_win
 ## Implementation checklist
 
 ### A. Shared (`packages/shared`)
-- [ ] A1 Extend `constants/credential-limits.ts`: providers `+opencode`; sources `+vm-agent.codex_rollout`,
+- [x] A1 Extend `constants/credential-limits.ts`: providers `+opencode`; sources `+vm-agent.codex_rollout`,
       `+vm-agent.opencode_go_usage`; windows `+claude.seven_day_opus`, `+claude.seven_day_sonnet`, `+codex.primary`,
       `+codex.secondary`, `+opencode.rolling`, `+opencode.weekly`, `+opencode.monthly`.
-- [ ] A2 Add `types/credential-limits.ts` (`CredentialLimitWindowSummary`, `CredentialLimitCredentialSummary`,
+- [x] A2 Add `types/credential-limits.ts` (`CredentialLimitWindowSummary`, `CredentialLimitCredentialSummary`,
       `CredentialLimitsResponse`) and export from `types/index.ts`.
-- [ ] A3 Add pure helpers (`credential-limits` utils): window label from `(windowType, windowMinutes)`, worst level,
+- [x] A3 Add pure helpers (`credential-limits` utils): window label from `(windowType, windowMinutes)`, worst level,
       credential id from reference; unit tests.
 
 ### B. API (`apps/api`)
-- [ ] B1 `services/credential-limit-events/read.ts`: `listProjectCredentialLimits(env, {projectId, userId,
+- [x] B1 `services/credential-limit-events/read.ts`: `listProjectCredentialLimits(env, {projectId, userId,
       credentialReference?})` (rows where `project_id = ?` AND (`user_id = ?` OR `credential_source IN
       ('project','platform'))), `listUserCredentialLimits(env, {userId})` (rows `user_id = ?` AND
       `credential_source = 'user'`, collapsed to newest per `(credential_reference, window_type)` across projects),
       `resolveAgentSessionCredentialReference(env, {projectId, agentSessionId})` (agent_sessions ⋈ workspaces,
       project-bound). Row-tolerant mapping (rule 50); bounded by `CREDENTIAL_LIMIT_READ_MAX_ROWS` (default 200).
-- [ ] B2 Route `GET /api/projects/:id/credential-limits?agentSessionId=` in `routes/projects/credential-limits.ts`
+- [x] B2 Route `GET /api/projects/:id/credential-limits?agentSessionId=` in `routes/projects/credential-limits.ts`
       (`requireProjectCapability(..., 'project:read')`), mounted in `routes/projects/index.ts`. ≤ 3 round trips.
-- [ ] B3 Route `GET /api/credentials/limits` (user) in `routes/credential-limits.ts`, mounted in `index.ts` before
+- [x] B3 Route `GET /api/credentials/limits` (user) in `routes/credential-limits.ts`, mounted in `index.ts` before
       `credentialsRoutes` (same as `resolutionStatusRoute`).
-- [ ] B4 MCP tool `get_credential_limits` (`scope: 'session' | 'project'`, default session): definition in
+- [x] B4 MCP tool `get_credential_limits` (`scope: 'session' | 'project'`, default session): definition in
       `tool-definitions-workspace-tools.ts`, handler in `workspace-tools-direct.ts`, switch case in `routes/mcp/index.ts`,
       tool listed in the onboarding instructions (`onboarding-tools.ts`).
-- [ ] B5 `env.ts` + `.env.example`: `CREDENTIAL_LIMIT_READ_MAX_ROWS`.
-- [ ] B6 Tests: read service on real SQLite (foreign user's personal row excluded + owner control; project/platform rows
+- [x] B5 `env.ts` + `.env.example`: `CREDENTIAL_LIMIT_READ_MAX_ROWS`.
+- [x] B6 Tests: read service on real SQLite (foreign user's personal row excluded + owner control; project/platform rows
       visible to a member; cross-project exclusion; user-level newest-wins collapse; malformed row skipped); both route
       tests; MCP handler test; producer tests proving `codex.primary`/`opencode.weekly`/`claude.seven_day_opus` are now
       admitted and an unknown window is still `unsupported`.
 
 ### C. VM agent (`packages/vm-agent`)
-- [ ] C1 Config: `ACPUsageProbeTimeout` (env `ACP_USAGE_PROBE_TIMEOUT`, default 10s) and `OpenCodeGoUsageURL`
+- [x] C1 Config: `ACPUsageProbeTimeout` (env `ACP_USAGE_PROBE_TIMEOUT`, default 10s) and `OpenCodeGoUsageURL`
       (env `OPENCODE_GO_USAGE_URL`, default `https://opencode.ai/zen/go/v1/usage`) in `config/config.go`,
       `config_load.go`, timeout validation list (`helpers.go`); plumbed via `server.go` into `GatewayConfig`.
-- [ ] C2 Refactor `prepareUsageReportWithAttribution` into a generic `buildUsageReportRequest(attr, source, limits)`;
+- [x] C2 Refactor `prepareUsageReportWithAttribution` into a generic `buildUsageReportRequest(attr, source, limits)`;
       Claude path behaviour unchanged (existing 22 tests stay green).
-- [ ] C3 Codex rollout reader (`session_host_usage_codex.go`): validate thread id (`^[0-9a-f-]{36}$`), locate
+- [x] C3 Codex rollout reader (`session_host_usage_codex.go`): validate thread id (`^[0-9a-f-]{36}$`), locate
       `rollout-*-<thread>*.jsonl` under `$CODEX_HOME`/`~/.codex/sessions` (container: `execInContainer` with a fixed
       `sh -c` script and the id as `$1`; standalone: `filepath.Glob`), read the last 256 KiB, drop a partial first line,
       take the newest `event_msg`/`token_count` with non-null `rate_limits`, emit `codex.primary`/`codex.secondary`
       (provider `openai`, source `vm-agent.codex_rollout`, `used_percent`, `window_minutes`, `resets_at*1000`,
       status `rejected` when `rate_limit_reached_type`/`spend_control_reached` is set or `used_percent >= 100`,
       else `allowed`). Reader is an injectable function for tests.
-- [ ] C4 OpenCode Go probe (`session_host_usage_opencode.go`): retain the API key in memory only when
+- [x] C4 OpenCode Go probe (`session_host_usage_opencode.go`): retain the API key in memory only when
       `agentType == opencode && provider == opencode-go && credentialKind == api-key`; clear it in
       `stopCurrentAgentLocked`; `GET OpenCodeGoUsageURL` with Bearer via `h.config.HTTPClient`; parse
       `usage.{rolling,weekly,monthly}` → `opencode.*` (provider `opencode`, source `vm-agent.opencode_go_usage`,
       `percent`, `resetsAt` ISO→ms, status ok→allowed, warning→allowed_warning, exceeded|limited|blocked→rejected,
       else unknown). Non-200 or unexpected shape → no observation, one debug log.
-- [ ] C5 Trigger: after a successful prompt completion (`finishPromptAttempt`), `scheduleProviderUsageProbe()` runs a
+- [x] C5 Trigger: after a successful prompt completion (`finishPromptAttempt`), `scheduleProviderUsageProbe()` runs a
       single-flight goroutine bound to `h.lifecycleContext()` + `ACPUsageProbeTimeout` and enqueues through the
       existing coalescing usage reporter. No probe for other agent types.
-- [ ] C6 Tests: rollout parser fixtures (partial first line, missing `rate_limits`, newest wins, bad thread id,
+- [x] C6 Tests: rollout parser fixtures (partial first line, missing `rate_limits`, newest wins, bad thread id,
       prolite weekly-only); OpenCode parser + status mapping + non-200; probe-through-real-prompt-completion for codex
       (fake reader) and opencode (httptest usage server) asserting the callback body posted to a fake control plane;
       control: claude-code completion schedules no probe; key cleared after stop.
-- [ ] C7 Docs: `apps/www/src/content/docs/docs/reference/vm-agent.md` env table (`ACP_USAGE_PROBE_TIMEOUT`,
+- [x] C7 Docs: `apps/www/src/content/docs/docs/reference/vm-agent.md` env table (`ACP_USAGE_PROBE_TIMEOUT`,
       `OPENCODE_GO_USAGE_URL`).
 
 ### D. Web (`apps/web`)
-- [ ] D1 `lib/api/credential-limits.ts` (`getProjectCredentialLimits`, `getMyCredentialLimits`) + barrel export.
-- [ ] D2 `lib/query-options/credential-limits.ts` (identity-scoped keys, `staleTime` 30s, `refetchInterval` 60s,
+- [x] D1 `lib/api/credential-limits.ts` (`getProjectCredentialLimits`, `getMyCredentialLimits`) + barrel export.
+- [x] D2 `lib/query-options/credential-limits.ts` (identity-scoped keys, `staleTime` 30s, `refetchInterval` 60s,
       no background refetch) + barrel export.
-- [ ] D3 `components/credential-limits/CredentialLimitChip.tsx` (+ `credential-limit-format.ts`): compact chip showing
+- [x] D3 `components/credential-limits/CredentialLimitChip.tsx` (+ `credential-limit-format.ts`): compact chip showing
       provider + worst window ("Claude · 5h 72% · wk 31%"), level colours (ok/warning/critical/rejected), accessible
       popover listing each window with reset countdown and freshness.
-- [ ] D4 `SessionHeader.tsx`: render the chip after `WorkspaceProfileBadge` when the project route returns windows for
+- [x] D4 `SessionHeader.tsx`: render the chip after `WorkspaceProfileBadge` when the project route returns windows for
       `session.agentSessionId`; hidden otherwise (no spinner, rule 48).
-- [ ] D5 `SettingsCredentials.tsx` `CredentialCard`: usage line from `/api/credentials/limits` matched by
+- [x] D5 `SettingsCredentials.tsx` `CredentialCard`: usage line from `/api/credentials/limits` matched by
       `cc_credentials:<id>`; `AgentSettingsCard.tsx`: when OpenCode provider is `opencode-zen`, show the one-line note
       "Zen credit balance is only visible in the OpenCode console" with a link.
 - [ ] D6 Unit tests: format helpers; `SessionHeader` shows/hides the chip from a mocked query; Settings card shows usage.
@@ -174,7 +174,7 @@ SAM already records provider quota windows per credential (`credential_limit_win
       `.tmp/playwright-screenshots/`; reviewed and posted to the PR.
 
 ### E. Docs and records
-- [ ] E1 Public docs: credential usage limits section (agent credentials guide) + `reference/api.md` entries for the two
+- [x] E1 Public docs: credential usage limits section (agent credentials guide) + `reference/api.md` entries for the two
       routes and the MCP tool.
 - [ ] E2 After merge: update idea `01M1RMTYR8FB95H3V031CRYN68` (Part 6 → shipped PR #, what remains: idle polling
       decision, Zen balance).

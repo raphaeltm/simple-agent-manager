@@ -142,6 +142,7 @@ import { workspaceEvictionCallbackRoute } from './routes/projects/workspace-evic
 import { workspaceResourceHistoryCallbackRoute } from './routes/projects/workspace-resource-history-callback';
 import { providersRoutes } from './routes/providers';
 import { reportIssueRoutes } from './routes/report-issue';
+import { credentialLimitsRoute } from './routes/credential-limits';
 import { resolutionStatusRoute } from './routes/resolution-status';
 import { samRoutes } from './routes/sam';
 import { setupRoutes } from './routes/setup';
@@ -780,6 +781,7 @@ app.route('/api/auth', deviceFlowRoutes);
 app.route('/api/auth', authRoutes);
 app.route('/api/setup', setupRoutes);
 app.route('/api/credentials', resolutionStatusRoute);
+app.route('/api/credentials', credentialLimitsRoute);
 app.route('/api/credentials', credentialsRoutes);
 app.route('/api/capacity-pools', capacityPoolsRoutes);
 app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);

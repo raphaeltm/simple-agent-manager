@@ -475,6 +475,8 @@ func New(cfg *config.Config) (*Server, error) {
 		TerminalActivityReportAttempts:   cfg.ACPTerminalActivityReportAttempts,
 		TerminalActivityReportBackoff:    cfg.ACPTerminalActivityReportBackoff,
 		ActivityReportTimeout:            cfg.ACPActivityReportTimeout,
+		UsageProbeTimeout:                cfg.ACPUsageProbeTimeout,
+		OpenCodeGoUsageURL:               cfg.OpenCodeGoUsageURL,
 		CredentialSyncTimeout:            cfg.ACPCredentialSyncTimeout,
 		RestartAttemptTimeout:            cfg.ACPRestartAttemptTimeout,
 		RecoveryWatchdogTimeout:          cfg.ACPRecoveryWatchdog,

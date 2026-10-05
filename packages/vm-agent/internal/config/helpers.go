@@ -352,6 +352,7 @@ func (c *Config) Validate() error {
 		{"ACP_CREDENTIAL_SYNC_TIMEOUT", c.ACPCredentialSyncTimeout},
 		{"ACP_RESTART_ATTEMPT_TIMEOUT", c.ACPRestartAttemptTimeout},
 		{"ACP_ACTIVITY_REPORT_TIMEOUT", c.ACPActivityReportTimeout},
+		{"ACP_USAGE_PROBE_TIMEOUT", c.ACPUsageProbeTimeout},
 		{"ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE", c.ACPHarnessActivityReportDebounce},
 		{"JWKS_FETCH_TIMEOUT", c.JWKSFetchTimeout},
 		{EnvDefaultPSIPollIntervalSeconds, c.PSIPollInterval},

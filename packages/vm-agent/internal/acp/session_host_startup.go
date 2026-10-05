@@ -139,6 +139,7 @@ func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string,
 	if err != nil {
 		return nil, err
 	}
+	h.storeOpencodeUsageProbeKey(agentType, cred, settings)
 	envVars, settings = h.applyModelAndExtraEnv(agentType, settings, envVars)
 	h.applyPermissionMode(settings)
 

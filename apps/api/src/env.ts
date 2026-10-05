@@ -296,6 +296,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CREDENTIAL_LIMIT_ADMISSION_MAX_ACTIVE_PER_PROJECT?: string; // Max retained credential event admissions per project (default: 1000)
   CREDENTIAL_LIMIT_ADMISSION_RETRY_BATCH_SIZE?: string; // Max pending credential admissions retried per opportunistic sweep (default: 25)
   CREDENTIAL_LIMIT_ADMISSION_RETENTION_DAYS?: string; // Retention for credential admission/outbox rows (default: 30)
+  CREDENTIAL_LIMIT_READ_MAX_ROWS?: string; // Max credential limit window rows returned per read request (default: 200)
   ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS?: string; // Durable parent-wait D1 reconciliation interval (default: 30000)
   ORCHESTRATOR_WAIT_MAX_CHILDREN?: string; // Max same-project task IDs in one wait_for_subtasks call (default: 20)
   ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT?: string; // Max active parent waits per project (default: 100)
