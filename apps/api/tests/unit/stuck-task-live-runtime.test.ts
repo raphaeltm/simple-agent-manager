@@ -56,12 +56,13 @@ vi.mock('../../src/lib/logger', async (importOriginal) => ({
 const { projectDataRpc } = vi.hoisted(() => ({
   projectDataRpc: {
     sql: null as SqlStorage | null,
+    messages: [] as Record<string, unknown>[],
     /** Simulates an unreachable ProjectData Durable Object. */
     unreachable: false,
   },
 }));
 vi.mock('../../src/services/project-data', () => ({
-  getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
+  getMessages: vi.fn(async () => ({ messages: projectDataRpc.messages, hasMore: false })),
   listSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
   listAcpSessions: vi.fn().mockResolvedValue({ sessions: [] }),
   failSession: vi.fn().mockResolvedValue(undefined),
@@ -262,6 +263,7 @@ function env(overrides: Partial<Record<string, unknown>> = {}): Env {
     TASK_RUN_ABSOLUTE_CEILING_MS: String(24 * HOUR),
     NODE_HEARTBEAT_STALE_SECONDS: '180',
     BASE_DOMAIN: 'example.test',
+    AI: { run: vi.fn() },
     ...overrides,
   } as unknown as Env;
 }
@@ -318,6 +320,7 @@ beforeEach(() => {
   doSql = createSqlStorage(projectDb);
   runMigrations(doSql);
   projectDataRpc.sql = doSql;
+  projectDataRpc.messages = [];
   projectDataRpc.unreachable = false;
 });
 
@@ -460,6 +463,85 @@ describe('live-runtime record: what kept the task, and why', () => {
       'a prompt turn is in progress (last activity 2m ago; turn started 1h 30m ago).'
     );
     expect(row.message).toContain('(now 540 min)');
+  });
+
+  it('fails a long live prompt when Clef classifies transcript silence as stalled', async () => {
+    seedTask({ startedAt: T0 - 9 * HOUR });
+    seedLiveRuntime({ generationStartedAt: T0 - 9 * HOUR, nodeHeartbeatAt: T0 - 30_000 });
+    seedAcpSession({ heartbeatAt: T0 - 20_000 });
+    upsertActivityState(doSql, ACP_ID, {
+      activity: 'prompting',
+      observedAt: T0 - 90 * MINUTE,
+      now: T0 - 90 * MINUTE,
+    });
+    upsertActivityState(doSql, ACP_ID, {
+      activity: 'prompting',
+      observedAt: T0 - 2 * MINUTE,
+      now: T0 - 2 * MINUTE,
+    });
+    projectDataRpc.messages = [
+      {
+        id: 'msg-1',
+        role: 'tool',
+        content: 'Started release artifact build.',
+        createdAt: T0 - 80 * MINUTE,
+      },
+    ];
+    const aiRun = vi.fn().mockResolvedValue({
+      answers: {
+        stall_status: {
+          value: 'stalled',
+          probabilities: { stalled: 0.93, still_working: 0.04, uncertain: 0.03 },
+        },
+        reason: { value: 'transcript_silent' },
+      },
+    });
+
+    const result = await recoverStuckTasks(env({ AI: { run: aiRun } }));
+
+    expect(result.failedInProgress).toBe(1);
+    expect(result.heartbeatSkipped).toBe(0);
+    expect(taskRow().status).toBe('failed');
+    expect(taskRow().error_message).toContain('SAM detected a stalled agent turn');
+    expect(cleanupTaskRunMock).toHaveBeenCalledWith(TASK_ID, expect.anything());
+    expect(aiRun).toHaveBeenCalledWith(
+      '@cf/cloudflare/clef',
+      expect.objectContaining({
+        model: 'clef',
+        questions: expect.objectContaining({ stall_status: expect.any(Object) }),
+      })
+    );
+  });
+
+  it('keeps a long live prompt when transcript output is recent', async () => {
+    seedTask({ startedAt: T0 - 9 * HOUR });
+    seedLiveRuntime({ generationStartedAt: T0 - 9 * HOUR, nodeHeartbeatAt: T0 - 30_000 });
+    seedAcpSession({ heartbeatAt: T0 - 20_000 });
+    upsertActivityState(doSql, ACP_ID, {
+      activity: 'prompting',
+      observedAt: T0 - 90 * MINUTE,
+      now: T0 - 90 * MINUTE,
+    });
+    upsertActivityState(doSql, ACP_ID, {
+      activity: 'prompting',
+      observedAt: T0 - 2 * MINUTE,
+      now: T0 - 2 * MINUTE,
+    });
+    projectDataRpc.messages = [
+      {
+        id: 'msg-1',
+        role: 'tool',
+        content: 'Compiling crate simple-agent-manager...',
+        createdAt: T0 - 10 * MINUTE,
+      },
+    ];
+    const aiRun = vi.fn();
+
+    const result = await recoverStuckTasks(env({ AI: { run: aiRun } }));
+
+    expect(result.heartbeatSkipped).toBe(1);
+    expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    expect(aiRun).not.toHaveBeenCalled();
   });
 
   it('names the failing sleep that is not releasing an idle runtime', async () => {

@@ -81,6 +81,7 @@ import {
   type CompactionLoopRecovery,
   detectTaskCompactionLoop,
 } from './claude-code-compaction-loop';
+import { classifyLongRunningTaskStall } from './stalled-task-classifier';
 import { evaluateRunawayCostCeiling, runawayCostCeilingReason } from './stuck-task-ceiling';
 import { recordLiveRuntimePreservation } from './stuck-task-live-runtime';
 
@@ -1254,6 +1255,19 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       cachedLiveness ??= await getTaskRuntimeLiveness(env, task, preloadedWorkspace);
       return cachedLiveness;
     };
+    let cachedStall: Awaited<ReturnType<typeof classifyLongRunningTaskStall>> | undefined;
+    const probeStall = async (
+      liveness: TaskRuntimeLiveness
+    ): Promise<Awaited<ReturnType<typeof classifyLongRunningTaskStall>>> => {
+      if (cachedStall === undefined) {
+        cachedStall = await classifyLongRunningTaskStall(env, {
+          task,
+          liveness,
+          nowMs: now.getTime(),
+        });
+      }
+      return cachedStall;
+    };
     let cachedTaskRunnerProbe: TaskRunnerProbeResult | null = null;
     const probeTaskRunner = async (): Promise<TaskRunnerProbeResult> => {
       if (!cachedTaskRunnerProbe) {
@@ -1337,6 +1351,21 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
             const liveness = await probeLiveness();
             if (liveness.live || !liveness.conclusive) {
               if (liveness.live) {
+                const stall = await probeStall(liveness);
+                if (stall?.decision === 'stalled') {
+                  isStuck = true;
+                  reason =
+                    `SAM detected a stalled agent turn after ${Math.round(executionMs / 60000)} minutes: ` +
+                    `${stall.reason || 'the transcript has been silent while the turn stayed active'}.`;
+                  log.warn('stuck_task.stalled_classifier_terminal', {
+                    taskId: task.id,
+                    livenessReason: liveness.reason,
+                    classifierConfidence: stall.confidence,
+                    latestTranscriptActivityAgeMs: stall.latestTranscriptActivityAgeMs,
+                    transcriptMessageCount: stall.transcriptMessageCount,
+                  });
+                  break;
+                }
                 await recordLiveRuntimePreservation(env, {
                   task,
                   liveness,
@@ -1387,6 +1416,24 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         const doProbe = await probeTaskRunner();
         const doStatus = doProbe.status;
         const liveness = task.status === 'in_progress' ? await probeLiveness() : null;
+
+        if (liveness?.live) {
+          const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
+          const stall = await probeStall(liveness);
+          if (stall?.decision === 'stalled') {
+            isStuck = true;
+            reason =
+              `SAM detected a stalled agent turn after ${Math.round((now.getTime() - startedAt) / 60000)} minutes: ` +
+              `${stall.reason || 'the transcript has been silent while the turn stayed active'}.`;
+            log.warn('stuck_task.stalled_classifier_terminal', {
+              taskId: task.id,
+              livenessReason: liveness.reason,
+              classifierConfidence: stall.confidence,
+              latestTranscriptActivityAgeMs: stall.latestTranscriptActivityAgeMs,
+              transcriptMessageCount: stall.transcriptMessageCount,
+            });
+          }
+        }
 
         // TaskRunner.completed means orchestration handed off successfully, not
         // that the agent later finalized D1. Conclusive task-scoped runtime death

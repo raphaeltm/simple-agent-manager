@@ -1,0 +1,254 @@
+import {
+  DEFAULT_STALLED_TASK_CLASSIFIER_CONFIDENCE_THRESHOLD,
+  DEFAULT_STALLED_TASK_CLASSIFIER_MESSAGE_LIMIT,
+  DEFAULT_STALLED_TASK_CLASSIFIER_MIN_ACTIVITY_AGE_MS,
+  DEFAULT_STALLED_TASK_CLASSIFIER_MODEL,
+  DEFAULT_STALLED_TASK_CLASSIFIER_SELECTOR,
+  DEFAULT_STALLED_TASK_CLASSIFIER_TIMEOUT_MS,
+  DEFAULT_STALLED_TASK_CLASSIFIER_TRANSCRIPT_MAX_CHARS,
+} from '@simple-agent-manager/shared';
+
+import type { Env } from '../env';
+import { log } from '../lib/logger';
+import * as projectDataService from '../services/project-data';
+import type { TaskRuntimeLiveness } from '../services/task-runtime-liveness';
+
+type StallDecision = 'stalled' | 'still_working' | 'uncertain';
+
+export interface StalledTaskClassifierConfig {
+  enabled: boolean;
+  model: string;
+  selector: string;
+  timeoutMs: number;
+  minActivityAgeMs: number;
+  messageLimit: number;
+  transcriptMaxChars: number;
+  confidenceThreshold: number;
+}
+
+export interface StalledTaskClassifierResult {
+  decision: StallDecision;
+  confidence: number;
+  reason: string;
+  transcriptMessageCount: number;
+  latestTranscriptActivityAgeMs: number | null;
+}
+
+interface ClefChoiceAnswer {
+  value?: unknown;
+  choice?: unknown;
+  probabilities?: Record<string, unknown>;
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseProbability(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseFloat(value ?? '');
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1) return fallback;
+  return parsed;
+}
+
+export function getStalledTaskClassifierConfig(env: Env): StalledTaskClassifierConfig {
+  return {
+    enabled: env.STALLED_TASK_CLASSIFIER_ENABLED !== 'false',
+    model: env.STALLED_TASK_CLASSIFIER_MODEL || DEFAULT_STALLED_TASK_CLASSIFIER_MODEL,
+    selector: env.STALLED_TASK_CLASSIFIER_SELECTOR || DEFAULT_STALLED_TASK_CLASSIFIER_SELECTOR,
+    timeoutMs: parsePositiveInt(
+      env.STALLED_TASK_CLASSIFIER_TIMEOUT_MS,
+      DEFAULT_STALLED_TASK_CLASSIFIER_TIMEOUT_MS
+    ),
+    minActivityAgeMs: parsePositiveInt(
+      env.STALLED_TASK_CLASSIFIER_MIN_ACTIVITY_AGE_MS,
+      DEFAULT_STALLED_TASK_CLASSIFIER_MIN_ACTIVITY_AGE_MS
+    ),
+    messageLimit: parsePositiveInt(
+      env.STALLED_TASK_CLASSIFIER_MESSAGE_LIMIT,
+      DEFAULT_STALLED_TASK_CLASSIFIER_MESSAGE_LIMIT
+    ),
+    transcriptMaxChars: parsePositiveInt(
+      env.STALLED_TASK_CLASSIFIER_TRANSCRIPT_MAX_CHARS,
+      DEFAULT_STALLED_TASK_CLASSIFIER_TRANSCRIPT_MAX_CHARS
+    ),
+    confidenceThreshold: parseProbability(
+      env.STALLED_TASK_CLASSIFIER_CONFIDENCE_THRESHOLD,
+      DEFAULT_STALLED_TASK_CLASSIFIER_CONFIDENCE_THRESHOLD
+    ),
+  };
+}
+
+function numberAge(nowMs: number, value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.max(0, nowMs - value);
+}
+
+function sanitizeTranscriptContent(content: unknown): string {
+  if (typeof content !== 'string') return '';
+  return content
+    .replace(/(Bearer|token|secret|password|authorization|cookie)\s*[:=]\s*["']?[^"'\s]+/gi, '$1=[REDACTED]')
+    .replace(/sk-[A-Za-z0-9_-]{16,}/g, '[REDACTED_KEY]')
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[REDACTED_EMAIL]');
+}
+
+function formatTranscript(messages: Record<string, unknown>[], maxChars: number): string {
+  const lines = messages.map((message) => {
+    const role = typeof message.role === 'string' ? message.role : 'unknown';
+    const createdAt =
+      typeof message.createdAt === 'number'
+        ? new Date(message.createdAt).toISOString()
+        : typeof message.created_at === 'number'
+          ? new Date(message.created_at).toISOString()
+          : 'unknown-time';
+    return `[${createdAt}] ${role}: ${sanitizeTranscriptContent(message.content)}`;
+  });
+  const text = lines.join('\n\n');
+  return text.length <= maxChars ? text : text.slice(text.length - maxChars);
+}
+
+function selectedChoice(answer: unknown): string | null {
+  if (!answer || typeof answer !== 'object' || Array.isArray(answer)) return null;
+  const record = answer as ClefChoiceAnswer;
+  const raw = record.value ?? record.choice;
+  return typeof raw === 'string' ? raw : null;
+}
+
+function choiceProbability(answer: unknown, choice: string): number {
+  if (!answer || typeof answer !== 'object' || Array.isArray(answer)) return 0;
+  const probabilities = (answer as ClefChoiceAnswer).probabilities;
+  const raw = probabilities?.[choice];
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : 0;
+}
+
+function extractDecision(payload: unknown, threshold: number): Pick<
+  StalledTaskClassifierResult,
+  'decision' | 'confidence' | 'reason'
+> {
+  const answers =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>).answers
+      : null;
+  const answerRecord =
+    answers && typeof answers === 'object' && !Array.isArray(answers)
+      ? (answers as Record<string, unknown>)
+      : {};
+  const stallAnswer = answerRecord.stall_status;
+  const choice = selectedChoice(stallAnswer);
+  const stalledProbability = choiceProbability(stallAnswer, 'stalled');
+  const confidence = choice ? Math.max(choiceProbability(stallAnswer, choice), stalledProbability) : 0;
+  const reasonAnswer = answerRecord.reason;
+  const reason =
+    reasonAnswer && typeof reasonAnswer === 'object' && !Array.isArray(reasonAnswer)
+      ? String((reasonAnswer as Record<string, unknown>).value ?? '')
+      : '';
+
+  if (choice === 'stalled' && stalledProbability >= threshold) {
+    return { decision: 'stalled', confidence: stalledProbability, reason };
+  }
+  if (choice === 'still_working') return { decision: 'still_working', confidence, reason };
+  return { decision: 'uncertain', confidence, reason };
+}
+
+function longTurnAge(liveness: TaskRuntimeLiveness): number | null {
+  const evidence = liveness.evidence;
+  if (liveness.reason === 'task_prompt_turn_active') return evidence?.promptStartedAgeMs ?? null;
+  if (liveness.reason === 'task_runtime_work_active') return evidence?.runtimeWorkProgressAgeMs ?? null;
+  return null;
+}
+
+export async function classifyLongRunningTaskStall(
+  env: Env,
+  input: {
+    task: {
+      id: string;
+      project_id: string;
+      workspace_id: string | null;
+      chat_session_id: string | null;
+    };
+    liveness: TaskRuntimeLiveness;
+    nowMs: number;
+  }
+): Promise<StalledTaskClassifierResult | null> {
+  const config = getStalledTaskClassifierConfig(env);
+  if (!config.enabled || !input.task.chat_session_id) return null;
+  const activeAgeMs = longTurnAge(input.liveness);
+  if (activeAgeMs === null || activeAgeMs < config.minActivityAgeMs) return null;
+
+  const { messages } = await projectDataService.getMessages(
+    env,
+    input.task.project_id,
+    input.task.chat_session_id,
+    config.messageLimit,
+    null,
+    null,
+    undefined,
+    false,
+    'desc'
+  );
+  const latestActivityAgeMs = numberAge(input.nowMs, messages[0]?.createdAt ?? messages[0]?.created_at);
+  if (latestActivityAgeMs === null || latestActivityAgeMs < config.minActivityAgeMs) return null;
+
+  const transcript = formatTranscript([...messages].reverse(), config.transcriptMaxChars);
+  const state = {
+    taskId: input.task.id,
+    workspaceId: input.task.workspace_id,
+    livenessReason: input.liveness.reason,
+    evidence: input.liveness.evidence ?? null,
+    activeAgeMs,
+    latestTranscriptActivityAgeMs: latestActivityAgeMs,
+    transcript,
+  };
+
+  try {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const payload = await Promise.race([
+      env.AI.run(config.model, {
+        model: config.selector,
+        state,
+        questions: {
+          stall_status: {
+            type: 'choice',
+            instructions:
+              'Decide whether this SAM agent turn is stalled. Treat long builds, downloads, tests, or deployments as still_working only when the transcript shows recent progress or a plausible pending operation. Choose stalled when the transcript and tool output have been silent for over the configured threshold and the last visible operation should have completed or stopped reporting.',
+            criteria: {
+              stalled: 'The agent turn appears wedged or abandoned and should be interrupted.',
+              still_working: 'The operation is long-running but plausibly still making progress.',
+              uncertain: 'The evidence is insufficient to safely interrupt.',
+            },
+          },
+          reason: {
+            type: 'choice',
+            instructions: 'Choose the shortest reason category for the decision.',
+            criteria: {
+              transcript_silent: 'No visible transcript or tool output progress for a long time.',
+              external_operation_pending: 'An external operation may still be legitimately pending.',
+              insufficient_evidence: 'The transcript does not prove either state.',
+            },
+          },
+        },
+      }),
+      new Promise<never>((_, reject) =>
+        {
+          timer = setTimeout(
+            () => reject(new Error('stalled task classifier timed out')),
+            config.timeoutMs
+          );
+        }
+      ),
+    ]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
+    return {
+      ...extractDecision(payload, config.confidenceThreshold),
+      transcriptMessageCount: messages.length,
+      latestTranscriptActivityAgeMs: latestActivityAgeMs,
+    };
+  } catch (err) {
+    log.warn('stuck_task.stalled_classifier_failed', {
+      taskId: input.task.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}

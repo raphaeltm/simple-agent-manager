@@ -455,6 +455,14 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   DEFAULT_TASK_AGENT_TYPE?: string;
   // Task execution timeout (stuck task recovery)
   TASK_RUN_MAX_EXECUTION_MS?: string;
+  STALLED_TASK_CLASSIFIER_ENABLED?: string; // "false" disables Clef-based long-turn stall classification
+  STALLED_TASK_CLASSIFIER_MODEL?: string; // Workers AI model id (default: @cf/cloudflare/clef)
+  STALLED_TASK_CLASSIFIER_SELECTOR?: string; // Clef selector (default: clef)
+  STALLED_TASK_CLASSIFIER_TIMEOUT_MS?: string; // Per-classification timeout (default: 10000)
+  STALLED_TASK_CLASSIFIER_MIN_ACTIVITY_AGE_MS?: string; // Transcript silence + turn age before classifying (default: 3600000)
+  STALLED_TASK_CLASSIFIER_MESSAGE_LIMIT?: string; // Raw transcript rows to inspect (default: 200)
+  STALLED_TASK_CLASSIFIER_TRANSCRIPT_MAX_CHARS?: string; // Max transcript chars sent to Clef (default: 24000)
+  STALLED_TASK_CLASSIFIER_CONFIDENCE_THRESHOLD?: string; // Required stalled probability (default: 0.8)
   TASK_STUCK_QUEUED_TIMEOUT_MS?: string;
   INSTANT_START_STALE_TIMEOUT_MS?: string;
   TASK_STUCK_DELEGATED_TIMEOUT_MS?: string;
