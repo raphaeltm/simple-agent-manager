@@ -899,4 +899,98 @@ describe('cancelled admission alarms', () => {
       expect(run.alarm()).toBeNull();
     }
   );
+  it('protects paid compute taken by an executable restart of the same task before workspace insertion', async () => {
+    fixture.sqlite.exec(
+      "DELETE FROM workspaces; UPDATE tasks SET auto_provisioned_node_id=NULL WHERE id='old-task'; UPDATE tasks SET status='cancelled',error_message='CANCELLED',auto_provisioned_node_id='existing-node' WHERE id='task-1'; UPDATE nodes SET provider_instance_id='paid-restarted-instance' WHERE id='existing-node'"
+    );
+    fixture.state.stepResults.nodeId = 'existing-node';
+    fixture.state.stepResults.autoProvisioned = true;
+    const run = alarmRunner();
+    const cleanup = vi.spyOn(nodesService, 'deleteNodeResourcesStrict');
+    const provider = vi.spyOn(nodesService, 'provisionNode');
+    const prepare = fixture.database.prepare.bind(fixture.database);
+    let restartTask: unknown;
+    let restartAdmission: unknown;
+    vi.spyOn(fixture.database, 'prepare').mockImplementation((sql: string) => {
+      if (sql.includes("UPDATE nodes SET status = 'destroying'")) {
+        fixture.sqlite.exec(
+          "UPDATE tasks SET status='queued',error_message=NULL,admission_state='provisioning_granted',admission_reason='restart_owns_node' WHERE id='task-1'; INSERT INTO vm_task_admissions(task_id,project_id,user_id,state,fencing_token,reason) VALUES ('task-1','project-1','user-1','provisioning_granted',2,'restart_owns_node') ON CONFLICT(task_id) DO UPDATE SET state='provisioning_granted',fencing_token=2,reason='restart_owns_node'"
+        );
+        restartTask = fixture.sqlite.prepare("SELECT * FROM tasks WHERE id='task-1'").get();
+        restartAdmission = fixture.sqlite
+          .prepare("SELECT * FROM vm_task_admissions WHERE task_id='task-1'")
+          .get();
+      }
+      return prepare(sql);
+    });
+    await run.runner.alarm();
+    expect(restartTask).toBeDefined();
+    expect(fixture.sqlite.prepare("SELECT * FROM tasks WHERE id='task-1'").get()).toEqual(
+      restartTask
+    );
+    expect(
+      fixture.sqlite.prepare("SELECT * FROM vm_task_admissions WHERE task_id='task-1'").get()
+    ).toEqual(restartAdmission);
+    expect(
+      fixture.sqlite
+        .prepare("SELECT status,provider_instance_id FROM nodes WHERE id='existing-node'")
+        .get()
+    ).toEqual({ status: 'running', provider_instance_id: 'paid-restarted-instance' });
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(provider).not.toHaveBeenCalled();
+  });
+
+  it('atomically completes old state and alarm before a newly reactivated run installs its own alarm', async () => {
+    fixture.sqlite.exec(
+      "UPDATE tasks SET status='cancelled',error_message='CANCELLED' WHERE id='task-1'"
+    );
+    const run = alarmRunner();
+    const newer = structuredClone(fixture.state);
+    newer.config.recoveryAttemptId = 'reactivated-after-commit';
+    const newAlarm = Date.now() + 12345;
+    let reactivated = false;
+    const transaction = run.storage.transaction.getMockImplementation()!;
+    run.storage.transaction.mockImplementation(async (callback) => {
+      const result = await transaction(callback);
+      if (!reactivated) {
+        reactivated = true;
+        // A reactivation waits until the completion transaction releases its
+        // lock, then commits its new state and alarm as one operation.
+        run.replaceState(newer);
+        await run.storage.setAlarm(newAlarm);
+      }
+      return result;
+    });
+    await run.runner.alarm();
+    expect(reactivated).toBe(true);
+    expect(run.state()).toEqual(newer);
+    expect(run.alarm()).toBe(newAlarm);
+    expect(run.storage.deleteAlarm).toHaveBeenCalledTimes(1);
+  });
+  it('fences late cancellation completion against a newer persisted wake and its alarm', async () => {
+    fixture.sqlite.exec(
+      "UPDATE tasks SET status='cancelled',error_message='CANCELLED' WHERE id='task-1'"
+    );
+    const run = alarmRunner();
+    const newer = structuredClone(fixture.state);
+    newer.config.recoveryAttemptId = 'newer-before-retirement-commit';
+    const newAlarm = Date.now() + 12345;
+    const transaction = run.storage.transaction.getMockImplementation()!;
+    let reactivated = false;
+    run.storage.transaction.mockImplementation(async (callback) => {
+      if (!reactivated) {
+        reactivated = true;
+        run.replaceState(newer);
+        await run.storage.setAlarm(newAlarm);
+      }
+      return transaction(callback);
+    });
+    await expect(run.runner.alarm()).rejects.toMatchObject({
+      name: 'SessionRecoveryAuthorityRevokedError',
+    });
+    expect(reactivated).toBe(true);
+    expect(run.state()).toEqual(newer);
+    expect(run.alarm()).toBe(newAlarm);
+    expect(run.storage.deleteAlarm).not.toHaveBeenCalled();
+  });
 });

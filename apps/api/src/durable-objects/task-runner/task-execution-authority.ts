@@ -8,6 +8,7 @@ import { releaseVmProvisioningLease } from '../../services/vm-admission-control'
 import { boundedWarmPlacementClaimGuardSql } from '../../services/warm-placement-claims';
 import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../../services/workspace-resource-capacity';
 import type { StartTaskInput, TaskRunnerContext, TaskRunnerState } from './types';
+import { putTaskRunnerState } from './attempt-storage';
 
 export class TaskExecutionAuthorityRevokedError extends Error {
   readonly permanent = true;
@@ -41,8 +42,7 @@ export async function retireRevokedTaskRunner(
 ): Promise<void> {
   const complete = async () => {
     state.completed = true;
-    await rc.ctx.storage.put('state', state);
-    await rc.ctx.storage.deleteAlarm();
+    await putTaskRunnerState(rc.ctx.storage, state, { deleteAlarm: true });
     log.info('task_runner_do.execution_authority_revoked', {
       taskId: state.taskId,
       projectId: state.projectId,
@@ -110,6 +110,8 @@ export async function retireRevokedTaskRunner(
          AND NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.node_id = nodes.id
            AND w.status IN (${ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL}))
          AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.auto_provisioned_node_id = nodes.id AND t.id != ?)
+         AND NOT EXISTS (SELECT 1 FROM tasks owner_task WHERE owner_task.auto_provisioned_node_id = nodes.id
+           AND owner_task.status IN (${TASK_EXECUTION_AUTHORITY_STATUS_SQL}))
          ${boundedWarmPlacementClaimGuardSql('nodes.id')}`
   )
     .bind(
