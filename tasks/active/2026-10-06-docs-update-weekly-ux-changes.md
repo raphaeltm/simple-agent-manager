@@ -251,3 +251,15 @@ since (#2180–#2240).
     - LOW: a new "Chat or Task" heading, with the concepts and MCP links pointing to it. Also:
       "set Task Mode to Task", the changelog sentence order, the MCP woken-chat caveat, and the
       release history cut from the self-hosting intro.
+  - Fact-checker, 1 MEDIUM and 4 LOW. All verified and fixed:
+    - MEDIUM: a woken Task runs as a conversation (`startRecoveryTask` `taskMode: 'conversation'`;
+      `skipGit`), so SAM no longer commits, pushes, or opens its PR. agents.md "After a chat wakes
+      from sleep" is now a short list (mode, model, requests, pull requests), and the
+      reply-to-wake advice points to it.
+    - LOW: the session list marks sleeping chats with a moon icon; the word appears only in the
+      header.
+    - LOW: SAM's own restores (container stop/error, eviction) behave like wakes.
+    - LOW: an Instant profile can't be set to Task, so PR work needs a VM profile with Task Mode
+      Task.
+    - LOW: an idea's **Execute** also routes Instant through task submission.
+    - Model wording narrowed to Claude Code (other agents may switch to their default).

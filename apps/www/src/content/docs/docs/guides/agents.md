@@ -129,7 +129,7 @@ When a limit is nearly used up, wait for the reset time shown in the dialog, or 
 profile for a different agent — Codex instead of Claude Code, say. If a limit runs out in the middle of work, a **Task** fails but
 SAM keeps its workspace (see [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)),
 and a **Chat** just stops with the provider's error. Either way, reply in the same chat after the
-reset to carry on.
+reset to carry on; a Task woken this way then [works like a Chat](#after-a-chat-wakes-from-sleep).
 
 The numbers are the last reading SAM took while an agent was using that credential, not live figures
 from the provider. A credential nobody has used for a while keeps its last reading for up to 30 days,
@@ -220,15 +220,21 @@ before some actions even when SAM sets Bypass Permissions.
 
 #### After a chat wakes from sleep
 
-A chat woken from sleep usually doesn't re-apply its profile's mode: it takes its mode from **Agent
-Overrides**, then **Settings → Agents**, and uses Bypass Permissions if neither sets one. So a chat
-whose profile is set to **Manual** or **Plan Mode** usually goes ahead without asking once it wakes,
-unless one of those places also sets an asking mode. Its model
-usually stays the same, but changes if one of those places sets a model. It also can't ask you
-anything yet — SAM refuses its requests without showing a card. (The exception is a wake where SAM
-has to start the agent fresh: that uses the profile and can ask.) To get the profile's settings
-back, or when the agent needs your approval,
-[fork](/docs/guides/chat-features/#conversation-forking) the chat or start a new one, with that
+A chat usually comes back from sleep — or from SAM restoring it after its container or machine
+failed — without the settings it started with:
+
+- **Mode:** it takes its mode from **Agent Overrides**, then **Settings → Agents**, and uses Bypass
+  Permissions if neither sets one. So a chat whose profile is set to **Manual** or **Plan Mode**
+  usually goes ahead without asking, unless one of those places also sets an asking mode.
+- **Model:** a Claude Code chat keeps its model unless one of those places sets one; other agents
+  may switch to their default model.
+- **Requests:** it can't ask you anything yet — SAM refuses its requests without showing a card.
+- **Pull requests:** a **Task** carries on like a **Chat**. When the agent finishes, SAM doesn't
+  commit, push, or open a pull request, so ask the agent to push its work and open one.
+
+The exception is a VM wake where SAM has to start the agent fresh, which uses the profile and can
+ask. To get the profile's settings back, or when the agent needs your approval,
+[fork](/docs/guides/chat-features/#conversation-forking) the chat or start a new one with that
 profile selected.
 
 #### An agent asks when you don't expect it

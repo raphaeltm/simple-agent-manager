@@ -55,8 +55,9 @@ For every kind of request:
 
 - **A chat that has slept and woken usually can't ask.** SAM refuses its requests without showing a
   card, and the chat usually drops its profile's permission mode, so a **Manual** profile may go
-  ahead without asking. Chats sleep on their own when idle — by default after 15 minutes on a VM and
-  an hour on Instant — and the session list then shows **Sleeping**. To approve the agent's work
+  ahead without asking. The same goes for a chat SAM restored after its container or machine failed.
+  Chats sleep on their own when idle — by default after 15 minutes on a VM and an hour on Instant —
+  and the session list then marks them with a moon icon. To approve the agent's work
   again, [fork](#conversation-forking) the chat or start a new one; a fork carries a summary of the
   chat, not its files. See
   [The agent stops for approval and no card appears](/docs/guides/session-troubleshooting/#the-agent-stops-for-approval-and-no-card-appears)
@@ -159,16 +160,17 @@ Each session is labelled **Chat** or **Task** in the session list. A **Task** ca
 permission, but not ask questions or send links. Which you get depends on what you start it with:
 
 - An [agent profile](/docs/guides/agents/#agent-profiles) whose runtime is
-  [Instant](/docs/guides/instant-sessions/) gives a **Chat** (unless you attach a file and also pick
-  a skill set to **Task**).
+  [Instant](/docs/guides/instant-sessions/) gives a **Chat** (unless you attach a file or start from
+  an idea's **Execute** button, and also pick a skill set to **Task**).
 - On a VM, a profile whose **Task Mode** is **Conversation** gives a **Chat**; profiles you create
   with **Chat and explore** in the chat input are set that way. With **Task Mode** left at
   **Default**, a profile whose **Workspace Profile** is **Lightweight** does too. If you also pick a
   skill, the skill's **Task Mode** decides instead, and new skills are set to **Task**.
 - Anything else gives a **Task**.
 
-A **Chat** doesn't commit, push, or open a pull request for you, so set **Task Mode** to **Task** for
-work you want delivered as a pull request — see
+A **Chat** doesn't commit, push, or open a pull request for you. For work you want delivered as a
+pull request, use a VM profile whose **Task Mode** is **Task**, such as one you create with **Build
+and open PRs** and **Cloud VM** — see
 [What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work).
 
 ## Message Actions
