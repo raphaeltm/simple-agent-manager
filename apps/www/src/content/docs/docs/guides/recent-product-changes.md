@@ -11,14 +11,14 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 - **Agents can stop and ask you.** When an agent wants permission, has a question, or needs you to
   open a sign-in link, a card appears in the chat, and the chat is marked **Needs input** in the
-  session list. Answer on the card; the agent waits until you do.
-  → [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you)
-- **Agents don't ask unless you want them to.** A Claude Code agent with no permission mode set now
-  starts in **Bypass Permissions** (Codex never asks for permission). The always-ask mode is now called **Manual**: choose it, or **Plan Mode**,
-  to approve changes yourself. A mode saved earlier still applies, so if an agent asks when you
+  session list. Answer on the card; the agent waits until you do. On self-hosted SAM this works once
+  your operator turns it on. → [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you)
+- **Claude Code starts in Bypass Permissions.** A Claude Code agent with no permission mode set now
+  works without asking, apart from a few safety checks (Codex never asks for permission). The
+  always-ask mode is now called **Manual**: choose it, or **Plan Mode**, to approve changes yourself. A mode saved earlier still applies, so if an agent asks when you
   don't expect it, check where its mode is set. → [Permission mode](/docs/guides/agents/#permission-mode)
 - **See your subscription limits.** On a Claude, ChatGPT, or OpenCode Go subscription, a chip under
-  the chat's title shows how much of each limit is used and when it resets.
+  the chat's title shows how much of each limit is used; select it for reset times.
   → [Usage Limits](/docs/guides/agents/#usage-limits)
 - **Connection problems say what to fix.** When an agent's credential is missing or rejected, or its
   model isn't available to your account, the chat names the problem, and for a credential links to
@@ -54,11 +54,11 @@ Also changed this week:
 - **SAM stops nudging a stuck agent.** After three check-ins with no progress, SAM pauses its
   check-ins and posts what to look at, instead of nudging the agent all day.
   → [SAM paused automatic check-ins](/docs/guides/session-troubleshooting/#sam-paused-automatic-check-ins)
-- **A turn that hangs for hours is ended.** When work started more than four hours ago and the agent's
-  turn has shown nothing for an hour, SAM checks it, and fails the task if the turn is clearly
-  wedged. Work that wasn't pushed is lost, and the check can't yet tell when the agent is waiting on
-  a card for you, so answer cards promptly on long-running work.
-  → [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)
+- **A turn that hangs for hours is ended.** When a task or chat has been awake for more than four
+  hours and the agent's turn has shown nothing for an hour, SAM checks it, and fails the task if the
+  turn is clearly wedged. Work that wasn't pushed is lost, and the check can't yet tell when the
+  agent is waiting on a card for you, so answer cards within an hour on long-running work.
+  → [SAM ended a stalled turn](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn)
 - **A message sent right after you stop the agent goes through.** A follow-up sent within about five
   seconds of stopping a prompt could be killed along with it, failing the task.
 - **A sleeping VM conversation keeps its task.** Waking one used to create a new task behind the
@@ -73,26 +73,35 @@ request automatically, whatever mode an agent was in. From v2026.10.01 each requ
 person running the chat — or, unless you turn agent requests on, it is refused, on new and updated
 installations alike.
 
-1. **Update to the newest release.** v2026.10.05 is the first where Claude Code agents with no mode
+1. **Update to the newest release**
+   ([Updating an existing instance](/docs/guides/self-hosting/#updating-an-existing-self-hosted-instance)).
+   v2026.10.05 is the first where Claude Code agents with no mode
    set start in Bypass Permissions; on v2026.10.01 to v2026.10.04 they ask, and with requests off are
    refused every time. The check-in cap, usage chips, the Codex upgrade for GPT-6.1 Sol, and sleeping
    tasks on Active Tasks arrive in the release after v2026.10.05.
 2. **Turn agent requests on**, with three GitHub Environment variables
    ([Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat)), or make sure agents
-   run in **Bypass Permissions**. Amp and Gemini CLI ask on their own even then.
-3. **Check where modes are set:** profiles, each project's **Agent Overrides**, and each user's
-   **Settings → Agents** — saving that page on a release before v2026.10.05 stored the old
-   always-ask default, now shown as **Manual**.
+   run in **Bypass Permissions**. Amp and Gemini CLI ask on their own even then, and so does Claude
+   Code in a devcontainer that
+   [runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions).
+3. **If you leave requests off, find the saved modes that will be refused** — in profiles,
+   projects' **Agent Overrides**, and users' **Settings → Agents**, where saving on a release before
+   v2026.10.05 stored the old always-ask default, now shown as **Manual**.
+   [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat) has a query that
+   lists them.
 
 - **Fresh GitHub sign-ins fail on v2026.09.24 to v2026.10.01** (fixed from v2026.10.02).
 - **Codex questions and links ship with the deploy.** Every deploy publishes SAM's own Codex build to
   your R2 bucket, and Instant images include it; Codex sessions use it once questions or links are
   on. No setup.
-- **New limits** ([Configuration](/docs/reference/configuration/) says where each is set). Sleep-failure budget: `SESSION_SLEEP_FAILURE_MAX_ATTEMPTS` (3) and
-  `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS` (15 min). Check-ins: `TASK_RECONCILIATION_MAX_CHECKINS` (3).
-  Stalled-turn checks: `STALLED_TASK_CLASSIFIER_*` (Workers AI, on by default). Callback-token
-  renewal: `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL`. The 24-hour runaway-cost ceiling now waits at most
-  `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS` (1 h) for a sleep that keeps retrying.
+- **New limits**, with their defaults. The sleep-failure budget, `SESSION_SLEEP_FAILURE_MAX_ATTEMPTS`
+  (3) and `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS` (15 min), can be set as GitHub Environment
+  variables. The rest are read only from `[vars]` in `apps/api/wrangler.toml`, so changing one means
+  editing your fork ([Worker Variables](/docs/reference/configuration/#worker-variables)): check-ins,
+  `TASK_RECONCILIATION_MAX_CHECKINS` (3); stalled-turn checks, `STALLED_TASK_CLASSIFIER_*` (Workers
+  AI, on); callback-token renewals, `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL` (12 an hour); and
+  `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS` (1 h), the longest the 24-hour runaway-cost ceiling now
+  waits for a sleep that keeps retrying.
 - **Failed snapshot uploads are cleaned up.** Uploads from snapshot attempts that can never finish
   are deleted from R2 instead of piling up. Ones already left behind are not removed.
 - **A project at the 10 GiB storage cap can be recovered.** A superadmin API frees space by removing

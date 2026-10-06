@@ -1,6 +1,6 @@
 ---
 title: Notifications
-description: In-app and Web Push notifications in SAM — task completion, agent requests, progress updates, and out-of-band delivery.
+description: In-app and Web Push notifications in SAM — task completion, questions agents send with the request_human_input tool, progress updates, and out-of-band delivery.
 ---
 
 SAM combines an in-app notification center with optional Web Push delivery for agent progress and activity.

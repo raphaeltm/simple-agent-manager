@@ -13,8 +13,9 @@ your work is safe and what to do next. Everything here applies to both
 - **"SAM paused automatic check-ins…"** The agent kept stopping without finishing, or its model was
   rejected, so SAM stopped nudging it. → [Look, then reply](#sam-paused-automatic-check-ins)
 - **A strip or failure card saying the agent's connection is missing or was rejected**, or that its
-  model is unavailable for your account; or a message saying a sign-in flow requires a local
-  callback this session cannot complete. → [Fix the connection](#the-agent-or-a-tool-cant-sign-in)
+  model is unavailable for your account. → [Fix the connection](#the-agent-or-a-tool-cant-sign-in)
+- **A message saying a sign-in flow requires a local callback**, or an MCP tool failing with
+  `401 Unauthorized`. → [Connect the tool another way](#the-agent-or-a-tool-cant-sign-in)
 - **On a self-hosted instance, the agent stops whenever it needs your approval**, and no card
   appears. → [Agent requests are turned off](#agent-requests-are-turned-off)
 - **A strip with a spinner**, such as **Waking and restoring session...** or, on a VM, a step like
@@ -32,7 +33,10 @@ your work is safe and what to do next. Everything here applies to both
   recovery point, so the workspace keeps running. → [Decide what to do](#sam-could-not-save-a-complete-snapshot)
 - **A system message starting "Wake failed:"**, and **Wake failed** in the session list. SAM could
   not wake the sleeping chat. → [Read the reason, then act on it](#wake-failed)
-- **A failure card under the chat header.** The task failed; its work may have been kept.
+- **A failure card whose error says "SAM detected a stalled agent turn…"**. SAM ended long-running
+  work it judged stuck, and changes the agent hadn't pushed were not saved.
+  → [Check what was pushed](#sam-ended-a-stalled-turn)
+- **Any other failure card under the chat header.** The task failed; its work may have been kept.
   → [See whether it was](#when-a-task-fails)
 - **A system message starting "SAM lost contact with node"** (VM). The machine behind the chat
   stopped responding. → [Wait for the chat to sleep, then wake it](#sam-lost-contact-with-the-machine)
@@ -57,8 +61,11 @@ messages for three hours moves into the collapsed **Older** group at the bottom 
 there too. Open the chat and look for one of these:
 
 - **A card in the chat** — a permission request, under the step it's about, or a question or a link
-  to open, at the end of the chat. Answer it there; the agent carries on once it has your answer. If the card says the request expired
-  or was cancelled, the agent was told no, so send a message saying how to continue. See
+  to open, at the end of the chat. Answer it there; the agent carries on once it has your answer. If
+  the card says the request expired or was cancelled, the agent was told no, so send a message
+  saying how to continue. On a chat or task that has been awake for more than four hours, answer
+  within an hour, or SAM may [end it as stalled](#sam-ended-a-stalled-turn) and changes the agent
+  hasn't pushed are lost. See
   [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
 - **A question the agent asked with its `request_human_input` tool.** It shows as that tool's step
   in the chat, and as a notification — with answer buttons if the agent offered choices. Reply in
@@ -70,14 +77,15 @@ there too. Open the chat and look for one of these:
 
 Only the person who started the chat can answer a card. If you're someone else in a
 [shared project](/docs/guides/collaboration/), the card says it is waiting for the session creator:
-ask them.
+ask them (the session list shows who started it).
 
 If an agent keeps asking about every command when you don't want it to, its permission mode is set
 to ask — often **Manual**, saved earlier without anyone choosing it. See
 [Permission mode](/docs/guides/agents/#permission-mode) for where to change it; the change applies to
 new chats and to chats woken from sleep. One exception: if the project's devcontainer runs as
-`root`, Claude Code refuses Bypass Permissions and asks anyway, so give the devcontainer a non-root
-user.
+`root`, Claude Code refuses Bypass Permissions and asks anyway — see
+[Claude Code asks even in Bypass Permissions](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions)
+to check and fix it.
 
 ## SAM paused automatic check-ins
 
@@ -97,12 +105,14 @@ keeps coming back — would otherwise be nudged forever. SAM pauses and posts on
   straight away, in any chat, when Codex reports that your ChatGPT plan doesn't support the selected
   model. Choose a model it supports — in the agent's
   [profile](/docs/guides/agents/#choosing-a-model), the project's **Agent Overrides**, or
-  **Settings → Agents**, wherever the model was set — then start a new chat. The notice says to send
-  a message to retry, but this chat keeps the model it started with, so it would hit the same error.
+  **Settings → Agents**, wherever the model was set — then start a new chat, or
+  [Fork](/docs/guides/chat-features/#conversation-forking) this one to carry a summary of it over.
+  The notice says to send a message to retry, but this chat keeps the model it started with, so it
+  would hit the same error.
 
 The chat is marked **Needs input** until someone replies. Your next message, or a new tool step
-finishing successfully, starts the check-ins again with a fresh count. Self-hosters can change the
-count with `TASK_RECONCILIATION_MAX_CHECKINS`.
+finishing successfully, starts the check-ins again with a fresh count. (On a self-hosted instance
+the count is `TASK_RECONCILIATION_MAX_CHECKINS`, set in `apps/api/wrangler.toml`.)
 
 ## The agent or a tool can't sign in
 
@@ -122,7 +132,8 @@ or in the failure card under the chat header (expand the card for the next step)
   new chat.
 - **A failure card: "Model unavailable for this account."** The credential works, but your plan or
   account can't use that model — or the model ID is mistyped. Pick another model in the agent's
-  profile, the project's **Agent Overrides**, or **Settings → Agents**, then start a new chat.
+  profile, the project's **Agent Overrides**, or **Settings → Agents**, then start a new chat, or
+  [Fork](/docs/guides/chat-features/#conversation-forking) this one to carry a summary of it over.
 
 A tool the agent connects to through an [MCP server](/docs/guides/mcp-servers/) can fail to sign in
 too:
@@ -132,8 +143,9 @@ too:
   [When a server needs sign-in](/docs/guides/mcp-servers/#when-a-server-needs-sign-in).
 - **A message: "This sign-in flow requires a local callback that this session cannot complete."**
   The server wants to finish its sign-in at `localhost`, which a remote SAM session can't do. While
-  that message is the latest in the chat, a strip above the conversation offers **Review MCP
-  connections**; connect the server another way.
+  that message is the latest in the chat, a strip above the conversation offers the person who
+  started the chat **Review MCP connections** (anyone else is asked to tell them); connect the
+  server another way.
 
 ## Agent requests are turned off
 
@@ -144,7 +156,9 @@ agent makes it. The step it wanted to run fails, and the agent either works arou
 Until requests are turned on, use **Bypass Permissions** for the agent — in its profile, in the
 project's **Agent Overrides**, and in **Settings → Agents** (see
 [Permission mode](/docs/guides/agents/#permission-mode)) — and start a new chat. That doesn't help
-Amp or Gemini CLI, which ask on their own even in Bypass Permissions. An operator can turn
+Amp or Gemini CLI, which ask on their own even in Bypass Permissions, or Claude Code in a
+devcontainer that
+[runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions). An operator can turn
 requests on as described in [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat).
 
 ## Recovery is in progress
@@ -331,9 +345,9 @@ If a reason isn't in this list, or a fixable one keeps coming back after you fix
 
 A task can fail for reasons that have nothing to do with its work — the provider's usage limit ran
 out, or nobody answered a question the agent asked with its `request_human_input` tool. (A card in
-the chat that nobody answers doesn't fail the task; it only tells the agent no.) When that happens
-while the workspace is
-still running, SAM tries to keep the workspace: it lets the agent's current turn end, snapshots the
+the chat that nobody answers doesn't fail the task when it expires; it only tells the agent no. On
+long-running work, though, see [SAM ended a stalled turn](#sam-ended-a-stalled-turn).) When that
+happens while the workspace is still running, SAM tries to keep the workspace: it lets the agent's current turn end, snapshots the
 workspace, and puts the chat to sleep. That usually takes a few minutes, but if the agent was in the
 middle of a turn SAM waits for it to end, for up to eight hours. Until then the chat stays awake with
 the failure card showing: wait for it to go to sleep rather than using **Retry**.
@@ -359,20 +373,25 @@ kept:
   gone; commits the agent pushed are safe. Check GitHub for what was pushed, then use **Retry** or
   [Fork](/docs/guides/chat-features/#conversation-forking).
 
-On long-running work, expanding the card may show **SAM detected a stalled agent turn after N
-minutes** under **Error**. SAM looks closer at a task or chat whose work started more than four hours
-ago when the agent's current turn has been open for over an hour and nothing new has appeared in the
-chat for an hour. An AI check reads the end of the conversation, and if it is confident the turn is
-wedged — the last step should have finished by now — SAM fails the task instead of letting it run
-until SAM's 24-hour limit. That check can't yet tell when the agent is waiting for you to answer a
-card, so on long-running work, answer cards within an hour. **This failure does not save the workspace:** uncommitted and unpushed
-changes are lost. Check GitHub for what was pushed, then use **Retry** or
+A task that fails while its workspace is still starting, on a machine SAM lost contact with
+(below), or because its turn stalled (next), is not saved this way. A kept chat stays wakeable for
+seven days, like any sleeping chat.
+
+### SAM ended a stalled turn
+
+If expanding the failure card shows **SAM detected a stalled agent turn after N minutes** under
+**Error**, SAM ended work it judged stuck. It looks closer at a task or chat that has been awake for
+more than four hours when the agent's current turn has been open for over an hour and nothing new
+has appeared in the chat for an hour. An AI check reads the end of the conversation, and if it is
+confident the turn is wedged — the last step should have finished by now — SAM fails the task
+instead of letting it run until SAM's 24-hour limit. That check can't yet tell when the agent is
+waiting for you to answer a card, so on long-running work, answer cards within an hour.
+
+**This failure does not save the workspace:** uncommitted and unpushed changes are lost. Check
+GitHub for what was pushed, then use **Retry** or
 [Fork](/docs/guides/chat-features/#conversation-forking). If the agent was really busy with
 something long and quiet, such as a slow build, ask it to report progress as it goes, or split the
 work into smaller tasks.
-
-A task that fails while its workspace is still starting, on a machine SAM lost contact with (below),
-or because its turn stalled, is not saved this way. A kept chat stays wakeable for seven days, like any sleeping chat.
 
 ## SAM lost contact with the machine
 

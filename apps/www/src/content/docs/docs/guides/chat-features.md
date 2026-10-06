@@ -33,17 +33,17 @@ For every kind of request:
   [shared project](/docs/guides/collaboration/), other members see that the agent is waiting, but
   not what it asked or what you answered.
 - **No notification is sent.** Watch the session list for **Needs input**; on a phone, open the list
-  with the list icon at the right of the project-name bar. A chat with no new messages for three hours
-  moves into the collapsed **Older** group at the bottom of the list, label and all, so look there
-  too. (Notifications cover a different kind of question, the one agents ask with their
-  `request_human_input` tool — see [Notifications](/docs/guides/notifications/).)
+  with the list icon at the right of the project-name bar. (Notifications cover a different kind of
+  question, the one agents ask with their `request_human_input` tool — see
+  [Notifications](/docs/guides/notifications/).)
 - **You don't have to stay on the page.** A request waits in SAM, not in your browser tab, so you can
   answer later or from another device until its deadline, which the card shows. If nobody answers in
   time, the request ends — the card says it expired or was cancelled — and the agent is told no, so
-  the action it asked about does not happen. Send a message to tell the agent how to carry on. One
-  exception: on work that started more than four hours ago, answer within an hour. SAM's check for
-  [stalled turns](/docs/guides/session-troubleshooting/#when-a-task-fails) can't yet tell that the
-  agent is waiting for you, and may end the task.
+  the action it asked about does not happen. Send a message to tell the agent how to carry on.
+- **On a chat or task that has been awake for more than four hours, answer within an hour.** SAM's
+  check for [stalled turns](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn) can't
+  yet tell that the agent is waiting for you, so SAM may end it — and changes the agent hasn't
+  pushed are lost.
 - **Answer on the card, not in the message box.** A message you type waits until the agent's turn
   ends, and the turn can't end until the card is answered or expires. To stop the agent instead,
   select **Interrupt** (the red button above the message box); the card then says **Request
@@ -81,8 +81,9 @@ buttons are the agent's own choices. For a Claude Code command they are usually:
 
 If the agent asks about every command and you didn't choose that, its mode was probably saved as
 **Manual** earlier — see [Permission mode](/docs/guides/agents/#permission-mode) — or the project's
-devcontainer runs as `root`, where Claude Code refuses Bypass Permissions. In the meantime, **Yes,
-and don't ask again for …** stops it asking about that kind of command.
+devcontainer runs as `root`, where Claude Code
+[refuses Bypass Permissions](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions). In
+the meantime, **Yes, and don't ask again for …** stops it asking about that kind of command.
 
 A plan approval is titled **Approve Plan** and asks how to continue — for example **Yes, and use
 auto mode** or **Yes, manually approve edits** — or offers **No, keep planning**. A permission request
@@ -106,7 +107,10 @@ own. **Decline** tells the agent you're skipping the question. A question waits 
 
 Questions appear only in sessions labelled **Chat** in the session list — which includes every
 [Instant](/docs/guides/instant-sessions/) session you start yourself. A **Task** can ask for
-permission, but not ask questions or send links.
+permission, but not ask questions or send links. On a VM, a chat is a **Chat** when its
+[agent profile](/docs/guides/agents/#agent-profiles) has **Task Mode** set to **Conversation**, as
+profiles you create with **Chat and explore** in the chat input do. With **Task Mode** left at
+**Default**, a profile whose **Workspace Profile** is **Lightweight** also gives a **Chat**.
 
 ### Links to open
 

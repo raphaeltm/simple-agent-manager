@@ -123,9 +123,10 @@ The chip's colour shows the most serious state among the limits, and the dialog 
 **Warning** (from 75%, or earlier if the provider warns), **Critical** (from 90%), or **Limit
 reached** (the provider is refusing requests). For your own subscription the percentages cover your
 whole account with that provider, so they include use outside SAM; a **Platform credential**'s
-numbers are SAM's shared limits. When a limit is nearly used up,
-wait for the reset time shown in the dialog, or start new work with a profile for a different agent
-— Codex instead of Claude Code, say. If a limit runs out in the middle of work, a **Task** fails but
+numbers are SAM's shared limits.
+
+When a limit is nearly used up, wait for the reset time shown in the dialog, or start new work with a
+profile for a different agent — Codex instead of Claude Code, say. If a limit runs out in the middle of work, a **Task** fails but
 SAM keeps its workspace (see [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)),
 and a **Chat** just stops with the provider's error. Either way, reply in the same chat after the
 reset to carry on.
@@ -197,9 +198,9 @@ or woken from sleep, after you save it — not to a chat that is already running
 A mode saved earlier still applies. If an agent asks when you don't expect it, check all three
 places: older built-in profiles were set to **Accept Edits** or **Plan Mode**, and saving
 **Settings → Agents** on or before 4 October stored the old default, now shown as **Manual**, even if
-you only changed the model. To stop the questions, set **Bypass Permissions** wherever the mode is
-set — a profile's choice wins over the project's **Agent Overrides**, which win over
-**Settings → Agents**.
+you only changed the model. To stop the questions, set **Bypass Permissions** where the mode is set,
+or clear it there so the next place decides: **No override** in a profile, **Inherit from user
+settings** in **Agent Overrides**.
 
 | Mode                             | What the agent does                                                        |
 | -------------------------------- | -------------------------------------------------------------------------- |
@@ -213,19 +214,33 @@ When the agent asks, a card appears in the chat and the agent waits for your ans
 [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you). A request nobody
 answers expires and counts as a no. On a self-hosted instance where the operator hasn't
 [turned agent requests on](/docs/guides/self-hosting/#let-agents-ask-in-chat), no card appears and
-every request counts as a no, so an agent in **Manual**, **Accept Edits**, or **Plan Mode** can't get
-approval to make changes.
+every request counts as a no: an agent in **Manual** or **Plan Mode** can't get approval to change
+anything, and one in **Accept Edits** can edit files but not run commands that need approval.
 
 Claude Code supports every mode. Even in Bypass Permissions it still asks about a few safety checks,
 and those questions appear in the chat. Codex always runs with full access. Other agents keep their
 own behavior when they don't support the chosen mode — Amp and Gemini CLI, for example, still ask
-before some actions even when SAM sets Bypass Permissions. And Claude Code itself refuses Bypass
-Permissions when the project's devcontainer runs as `root`; it then asks as in **Manual**, so give
-the devcontainer a non-root user.
+before some actions even when SAM sets Bypass Permissions. Claude Code itself refuses Bypass
+Permissions when it runs as `root` — see below.
+
+#### Claude Code asks even in Bypass Permissions
+
+Claude Code won't use Bypass Permissions when it runs as `root`, so it asks as in **Manual** instead.
+On a VM the agent runs as your devcontainer's user, so this happens when the project's devcontainer
+runs as `root`. SAM's own devcontainer — used by the **Lightweight** workspace profile and for
+repositories without a `.devcontainer` — and [Instant](/docs/guides/instant-sessions/) sessions run
+as a non-root user, so they aren't affected.
+
+To check, ask the agent to run `whoami`, or run it yourself in the workspace's
+[terminal](/docs/guides/creating-workspaces/#terminal). If it prints `root`, set `"remoteUser"` in
+`.devcontainer/devcontainer.json` to a non-root user that exists in your image — `vscode` in most
+[Dev Container images](https://github.com/devcontainers/images), `node` in the Node.js ones; if your
+image has none, create one in its Dockerfile. Then push the change to your default branch and start
+a new chat.
 
 ## Workspace Profiles
 
-When you start a chat you can also choose how much environment to bring:
+An agent profile's **Workspace Profile** setting chooses how much environment its chats get:
 
 - **Full** (default) — builds your project's `.devcontainer` so the agent can run your stack, tests, and services. Best when the work depends on your real environment.
 - **Lightweight** — starts faster with a minimal environment. Best for quick questions, planning, and code exploration.

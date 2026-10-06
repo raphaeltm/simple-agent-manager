@@ -141,3 +141,38 @@ since (#2180–#2240).
     more often hides the server's tools; Claude Code refuses Bypass when the devcontainer runs as
     root (adapter `ALLOW_BYPASS`; SAM never sets `IS_SANDBOX`).
   - `mcp-servers.md` is now Prettier-clean (it wasn't on `main`); the ratchet only counts files.
+- **Round 3** — same two lenses on 4a48c5546.
+  - Fact-checker: 3 LOW fixed — **Accept Edits** with requests off can edit files but not run
+    commands; only the session creator gets **Review MCP connections**; the usage chip shows
+    percentages and the dialog shows reset times.
+  - User reviewer: 1 HIGH, 3 MEDIUM, 11 LOW. Each was verified in code before fixing:
+    - HIGH: root devcontainers. Claude Code clamps Bypass to Manual when euid is 0 (`claude-agent-acp@0.81.2`
+      `ALLOW_BYPASS`). The ACP process runs `docker exec -u <ContainerUser>`, with the user resolved from
+      `remoteUser`/`containerUser`. agents.md now has "Claude Code asks even in Bypass Permissions",
+      with a `whoami` check and a `remoteUser` fix. The four self-hosted remedy spots name the root case.
+      `IS_SANDBOX` follow-up appended to idea `01M43B7Q8HC87N3AEW187Q6BMT`.
+    - MEDIUM: the 4-hour warning is now its own bullet and says unpushed work is lost. The clock is the
+      task's `started_at`, which a wake resets (`transitionToInProgress`), hence "awake for more than
+      four hours". The stalled turn has its own heading, "SAM ended a stalled turn", plus an index
+      entry. The card usually reads **Failed** (no `stalled` pattern matches); noted on idea
+      `01M47RANRASPRD6JVB4YAPAG6P`.
+    - MEDIUM: how to get a **Chat**. `resolveTaskMode` takes explicit → profile Task Mode →
+      Lightweight → conversation, else task. The composer has no workspace-profile or mode picker
+      (dead state, filed as idea `01M47V0GCMCZH5A51Z9FTJDKHM`). Docs now point to the profile's
+      **Task Mode**, and the stale "choose a workspace profile when you start a chat" claims in
+      agents.md and creating-workspaces.md were corrected.
+    - MEDIUM: `TASK_RECONCILIATION_MAX_CHECKINS`, `STALLED_TASK_CLASSIFIER_*`,
+      `RATE_LIMIT_CALLBACK_TOKEN_RENEWAL*`, and `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS` are not
+      deploy-syncable. Configuration's Worker Variables intro now says how to check, and the changelog
+      separates them. Filed idea `01M47V0101CAM43ZNZN4JHB4AK`.
+    - LOW: operator check plus a D1 query for saved modes, tested against all 200 migrations. Also a
+      Step 6 table row, **No override** / **Inherit from user settings**, the self-hosted caveat in
+      "For everyone", **Fork** as the context-keeping alternative to a new chat, and a quickstart
+      duplicate removed.
+    - LOW: notifications description; Older-group sentence kept only in troubleshooting; index bullet
+      split; who started the chat; URL deadline annotation; a two-column variables table for phones;
+      a pre-existing phone overflow (long aside title in configuration.md) fixed.
+    - Pushed back on: naming the release after v2026.10.05 (no v2026.10.06 tag exists yet), and
+      "Sleep, then message" after changing a model. The VM restore path (`restoreAgentSessionOnNode`)
+      doesn't pass the new model override, so it's unverified; Fork is offered instead. Kept the usage
+      "how SAM reads these numbers" sentence because it explains differences from provider pages.

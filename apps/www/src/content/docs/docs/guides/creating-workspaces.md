@@ -63,7 +63,7 @@ Cloud provider credentials are stored encrypted per user — never as environmen
 When you start a chat you can optionally choose:
 
 - **Agent profile** — which agent, model, and settings to run (see [AI Agents](/docs/guides/agents/)).
-- **Workspace profile** — a **Full** environment that builds your project's `.devcontainer` (best when the agent needs to run your stack), or a **Lightweight** environment that starts faster (best for quick questions and code exploration). Workspace profile and runtime are separate choices: **Full has no effect on an [Instant session](/docs/guides/instant-sessions/)**, which never builds a devcontainer. To get your devcontainer you need a VM workspace.
+- **Workspace profile**, a setting of the agent profile you pick — a **Full** environment that builds your project's `.devcontainer` (best when the agent needs to run your stack), or a **Lightweight** environment that starts faster (best for quick questions and code exploration). Workspace profile and runtime are separate choices: **Full has no effect on an [Instant session](/docs/guides/instant-sessions/)**, which never builds a devcontainer. To get your devcontainer you need a VM workspace.
 - **Resources** — how much CPU, memory, and disk this piece of work needs, and whether it wants a machine to itself. Leave it blank to inherit the profile, project, and platform defaults. See [Compute Pools](/docs/guides/compute-pools/#resource-requirements-how-much-machine-work-asks-for).
 
 :::note[Node.js in your devcontainer]
