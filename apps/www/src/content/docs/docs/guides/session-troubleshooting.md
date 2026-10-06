@@ -159,16 +159,20 @@ it or stops. There are two causes:
 
 - **The chat has slept and woken**, or SAM restored it after its container or machine failed. A
   woken chat usually can't ask yet, on any instance, and it takes its mode from the project's
-  **Agent Overrides** and your **Settings → Agents**, not its profile. If either is set to **Manual**, **Accept Edits**, or **Plan Mode**, set **Bypass
-  Permissions** there, or **Inherit from user settings** in **Agent Overrides**. The change applies
-  the next time the chat wakes: in a **Chat**, select **Sleep** (the moon button above the message
-  box), then send a message; in a **Task**, wait for it to go to sleep, then reply. Or
-  [fork](/docs/guides/chat-features/#conversation-forking) the chat or start a new one; a fork
-  carries a summary of the chat, not its files.
+  **Agent Overrides** and your **Settings → Agents**, not its profile. Choose one:
+  - **Keep this chat and its files:** wherever those two are set to **Manual**, **Accept Edits**, or
+    **Plan Mode**, set **Bypass Permissions** (or **Inherit from user settings** in **Agent
+    Overrides**). Then wake the chat again: in a **Chat**, select **Sleep** (the moon button above
+    the message box) and send a message; in a **Task**, wait for it to go to sleep, then reply. New
+    chats then also work without asking unless their profile sets a mode, so to keep approvals
+    there, set **Manual** or **Plan Mode** on the profile.
+  - **Get approvals back:** [fork](/docs/guides/chat-features/#conversation-forking) the chat or
+    start a new one. A fork carries a summary of the chat, not its files.
 - **Agent requests are off on a self-hosted instance.** Until the operator turns them on, use
   **Bypass Permissions** for the agent — in its profile, in the project's **Agent Overrides**, and in
   **Settings → Agents** (see [Permission mode](/docs/guides/agents/#permission-mode)) — and start a
-  new chat. An operator can turn requests on as described in
+  new chat. To keep this chat's files instead, put it to sleep and send a message, as in the bullet
+  above. An operator can turn requests on as described in
   [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat).
 
 Switching to Bypass Permissions doesn't help Amp or Gemini CLI, which ask on their own even in

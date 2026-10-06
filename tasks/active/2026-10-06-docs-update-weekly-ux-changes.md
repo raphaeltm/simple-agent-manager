@@ -300,3 +300,10 @@ since (#2180–#2240).
     - Pushing to the output branch updates the existing PR.
     - Task-mode turns push after every turn while the Task is awake.
     - Completed tasks sleep immediately.
+  - User reviewer: 1 MEDIUM and 1 LOW, both fixed.
+    - MEDIUM: setting Bypass in Agent Overrides / Settings → Agents also changes new chats whose
+      profile sets no mode. The woken-chat cause is now split into "Keep this chat and its files"
+      (Bypass there, then wake again; keep approvals in new chats via the profile) and "Get
+      approvals back" (fork or new chat).
+    - LOW: the self-hosted requests-off remedy now also says how to keep the chat's files (Sleep,
+      then send a message).
