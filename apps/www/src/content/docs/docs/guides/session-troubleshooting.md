@@ -153,21 +153,23 @@ the moment the agent makes them. The step it wanted to run fails, and the agent 
 it or stops. There are two causes:
 
 - **The chat has slept and woken**, or SAM restored it after its container or machine failed. A
-  woken chat usually can't ask yet, on any instance, and it
-  takes its mode from the project's **Agent Overrides** and your **Settings → Agents**, not its
-  profile. If either is set to **Manual**, **Accept Edits**, or **Plan Mode**, set **Bypass
+  woken chat usually can't ask yet, on any instance, and it takes its mode from the project's
+  **Agent Overrides** and your **Settings → Agents**, not its profile. If either is set to **Manual**, **Accept Edits**, or **Plan Mode**, set **Bypass
   Permissions** there, or **Inherit from user settings** in **Agent Overrides**. The change applies
   the next time the chat wakes: in a **Chat**, select **Sleep** (the moon button above the message
-  box), then send a message. Or [fork](/docs/guides/chat-features/#conversation-forking) the chat or
-  start a new one; a fork carries a summary of the chat, not its files.
+  box), then send a message; in a **Task**, wait for it to go to sleep, then reply. Or
+  [fork](/docs/guides/chat-features/#conversation-forking) the chat or start a new one; a fork
+  carries a summary of the chat, not its files.
 - **Agent requests are off on a self-hosted instance.** Until the operator turns them on, use
   **Bypass Permissions** for the agent — in its profile, in the project's **Agent Overrides**, and in
   **Settings → Agents** (see [Permission mode](/docs/guides/agents/#permission-mode)) — and start a
-  new chat. That doesn't help Amp or Gemini CLI, which ask on their own even in Bypass Permissions,
-  or Claude Code in a devcontainer that
-  [runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions). An operator can
-  turn requests on as described in
+  new chat. An operator can turn requests on as described in
   [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat).
+
+Switching to Bypass Permissions doesn't help Amp or Gemini CLI, which ask on their own even in
+Bypass Permissions, or Claude Code in a devcontainer that
+[runs as `root`](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions). Those agents
+can ask only in a new or forked chat, and on a self-hosted instance only once requests are on.
 
 ## Recovery is in progress
 

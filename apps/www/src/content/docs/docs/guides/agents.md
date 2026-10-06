@@ -232,8 +232,8 @@ failed — without the settings it started with:
 - **Pull requests:** a **Task** carries on like a **Chat**. When the agent finishes, SAM doesn't
   commit, push, or open a pull request, so ask the agent to push its work and open one.
 
-The exception is a VM wake where SAM has to start the agent fresh, which uses the profile and can
-ask. To get the profile's settings back, or when the agent needs your approval,
+The exception is a VM wake where SAM has to start the agent fresh: that uses the profile's mode and
+model and can ask, though a Task still doesn't open its pull request. To get the profile's settings back, or when the agent needs your approval,
 [fork](/docs/guides/chat-features/#conversation-forking) the chat or start a new one with that
 profile selected.
 

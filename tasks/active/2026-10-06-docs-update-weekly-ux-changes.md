@@ -263,3 +263,13 @@ since (#2180–#2240).
       Task.
     - LOW: an idea's **Execute** also routes Instant through task submission.
     - Model wording narrowed to Claude Code (other agents may switch to their default).
+- **Round 7**, same two lenses on 63dbce2fa.
+  - Fact-checker found 3 LOW issues and nothing above that. All fixed:
+    - The fresh-start exception still doesn't open a Task's PR (`startRecoveryTask` always sets
+      conversation mode).
+    - A woken Task has no Sleep button, so the docs now say "wait for it to go to sleep, then
+      reply".
+    - The Amp/Gemini/root caveat now covers both causes in "The agent stops for approval and no
+      card appears".
+  - The fact-checker also confirmed that Agent Overrides and Settings → Agents changes apply on
+    the next wake: the restore re-fetches `/agent-settings`.
