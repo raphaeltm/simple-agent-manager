@@ -46,9 +46,11 @@ These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generate
 
 Unless the deploy sets them itself (as it does `BASE_DOMAIN`), Worker variables come from `[vars]`
 in `apps/api/wrangler.toml`, falling back to the default in the code. On a self-hosted instance, a
-GitHub Environment variable of the same name replaces that value at deploy time, but only for
-variables the deploy forwards to the Worker: search for the name in
-`scripts/deploy/sync-wrangler-config.ts` to check. To change any other variable, edit
+GitHub Environment variable of the same name replaces that value at deploy time, but only if the
+deploy forwards it: `scripts/deploy/sync-wrangler-config.ts` must read it, and the **Sync Wrangler
+Config** steps in `.github/workflows/deploy-reusable.yml` must pass it from `vars`. After a deploy,
+the Worker's **Settings → Variables and Secrets** page in the Cloudflare dashboard shows the value it
+got. To change any other variable, edit
 `wrangler.toml` in your fork; updates then need a manual merge (see
 [Updating an Existing Self-Hosted Instance](/docs/guides/self-hosting/#updating-an-existing-self-hosted-instance)).
 
@@ -761,7 +763,8 @@ them a question, or send a link to open — see
 [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you). All three switches
 are `false` in the checked-in configuration; set them as GitHub Environment variables to turn them
 on (see [Let agents ask in chat](/docs/guides/self-hosting/#let-agents-ask-in-chat)). Turning a
-switch on applies to agent sessions started afterwards (a session woken from sleep can't ask yet);
+switch on applies to agent sessions started afterwards (a session woken from sleep usually can't ask
+yet);
 turning one off refuses new requests at once, even in running sessions.
 
 A permission request in a **Chat** session, and every question, waits up to

@@ -24,7 +24,7 @@ A workspace runs in one of two places:
 | **Instant** | A container on Cloudflare's network | Starts in seconds, no cloud account needed — but no devcontainer and no Docker |
 | **VM**      | A cloud VM on your provider account | Your full environment, at the cost of a minute or two of provisioning          |
 
-Which one you get is an [agent profile](#agent-profiles) setting: a profile whose runtime is **Instant container** starts chats on Instant; everything else runs on a VM, as a **Task** or a **Chat** depending on the profile's **Task Mode**. A Task carries the work through to a pull request; a Chat is back-and-forth and doesn't commit or push for you. Instant needs no cloud provider credential, so it's how you work before connecting a cloud account.
+Which one you get is an [agent profile](#agent-profiles) setting: a profile whose runtime is **Instant container** starts chats on Instant; everything else runs on a VM, as a **Task** or a **Chat** depending on the profile (see [Questions](/docs/guides/chat-features/#questions)). A Task carries the work through to a pull request; a Chat is back-and-forth and doesn't commit or push for you. Instant needs no cloud provider credential, so it's how you work before connecting a cloud account.
 
 Instant and VM sessions sleep when idle and restore from a runtime-neutral snapshot on wake. A VM wake provisions a replacement workspace after the original compute is removed. See [Instant Sessions and persistent sleep](/docs/guides/instant-sessions/).
 

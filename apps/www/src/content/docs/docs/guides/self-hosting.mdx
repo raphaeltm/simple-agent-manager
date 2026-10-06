@@ -127,7 +127,8 @@ Environment **variables** (not secrets) to your `production` environment, each s
 
 They take effect at the next deploy: run **Deploy Production**, or set them before you
 [update](#updating-an-existing-self-hosted-instance) so the update's deploy picks them up. Turning a
-switch on applies to chats started after that deploy; a chat that sleeps and wakes can't ask yet.
+switch on applies to chats started after that deploy; a chat that sleeps and wakes usually can't
+ask yet.
 To check that it works, start a new chat with a Claude Code profile set to **Manual** and ask the
 agent to create a file: a card with a **Permission needed** badge should appear. Turning a switch off refuses new requests straight away,
 even in running chats; any already waiting can still be answered until they expire. Deadlines and
@@ -161,9 +162,12 @@ SELECT 'project: ' || pr.name, pr.id, u.email, pr.agent_defaults
  WHERE pr.agent_defaults LIKE '%"permissionMode":"%';
 ```
 
-`owner` is the user who saved the setting, or who owns the project. A project row lists every
-agent the project sets a mode for; read its JSON to see which. Ask those owners to set **Bypass
-Permissions** there, or to clear the mode.
+`owner` is whose **Settings → Agents** it is, who created the profile or skill, or who owns the
+project. A project row lists every agent the project sets a mode for; read its JSON to see which.
+Set those modes to **Bypass Permissions**, or clear them: a user changes their own **Settings →
+Agents**, and any admin of a project can change its profiles and **Agent Overrides**. A skill's mode
+has no field in the app; change it with SAM's `update_skill` tool (ask an agent in the project) or
+the API.
 
 ## GCP provisioning credentials
 
@@ -232,8 +236,8 @@ installations must add this policy before their next production deployment.
 | Variable                                           | Description                                                                                                                                                               | Example                                  |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
 | `BASE_DOMAIN`                                      | Your domain                                                                                                                                                               | `example.com`                            |
-| `PREVIEW_BASE_DOMAIN`                              | Optional full preview hostname override; defaults to `preview.BASE_DOMAIN`                                                                                                | `usercontent.example.com`                |
-| `PREVIEW_URL_TTL_SECONDS`                          | Optional lifetime for signed interactive-preview URLs                                                                                                                     | `300`                                    |
+| `PREVIEW_BASE_DOMAIN`                              | Optional full preview hostname override; defaults to `preview.BASE_DOMAIN`. Currently ignored: the deploy doesn't pass it to the Worker                                   | `usercontent.example.com`                |
+| `PREVIEW_URL_TTL_SECONDS`                          | Optional lifetime for signed interactive-preview URLs. Currently ignored: the deploy doesn't pass it to the Worker                                                        | `300`                                    |
 | `RESOURCE_PREFIX`                                  | Domain-derived Cloudflare resource prefix                                                                                                                                 | `sa379a6`                                |
 | `CF_CONTAINER_ENABLED`                             | Optional instant-session runtime toggle. Generated deploys set `true`; set `false` to force VM runtime.                                                                   | `false`                                  |
 | `D1_READ_REPLICATION_MODE`                         | Optional D1 read-replication mode applied on every deploy. Defaults to `auto`; set `disabled` to remove replicas.                                                         | `disabled`                               |
@@ -610,8 +614,8 @@ For what SAM does with a workspace VM that stops responding, see [Unresponsive m
 ### Agents stop whenever they need approval
 
 If agents stop each time they need permission and no card appears in the chat, agent requests are
-off, so SAM refuses every request. (With requests on, a chat that has slept and woken does the same:
-it can't ask yet, so fork it or start a new chat.) Turn them on as described in
+off, so SAM refuses every request. (With requests on, a chat that has slept and woken usually does the
+same: it can't ask yet, so fork it or start a new chat.) Turn them on as described in
 [Let agents ask in chat](#let-agents-ask-in-chat), or have users switch those agents to **Bypass
 Permissions**, then start a new chat — running sessions keep the setting they started with. Amp and
 Gemini CLI ask on their own even in Bypass Permissions, and so does Claude Code in a devcontainer that

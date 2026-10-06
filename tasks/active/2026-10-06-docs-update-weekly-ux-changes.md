@@ -220,3 +220,18 @@ since (#2180–#2240).
     - LOW: concepts and quickstart PR promises ("Build and open PRs" vs "Chat and explore").
     - LOW: self-hosting recommends turning requests on, says what changes, and what to do with
       query results.
+  - Fact-checker: 2 MEDIUM, 4 LOW. All verified in code and fixed.
+    - MEDIUM: a name in `sync-wrangler-config.ts` isn't enough.
+      - `PREVIEW_BASE_DOMAIN` and `PREVIEW_URL_TTL_SECONDS` reach only the Pulumi config step,
+        which ignores them, and have done since #1729.
+      - The configuration reference now requires both conditions (script reads it, Sync steps pass
+        it from `vars`) and says to check the deployed value in the dashboard.
+      - Step 6 marks both `PREVIEW_*` rows as currently ignored.
+      - Added to idea `01M47V0101CAM43ZNZN4JHB4AK`, which was retitled.
+    - MEDIUM: a woken chat keeps its model unless Agent Overrides or Settings → Agents set one.
+      `applySessionSettings` sets a model only if one is given; the adapter resumes the transcript
+      model. Fork uses the profile selected in the composer.
+    - LOW: a degraded restore starts the agent fresh with the profile and requests, hence "usually".
+    - LOW: query owners and who can change what (a skill's mode only via `update_skill` or the API).
+    - LOW: concepts wording.
+    - LOW: an Instant chat with an attachment and a Task skill becomes a Task.

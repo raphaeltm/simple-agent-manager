@@ -55,8 +55,8 @@ For every kind of request:
   unconfirmed, or that the request was interrupted because the agent stopped first, check whether
   the agent carried on. If it's still waiting, select **Interrupt** first, then send your decision as
   a message.
-- **A chat that has slept and woken can't ask yet.** SAM refuses its requests without showing a card,
-  so the agent is told no. When you need to approve something, [fork](#conversation-forking) the
+- **A chat that has slept and woken usually can't ask yet.** SAM refuses its requests without
+  showing a card, so the agent is told no. When you need to approve something, [fork](#conversation-forking) the
   chat or start a new one.
 
 :::note[Self-hosted instances]
@@ -116,7 +116,8 @@ permission, but not ask questions or send links. Which you get depends on what y
 with:
 
 - An [agent profile](/docs/guides/agents/#agent-profiles) whose runtime is
-  [Instant](/docs/guides/instant-sessions/) gives a **Chat**.
+  [Instant](/docs/guides/instant-sessions/) gives a **Chat** (unless you attach a file and also pick
+  a skill set to **Task**).
 - On a VM, a profile whose **Task Mode** is **Conversation** gives a **Chat**; profiles you create
   with **Chat and explore** in the chat input are set that way. With **Task Mode** left at
   **Default**, a profile whose **Workspace Profile** is **Lightweight** does too. If you also pick a

@@ -83,7 +83,7 @@ ask them (the session list shows who started it).
 If an agent keeps asking about every command when you don't want it to, its permission mode is set
 to ask — often **Manual**, saved earlier without anyone choosing it. See
 [An agent asks when you don't expect it](/docs/guides/agents/#an-agent-asks-when-you-dont-expect-it)
-for where to change it. A change applies to new chats; a chat woken from sleep follows **Agent
+for where to change it. A change applies to new chats; a chat woken from sleep usually takes its mode from **Agent
 Overrides** and **Settings → Agents**, not its profile. And if the project's devcontainer runs as
 `root`, Claude Code refuses Bypass Permissions and asks anyway — see
 [Claude Code asks even in Bypass Permissions](/docs/guides/agents/#claude-code-asks-even-in-bypass-permissions)
@@ -132,8 +132,8 @@ or in the failure card under the chat header (expand the card for the next step)
   (the card's **Open agent connections** button, for the person who started the chat). The agent
   picks up the new connection only when it starts again: in a **Task**, wait for the chat to go to
   sleep, then reply to wake it; in a **Chat**, select **Sleep** (the moon button above the message
-  box) and then send a message, or start a new chat. A woken chat can't ask for your approval, so
-  start a new chat if the agent will need to ask.
+  box) and then send a message, or start a new chat. A woken chat usually can't ask for your approval,
+  so start a new chat if the agent will need to ask.
 - **A failure card: "Model unavailable for this account."** The credential works, but your plan or
   account can't use that model — or the model ID is mistyped. Pick another model in the agent's
   profile, the project's **Agent Overrides**, or **Settings → Agents**, then start a new chat, or
@@ -157,7 +157,7 @@ If an agent stops each time it needs your approval and no card appears, SAM is r
 the moment the agent makes them. The step it wanted to run fails, and the agent either works around
 it or stops. There are two causes:
 
-- **The chat has slept and woken.** A woken chat can't ask yet, on any instance. When the agent
+- **The chat has slept and woken.** A woken chat usually can't ask yet, on any instance. When the agent
   needs your approval, [fork](/docs/guides/chat-features/#conversation-forking) the chat or start a
   new one.
 - **Agent requests are off on a self-hosted instance.** Until the operator turns them on, use

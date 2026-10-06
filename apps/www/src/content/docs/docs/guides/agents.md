@@ -220,11 +220,14 @@ before some actions even when SAM sets Bypass Permissions.
 
 #### After a chat wakes from sleep
 
-A chat woken from sleep doesn't re-apply its profile's mode or model: it takes them from **Agent
-Overrides**, then **Settings → Agents**, and uses Bypass Permissions if neither sets a mode. It also
-can't ask you anything yet — SAM refuses its requests without showing a card. To get the profile's
-mode and model back, or when the agent needs your approval,
-[fork](/docs/guides/chat-features/#conversation-forking) the chat or start a new one.
+A chat woken from sleep usually doesn't re-apply its profile's mode: it takes its mode from **Agent
+Overrides**, then **Settings → Agents**, and uses Bypass Permissions if neither sets one. Its model
+usually stays the same, but changes if one of those places sets a model. It also can't ask you
+anything yet — SAM refuses its requests without showing a card. (The exception is a wake where SAM
+has to start the agent fresh: that uses the profile and can ask.) To get the profile's settings
+back, or when the agent needs your approval,
+[fork](/docs/guides/chat-features/#conversation-forking) the chat or start a new one, with that
+profile selected.
 
 #### An agent asks when you don't expect it
 
