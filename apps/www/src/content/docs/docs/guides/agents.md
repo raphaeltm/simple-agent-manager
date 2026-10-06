@@ -121,12 +121,14 @@ provider's limits.
 
 The chip's colour shows the most serious state among the limits, and the dialog names it: **OK**,
 **Warning** (from 75%, or earlier if the provider warns), **Critical** (from 90%), or **Limit
-reached** (the provider is refusing requests). The percentages are for your whole account with that
-provider, so they include use outside SAM. When a limit is nearly used up,
+reached** (the provider is refusing requests). For your own subscription the percentages cover your
+whole account with that provider, so they include use outside SAM; a **Platform credential**'s
+numbers are SAM's shared limits. When a limit is nearly used up,
 wait for the reset time shown in the dialog, or start new work with a profile for a different agent
-— Codex instead of Claude Code, say. If a limit runs out in the middle of a task, the task fails, but
-SAM keeps its workspace: reply in the same chat after the reset to carry on (see
-[When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)).
+— Codex instead of Claude Code, say. If a limit runs out in the middle of work, a **Task** fails but
+SAM keeps its workspace (see [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)),
+and a **Chat** just stops with the provider's error. Either way, reply in the same chat after the
+reset to carry on.
 
 The numbers are the last reading SAM took while an agent was using that credential, not live figures
 from the provider. A credential nobody has used for a while keeps its last reading for up to 30 days,
@@ -217,7 +219,9 @@ approval to make changes.
 Claude Code supports every mode. Even in Bypass Permissions it still asks about a few safety checks,
 and those questions appear in the chat. Codex always runs with full access. Other agents keep their
 own behavior when they don't support the chosen mode — Amp and Gemini CLI, for example, still ask
-before some actions even when SAM sets Bypass Permissions.
+before some actions even when SAM sets Bypass Permissions. And Claude Code itself refuses Bypass
+Permissions when the project's devcontainer runs as `root`; it then asks as in **Manual**, so give
+the devcontainer a non-root user.
 
 ## Workspace Profiles
 

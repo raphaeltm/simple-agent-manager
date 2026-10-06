@@ -123,3 +123,21 @@ since (#2180–#2240).
     `01M47PYF4XAJ0GZZ8KJP3XBBKH` (Archive fails on sleeping VM chats since #2230),
     `01M47PYM16AJQ3ANQ4X2Z1QB9T` (expired requests shown as cancelled),
     `01M47PYS4NFYDHEDYAQ4ZF2WAQ` (unreachable MCP sign-in failure cards).
+- **Round 2** — same two lenses on 37ec68b21.
+  - User reviewer (fixed in 5d9cf9432): 1 CRITICAL — an unanswered card on work older than 4 h can
+    trip the stalled-turn classifier (it never consults pending interactions) and the stuck-task path
+    skips work preservation; docs now say to answer within an hour there, filed as idea
+    `01M47RANRASPRD6JVB4YAPAG6P`. Plus: self-hoster steps keyed to releases (v2026.10.05 lacks
+    #2234/#2236/#2238/#2240); card expiry never fails a task (`attention-expiry.ts` ignores ACP
+    markers) vs. `request_human_input` expiry; mode precedence and "asked about every command";
+    Settings → Usage is not the limits view; Interrupt before resending; 10 GiB error text and
+    Troubleshooting entry; completion-dock crest hidden in card crops.
+  - Fact-checker (fixed in the following commit): over-limit deadlines make session starts fail
+    (`workspaces.go` → 400), not just refuse requests; the dashboard card shows no "Agent is
+    working" line (`ActiveTaskCard.getStepLabel`); a rejected credential in a **Chat** doesn't fail
+    the task and the running agent keeps the old credential, so Sleep then reply (Task: wait for
+    sleep); Platform-credential percentages are SAM's shared limits; a Chat stops rather than fails on
+    a usage limit; quote the persisted "requires a local callback" message; a refused MCP credential
+    more often hides the server's tools; Claude Code refuses Bypass when the devcontainer runs as
+    root (adapter `ALLOW_BYPASS`; SAM never sets `IS_SANDBOX`).
+  - `mcp-servers.md` is now Prettier-clean (it wasn't on `main`); the ratchet only counts files.

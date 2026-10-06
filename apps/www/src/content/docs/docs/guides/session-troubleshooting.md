@@ -13,8 +13,8 @@ your work is safe and what to do next. Everything here applies to both
 - **"SAM paused automatic check-ins…"** The agent kept stopping without finishing, or its model was
   rejected, so SAM stopped nudging it. → [Look, then reply](#sam-paused-automatic-check-ins)
 - **A strip or failure card saying the agent's connection is missing or was rejected**, or that its
-  model is unavailable for your account; or a strip saying a sign-in flow needs a local callback
-  this session cannot complete. → [Fix the connection](#the-agent-or-a-tool-cant-sign-in)
+  model is unavailable for your account; or a message saying a sign-in flow requires a local
+  callback this session cannot complete. → [Fix the connection](#the-agent-or-a-tool-cant-sign-in)
 - **On a self-hosted instance, the agent stops whenever it needs your approval**, and no card
   appears. → [Agent requests are turned off](#agent-requests-are-turned-off)
 - **A strip with a spinner**, such as **Waking and restoring session...** or, on a VM, a step like
@@ -75,7 +75,9 @@ ask them.
 If an agent keeps asking about every command when you don't want it to, its permission mode is set
 to ask — often **Manual**, saved earlier without anyone choosing it. See
 [Permission mode](/docs/guides/agents/#permission-mode) for where to change it; the change applies to
-new chats and to chats woken from sleep.
+new chats and to chats woken from sleep. One exception: if the project's devcontainer runs as
+`root`, Claude Code refuses Bypass Permissions and asks anyway, so give the devcontainer a non-root
+user.
 
 ## SAM paused automatic check-ins
 
@@ -114,8 +116,10 @@ or in the failure card under the chat header (expand the card for the next step)
   chat.
 - **A failure card: "Agent connection rejected."** The provider refused the credential — usually an
   expired subscription sign-in or a revoked API key. Reconnect it under **Settings → Connections**
-  (the card's **Open agent connections** button, for the person who started the chat), then reply in
-  the chat to carry on. Use **Retry** only if the chat has ended.
+  (the card's **Open agent connections** button, for the person who started the chat). The agent
+  picks up the new connection only when it starts again: in a **Task**, wait for the chat to go to
+  sleep, then reply to wake it; in a **Chat**, select **Sleep** and then send a message, or start a
+  new chat.
 - **A failure card: "Model unavailable for this account."** The credential works, but your plan or
   account can't use that model — or the model ID is mistyped. Pick another model in the agent's
   profile, the project's **Agent Overrides**, or **Settings → Agents**, then start a new chat.
@@ -123,12 +127,13 @@ or in the failure card under the chat header (expand the card for the next step)
 A tool the agent connects to through an [MCP server](/docs/guides/mcp-servers/) can fail to sign in
 too:
 
-- **A tool step fails with the server's own error**, such as `401 Unauthorized`. The server refused
-  the credential SAM sent; see
+- **The server's tools are missing from the session**, or a tool step fails with the server's own
+  error, such as `401 Unauthorized`. The server refused the credential SAM sent; see
   [When a server needs sign-in](/docs/guides/mcp-servers/#when-a-server-needs-sign-in).
-- **A strip: "This sign-in flow needs a local callback that this session cannot complete."** The
-  server wants to finish its sign-in at `localhost`, which a remote SAM session can't do. Select
-  **Review MCP connections** and connect it another way.
+- **A message: "This sign-in flow requires a local callback that this session cannot complete."**
+  The server wants to finish its sign-in at `localhost`, which a remote SAM session can't do. While
+  that message is the latest in the chat, a strip above the conversation offers **Review MCP
+  connections**; connect the server another way.
 
 ## Agent requests are turned off
 

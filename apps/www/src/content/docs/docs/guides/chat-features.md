@@ -80,8 +80,9 @@ buttons are the agent's own choices. For a Claude Code command they are usually:
 - **No** refuses. The agent is told you said no and carries on without it.
 
 If the agent asks about every command and you didn't choose that, its mode was probably saved as
-**Manual** earlier — see [Permission mode](/docs/guides/agents/#permission-mode). In the meantime,
-**Yes, and don't ask again for …** stops it asking about that kind of command.
+**Manual** earlier — see [Permission mode](/docs/guides/agents/#permission-mode) — or the project's
+devcontainer runs as `root`, where Claude Code refuses Bypass Permissions. In the meantime, **Yes,
+and don't ask again for …** stops it asking about that kind of command.
 
 A plan approval is titled **Approve Plan** and asks how to continue — for example **Yes, and use
 auto mode** or **Yes, manually approve edits** — or offers **No, keep planning**. A permission request
@@ -132,7 +133,7 @@ even when it succeeded. A link request waits up to 10 minutes, and like question
 sessions labelled **Chat**.
 
 A tool whose sign-in has to return to `localhost` can't finish from a SAM session, so SAM refuses
-it and the chat says **This sign-in flow needs a local callback that this session cannot
+it and the chat says **This sign-in flow requires a local callback that this session cannot
 complete**. Connect that service another way — see
 [When a server needs sign-in](/docs/guides/mcp-servers/#when-a-server-needs-sign-in).
 
